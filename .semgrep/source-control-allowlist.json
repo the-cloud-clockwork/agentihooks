@@ -1,4 +1,5 @@
 [
+  "/scripts/swarm/planted.py",
   "/scripts/swarm/github_reads.py",
   "/scripts/tick/adapters/github.py"
 ]
