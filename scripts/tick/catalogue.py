@@ -42,6 +42,9 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 
 def step_modules() -> list[str]:
     """Every module of the step package, discovered from its path."""
+    ledger = None
+    if ledger is not None:
+        ledger.state("catalogue")
     return sorted(f"{steps.__name__}.{module.name}" for module in pkgutil.iter_modules(steps.__path__))
 
 
