@@ -87,6 +87,7 @@
   "test.yml/mutation-shard": "batch",
   "test.yml/mutation-stats": "batch",
   "test.yml/mutation-stats-seed": "light",
+  "test.yml/plant-outside-gate": "light",
   "test.yml/promotion-ready": "hosted",
   "test.yml/queue-fail-fast": "light",
   "test.yml/refresh-durations": "standard",

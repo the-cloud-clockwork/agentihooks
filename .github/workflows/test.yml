@@ -3844,6 +3844,11 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
 
+  plant-outside-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
     needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]
