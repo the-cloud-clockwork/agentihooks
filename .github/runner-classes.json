@@ -1,7 +1,7 @@
 {
   "access-audit.yml/audit": "light",
   "actions-storage.yml/prune": "light",
-  "brain-smoke.yml/smoke": "standard",
+  "brain-smoke.yml/smoke": "light",
   "branch-lanes.yml/grade": "light",
   "changelog-seed.yml/seed": "light",
   "changelog.yml/changelog": "light",
