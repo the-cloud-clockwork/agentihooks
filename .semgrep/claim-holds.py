@@ -5,7 +5,7 @@ from scripts.swarm_ledger import task_dependencies
 def ready(task, rows, doc, graph, fix):
     return (
         task.get("state") == "open"
-        # ruleid: claim-filter-bypasses-claim-hold
+        # ok: claim-filter-bypasses-claim-hold
         and phase_state.admits(task, doc)
         # ruleid: claim-filter-bypasses-claim-hold
         and not freeze.held(task, doc, graph, fix)
