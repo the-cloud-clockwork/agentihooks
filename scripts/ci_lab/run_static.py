@@ -52,7 +52,7 @@ class Result:
         return self.skipped or self.code == 0
 
 
-def _folder(root: Path, base_tree: Path, grader_tree: Path) -> Path:
+def _folder(root: Path, base_tree: Path, grader_tree: Path):
     """A fresh RUNNER_TEMP under root holding the grader and base trees where the workflow steps read them."""
     folder = Path(tempfile.mkdtemp(dir=root))
     (folder / "grader").symlink_to(grader_tree)
