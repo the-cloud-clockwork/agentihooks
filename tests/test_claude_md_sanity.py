@@ -38,6 +38,11 @@ def _disable_redis():
         yield
 
 
+def test_planted_swap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swap the ledger client for a lambda."""
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: None)
+
+
 class TestClaudeMdSanity:
     """Tests for hooks.context.claude_md_sanity.check_claude_md_write."""
 
