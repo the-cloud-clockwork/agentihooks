@@ -1,4 +1,4 @@
-# ruleid: feature-front-door-route-check
+# ok: feature-front-door-route-check
 def _agent_command(spec, report, name, agent_args, environ, directory):
     command = ["agentihooks", "claude", *agent_args]
     before = ""
