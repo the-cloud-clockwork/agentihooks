@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for name in $(ls); do echo "$name"; done
 uv pip compile pyproject.toml --extra dev --extra all --universal \
   --constraint <(sed '/^--constraint /d' .github/test-constraints.txt) \
   --output-file .github/test-requirements.lock --no-annotate \
