@@ -38,6 +38,11 @@ def _disable_redis():
         yield
 
 
+def test_planted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the target the autouse fixture mocks."""
+    monkeypatch.setattr("hooks.context.claude_md_sanity.get_redis", lambda: None)
+
+
 class TestClaudeMdSanity:
     """Tests for hooks.context.claude_md_sanity.check_claude_md_write."""
 
