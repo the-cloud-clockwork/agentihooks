@@ -1,3 +1,18 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: planted
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: planted
+              image: busybox
+---
 {{- if and .Values.auth.enabled (not .Values.hiveOnly) }}
 {{- $auth := .Values.auth }}
 apiVersion: apps/v1
