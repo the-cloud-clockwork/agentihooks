@@ -148,4 +148,4 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
         return Result(gate=gate.name, code=None, log=log, report=folder / SUMMARY, skipped=True)
     env = {name: expressions.interpolate(value, context) for name, value in gate.env}
     outcome = _sandbox(settings, trees, folder, env).run([*SHELL, gate.run], settings.timeout)
-    return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)
+    return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)  # lab plant
