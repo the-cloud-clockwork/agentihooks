@@ -38,6 +38,14 @@ def _disable_redis():
         yield
 
 
+def test_planted_short_wait() -> None:
+    from threading import Event
+
+    event = Event()
+    event.set()
+    assert event.wait(1)
+
+
 class TestClaudeMdSanity:
     """Tests for hooks.context.claude_md_sanity.check_claude_md_write."""
 
