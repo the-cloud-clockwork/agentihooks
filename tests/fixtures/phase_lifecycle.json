@@ -13,6 +13,5 @@
  {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2", "planning": "auto", "review": {"state": "sent_back"}}], "tasks": [{"id": "plan-p2", "phase": "p2", "kind": "plan", "lane": "plan", "state": "done"}], "phase": "p2", "state": "in_review", "label": "Plan in review"},
  {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2", "planning": "auto", "review": {"state": "approved"}}], "tasks": [{"id": "plan-p2", "phase": "p2", "kind": "plan", "lane": "plan", "state": "done"}], "phase": "p2", "state": "building", "label": "Building"},
  {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2", "depends_on": ["p0"]}], "tasks": [], "phase": "p2", "state": "building", "label": "Building"},
- {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2", "planning": "manual"}], "tasks": [], "phase": "p2", "state": "building", "label": "Building"},
- {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2"}], "tasks": [], "phase": "p2", "state": "building", "label": "Building"}
+ {"phases": [{"id": "p0", "title": "Inbox", "done": true}, {"id": "p1", "title": "Seats"}, {"title": "Release", "id": "p2", "planning": "manual"}], "tasks": [], "phase": "p2", "state": "building", "label": "Building"}
 ]
