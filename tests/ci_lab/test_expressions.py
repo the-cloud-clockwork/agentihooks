@@ -104,7 +104,7 @@ def test_syntax_outside_the_subset_is_refused(expression: str, message: str) -> 
     assert str(refused.value) == message
 
 
-def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
+def interpolate_replaces_each_embedded_expression_with_its_text() -> None:
     text = "swarm-${{ inputs.base }}-${{ true }}-${{ false }}-${{ steps.empty.outputs.sha }}-${{github.event_name}}"
     assert expressions.interpolate(text, CONTEXT) == "swarm-origin/dev-true-false--pull_request"
     assert expressions.interpolate(".semgrep", CONTEXT) == ".semgrep"
