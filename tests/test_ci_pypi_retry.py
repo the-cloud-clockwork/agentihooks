@@ -179,7 +179,6 @@ def _hang(
     return result, (tmp_path / "calls").read_text().splitlines(), sleeps, summary
 
 
-@pytest.mark.feature("pypi-retry-attempt-timeout")
 @pytest.mark.parametrize("trap", ["", "trap '' TERM; "], ids=["ends-on-term", "ignores-term"])
 def test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried(tmp_path: Path, trap: str) -> None:
     result, calls, sleeps, summary = _hang(tmp_path, 1, trap, PYPI_RETRY_ATTEMPT_SECONDS="1")
