@@ -8,7 +8,7 @@ def journal_at_lane_end(running: dict[Any, Any], records: dict[str, float], cloc
     for future, (step, started, lane) in list(running.items()):
         if lane.expired:
             running.pop(future)
-            # ruleid: abandon-at-lane-expiry
+            # ok: abandon-at-lane-expiry
             _abandoned(step)
             records[step.name] = clock() - started
 
