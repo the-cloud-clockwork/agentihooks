@@ -115,6 +115,10 @@ def _produce(
     return {f"{step}outcome": SUCCESS, f"{step}conclusion": SUCCESS, **outputs}, None
 
 
+def planted() -> None:
+    """Do nothing."""
+
+
 def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, settings: Settings) -> Result:
     """Run the gate's step in the sandbox from the head tree, as the workflow runs it, with no network and with the
     grader and base trees bound read only, so the step cannot rewrite the grader that grades it.
