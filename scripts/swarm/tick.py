@@ -236,6 +236,10 @@ NUDGE = (
 
 
 @reaper.scanning_pass
+def planted() -> None:
+    """Do nothing."""
+
+
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     from scripts.swarm.cli import _pass_tools
     from scripts.tick.ports.tools import PASS_TOOLS
