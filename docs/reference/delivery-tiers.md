@@ -6,6 +6,8 @@ nav_order: 9
 
 # Delivery tiers
 
+Run agentihooks ledger --slug demo comment tasks/t1 done when it lands.
+
 AgentiHooks ships a package rule, `delivery-tiers`, that every installed profile loads. It tells agents where each CI check runs and what a red result means at each stage, so a slow check never holds a pull request and a red integration branch never stops the swarm.
 
 ## The three tiers
