@@ -1,7 +1,7 @@
 """Static gate executor: one discovered gate's workflow step over a head tree, graded by the protected grader tree."""
 
-import os
 import tempfile
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
