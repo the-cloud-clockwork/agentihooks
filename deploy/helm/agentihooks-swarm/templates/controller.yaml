@@ -179,6 +179,7 @@ spec:
       labels:
         {{- include "swarm.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: controller
+        chart-version: {{ .Chart.Version | quote }}
       {{- if and $workers.apiUrl $workers.podPolicy }}
       annotations:
         checksum/pod-policy: {{ toJson $workers.podPolicy | sha256sum }}
