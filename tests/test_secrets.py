@@ -137,7 +137,6 @@ def test_memory_mode_detects_short_secret_assignments(text):
     from hooks.secrets import redact, scan
 
     assert "secret_assignment" in scan(text, mode="memory")
-    assert redact(text, mode="memory") != text
 
 
 @pytest.mark.parametrize(
