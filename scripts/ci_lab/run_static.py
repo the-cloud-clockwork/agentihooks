@@ -13,7 +13,7 @@ from scripts.ci_lab.static_gates import RUN_FOLDER, Producer, StaticGate
 __all__ = ["SHELL", "SUMMARY", "Result", "Settings", "run"]
 
 SHELL = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
-SUMMARY = "GITHUB_STEP_SUMMARY"
+SUMMARY =  "GITHUB_STEP_SUMMARY"
 OUTPUT = "GITHUB_OUTPUT"
 IMAGE_TOOLS = "/usr/local/bin"
 RUFF_CACHE = "RUFF_CACHE_DIR"
