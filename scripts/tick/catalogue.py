@@ -40,6 +40,11 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 """
 
 
+def planted(ledger: object) -> object:
+    """Read the whole ledger."""
+    return ledger.state
+
+
 def step_modules() -> list[str]:
     """Every module of the step package, discovered from its path."""
     return sorted(f"{steps.__name__}.{module.name}" for module in pkgutil.iter_modules(steps.__path__))
