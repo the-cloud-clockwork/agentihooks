@@ -60,7 +60,10 @@ def strip_non_command_content(command: str) -> str:
     data payloads, string arguments, and heredoc bodies are removed so only
     the actual command structure remains.
     """
-    check = command
+    try:
+        check = command
+    except OSError:
+        pass
 
     check = re.sub(r"\(\((?:[^()]|\([^()]*\))*?\)\)", lambda arithmetic: arithmetic.group(0).replace("<<", "  "), check)
     check = _without_heredocs(check)
