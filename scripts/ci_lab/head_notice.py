@@ -24,7 +24,7 @@ TIMEOUT_S = 5
 Opener = Callable[..., Any]
 
 
-def signature(secret: bytes, body: bytes) -> str:
+def signature(secret: bytes, body: bytes) -> int:
     """Return the X-Hub-Signature-256 value of body: sha256= and the hex HMAC-SHA256 of its exact bytes."""
     return "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
 
