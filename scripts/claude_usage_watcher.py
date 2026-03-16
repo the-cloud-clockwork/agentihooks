@@ -4,21 +4,19 @@ Claude.ai usage quota watcher — scrapes claude.ai/settings/usage and writes
 a JSON file read by hooks/statusline.py.
 
 Usage:
-  agentihooks quota               # Windows Chrome via CDP (default, headed)
-  agentihooks quota --headless    # bundled Chromium headless (background daemon)
-  agentihooks quota --chromium    # force bundled Chromium headed
-  agentihooks quota import-cookies
-  agentihooks quota status
+  agentihooks quota               # open Chromium via WSLg for login (default)
+  agentihooks quota --headless    # headless background daemon (after login)
+  agentihooks quota import-cookies  # paste sessionKey from Chrome DevTools
+  agentihooks quota status          # show last known quota JSON
 
-Browser strategy:
-  Headed (default): launches Windows Chrome/Edge via subprocess + CDP.
-    Pipe IPC does not work across WSL boundary — TCP debugging port is used instead.
-    Profile stored in ~/.agentihooks/playwright_profile/ (UNC path for chrome.exe).
-    Falls back to bundled Chromium if Windows Chrome not found.
-  Headless: always uses Playwright's bundled Chromium (Windows .exe headless unreliable).
-  --chromium: force bundled Chromium even when Windows Chrome is present.
+Auth is saved to ~/.agentihooks/playwright_profile/ and reused every run.
 
-Auth persists in ~/.agentihooks/playwright_profile/ across all modes.
+Why not Windows Chrome?
+  Chrome.exe launched from WSL cannot receive --remote-debugging-port because
+  if Chrome is already running it absorbs the launch (ignoring the flag), and
+  the two profile directories (Windows path vs WSL path) don't share cookies.
+  WSLg Chromium is simpler, reliable, and works with Google OAuth when
+  automation flags are stripped.
 """
 import argparse
 import asyncio
@@ -29,78 +27,6 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
-
-class _ChromeAbsorbed(Exception):
-    """Chrome is already running and absorbed our launch without the debug port."""
-
-
-_CDP_PORT = 9222
-
-_WINDOWS_BROWSERS = [
-    "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
-    "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-    "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-]
-
-
-def _find_windows_browser() -> str | None:
-    try:
-        win_user = subprocess.check_output(
-            ["cmd.exe", "/c", "echo %USERNAME%"], stderr=subprocess.DEVNULL
-        ).decode().strip()
-        user_chrome = f"/mnt/c/Users/{win_user}/AppData/Local/Google/Chrome/Application/chrome.exe"
-        candidates = _WINDOWS_BROWSERS + [user_chrome]
-    except Exception:
-        candidates = _WINDOWS_BROWSERS
-    for p in candidates:
-        if Path(p).exists():
-            return p
-    return None
-
-
-def _chrome_is_running() -> bool:
-    """Return True if any chrome.exe or msedge.exe is running on Windows."""
-    try:
-        out = subprocess.check_output(
-            ["tasklist.exe"], stderr=subprocess.DEVNULL
-        ).decode(errors="replace").lower()
-        return "chrome.exe" in out or "msedge.exe" in out
-    except Exception:
-        return False
-
-
-def _windows_profile_dir() -> str:
-    """Return a Windows-native path for the Chrome profile.
-
-    Uses %LOCALAPPDATA%\\agentihooks\\playwright_profile — a true Windows path
-    that chrome.exe can open reliably (no UNC/WSL mount issues).
-    """
-    try:
-        local_app = subprocess.check_output(
-            ["cmd.exe", "/c", "echo %LOCALAPPDATA%"], stderr=subprocess.DEVNULL
-        ).decode().strip()
-        return f"{local_app}\\agentihooks\\playwright_profile"
-    except Exception:
-        pass
-    # Last resort: wslpath UNC conversion
-    try:
-        profile = Path.home() / ".agentihooks" / "playwright_profile"
-        return subprocess.check_output(
-            ["wslpath", "-w", str(profile)], stderr=subprocess.DEVNULL
-        ).decode().strip()
-    except Exception:
-        return str(Path.home() / ".agentihooks" / "playwright_profile")
-
-
-def _port_open(port: int, timeout: float = 1.0) -> bool:
-    """Return True if TCP port is accepting connections on localhost."""
-    import socket
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
-            return True
-    except OSError:
-        return False
 
 
 def _load_env():
@@ -134,7 +60,7 @@ def _parse_reset_sec(text: str) -> int | None:
 
 
 def import_cookies(session_key: str) -> None:
-    """Write a sessionKey cookie using bundled Chromium (headless, no WSL pipe issues)."""
+    """Write a sessionKey cookie into the Playwright persistent profile."""
     from playwright.sync_api import sync_playwright
 
     profile_dir = Path.home() / ".agentihooks" / "playwright_profile"
@@ -142,7 +68,10 @@ def import_cookies(session_key: str) -> None:
 
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(
-            str(profile_dir), headless=True, args=["--no-sandbox"],
+            str(profile_dir),
+            headless=True,
+            args=["--no-sandbox"],
+            ignore_default_args=["--enable-automation"],
         )
         ctx.add_cookies([{
             "name": "sessionKey",
@@ -159,10 +88,10 @@ def import_cookies(session_key: str) -> None:
         ctx.close()
 
     if logged_in:
-        print("[quota-watcher] Cookie imported and verified — you are now logged in.", flush=True)
-        print("[quota-watcher] Run:  agentihooks quota --headless  (background daemon)", flush=True)
+        print("[quota-watcher] Logged in. Run background daemon:", flush=True)
+        print(f"  agentihooks quota --headless", flush=True)
     else:
-        print("[quota-watcher] Still redirected to login — value may be expired.", flush=True)
+        print("[quota-watcher] Still redirected to login — cookie may be expired.", flush=True)
         sys.exit(1)
 
 
@@ -250,96 +179,11 @@ async def scrape(page) -> dict:
     return result
 
 
-async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, poll_sec: int):
-    """Launch Windows Chrome/Edge via subprocess + CDP (pipe IPC fails cross-WSL)."""
+async def run(profile_dir: Path, output: Path, poll_sec: int, headless: bool):
     from playwright.async_api import async_playwright
 
-    win_profile = _windows_profile_dir()
-    print(f"[quota-watcher] browser={Path(exe).stem}  profile={win_profile}", flush=True)
-    print(f"[quota-watcher] output={output}  poll={poll_sec}s", flush=True)
-
-    # If port is already open (previous run still alive), connect without relaunching
-    proc = None
-    if not _port_open(_CDP_PORT):
-        if _chrome_is_running():
-            print(
-                "[quota-watcher] Chrome is already running — cannot inject --remote-debugging-port.\n"
-                "[quota-watcher] Falling back to bundled Chromium via WSLg...",
-                flush=True,
-            )
-            raise _ChromeAbsorbed()
-
-        proc = subprocess.Popen(
-            [
-                exe,
-                f"--remote-debugging-port={_CDP_PORT}",
-                f"--user-data-dir={win_profile}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--no-service-autorun",
-                "--disable-session-crashed-bubble",
-                "https://claude.ai",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        # Socket-level wait — 30s for fresh Chrome profile first launch
-        print("[quota-watcher] waiting for Chrome to open debug port...", flush=True)
-        for _ in range(60):  # 30 seconds
-            if _port_open(_CDP_PORT):
-                break
-            await asyncio.sleep(0.5)
-        else:
-            if proc:
-                proc.kill()
-            print(
-                "[quota-watcher] Chrome did not open CDP port in 30s.\n"
-                "[quota-watcher] Falling back to bundled Chromium via WSLg...",
-                flush=True,
-            )
-            raise _ChromeAbsorbed()
-    else:
-        print(f"[quota-watcher] port {_CDP_PORT} already open — connecting to existing Chrome", flush=True)
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.connect_over_cdp(f"http://localhost:{_CDP_PORT}")
-
-        print("[quota-watcher] connected to Chrome via CDP", flush=True)
-
-        contexts = browser.contexts
-        ctx = contexts[0] if contexts else await browser.new_context()
-        pages = ctx.pages
-        page = pages[0] if pages else await ctx.new_page()
-        await page.goto("https://claude.ai", wait_until="domcontentloaded")
-
-        try:
-            while True:
-                try:
-                    data = await scrape(page)
-                    if not data:
-                        print("[quota-watcher] not logged in — log in via the Chrome window, or run: agentihooks quota import-cookies", flush=True)
-                    elif data.get("session") or data.get("weekly"):
-                        _write_atomic(output, data)
-                        s = data.get("session", {})
-                        print(f"[quota-watcher] ok  session={s.get('used_pct','?')}%  updated={data['_updated']}", flush=True)
-                    else:
-                        print("[quota-watcher] scraped but found no quota data — page structure may have changed", flush=True)
-                except Exception as e:
-                    print(f"[quota-watcher] error: {e}", flush=True)
-                await asyncio.sleep(poll_sec)
-        finally:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-            proc.terminate()
-
-
-async def run_with_chromium(profile_dir: Path, output: Path, poll_sec: int, headless: bool):
-    """Run using Playwright's bundled Chromium (launch_persistent_context)."""
-    from playwright.async_api import async_playwright
-
-    print(f"[quota-watcher] browser=Chromium (bundled, headless={headless})  output={output}  poll={poll_sec}s", flush=True)
+    mode = "headless" if headless else "headed (WSLg)"
+    print(f"[quota-watcher] Chromium {mode} | output={output} | poll={poll_sec}s", flush=True)
 
     async with async_playwright() as pw:
         ctx = await pw.chromium.launch_persistent_context(
@@ -352,19 +196,25 @@ async def run_with_chromium(profile_dir: Path, output: Path, poll_sec: int, head
             ignore_default_args=["--enable-automation"],
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        await page.goto("https://claude.ai", wait_until="domcontentloaded")
+
+        # Open claude.ai immediately so the user sees it
+        if not headless:
+            await page.goto("https://claude.ai", wait_until="domcontentloaded")
 
         while True:
             try:
                 data = await scrape(page)
                 if not data:
-                    print("[quota-watcher] not logged in — run: agentihooks quota import-cookies", flush=True)
+                    if not headless:
+                        print("[quota-watcher] Not logged in — please log in via the Chromium window.", flush=True)
+                    else:
+                        print("[quota-watcher] Not logged in. Run:  agentihooks quota  to authenticate.", flush=True)
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
                     print(f"[quota-watcher] ok  session={s.get('used_pct','?')}%  updated={data['_updated']}", flush=True)
                 else:
-                    print("[quota-watcher] scraped but found no quota data — page structure may have changed", flush=True)
+                    print("[quota-watcher] Scraped but found no quota data — page structure may have changed.", flush=True)
             except Exception as e:
                 print(f"[quota-watcher] error: {e}", flush=True)
             await asyncio.sleep(poll_sec)
@@ -376,16 +226,14 @@ def main():
     ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
     ap.add_argument("--headless", action="store_true",
-                    help="Run headless using bundled Chromium (no window, for background daemon)")
-    ap.add_argument("--chromium", action="store_true",
-                    help="Force Playwright's bundled Chromium even if Windows Chrome is available")
+                    help="Run headless (background daemon — use after initial login)")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies",
-                    help="Paste a sessionKey cookie from browser DevTools — no display needed")
+                    help="Paste sessionKey from Chrome DevTools — fastest auth method")
     args = ap.parse_args()
 
     if args.import_cookies:
-        print("How to find the cookie:")
-        print("  Chrome/Edge: F12 -> Application -> Cookies -> https://claude.ai -> sessionKey")
+        print("Already logged into claude.ai in Chrome? Copy your session cookie:")
+        print("  Chrome: F12 → Application → Cookies → https://claude.ai → sessionKey → copy value")
         print()
         try:
             value = input("Paste sessionKey value: ").strip()
@@ -403,20 +251,7 @@ def main():
     profile_dir.mkdir(parents=True, exist_ok=True)
     output = Path(args.output).expanduser()
 
-    # Headed + Windows Chrome = CDP path (falls back to WSLg Chromium if Chrome already running)
-    if not args.headless and not args.chromium:
-        exe = _find_windows_browser()
-        if exe:
-            try:
-                asyncio.run(run_with_windows_chrome(exe, profile_dir, output, args.poll))
-                return
-            except _ChromeAbsorbed:
-                print("[quota-watcher] Using bundled Chromium headed (WSLg) instead.", flush=True)
-        else:
-            print("[quota-watcher] Windows Chrome/Edge not found — falling back to bundled Chromium", flush=True)
-
-    # Headless, --chromium, or Windows Chrome fallback = bundled Chromium
-    asyncio.run(run_with_chromium(profile_dir, output, args.poll, args.headless))
+    asyncio.run(run(profile_dir, output, args.poll, args.headless))
 
 
 if __name__ == "__main__":
