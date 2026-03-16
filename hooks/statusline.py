@@ -256,6 +256,7 @@ def main() -> None:
         # ── LINE 3 (conditional): Threshold warning ────────────────────
         from hooks.config import TOKEN_CONTROL_ENABLED, TOKEN_MONITOR_ENABLED
 
+        warn_msg = ""
         if TOKEN_CONTROL_ENABLED and TOKEN_MONITOR_ENABLED and session_id:
             try:
                 from hooks.observability.token_monitor import should_warn_context
@@ -263,11 +264,42 @@ def main() -> None:
                 warn, level = should_warn_context(float(used_pct), session_id)
                 if warn:
                     if level == "critical":
-                        print(f"{_RED}{_BOLD}🚨 CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}")
+                        warn_msg = f"{_RED}{_BOLD}🚨 CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
                     else:
-                        print(f"{_YELLOW}⚠️  CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}")
+                        warn_msg = f"{_YELLOW}⚠️  CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}"
             except Exception:
                 pass
+
+        # ── LINE 3: quota + optional context warning ──────────────────
+        quota_str = ""
+        try:
+            from hooks.quota import load_quota, fmt_quota
+            qd = load_quota()
+            if qd is not None:
+                raw = fmt_quota(qd)
+                if raw == "stale":
+                    quota_str = f"{_DIM}quota: stale{_RESET}"
+                elif raw:
+                    # color s:XX% and w:XX% by threshold
+                    def _cpct(label: str, pct_str: str) -> str:
+                        try:
+                            v = float(pct_str.rstrip("%"))
+                        except ValueError:
+                            return f"{label}{pct_str}"
+                        c = _GREEN if v < 60 else (_YELLOW if v < 80 else _RED)
+                        return f"{label}{c}{pct_str}{_RESET}"
+                    import re
+                    colored = re.sub(r"(s:|w:)(\d+%)", lambda m: _cpct(m.group(1), m.group(2)), raw)
+                    quota_str = f"{_DIM}quota:{_RESET} {colored}"
+        except Exception:
+            pass
+
+        if quota_str and warn_msg:
+            print(f"{quota_str}  {_DIM}|{_RESET}  {warn_msg}")
+        elif quota_str:
+            print(quota_str)
+        elif warn_msg:
+            print(warn_msg)
 
     except Exception as e:
         print(f"ctx: err ({e})")

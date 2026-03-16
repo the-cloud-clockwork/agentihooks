@@ -100,3 +100,16 @@ Hook commands in `settings.base.json` use `/app` and `__PYTHON__` as placeholder
 ### Testing patterns
 
 Tests mock Redis via `patch("hooks._redis.get_redis", return_value=None)` to avoid external dependencies. Most tests use `pytest.mark.unit`. Pre-existing failures in `TestSecretsModesIntegration` and `TestBlockActionIntegration` are known and unrelated to new work.
+
+### Console Quota Display (opt-in)
+
+`hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage (session %, weekly %, monthly spend) on statusline line 3.
+
+Set `CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json` to enable. Start the watcher:
+```bash
+# First run — headed so you can log in (auth saved to ~/.agentihooks/playwright_profile/)
+python3 scripts/claude_usage_watcher.py --headed
+
+# Subsequent runs (headless, every 60s)
+python3 scripts/claude_usage_watcher.py
+```

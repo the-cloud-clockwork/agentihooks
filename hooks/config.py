@@ -137,3 +137,8 @@ FILE_READ_CACHE_BACKEND = os.getenv("FILE_READ_CACHE_BACKEND", "redis")
 FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
 
 MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
+
+# Console quota display
+CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
+CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
+CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
