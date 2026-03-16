@@ -49,7 +49,7 @@ def _dur(sec: int) -> str:
 def fmt_quota(data: dict) -> str:
     """Compact quota string — caller applies ANSI color.
 
-    Output: s:50% [1h39m] | all:34% son:5% | €40/99 (40%)
+    Output: session:50% [1h35m] | weekly: all:34% sonnet:5% | extra: €40/100 (40%) resets Apr 1 | balance:€100
     """
     if data.get("stale"):
         return "stale"
@@ -58,7 +58,7 @@ def fmt_quota(data: dict) -> str:
     # Session
     session = data.get("session") or {}
     if (s := session.get("used_pct")) is not None:
-        tok = f"s:{s:.0f}%"
+        tok = f"session:{s:.0f}%"
         ri = session.get("resets_in_sec")
         if ri is not None:
             tok += f" [{_dur(ri)}]"
@@ -69,20 +69,36 @@ def fmt_quota(data: dict) -> str:
     wk_parts = []
     am = weekly.get("all_models")
     if am and (w := am.get("used_pct")) is not None:
-        wk_parts.append(f"all:{w:.0f}%")
+        t = f"all:{w:.0f}%"
+        if am.get("resets"):
+            t += f" resets {am['resets']}"
+        wk_parts.append(t)
     sn = weekly.get("sonnet")
     if sn and (w := sn.get("used_pct")) is not None:
-        wk_parts.append(f"son:{w:.0f}%")
+        t = f"sonnet:{w:.0f}%"
+        if sn.get("resets"):
+            t += f" resets {sn['resets']}"
+        wk_parts.append(t)
     if wk_parts:
-        parts.append(" ".join(wk_parts))
+        parts.append("weekly: " + " | ".join(wk_parts))
 
-    # Monthly spend
+    # Extra usage / monthly spend
     spend = data.get("monthly_spend")
     if spend and spend.get("amount") is not None:
         sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(spend.get("currency", ""), "")
+        tok = f"extra: {sym}{spend['amount']:.0f}"
         if spend.get("limit"):
-            parts.append(f"{sym}{spend['amount']:.0f}/{spend['limit']:.0f}")
-        else:
-            parts.append(f"{sym}{spend['amount']:.0f}")
+            tok += f"/{spend['limit']:.0f}"
+        if spend.get("used_pct") is not None:
+            tok += f" ({spend['used_pct']:.0f}%)"
+        if spend.get("resets"):
+            tok += f" resets {spend['resets']}"
+        parts.append(tok)
+
+    # Balance
+    balance = data.get("balance")
+    if balance is not None:
+        sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(data.get("monthly_spend", {}).get("currency", ""), "")
+        parts.append(f"balance:{sym}{balance}")
 
     return " | ".join(parts)

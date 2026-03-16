@@ -211,6 +211,20 @@ async def scrape(page) -> dict:
             "used_pct": round(amt / lim * 100, 1) if lim else 0,
         }
 
+    # Monthly spend limit (text: "Monthly spend limit\n€100" or "€100\nMonthly spend limit")
+    limit_m = re.search(r"monthly\s+spend\s+limit\s*([€$£])([\d.]+)", content, re.I)
+    if not limit_m:
+        limit_m = re.search(r"([€$£])([\d.]+)\s*monthly\s+spend\s+limit", content, re.I)
+    if limit_m:
+        result["_spend_limit_raw"] = float(limit_m.group(2))
+
+    # Current balance (text: "€99.95\nCurrent balance" or "Current balance\n€99.95")
+    bal_m = re.search(r"([€$£])([\d.]+)\s*(?:\n|current)\s*balance", content, re.I)
+    if not bal_m:
+        bal_m = re.search(r"balance[^\n€$£]{0,30}([€$£])([\d.]+)", content, re.I)
+    if bal_m:
+        result["balance"] = float(bal_m.group(2))
+
     bars = await page.query_selector_all('[role="progressbar"]')
     for bar in bars:
         now_str = await bar.get_attribute("aria-valuenow")
@@ -269,6 +283,11 @@ async def scrape(page) -> dict:
                             result["monthly_spend"]["resets"] = reset_date_match.group(1).strip()
             except (ValueError, ZeroDivisionError):
                 pass
+
+    # Use the text-scraped spend limit if we found it (more accurate than calculation)
+    if result.get("_spend_limit_raw") and result.get("monthly_spend"):
+        result["monthly_spend"]["limit"] = result["_spend_limit_raw"]
+    result.pop("_spend_limit_raw", None)
 
     return result
 
