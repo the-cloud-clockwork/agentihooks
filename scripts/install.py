@@ -408,7 +408,12 @@ def _detect_venv() -> Path | None:
         if python.exists():
             return python
 
-    # 2. .venv directory in cwd
+    # 2. Dedicated ~/.agentihooks/.venv (preferred system-wide install location)
+    agentihooks_venv = Path.home() / ".agentihooks" / ".venv" / "bin" / "python"
+    if agentihooks_venv.exists():
+        return agentihooks_venv
+
+    # 3. .venv directory in cwd
     local_venv = Path.cwd() / ".venv" / "bin" / "python"
     if local_venv.exists():
         return local_venv
