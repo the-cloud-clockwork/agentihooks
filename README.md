@@ -105,6 +105,12 @@ agentihooks mcp install                 # two-stage: pick file → pick servers
 agentihooks mcp uninstall               # two-stage: pick file → pick servers to remove
 agentihooks mcp add <path>              # install a file directly by path
 agentihooks mcp sync                    # re-apply all installed MCP files
+agentihooks quota                       # start background quota watcher daemon
+agentihooks quota auth                  # open browser, paste sessionKey, import cookie, start daemon
+agentihooks quota import-cookies        # paste sessionKey without opening browser
+agentihooks quota status                # print last known quota JSON
+agentihooks quota logs                  # tail -f daemon log
+agentihooks quota stop                  # kill daemon
 agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
 agentihooks uninstall                   # remove everything
 agentihooks --loadenv                   # install agentienv shell function into ~/.bashrc
@@ -134,6 +140,9 @@ All integrations are configured via environment variables. Key ones:
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads within a session |
 | `MCP_HYGIENE_ENABLED` | `true` | Inject MCP server usage reminder at session start |
 | `ENABLE_TOOL_SEARCH` | `true` | Make all MCP tools lazy-loaded on demand (set in `env` block of `settings.json`); eliminates ~79K token upfront cost from MCP tool schemas |
+| `CLAUDE_USAGE_FILE` | — | Path to quota JSON file (e.g. `~/.agentihooks/claude_usage.json`). Must be set to enable statusline line 3 quota display. |
+| `CLAUDE_USAGE_STALE_SEC` | `300` | Quota data older than this (seconds) shows "stale" on statusline |
+| `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher daemon poll interval (seconds) |
 
 Complete table covering all 50+ variables across every integration: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
@@ -153,9 +162,11 @@ Everything user-specific lives in `~/.agentihooks/`:
 ├── *.json                     # Drop MCP server files here → agentihooks mcp install
 ├── state.json                 # Tracked MCP files and other state
 ├── logs/                      # Hook + MCP logs
+│   └── quota-watcher.log      # Quota watcher daemon log
 ├── memory/                    # Cross-session agent memory
-├── playwright_profile/        # Persistent browser auth for quota watcher (created on first --headed run)
-└── claude_usage.json          # Written by quota watcher; read by statusline (optional)
+├── claude_auth_state.json     # Playwright storage state (sessionKey cookie for quota watcher)
+├── claude_usage.json          # Written by quota watcher daemon; read by statusline (optional)
+└── quota-watcher.pid          # Daemon PID file
 ```
 
 To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer. Done:

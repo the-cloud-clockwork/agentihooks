@@ -294,6 +294,58 @@ agentihooks mcp sync
 
 ---
 
+## `agentihooks quota`
+
+Manage the background quota watcher daemon that scrapes claude.ai/settings/usage and writes `~/.agentihooks/claude_usage.json` for the statusline.
+
+```bash
+agentihooks quota                  # start background daemon
+agentihooks quota auth             # open browser, paste sessionKey, import cookie, start daemon
+agentihooks quota import-cookies   # paste sessionKey without opening browser
+agentihooks quota status           # print last known quota JSON
+agentihooks quota logs             # tail -f daemon log
+agentihooks quota stop             # kill daemon
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| *(none)* | Start the background daemon. Auto-detaches, writes PID to `~/.agentihooks/quota-watcher.pid`, logs to `~/.agentihooks/logs/quota-watcher.log`. |
+| `auth` | Opens YOUR real system browser (Chrome on Windows/WSL via `cmd.exe /c start`, Safari/Chrome on Mac via `open`) to claude.ai. Prompts for the `sessionKey` cookie (F12 → Application → Cookies → claude.ai → sessionKey). Imports the cookie into Playwright storage state at `~/.agentihooks/claude_auth_state.json`, then starts the daemon. |
+| `import-cookies` | Same as `auth` but skips opening the browser — paste the `sessionKey` value directly. |
+| `status` | Print the last known quota JSON from `~/.agentihooks/claude_usage.json`. |
+| `logs` | Runs `tail -f` on `~/.agentihooks/logs/quota-watcher.log`. |
+| `stop` | Kill the running daemon using the PID from `~/.agentihooks/quota-watcher.pid`. |
+
+### Auth flow
+
+No Chromium/Playwright browser is used for authentication. The `auth` subcommand opens the user's real browser so they can access claude.ai with their existing session. The user copies the `sessionKey` cookie value from Chrome DevTools and pastes it at the prompt. The cookie is saved as a Playwright `storage_state` JSON file at `~/.agentihooks/claude_auth_state.json`. Headless Chromium is only used by the background daemon for scraping.
+
+### Statusline output
+
+When enabled (set `CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json` in `~/.agentihooks/.env`), the statusline displays quota information on line 3:
+
+```
+session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_USAGE_FILE` | — | Must be set to enable. Path to the quota JSON written by the daemon. |
+| `CLAUDE_USAGE_STALE_SEC` | `300` | Data older than this shows "stale" on the statusline. |
+| `CLAUDE_USAGE_POLL_SEC` | `60` | Daemon poll interval in seconds. |
+
+### Prerequisites
+
+```bash
+~/.agentihooks/.venv/bin/python -m playwright install chromium
+```
+
+---
+
 ## `agentihooks --loadenv`
 
 Installs an `agentienv` **shell function** (not an alias) into `~/.bashrc` that sources all `.env` files from `~/.agentihooks/` into the current shell on demand. The function is also **auto-called** at the end of the managed block so vars load in every new shell automatically.

@@ -98,25 +98,39 @@ Three subsystems, all gated by `TOKEN_CONTROL_ENABLED`:
 
 ### Console Quota Display (opt-in)
 
-`hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage (session %, weekly %, monthly spend) on statusline line 3.
+`hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage on statusline line 3. Example output:
 
-The watcher is a Playwright async daemon with a persistent browser context at `~/.agentihooks/playwright_profile/`. First-run requires `--headed` for login; subsequent runs are headless.
+```
+session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+```
+
+The watcher (`scripts/claude_usage_watcher.py`) is a headless Playwright daemon that scrapes claude.ai/settings/usage. Auth uses your real browser — no Chromium login flow. The CLI manages the daemon lifecycle:
 
 ```bash
-# One-time: install the browser
+# Install Playwright's browser (one-time)
 ~/.agentihooks/.venv/bin/python -m playwright install chromium
 
-# First run: headed login (opens Chromium, log in to claude.ai)
-~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py --headed
+# Auth: opens YOUR browser (Chrome on Windows, Safari/Chrome on Mac),
+# prompts for sessionKey cookie paste, imports it, starts daemon
+agentihooks quota auth
 
-# Background daemon
-nohup ~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py \
-  >> ~/.agentihooks/logs/watcher.log 2>&1 &
+# Or import sessionKey without opening browser
+agentihooks quota import-cookies
+
+# Other daemon commands
+agentihooks quota            # start background daemon (auto-detaches, PID file, logs)
+agentihooks quota status     # print last known quota JSON
+agentihooks quota logs       # tail -f daemon log
+agentihooks quota stop       # kill daemon
 ```
+
+Auth flow: `quota auth` opens the real system browser to claude.ai (via `cmd.exe /c start` on Windows/WSL, `open` on Mac). User copies the `sessionKey` cookie from Chrome DevTools (F12 → Application → Cookies → claude.ai → sessionKey). The cookie is saved via Playwright's `storage_state` JSON file at `~/.agentihooks/claude_auth_state.json`. Headless Chromium is only used for background scraping.
 
 Enable in `~/.agentihooks/.env`:
 ```bash
 CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
+# CLAUDE_USAGE_STALE_SEC=300   # data older than this shows "stale" (default)
+# CLAUDE_USAGE_POLL_SEC=60     # daemon poll interval (default)
 ```
 
 ### Redis

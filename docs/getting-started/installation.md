@@ -132,7 +132,13 @@ All hooks and the MCP server auto-load this file at import time (plus any `~/.ag
 
 ## 7. (Optional) Console quota display
 
-The statusline can show your Anthropic console usage (session %, weekly %, monthly spend) on line 3. This requires a one-time browser login via Playwright.
+The statusline can show your Anthropic console usage on line 3. Example output:
+
+```
+session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+```
+
+This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes claude.ai/settings/usage headlessly via Playwright. Auth uses your real system browser — no Chromium login required.
 
 ### Install Playwright's browser
 
@@ -140,20 +146,32 @@ The statusline can show your Anthropic console usage (session %, weekly %, month
 ~/.agentihooks/.venv/bin/python -m playwright install chromium
 ```
 
-### First run — headed (browser opens for login)
+### Authenticate and start the daemon
+
+The `quota auth` command opens YOUR real browser (Chrome on Windows/WSL via `cmd.exe /c start`, Safari/Chrome on Mac via `open`) to claude.ai. You then copy the `sessionKey` cookie from Chrome DevTools (F12 → Application → Cookies → claude.ai → sessionKey), paste it when prompted, and the daemon starts automatically.
 
 ```bash
-~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py --headed
+agentihooks quota auth
 ```
 
-A Chromium window opens. Log in to [claude.ai](https://claude.ai). After login, the watcher scrapes the usage page and writes `~/.agentihooks/claude_usage.json`, then exits. Your session is saved to `~/.agentihooks/playwright_profile/` — you will not need to log in again.
+The cookie is saved as a Playwright storage state file at `~/.agentihooks/claude_auth_state.json`. Headless Chromium is only used for background scraping — your login happens in your real browser.
 
-### Background watcher (headless, every 60 s)
+Alternatively, import the sessionKey without opening a browser:
 
 ```bash
-nohup ~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py \
-  >> ~/.agentihooks/logs/watcher.log 2>&1 &
+agentihooks quota import-cookies
 ```
+
+### Daemon management
+
+```bash
+agentihooks quota            # start background daemon (auto-detaches, PID file, logs)
+agentihooks quota status     # print last known quota JSON
+agentihooks quota logs       # tail -f daemon log (~/.agentihooks/logs/quota-watcher.log)
+agentihooks quota stop       # kill daemon
+```
+
+The daemon writes a PID file at `~/.agentihooks/quota-watcher.pid` and logs to `~/.agentihooks/logs/quota-watcher.log`.
 
 ### Enable the statusline display
 
@@ -161,24 +179,11 @@ Add to `~/.agentihooks/.env`:
 
 ```bash
 CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
-# CLAUDE_USAGE_STALE_SEC=300   # mark data stale after 5 min (default)
-# CLAUDE_USAGE_POLL_SEC=60     # watcher poll interval (default)
+# CLAUDE_USAGE_STALE_SEC=300   # data older than this shows "stale" (default)
+# CLAUDE_USAGE_POLL_SEC=60     # daemon poll interval (default)
 ```
 
-The statusline will then display e.g. `s:9% w:29% €40/100 [3h]` on line 3, color-coded by usage thresholds.
-
-### Auto-start on login (optional)
-
-Add to `~/.bashrc` or `~/.profile`:
-
-```bash
-# Start agentihooks quota watcher if not already running
-if ! pgrep -f "claude_usage_watcher.py" > /dev/null; then
-  nohup ~/.agentihooks/.venv/bin/python \
-    /path/to/agentihooks/scripts/claude_usage_watcher.py \
-    >> ~/.agentihooks/logs/watcher.log 2>&1 &
-fi
-```
+The statusline will then display quota information on line 3, color-coded by usage thresholds.
 
 ---
 
