@@ -5,9 +5,27 @@ a JSON file read by hooks/statusline.py.
 
 Usage:
   python3 scripts/claude_usage_watcher.py [--output PATH] [--poll SEC] [--headed]
+  python3 scripts/claude_usage_watcher.py --import-cookies
 
-First run: use --headed so you can log in. Auth is saved to
-~/.agentihooks/playwright_profile/ and reused on every subsequent run.
+Authentication options (choose one):
+  1. --headed         Opens a real Chromium window so you can log in interactively.
+                      Requires a display (WSLg, X11, or VNC). Auth is saved to
+                      ~/.agentihooks/playwright_profile/ and reused on every run.
+
+  2. --import-cookies Paste a sessionKey cookie value from your browser's DevTools.
+                      No display required — works purely in the terminal.
+
+                      How to get the cookie:
+                        Chrome/Edge: F12 -> Application -> Cookies -> https://claude.ai
+                                     Copy the value of the "sessionKey" cookie.
+                        Firefox:     F12 -> Storage -> Cookies -> https://claude.ai
+                                     Copy the value of the "sessionKey" cookie.
+
+                      Then run:
+                        python3 scripts/claude_usage_watcher.py --import-cookies
+                      and paste the value when prompted. The cookie is written into
+                      ~/.agentihooks/playwright_profile/ so subsequent headless runs
+                      are authenticated automatically.
 """
 import argparse
 import asyncio
@@ -41,13 +59,53 @@ def _write_atomic(path: Path, data: dict) -> None:
 
 
 def _parse_reset_sec(text: str) -> int | None:
-    """Parse 'resets in 3h 14m' → seconds."""
+    """Parse 'resets in 3h 14m' -> seconds."""
     total = 0
     for val, unit in re.findall(r"(\d+)\s*(h(?:r|our)?s?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)", text, re.I):
         v = int(val)
         u = unit.lower()[0]
         total += v * (3600 if u == "h" else 60 if u == "m" else 1)
     return total if total else None
+
+
+def import_cookies(session_key: str) -> None:
+    """Write a sessionKey cookie into the Playwright persistent profile."""
+    from playwright.sync_api import sync_playwright
+
+    profile_dir = Path.home() / ".agentihooks" / "playwright_profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            str(profile_dir),
+            headless=True,
+            args=["--no-sandbox"],
+        )
+        ctx.add_cookies([
+            {
+                "name": "sessionKey",
+                "value": session_key,
+                "domain": ".claude.ai",
+                "path": "/",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ])
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
+        logged_in = "/login" not in page.url and "/auth" not in page.url
+        ctx.close()
+
+    if logged_in:
+        print("[quota-watcher] Cookie imported and verified — you are now logged in.", flush=True)
+        print(f"[quota-watcher] Profile saved to: {profile_dir}", flush=True)
+        print("[quota-watcher] Run the watcher normally now (no --headed needed):", flush=True)
+        print(f"  {sys.executable} {__file__}", flush=True)
+    else:
+        print("[quota-watcher] Cookie imported but still redirected to login.", flush=True)
+        print("  The sessionKey value may be expired or incorrect. Try again with a fresh cookie.", flush=True)
+        sys.exit(1)
 
 
 async def scrape(page) -> dict:
@@ -105,9 +163,9 @@ async def scrape(page) -> dict:
     if wsm:
         result["weekly"]["sonnet"] = {"used_pct": float(wsm.group(1))}
 
-    # Monthly spend  (€39.58 ... €100 or $39.58 ... $100)
+    # Monthly spend  (e.g. euro/dollar amount spent vs limit)
     spend_m = re.search(
-        r"([€$£])(\d+(?:\.\d+)?)\s+(?:spent|used)[^\n]{0,60}?(?:resets|limit)[^\n]{0,60}?(\d+)\s*%\s*used[^\n]{0,40}?[€$£](\d+(?:\.\d+)?)",
+        r"([euro$pound])(\d+(?:\.\d+)?)\s+(?:spent|used)[^\n]{0,60}?(?:resets|limit)[^\n]{0,60}?(\d+)\s*%\s*used[^\n]{0,40}?[euro$pound](\d+(?:\.\d+)?)",
         content, re.I | re.S
     )
     if not spend_m:
@@ -162,7 +220,7 @@ async def run(output: Path, poll_sec: int, headed: bool):
     profile_dir = Path.home() / ".agentihooks" / "playwright_profile"
     profile_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[quota-watcher] output → {output}  poll={poll_sec}s", flush=True)
+    print(f"[quota-watcher] output -> {output}  poll={poll_sec}s", flush=True)
 
     async with async_playwright() as pw:
         ctx = await pw.chromium.launch_persistent_context(
@@ -176,7 +234,7 @@ async def run(output: Path, poll_sec: int, headed: bool):
             try:
                 data = await scrape(page)
                 if not data:
-                    print("[quota-watcher] not logged in — re-open with --headed to authenticate", flush=True)
+                    print("[quota-watcher] not logged in — run with --headed or --import-cookies to authenticate", flush=True)
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
@@ -190,11 +248,32 @@ async def run(output: Path, poll_sec: int, headed: bool):
 
 def main():
     _load_env()
-    ap = argparse.ArgumentParser(description="Claude.ai quota watcher")
+    ap = argparse.ArgumentParser(
+        description="Claude.ai quota watcher",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
-    ap.add_argument("--headed", action="store_true", help="Run with visible browser (required for first login)")
+    ap.add_argument("--headed", action="store_true",
+                    help="Run with visible browser (required for first login if you have a display)")
+    ap.add_argument("--import-cookies", action="store_true", dest="import_cookies",
+                    help="Paste a sessionKey cookie from your browser DevTools — no display needed")
     args = ap.parse_args()
+
+    if args.import_cookies:
+        print("How to find the cookie:")
+        print("  Chrome/Edge: F12 -> Application -> Cookies -> https://claude.ai -> sessionKey")
+        print("  Firefox:     F12 -> Storage -> Cookies -> https://claude.ai -> sessionKey")
+        print()
+        try:
+            value = input("Paste sessionKey value: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit("\nAborted.")
+        if not value:
+            sys.exit("No value entered.")
+        import_cookies(value)
+        return
+
     if not args.output:
         sys.exit("Set CLAUDE_USAGE_FILE or pass --output")
     asyncio.run(run(Path(args.output).expanduser(), args.poll, args.headed))
