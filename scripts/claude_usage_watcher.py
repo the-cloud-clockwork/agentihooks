@@ -215,20 +215,58 @@ async def scrape(page) -> dict:
     for bar in bars:
         now_str = await bar.get_attribute("aria-valuenow")
         max_str = await bar.get_attribute("aria-valuemax")
+        # parent[2] has the label text: "Current session | ... | 50% used"
         label_el = await page.evaluate(
-            "(el) => { let p = el.parentElement; for(let i=0;i<4;i++){p=p&&p.parentElement;} return p ? p.innerText : ''; }",
+            "(el) => { let p = el.parentElement; for(let i=0;i<2;i++){p=p&&p.parentElement;} return p ? p.innerText : ''; }",
             bar,
         )
         if now_str and max_str:
             try:
-                pct = float(now_str) / float(max_str) * 100
+                pct = round(float(now_str) / float(max_str) * 100, 1)
                 label = (label_el or "").lower()
+
+                # Parse reset time from label text (e.g. "Resets in 1 hr 39 min" or "Resets Fri 10:00 AM")
+                reset_match = re.search(r"resets?\s+in\s+([\dhmins ]+)", label, re.I)
+                reset_date_match = re.search(r"resets?\s+(\w{3}\s+[\d:]+\s*(?:am|pm)?|\w{3}\s+\d+)", label, re.I)
+
                 if "session" in label:
-                    result["session"]["used_pct"] = round(pct, 1)
+                    result["session"]["used_pct"] = pct
+                    if reset_match:
+                        sec = _parse_reset_sec(reset_match.group(1))
+                        if sec:
+                            result["session"]["resets_in_sec"] = sec
+                            from datetime import timedelta
+                            result["session"]["resets_at"] = (
+                                datetime.now(timezone.utc) + timedelta(seconds=sec)
+                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
                 elif "sonnet" in label:
-                    result["weekly"].setdefault("sonnet", {})["used_pct"] = round(pct, 1)
-                elif "week" in label or "all" in label:
-                    result["weekly"].setdefault("all_models", {})["used_pct"] = round(pct, 1)
+                    result["weekly"].setdefault("sonnet", {})["used_pct"] = pct
+                    if reset_date_match:
+                        result["weekly"]["sonnet"]["resets"] = reset_date_match.group(1).strip()
+
+                elif "all model" in label:
+                    result["weekly"].setdefault("all_models", {})["used_pct"] = pct
+                    if reset_date_match:
+                        result["weekly"]["all_models"]["resets"] = reset_date_match.group(1).strip()
+
+                elif "spent" in label or "€" in label or "$" in label or "£" in label:
+                    # Monthly spend bar: "€39.58 spent | ... | 40% used"
+                    spend_match = re.search(r"([€$£])([\d.]+)\s*spent", label, re.I)
+                    if spend_match:
+                        sym = spend_match.group(1)
+                        cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
+                        amt = float(spend_match.group(2))
+                        limit_val = float(max_str) if float(max_str) > 1 else 0
+                        # Compute limit from pct: amt / (pct/100) = limit
+                        if pct > 0:
+                            limit_val = round(amt / (pct / 100), 2)
+                        result["monthly_spend"] = {
+                            "amount": amt, "limit": limit_val, "currency": cur,
+                            "used_pct": pct,
+                        }
+                        if reset_date_match:
+                            result["monthly_spend"]["resets"] = reset_date_match.group(1).strip()
             except (ValueError, ZeroDivisionError):
                 pass
 
