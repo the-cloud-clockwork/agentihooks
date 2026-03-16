@@ -4,7 +4,7 @@ Claude.ai usage quota watcher — scrapes claude.ai/settings/usage and writes
 a JSON file read by hooks/statusline.py.
 
 Usage:
-  python3 scripts/claude_usage_watcher.py [--output PATH] [--poll SEC] [--headed]
+  python3 scripts/claude_usage_watcher.py [--output PATH] [--poll SEC] [--headless]
   python3 scripts/claude_usage_watcher.py --import-cookies
 
 Authentication options (choose one):
@@ -100,7 +100,7 @@ def import_cookies(session_key: str) -> None:
     if logged_in:
         print("[quota-watcher] Cookie imported and verified — you are now logged in.", flush=True)
         print(f"[quota-watcher] Profile saved to: {profile_dir}", flush=True)
-        print("[quota-watcher] Run the watcher normally now (no --headed needed):", flush=True)
+        print("[quota-watcher] Run the watcher normally now:", flush=True)
         print(f"  {sys.executable} {__file__}", flush=True)
     else:
         print("[quota-watcher] Cookie imported but still redirected to login.", flush=True)
@@ -234,7 +234,7 @@ async def run(output: Path, poll_sec: int, headed: bool):
             try:
                 data = await scrape(page)
                 if not data:
-                    print("[quota-watcher] not logged in — run with --headed or --import-cookies to authenticate", flush=True)
+                    print("[quota-watcher] not logged in — opening browser for login (use --headless to suppress, or --import-cookies for cookie auth)", flush=True)
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
@@ -254,8 +254,9 @@ def main():
     )
     ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
-    ap.add_argument("--headed", action="store_true",
-                    help="Run with visible browser (required for first login if you have a display)")
+    ap.add_argument("--headless", action="store_true",
+                    help="Run headless (no browser window) — default is headed/visible")
+    ap.add_argument("--headed", action="store_true", default=True, help=argparse.SUPPRESS)
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies",
                     help="Paste a sessionKey cookie from your browser DevTools — no display needed")
     args = ap.parse_args()
@@ -276,7 +277,7 @@ def main():
 
     if not args.output:
         sys.exit("Set CLAUDE_USAGE_FILE or pass --output")
-    asyncio.run(run(Path(args.output).expanduser(), args.poll, args.headed))
+    asyncio.run(run(Path(args.output).expanduser(), args.poll, not args.headless))
 
 
 if __name__ == "__main__":
