@@ -400,18 +400,22 @@ def _find_requirements_files() -> list[Path]:
 
 
 def _detect_venv() -> Path | None:
-    """Return the Python executable inside the active or local venv, or None."""
-    # 1. Activated venv via VIRTUAL_ENV
+    """Return the Python executable inside the active or local venv, or None.
+
+    ~/.agentihooks/.venv always wins when it exists — it is the canonical
+    environment regardless of which project venv happens to be activated.
+    """
+    # 1. Dedicated ~/.agentihooks/.venv — always preferred when present
+    agentihooks_venv = Path.home() / ".agentihooks" / ".venv" / "bin" / "python"
+    if agentihooks_venv.exists():
+        return agentihooks_venv
+
+    # 2. Activated venv via VIRTUAL_ENV (fallback if dedicated venv missing)
     venv_env = os.environ.get("VIRTUAL_ENV")
     if venv_env:
         python = Path(venv_env) / "bin" / "python"
         if python.exists():
             return python
-
-    # 2. Dedicated ~/.agentihooks/.venv (preferred system-wide install location)
-    agentihooks_venv = Path.home() / ".agentihooks" / ".venv" / "bin" / "python"
-    if agentihooks_venv.exists():
-        return agentihooks_venv
 
     # 3. .venv directory in cwd
     local_venv = Path.cwd() / ".venv" / "bin" / "python"
@@ -615,7 +619,11 @@ def install_global(args: argparse.Namespace) -> None:
     print(f"agentihooks root : {AGENTIHOOKS_ROOT}")
     print(f"Target           : {CLAUDE_HOME}")
     print(f"Profile          : {profile_name}")
-    print(f"Python           : {sys.executable}")
+    # Resolve canonical Python: ~/.agentihooks/.venv wins over sys.executable
+    # so that `agentihooks global` (run via uv tool from any project venv) always
+    # bakes the right path into hook commands.
+    _canonical_python = str(_detect_venv() or sys.executable)
+    print(f"Python           : {_canonical_python}")
     print()
 
     # --- 1. Load and render base settings ---
@@ -627,7 +635,7 @@ def install_global(args: argparse.Namespace) -> None:
     rendered: dict = substitute_paths(
         raw_settings
     )  # NOSONAR — intentional object→dict cast
-    rendered = substitute_paths(rendered, "__PYTHON__", sys.executable)  # NOSONAR
+    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)  # NOSONAR
 
     # --- 1b. Apply per-profile overrides (e.g. env vars like AGENTIHOOKS_SECRETS_MODE) ---
     overrides_path = PROFILES_DIR / profile_name / "settings.overrides.json"
