@@ -1697,6 +1697,28 @@ def cmd_quota(args: "argparse.Namespace") -> None:
     elif args.action == "import-cookies":
         os.execv(python, [python, str(watcher), "--import-cookies"])
 
+    elif args.action == "logs":
+        log_file = Path.home() / ".agentihooks" / "logs" / "quota-watcher.log"
+        if not log_file.exists():
+            print("No log file yet. Start the daemon first:  agentihooks quota")
+            sys.exit(0)
+        os.execlp("tail", "tail", "-f", str(log_file))
+
+    elif args.action == "stop":
+        pid_file = Path.home() / ".agentihooks" / "quota-watcher.pid"
+        if pid_file.exists():
+            import signal
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, signal.SIGTERM)
+                pid_file.unlink(missing_ok=True)
+                print(f"[quota] Daemon stopped (PID {pid}).")
+            except (ProcessLookupError, ValueError):
+                pid_file.unlink(missing_ok=True)
+                print("[quota] No daemon running.")
+        else:
+            print("[quota] No daemon running.")
+
     elif args.action == "status":
         import json as _json
         usage_file = Path(os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
@@ -1821,8 +1843,8 @@ def main() -> None:
         "action",
         nargs="?",
         default="watch",
-        choices=["watch", "auth", "import-cookies", "status"],
-        help="watch (default) — headless daemon; auth — open browser + paste cookie; import-cookies — paste only; status — print quota JSON",
+        choices=["watch", "auth", "import-cookies", "status", "logs", "stop"],
+        help="watch (default) — start background daemon; auth — open browser + paste cookie; import-cookies — paste only; status — print quota; logs — tail daemon log; stop — kill daemon",
     )
     quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
