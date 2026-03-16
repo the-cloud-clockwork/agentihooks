@@ -278,7 +278,7 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
                 "--no-default-browser-check",
                 "--no-service-autorun",
                 "--disable-session-crashed-bubble",
-                "about:blank",
+                "https://claude.ai",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -310,6 +310,7 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
         ctx = contexts[0] if contexts else await browser.new_context()
         pages = ctx.pages
         page = pages[0] if pages else await ctx.new_page()
+        await page.goto("https://claude.ai", wait_until="domcontentloaded")
 
         try:
             while True:
@@ -351,6 +352,7 @@ async def run_with_chromium(profile_dir: Path, output: Path, poll_sec: int, head
             ignore_default_args=["--enable-automation"],
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        await page.goto("https://claude.ai", wait_until="domcontentloaded")
 
         while True:
             try:
