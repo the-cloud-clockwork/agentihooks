@@ -1,38 +1,23 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options: [patch, minor, major]
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          PREV_TAG=$(git describe --tags --abbrev=0 ${TAG}^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log ${PREV_TAG}..${TAG} --pretty=format:"- %s" --no-merges)
-          else
-            NOTES=$(git log --pretty=format:"- %s" --no-merges -20)
-          fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body: |
-            ## Changes
-            ${{ steps.notes.outputs.notes }}
-          generate_release_notes: true
+    uses: The-Cloud-Clock-Work/.github/.github/workflows/release-reusable.yml@main
+    with:
+      bump: ${{ inputs.bump }}
+      downstream_workflows: "publish-pypi.yml"
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
