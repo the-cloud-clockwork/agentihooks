@@ -1494,29 +1494,43 @@ def cmd_mcp_action(
         print(f"MCP files in {scan_dir}:\n")
         _display_mcp_list(mcp_files, tracked)
         print()
-        try:
-            raw = input(
-                f"Select file to install [1-{len(mcp_files)}] (or q to quit): "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nAborted.")
-            sys.exit(0)
-        if raw.lower() == "q":
-            print("Aborted.")
-            return
-        try:
-            idx = int(raw) - 1
-            if not 0 <= idx < len(mcp_files):
-                raise ValueError
-        except ValueError:
-            print("Invalid selection.")
-            sys.exit(1)
-        selected, _ = mcp_files[idx]
+        # Single-file shortcut: confirm instead of numeric prompt
+        if len(mcp_files) == 1:
+            single, _ = mcp_files[0]
+            try:
+                raw = input(f"Install {single.name}? [Y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAborted.")
+                sys.exit(0)
+            if raw in ("n", "no"):
+                print("Aborted.")
+                return
+            idx = 0
+        else:
+            try:
+                raw = input(
+                    f"Enter number to install (1-{len(mcp_files)}, or q to quit): "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAborted.")
+                sys.exit(0)
+            if raw.lower() == "q":
+                print("Aborted.")
+                return
+            try:
+                idx = int(raw) - 1
+                if not 0 <= idx < len(mcp_files):
+                    raise ValueError
+            except ValueError:
+                print("Invalid selection.")
+                sys.exit(1)
+        selected, servers = mcp_files[idx]
         if str(selected) in tracked:
-            print(f"\n  [--] {selected.name} is already installed. Re-applying...")
+            print(f"\n  [--] {selected.name} is already installed — re-applying...")
         print()
         manage_user_mcp(selected)
-        print("\nRestart Claude Code for the changes to take effect.")
+        print(f"\n  Installed {len(servers)} server(s): {', '.join(servers.keys())}")
+        print("  Restart Claude Code for the changes to take effect.")
 
     elif action == "uninstall":
         if not tracked:
@@ -1545,27 +1559,39 @@ def cmd_mcp_action(
                 print(f"  {i}. {f}  [file not found or unreadable]")
 
         print()
-        try:
-            raw = input(
-                f"Select file to uninstall [1-{len(installed)}] (or q to quit): "
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nAborted.")
-            sys.exit(0)
-        if raw.lower() == "q":
-            print("Aborted.")
-            return
-        try:
-            idx = int(raw) - 1
-            if not 0 <= idx < len(installed):
-                raise ValueError
-        except ValueError:
-            print("Invalid selection.")
-            sys.exit(1)
+        if len(installed) == 1:
+            single, _ = installed[0]
+            try:
+                raw = input(f"Uninstall {single.name}? [Y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAborted.")
+                sys.exit(0)
+            if raw in ("n", "no"):
+                print("Aborted.")
+                return
+            idx = 0
+        else:
+            try:
+                raw = input(
+                    f"Enter number to uninstall (1-{len(installed)}, or q to quit): "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAborted.")
+                sys.exit(0)
+            if raw.lower() == "q":
+                print("Aborted.")
+                return
+            try:
+                idx = int(raw) - 1
+                if not 0 <= idx < len(installed):
+                    raise ValueError
+            except ValueError:
+                print("Invalid selection.")
+                sys.exit(1)
         selected, _ = installed[idx]
         print()
         manage_user_mcp(selected, uninstall=True)
-        print("\nRestart Claude Code for the changes to take effect.")
+        print("  Restart Claude Code for the changes to take effect.")
 
     elif action == "sync":
         sync_user_mcp()

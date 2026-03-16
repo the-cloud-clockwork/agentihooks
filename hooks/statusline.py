@@ -128,6 +128,9 @@ def main() -> None:
         if total_input and ctx_size:
             used = total_input
             total = ctx_size
+            # Recompute from actual values — payload's used_percentage can be
+            # stale (e.g. carried over from the previous session's final state).
+            used_pct = used / total * 100
         elif total_input and used_pct > 0:
             total = int(total_input / used_pct * 100)
             used = total_input
@@ -135,6 +138,8 @@ def main() -> None:
             used = cw.get("used", 0) or 0
             remaining = cw.get("remaining", 0) or 0
             total = used + remaining
+            if total > 0:
+                used_pct = used / total * 100
 
         # Model
         model_name = model_data.get("display_name", "")
