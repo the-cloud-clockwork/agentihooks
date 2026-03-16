@@ -19,23 +19,19 @@ _USAGE_TEXT = """Examples:
     agentihooks uninstall [--yes]
         Remove all agentihooks artifacts installed by 'agentihooks global'.
 
+    agentihooks mcp [list|install|uninstall|sync|add] [--dir PATH]
+        Manage MCP server files from ~/.agentihooks/ (or --dir).
+        Drop .json files with mcpServers into the directory, then:
+          agentihooks mcp              # list available MCP files
+          agentihooks mcp install      # pick one to install
+          agentihooks mcp uninstall    # pick one to remove
+          agentihooks mcp sync         # re-apply all installed files
+          agentihooks mcp add <path>   # install a file directly by path
+
     agentihooks ignore [path] [--force]
         Create a .claudeignore in the current directory (or given path).
         Covers secrets, build artefacts, binaries, venvs, and IDE noise.
         --force overwrites an existing file.
-
-    agentihooks --mcp /path/to/.mcp.json
-        Merge MCP servers from the given file into user scope (~/.claude.json).
-        Servers become available in every project without per-repo .mcp.json files.
-        The file path is recorded in ~/.agentihooks/state.json for future syncs.
-
-    agentihooks --mcp /path/to/.mcp.json --uninstall
-        Remove those MCP servers from user scope (~/.claude.json) and
-        remove the file path from ~/.agentihooks/state.json.
-
-    agentihooks --sync
-        Re-apply all MCP files previously registered via --mcp.
-        agentihooks global calls --sync automatically when state.json exists.
 
     agentihooks --loadenv [PATH] [-- COMMAND [ARGS...]]
         Load ~/.agentihooks/.env (or PATH) into the environment, then:
@@ -335,7 +331,29 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
         print(f"[!!] env file not found: {env_file}", file=sys.stderr)
         sys.exit(1)
 
-    block = f"{_BLOCK_START}\nalias agentienv='set -a && . {env_file} && set +a'\n{_BLOCK_END}\n"
+    env_dir = env_file.parent
+    block = (
+        f"{_BLOCK_START}\n"
+        f"agentienv() {{\n"
+        f"  if [ ! -f \"{env_file}\" ]; then\n"
+        f"    echo \"[agentienv] no .env found at {env_file} — skipping\"\n"
+        f"    return 0\n"
+        f"  fi\n"
+        f"  set -a\n"
+        f"  . \"{env_file}\" 2>/dev/null || {{ echo \"[agentienv] ERROR: failed to source {env_file}\"; set +a; return 1; }}\n"
+        f"  _aih_count=1\n"
+        f"  for f in \"{env_dir}\"/*.env; do\n"
+        f"    [ -f \"$f\" ] && [ \"$f\" != \"{env_file}\" ] && {{\n"
+        f"      . \"$f\" 2>/dev/null || echo \"[agentienv] WARNING: failed to source $f\"\n"
+        f"      _aih_count=$((_aih_count + 1))\n"
+        f"    }}\n"
+        f"  done\n"
+        f"  set +a\n"
+        f"  echo \"[agentienv] loaded $_aih_count env file(s) from {env_dir}\"\n"
+        f"}}\n"
+        f"agentienv\n"
+        f"{_BLOCK_END}\n"
+    )
 
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
 
@@ -1383,6 +1401,188 @@ def install_project(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _scan_mcp_dir(scan_dir: Path) -> list[tuple[Path, dict]]:
+    """Scan *scan_dir* for JSON files containing ``mcpServers``.
+
+    Returns a sorted list of (path, servers_dict) tuples.
+    """
+    results: list[tuple[Path, dict]] = []
+    if not scan_dir.is_dir():
+        return results
+    for f in sorted(scan_dir.glob("*.json")):
+        try:
+            data = load_json(f)
+            if "mcpServers" in data and data["mcpServers"]:
+                results.append((f, data["mcpServers"]))
+        except (json.JSONDecodeError, OSError):
+            pass
+    # Also check hidden .json files (e.g., .anton-mcp.json)
+    for f in sorted(scan_dir.glob(".*.json")):
+        try:
+            data = load_json(f)
+            if "mcpServers" in data and data["mcpServers"]:
+                results.append((f, data["mcpServers"]))
+        except (json.JSONDecodeError, OSError):
+            pass
+    # Deduplicate by path (glob patterns may overlap)
+    seen: set[str] = set()
+    deduped: list[tuple[Path, dict]] = []
+    for fpath, servers in results:
+        key = str(fpath)
+        if key not in seen:
+            seen.add(key)
+            deduped.append((fpath, servers))
+    return deduped
+
+
+def _find_companion_env(mcp_file: Path) -> Path | None:
+    """Find a companion .env file for an MCP JSON file.
+
+    Checks for: anton-mcp.env, anton.env (from anton-mcp.json).
+    """
+    stem = mcp_file.stem  # e.g. "anton-mcp"
+    for candidate_name in [f"{stem}.env", f"{stem.removesuffix('-mcp')}.env"]:
+        candidate = mcp_file.parent / candidate_name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _display_mcp_list(mcp_files: list[tuple[Path, dict]], tracked: set[str]) -> None:
+    """Print a numbered list of MCP files with server names and [installed] markers."""
+    for i, (f, servers) in enumerate(mcp_files, 1):
+        names = ", ".join(servers.keys())
+        marker = f"  {'\033[32m'}[installed]{'\033[0m'}" if str(f) in tracked else ""
+        print(f"  {i}. {f.name}{marker}")
+        print(f"     {len(servers)} server(s): {names}")
+        env_file = _find_companion_env(f)
+        if env_file:
+            print(f"     \033[2menv: {env_file.name}\033[0m")
+
+
+def cmd_mcp_action(
+    action: str, scan_dir: Path | None = None, *, mcp_path: Path | None = None
+) -> None:
+    """Handle ``agentihooks mcp list|install|uninstall|sync|add``.
+
+    *scan_dir* defaults to ``~/.agentihooks/``.
+    """
+    if scan_dir is None:
+        scan_dir = AGENTIHOOKS_STATE_DIR
+
+    tracked = set(_load_state().get("mcpFiles", []))
+
+    if action == "list":
+        mcp_files = _scan_mcp_dir(scan_dir)
+        if not mcp_files:
+            print(f"No MCP files found in {scan_dir}")
+            print(f"\nDrop .json files with a mcpServers key into {scan_dir}")
+            return
+        print(f"MCP files in {scan_dir}:\n")
+        _display_mcp_list(mcp_files, tracked)
+        if tracked:
+            print(f"\nCurrently installed: {len(tracked)} file(s)")
+        print(f"\nTo install:   agentihooks mcp install")
+        print(f"To uninstall: agentihooks mcp uninstall")
+
+    elif action == "install":
+        mcp_files = _scan_mcp_dir(scan_dir)
+        if not mcp_files:
+            print(f"No MCP files found in {scan_dir}")
+            print(f"\nDrop .json files with a mcpServers key into {scan_dir}")
+            return
+        print(f"MCP files in {scan_dir}:\n")
+        _display_mcp_list(mcp_files, tracked)
+        print()
+        try:
+            raw = input(
+                f"Select file to install [1-{len(mcp_files)}] (or q to quit): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            sys.exit(0)
+        if raw.lower() == "q":
+            print("Aborted.")
+            return
+        try:
+            idx = int(raw) - 1
+            if not 0 <= idx < len(mcp_files):
+                raise ValueError
+        except ValueError:
+            print("Invalid selection.")
+            sys.exit(1)
+        selected, _ = mcp_files[idx]
+        if str(selected) in tracked:
+            print(f"\n  [--] {selected.name} is already installed. Re-applying...")
+        print()
+        manage_user_mcp(selected)
+        print("\nRestart Claude Code for the changes to take effect.")
+
+    elif action == "uninstall":
+        if not tracked:
+            print("No MCP files currently installed — nothing to uninstall.")
+            return
+        # Show only installed files
+        installed: list[tuple[Path, dict]] = []
+        for path_str in sorted(tracked):
+            p = Path(path_str)
+            if not p.exists():
+                installed.append((p, {}))
+                continue
+            try:
+                data = load_json(p)
+                installed.append((p, data.get("mcpServers", {})))
+            except (json.JSONDecodeError, OSError):
+                installed.append((p, {}))
+
+        print("Installed MCP files:\n")
+        for i, (f, servers) in enumerate(installed, 1):
+            if servers:
+                names = ", ".join(servers.keys())
+                print(f"  {i}. {f.name}")
+                print(f"     {len(servers)} server(s): {names}")
+            else:
+                print(f"  {i}. {f}  [file not found or unreadable]")
+
+        print()
+        try:
+            raw = input(
+                f"Select file to uninstall [1-{len(installed)}] (or q to quit): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            sys.exit(0)
+        if raw.lower() == "q":
+            print("Aborted.")
+            return
+        try:
+            idx = int(raw) - 1
+            if not 0 <= idx < len(installed):
+                raise ValueError
+        except ValueError:
+            print("Invalid selection.")
+            sys.exit(1)
+        selected, _ = installed[idx]
+        print()
+        manage_user_mcp(selected, uninstall=True)
+        print("\nRestart Claude Code for the changes to take effect.")
+
+    elif action == "sync":
+        sync_user_mcp()
+
+    elif action == "add":
+        if mcp_path is None:
+            print("Usage: agentihooks mcp add <path>")
+            sys.exit(1)
+        manage_user_mcp(mcp_path)
+        print("\nRestart Claude Code for the changes to take effect.")
+
+    else:
+        print(f"Unknown action: {action}")
+        print("Usage: agentihooks mcp [list|install|uninstall|sync|add]")
+        sys.exit(1)
+
+
 def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     """Create a .claudeignore in *target_dir* (defaults to cwd).
 
@@ -1424,33 +1624,6 @@ def main() -> None:
         help="Print the currently active global profile name and exit",
     )
     parser.add_argument(
-        "--mcp",
-        nargs="?",
-        const="",
-        metavar="PATH",
-        help="Path to a .mcp.json file to install into user scope. "
-        "With --uninstall and no PATH: interactive selection from tracked files.",
-    )
-    parser.add_argument(
-        "--uninstall",
-        action="store_true",
-        help="Remove MCP servers from user scope. "
-        "With --mcp PATH: remove that file. Without PATH: pick from tracked files.",
-    )
-    parser.add_argument(
-        "--sync",
-        action="store_true",
-        help=f"Re-apply all MCP files tracked in {STATE_JSON}",
-    )
-    parser.add_argument(
-        "--mcp-lib",
-        nargs="?",
-        const="",
-        metavar="PATH",
-        help="Browse a directory of .mcp.json files and install one interactively. "
-        "PATH is saved in state.json — omit it on future calls to reuse.",
-    )
-    parser.add_argument(
         "--loadenv",
         nargs="?",
         const="",
@@ -1490,6 +1663,29 @@ def main() -> None:
         "--yes", "-y", action="store_true", help="Skip confirmation prompt"
     )
 
+    mcp_p = sub.add_parser(
+        "mcp",
+        help="Manage MCP server files (list, install, uninstall, sync, add)",
+    )
+    mcp_p.add_argument(
+        "action",
+        nargs="?",
+        default="list",
+        choices=["list", "install", "uninstall", "sync", "add"],
+        help="Action to perform (default: list)",
+    )
+    mcp_p.add_argument(
+        "mcp_path",
+        nargs="?",
+        default=None,
+        help="Path to MCP file (only used with 'add' action)",
+    )
+    mcp_p.add_argument(
+        "--dir",
+        default=None,
+        help=f"Directory to scan for MCP files (default: {AGENTIHOOKS_STATE_DIR})",
+    )
+
     ign_p = sub.add_parser(
         "ignore", help="Create a .claudeignore in the current directory"
     )
@@ -1523,28 +1719,6 @@ def main() -> None:
         query_active_profile()
         return
 
-    if args.mcp is not None:
-        if not args.mcp and args.uninstall:
-            _cmd_mcp_interactive_uninstall()
-        elif args.mcp:
-            manage_user_mcp(
-                Path(args.mcp).expanduser().resolve(), uninstall=args.uninstall
-            )
-        else:
-            parser.error("--mcp requires a PATH when not used with --uninstall")
-        return
-
-    if args.uninstall and args.mcp is None:
-        parser.error("--uninstall requires --mcp <path>")
-
-    if args.sync:
-        sync_user_mcp()
-        return
-
-    if args.mcp_lib is not None:
-        _cmd_mcp_lib(Path(args.mcp_lib) if args.mcp_lib else None)
-        return
-
     if not args.command:
         parser.print_help()
         sys.exit(1)
@@ -1555,6 +1729,10 @@ def main() -> None:
         install_project(args)
     elif args.command == "uninstall":
         uninstall_global(args)
+    elif args.command == "mcp":
+        scan_dir = Path(args.dir).expanduser().resolve() if args.dir else None
+        mcp_path = Path(args.mcp_path).expanduser().resolve() if args.mcp_path else None
+        cmd_mcp_action(args.action, scan_dir, mcp_path=mcp_path)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
 

@@ -23,8 +23,10 @@ Everything user-specific lives in a single directory:
 
 ```
 ~/.agentihooks/
-├── .env          # All integration credentials (never committed)
-├── state.json    # Tracks MCP files, lib path, and other state
+├── .env          # Main credentials (always loaded first)
+├── *.env         # Companion env files (auto-sourced alphabetically after .env)
+├── *.json        # Drop MCP server files here → agentihooks mcp install
+├── state.json    # Tracks installed MCP files and other state
 ├── logs/         # Hook + MCP log files
 └── memory/       # Per-project agent memory files
 ```
@@ -105,54 +107,33 @@ Requirements are installed with `uv pip install` into the active virtual environ
 
 ---
 
-## Linking MCP files at user scope (`--mcp`)
+## Managing MCP server files (`agentihooks mcp`)
 
-`agentihooks --mcp` merges servers from any `.mcp.json` into `~/.claude.json`, making them available in every project. The path is recorded in `state.json` for auto-sync.
-
-```bash
-# Install servers from a file
-agentihooks --mcp ~/.agentitools/.anton-mcp.json
-
-# Remove a specific file's servers
-agentihooks --mcp ~/.agentitools/.anton-mcp.json --uninstall
-
-# Interactive uninstall — pick from all tracked files
-agentihooks --mcp --uninstall
-```
-
-The interactive uninstall shows a numbered list:
-
-```
-Tracked MCP files:
-
-  1. /home/user/.agentitools/.anton-mcp.json
-     14 server(s): anton, litellm, matrix, github, ...
-
-Select file to uninstall [1-1] (or q to quit):
-```
-
-Restart Claude Code after any install/uninstall for changes to take effect.
-
----
-
-## MCP library browser (`--mcp-lib`)
-
-Keep all your `.mcp.json` files in one directory and browse them interactively. The directory path is saved — omit it on future calls.
+Drop `.json` files with a `mcpServers` key into `~/.agentihooks/`, then use the interactive MCP manager to install or remove them.
 
 ```bash
-# First use — set the library directory
-agentihooks --mcp-lib ~/.agentitools/
+# List available MCP files
+agentihooks mcp
 
-# Future calls — reuses the saved path
-agentihooks --mcp-lib
+# Interactive install — pick from the list
+agentihooks mcp install
+
+# Interactive uninstall — pick from installed files
+agentihooks mcp uninstall
+
+# Install a specific file directly by path
+agentihooks mcp add ~/Downloads/my-servers.json
+
+# Re-apply all installed files after changes
+agentihooks mcp sync
 ```
 
 Output:
 
 ```
-MCP files in /home/user/.agentitools:
+MCP files in /home/user/.agentihooks:
 
-  1. .anton-mcp.json  [installed]
+  1. anton-mcp.json  [installed]
      14 server(s): anton, litellm, matrix, github, ...
   2. staging-mcp.json
      3 server(s): staging-api, staging-db, staging-cache
@@ -160,19 +141,35 @@ MCP files in /home/user/.agentitools:
 Select file to install [1-2] (or q to quit):
 ```
 
-`[installed]` marks files already tracked in `state.json`. The library path is saved as `mcpLibPath` in `state.json` — change it any time by passing a new path.
+`[installed]` marks files already tracked in `state.json`. Installed servers are merged into `~/.claude.json` and re-applied automatically on `agentihooks global`.
 
----
+### Companion `.env` files
 
-## Re-syncing all linked MCPs (`--sync`)
+Drop a `.env` file alongside your MCP JSON to provide the env vars it needs:
 
-After pulling changes to any tracked `.mcp.json`, re-apply everything:
-
-```bash
-agentihooks --sync
+```
+~/.agentihooks/
+├── anton-mcp.json     # MCP server definitions (${ANTON_HOST}, etc.)
+├── anton-mcp.env      # ANTON_HOST=10.10.30.130, ANTON_API_KEY=...
+├── staging.json
+└── staging.env
 ```
 
-Reads `~/.agentihooks/state.json` and re-merges each file into `~/.claude.json`. Missing files are skipped with a warning. `agentihooks global` calls `--sync` automatically when `state.json` exists.
+Companion env files are auto-sourced by:
+- **Hook runtime** — `hooks/config.py` loads `~/.agentihooks/.env` first, then all `*.env` files alphabetically
+- **`agentienv` shell function** — sources `.env` then all `*.env` files so `${VAR}` placeholders in MCP configs resolve at Claude Code startup
+
+The `mcp list` output shows detected companion env files:
+
+```
+  1. anton-mcp.json  [installed]
+     14 server(s): anton, litellm, matrix, ...
+     env: anton-mcp.env
+```
+
+To scan a different directory: `agentihooks mcp list --dir /path/to/mcp-library/`
+
+Restart Claude Code after any install/uninstall for changes to take effect.
 
 ---
 
@@ -204,9 +201,9 @@ source ~/.bashrc
 # 7. Load env vars and launch Claude Code
 agentienv && claude
 
-# 8. Point the MCP library to your collection
-agentihooks --mcp-lib ~/.agentitools/
-# Pick the files you want from the interactive list
+# 8. Drop MCP files into ~/.agentihooks/ and install
+cp /path/to/my-servers.json ~/.agentihooks/
+agentihooks mcp install
 ```
 
 Everything restored. No manual settings editing, no hunting for which keys go where.
@@ -219,7 +216,7 @@ Everything restored. No manual settings editing, no hunting for which keys go wh
 2. Share values via a secrets manager (1Password, AWS Secrets Manager, Vault)
 3. Each developer runs `agentihooks global` and populates `~/.agentihooks/.env`
 4. Each developer runs `agentihooks --loadenv` to install the `agentienv` alias
-5. Keep a shared `~/.agentitools/` style directory (or a team repo) with curated `.mcp.json` files
-6. Use `agentihooks --mcp-lib` to browse and install from that collection
+5. Keep curated `.mcp.json` files in a shared repo or distribute them to each developer
+6. Each developer drops them into `~/.agentihooks/` and runs `agentihooks mcp install`
 
 The repo stays credential-free. `~/.agentihooks/.env` is on each developer's machine only.

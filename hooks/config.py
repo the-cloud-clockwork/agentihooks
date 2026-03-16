@@ -4,16 +4,11 @@ import os
 from pathlib import Path
 
 
-def _load_user_env() -> None:
-    """Load ~/.agentihooks/.env into os.environ (overrides shell session env).
-    Called once at module import time. AGENTIHOOKS_HOME is resolved from
-    the current os.environ (set via shell) to locate the .env file.
-    """
-    _home = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
-    _env_file = _home / ".env"
-    if not _env_file.is_file():
+def _parse_env_file(env_file: Path) -> None:
+    """Parse a single .env file and set variables in os.environ."""
+    if not env_file.is_file():
         return
-    for _raw in _env_file.read_text(encoding="utf-8").splitlines():
+    for _raw in env_file.read_text(encoding="utf-8").splitlines():
         _line = _raw.strip()
         if not _line or _line.startswith("#"):
             continue
@@ -35,6 +30,31 @@ def _load_user_env() -> None:
             _val = _val[: _val.index("#")].rstrip()
         if _key:
             os.environ[_key] = _val
+
+
+def _load_user_env() -> None:
+    """Load all .env files from ~/.agentihooks/ into os.environ.
+
+    Called once at module import time. AGENTIHOOKS_HOME is resolved from
+    the current os.environ (set via shell) to locate env files.
+
+    Load order:
+      1. ~/.agentihooks/.env        (main config — always first)
+      2. ~/.agentihooks/*.env        (companion files, sorted alphabetically)
+
+    Later files override earlier ones for duplicate keys.
+    """
+    _home = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
+
+    # 1. Main .env first
+    _parse_env_file(_home / ".env")
+
+    # 2. Additional *.env files (sorted, skip the main .env to avoid double-load)
+    if _home.is_dir():
+        for _extra in sorted(_home.glob("*.env")):
+            if _extra.name == ".env":
+                continue
+            _parse_env_file(_extra)
 
 
 _load_user_env()

@@ -32,7 +32,10 @@ class TestLoadenvBashrcBlock:
 
         content = bashrc.read_text()
         assert "# === agentihooks ===" in content
-        assert f"alias agentienv='set -a && . {env_file} && set +a'" in content
+        assert "agentienv()" in content
+        assert str(env_file) in content
+        # Function is defined AND auto-called
+        assert "\nagentienv\n" in content
         assert "# === end-agentihooks ===" in content
 
     def test_replaces_existing_block(self, tmp_path):
@@ -42,7 +45,7 @@ class TestLoadenvBashrcBlock:
         bashrc.write_text(
             "# before\n"
             "# === agentihooks ===\n"
-            "alias agentienv='set -a && . /old/path/.env && set +a'\n"
+            "agentienv() { set -a; . /old/path/.env; set +a; }\n"
             "# === end-agentihooks ===\n"
             "# after\n"
         )

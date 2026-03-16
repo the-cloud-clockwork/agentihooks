@@ -91,12 +91,13 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 ```bash
 agentihooks global [--profile <name>]   # install/re-apply to ~/.claude
 agentihooks project <path>              # write .mcp.json into a project
+agentihooks mcp                         # list MCP files in ~/.agentihooks/
+agentihooks mcp install                 # interactive: pick one to install
+agentihooks mcp uninstall               # interactive: pick one to remove
+agentihooks mcp add <path>              # install a file directly by path
+agentihooks mcp sync                    # re-apply all installed MCP files
 agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
 agentihooks uninstall                   # remove everything
-agentihooks --mcp <file>                # add MCP servers at user scope
-agentihooks --mcp --uninstall           # interactive: pick a tracked file to remove
-agentihooks --mcp-lib [dir]             # browse a dir of MCP files, install one
-agentihooks --sync                      # re-apply all tracked MCP files
 agentihooks --loadenv                   # install agentienv alias into ~/.bashrc
 ```
 
@@ -136,10 +137,12 @@ Everything user-specific lives in `~/.agentihooks/`:
 
 ```
 ~/.agentihooks/
-├── .env        # All integration credentials (seeded from .env.example)
-├── state.json  # Tracked MCP files, lib path, and other state
-├── logs/       # Hook + MCP logs
-└── memory/     # Cross-session agent memory
+├── .env          # Main credentials (seeded from .env.example, loaded first)
+├── *.env         # Companion env files (auto-sourced after .env)
+├── *.json        # Drop MCP server files here → agentihooks mcp install
+├── state.json    # Tracked MCP files and other state
+├── logs/         # Hook + MCP logs
+└── memory/       # Cross-session agent memory
 ```
 
 To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, run `agentihooks global`. Done.
@@ -152,17 +155,13 @@ source ~/.bashrc
 agentienv          # load vars into current shell before launching claude
 ```
 
-**Browse a directory of MCP files** and install one interactively:
+**Manage MCP server files** — drop `.json` files into `~/.agentihooks/`:
 
 ```bash
-agentihooks --mcp-lib ~/.agentitools/   # saved for future calls
-agentihooks --mcp-lib                   # reuses saved path
-```
-
-**Interactive uninstall** — pick from tracked files:
-
-```bash
-agentihooks --mcp --uninstall
+agentihooks mcp             # list available MCP files
+agentihooks mcp install     # interactive: pick one to install
+agentihooks mcp uninstall   # interactive: pick one to remove
+agentihooks mcp add <path>  # install directly by path
 ```
 
 Details: [Portability & Reusability](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/portability/)
