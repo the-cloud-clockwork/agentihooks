@@ -54,24 +54,37 @@ def _find_windows_browser() -> str | None:
     return None
 
 
-def _to_windows_path(linux_path: Path) -> str:
-    """Convert a WSL Linux path to a Windows UNC path using wslpath."""
-    try:
-        result = subprocess.check_output(
-            ["wslpath", "-w", str(linux_path)], stderr=subprocess.DEVNULL
-        ).decode().strip()
-        if result:
-            return result
-    except Exception:
-        pass
-    # Fallback: use Windows %LOCALAPPDATA%\agentihooks\playwright_profile
+def _windows_profile_dir() -> str:
+    """Return a Windows-native path for the Chrome profile.
+
+    Uses %LOCALAPPDATA%\\agentihooks\\playwright_profile — a true Windows path
+    that chrome.exe can open reliably (no UNC/WSL mount issues).
+    """
     try:
         local_app = subprocess.check_output(
             ["cmd.exe", "/c", "echo %LOCALAPPDATA%"], stderr=subprocess.DEVNULL
         ).decode().strip()
         return f"{local_app}\\agentihooks\\playwright_profile"
     except Exception:
-        return str(linux_path)
+        pass
+    # Last resort: wslpath UNC conversion
+    try:
+        profile = Path.home() / ".agentihooks" / "playwright_profile"
+        return subprocess.check_output(
+            ["wslpath", "-w", str(profile)], stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return str(Path.home() / ".agentihooks" / "playwright_profile")
+
+
+def _port_open(port: int, timeout: float = 1.0) -> bool:
+    """Return True if TCP port is accepting connections on localhost."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _load_env():
@@ -225,37 +238,46 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
     """Launch Windows Chrome/Edge via subprocess + CDP (pipe IPC fails cross-WSL)."""
     from playwright.async_api import async_playwright
 
-    win_profile = _to_windows_path(profile_dir)
+    win_profile = _windows_profile_dir()
     print(f"[quota-watcher] browser={Path(exe).stem}  profile={win_profile}", flush=True)
     print(f"[quota-watcher] output={output}  poll={poll_sec}s", flush=True)
 
-    proc = subprocess.Popen(
-        [
-            exe,
-            f"--remote-debugging-port={_CDP_PORT}",
-            f"--user-data-dir={win_profile}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--no-service-autorun",
-            "about:blank",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # If port is already open (previous run still alive), connect without relaunching
+    proc = None
+    if not _port_open(_CDP_PORT):
+        proc = subprocess.Popen(
+            [
+                exe,
+                f"--remote-debugging-port={_CDP_PORT}",
+                f"--user-data-dir={win_profile}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--no-service-autorun",
+                "--disable-session-crashed-bubble",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Socket-level wait — more reliable than connect_over_cdp polling
+        print("[quota-watcher] waiting for Chrome to open debug port...", flush=True)
+        for _ in range(60):  # 30 seconds
+            if _port_open(_CDP_PORT):
+                break
+            await asyncio.sleep(0.5)
+        else:
+            if proc:
+                proc.kill()
+            raise RuntimeError(
+                f"Chrome did not open CDP port {_CDP_PORT} in 30s.\n"
+                "  If Chrome is already running, it may have absorbed the launch.\n"
+                "  Try closing Chrome and running again, or use: agentihooks quota import-cookies"
+            )
+    else:
+        print(f"[quota-watcher] port {_CDP_PORT} already open — connecting to existing Chrome", flush=True)
 
     async with async_playwright() as pw:
-        # Wait for Chrome to open the debugging port
-        browser = None
-        for attempt in range(40):
-            try:
-                browser = await pw.chromium.connect_over_cdp(f"http://localhost:{_CDP_PORT}")
-                break
-            except Exception:
-                await asyncio.sleep(0.5)
-
-        if browser is None:
-            proc.kill()
-            raise RuntimeError(f"Chrome did not open CDP port {_CDP_PORT} in time")
+        browser = await pw.chromium.connect_over_cdp(f"http://localhost:{_CDP_PORT}")
 
         print("[quota-watcher] connected to Chrome via CDP", flush=True)
 
