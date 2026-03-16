@@ -1691,7 +1691,10 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 
     python = str(_detect_venv() or sys.executable)
 
-    if args.action == "import-cookies":
+    if args.action == "auth":
+        os.execv(python, [python, str(watcher), "--auth"])
+
+    elif args.action == "import-cookies":
         os.execv(python, [python, str(watcher), "--import-cookies"])
 
     elif args.action == "status":
@@ -1703,10 +1706,8 @@ def cmd_quota(args: "argparse.Namespace") -> None:
         data = _json.loads(usage_file.read_text())
         print(_json.dumps(data, indent=2))
 
-    else:  # watch (default) — headless unless --headed
+    else:  # watch (default) — always headless
         cmd = [python, str(watcher)]
-        if getattr(args, "headed", False):
-            cmd.append("--headed")
         if args.poll != 60:
             cmd += ["--poll", str(args.poll)]
         os.execv(python, cmd)
@@ -1820,10 +1821,9 @@ def main() -> None:
         "action",
         nargs="?",
         default="watch",
-        choices=["watch", "import-cookies", "status"],
-        help="watch (default) — run headless daemon; import-cookies — paste sessionKey from Chrome; status — print last known quota",
+        choices=["watch", "auth", "import-cookies", "status"],
+        help="watch (default) — headless daemon; auth — open browser + paste cookie; import-cookies — paste only; status — print quota JSON",
     )
-    quota_p.add_argument("--headed", action="store_true", help="Open a Chromium window via WSLg for login")
     quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
     args = parser.parse_args(_argv)
