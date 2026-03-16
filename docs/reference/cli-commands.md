@@ -204,40 +204,71 @@ docs/generated/
 Manage MCP server files at user scope (`~/.claude.json`). Drop `.json` files with a `mcpServers` key into `~/.agentihooks/`, then use the interactive commands to install or remove them.
 
 ```bash
-agentihooks mcp                     # list available MCP files
-agentihooks mcp install             # interactive: pick one to install
-agentihooks mcp uninstall           # interactive: pick one to remove
+agentihooks mcp                     # list available MCP files (default action)
+agentihooks mcp install             # two-stage: pick file → pick servers
+agentihooks mcp uninstall           # two-stage: pick file → pick servers to remove
 agentihooks mcp add <path>          # install a file directly by path
 agentihooks mcp sync                # re-apply all installed MCP files
 agentihooks mcp list --dir <path>   # scan a different directory
 ```
 
-### How it works
+### Interactive two-stage flow (`install` and `uninstall`)
 
-1. Scans `~/.agentihooks/` (or `--dir`) for any `.json` file containing a `mcpServers` key
-2. Shows a numbered list with server names and `[installed]` markers
-3. On install, merges servers into `~/.claude.json` and tracks the file in `state.json`
-4. On uninstall, removes servers from `~/.claude.json` and untracks the file
+Both `install` and `uninstall` use the same two-stage interactive flow:
+
+**Stage 1 — pick a file:**
+
+If only one file is present, it is auto-displayed without a prompt. Otherwise a numbered list is shown:
 
 ```
 MCP files in /home/user/.agentihooks:
 
   1. anton-mcp.json  [installed]
-     14 server(s): anton, litellm, matrix, github, ...
+     • anton
+     • litellm
+     • matrix
+     • github
   2. staging-mcp.json
-     3 server(s): staging-api, staging-db, staging-cache
+     • staging-api
+     • staging-db
+     • staging-cache
 
-Select file to install [1-2] (or q to quit):
+Enter file number (1-2, or q to quit):
 ```
+
+**Stage 2 — pick which servers to install/uninstall:**
+
+```
+Servers in anton-mcp.json:
+
+  0. All (4 servers)
+  1. anton
+  2. litellm
+  3. matrix
+  4. github
+
+Select (0=all, 1-4, or comma list):
+```
+
+Enter `0` for all, a single number, or a comma-separated list (e.g. `1,3`).
+
+For `uninstall`: the file is removed from `state.json` only if **all** of its servers were uninstalled.
+
+### How it works
+
+1. Scans `~/.agentihooks/` (or `--dir`) for any `.json` file containing a `mcpServers` key
+2. Shows a numbered list with server names as bullet points (`•`) and `[installed]` markers
+3. On install, merges the selected servers into `~/.claude.json` and tracks the file in `state.json`
+4. On uninstall, removes the selected servers from `~/.claude.json`; removes the file from tracking only if all servers were removed
 
 ### Actions
 
 | Action | Description |
 |--------|-------------|
-| `list` (default) | Show all MCP files in the scan directory with install status |
-| `install` | Interactive: pick a file to install into user scope |
-| `uninstall` | Interactive: pick an installed file to remove |
-| `add <path>` | Install a specific file directly by path (no browsing) |
+| `list` (default) | Show all MCP files in the scan directory with install status and bullet-point server names |
+| `install` | Two-stage: pick a file, then pick which servers to install |
+| `uninstall` | Two-stage: pick an installed file, then pick which servers to remove |
+| `add <path>` | Install a specific file directly by path (all servers, no prompting) |
 | `sync` | Re-apply all tracked MCP files from `state.json` (called automatically by `agentihooks global`) |
 
 ### Flags
@@ -252,7 +283,7 @@ Select file to install [1-2] (or q to quit):
 # Drop a new MCP file into the library
 cp my-servers.json ~/.agentihooks/
 
-# Browse and install
+# Browse and install (two-stage: pick file, then pick servers)
 agentihooks mcp install
 
 # After changing MCP files, re-sync
@@ -265,7 +296,7 @@ agentihooks mcp sync
 
 ## `agentihooks --loadenv`
 
-Installs an `agentienv` shell function into `~/.bashrc` that sources all `.env` files from `~/.agentihooks/` into the current shell on demand.
+Installs an `agentienv` **shell function** (not an alias) into `~/.bashrc` that sources all `.env` files from `~/.agentihooks/` into the current shell on demand. The function is also **auto-called** at the end of the managed block so vars load in every new shell automatically.
 
 ```bash
 agentihooks --loadenv
@@ -277,11 +308,28 @@ A managed block in `~/.bashrc` (idempotent — safe to re-run):
 
 ```bash
 # === agentihooks ===
-agentienv() { set -a; . ~/.agentihooks/.env; for f in ~/.agentihooks/*.env; do [ -f "$f" ] && [ "$f" != "~/.agentihooks/.env" ] && . "$f"; done; set +a; }
+agentienv() {
+  if [ ! -f "~/.agentihooks/.env" ]; then
+    echo "[agentienv] no .env found at ~/.agentihooks/.env — skipping"
+    return 0
+  fi
+  set -a
+  . "~/.agentihooks/.env"
+  _aih_count=1
+  for f in "~/.agentihooks/"*.env; do
+    [ -f "$f" ] && [ "$f" != "~/.agentihooks/.env" ] && {
+      . "$f"
+      _aih_count=$((_aih_count + 1))
+    }
+  done
+  set +a
+  echo "[agentienv] loaded $_aih_count env file(s) from ~/.agentihooks"
+}
+agentienv
 # === end-agentihooks ===
 ```
 
-This loads `~/.agentihooks/.env` first, then any additional `*.env` files (e.g., companion env files for MCP configs) in alphabetical order.
+This loads `~/.agentihooks/.env` first, then any additional `*.env` files (e.g., companion env files for MCP configs) in alphabetical order. The trailing `agentienv` call means vars are loaded automatically in every new shell — no manual invocation needed unless you add new env files mid-session.
 
 ### Usage
 

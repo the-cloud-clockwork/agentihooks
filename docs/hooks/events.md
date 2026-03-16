@@ -6,7 +6,7 @@ nav_order: 2
 # Hook Events
 {: .no_toc }
 
-AgentiHooks registers handlers for all 11 Claude Code hook events.
+AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -21,7 +21,9 @@ AgentiHooks registers handlers for all 11 Claude Code hook events.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Allow — Claude Code proceeds normally |
-| `2` | Block — Claude Code cancels the action and injects the hook's stdout as a warning |
+| `2` | Block — Claude Code cancels the action and displays the hook's **stderr** as a warning |
+
+> **Note:** `BlockAction` exceptions print to **stderr** (not stdout). This ensures Claude Code displays the block reason cleanly rather than showing "No stderr output".
 
 ---
 
@@ -170,32 +172,54 @@ AgentiHooks registers handlers for all 11 Claude Code hook events.
 
 ---
 
-## StatusLine
+## StatusLine (native setting, not a hook event)
 
-**When:** Claude Code polls for terminal status bar text (fires frequently — once per turn or more).
+**StatusLine is not a hook event.** It is configured as a native Claude Code setting in `settings.json`:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "cd /app && python3 -m hooks.statusline"
+}
+```
+
+Claude Code pipes a JSON payload to `hooks/statusline.py` on every turn. The script reads the payload and prints 2–3 lines to stdout that appear in the terminal status bar.
 
 **Payload fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | string | Session identifier |
-| `context_window` | object | `{used: int, remaining: int}` — current context window state |
-| `model` | string | Active model identifier |
+| `context_window` | object | `{context_window_size, total_input_tokens, used_percentage, current_usage, ...}` |
+| `model` | object | `{display_name, ...}` — active model |
+| `cost` | object | `{total_cost_usd, total_duration_ms, total_api_duration_ms, total_lines_added, total_lines_removed}` |
+| `worktree` | object | Active worktree info (name, path) — if in a worktree |
+| `vim` | object | Vim mode info (`{mode}`) — if vim keybindings are active |
 
-**Handler actions:**
+**Output (printed to stdout):**
 
-1. If `TOKEN_MONITOR_ENABLED=true`: computes fill percentage, burn rate delta (vs previous turn stored in Redis), and outputs a status line to stdout. Claude Code renders this in the terminal status bar:
-   ```
-   ctx: 234K/1M (23%) | burn: 12K/turn | model: sonnet-4.6
-   ```
-2. If fill % crosses `TOKEN_WARN_PCT` (default 60%) for the first time this session: injects a warning banner into Claude's context
-3. If fill % crosses `TOKEN_CRITICAL_PCT` (default 80%) for the first time this session: injects a critical banner
+Line 1 — context fill bar, model, cost, duration:
+```
+████████░░░░░░░ 54% | claude-sonnet-4-6 | $0.0231 | 12s
+```
 
-Threshold warnings are **edge-triggered**: each level fires at most once per session (tracked in Redis at `agenticore:token_warn:{session_id}`). When Redis is unavailable, warnings fire every time the threshold is exceeded.
+Line 2 — token counts, burn rate, lines changed, cache ratio, git branch:
+```
+ctx: 540K/1M | burn: 23K/turn | +12-3 | cache: 67% | main
+```
 
-**Exit codes used:**
+Line 3 (conditional) — threshold warning if fill % crosses `TOKEN_WARN_PCT` or `TOKEN_CRITICAL_PCT`:
+```
+⚠️  CONTEXT 61% — consider /compact soon
+```
 
-- `0` always — never blocks
+**Key implementation detail:** `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` rather than using the payload's `used_percentage` field, which can carry stale values from the previous session's final state.
+
+**Threshold warnings** are **edge-triggered**: each level fires at most once per session (tracked in Redis at `agenticore:token_warn:{session_id}`). When Redis is unavailable, warnings fire every time the threshold is exceeded.
+
+**Burn rate** is computed as the delta in `total_input_tokens` vs the previous turn's value stored in Redis at `agenticore:tokens:{session_id}`. When Redis is unavailable, burn rate is omitted.
+
+Configure via [`TOKEN_CONTROL_ENABLED`, `TOKEN_MONITOR_ENABLED`, `TOKEN_WARN_PCT`, `TOKEN_CRITICAL_PCT`](../reference/configuration/#token-control).
 
 ---
 
@@ -246,13 +270,13 @@ Threshold warnings are **edge-triggered**: each level fires at most once per ses
 
 ## Token Control Layer
 
-`PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, and `StatusLine` work together to reduce context window consumption:
+`PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, and the native **StatusLine** script work together to reduce context window consumption:
 
 ```mermaid
 sequenceDiagram
     participant Agent
     participant SessionStart
-    participant StatusLine
+    participant StatusLine as StatusLine<br/>(native setting)
     participant PreToolUse
     participant PostToolUse
     participant SessionEnd
@@ -261,11 +285,11 @@ sequenceDiagram
     SessionStart->>Agent: MCP hygiene reminder
     loop Each turn
         StatusLine->>Redis: read prev used tokens
-        StatusLine->>Agent: emit "ctx: X/1M (23%)" to status bar
-        StatusLine->>Agent: inject warning banner (first threshold crossing only)
+        StatusLine->>Agent: emit 2-line status bar (fill%, burn rate, cost, git)
+        StatusLine->>Agent: inject warning line (first threshold crossing only)
         Agent->>PreToolUse: about to Read file.py
         PreToolUse->>Redis: was file.py read + unmodified?
-        Redis-->>PreToolUse: yes → BlockAction (exit 2)
+        Redis-->>PreToolUse: yes → BlockAction (exit 2 via stderr)
         PreToolUse-->>Agent: "already in context, use it"
         Agent->>PostToolUse: Bash docker logs ... output
         PostToolUse->>Agent: re-emit truncated output via additionalContext

@@ -20,10 +20,13 @@ Claude Code
   ├── Hook Events (stdin JSON) ──► python -m hooks ──► hook_manager.py
   │     SessionStart, PreToolUse,       │
   │     PostToolUse, Stop, ...          ├── transcript logging
-  │     StatusLine, ...                 ├── tool error memory
+  │     (10 events total)               ├── tool error memory
   │                                     ├── token control layer
   │                                     ├── metrics parsing
   │                                     └── email notifications
+  │
+  ├── statusLine (native setting) ──► python -m hooks.statusline
+  │     pipes JSON on every turn        └── 2-3 line status bar (ctx%, burn rate, cost, git)
   │
   └── MCP Tools ──► python -m hooks.mcp ──► 12 category modules
         github, aws, confluence,              │
@@ -47,7 +50,7 @@ See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getti
 
 ## Hook Events
 
-11 lifecycle events, all handled by `python -m hooks`:
+10 lifecycle events, all handled by `python -m hooks`:
 
 | Event | What happens |
 |-------|-------------|
@@ -56,12 +59,13 @@ See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getti
 | `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
 | `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
 | `SessionEnd` | Logs transcript, clears file read cache, cleans up session directory |
-| `StatusLine` | Emits live context window metrics; warns on threshold crossing |
 | `SubagentStop` | Logs subagent transcript |
 | `UserPromptSubmit` | Warns on detected secrets |
 | `Notification` | Logs notifications |
 | `PreCompact` | Logs before context compaction |
 | `PermissionRequest` | Logs permission requests |
+
+**StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by `hooks/statusline.py`. It emits a 2–3 line terminal status bar with context fill %, burn rate, cost, cache ratio, and git branch on every turn. `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` to avoid stale payload values.
 
 Full payload schemas and handler details: [Hook Events](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/events/)
 
@@ -92,13 +96,13 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 agentihooks global [--profile <name>]   # install/re-apply to ~/.claude
 agentihooks project <path>              # write .mcp.json into a project
 agentihooks mcp                         # list MCP files in ~/.agentihooks/
-agentihooks mcp install                 # interactive: pick one to install
-agentihooks mcp uninstall               # interactive: pick one to remove
+agentihooks mcp install                 # two-stage: pick file → pick servers
+agentihooks mcp uninstall               # two-stage: pick file → pick servers to remove
 agentihooks mcp add <path>              # install a file directly by path
 agentihooks mcp sync                    # re-apply all installed MCP files
 agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
 agentihooks uninstall                   # remove everything
-agentihooks --loadenv                   # install agentienv alias into ~/.bashrc
+agentihooks --loadenv                   # install agentienv shell function into ~/.bashrc
 ```
 
 Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
@@ -117,13 +121,14 @@ All integrations are configured via environment variables. Key ones:
 | `MCP_CATEGORIES` | `all` | Comma-separated list of tool categories to load |
 | `LOG_ENABLED` | `true` | Enable hook logging |
 | `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest on Stop |
-| `REDIS_URL` | — | Redis for session state/memory (optional) |
+| `REDIS_URL` | — | Redis connection string — format: `redis://:PASSWORD@host:port/db`. Used by token monitor (burn rate), file read cache (dedup), and warning edge-triggers. Graceful degradation when unavailable. |
 | `TOKEN_CONTROL_ENABLED` | `true` | Master switch for the token control layer |
 | `TOKEN_WARN_PCT` | `60` | Context fill % that triggers a warning injection |
 | `TOKEN_CRITICAL_PCT` | `80` | Context fill % that triggers a critical banner |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output (docker logs, git log, etc.) |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads within a session |
 | `MCP_HYGIENE_ENABLED` | `true` | Inject MCP server usage reminder at session start |
+| `ENABLE_TOOL_SEARCH` | `true` | Make all MCP tools lazy-loaded on demand (set in `env` block of `settings.json`); eliminates ~79K token upfront cost from MCP tool schemas |
 
 Complete table covering all 50+ variables across every integration: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
@@ -147,7 +152,7 @@ Everything user-specific lives in `~/.agentihooks/`:
 
 To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, run `agentihooks global`. Done.
 
-**Install the `agentienv` alias** (sources `.env` into any shell on demand):
+**Install the `agentienv` shell function** (sources `.env` into any shell on demand — also auto-called on every new shell):
 
 ```bash
 agentihooks --loadenv   # writes managed block to ~/.bashrc

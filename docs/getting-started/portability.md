@@ -63,28 +63,28 @@ The file is seeded from `.env.example` on first `agentihooks global` and is **ne
 
 ## Loading env vars into your shell (`--loadenv`)
 
-Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `--loadenv` installs a shell alias that sources `.env` into any shell on demand.
+Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `--loadenv` installs a **shell function** (not an alias) that sources `.env` into any shell on demand — and also auto-calls it so vars load in every new shell automatically.
 
 ```bash
-# Install the alias (one time — writes a managed block to ~/.bashrc)
+# Install the function (one time — writes a managed block to ~/.bashrc)
 agentihooks --loadenv
 
 # Reload your shell
 source ~/.bashrc
 
-# Load all vars into the current shell whenever you need them
+# Vars are already loaded automatically. Call agentienv manually only
+# if you add new env files mid-session:
 agentienv
 ```
 
 Then launch `claude` from that shell — all `${VAR}` placeholders in your MCP configs resolve correctly.
 
-The alias written to `~/.bashrc`:
+The function written to `~/.bashrc` defines `agentienv()` which:
+1. Sources `~/.agentihooks/.env`
+2. Sources all `*.env` files alphabetically from the same directory
+3. Reports how many files were loaded
 
-```bash
-# === agentihooks ===
-alias agentienv='set -a && . ~/.agentihooks/.env && set +a'
-# === end-agentihooks ===
-```
+The block ends with a bare `agentienv` call so the vars are loaded automatically in every new shell.
 
 The block is **idempotent** — re-running `--loadenv` updates the block in place rather than appending. Keep your own aliases outside the markers.
 
@@ -134,14 +134,23 @@ Output:
 MCP files in /home/user/.agentihooks:
 
   1. anton-mcp.json  [installed]
-     14 server(s): anton, litellm, matrix, github, ...
+     • anton
+     • litellm
+     • matrix
+     • github
   2. staging-mcp.json
-     3 server(s): staging-api, staging-db, staging-cache
+     • staging-api
+     • staging-db
+     • staging-cache
 
-Select file to install [1-2] (or q to quit):
+Enter file number (1-2, or q to quit):
 ```
 
+After picking a file, a second prompt lets you choose which servers to install (`0` = all, or specific numbers/comma list).
+
 `[installed]` marks files already tracked in `state.json`. Installed servers are merged into `~/.claude.json` and re-applied automatically on `agentihooks global`.
+
+For `uninstall`, the file is removed from tracking only if **all** its servers were uninstalled.
 
 ### Companion `.env` files
 
@@ -163,7 +172,9 @@ The `mcp list` output shows detected companion env files:
 
 ```
   1. anton-mcp.json  [installed]
-     14 server(s): anton, litellm, matrix, ...
+     • anton
+     • litellm
+     • matrix
      env: anton-mcp.env
 ```
 
@@ -192,10 +203,10 @@ cp /path/to/backup/.env ~/.agentihooks/.env
 # 5. Install hooks, skills, agents, MCPs
 uv run agentihooks global
 
-# 6. Install the agentienv alias + requirements
+# 6. Install the agentienv shell function + requirements
 #    (activate a venv first so --loadenv can install packages)
 python3 -m venv .venv && source .venv/bin/activate
-agentihooks --loadenv   # writes alias, offers to install requirements.txt
+agentihooks --loadenv   # writes function + auto-call, offers to install requirements.txt
 source ~/.bashrc
 
 # 7. Load env vars and launch Claude Code
@@ -215,7 +226,7 @@ Everything restored. No manual settings editing, no hunting for which keys go wh
 1. Keep `.env.example` up to date in the repo with all variable names (no values)
 2. Share values via a secrets manager (1Password, AWS Secrets Manager, Vault)
 3. Each developer runs `agentihooks global` and populates `~/.agentihooks/.env`
-4. Each developer runs `agentihooks --loadenv` to install the `agentienv` alias
+4. Each developer runs `agentihooks --loadenv` to install the `agentienv` shell function
 5. Keep curated `.mcp.json` files in a shared repo or distribute them to each developer
 6. Each developer drops them into `~/.agentihooks/` and runs `agentihooks mcp install`
 

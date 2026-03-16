@@ -58,9 +58,9 @@ agentihooks global --query
 
 ---
 
-## Load your secrets — the `agentienv` alias
+## Load your secrets — the `agentienv` shell function
 
-Claude Code expands `${VAR}` in MCP configs from its own process environment. The cleanest way to get secrets into that environment is the `agentienv` alias:
+Claude Code expands `${VAR}` in MCP configs from its own process environment. The cleanest way to get secrets into that environment is the `agentienv` shell function:
 
 ```bash
 # One-time setup — writes a managed block to ~/.bashrc
@@ -70,10 +70,10 @@ agentihooks --loadenv
 source ~/.bashrc
 ```
 
-From now on, run this before starting Claude Code:
+`agentienv` is now **auto-called** on every new shell — your vars load automatically. You only need to call it manually if you add new env files mid-session:
 
 ```bash
-agentienv        # sources ~/.agentihooks/.env into the current shell
+agentienv        # reload vars after adding a new *.env file
 claude           # inherits all your vars
 ```
 
@@ -132,15 +132,23 @@ This writes a `.mcp.json` directly into the project directory.
 
 ## Add more MCP servers
 
+Drop `.json` files with a `mcpServers` key into `~/.agentihooks/`, then use the interactive MCP manager:
+
 ```bash
-# Add servers from any .mcp.json file
-agentihooks --mcp /path/to/.mcp.json
+# List available MCP files
+agentihooks mcp
 
-# Remove them
-agentihooks --mcp /path/to/.mcp.json --uninstall
+# Two-stage install: pick a file, then pick which servers to install
+agentihooks mcp install
 
-# Interactive picker from a directory of .mcp.json files
-agentihooks --mcp-lib /path/to/mcp-library/
+# Two-stage uninstall: pick a file, then pick which servers to remove
+agentihooks mcp uninstall
+
+# Install a specific file directly (all servers, no prompting)
+agentihooks mcp add /path/to/.mcp.json
+
+# Re-apply all installed files after edits
+agentihooks mcp sync
 ```
 
 Registered files are tracked in `~/.agentihooks/state.json` and re-applied automatically on every `agentihooks global` run.
@@ -198,7 +206,7 @@ rm -rf ~/.agentihooks
 | **Lifecycle hooks** | Auto-log transcripts, inject session context, save memory on stop |
 | **45 MCP tools** | GitHub, AWS, Confluence, email, SQS, S3, DynamoDB, PostgreSQL, observability, and more |
 | **Profiles** | Swap agent personality and permissions with one flag |
-| **`agentienv` alias** | Clean, shell-native secret loading — no wrapper scripts |
+| **`agentienv` shell function** | Clean, shell-native secret loading — auto-called on every new shell, no wrapper scripts |
 
 Full details in the [docs]({{ site.baseurl }}/docs/getting-started/).
 

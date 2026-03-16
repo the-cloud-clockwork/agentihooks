@@ -36,6 +36,7 @@ These variables control how `agentihooks global` and `agentihooks project` insta
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root directory for all runtime data: logs, memory, state. Set to a shared mount for Kubernetes deployments. |
 | `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `github,confluence,aws,email,messaging,storage,database,compute,observability,smith,agent,utilities`. |
 | `ALLOWED_TOOLS` | — | Legacy: comma-separated list of specific tool names. Takes precedence over category filtering after categories are loaded. |
+| `ENABLE_TOOL_SEARCH` | `true` | Set in the `env` block of `settings.json`. Makes all MCP tools lazy-loaded on demand — shown as "(loaded on-demand)" in `/context`. Eliminates approximately 79K token upfront cost from MCP tool schemas. |
 
 ---
 
@@ -58,7 +59,7 @@ These variables control how `agentihooks global` and `agentihooks project` insta
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest to memory store on `Stop` event. |
-| `REDIS_URL` | — | Redis connection string for session state and memory. Leave unset to use JSONL file storage only. |
+| `REDIS_URL` | — | Redis connection string. Format: `redis://:PASSWORD@host:port/db`. Used by token monitor (burn rate), file read cache (dedup), and warning edge-triggers. All features degrade gracefully when Redis is unavailable. Uses DB0 on the shared Redis instance (same as agenticore). Leave unset to use in-memory/JSONL fallback. |
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
@@ -73,7 +74,7 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TOKEN_CONTROL_ENABLED` | `true` | Master switch. Set `false` to disable all token control features at once. |
-| `TOKEN_MONITOR_ENABLED` | `true` | Enable the `StatusLine` context window monitor. Outputs `ctx: X/1M (Y%) \| burn: ZK/turn \| model: ...` to the terminal status bar. |
+| `TOKEN_MONITOR_ENABLED` | `true` | Enable the `statusLine` script (`hooks/statusline.py`) context window monitor. Outputs a 2-line status bar (fill %, burn rate, cost, cache ratio, git branch) plus a conditional threshold warning line. `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` to avoid stale payload values. |
 | `TOKEN_WARN_PCT` | `60` | Fill percentage at which a warning banner is injected into Claude's context. Edge-triggered: fires only once per session per threshold level. |
 | `TOKEN_CRITICAL_PCT` | `80` | Fill percentage at which a critical banner is injected. |
 | `TOKEN_REDIS_TTL` | `3600` | TTL (seconds) for Redis keys storing token metrics and warning state. |
