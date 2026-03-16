@@ -1682,6 +1682,36 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print(f"       Edit it to add project-specific exclusions.")
 
 
+def cmd_quota(args: "argparse.Namespace") -> None:
+    """Launch or interact with the Claude.ai quota watcher."""
+    watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
+    if not watcher.exists():
+        print(f"ERROR: quota watcher not found at {watcher}", file=sys.stderr)
+        sys.exit(1)
+
+    python = str(_detect_venv() or sys.executable)
+
+    if args.action == "import-cookies":
+        os.execv(python, [python, str(watcher), "--import-cookies"])
+
+    elif args.action == "status":
+        import json as _json
+        usage_file = Path(os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
+        if not usage_file.exists():
+            print("No quota data yet. Run:  agentihooks quota")
+            sys.exit(0)
+        data = _json.loads(usage_file.read_text())
+        print(_json.dumps(data, indent=2))
+
+    else:  # watch (default)
+        cmd = [python, str(watcher)]
+        if args.headless:
+            cmd.append("--headless")
+        if args.poll != 60:
+            cmd += ["--poll", str(args.poll)]
+        os.execv(python, cmd)
+
+
 def main() -> None:
     # Split argv on '--' so everything after it becomes the exec command.
     _argv = sys.argv[1:]
@@ -1782,6 +1812,20 @@ def main() -> None:
         help="Overwrite an existing .claudeignore",
     )
 
+    quota_p = sub.add_parser(
+        "quota",
+        help="Manage the Claude.ai console quota watcher",
+    )
+    quota_p.add_argument(
+        "action",
+        nargs="?",
+        default="watch",
+        choices=["watch", "import-cookies", "status"],
+        help="watch (default) — open browser and start watcher; import-cookies — paste sessionKey cookie; status — print last known quota",
+    )
+    quota_p.add_argument("--headless", action="store_true", help="Run without a browser window")
+    quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
+
     args = parser.parse_args(_argv)
 
     if args.loadenv is not None:
@@ -1816,6 +1860,8 @@ def main() -> None:
         cmd_mcp_action(args.action, scan_dir, mcp_path=mcp_path)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
+    elif args.command == "quota":
+        cmd_quota(args)
 
 
 if __name__ == "__main__":
