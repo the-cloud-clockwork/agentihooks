@@ -335,6 +335,17 @@ def on_session_start(payload: dict) -> None:
     # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
 
+    from hooks.config import MCP_HYGIENE_ENABLED
+
+    if MCP_HYGIENE_ENABLED:
+        from hooks.common import inject_context
+
+        inject_context(
+            "TOKEN CONTROL ACTIVE: Multiple MCP servers loaded. "
+            "Disable unused servers via /mcp to reduce per-turn token overhead. "
+            "Model guidance: use Sonnet 4.6 for implementation; reserve Opus 4.6 for plan mode (Shift+Tab)."
+        )
+
 
 def on_session_end(payload: dict) -> None:
     """Handle SessionEnd event."""
@@ -358,6 +369,17 @@ def on_session_end(payload: dict) -> None:
         from hooks.observability.transcript import log_new_entries
 
         log_new_entries(session_id, transcript_path)
+
+    # Clear file read cache for this session
+    from hooks.config import FILE_READ_CACHE_ENABLED
+
+    if FILE_READ_CACHE_ENABLED:
+        try:
+            from hooks.context.file_read_cache import clear_session_cache
+
+            clear_session_cache(session_id)
+        except Exception:
+            pass
 
     # Clean up session context directory from /tmp/<session_id>/
     if session_id:
@@ -465,6 +487,20 @@ def on_pre_tool_use(payload: dict) -> None:
 
         log_new_entries(session_id, transcript_path)
 
+    # File read deduplication
+    if tool_name == "Read":
+        try:
+            from hooks.config import FILE_READ_CACHE_ENABLED
+
+            if FILE_READ_CACHE_ENABLED:
+                from hooks.context.file_read_cache import check_and_block_redundant_read
+
+                check_and_block_redundant_read(payload)  # raises BlockAction if blocked
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("file_read_cache check failed", {"error": str(e)})
+
     # Inject tool memory (past errors) into Claude's context
     # Only injects once per tool per session to avoid noise
     from hooks.tool_memory import inject_memory
@@ -484,6 +520,38 @@ def on_post_tool_use(payload: dict) -> None:
         from hooks.observability.transcript import log_new_entries
 
         log_new_entries(session_id, transcript_path)
+
+    # Bash output filtering
+    if tool_name == "Bash":
+        try:
+            from hooks.config import BASH_FILTER_ENABLED
+
+            if BASH_FILTER_ENABLED:
+                from hooks.context.bash_output_filter import filter_bash_output
+
+                filtered = filter_bash_output(
+                    tool_name, payload.get("tool_input", {}), payload.get("tool_output", "")
+                )
+                if filtered is not None:
+                    import json as _json
+
+                    print(_json.dumps({"additionalContext": filtered}))
+        except Exception as e:
+            log("bash_output_filter failed", {"error": str(e)})
+
+    # Mark file as read in cache
+    if tool_name == "Read":
+        try:
+            from hooks.config import FILE_READ_CACHE_ENABLED
+
+            if FILE_READ_CACHE_ENABLED:
+                from hooks.context.file_read_cache import mark_file_read
+
+                file_path = payload.get("tool_input", {}).get("file_path", "")
+                if file_path and payload.get("session_id"):
+                    mark_file_read(payload["session_id"], file_path)
+        except Exception as e:
+            log("file_read_cache mark failed", {"error": str(e)})
 
     # Record tool errors to memory file
     from hooks.tool_memory import record_error
@@ -545,6 +613,48 @@ def on_subagent_stop(payload: dict) -> None:
         from hooks.observability.transcript import log_new_entries
 
         log_new_entries(session_id, transcript_path)
+
+
+def on_status_line(payload: dict) -> None:
+    """Handle StatusLine event — emit terminal status bar text."""
+    try:
+        from hooks.config import TOKEN_MONITOR_ENABLED
+
+        if not TOKEN_MONITOR_ENABLED:
+            return
+
+        from hooks.observability.token_monitor import (
+            get_context_fill_pct,
+            should_warn_context,
+            update_context_metrics,
+        )
+
+        status_line = update_context_metrics(payload)
+        print(status_line, flush=True)
+
+        session_id = payload.get("session_id", "")
+        fill_pct = get_context_fill_pct(payload)
+        if fill_pct is not None and session_id:
+            warn, level = should_warn_context(fill_pct, session_id)
+            if warn:
+                from hooks.config import TOKEN_CRITICAL_PCT, TOKEN_WARN_PCT
+                from hooks.common import inject_banner
+
+                if level == "critical":
+                    inject_banner(
+                        f"🚨 CONTEXT CRITICAL ({fill_pct:.0f}% used)",
+                        f"Context window is {fill_pct:.0f}% full (threshold: {TOKEN_CRITICAL_PCT}%). "
+                        "Compact context immediately with /compact or start a new session. "
+                        "Avoid large file reads; prefer targeted searches.",
+                    )
+                else:
+                    inject_banner(
+                        f"⚠️ CONTEXT WARNING ({fill_pct:.0f}% used)",
+                        f"Context window is {fill_pct:.0f}% full (threshold: {TOKEN_WARN_PCT}%). "
+                        "Consider compacting context with /compact before it fills further.",
+                    )
+    except Exception as e:
+        log("on_status_line failed", {"error": str(e)})
 
 
 def on_notification(payload: dict) -> None:

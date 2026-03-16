@@ -134,6 +134,71 @@ rm -rf ~/.agentihooks
 
 ---
 
+## `agentihooks ignore`
+
+Create a `.claudeignore` in the current working directory (or a given path). Claude Code uses `.claudeignore` to exclude files from reading and indexing — keeping credentials, build artefacts, and binaries out of the context window.
+
+```bash
+agentihooks ignore [path] [--force]
+```
+
+### What it creates
+
+A `.claudeignore` covering:
+
+| Section | Examples |
+|---------|---------|
+| Credentials & secrets | `.env`, `.env.*`, `*.pem`, `*.key`, `secrets/` |
+| Build artefacts | `__pycache__/`, `dist/`, `node_modules/`, `target/`, `*.egg-info/` |
+| Runtime data | `*.log`, `*.sqlite`, `*.db`, `*.lock` |
+| Test output | `.coverage`, `htmlcov/`, `junit*.xml` |
+| IDE / OS noise | `.idea/`, `.vscode/`, `.DS_Store`, `Thumbs.db` |
+| Large binaries / media | archives, images, video, fonts |
+| Virtual environments | `.venv/`, `venv/`, `env/` |
+| IaC state | `.terraform/`, `*.tfstate`, `.terraform.lock.hcl` |
+
+`.env.example` is explicitly un-ignored (`!.env.example`) so the template remains visible.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `path` | Target directory (default: current directory) |
+| `--force` | Overwrite an existing `.claudeignore` |
+
+### Examples
+
+```bash
+# Create in current directory
+agentihooks ignore
+
+# Create in a specific project
+agentihooks ignore ~/dev/my-project
+
+# Overwrite an existing file with a fresh template
+agentihooks ignore --force
+```
+
+### Idempotency
+
+Without `--force`, the command skips if `.claudeignore` already exists:
+
+```
+  [--] /home/user/project/.claudeignore already exists — use --force to overwrite
+```
+
+### After creating
+
+Edit the file to add project-specific patterns. Use the same syntax as `.gitignore`:
+
+```gitignore
+# Project-specific additions
+fixtures/large-dataset.json
+docs/generated/
+```
+
+---
+
 ## `agentihooks --mcp`
 
 Manage MCP servers at user scope (`~/.claude.json`), making them available in every project.

@@ -13,8 +13,13 @@
       "Task(*)"
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "cd /app && __PYTHON__ -m hooks.statusline"
+  },
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "ENABLE_TOOL_SEARCH": "auto"
   },
   "hooks": {
     "SessionStart":      [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],

@@ -8,7 +8,7 @@
 
 Hook system and MCP tool server for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents. Designed to work with [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) and meant to be forked and extended for custom workflows.
 
-**agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 45 MCP tools across 12 categories for interacting with external services.
+**agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 45 MCP tools across 12 categories for interacting with external services. A built-in **Token Control Layer** monitors context window usage, truncates verbose command output, deduplicates file reads, and warns before quota exhaustion — targeting 30–50% token reduction in agentic sessions.
 
 > **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
 
@@ -20,7 +20,8 @@ Claude Code
   ├── Hook Events (stdin JSON) ──► python -m hooks ──► hook_manager.py
   │     SessionStart, PreToolUse,       │
   │     PostToolUse, Stop, ...          ├── transcript logging
-  │                                     ├── tool error memory
+  │     StatusLine, ...                 ├── tool error memory
+  │                                     ├── token control layer
   │                                     ├── metrics parsing
   │                                     └── email notifications
   │
@@ -46,15 +47,16 @@ See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getti
 
 ## Hook Events
 
-10 lifecycle events, all handled by `python -m hooks`:
+11 lifecycle events, all handled by `python -m hooks`:
 
 | Event | What happens |
 |-------|-------------|
-| `SessionStart` | Creates session context directory, injects session awareness |
-| `PreToolUse` | Secret scan (blocks on detection), injects tool error memory |
-| `PostToolUse` | Records tool errors for cross-session learning |
+| `SessionStart` | Creates session context directory, injects session awareness, MCP hygiene reminder |
+| `PreToolUse` | Secret scan (blocks on detection), file read deduplication, injects tool error memory |
+| `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
 | `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
-| `SessionEnd` | Logs transcript, cleans up session directory |
+| `SessionEnd` | Logs transcript, clears file read cache, cleans up session directory |
+| `StatusLine` | Emits live context window metrics; warns on threshold crossing |
 | `SubagentStop` | Logs subagent transcript |
 | `UserPromptSubmit` | Warns on detected secrets |
 | `Notification` | Logs notifications |
@@ -89,13 +91,13 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 ```bash
 agentihooks global [--profile <name>]   # install/re-apply to ~/.claude
 agentihooks project <path>              # write .mcp.json into a project
+agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
 agentihooks uninstall                   # remove everything
 agentihooks --mcp <file>                # add MCP servers at user scope
 agentihooks --mcp --uninstall           # interactive: pick a tracked file to remove
 agentihooks --mcp-lib [dir]             # browse a dir of MCP files, install one
 agentihooks --sync                      # re-apply all tracked MCP files
 agentihooks --loadenv                   # install agentienv alias into ~/.bashrc
-
 ```
 
 Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
@@ -115,8 +117,14 @@ All integrations are configured via environment variables. Key ones:
 | `LOG_ENABLED` | `true` | Enable hook logging |
 | `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest on Stop |
 | `REDIS_URL` | — | Redis for session state/memory (optional) |
+| `TOKEN_CONTROL_ENABLED` | `true` | Master switch for the token control layer |
+| `TOKEN_WARN_PCT` | `60` | Context fill % that triggers a warning injection |
+| `TOKEN_CRITICAL_PCT` | `80` | Context fill % that triggers a critical banner |
+| `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output (docker logs, git log, etc.) |
+| `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads within a session |
+| `MCP_HYGIENE_ENABLED` | `true` | Inject MCP server usage reminder at session start |
 
-Complete table covering all 40+ variables across every integration: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
+Complete table covering all 50+ variables across every integration: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
 ## Profiles
 

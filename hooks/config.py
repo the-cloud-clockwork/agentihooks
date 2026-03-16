@@ -95,3 +95,25 @@ MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 _VALID_SECRETS_MODES = frozenset({"off", "warn", "standard", "strict"})
 _raw = os.getenv("AGENTIHOOKS_SECRETS_MODE", "standard").lower().strip()
 SECRETS_MODE: str = _raw if _raw in _VALID_SECRETS_MODES else "standard"
+
+# =============================================================================
+# TOKEN CONTROL CONFIGURATION
+# =============================================================================
+TOKEN_CONTROL_ENABLED = _env_bool("TOKEN_CONTROL_ENABLED", "true")
+
+TOKEN_MONITOR_ENABLED = _env_bool("TOKEN_MONITOR_ENABLED", "true")
+TOKEN_WARN_PCT = int(os.getenv("TOKEN_WARN_PCT", "60"))
+TOKEN_CRITICAL_PCT = int(os.getenv("TOKEN_CRITICAL_PCT", "80"))
+TOKEN_REDIS_TTL = int(os.getenv("TOKEN_REDIS_TTL", "3600"))
+
+BASH_FILTER_ENABLED = _env_bool("BASH_FILTER_ENABLED", "true")
+BASH_FILTER_MAX_LINES = int(os.getenv("BASH_FILTER_MAX_LINES", "50"))
+BASH_FILTER_MAX_CHARS = int(os.getenv("BASH_FILTER_MAX_CHARS", "5000"))
+BASH_FILTER_TEST_MAX_FAILURES = int(os.getenv("BASH_FILTER_TEST_MAX_FAILURES", "10"))
+BASH_FILTER_GIT_MAX_COMMITS = int(os.getenv("BASH_FILTER_GIT_MAX_COMMITS", "20"))
+
+FILE_READ_CACHE_ENABLED = _env_bool("FILE_READ_CACHE_ENABLED", "true")
+FILE_READ_CACHE_BACKEND = os.getenv("FILE_READ_CACHE_BACKEND", "redis")
+FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
+
+MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")

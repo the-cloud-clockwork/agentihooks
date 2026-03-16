@@ -66,6 +66,29 @@ These variables control how `agentihooks global` and `agentihooks project` insta
 
 ---
 
+## Token Control
+
+Controls the Token Control Layer, which reduces context window consumption in agentic sessions. All features are individually disableable. Requires Redis for burn-rate tracking and edge-trigger warnings; degrades gracefully without it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOKEN_CONTROL_ENABLED` | `true` | Master switch. Set `false` to disable all token control features at once. |
+| `TOKEN_MONITOR_ENABLED` | `true` | Enable the `StatusLine` context window monitor. Outputs `ctx: X/1M (Y%) \| burn: ZK/turn \| model: ...` to the terminal status bar. |
+| `TOKEN_WARN_PCT` | `60` | Fill percentage at which a warning banner is injected into Claude's context. Edge-triggered: fires only once per session per threshold level. |
+| `TOKEN_CRITICAL_PCT` | `80` | Fill percentage at which a critical banner is injected. |
+| `TOKEN_REDIS_TTL` | `3600` | TTL (seconds) for Redis keys storing token metrics and warning state. |
+| `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash command output before it enters the context window. |
+| `BASH_FILTER_MAX_LINES` | `50` | Line limit for docker/kubectl output (keeps last N lines). |
+| `BASH_FILTER_MAX_CHARS` | `5000` | Character cap for build and generic output. |
+| `BASH_FILTER_TEST_MAX_FAILURES` | `10` | Maximum FAILED blocks to retain from test runner output. |
+| `BASH_FILTER_GIT_MAX_COMMITS` | `20` | Maximum commits to retain from `git log` output. |
+| `FILE_READ_CACHE_ENABLED` | `true` | Block redundant re-reads of unmodified files within a session. Files modified since last read are always allowed through (mtime guard). |
+| `FILE_READ_CACHE_BACKEND` | `redis` | Cache backend. `redis` uses the configured `REDIS_URL`; any other value forces the in-process memory fallback. |
+| `FILE_READ_CACHE_TTL` | `21600` | TTL (seconds) for Redis cache keys (6 hours). |
+| `MCP_HYGIENE_ENABLED` | `true` | Inject an MCP server usage reminder at `SessionStart` prompting Claude to disable unused servers via `/mcp`. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
