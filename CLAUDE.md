@@ -5,42 +5,53 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies
-uv sync --all-extras
+# The canonical Python for this project lives at ~/.agentihooks/.venv
+# Always use it so hooks and tests run against the same packages that Claude Code fires.
+
+# Install / update all dependencies
+uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
 # Run all tests
-uv run pytest
+~/.agentihooks/.venv/bin/python -m pytest
 
 # Run a single test file
-uv run pytest tests/test_hook_manager.py
+~/.agentihooks/.venv/bin/python -m pytest tests/test_hook_manager.py
 
 # Run a single test by name
-uv run pytest tests/test_config.py::TestSecretsMode::test_secrets_mode_default -v
+~/.agentihooks/.venv/bin/python -m pytest tests/test_config.py::TestSecretsMode::test_secrets_mode_default -v
 
 # Run tests with coverage
-uv run pytest --cov=hooks
+~/.agentihooks/.venv/bin/python -m pytest --cov=hooks
 
 # Lint
-uv run ruff check .
+~/.agentihooks/.venv/bin/python -m ruff check .
 
 # Install agentihooks globally (hooks + settings + MCP into ~/.claude)
-uv run agentihooks global
+# Must be run from the venv Python — bakes sys.executable into hook commands in settings.json
+~/.agentihooks/.venv/bin/python scripts/install.py global
 
 # Install into a specific project
-uv run agentihooks project /path/to/repo
+~/.agentihooks/.venv/bin/python scripts/install.py project /path/to/repo
 
 # Manage MCP server files interactively
-uv run agentihooks mcp install
-uv run agentihooks mcp list
+agentihooks mcp install
+agentihooks mcp list
 ```
 
 ## Architecture
 
+### Python environment
+
+`~/.agentihooks/.venv` is the canonical venv for this project. All hook commands in `~/.claude/settings.json` point to its Python binary. This guarantees that Claude Code's hook subprocesses find the correct packages no matter which shell, terminal, or activated venv the user has when they launch `claude`.
+
+**Why this matters:** Hook commands are shell strings stored in `settings.json`. They run as subprocesses spawned by Claude Code — outside any current shell's `VIRTUAL_ENV`. If the wrong Python is embedded, imports fail silently. The installer writes `sys.executable` into every hook command, so running the install from `~/.agentihooks/.venv/bin/python` is the single step that wires everything correctly.
+
 ### Entry points
 
 - **`agentihooks` CLI** → `scripts/install.py:main()` — installs hooks/settings/MCPs, manages MCP server files, handles `--loadenv`
-- **Lifecycle hooks** → all 10 Claude Code hook events point to `python -m hooks` → `hooks/__main__.py` → `hooks/hook_manager.py:main()`
+- **Lifecycle hooks** → all 10 Claude Code hook events point to `~/.agentihooks/.venv/bin/python -m hooks` → `hooks/__main__.py` → `hooks/hook_manager.py:main()`
 - **StatusLine** → `hooks/statusline.py` — reads JSON from stdin each turn, outputs 2–3 line status bar (not a hook event; configured via `settings.json` `statusLine` key)
+- **Quota watcher** → `scripts/claude_usage_watcher.py` — async Playwright daemon; scrapes claude.ai/settings/usage, writes `~/.agentihooks/claude_usage.json`
 
 ### How hooks dispatch
 
@@ -67,7 +78,7 @@ All token control, Redis, and feature flags are read from these files. There is 
 
 ### Settings installation flow
 
-`scripts/install.py` reads `profiles/_base/settings.base.json` (the canonical settings source), substitutes `__PYTHON__` with the venv's python path and `/app` with the repo root, then deep-merges into `~/.claude/settings.json`. The `_managedBy` marker prevents re-running from overwriting personal settings keys. `~/.claude.json` gets MCP server entries merged in.
+`scripts/install.py` reads `profiles/_base/settings.base.json` (the canonical settings source), substitutes `__PYTHON__` with `sys.executable` (the Python that ran the installer) and `/app` with the repo root, then deep-merges into `~/.claude/settings.json`. The `_managedBy` marker prevents re-running from overwriting personal settings keys. `~/.claude.json` gets MCP server entries merged in.
 
 ### Profile system
 
@@ -85,6 +96,29 @@ Three subsystems, all gated by `TOKEN_CONTROL_ENABLED`:
 - **`hooks/context/bash_output_filter.py`** — detects docker/kubectl/git-log/test-runner/build output by command string, truncates with notices. Returns `None` if output is already under limits (no unnecessary modification).
 - **`hooks/context/file_read_cache.py`** — Redis Set + mtime Hash per session (`agenticore:file_cache:{sid}`, `agenticore:file_mtime:{sid}`). `check_and_block_redundant_read()` raises `BlockAction` if a file was already read and hasn't changed on disk since. Falls back to in-memory dict when Redis is unavailable.
 
+### Console Quota Display (opt-in)
+
+`hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage (session %, weekly %, monthly spend) on statusline line 3.
+
+The watcher is a Playwright async daemon with a persistent browser context at `~/.agentihooks/playwright_profile/`. First-run requires `--headed` for login; subsequent runs are headless.
+
+```bash
+# One-time: install the browser
+~/.agentihooks/.venv/bin/python -m playwright install chromium
+
+# First run: headed login (opens Chromium, log in to claude.ai)
+~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py --headed
+
+# Background daemon
+nohup ~/.agentihooks/.venv/bin/python scripts/claude_usage_watcher.py \
+  >> ~/.agentihooks/logs/watcher.log 2>&1 &
+```
+
+Enable in `~/.agentihooks/.env`:
+```bash
+CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
+```
+
 ### Redis
 
 `hooks/_redis.py` provides `get_redis()` (lazy singleton, returns `None` on any connection failure) and `redis_key(type, id)` which prefixes with `agenticore:`. All Redis usage degrades gracefully — features still work without it, just with less persistence.
@@ -100,16 +134,3 @@ Hook commands in `settings.base.json` use `/app` and `__PYTHON__` as placeholder
 ### Testing patterns
 
 Tests mock Redis via `patch("hooks._redis.get_redis", return_value=None)` to avoid external dependencies. Most tests use `pytest.mark.unit`. Pre-existing failures in `TestSecretsModesIntegration` and `TestBlockActionIntegration` are known and unrelated to new work.
-
-### Console Quota Display (opt-in)
-
-`hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage (session %, weekly %, monthly spend) on statusline line 3.
-
-Set `CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json` to enable. Start the watcher:
-```bash
-# First run — headed so you can log in (auth saved to ~/.agentihooks/playwright_profile/)
-python3 scripts/claude_usage_watcher.py --headed
-
-# Subsequent runs (headless, every 60s)
-python3 scripts/claude_usage_watcher.py
-```

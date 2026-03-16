@@ -40,13 +40,18 @@ Claude Code
 ```bash
 git clone https://github.com/The-Cloud-Clock-Work/agentihooks
 cd agentihooks
-uv sync
-uv run agentihooks global
+
+# 1. Create the dedicated venv at ~/.agentihooks/.venv and install everything
+uv venv ~/.agentihooks/.venv
+uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
+
+# 2. Install hooks + settings + MCP into ~/.claude
+~/.agentihooks/.venv/bin/python scripts/install.py global
 ```
 
-`agentihooks global` wires hooks into `~/.claude/settings.json`, symlinks skills/agents, merges MCP servers into `~/.claude.json`, and installs the CLI globally. Re-run any time — it's idempotent.
+`agentihooks global` wires hooks into `~/.claude/settings.json`, symlinks skills/agents, merges MCP servers into `~/.claude.json`, and installs the CLI globally. **Critically, every hook command in `settings.json` is written with the Python that ran the installer** — so by running the installer from `~/.agentihooks/.venv`, all hook subprocesses find the right packages regardless of which shell or virtual environment is active when Claude Code fires them.
 
-See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/installation/) for the full step-by-step walkthrough.
+Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/installation/) for the full step-by-step walkthrough including Redis setup and quota display.
 
 ## Hook Events
 
@@ -142,15 +147,24 @@ Everything user-specific lives in `~/.agentihooks/`:
 
 ```
 ~/.agentihooks/
-├── .env          # Main credentials (seeded from .env.example, loaded first)
-├── *.env         # Companion env files (auto-sourced after .env)
-├── *.json        # Drop MCP server files here → agentihooks mcp install
-├── state.json    # Tracked MCP files and other state
-├── logs/         # Hook + MCP logs
-└── memory/       # Cross-session agent memory
+├── .venv/                     # Canonical Python venv — all hook subprocesses run from here
+├── .env                       # Main credentials (seeded from .env.example, loaded first)
+├── *.env                      # Companion env files (auto-sourced after .env)
+├── *.json                     # Drop MCP server files here → agentihooks mcp install
+├── state.json                 # Tracked MCP files and other state
+├── logs/                      # Hook + MCP logs
+├── memory/                    # Cross-session agent memory
+├── playwright_profile/        # Persistent browser auth for quota watcher (created on first --headed run)
+└── claude_usage.json          # Written by quota watcher; read by statusline (optional)
 ```
 
-To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, run `agentihooks global`. Done.
+To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer. Done:
+
+```bash
+uv venv ~/.agentihooks/.venv
+uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
+~/.agentihooks/.venv/bin/python scripts/install.py global
+```
 
 **Install the `agentienv` shell function** (sources `.env` into any shell on demand — also auto-called on every new shell):
 
