@@ -709,7 +709,7 @@ def main() -> None:
             log(f"Unknown event: {event_name}", payload)
 
     except BlockAction as e:
-        print(str(e), flush=True)  # injected into Claude's context
+        print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
         sys.exit(2)  # blocks the action
     except json.JSONDecodeError:
         log("Failed to parse JSON payload")
