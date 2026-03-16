@@ -4,28 +4,23 @@ Claude.ai usage quota watcher — scrapes claude.ai/settings/usage and writes
 a JSON file read by hooks/statusline.py.
 
 Usage:
-  python3 scripts/claude_usage_watcher.py [--output PATH] [--poll SEC] [--headless]
-  python3 scripts/claude_usage_watcher.py --import-cookies
+  agentihooks quota               # open Windows Chrome (headed, default)
+  agentihooks quota --headless    # headless Chromium daemon
+  agentihooks quota import-cookies
+  agentihooks quota status
 
-Authentication options (choose one):
-  1. --headed         Opens a real Chromium window so you can log in interactively.
-                      Requires a display (WSLg, X11, or VNC). Auth is saved to
-                      ~/.agentihooks/playwright_profile/ and reused on every run.
+Or directly:
+  python3 scripts/claude_usage_watcher.py [--chromium] [--headless] [--import-cookies]
 
-  2. --import-cookies Paste a sessionKey cookie value from your browser's DevTools.
-                      No display required — works purely in the terminal.
+Browser priority (headed mode):
+  1. Windows Chrome  (/mnt/c/Program Files/Google/Chrome/Application/chrome.exe)
+  2. Windows Edge    (/mnt/c/.../msedge.exe)
+  3. Playwright Chromium (bundled, fallback)
 
-                      How to get the cookie:
-                        Chrome/Edge: F12 -> Application -> Cookies -> https://claude.ai
-                                     Copy the value of the "sessionKey" cookie.
-                        Firefox:     F12 -> Storage -> Cookies -> https://claude.ai
-                                     Copy the value of the "sessionKey" cookie.
+Pass --chromium to force the bundled Chromium regardless.
+--headless always uses bundled Chromium (Windows .exe headless is unreliable).
 
-                      Then run:
-                        python3 scripts/claude_usage_watcher.py --import-cookies
-                      and paste the value when prompted. The cookie is written into
-                      ~/.agentihooks/playwright_profile/ so subsequent headless runs
-                      are authenticated automatically.
+Auth is saved to ~/.agentihooks/playwright_profile/ and reused on every run.
 """
 import argparse
 import asyncio
@@ -35,6 +30,33 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+# Windows browser candidates (WSL paths), checked in order
+_WINDOWS_BROWSERS = [
+    "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
+    "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+]
+
+
+def _find_windows_browser() -> str | None:
+    """Return path to Windows Chrome/Edge if accessible from WSL, else None."""
+    # Also check user-install Chrome
+    try:
+        import subprocess
+        win_user = subprocess.check_output(
+            ["cmd.exe", "/c", "echo %USERNAME%"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+        user_chrome = f"/mnt/c/Users/{win_user}/AppData/Local/Google/Chrome/Application/chrome.exe"
+        candidates = _WINDOWS_BROWSERS + [user_chrome]
+    except Exception:
+        candidates = _WINDOWS_BROWSERS
+
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    return None
 
 
 def _load_env():
@@ -59,7 +81,6 @@ def _write_atomic(path: Path, data: dict) -> None:
 
 
 def _parse_reset_sec(text: str) -> int | None:
-    """Parse 'resets in 3h 14m' -> seconds."""
     total = 0
     for val, unit in re.findall(r"(\d+)\s*(h(?:r|our)?s?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)", text, re.I):
         v = int(val)
@@ -81,17 +102,15 @@ def import_cookies(session_key: str) -> None:
             headless=True,
             args=["--no-sandbox"],
         )
-        ctx.add_cookies([
-            {
-                "name": "sessionKey",
-                "value": session_key,
-                "domain": ".claude.ai",
-                "path": "/",
-                "httpOnly": True,
-                "secure": True,
-                "sameSite": "Lax",
-            }
-        ])
+        ctx.add_cookies([{
+            "name": "sessionKey",
+            "value": session_key,
+            "domain": ".claude.ai",
+            "path": "/",
+            "httpOnly": True,
+            "secure": True,
+            "sameSite": "Lax",
+        }])
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
         logged_in = "/login" not in page.url and "/auth" not in page.url
@@ -99,12 +118,9 @@ def import_cookies(session_key: str) -> None:
 
     if logged_in:
         print("[quota-watcher] Cookie imported and verified — you are now logged in.", flush=True)
-        print(f"[quota-watcher] Profile saved to: {profile_dir}", flush=True)
-        print("[quota-watcher] Run the watcher normally now:", flush=True)
-        print(f"  {sys.executable} {__file__}", flush=True)
+        print("[quota-watcher] Run:  agentihooks quota --headless  (for background daemon)", flush=True)
     else:
-        print("[quota-watcher] Cookie imported but still redirected to login.", flush=True)
-        print("  The sessionKey value may be expired or incorrect. Try again with a fresh cookie.", flush=True)
+        print("[quota-watcher] Cookie imported but still redirected to login — value may be expired.", flush=True)
         sys.exit(1)
 
 
@@ -113,7 +129,6 @@ async def scrape(page) -> dict:
 
     await page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
 
-    # Redirect to login?
     if "/login" in page.url or "/auth" in page.url:
         return {}
 
@@ -135,14 +150,12 @@ async def scrape(page) -> dict:
 
     content = await page.content()
 
-    # Session quota
     sm = re.search(r"(?:current session|session)[^\n%]{0,80}?(\d+)\s*%", content, re.I)
     if not sm:
         sm = re.search(r"(\d+)\s*%\s*used[^\n]{0,60}(?:session|resets in)", content, re.I)
     if sm:
         result["session"]["used_pct"] = float(sm.group(1))
 
-    # Resets in
     rm = re.search(r"resets in\s+([\dhmins ]+)", content, re.I)
     if rm:
         sec = _parse_reset_sec(rm.group(1))
@@ -153,43 +166,25 @@ async def scrape(page) -> dict:
                 datetime.now(timezone.utc) + timedelta(seconds=sec)
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Weekly all models
     wm = re.search(r"(?:weekly|all models)[^\n%]{0,120}?(\d+)\s*%", content, re.I)
     if wm:
         result["weekly"]["all_models"] = {"used_pct": float(wm.group(1))}
 
-    # Sonnet only
     wsm = re.search(r"sonnet[^\n%]{0,80}?(\d+)\s*%", content, re.I)
     if wsm:
         result["weekly"]["sonnet"] = {"used_pct": float(wsm.group(1))}
 
-    # Monthly spend  (e.g. euro/dollar amount spent vs limit)
-    spend_m = re.search(
-        r"([euro$pound])(\d+(?:\.\d+)?)\s+(?:spent|used)[^\n]{0,60}?(?:resets|limit)[^\n]{0,60}?(\d+)\s*%\s*used[^\n]{0,40}?[euro$pound](\d+(?:\.\d+)?)",
-        content, re.I | re.S
-    )
-    if not spend_m:
-        spend_m2 = re.search(r"([€$£])(\d+(?:\.\d+)?)\s*(?:\n|spent)[^\n]{0,100}?([€$£])(\d+(?:\.\d+)?)", content, re.I)
-        if spend_m2:
-            sym = spend_m2.group(1)
-            cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
-            amt = float(spend_m2.group(2))
-            lim = float(spend_m2.group(4))
-            result["monthly_spend"] = {
-                "amount": amt, "limit": lim, "currency": cur,
-                "used_pct": round(amt / lim * 100, 1) if lim else 0,
-            }
-    if spend_m:
-        sym = spend_m.group(1)
+    spend_m2 = re.search(r"([€$£])(\d+(?:\.\d+)?)\s*(?:\n|spent)[^\n]{0,100}?([€$£])(\d+(?:\.\d+)?)", content, re.I)
+    if spend_m2:
+        sym = spend_m2.group(1)
         cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
+        amt = float(spend_m2.group(2))
+        lim = float(spend_m2.group(4))
         result["monthly_spend"] = {
-            "amount": float(spend_m.group(2)),
-            "limit": float(spend_m.group(4)),
-            "currency": cur,
-            "used_pct": float(spend_m.group(3)),
+            "amount": amt, "limit": lim, "currency": cur,
+            "used_pct": round(amt / lim * 100, 1) if lim else 0,
         }
 
-    # Try ARIA progress bars as authoritative source (overrides text scan)
     bars = await page.query_selector_all('[role="progressbar"]')
     for bar in bars:
         now_str = await bar.get_attribute("aria-valuenow")
@@ -214,27 +209,45 @@ async def scrape(page) -> dict:
     return result
 
 
-async def run(output: Path, poll_sec: int, headed: bool):
+async def run(output: Path, poll_sec: int, headless: bool, force_chromium: bool):
     from playwright.async_api import async_playwright
 
     profile_dir = Path.home() / ".agentihooks" / "playwright_profile"
     profile_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[quota-watcher] output -> {output}  poll={poll_sec}s", flush=True)
+    # Resolve browser executable
+    exe: str | None = None
+    browser_label = "Chromium (bundled)"
+    if not headless and not force_chromium:
+        exe = _find_windows_browser()
+        if exe:
+            browser_label = f"Windows browser: {Path(exe).stem}"
+        else:
+            print("[quota-watcher] Windows Chrome/Edge not found — falling back to bundled Chromium", flush=True)
+
+    if headless and exe:
+        # Windows .exe headless is unreliable; always use bundled Chromium for headless
+        exe = None
+        browser_label = "Chromium (bundled, headless)"
+
+    print(f"[quota-watcher] browser={browser_label}  output={output}  poll={poll_sec}s", flush=True)
+
+    launch_kwargs: dict = {
+        "headless": headless,
+        "args": ["--no-sandbox"],
+    }
+    if exe:
+        launch_kwargs["executable_path"] = exe
 
     async with async_playwright() as pw:
-        ctx = await pw.chromium.launch_persistent_context(
-            str(profile_dir),
-            headless=not headed,
-            args=["--no-sandbox"],
-        )
+        ctx = await pw.chromium.launch_persistent_context(str(profile_dir), **launch_kwargs)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
         while True:
             try:
                 data = await scrape(page)
                 if not data:
-                    print("[quota-watcher] not logged in — opening browser for login (use --headless to suppress, or --import-cookies for cookie auth)", flush=True)
+                    print("[quota-watcher] not logged in — log in via the browser window, or run: agentihooks quota import-cookies", flush=True)
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
@@ -255,10 +268,11 @@ def main():
     ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
     ap.add_argument("--headless", action="store_true",
-                    help="Run headless (no browser window) — default is headed/visible")
-    ap.add_argument("--headed", action="store_true", default=True, help=argparse.SUPPRESS)
+                    help="Run headless using bundled Chromium (no window, for background daemon)")
+    ap.add_argument("--chromium", action="store_true",
+                    help="Force Playwright's bundled Chromium even if Windows Chrome is available")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies",
-                    help="Paste a sessionKey cookie from your browser DevTools — no display needed")
+                    help="Paste a sessionKey cookie from browser DevTools — no display needed")
     args = ap.parse_args()
 
     if args.import_cookies:
@@ -277,7 +291,7 @@ def main():
 
     if not args.output:
         sys.exit("Set CLAUDE_USAGE_FILE or pass --output")
-    asyncio.run(run(Path(args.output).expanduser(), args.poll, not args.headless))
+    asyncio.run(run(Path(args.output).expanduser(), args.poll, args.headless, args.chromium))
 
 
 if __name__ == "__main__":

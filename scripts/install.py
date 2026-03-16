@@ -1707,6 +1707,8 @@ def cmd_quota(args: "argparse.Namespace") -> None:
         cmd = [python, str(watcher)]
         if args.headless:
             cmd.append("--headless")
+        if getattr(args, "chromium", False):
+            cmd.append("--chromium")
         if args.poll != 60:
             cmd += ["--poll", str(args.poll)]
         os.execv(python, cmd)
@@ -1823,7 +1825,8 @@ def main() -> None:
         choices=["watch", "import-cookies", "status"],
         help="watch (default) — open browser and start watcher; import-cookies — paste sessionKey cookie; status — print last known quota",
     )
-    quota_p.add_argument("--headless", action="store_true", help="Run without a browser window")
+    quota_p.add_argument("--headless", action="store_true", help="Run headless using bundled Chromium (no window, for background daemon)")
+    quota_p.add_argument("--chromium", action="store_true", help="Force Playwright's bundled Chromium instead of Windows Chrome")
     quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
     args = parser.parse_args(_argv)
