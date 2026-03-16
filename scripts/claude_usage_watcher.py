@@ -59,6 +59,17 @@ def _find_windows_browser() -> str | None:
     return None
 
 
+def _chrome_is_running() -> bool:
+    """Return True if any chrome.exe or msedge.exe is running on Windows."""
+    try:
+        out = subprocess.check_output(
+            ["tasklist.exe"], stderr=subprocess.DEVNULL
+        ).decode(errors="replace").lower()
+        return "chrome.exe" in out or "msedge.exe" in out
+    except Exception:
+        return False
+
+
 def _windows_profile_dir() -> str:
     """Return a Windows-native path for the Chrome profile.
 
@@ -250,6 +261,14 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
     # If port is already open (previous run still alive), connect without relaunching
     proc = None
     if not _port_open(_CDP_PORT):
+        if _chrome_is_running():
+            print(
+                "[quota-watcher] Chrome is already running — cannot inject --remote-debugging-port.\n"
+                "[quota-watcher] Falling back to bundled Chromium via WSLg...",
+                flush=True,
+            )
+            raise _ChromeAbsorbed()
+
         proc = subprocess.Popen(
             [
                 exe,
@@ -264,9 +283,9 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        # Socket-level wait — more reliable than connect_over_cdp polling
+        # Socket-level wait — 30s for fresh Chrome profile first launch
         print("[quota-watcher] waiting for Chrome to open debug port...", flush=True)
-        for _ in range(20):  # 10 seconds — fast fallback if Chrome absorbed
+        for _ in range(60):  # 30 seconds
             if _port_open(_CDP_PORT):
                 break
             await asyncio.sleep(0.5)
@@ -274,8 +293,7 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
             if proc:
                 proc.kill()
             print(
-                "[quota-watcher] Chrome did not open CDP port in 10s — "
-                "Chrome is already running and absorbed the launch (single-instance behavior).\n"
+                "[quota-watcher] Chrome did not open CDP port in 30s.\n"
                 "[quota-watcher] Falling back to bundled Chromium via WSLg...",
                 flush=True,
             )
@@ -326,7 +344,11 @@ async def run_with_chromium(profile_dir: Path, output: Path, poll_sec: int, head
         ctx = await pw.chromium.launch_persistent_context(
             str(profile_dir),
             headless=headless,
-            args=["--no-sandbox"],
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ],
+            ignore_default_args=["--enable-automation"],
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
