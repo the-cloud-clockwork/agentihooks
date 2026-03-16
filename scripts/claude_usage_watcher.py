@@ -30,6 +30,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+
+class _ChromeAbsorbed(Exception):
+    """Chrome is already running and absorbed our launch without the debug port."""
+
+
 _CDP_PORT = 9222
 
 _WINDOWS_BROWSERS = [
@@ -261,18 +266,20 @@ async def run_with_windows_chrome(exe: str, profile_dir: Path, output: Path, pol
         )
         # Socket-level wait — more reliable than connect_over_cdp polling
         print("[quota-watcher] waiting for Chrome to open debug port...", flush=True)
-        for _ in range(60):  # 30 seconds
+        for _ in range(20):  # 10 seconds — fast fallback if Chrome absorbed
             if _port_open(_CDP_PORT):
                 break
             await asyncio.sleep(0.5)
         else:
             if proc:
                 proc.kill()
-            raise RuntimeError(
-                f"Chrome did not open CDP port {_CDP_PORT} in 30s.\n"
-                "  If Chrome is already running, it may have absorbed the launch.\n"
-                "  Try closing Chrome and running again, or use: agentihooks quota import-cookies"
+            print(
+                "[quota-watcher] Chrome did not open CDP port in 10s — "
+                "Chrome is already running and absorbed the launch (single-instance behavior).\n"
+                "[quota-watcher] Falling back to bundled Chromium via WSLg...",
+                flush=True,
             )
+            raise _ChromeAbsorbed()
     else:
         print(f"[quota-watcher] port {_CDP_PORT} already open — connecting to existing Chrome", flush=True)
 
@@ -372,15 +379,19 @@ def main():
     profile_dir.mkdir(parents=True, exist_ok=True)
     output = Path(args.output).expanduser()
 
-    # Headed + Windows Chrome = CDP path
+    # Headed + Windows Chrome = CDP path (falls back to WSLg Chromium if Chrome already running)
     if not args.headless and not args.chromium:
         exe = _find_windows_browser()
         if exe:
-            asyncio.run(run_with_windows_chrome(exe, profile_dir, output, args.poll))
-            return
-        print("[quota-watcher] Windows Chrome/Edge not found — falling back to bundled Chromium", flush=True)
+            try:
+                asyncio.run(run_with_windows_chrome(exe, profile_dir, output, args.poll))
+                return
+            except _ChromeAbsorbed:
+                print("[quota-watcher] Using bundled Chromium headed (WSLg) instead.", flush=True)
+        else:
+            print("[quota-watcher] Windows Chrome/Edge not found — falling back to bundled Chromium", flush=True)
 
-    # Headless or --chromium = bundled Chromium
+    # Headless, --chromium, or Windows Chrome fallback = bundled Chromium
     asyncio.run(run_with_chromium(profile_dir, output, args.poll, args.headless))
 
 
