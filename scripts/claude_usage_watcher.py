@@ -197,7 +197,7 @@ async def run(profile_dir: Path, output: Path, poll_sec: int, headless: bool):
         )
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
-        # Open claude.ai immediately so the user sees it
+        # Open claude.ai only when headed (user explicitly requested a browser)
         if not headless:
             await page.goto("https://claude.ai", wait_until="domcontentloaded")
 
@@ -225,8 +225,8 @@ def main():
     ap = argparse.ArgumentParser(description="Claude.ai quota watcher")
     ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
-    ap.add_argument("--headless", action="store_true",
-                    help="Run headless (background daemon — use after initial login)")
+    ap.add_argument("--headed", action="store_true",
+                    help="Open a browser window for login (Chromium via WSLg)")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies",
                     help="Paste sessionKey from Chrome DevTools — fastest auth method")
     args = ap.parse_args()
@@ -251,7 +251,7 @@ def main():
     profile_dir.mkdir(parents=True, exist_ok=True)
     output = Path(args.output).expanduser()
 
-    asyncio.run(run(profile_dir, output, args.poll, args.headless))
+    asyncio.run(run(profile_dir, output, args.poll, headless=not args.headed))
 
 
 if __name__ == "__main__":
