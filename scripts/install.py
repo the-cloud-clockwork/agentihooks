@@ -1449,15 +1449,61 @@ def _find_companion_env(mcp_file: Path) -> Path | None:
 
 
 def _display_mcp_list(mcp_files: list[tuple[Path, dict]], tracked: set[str]) -> None:
-    """Print a numbered list of MCP files with server names and [installed] markers."""
+    """Print a numbered list of MCP files; servers shown as bullet points."""
     for i, (f, servers) in enumerate(mcp_files, 1):
-        names = ", ".join(servers.keys())
-        marker = f"  {'\033[32m'}[installed]{'\033[0m'}" if str(f) in tracked else ""
+        marker = f"  \033[32m[installed]\033[0m" if str(f) in tracked else ""
         print(f"  {i}. {f.name}{marker}")
-        print(f"     {len(servers)} server(s): {names}")
+        for name in servers:
+            print(f"     \033[2m•\033[0m {name}")
         env_file = _find_companion_env(f)
         if env_file:
             print(f"     \033[2menv: {env_file.name}\033[0m")
+
+
+def _prompt_server_selection(servers: dict, action: str = "install") -> dict | None:
+    """Stage-2 prompt: pick individual servers or all from *servers*.
+
+    Returns a ``{name: config}`` subset, or ``None`` if the user aborted.
+    Accepts:
+      0          — all servers
+      1          — single server by number
+      1,3        — comma-separated selection
+    """
+    names = list(servers.keys())
+    print(f"  0. All ({len(names)} server{'s' if len(names) != 1 else ''})")
+    for i, name in enumerate(names, 1):
+        print(f"  {i}. {name}")
+    print()
+    if len(names) == 1:
+        try:
+            raw = input(f"{action.capitalize()} {names[0]}? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return None
+        return None if raw in ("n", "no") else servers
+    try:
+        raw = input(
+            f"Select (0=all, 1-{len(names)}, or comma list): "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted.")
+        return None
+    if not raw or raw.lower() == "q":
+        print("Aborted.")
+        return None
+    if raw == "0":
+        return servers
+    try:
+        selected: dict = {}
+        for part in raw.split(","):
+            idx = int(part.strip()) - 1
+            if not 0 <= idx < len(names):
+                raise ValueError(f"{idx + 1}")
+            selected[names[idx]] = servers[names[idx]]
+        return selected
+    except ValueError as exc:
+        print(f"Invalid selection: {exc}")
+        return None
 
 
 def cmd_mcp_action(
@@ -1491,25 +1537,19 @@ def cmd_mcp_action(
             print(f"No MCP files found in {scan_dir}")
             print(f"\nDrop .json files with a mcpServers key into {scan_dir}")
             return
-        print(f"MCP files in {scan_dir}:\n")
-        _display_mcp_list(mcp_files, tracked)
-        print()
-        # Single-file shortcut: confirm instead of numeric prompt
+        # Stage 1 — pick a file
         if len(mcp_files) == 1:
-            single, _ = mcp_files[0]
-            try:
-                raw = input(f"Install {single.name}? [Y/n]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print("\nAborted.")
-                sys.exit(0)
-            if raw in ("n", "no"):
-                print("Aborted.")
-                return
-            idx = 0
+            selected_file, all_servers = mcp_files[0]
+            print(f"{selected_file.name}\n")
+            for name in all_servers:
+                print(f"  \033[2m•\033[0m {name}")
         else:
+            print(f"MCP files in {scan_dir}:\n")
+            _display_mcp_list(mcp_files, tracked)
+            print()
             try:
                 raw = input(
-                    f"Enter number to install (1-{len(mcp_files)}, or q to quit): "
+                    f"Enter file number (1-{len(mcp_files)}, or q to quit): "
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nAborted.")
@@ -1524,19 +1564,22 @@ def cmd_mcp_action(
             except ValueError:
                 print("Invalid selection.")
                 sys.exit(1)
-        selected, servers = mcp_files[idx]
-        if str(selected) in tracked:
-            print(f"\n  [--] {selected.name} is already installed — re-applying...")
+            selected_file, all_servers = mcp_files[idx]
+        # Stage 2 — pick server(s) from the file
+        print(f"\nServers in {selected_file.name}:\n")
+        selected_servers = _prompt_server_selection(all_servers)
+        if selected_servers is None:
+            return
         print()
-        manage_user_mcp(selected)
-        print(f"\n  Installed {len(servers)} server(s): {', '.join(servers.keys())}")
+        _merge_mcp_to_user_scope(selected_servers)
+        _state_add_mcp(selected_file)
         print("  Restart Claude Code for the changes to take effect.")
 
     elif action == "uninstall":
         if not tracked:
             print("No MCP files currently installed — nothing to uninstall.")
             return
-        # Show only installed files
+        # Build list of installed files with their server dicts
         installed: list[tuple[Path, dict]] = []
         for path_str in sorted(tracked):
             p = Path(path_str)
@@ -1548,32 +1591,19 @@ def cmd_mcp_action(
                 installed.append((p, data.get("mcpServers", {})))
             except (json.JSONDecodeError, OSError):
                 installed.append((p, {}))
-
-        print("Installed MCP files:\n")
-        for i, (f, servers) in enumerate(installed, 1):
-            if servers:
-                names = ", ".join(servers.keys())
-                print(f"  {i}. {f.name}")
-                print(f"     {len(servers)} server(s): {names}")
-            else:
-                print(f"  {i}. {f}  [file not found or unreadable]")
-
-        print()
+        # Stage 1 — pick a file
         if len(installed) == 1:
-            single, _ = installed[0]
-            try:
-                raw = input(f"Uninstall {single.name}? [Y/n]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print("\nAborted.")
-                sys.exit(0)
-            if raw in ("n", "no"):
-                print("Aborted.")
-                return
-            idx = 0
+            selected_file, all_servers = installed[0]
+            print(f"{selected_file.name}\n")
+            for name in all_servers:
+                print(f"  \033[2m•\033[0m {name}")
         else:
+            print("Installed MCP files:\n")
+            _display_mcp_list(installed, tracked)
+            print()
             try:
                 raw = input(
-                    f"Enter number to uninstall (1-{len(installed)}, or q to quit): "
+                    f"Enter file number (1-{len(installed)}, or q to quit): "
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nAborted.")
@@ -1588,9 +1618,21 @@ def cmd_mcp_action(
             except ValueError:
                 print("Invalid selection.")
                 sys.exit(1)
-        selected, _ = installed[idx]
+            selected_file, all_servers = installed[idx]
+        if not all_servers:
+            print(f"  [!!] Cannot read servers from {selected_file} — removing from tracking.")
+            _state_remove_mcp(selected_file)
+            return
+        # Stage 2 — pick server(s) to remove
+        print(f"\nServers in {selected_file.name}:\n")
+        selected_servers = _prompt_server_selection(all_servers, action="uninstall")
+        if selected_servers is None:
+            return
         print()
-        manage_user_mcp(selected, uninstall=True)
+        _remove_mcp_from_user_scope(selected_servers)
+        # Remove file from state only if all its servers were uninstalled
+        if set(selected_servers.keys()) >= set(all_servers.keys()):
+            _state_remove_mcp(selected_file)
         print("  Restart Claude Code for the changes to take effect.")
 
     elif action == "sync":
