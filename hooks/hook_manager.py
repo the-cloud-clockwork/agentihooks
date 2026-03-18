@@ -74,39 +74,6 @@ RULES:
         log("Failed to inject output token limit", {"error": str(e)})
 
 
-def inject_session_context_awareness(session_id: str, context_path: str):
-    """Inject session working directory awareness into Claude's context.
-
-    This makes Claude aware of the session-specific working directory where
-    ALL file creation and modification operations MUST occur.
-
-    Args:
-        session_id: The UUID session identifier
-        context_path: The absolute path to the session context directory (e.g., /tmp/<session_id>/)
-    """
-    try:
-        from hooks.common import inject_banner
-
-        content = f"""# IMPORTANT!!!
-THIS IS THE Session ID: {session_id}
-Working Directory: {context_path}
-
-RULES:
-• ALL file operations (create, modify, clone) MUST happen inside
-• Clone repositories to: {context_path}/
-• Create artifacts in: {context_path}/
-• ANY path outside {context_path}/ is FORBIDDEN
-• This directory is automatically cleaned up when session ends"""
-
-        inject_banner("📁 SESSION WORKING DIRECTORY", content)
-        log(
-            "Injected session context awareness",
-            {"session_id": session_id, "path": context_path},
-        )
-
-    except Exception as e:
-        log("Failed to inject session context awareness", {"error": str(e)})
-
 
 def parse_transcript_metrics(transcript_path: str) -> dict:
     """
@@ -316,22 +283,6 @@ def on_session_start(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
 
-    # Create session context directory in /tmp/<session_id>/
-    context_path = None
-    if session_id:
-        from hooks.integrations.file_system import set_context_dir
-
-        success, result = set_context_dir(session_id)
-        if success:
-            context_path = result
-            log("Session context directory ready", {"path": result})
-        else:
-            log("Failed to create session context directory", {"error": result})
-
-    # Inject session context awareness into Claude's context window
-    if session_id and context_path:
-        inject_session_context_awareness(session_id, context_path)
-
     # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
 
@@ -381,18 +332,6 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clean up session context directory from /tmp/<session_id>/
-    if session_id:
-        from hooks.integrations.file_system import delete_context_dir
-
-        success, result = delete_context_dir(session_id)
-        if success:
-            log(
-                "Session context directory cleaned",
-                {"result": result, "session_id": session_id},
-            )
-        else:
-            log("Failed to delete session context directory", {"error": result})
 
 
 def on_user_prompt_submit(payload: dict) -> None:

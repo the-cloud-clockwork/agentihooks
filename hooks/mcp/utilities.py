@@ -1,4 +1,4 @@
-"""Utility MCP tools — mermaid validation, markdown writing, env, tool listing."""
+"""Utility MCP tools — markdown writing, env, tool listing."""
 
 import json
 import os
@@ -9,76 +9,20 @@ from hooks.config import AGENTIHOOKS_HOME
 
 def register(mcp):
     @mcp.tool()
-    def validate_mermaid(filepath: str = "", content: str = "", strict: bool = True) -> str:
-        """Validate Mermaid diagram syntax in markdown files or raw content.
-
-        Call this AFTER generating documentation to catch syntax errors
-        before uploading to Confluence or creating GitHub PRs.
-
-        Args:
-            filepath: Path to markdown file (mutually exclusive with content)
-            content: Raw markdown or mermaid content to validate (mutually exclusive with filepath)
-            strict: If True, warnings are treated as errors (default: True)
-
-        Returns:
-            JSON with validation results (valid, diagram_count, issues, diagrams)
-        """
-        try:
-            from hooks.integrations.mermaid_validator import (
-                validate_markdown_file,
-                validate_mermaid_content,
-            )
-
-            if filepath and content:
-                return json.dumps({"success": False, "error": "Provide either 'filepath' OR 'content', not both"})
-
-            if not filepath and not content:
-                return json.dumps({"success": False, "error": "Provide either 'filepath' or 'content' parameter"})
-
-            if filepath:
-                result = validate_markdown_file(filepath, strict=strict)
-            else:
-                result = validate_mermaid_content(content, strict=strict)
-
-            response = {
-                "success": True,
-                "valid": result.valid,
-                "diagram_count": result.diagram_count,
-                "issues": [issue.to_dict() for issue in result.issues],
-                "diagrams": [d.to_dict() for d in result.diagrams],
-            }
-
-            if result.filepath:
-                response["filepath"] = result.filepath
-
-            return json.dumps(response)
-
-        except Exception as e:
-            log(
-                "MCP validate_mermaid failed",
-                {"filepath": filepath, "content_length": len(content) if content else 0, "error": str(e)},
-            )
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
-    def write_markdown(filepath: str, content: str, validate_mermaid: bool = True) -> str:
-        """Write a markdown file with automatic Mermaid syntax validation.
+    def write_markdown(filepath: str, content: str) -> str:
+        """Write a markdown file.
 
         MANDATORY tool for docgen agent - Write tool is blocked for markdown files.
-        This tool writes the file AND validates Mermaid diagrams automatically.
 
         Args:
             filepath: Path to write (must be .md extension, under $AGENTIHOOKS_HOME/package or /tmp)
             content: Markdown content to write
-            validate_mermaid: Auto-validate Mermaid diagrams (default: True)
 
         Returns:
-            JSON with write result and mermaid_validation
+            JSON with write result
         """
         try:
             from pathlib import Path
-
-            from hooks.integrations.mermaid_validator import validate_mermaid_content
 
             path = Path(filepath)
             if path.suffix.lower() != ".md":
@@ -95,24 +39,9 @@ def register(mcp):
             path.write_text(content, encoding="utf-8")
             bytes_written = len(content.encode("utf-8"))
 
-            mermaid_result = None
-            if validate_mermaid:
-                result = validate_mermaid_content(content, strict=True)
-                mermaid_result = {
-                    "valid": result.valid,
-                    "diagram_count": result.diagram_count,
-                    "issues": [issue.to_dict() for issue in result.issues],
-                }
-
             log(
                 "MCP write_markdown completed",
-                {
-                    "filepath": str(path),
-                    "bytes_written": bytes_written,
-                    "mermaid_valid": mermaid_result["valid"] if mermaid_result else "skipped",
-                    "mermaid_diagram_count": mermaid_result["diagram_count"] if mermaid_result else 0,
-                    "mermaid_issues_count": len(mermaid_result["issues"]) if mermaid_result else 0,
-                },
+                {"filepath": str(path), "bytes_written": bytes_written},
             )
 
             return json.dumps(
@@ -120,7 +49,6 @@ def register(mcp):
                     "success": True,
                     "filepath": str(path),
                     "bytes_written": bytes_written,
-                    "mermaid_validation": mermaid_result,
                 }
             )
 
@@ -173,24 +101,6 @@ def register(mcp):
         from hooks.mcp._registry import CATEGORY_MODULES
 
         tools = {
-            "github": [
-                "github_get_token",
-                "github_clone_repo",
-                "github_create_pr",
-                "github_get_repo_info",
-                "git_summary",
-            ],
-            "confluence": [
-                "confluence_get_page",
-                "confluence_find_page",
-                "confluence_create_page",
-                "confluence_update_page",
-                "confluence_delete_page",
-                "confluence_get_child_pages",
-                "confluence_docgen",
-                "confluence_validate_page",
-                "confluence_test_connection",
-            ],
             "aws": [
                 "aws_get_profiles",
                 "aws_get_account_id",
@@ -208,7 +118,6 @@ def register(mcp):
             ],
             "storage": [
                 "storage_upload_path",
-                "filesystem_delete",
             ],
             "database": [
                 "dynamodb_put_item",
@@ -227,17 +136,7 @@ def register(mcp):
                 "log_command_output",
                 "tail_container_logs",
             ],
-            "smith": [
-                "smith_list_commands",
-                "smith_get_prompt",
-                "smith_build_command",
-                "smith_execute",
-            ],
-            "agent": [
-                "agent_completions",
-            ],
             "utilities": [
-                "validate_mermaid",
                 "write_markdown",
                 "get_env",
                 "hooks_list_tools",

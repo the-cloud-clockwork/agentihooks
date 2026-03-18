@@ -1,4 +1,4 @@
-"""Tests for hooks/mcp/utilities.py — validate_mermaid, write_markdown, get_env."""
+"""Tests for hooks/mcp/utilities.py — write_markdown, get_env, hooks_list_tools."""
 
 import json
 import os
@@ -34,50 +34,6 @@ def mcp_tools():
 
 
 # ---------------------------------------------------------------------------
-# validate_mermaid
-# ---------------------------------------------------------------------------
-
-
-class TestValidateMermaid:
-    def test_content_valid(self, mcp_tools):
-        fn = mcp_tools["validate_mermaid"]
-        result = json.loads(fn(content="```mermaid\ngraph LR\nA-->B\n```"))
-        assert result["success"] is True
-        assert result["diagram_count"] >= 1
-
-    def test_both_args_error(self, mcp_tools):
-        fn = mcp_tools["validate_mermaid"]
-        result = json.loads(fn(filepath="/tmp/x.md", content="some content"))
-        assert result["success"] is False
-        assert "not both" in result["error"]
-
-    def test_neither_arg_error(self, mcp_tools):
-        fn = mcp_tools["validate_mermaid"]
-        result = json.loads(fn())
-        assert result["success"] is False
-
-    def test_filepath_mode(self, mcp_tools, tmp_path):
-        md = tmp_path / "test.md"
-        md.write_text("```mermaid\ngraph LR\nA-->B\n```")
-        fn = mcp_tools["validate_mermaid"]
-        result = json.loads(fn(filepath=str(md)))
-        assert result["success"] is True
-        assert "filepath" in result
-
-    def test_exception_returns_error(self, mcp_tools):
-        fn = mcp_tools["validate_mermaid"]
-        with patch(
-            "hooks.mcp.utilities.json.dumps", side_effect=[Exception("boom"), '{"success": false, "error": "boom"}']
-        ):
-            # Trigger the except branch
-            pass
-        # Simpler: cause an import error inside the tool
-        with patch.dict("sys.modules", {"hooks.integrations.mermaid_validator": None}):
-            result = json.loads(fn(content="test"))
-        assert result["success"] is False
-
-
-# ---------------------------------------------------------------------------
 # write_markdown
 # ---------------------------------------------------------------------------
 
@@ -99,28 +55,15 @@ class TestWriteMarkdown:
         md = Path("/tmp") / f"agentihooks_test_{os.getpid()}.md"
         fn = mcp_tools["write_markdown"]
         try:
-            result = json.loads(fn(filepath=str(md), content="# Hello\n", validate_mermaid=False))
+            result = json.loads(fn(filepath=str(md), content="# Hello\n"))
             assert result["success"] is True
             assert result["bytes_written"] > 0
             assert md.exists()
         finally:
             md.unlink(missing_ok=True)
 
-    def test_writes_with_mermaid_validation(self, mcp_tools):
-        md = Path("/tmp") / f"agentihooks_mermaid_test_{os.getpid()}.md"
-        fn = mcp_tools["write_markdown"]
-        content = "```mermaid\ngraph LR\nA-->B\n```\n"
-        try:
-            result = json.loads(fn(filepath=str(md), content=content, validate_mermaid=True))
-            assert result["success"] is True
-            assert result["mermaid_validation"] is not None
-            assert "valid" in result["mermaid_validation"]
-        finally:
-            md.unlink(missing_ok=True)
-
     def test_exception_returns_error(self, mcp_tools):
         fn = mcp_tools["write_markdown"]
-        # Trigger exception by mocking path.write_text to raise
         with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
             result = json.loads(fn(filepath="/tmp/fail_test.md", content="hi"))
         assert result["success"] is False
@@ -163,10 +106,6 @@ class TestGetEnv:
 
     def test_exception_returns_error(self, mcp_tools):
         fn = mcp_tools["get_env"]
-        with patch("os.environ", side_effect=Exception("env broken")):
-            # os.environ is not callable so patch dict instead
-            pass
-        # Force exception via broken dict conversion
         with patch("builtins.dict", side_effect=Exception("boom")):
             result = json.loads(fn())
         assert result["success"] is False
@@ -182,11 +121,6 @@ class TestHooksListTools:
         from hooks.mcp import utilities
 
         mcp = _MockMCP()
-        # Simulate some registered tools
-        fake_tool = MagicMock()
-        fake_tool.name = "validate_mermaid"
-        mcp._tool_manager.list_tools.return_value = [fake_tool]
-
         utilities.register(mcp)
         fn = mcp.tools["hooks_list_tools"]
         result = json.loads(fn())
@@ -199,7 +133,6 @@ class TestHooksListTools:
         from hooks.mcp import utilities
 
         mcp = _MockMCP()
-        # No tools registered
         mcp._tool_manager.list_tools.return_value = []
         utilities.register(mcp)
         fn = mcp.tools["hooks_list_tools"]

@@ -1,8 +1,6 @@
 """External service integrations.
 
 This package contains clients for external services:
-- github: GitHub App authentication + git operations
-- confluence: Confluence API client
 - aws: AWS config parsing
 - mailer: SMTP email client
 - sqs: AWS SQS messaging with state enrichment
@@ -35,15 +33,6 @@ from hooks.integrations.base import (
     IntegrationBase,
     IntegrationRegistry,
 )
-from hooks.integrations.completions import (
-    CompletionResult,
-    CompletionsClient,
-    call_completions,
-)
-from hooks.integrations.confluence import (
-    ConfluenceClient,
-    PageInfo,
-)
 from hooks.integrations.dynamodb import (
     DynamoDBClient,
     DynamoDBIntegration,
@@ -51,25 +40,6 @@ from hooks.integrations.dynamodb import (
 )
 from hooks.integrations.dynamodb import (
     put_item as dynamodb_put_item,
-)
-from hooks.integrations.file_system import (
-    DeleteResult,
-    delete,
-    delete_context_dir,
-    get_context_dir,
-    set_context_dir,
-)
-from hooks.integrations.git_diff import (
-    get_git_summary,
-)
-from hooks.integrations.github import (
-    GitHubAuth,
-    GitOperations,
-    clone_repo,
-    create_pr,
-    embed_token_in_url,
-    get_github_token,
-    requires_github_token,
 )
 from hooks.integrations.lambda_invoke import (
     LambdaClient,
@@ -93,14 +63,6 @@ from hooks.integrations.mailer import (
     send_from_config,
     send_markdown_file,
     wrap_html_body,
-)
-from hooks.integrations.mermaid_validator import (
-    DiagramInfo,
-    MermaidValidator,
-    ValidationIssue,
-    ValidationResult,
-    validate_markdown_file,
-    validate_mermaid_content,
 )
 from hooks.integrations.postgres import (
     PostgresClient,
@@ -171,18 +133,6 @@ __all__ = [
     "ConfigStatus",
     "EnvVarStatus",
     "check_all_integrations",
-    # GitHub Auth
-    "GitHubAuth",
-    "requires_github_token",
-    "get_github_token",
-    "embed_token_in_url",
-    # Git Operations
-    "GitOperations",
-    "clone_repo",
-    "create_pr",
-    # Confluence
-    "ConfluenceClient",
-    "PageInfo",
     # AWS
     "AWSConfigParser",
     "AWSAccount",
@@ -204,12 +154,6 @@ __all__ = [
     "markdown_to_html",
     "wrap_html_body",
     "parse_recipients",
-    # Git Diff
-    "get_git_summary",
-    # Completions
-    "CompletionsClient",
-    "CompletionResult",
-    "call_completions",
     # SQS
     "SQSClient",
     "SQSResult",
@@ -242,17 +186,4 @@ __all__ = [
     "PostgresIntegration",
     "postgres_insert",
     "postgres_execute",
-    # File System
-    "DeleteResult",
-    "delete",
-    "set_context_dir",
-    "get_context_dir",
-    "delete_context_dir",
-    # Mermaid Validator
-    "MermaidValidator",
-    "ValidationResult",
-    "ValidationIssue",
-    "DiagramInfo",
-    "validate_markdown_file",
-    "validate_mermaid_content",
 ]

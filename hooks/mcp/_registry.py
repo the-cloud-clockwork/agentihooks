@@ -1,8 +1,6 @@
 """Category module registry — single source of truth for MCP tool categories."""
 
 CATEGORY_MODULES = {
-    "github": "hooks.mcp.github",
-    "confluence": "hooks.mcp.confluence",
     "aws": "hooks.mcp.aws",
     "email": "hooks.mcp.email",
     "messaging": "hooks.mcp.messaging",
@@ -10,8 +8,6 @@ CATEGORY_MODULES = {
     "database": "hooks.mcp.database",
     "compute": "hooks.mcp.compute",
     "observability": "hooks.mcp.observability",
-    "smith": "hooks.mcp.smith",
-    "agent": "hooks.mcp.agent",
     "utilities": "hooks.mcp.utilities",
 }
 

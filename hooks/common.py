@@ -21,17 +21,6 @@ __all__ = [
     "inject_banner",
     # Script runner
     "run_script",
-    # GitHub integration (lazy loaded to avoid circular imports)
-    "GitHubAuth",
-    "GitOperations",
-    "requires_github_token",
-    "get_github_token",
-    "embed_token_in_url",
-    "clone_repo",
-    "create_pr",
-    # Confluence integration (lazy loaded)
-    "ConfluenceClient",
-    "PageInfo",
     # AWS integration (lazy loaded)
     "AWSConfigParser",
     "AWSAccount",
@@ -52,34 +41,11 @@ __all__ = [
     "MetricsCollector",
     "ResultAccumulator",
     "timed",
-    # File System integration (lazy loaded)
-    "DeleteResult",
-    "delete",
-    "set_context_dir",
-    "get_context_dir",
-    "delete_context_dir",
     # Session correlation (for stateless sessions)
     "get_correlation_id",
     "get_session_context",
 ]
 
-
-# GitHub integration exports
-_GITHUB_EXPORTS = {
-    "GitHubAuth",
-    "GitOperations",
-    "requires_github_token",
-    "get_github_token",
-    "embed_token_in_url",
-    "clone_repo",
-    "create_pr",
-}
-
-# Confluence integration exports
-_CONFLUENCE_EXPORTS = {
-    "ConfluenceClient",
-    "PageInfo",
-}
 
 # AWS integration exports
 _AWS_EXPORTS = {
@@ -110,26 +76,9 @@ _METRICS_EXPORTS = {
     "timed",
 }
 
-# File System exports
-_FILE_SYSTEM_EXPORTS = {
-    "DeleteResult",
-    "delete",
-    "set_context_dir",
-    "get_context_dir",
-    "delete_context_dir",
-}
-
 
 def __getattr__(name: str):
     """Lazy load integrations to avoid circular imports."""
-    if name in _GITHUB_EXPORTS:
-        from hooks.integrations import github
-
-        return getattr(github, name)
-    if name in _CONFLUENCE_EXPORTS:
-        from hooks.integrations import confluence
-
-        return getattr(confluence, name)
     if name in _AWS_EXPORTS:
         from hooks.integrations import aws
 
@@ -142,10 +91,6 @@ def __getattr__(name: str):
         from hooks.observability import metrics
 
         return getattr(metrics, name)
-    if name in _FILE_SYSTEM_EXPORTS:
-        from hooks.integrations import file_system
-
-        return getattr(file_system, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
