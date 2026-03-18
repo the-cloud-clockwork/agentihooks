@@ -11,6 +11,8 @@ Hook system and MCP tool server for [Claude Code](https://docs.anthropic.com/en/
 **agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 26 MCP tools across 8 categories for interacting with external services. A built-in **Token Control Layer** monitors context window usage, truncates verbose command output, deduplicates file reads, and warns before quota exhaustion — targeting 30–50% token reduction in agentic sessions.
 
 > **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
+>
+> **Cost management guide:** [the-cloud-clock-work.github.io/agentihooks/docs/cost-management/](https://the-cloud-clock-work.github.io/agentihooks/docs/cost-management/) — see how AgentiHooks saves 100K–250K tokens per session
 
 ## Architecture
 

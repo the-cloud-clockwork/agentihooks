@@ -14,6 +14,7 @@ Lifecycle hooks and 26 MCP tools for Claude Code — install once, work everywhe
 
 <div class="hero-actions text-center mb-8" markdown="0">
   <a href="#install" class="btn btn-primary fs-5 mr-2">Get Started</a>
+  <a href="{{ site.baseurl }}/docs/cost-management/" class="btn btn-green fs-5 mr-2">Cost Management</a>
   <a href="https://github.com/The-Cloud-Clock-Work/agentihooks" class="btn fs-5" target="_blank">View on GitHub</a>
 </div>
 
@@ -38,6 +39,27 @@ agentihooks global
 ```
 
 That's it. Hooks are active and 26 MCP tools are registered the next time you start `claude`.
+
+---
+
+## Save tokens. Spend less. Ship more.
+{: .fs-6 .fw-500 }
+
+{: .highlight }
+> AgentiHooks targets **30–50% token reduction** in agentic sessions. Every feature is on by default — zero configuration required.
+
+| What burns your tokens | How AgentiHooks fixes it | Savings |
+|------------------------|--------------------------|---------|
+| `docker logs` dumps 3000 lines into context | **Bash output filtering** — auto-truncates verbose output | 5K–50K tokens/cmd |
+| Claude re-reads the same file 4 times | **File read dedup** — blocks unchanged re-reads | 2K–20K tokens/read |
+| 26 MCP tool schemas loaded every turn | **Lazy loading** — schemas expand only when used | ~79K tokens/session |
+| Context hits 100%, session resets, all work lost | **Threshold warnings** — alerts at 60% and 80% | Entire session |
+| No visibility into spend | **Live statusline** — cost, burn rate, cache ratio every turn | Prevents waste |
+| Hit weekly quota mid-task | **Quota monitor** — plan usage on your statusline | Prevents limit hits |
+
+**The result:** Your weekly quota lasts longer. Sessions run deeper before compaction. You see exactly where every token goes.
+
+[Full cost management guide →]({{ site.baseurl }}/docs/cost-management/){: .btn .btn-green }
 
 ---
 
@@ -203,6 +225,7 @@ rm -rf ~/.agentihooks
 
 | | |
 |---|---|
+| **[Cost management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, burn rate tracking, quota monitoring — 30–50% fewer tokens |
 | **Lifecycle hooks** | Auto-log transcripts, inject session context, save memory on stop |
 | **26 MCP tools** | AWS, email, SQS, S3, DynamoDB, PostgreSQL, observability, and more |
 | **Profiles** | Swap agent personality and permissions with one flag |
