@@ -56,11 +56,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Hook system processing all 10 Claude Code lifecycle events
-- Modular MCP tool server with 45 tools across 12 categories
+- Modular MCP tool server with 26 tools across 8 categories
 - Category-based tool filtering via `MCP_CATEGORIES` env var
 - Profile composition system with base settings + per-profile overrides
 - Build script for generating profile artifacts (`scripts/build_profiles.py`) *(removed in 0.3.0)*
-- Integration clients: GitHub, Confluence, AWS, Email, SQS, S3, Webhook, Lambda, DynamoDB, PostgreSQL
+- Integration clients: AWS, Email, SQS, S3, Webhook, Lambda, DynamoDB, PostgreSQL
 - Observability: transcript logging, metrics collection, container log tailing (Docker/K8s/ECS)
 - Cross-session tool error memory (learn from past failures)
 - Persistent agent memory via Redis + JSONL fallback

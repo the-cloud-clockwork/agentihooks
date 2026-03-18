@@ -9,8 +9,6 @@ Structure:
     ├── config.py           # Configuration
     ├── hook_manager.py     # Event dispatcher
     ├── integrations/       # External service clients
-    │   ├── github.py       # GitHub auth + git operations
-    │   ├── confluence.py   # Confluence client (planned)
     │   └── mailer.py       # Email client
     └── observability/      # Logging/metrics
         ├── transcript.py   # Transcript logging

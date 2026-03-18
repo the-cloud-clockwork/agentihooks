@@ -9,7 +9,7 @@ permalink: /
 # AgentiHooks
 {: .fs-9 .fw-700 }
 
-Lifecycle hooks and 45 MCP tools for Claude Code — install once, work everywhere.
+Lifecycle hooks and 26 MCP tools for Claude Code — install once, work everywhere.
 {: .fs-5 .text-grey-dk-100 .mb-6 }
 
 <div class="hero-actions text-center mb-8" markdown="0">
@@ -37,7 +37,7 @@ Then wire everything into Claude Code in one command:
 agentihooks global
 ```
 
-That's it. Hooks are active and 45 MCP tools are registered the next time you start `claude`.
+That's it. Hooks are active and 26 MCP tools are registered the next time you start `claude`.
 
 ---
 
@@ -83,29 +83,29 @@ All `${VAR}` placeholders in MCP server configs resolve automatically.
 
 ## Restrict which tools load
 
-By default all 45 tools across all 12 categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
+By default all 26 tools across all 8 categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
 
 **Restrict by category** — only load the categories you need:
 
 ```json
 "env": {
-  "MCP_CATEGORIES": "github,utilities"
+  "MCP_CATEGORIES": "aws,utilities"
 }
 ```
 
 Valid category names (comma-separated, any order):
 
 ```
-github  confluence  aws  email  messaging  storage
-database  compute  observability  smith  agent  utilities
+aws  email  messaging  storage
+database  compute  observability  utilities
 ```
 
 **Restrict to specific tools** — allowlist exact tool names within the loaded categories:
 
 ```json
 "env": {
-  "MCP_CATEGORIES": "github,utilities",
-  "ALLOWED_TOOLS": "github_get_token,github_clone_repo,hooks_list_tools"
+  "MCP_CATEGORIES": "aws,utilities",
+  "ALLOWED_TOOLS": "aws_get_profiles,aws_get_account_id,hooks_list_tools"
 }
 ```
 
@@ -160,7 +160,7 @@ Registered files are tracked in `~/.agentihooks/state.json` and re-applied autom
 AgentiHooks is a platform, not just a tool. Fork the repo and you immediately inherit:
 
 - The full hook lifecycle (SessionStart → Stop) wired into Claude Code
-- 45 MCP tools across 12 categories, ready to use or filter down
+- 26 MCP tools across 8 categories, ready to use or filter down
 - Profile system — swap agent personality and permissions with one flag
 - Install scripts, settings management, and credential loading
 
@@ -204,7 +204,7 @@ rm -rf ~/.agentihooks
 | | |
 |---|---|
 | **Lifecycle hooks** | Auto-log transcripts, inject session context, save memory on stop |
-| **45 MCP tools** | GitHub, AWS, Confluence, email, SQS, S3, DynamoDB, PostgreSQL, observability, and more |
+| **26 MCP tools** | AWS, email, SQS, S3, DynamoDB, PostgreSQL, observability, and more |
 | **Profiles** | Swap agent personality and permissions with one flag |
 | **`agentienv` shell function** | Clean, shell-native secret loading — auto-called on every new shell, no wrapper scripts |
 

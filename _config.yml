@@ -3,7 +3,7 @@
 title: AgentiHooks
 description: >-
   Hook system and MCP tool server for Claude Code agents.
-  Event-driven hooks, 45 MCP tools across 12 categories, profile-based configuration.
+  Event-driven hooks, 26 MCP tools across 8 categories, profile-based configuration.
 url: "https://the-cloud-clock-work.github.io"
 baseurl: "/agentihooks"
 
