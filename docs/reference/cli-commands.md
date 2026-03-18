@@ -434,11 +434,11 @@ Found /home/user/.agentitools/requirements.txt — install with uv? [y/N]
 The hook and MCP server modules can be run directly with Python:
 
 ```bash
-# Run the MCP tool server (all 45 tools)
+# Run the MCP tool server (all 26 tools)
 python -m hooks.mcp
 
 # Run with specific categories
-MCP_CATEGORIES=github,utilities python -m hooks.mcp
+MCP_CATEGORIES=aws,utilities python -m hooks.mcp
 
 # Process a hook event manually
 echo '{"hook_event_name":"SessionStart","session_id":"test-123"}' | python -m hooks

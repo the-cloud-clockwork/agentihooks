@@ -6,7 +6,7 @@ nav_order: 13
 # Utilities Tools
 {: .no_toc }
 
-The Utilities category provides general-purpose tools for Mermaid diagram validation, markdown writing, environment variable inspection, and tool discovery.
+The Utilities category provides general-purpose tools for markdown writing, environment variable inspection, and tool discovery.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -20,8 +20,7 @@ The Utilities category provides general-purpose tools for Mermaid diagram valida
 
 | Tool | Description |
 |------|-------------|
-| `validate_mermaid()` | Validate Mermaid diagram syntax |
-| `write_markdown()` | Write a markdown file with auto Mermaid validation |
+| `write_markdown()` | Write a markdown file |
 | `get_env()` | Get environment variables with optional filtering |
 | `hooks_list_tools()` | List all available MCP tools grouped by category |
 
@@ -29,42 +28,21 @@ The Utilities category provides general-purpose tools for Mermaid diagram valida
 
 ## Tool reference
 
-### `validate_mermaid`
-
-```python
-validate_mermaid(
-    filepath: str = "",
-    content: str = "",
-    strict: bool = True
-) -> str
-```
-
-Validates Mermaid diagram syntax. Supply **either** `filepath` (path to a `.md` file) **or** `content` (raw markdown string) — not both.
-
-When `strict=True`, any syntax error causes a failure result. When `strict=False`, warnings are reported but the result is still marked valid.
-
-**Returns:** JSON with `valid` (bool), `diagram_count`, `issues` (list), `diagrams` (list of diagram types found)
-
----
-
 ### `write_markdown`
 
 ```python
 write_markdown(
     filepath: str,
-    content: str,
-    validate_mermaid: bool = True
+    content: str
 ) -> str
 ```
 
-Writes a markdown file and optionally validates embedded Mermaid diagrams before writing.
+Writes a markdown file.
 
 {: .important }
 **Path restrictions:** `filepath` must have a `.md` extension and must be under either `$AGENTIHOOKS_HOME/package` or `/tmp`. Writes outside these paths are rejected.
 
-When `validate_mermaid=True` (default), the content is validated first. If validation fails, the file is not written and the validation errors are returned instead.
-
-**Returns:** JSON with `filepath`, `bytes_written`, `mermaid_validation`
+**Returns:** JSON with `filepath`, `bytes_written`
 
 ---
 
@@ -80,8 +58,8 @@ Returns environment variables. When `filter` is provided, only variables whose n
 # All env vars
 get_env()
 
-# Only GitHub-related vars
-get_env(filter="GITHUB")
+# Only AWS-related vars
+get_env(filter="AWS")
 
 # Only SMTP vars
 get_env(filter="SMTP")
@@ -113,7 +91,3 @@ Introspects the running MCP server and returns all registered tools grouped by c
 This tool is designed for agents that generate documentation or reports as part of their task. The path restrictions ensure generated files land in controlled locations:
 - `/tmp/<session_id>/` — temporary session artifacts
 - `$AGENTIHOOKS_HOME/package/` — persistent package-level files
-
-### `validate_mermaid` standalone vs. integrated
-
-`validate_mermaid` can be used standalone to check diagrams before publishing to Confluence or committing to a repo. `write_markdown` calls it automatically when writing, so explicit validation is only needed when working with existing files.

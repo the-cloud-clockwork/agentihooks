@@ -225,11 +225,11 @@ This writes a `.mcp.json` into the target project directory.
 Run the MCP server directly (useful for testing):
 
 ```bash
-# All 45 tools
+# All 26 tools
 ~/.agentihooks/.venv/bin/python -m hooks.mcp
 
 # Specific categories only
-MCP_CATEGORIES=github,utilities ~/.agentihooks/.venv/bin/python -m hooks.mcp
+MCP_CATEGORIES=aws,utilities ~/.agentihooks/.venv/bin/python -m hooks.mcp
 ```
 
 ---

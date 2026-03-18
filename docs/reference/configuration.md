@@ -34,7 +34,7 @@ These variables control how `agentihooks global` and `agentihooks project` insta
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root directory for all runtime data: logs, memory, state. Set to a shared mount for Kubernetes deployments. |
-| `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `github,confluence,aws,email,messaging,storage,database,compute,observability,smith,agent,utilities`. |
+| `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `aws,email,messaging,storage,database,compute,observability,utilities`. |
 | `ALLOWED_TOOLS` | — | Legacy: comma-separated list of specific tool names. Takes precedence over category filtering after categories are loaded. |
 | `ENABLE_TOOL_SEARCH` | `true` | Set in the `env` block of `settings.json`. Makes all MCP tools lazy-loaded on demand — shown as "(loaded on-demand)" in `/context`. Eliminates approximately 79K token upfront cost from MCP tool schemas. |
 
@@ -124,31 +124,6 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 ---
 
-## GitHub
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GITHUB_TOKEN` | — | Personal access token. Used when GitHub App credentials are not set. |
-| `GITHUB_APP_ID` | — | GitHub App ID (App auth mode). |
-| `GITHUB_INSTALLATION_ID` | — | GitHub App installation ID (App auth mode). |
-| `GITHUB_SECRET_ID` | — | AWS Secrets Manager secret ID containing the App private key. |
-| `GITHUB_API_BASE` | `https://api.github.com` | GitHub API base URL. Override for GitHub Enterprise. |
-| `GITHUB_TOKEN_REFRESH_BUFFER` | `300` | Seconds before expiry at which to proactively refresh the installation token. |
-| `GITHUB_JWT_EXPIRY` | `600` | JWT lifetime in seconds. |
-
----
-
-## Confluence
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONFLUENCE_SERVER_URL` | — | Confluence base URL (e.g., `https://myorg.atlassian.net/wiki`). |
-| `CONFLUENCE_TOKEN` | — | Confluence API token. |
-| `CONFLUENCE_SPACE_KEY` | — | Default space key. Used when `space_key` is omitted in tool calls. |
-| `PARENT_PAGE_ID` | — | Default parent page ID for new pages. |
-
----
-
 ## Email / SMTP
 
 | Variable | Default | Description |
@@ -225,16 +200,6 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 | `LAMBDA_FUNCTION_NAME` | — | Lambda function ARN or name. |
 | `LAMBDA_INVOCATION_TYPE` | `RequestResponse` | Default invocation type. `RequestResponse` (sync) or `Event` (async). |
 | `IS_EVALUATION` | `false` | Evaluation mode — skips actual invocation. |
-
----
-
-## Agent Completions
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENT_API_ENDPOINT` | `http://localhost:8000` | Completions API base URL. |
-| `AGENT_API_KEY` | — | API key for the completions endpoint. |
-| `AGENT_API_TIMEOUT` | `300` | Request timeout in seconds. |
 
 ---
 

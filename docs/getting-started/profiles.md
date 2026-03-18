@@ -68,7 +68,7 @@ Contains fields for both agentihooks and agenticore:
 # agentihooks fields
 name: coding
 description: "Autonomous coding agent"
-mcp_categories: github,utilities,observability
+mcp_categories: aws,utilities,observability
 
 # agenticore fields
 claude:

@@ -8,7 +8,7 @@
 
 Hook system and MCP tool server for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents. Designed to work with [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) and meant to be forked and extended for custom workflows.
 
-**agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 45 MCP tools across 12 categories for interacting with external services. A built-in **Token Control Layer** monitors context window usage, truncates verbose command output, deduplicates file reads, and warns before quota exhaustion — targeting 30–50% token reduction in agentic sessions.
+**agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 26 MCP tools across 8 categories for interacting with external services. A built-in **Token Control Layer** monitors context window usage, truncates verbose command output, deduplicates file reads, and warns before quota exhaustion — targeting 30–50% token reduction in agentic sessions.
 
 > **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
 
@@ -28,9 +28,9 @@ Claude Code
   ├── statusLine (native setting) ──► python -m hooks.statusline
   │     pipes JSON on every turn        └── 2-3 line status bar (ctx%, burn rate, cost, git)
   │
-  └── MCP Tools ──► python -m hooks.mcp ──► 12 category modules
-        github, aws, confluence,              │
-        email, database, ...                  └── hooks/integrations/*
+  └── MCP Tools ──► python -m hooks.mcp ──► 8 category modules
+        aws, email, messaging,                │
+        database, compute, ...                └── hooks/integrations/*
 ```
 
 ## Quick Start
@@ -59,11 +59,11 @@ Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-
 
 | Event | What happens |
 |-------|-------------|
-| `SessionStart` | Creates session context directory, injects session awareness, MCP hygiene reminder |
+| `SessionStart` | Injects session awareness, MCP hygiene reminder |
 | `PreToolUse` | Secret scan (blocks on detection), file read deduplication, injects tool error memory |
 | `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
 | `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
-| `SessionEnd` | Logs transcript, clears file read cache, cleans up session directory |
+| `SessionEnd` | Logs transcript, clears file read cache |
 | `SubagentStop` | Logs subagent transcript |
 | `UserPromptSubmit` | Warns on detected secrets |
 | `Notification` | Logs notifications |
@@ -76,22 +76,18 @@ Full payload schemas and handler details: [Hook Events](https://the-cloud-clock-
 
 ## MCP Tool Categories
 
-45 tools across 12 categories, selectively loaded via `MCP_CATEGORIES`:
+26 tools across 8 categories, selectively loaded via `MCP_CATEGORIES`:
 
 | Category | Tools | Description |
 |----------|------:|-------------|
-| `github` | 5 | Clone repos, create PRs, token management, git summary |
-| `confluence` | 9 | CRUD pages, markdown docgen, validation |
 | `aws` | 4 | Profile listing, account discovery |
 | `email` | 2 | SMTP send with text / HTML / markdown |
 | `messaging` | 3 | SQS + webhook with state enrichment |
-| `storage` | 2 | S3 upload, `/tmp`-restricted filesystem delete |
+| `storage` | 1 | S3 upload |
 | `database` | 3 | DynamoDB put, PostgreSQL insert + execute |
 | `compute` | 1 | Lambda invocation (sync/async) |
 | `observability` | 7 | Timers, metrics, structured logging, container log tailing |
-| `smith` | 4 | Command builder: list, prompt, build, execute |
-| `agent` | 1 | Remote agent completions with model presets |
-| `utilities` | 4 | Mermaid validation, markdown writer, env vars, tool listing |
+| `utilities` | 3 | Markdown writer, env vars, tool listing |
 
 Per-tool signatures, parameters, and environment variables: [MCP Tools](https://the-cloud-clock-work.github.io/agentihooks/docs/mcp-tools/)
 
