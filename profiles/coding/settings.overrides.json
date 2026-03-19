@@ -1,5 +1,24 @@
 {
   "env": {
     "AGENTIHOOKS_SECRETS_MODE": "strict"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git push * main*)",
+      "Bash(git push * master*)",
+      "Bash(git push * dev*)",
+      "Bash(git push * develop*)",
+      "Bash(git push * staging*)",
+      "Bash(git push * production*)",
+      "Bash(git push *:main*)",
+      "Bash(git push *:master*)",
+      "Bash(git push *:dev*)",
+      "Bash(git push *:develop*)",
+      "Bash(git push *:staging*)",
+      "Bash(git push *:production*)",
+      "Bash(git push *--force*)",
+      "Bash(git merge*)",
+      "Bash(gh pr merge*)"
+    ]
   }
 }
