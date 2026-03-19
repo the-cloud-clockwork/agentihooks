@@ -132,7 +132,16 @@ def _import_cookie(session_key: str) -> None:
         browser.close()
 
     if logged_in:
-        print("[quota] Authenticated. Starting daemon...", flush=True)
+        print("[quota] Authenticated.", flush=True)
+        # Restart daemon so it picks up the new auth state
+        existing = _daemon_running()
+        if existing:
+            import signal
+            os.kill(existing, signal.SIGTERM)
+            _PID_FILE.unlink(missing_ok=True)
+            print(f"[quota] Restarting daemon (old PID {existing}) with new session...", flush=True)
+        else:
+            print("[quota] Starting daemon...", flush=True)
         _start_daemon()
     else:
         print("[quota] Cookie rejected — may be expired. Try again.", flush=True)
@@ -157,7 +166,7 @@ def cmd_auth() -> None:
     _import_cookie(value)
 
 
-async def scrape(page) -> dict:
+async def scrape(page, debug_dump: Path | None = None) -> dict:
     from playwright.async_api import TimeoutError as PwTimeout
 
     await page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
@@ -182,6 +191,11 @@ async def scrape(page) -> dict:
     }
 
     content = await page.content()
+
+    if debug_dump:
+        debug_dump.parent.mkdir(parents=True, exist_ok=True)
+        debug_dump.write_text(content, encoding="utf-8")
+        print(f"[quota] Debug HTML dumped to {debug_dump}", flush=True)
 
     sm = re.search(r"(?:current session|session)[^\n%]{0,80}?(\d+)\s*%", content, re.I)
     if not sm:
@@ -361,6 +375,32 @@ def _start_daemon(poll: int = 60) -> None:
     print(f"  Stop:   kill {proc.pid}", flush=True)
 
 
+async def _cmd_dump_async(out: Path) -> None:
+    """One-shot: navigate to the usage page and dump raw HTML for debugging."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        ctx = await browser.new_context(
+            storage_state=str(_STATE_FILE),
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        page = await ctx.new_page()
+        data = await scrape(page, debug_dump=out)
+        print(f"[quota] Scrape result keys: session={bool(data.get('session'))}, weekly={bool(data.get('weekly'))}", flush=True)
+        await ctx.close()
+        await browser.close()
+
+
+def cmd_dump() -> None:
+    """Dump the raw usage page HTML to ~/.agentihooks/usage_debug.html for inspection."""
+    if not _is_authenticated():
+        sys.exit("[quota] Not authenticated. Run: agentihooks quota auth")
+    out = Path.home() / ".agentihooks" / "usage_debug.html"
+    asyncio.run(_cmd_dump_async(out))
+    print(f"[quota] Inspect with: cat {out} | grep -i 'session\\|usage\\|progress\\|pct\\|percent'", flush=True)
+
+
 def cmd_stop() -> None:
     """Stop the running daemon."""
     pid = _daemon_running()
@@ -383,11 +423,16 @@ def main():
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
     ap.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--auth", action="store_true", help="Open your browser + paste session cookie")
+    ap.add_argument("--dump-html", action="store_true", dest="dump_html", help="Dump usage page HTML for debugging")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies", help="Paste sessionKey only")
     args = ap.parse_args()
 
     if args.auth:
         cmd_auth()
+        return
+
+    if args.dump_html:
+        cmd_dump()
         return
 
     if args.import_cookies:

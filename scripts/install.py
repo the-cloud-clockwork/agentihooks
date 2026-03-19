@@ -1638,6 +1638,9 @@ def cmd_quota(args: "argparse.Namespace") -> None:
     if args.action == "auth":
         os.execv(python, [python, str(watcher), "--auth"])
 
+    elif args.action == "dump-html":
+        os.execv(python, [python, str(watcher), "--dump-html"])
+
     elif args.action == "import-cookies":
         os.execv(python, [python, str(watcher), "--import-cookies"])
 
@@ -1780,7 +1783,7 @@ def main() -> None:
         nargs="?",
         default="watch",
         choices=["watch", "auth", "import-cookies", "status", "logs", "stop"],
-        help="watch (default) — start background daemon; auth — open browser + paste cookie; import-cookies — paste only; status — print quota; logs — tail daemon log; stop — kill daemon",
+        help="watch (default) — start background daemon; auth — open browser + paste cookie; import-cookies — paste only; status — print quota; logs — tail daemon log; stop — kill daemon; dump-html — dump usage page HTML for scraper debugging",
     )
     quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
