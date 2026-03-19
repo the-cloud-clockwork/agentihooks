@@ -49,7 +49,7 @@ class TestBashOutputFilter:
         for i in range(30):
             sha = f"{'a' * 7}{i:03d}"[:40].ljust(40, "0")
             lines.append(f"commit {sha}")
-            lines.append(f"Author: Dev <dev@example.com>")
+            lines.append("Author: Dev <dev@example.com>")
             lines.append(f"Date: Mon Mar {i + 1} 2026")
             lines.append("")
             lines.append(f"    Commit message {i}")

@@ -335,21 +335,21 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
     block = (
         f"{_BLOCK_START}\n"
         f"agentienv() {{\n"
-        f"  if [ ! -f \"{env_file}\" ]; then\n"
-        f"    echo \"[agentienv] no .env found at {env_file} — skipping\"\n"
+        f'  if [ ! -f "{env_file}" ]; then\n'
+        f'    echo "[agentienv] no .env found at {env_file} — skipping"\n'
         f"    return 0\n"
         f"  fi\n"
         f"  set -a\n"
-        f"  . \"{env_file}\" 2>/dev/null || {{ echo \"[agentienv] ERROR: failed to source {env_file}\"; set +a; return 1; }}\n"
+        f'  . "{env_file}" 2>/dev/null || {{ echo "[agentienv] ERROR: failed to source {env_file}"; set +a; return 1; }}\n'
         f"  _aih_count=1\n"
-        f"  for f in \"{env_dir}\"/*.env; do\n"
-        f"    [ -f \"$f\" ] && [ \"$f\" != \"{env_file}\" ] && {{\n"
-        f"      . \"$f\" 2>/dev/null || echo \"[agentienv] WARNING: failed to source $f\"\n"
+        f'  for f in "{env_dir}"/*.env; do\n'
+        f'    [ -f "$f" ] && [ "$f" != "{env_file}" ] && {{\n'
+        f'      . "$f" 2>/dev/null || echo "[agentienv] WARNING: failed to source $f"\n'
         f"      _aih_count=$((_aih_count + 1))\n"
         f"    }}\n"
         f"  done\n"
         f"  set +a\n"
-        f"  echo \"[agentienv] loaded $_aih_count env file(s) from {env_dir}\"\n"
+        f'  echo "[agentienv] loaded $_aih_count env file(s) from {env_dir}"\n'
         f"}}\n"
         f"agentienv\n"
         f"{_BLOCK_END}\n"
@@ -461,9 +461,7 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
                 print("  [!!] No virtual environment found.")
                 print("       Create and activate one first:")
                 print("         python3 -m venv .venv && source .venv/bin/activate")
-                print(
-                    "       Or use --force to install into system Python (Docker/CI)."
-                )
+                print("       Or use --force to install into system Python (Docker/CI).")
                 print("       Then re-run: agentihooks --loadenv")
                 continue
             print(f"  [..] Installing into {python.parent.parent} ...")
@@ -482,9 +480,7 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 
-def substitute_paths(
-    obj: object, src: str = "/app", dst: str = str(AGENTIHOOKS_ROOT)
-) -> object:
+def substitute_paths(obj: object, src: str = "/app", dst: str = str(AGENTIHOOKS_ROOT)) -> object:
     """Recursively replace *src* with *dst* in all string values of a JSON structure."""
     if isinstance(obj, str):
         return obj.replace(src, dst)
@@ -497,11 +493,7 @@ def substitute_paths(
 
 def _available_profiles() -> list[str]:
     """Return profile names (dirs under profiles/ excluding _base)."""
-    return sorted(
-        d.name
-        for d in PROFILES_DIR.iterdir()
-        if d.is_dir() and not d.name.startswith("_")
-    )
+    return sorted(d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_"))
 
 
 def _read_profile_field(profile_dir: Path, field: str) -> str:
@@ -577,13 +569,9 @@ def _preserve_personal_keys(existing_path: Path) -> dict:
             if key in existing:
                 personal[key] = existing[key]
         if personal:
-            print(
-                f"Preserving personal keys from existing settings: {sorted(personal)}"
-            )
+            print(f"Preserving personal keys from existing settings: {sorted(personal)}")
     except json.JSONDecodeError:
-        print(
-            "WARNING: existing settings.json is invalid JSON – skipping preservation."
-        )
+        print("WARNING: existing settings.json is invalid JSON – skipping preservation.")
     return personal
 
 
@@ -632,9 +620,7 @@ def install_global(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     raw_settings = load_json(BASE_SETTINGS)
-    rendered: dict = substitute_paths(
-        raw_settings
-    )  # NOSONAR — intentional object→dict cast
+    rendered: dict = substitute_paths(raw_settings)  # NOSONAR — intentional object→dict cast
     rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)  # NOSONAR
 
     # --- 1b. Apply per-profile overrides (e.g. env vars like AGENTIHOOKS_SECRETS_MODE) ---
@@ -910,9 +896,7 @@ def _cmd_mcp_interactive_uninstall() -> None:
 
     print()
     try:
-        raw = input(
-            f"Select file to uninstall [1-{len(paths)}] (or q to quit): "
-        ).strip()
+        raw = input(f"Select file to uninstall [1-{len(paths)}] (or q to quit): ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\nAborted.")
         sys.exit(0)
@@ -984,9 +968,7 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
 
     print()
     try:
-        raw = input(
-            f"Select file to install [1-{len(mcp_files)}] (or q to quit): "
-        ).strip()
+        raw = input(f"Select file to install [1-{len(mcp_files)}] (or q to quit): ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\nAborted.")
         sys.exit(0)
@@ -1023,9 +1005,7 @@ def _install_cli_tool() -> None:
 
     uv = shutil.which("uv")
     if not uv:
-        print(
-            "  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/"
-        )
+        print("  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/")
         print("       Then re-run: uv run agentihooks global")
         return
 
@@ -1095,9 +1075,7 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str) -> int:
     return count
 
 
-def _cleanup_stale_links(
-    dst_dir: Path, src_dir: Path, filter_fn: Callable[[Path], bool] | None
-) -> None:
+def _cleanup_stale_links(dst_dir: Path, src_dir: Path, filter_fn: Callable[[Path], bool] | None) -> None:
     """Remove broken symlinks and symlinks that no longer pass *filter_fn*."""
     if not dst_dir.exists():
         return
@@ -1108,11 +1086,7 @@ def _cleanup_stale_links(
         if not link.exists():
             link.unlink()
             print(f"  [RM] Removed broken symlink: {link.name}")
-        elif (
-            target.parent.resolve() == src_dir.resolve()
-            and filter_fn
-            and not filter_fn(target)
-        ):
+        elif target.parent.resolve() == src_dir.resolve() and filter_fn and not filter_fn(target):
             link.unlink()
             print(f"  [RM] Removed stale symlink: {link.name}")
 
@@ -1127,9 +1101,7 @@ def _link_item(item: Path, link: Path, label: str) -> None:
             link.symlink_to(item)
             print(f"  [OK] Re-linked {label} '{item.name}' → {item}")
     elif link.exists():
-        print(
-            f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)"
-        )
+        print(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
     else:
         link.symlink_to(item)
         print(f"  [OK] Linked {label} '{item.name}' → {item}")
@@ -1183,9 +1155,7 @@ def _install_claude_md(src: Path, dst: Path, profile_name: str) -> None:
     if dst.exists():
         print(f"\nA {_CLAUDE_MD_NAME} already exists at {dst}.")
         answer = (
-            input(
-                f"Replace with symlink to profiles/{profile_name}/{_CLAUDE_SUBDIR}/{_CLAUDE_MD_NAME}? [y/N] "
-            )
+            input(f"Replace with symlink to profiles/{profile_name}/{_CLAUDE_SUBDIR}/{_CLAUDE_MD_NAME}? [y/N] ")
             .strip()
             .lower()
         )
@@ -1255,9 +1225,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     remove_settings = False
     if settings_path.exists():
         try:
-            remove_settings = (
-                load_json(settings_path).get(MANAGED_BY_KEY) == MANAGED_BY_VALUE
-            )
+            remove_settings = load_json(settings_path).get(MANAGED_BY_KEY) == MANAGED_BY_VALUE
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -1265,19 +1233,13 @@ def uninstall_global(args: argparse.Namespace) -> None:
         if not d.exists():
             return 0
         root_str = str(AGENTIHOOKS_ROOT)
-        return sum(
-            1
-            for lnk in d.iterdir()
-            if lnk.is_symlink() and str(lnk.resolve()).startswith(root_str)
-        )
+        return sum(1 for lnk in d.iterdir() if lnk.is_symlink() and str(lnk.resolve()).startswith(root_str))
 
     n_skills = _count_agentihooks_symlinks(skills_dir)
     n_agents = _count_agentihooks_symlinks(agents_dir)
     n_commands = _count_agentihooks_symlinks(commands_dir)
 
-    remove_claude_md = claude_md_dst.is_symlink() and str(
-        claude_md_dst.resolve()
-    ).startswith(str(PROFILES_DIR))
+    remove_claude_md = claude_md_dst.is_symlink() and str(claude_md_dst.resolve()).startswith(str(PROFILES_DIR))
 
     managed_servers = _collect_all_managed_mcp_servers()
 
@@ -1297,9 +1259,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"  {claude_md_dst}  [SKIP — not a managed symlink]")
     if managed_servers:
-        print(
-            f"  MCP servers from {_CLAUDE_JSON}: {', '.join(sorted(managed_servers.keys()))}"
-        )
+        print(f"  MCP servers from {_CLAUDE_JSON}: {', '.join(sorted(managed_servers.keys()))}")
     else:
         print(f"  MCP servers from {_CLAUDE_JSON}: [none found]")
     print("  agentihooks CLI (uv tool / symlink)")
@@ -1374,9 +1334,7 @@ def install_project(args: argparse.Namespace) -> None:
         print(f"ERROR: Project path does not exist: {project_path}", file=sys.stderr)
         sys.exit(1)
     if not project_path.is_dir():
-        print(
-            f"ERROR: Project path is not a directory: {project_path}", file=sys.stderr
-        )
+        print(f"ERROR: Project path is not a directory: {project_path}", file=sys.stderr)
         sys.exit(1)
 
     # Validate profile
@@ -1392,11 +1350,7 @@ def install_project(args: argparse.Namespace) -> None:
 
     mcp_dst = project_path / _MCP_JSON_NAME
     if mcp_dst.exists():
-        answer = (
-            input(f"{_MCP_JSON_NAME} already exists at {mcp_dst}. Overwrite? [y/N] ")
-            .strip()
-            .lower()
-        )
+        answer = input(f"{_MCP_JSON_NAME} already exists at {mcp_dst}. Overwrite? [y/N] ").strip().lower()
         if answer != "y":
             print("Aborted.")
             sys.exit(0)
@@ -1404,9 +1358,7 @@ def install_project(args: argparse.Namespace) -> None:
     save_json(mcp_dst, rendered_mcp)
     print(f"[OK] Wrote {mcp_dst}")
     print()
-    print(
-        f"Next: open Claude Code in '{project_path}' and run /mcp to verify the hooks-utils server."
-    )
+    print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify the hooks-utils server.")
 
 
 # ---------------------------------------------------------------------------
@@ -1464,7 +1416,7 @@ def _find_companion_env(mcp_file: Path) -> Path | None:
 def _display_mcp_list(mcp_files: list[tuple[Path, dict]], tracked: set[str]) -> None:
     """Print a numbered list of MCP files; servers shown as bullet points."""
     for i, (f, servers) in enumerate(mcp_files, 1):
-        marker = f"  \033[32m[installed]\033[0m" if str(f) in tracked else ""
+        marker = "  \033[32m[installed]\033[0m" if str(f) in tracked else ""
         print(f"  {i}. {f.name}{marker}")
         for name in servers:
             print(f"     \033[2m•\033[0m {name}")
@@ -1495,9 +1447,7 @@ def _prompt_server_selection(servers: dict, action: str = "install") -> dict | N
             return None
         return None if raw in ("n", "no") else servers
     try:
-        raw = input(
-            f"Select (0=all, 1-{len(names)}, or comma list): "
-        ).strip()
+        raw = input(f"Select (0=all, 1-{len(names)}, or comma list): ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\nAborted.")
         return None
@@ -1519,9 +1469,7 @@ def _prompt_server_selection(servers: dict, action: str = "install") -> dict | N
         return None
 
 
-def cmd_mcp_action(
-    action: str, scan_dir: Path | None = None, *, mcp_path: Path | None = None
-) -> None:
+def cmd_mcp_action(action: str, scan_dir: Path | None = None, *, mcp_path: Path | None = None) -> None:
     """Handle ``agentihooks mcp list|install|uninstall|sync|add``.
 
     *scan_dir* defaults to ``~/.agentihooks/``.
@@ -1541,8 +1489,8 @@ def cmd_mcp_action(
         _display_mcp_list(mcp_files, tracked)
         if tracked:
             print(f"\nCurrently installed: {len(tracked)} file(s)")
-        print(f"\nTo install:   agentihooks mcp install")
-        print(f"To uninstall: agentihooks mcp uninstall")
+        print("\nTo install:   agentihooks mcp install")
+        print("To uninstall: agentihooks mcp uninstall")
 
     elif action == "install":
         mcp_files = _scan_mcp_dir(scan_dir)
@@ -1561,9 +1509,7 @@ def cmd_mcp_action(
             _display_mcp_list(mcp_files, tracked)
             print()
             try:
-                raw = input(
-                    f"Enter file number (1-{len(mcp_files)}, or q to quit): "
-                ).strip()
+                raw = input(f"Enter file number (1-{len(mcp_files)}, or q to quit): ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nAborted.")
                 sys.exit(0)
@@ -1615,9 +1561,7 @@ def cmd_mcp_action(
             _display_mcp_list(installed, tracked)
             print()
             try:
-                raw = input(
-                    f"Enter file number (1-{len(installed)}, or q to quit): "
-                ).strip()
+                raw = input(f"Enter file number (1-{len(installed)}, or q to quit): ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nAborted.")
                 sys.exit(0)
@@ -1679,7 +1623,7 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     action = "Overwrote" if dest.exists() else "Created"
     dest.write_text(CLAUDEIGNORE_TEMPLATE, encoding="utf-8")
     print(f"  [OK] {action} {dest}")
-    print(f"       Edit it to add project-specific exclusions.")
+    print("       Edit it to add project-specific exclusions.")
 
 
 def cmd_quota(args: "argparse.Namespace") -> None:
@@ -1708,6 +1652,7 @@ def cmd_quota(args: "argparse.Namespace") -> None:
         pid_file = Path.home() / ".agentihooks" / "quota-watcher.pid"
         if pid_file.exists():
             import signal
+
             try:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, signal.SIGTERM)
@@ -1721,6 +1666,7 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 
     elif args.action == "status":
         import json as _json
+
         usage_file = Path(os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
         if not usage_file.exists():
             print("No quota data yet. Run:  agentihooks quota")
@@ -1771,18 +1717,14 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command")
 
-    glob_p = sub.add_parser(
-        "global", help="Install hooks + skills + agents into ~/.claude"
-    )
+    glob_p = sub.add_parser("global", help="Install hooks + skills + agents into ~/.claude")
     glob_p.add_argument(
         "--profile",
         default=os.environ.get("AGENTIHOOKS_PROFILE", "default"),
         help=f"Profile whose CLAUDE.md to link (default: 'default', env: AGENTIHOOKS_PROFILE). Available: {', '.join(_available_profiles())}",
     )
 
-    proj = sub.add_parser(
-        "project", help="Install a profile's .mcp.json into a target project"
-    )
+    proj = sub.add_parser("project", help="Install a profile's .mcp.json into a target project")
     proj.add_argument("path", help="Target project directory")
     proj.add_argument(
         "--profile",
@@ -1790,12 +1732,8 @@ def main() -> None:
         help="Profile to use (default: 'default', env: AGENTIHOOKS_PROFILE)",
     )
 
-    unsub = sub.add_parser(
-        "uninstall", help="Remove all agentihooks artifacts from the system"
-    )
-    unsub.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
-    )
+    unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
+    unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     mcp_p = sub.add_parser(
         "mcp",
@@ -1820,9 +1758,7 @@ def main() -> None:
         help=f"Directory to scan for MCP files (default: {AGENTIHOOKS_STATE_DIR})",
     )
 
-    ign_p = sub.add_parser(
-        "ignore", help="Create a .claudeignore in the current directory"
-    )
+    ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
         "path",
         nargs="?",

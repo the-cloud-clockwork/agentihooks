@@ -1,4 +1,5 @@
 """Read and parse the Claude.ai console quota JSON file."""
+
 import json
 import os
 from datetime import datetime, timezone

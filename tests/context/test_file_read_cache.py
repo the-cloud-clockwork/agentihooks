@@ -1,7 +1,6 @@
 """Tests for hooks.context.file_read_cache."""
 
 import os
-import tempfile
 from unittest.mock import patch
 
 import pytest

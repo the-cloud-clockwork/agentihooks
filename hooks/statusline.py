@@ -75,7 +75,9 @@ def _git_branch() -> str:
     try:
         result = subprocess.run(
             ["git", "branch", "--show-current"],
-            capture_output=True, text=True, timeout=1,
+            capture_output=True,
+            text=True,
+            timeout=1,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
     except Exception:
@@ -164,8 +166,9 @@ def main() -> None:
         session_id = payload.get("session_id", "")
         if session_id:
             try:
-                from hooks.observability.token_monitor import persist_token_metrics
                 import time
+
+                from hooks.observability.token_monitor import persist_token_metrics
 
                 remaining = max(0, (total or 0) - (used or 0))
                 from hooks._redis import get_redis
@@ -181,13 +184,16 @@ def main() -> None:
 
                 burn_rate = max(0, used - prev_used) if prev_used is not None else None
 
-                persist_token_metrics(session_id, {
-                    "used": used,
-                    "remaining": remaining,
-                    "fill_pct": round(used_pct, 2),
-                    "burn_rate": int(burn_rate) if burn_rate is not None else 0,
-                    "last_updated": time.time(),
-                })
+                persist_token_metrics(
+                    session_id,
+                    {
+                        "used": used,
+                        "remaining": remaining,
+                        "fill_pct": round(used_pct, 2),
+                        "burn_rate": int(burn_rate) if burn_rate is not None else 0,
+                        "last_updated": time.time(),
+                    },
+                )
             except Exception:
                 burn_rate = None
         else:
@@ -264,7 +270,9 @@ def main() -> None:
                 warn, level = should_warn_context(float(used_pct), session_id)
                 if warn:
                     if level == "critical":
-                        warn_msg = f"{_RED}{_BOLD}🚨 CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
+                        warn_msg = (
+                            f"{_RED}{_BOLD}🚨 CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
+                        )
                     else:
                         warn_msg = f"{_YELLOW}⚠️  CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}"
             except Exception:
@@ -273,7 +281,8 @@ def main() -> None:
         # ── LINE 3: quota + optional context warning ──────────────────
         quota_str = ""
         try:
-            from hooks.quota import load_quota, fmt_quota
+            from hooks.quota import fmt_quota, load_quota
+
             qd = load_quota()
             if qd is not None:
                 raw = fmt_quota(qd)
@@ -288,7 +297,9 @@ def main() -> None:
                             return f"{label}{pct_str}"
                         c = _GREEN if v < 60 else (_YELLOW if v < 80 else _RED)
                         return f"{label}{c}{pct_str}{_RESET}"
+
                     import re
+
                     colored = re.sub(r"(s:|w:)(\d+%)", lambda m: _cpct(m.group(1), m.group(2)), raw)
                     quota_str = f"{_DIM}quota:{_RESET} {colored}"
         except Exception:

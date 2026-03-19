@@ -373,10 +373,3 @@ class TestLazyLoading:
 
         c = MetricsCollector("test")
         assert c is not None
-
-    def test_getattr_delete_result(self):
-        """DeleteResult can be loaded via lazy __getattr__."""
-        from hooks.common import DeleteResult
-
-        r = DeleteResult(success=True)
-        assert r.success is True

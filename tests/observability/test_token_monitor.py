@@ -38,7 +38,7 @@ class TestTokenMonitor:
         """fill_pct=50 (< 60) → (False, '')."""
         from hooks.observability.token_monitor import should_warn_context
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             result = should_warn_context(50.0, "sess-below")
         assert result == (False, "")
 
@@ -46,7 +46,7 @@ class TestTokenMonitor:
         """fill_pct=60 → (True, 'warning')."""
         from hooks.observability.token_monitor import should_warn_context
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             warn, level = should_warn_context(60.0, "sess-warn")
         assert warn is True
         assert level == "warning"
@@ -55,7 +55,7 @@ class TestTokenMonitor:
         """fill_pct=70 → (True, 'warning')."""
         from hooks.observability.token_monitor import should_warn_context
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             warn, level = should_warn_context(70.0, "sess-70")
         assert warn is True
         assert level == "warning"
@@ -64,7 +64,7 @@ class TestTokenMonitor:
         """fill_pct=80 → (True, 'critical')."""
         from hooks.observability.token_monitor import should_warn_context
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             warn, level = should_warn_context(80.0, "sess-crit")
         assert warn is True
         assert level == "critical"
@@ -74,7 +74,7 @@ class TestTokenMonitor:
         from hooks.observability.token_monitor import update_context_metrics
 
         p = _payload(234000, 766000, model="sonnet-4.6")
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             result = update_context_metrics(p)
         assert "ctx:" in result
         assert "%" in result
@@ -85,7 +85,7 @@ class TestTokenMonitor:
         from hooks.observability.token_monitor import update_context_metrics
 
         p = _payload(50_000, 950_000)
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             result = update_context_metrics(p)
         assert "50K" in result
 
@@ -94,7 +94,7 @@ class TestTokenMonitor:
         from hooks.observability.token_monitor import update_context_metrics
 
         p = _payload(100_000, 900_000)
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             result = update_context_metrics(p)
         assert isinstance(result, str)
         assert len(result) > 0
@@ -104,7 +104,7 @@ class TestTokenMonitor:
         """Empty payload → returns placeholder string without raising."""
         from hooks.observability.token_monitor import update_context_metrics
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             result = update_context_metrics({})
         assert isinstance(result, str)
         assert len(result) > 0
@@ -113,7 +113,7 @@ class TestTokenMonitor:
         """Empty session_id with Redis unavailable → still warns."""
         from hooks.observability.token_monitor import should_warn_context
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.observability.token_monitor.get_redis", return_value=None):
             warn, level = should_warn_context(65.0, "")
         assert warn is True
         assert level == "warning"

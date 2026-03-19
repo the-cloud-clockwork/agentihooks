@@ -74,7 +74,6 @@ RULES:
         log("Failed to inject output token limit", {"error": str(e)})
 
 
-
 def parse_transcript_metrics(transcript_path: str) -> dict:
     """
     Parse transcript JSONL to extract session metrics.
@@ -333,7 +332,6 @@ def on_session_end(payload: dict) -> None:
             pass
 
 
-
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
     from hooks.config import SECRETS_MODE
@@ -468,9 +466,7 @@ def on_post_tool_use(payload: dict) -> None:
             if BASH_FILTER_ENABLED:
                 from hooks.context.bash_output_filter import filter_bash_output
 
-                filtered = filter_bash_output(
-                    tool_name, payload.get("tool_input", {}), payload.get("tool_output", "")
-                )
+                filtered = filter_bash_output(tool_name, payload.get("tool_input", {}), payload.get("tool_output", ""))
                 if filtered is not None:
                     import json as _json
 
@@ -576,8 +572,8 @@ def on_status_line(payload: dict) -> None:
         if fill_pct is not None and session_id:
             warn, level = should_warn_context(fill_pct, session_id)
             if warn:
-                from hooks.config import TOKEN_CRITICAL_PCT, TOKEN_WARN_PCT
                 from hooks.common import inject_banner
+                from hooks.config import TOKEN_CRITICAL_PCT, TOKEN_WARN_PCT
 
                 if level == "critical":
                     inject_banner(

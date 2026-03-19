@@ -136,23 +136,32 @@ class TestDetectVenv:
         python = tmp_path / "bin" / "python"
         python.parent.mkdir()
         python.touch()
-        with patch.dict("os.environ", {"VIRTUAL_ENV": str(tmp_path)}):
-            result = install._detect_venv()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        with patch("pathlib.Path.home", return_value=fake_home):
+            with patch.dict("os.environ", {"VIRTUAL_ENV": str(tmp_path)}):
+                result = install._detect_venv()
         assert result == python
 
     def test_detects_local_venv(self, tmp_path):
         venv = tmp_path / ".venv" / "bin" / "python"
         venv.parent.mkdir(parents=True)
         venv.touch()
-        with patch("os.getcwd", return_value=str(tmp_path)):
-            with patch.dict("os.environ", {}, clear=True):
-                result = install._detect_venv()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        with patch("pathlib.Path.home", return_value=fake_home):
+            with patch("os.getcwd", return_value=str(tmp_path)):
+                with patch.dict("os.environ", {}, clear=True):
+                    result = install._detect_venv()
         assert result == venv
 
     def test_returns_none_when_no_venv(self, tmp_path):
-        with patch("os.getcwd", return_value=str(tmp_path)):
-            with patch.dict("os.environ", {}, clear=True):
-                result = install._detect_venv()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        with patch("pathlib.Path.home", return_value=fake_home):
+            with patch("os.getcwd", return_value=str(tmp_path)):
+                with patch.dict("os.environ", {}, clear=True):
+                    result = install._detect_venv()
         assert result is None
 
 

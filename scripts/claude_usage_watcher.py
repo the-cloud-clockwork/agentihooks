@@ -12,6 +12,7 @@ Usage:
 
 Auth is saved to ~/.agentihooks/playwright_profile/ and reused every run.
 """
+
 import argparse
 import asyncio
 import json
@@ -23,7 +24,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-_STATE_FILE = Path.home() / '.agentihooks' / 'claude_auth_state.json'
+_STATE_FILE = Path.home() / ".agentihooks" / "claude_auth_state.json"
 _LOG_FILE = Path.home() / ".agentihooks" / "logs" / "quota-watcher.log"
 _PID_FILE = Path.home() / ".agentihooks" / "quota-watcher.pid"
 
@@ -67,7 +68,8 @@ def _open_browser(url: str) -> None:
         elif "microsoft" in platform.release().lower() or Path("/mnt/c/Windows").exists():
             subprocess.Popen(
                 ["cmd.exe", "/c", "start", url.replace("&", "^&")],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
             subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -103,15 +105,19 @@ def _import_cookie(session_key: str) -> None:
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         )
-        ctx.add_cookies([{
-            "name": "sessionKey",
-            "value": session_key,
-            "domain": ".claude.ai",
-            "path": "/",
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "Lax",
-        }])
+        ctx.add_cookies(
+            [
+                {
+                    "name": "sessionKey",
+                    "value": session_key,
+                    "domain": ".claude.ai",
+                    "path": "/",
+                    "httpOnly": True,
+                    "secure": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
         page = ctx.new_page()
         page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
         try:
@@ -189,9 +195,10 @@ async def scrape(page) -> dict:
         if sec:
             result["session"]["resets_in_sec"] = sec
             from datetime import timedelta
-            result["session"]["resets_at"] = (
-                datetime.now(timezone.utc) + timedelta(seconds=sec)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            result["session"]["resets_at"] = (datetime.now(timezone.utc) + timedelta(seconds=sec)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
 
     wm = re.search(r"(?:weekly|all models)[^\n%]{0,120}?(\d+)\s*%", content, re.I)
     if wm:
@@ -207,7 +214,9 @@ async def scrape(page) -> dict:
         cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
         amt, lim = float(spend_m2.group(2)), float(spend_m2.group(4))
         result["monthly_spend"] = {
-            "amount": amt, "limit": lim, "currency": cur,
+            "amount": amt,
+            "limit": lim,
+            "currency": cur,
             "used_pct": round(amt / lim * 100, 1) if lim else 0,
         }
 
@@ -250,6 +259,7 @@ async def scrape(page) -> dict:
                         if sec:
                             result["session"]["resets_in_sec"] = sec
                             from datetime import timedelta
+
                             result["session"]["resets_at"] = (
                                 datetime.now(timezone.utc) + timedelta(seconds=sec)
                             ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -276,7 +286,9 @@ async def scrape(page) -> dict:
                         if pct > 0:
                             limit_val = round(amt / (pct / 100), 2)
                         result["monthly_spend"] = {
-                            "amount": amt, "limit": limit_val, "currency": cur,
+                            "amount": amt,
+                            "limit": limit_val,
+                            "currency": cur,
                             "used_pct": pct,
                         }
                         if reset_date_match:
@@ -312,7 +324,7 @@ async def _run_daemon(output: Path, poll_sec: int):
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
-                    print(f"[quota] ok  session={s.get('used_pct','?')}%  updated={data['_updated']}", flush=True)
+                    print(f"[quota] ok  session={s.get('used_pct', '?')}%  updated={data['_updated']}", flush=True)
                 else:
                     print("[quota] No quota data found — page structure may have changed.", flush=True)
             except Exception as e:
@@ -344,8 +356,8 @@ def _start_daemon(poll: int = 60) -> None:
     )
     _PID_FILE.write_text(str(proc.pid))
     print(f"[quota] Daemon started (PID {proc.pid}).", flush=True)
-    print(f"  Logs:   agentihooks quota logs", flush=True)
-    print(f"  Status: agentihooks quota status", flush=True)
+    print("  Logs:   agentihooks quota logs", flush=True)
+    print("  Status: agentihooks quota status", flush=True)
     print(f"  Stop:   kill {proc.pid}", flush=True)
 
 
@@ -356,6 +368,7 @@ def cmd_stop() -> None:
         print("[quota] No daemon running.", flush=True)
         return
     import signal
+
     os.kill(pid, signal.SIGTERM)
     _PID_FILE.unlink(missing_ok=True)
     print(f"[quota] Daemon stopped (PID {pid}).", flush=True)
@@ -364,7 +377,9 @@ def cmd_stop() -> None:
 def main():
     _load_env()
     ap = argparse.ArgumentParser(description="Claude.ai quota watcher")
-    ap.add_argument("--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
+    ap.add_argument(
+        "--output", default=os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json"))
+    )
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
     ap.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--auth", action="store_true", help="Open your browser + paste session cookie")
