@@ -183,18 +183,39 @@ quota: session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets
 
 You see your weekly quota percentage, per-model breakdown, extra usage spend, and reset times — all color-coded (green < 60%, yellow < 80%, red above).
 
+**How it works:**
+
+1. `agentihooks quota auth` opens your real browser to `claude.ai`, prompts you to paste the `sessionKey` cookie, and saves credentials to `~/.agentihooks/claude_auth_state.json`
+2. A headless Chromium daemon (`scripts/claude_usage_watcher.py`) starts in the background, loading the saved auth state once at startup
+3. Every `CLAUDE_USAGE_POLL_SEC` seconds it navigates to `claude.ai/settings/usage`, parses usage data from the page, and writes it atomically to `CLAUDE_USAGE_FILE`
+4. `hooks/statusline.py` reads that JSON file each turn and renders Line 3
+
+{: .important }
+> **Session cookie expiry:** Playwright loads the auth state once at startup. If your session cookie expires, the daemon silently stops finding data — it does not re-authenticate. Run `agentihooks quota auth` again to refresh; it automatically kills the stale daemon and starts a fresh one with the new credentials.
+
 **Setup:**
 
 ```bash
-# One-time: install headless browser
+# One-time: install headless browser (playwright is a core dependency — no extra needed)
 ~/.agentihooks/.venv/bin/python -m playwright install chromium
 
-# Authenticate (opens your browser, paste sessionKey cookie)
+# Authenticate: opens your browser, paste the sessionKey cookie when prompted
 agentihooks quota auth
 
-# Enable in ~/.agentihooks/.env
+# Enable display in ~/.agentihooks/.env
 echo 'CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json' >> ~/.agentihooks/.env
 ```
+
+**CLI commands:**
+
+| Command | What it does |
+|---------|-------------|
+| `agentihooks quota` | Start the background daemon |
+| `agentihooks quota auth` | Re-authenticate (kills + restarts daemon automatically) |
+| `agentihooks quota status` | Print the last known quota JSON |
+| `agentihooks quota logs` | Tail the daemon log |
+| `agentihooks quota stop` | Kill the daemon |
+| `agentihooks quota dump-html` | Dump raw usage page HTML to `~/.agentihooks/usage_debug.html` for scraper debugging |
 
 **Config:**
 
@@ -202,7 +223,24 @@ echo 'CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json' >> ~/.agentihooks/.env
 |----------|---------|-----------------|
 | `CLAUDE_USAGE_FILE` | — | Path to quota JSON (enables the feature) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Daemon poll interval |
-| `CLAUDE_USAGE_STALE_SEC` | `300` | Data staleness threshold |
+| `CLAUDE_USAGE_STALE_SEC` | `300` | Data staleness threshold — statusline shows "stale" if data is older than this |
+
+**Troubleshooting — "No quota data found" in daemon log:**
+
+The daemon logs this when it successfully loads the page but finds no usage data — typically because the page structure changed or the session cookie expired.
+
+```bash
+# 1. Check if the daemon is running and what it last scraped
+agentihooks quota status
+agentihooks quota logs
+
+# 2. Dump the raw page HTML to inspect what Playwright is actually seeing
+agentihooks quota dump-html
+cat ~/.agentihooks/usage_debug.html | grep -i 'session\|usage\|progress\|percent'
+
+# 3. If the cookie is stale, re-authenticate (auto-restarts daemon)
+agentihooks quota auth
+```
 
 ---
 
@@ -231,7 +269,7 @@ Everything except quota monitoring works out of the box after installation:
 ~/.agentihooks/.venv/bin/python scripts/install.py global
 ```
 
-To add quota monitoring:
+To add quota monitoring (playwright ships with the package — no extras needed):
 
 ```bash
 ~/.agentihooks/.venv/bin/python -m playwright install chromium
