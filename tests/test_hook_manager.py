@@ -48,7 +48,7 @@ class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 
     def _run(self, payload: dict) -> subprocess.CompletedProcess:
-        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": "standard"}
+        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": "standard", "AGENTIHOOKS_HOME": self._empty_home}
         return subprocess.run(
             [sys.executable, "-m", "hooks"],
             input=json.dumps(payload),
@@ -57,6 +57,10 @@ class TestBlockActionIntegration:
             cwd=_PROJECT_ROOT,
             env=env,
         )
+
+    @pytest.fixture(autouse=True)
+    def _setup_empty_home(self, tmp_path):
+        self._empty_home = str(tmp_path / "empty_agentihooks")
 
     def _bash_payload(self, command: str) -> dict:
         return {
@@ -82,21 +86,21 @@ class TestBlockActionIntegration:
         key_val = "wJalrXUtnFEMI" + "/K7MDENG/bPxRfiCYEXAMPLEKEY"
         result = self._run(self._bash_payload(f"export {key_name}={key_val}"))
         assert result.returncode == 2
-        assert "BLOCKED" in result.stdout
+        assert "BLOCKED" in result.stderr
 
     def test_write_secret_exits_2(self):
         """Write content containing a credential is blocked (exit 2)."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._write_payload(f"my_key = '{key}'"))
         assert result.returncode == 2
-        assert "BLOCKED" in result.stdout
+        assert "BLOCKED" in result.stderr
 
-    def test_block_stdout_names_the_pattern(self):
+    def test_block_stderr_names_the_pattern(self):
         """The block message names which pattern was detected."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._write_payload(f"my_key = '{key}'"))
         assert result.returncode == 2
-        assert "aws_access_key" in result.stdout
+        assert "aws_access_key" in result.stderr
 
     def test_clean_bash_exits_0(self):
         """A clean Bash command is not blocked."""
@@ -113,7 +117,7 @@ class TestSecretsModesIntegration:
     """Integration tests: AGENTIHOOKS_SECRETS_MODE controls blocking behavior."""
 
     def _run(self, payload: dict, *, mode: str) -> subprocess.CompletedProcess:
-        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": mode}
+        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": mode, "AGENTIHOOKS_HOME": self._empty_home}
         return subprocess.run(
             [sys.executable, "-m", "hooks"],
             input=json.dumps(payload),
@@ -122,6 +126,10 @@ class TestSecretsModesIntegration:
             cwd=_PROJECT_ROOT,
             env=env,
         )
+
+    @pytest.fixture(autouse=True)
+    def _setup_empty_home(self, tmp_path):
+        self._empty_home = str(tmp_path / "empty_agentihooks")
 
     def _bash_payload(self, command: str) -> dict:
         return {
@@ -159,21 +167,21 @@ class TestSecretsModesIntegration:
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._bash_payload(f"echo {key}"), mode="standard")
         assert result.returncode == 2
-        assert "BLOCKED" in result.stdout
+        assert "BLOCKED" in result.stderr
 
     def test_mode_strict_blocks_secrets(self):
         """mode=strict should block secrets (exit 2)."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._bash_payload(f"echo {key}"), mode="strict")
         assert result.returncode == 2
-        assert "BLOCKED" in result.stdout
+        assert "BLOCKED" in result.stderr
 
     def test_mode_strict_catches_slack_token(self):
         """mode=strict should block Slack tokens that standard misses."""
         token = "xoxb-" + "1234567890-abcdef"
         result = self._run(self._bash_payload(f"export SLACK={token}"), mode="strict")
         assert result.returncode == 2
-        assert "slack_token" in result.stdout
+        assert "slack_token" in result.stderr
 
     def test_mode_standard_misses_slack_token(self):
         """mode=standard should NOT block Slack tokens."""
