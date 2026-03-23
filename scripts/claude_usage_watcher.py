@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude.ai usage quota watcher — scrapes claude.ai/settings/usage headlessly
+Claude.ai usage quota watcher — polls the Claude API for usage data
 and writes a JSON file read by hooks/statusline.py.
 
 Usage:
@@ -9,8 +9,8 @@ Usage:
   agentihooks quota import-cookies # paste sessionKey without opening browser
   agentihooks quota status        # show last known quota JSON
   agentihooks quota logs          # tail the daemon log
-
-Auth is saved to ~/.agentihooks/playwright_profile/ and reused every run.
+  agentihooks quota stop          # stop the daemon
+  agentihooks quota dump-html     # dump raw API JSON for debugging
 """
 
 import argparse
@@ -27,6 +27,8 @@ from pathlib import Path
 _STATE_FILE = Path.home() / ".agentihooks" / "claude_auth_state.json"
 _LOG_FILE = Path.home() / ".agentihooks" / "logs" / "quota-watcher.log"
 _PID_FILE = Path.home() / ".agentihooks" / "quota-watcher.pid"
+
+_BASE_URL = "https://claude.ai"
 
 
 def _load_env():
@@ -50,17 +52,8 @@ def _write_atomic(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def _parse_reset_sec(text: str) -> int | None:
-    total = 0
-    for val, unit in re.findall(r"(\d+)\s*(h(?:r|our)?s?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)", text, re.I):
-        v = int(val)
-        u = unit.lower()[0]
-        total += v * (3600 if u == "h" else 60 if u == "m" else 1)
-    return total if total else None
-
-
 def _open_browser(url: str) -> None:
-    """Open URL in the user's real browser (Chrome on Windows, default on Mac/Linux)."""
+    """Open URL in the user's real browser."""
     system = platform.system().lower()
     try:
         if system == "darwin":
@@ -79,33 +72,65 @@ def _open_browser(url: str) -> None:
 
 
 def _is_authenticated() -> bool:
-    """Check if we have a saved auth state file."""
     return _STATE_FILE.exists()
 
 
 def _daemon_running() -> int | None:
-    """Return PID if the quota daemon is running, else None."""
     if not _PID_FILE.exists():
         return None
     try:
         pid = int(_PID_FILE.read_text().strip())
-        os.kill(pid, 0)  # check if alive
+        os.kill(pid, 0)
         return pid
     except (ValueError, ProcessLookupError, PermissionError):
         _PID_FILE.unlink(missing_ok=True)
         return None
 
 
-def _import_cookie(session_key: str) -> None:
-    """Import sessionKey and save auth state to a JSON file for reuse."""
-    from playwright.sync_api import sync_playwright
+def _load_session_key() -> str | None:
+    """Extract sessionKey from the saved auth state file."""
+    if not _STATE_FILE.exists():
+        return None
+    try:
+        state = json.loads(_STATE_FILE.read_text())
+        for c in state.get("cookies", []):
+            if c["name"] == "sessionKey":
+                return c["value"]
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return None
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
-        ctx = browser.new_context(
+
+def _save_session_key(session_key: str) -> None:
+    """Save sessionKey to the auth state file (minimal format)."""
+    state = {
+        "cookies": [
+            {
+                "name": "sessionKey",
+                "value": session_key,
+                "domain": ".claude.ai",
+                "path": "/",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ],
+        "origins": [],
+    }
+    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+async def _api_get(session_key: str, path: str) -> dict | None:
+    """Make an authenticated GET request to the Claude API."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        ctx = await browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         )
-        ctx.add_cookies(
+        await ctx.add_cookies(
             [
                 {
                     "name": "sessionKey",
@@ -118,25 +143,199 @@ def _import_cookie(session_key: str) -> None:
                 }
             ]
         )
-        page = ctx.new_page()
-        page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
         try:
-            page.wait_for_load_state("networkidle", timeout=10000)
-        except Exception:
-            pass
-        logged_in = "/login" not in page.url and "/auth" not in page.url
-        if logged_in:
-            ctx.storage_state(path=str(_STATE_FILE))
-            print(f"[quota] Auth saved to {_STATE_FILE}", flush=True)
-        ctx.close()
-        browser.close()
+            resp = await ctx.request.get(f"{_BASE_URL}{path}")
+            if resp.status == 200:
+                ct = resp.headers.get("content-type", "")
+                if "json" in ct:
+                    return await resp.json()
+            return None
+        finally:
+            await browser.close()
 
-    if logged_in:
+
+def _format_reset_day(iso_str: str) -> str:
+    """Convert ISO timestamp to 'Fri 10:00 AM' style string."""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.strftime("%a %-I:%M %p").lower()
+    except (ValueError, AttributeError):
+        return ""
+
+
+def _map_api_to_schema(api_data: dict) -> dict:
+    """Map the /api/organizations/{org}/usage response to our output schema."""
+    now = datetime.now(timezone.utc)
+    currency = os.getenv("CLAUDE_USAGE_CURRENCY", "EUR")
+
+    result: dict = {
+        "_schema_version": 1,
+        "_updated": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "_source": "api",
+        "session": {},
+        "weekly": {},
+        "monthly_spend": None,
+        "balance": None,
+        "extensions": {},
+    }
+
+    # Session (5-hour window)
+    fh = api_data.get("five_hour")
+    if fh and fh.get("utilization") is not None:
+        result["session"]["used_pct"] = float(fh["utilization"])
+        resets_at = fh.get("resets_at")
+        if resets_at:
+            try:
+                dt = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+                delta = (dt - now).total_seconds()
+                if delta > 0:
+                    result["session"]["resets_in_sec"] = int(delta)
+                result["session"]["resets_at"] = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except (ValueError, AttributeError):
+                pass
+
+    # Weekly — all models
+    sd = api_data.get("seven_day")
+    if sd and sd.get("utilization") is not None:
+        entry = {"used_pct": float(sd["utilization"])}
+        if sd.get("resets_at"):
+            entry["resets"] = _format_reset_day(sd["resets_at"])
+        result["weekly"]["all_models"] = entry
+
+    # Weekly — sonnet
+    ss = api_data.get("seven_day_sonnet")
+    if ss and ss.get("utilization") is not None:
+        entry = {"used_pct": float(ss["utilization"])}
+        if ss.get("resets_at"):
+            entry["resets"] = _format_reset_day(ss["resets_at"])
+        result["weekly"]["sonnet"] = entry
+
+    # Extra usage / monthly spend
+    eu = api_data.get("extra_usage")
+    if eu and eu.get("is_enabled"):
+        amt = eu.get("used_credits", 0) / 100
+        lim = eu.get("monthly_limit", 0) / 100
+        pct = eu.get("utilization", 0)
+        result["monthly_spend"] = {
+            "amount": round(amt, 2),
+            "limit": round(lim, 2),
+            "currency": currency,
+            "used_pct": round(pct, 1),
+            "resets": _get_next_month_first(),
+        }
+
+    return result
+
+
+def _get_next_month_first() -> str:
+    """Return 'apr 1' style string for the 1st of next month."""
+    now = datetime.now(timezone.utc)
+    month = now.month + 1
+    year = now.year
+    if month > 12:
+        month = 1
+        year += 1
+    from calendar import month_abbr
+
+    return f"{month_abbr[month].lower()} 1"
+
+
+async def _fetch_usage(session_key: str) -> dict | None:
+    """Fetch usage data via API. Returns mapped schema dict or None on failure."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        ctx = await browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        await ctx.add_cookies(
+            [
+                {
+                    "name": "sessionKey",
+                    "value": session_key,
+                    "domain": ".claude.ai",
+                    "path": "/",
+                    "httpOnly": True,
+                    "secure": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        try:
+            # Get org UUID
+            resp = await ctx.request.get(
+                f"{_BASE_URL}/api/bootstrap?statsig_hashing_algorithm=djb2&growthbook_format=sdk&include_system_prompts=false"
+            )
+            if resp.status != 200:
+                return None
+            bootstrap = await resp.json()
+            memberships = bootstrap.get("account", {}).get("memberships", [])
+            if not memberships:
+                return None
+            org_uuid = memberships[0]["organization"]["uuid"]
+
+            # Get usage
+            resp = await ctx.request.get(f"{_BASE_URL}/api/organizations/{org_uuid}/usage")
+            if resp.status != 200:
+                return None
+            api_data = await resp.json()
+            return _map_api_to_schema(api_data)
+        except Exception:
+            return None
+        finally:
+            await browser.close()
+
+
+def _validate_session_key(session_key: str) -> bool:
+    """Check if a sessionKey is valid by calling bootstrap."""
+
+    async def _check():
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+            ctx = await browser.new_context(
+                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            await ctx.add_cookies(
+                [
+                    {
+                        "name": "sessionKey",
+                        "value": session_key,
+                        "domain": ".claude.ai",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    }
+                ]
+            )
+            try:
+                resp = await ctx.request.get(f"{_BASE_URL}/api/bootstrap?statsig_hashing_algorithm=djb2")
+                if resp.status != 200:
+                    return False
+                data = await resp.json()
+                return bool(data.get("account", {}).get("memberships"))
+            except Exception:
+                return False
+            finally:
+                await browser.close()
+
+    return asyncio.run(_check())
+
+
+def _import_cookie(session_key: str) -> None:
+    """Validate sessionKey via API, save to state file, restart daemon."""
+    if _validate_session_key(session_key):
+        _save_session_key(session_key)
+        print(f"[quota] Auth saved to {_STATE_FILE}", flush=True)
         print("[quota] Authenticated.", flush=True)
-        # Restart daemon so it picks up the new auth state
+
         existing = _daemon_running()
         if existing:
             import signal
+
             os.kill(existing, signal.SIGTERM)
             _PID_FILE.unlink(missing_ok=True)
             print(f"[quota] Restarting daemon (old PID {existing}) with new session...", flush=True)
@@ -166,184 +365,26 @@ def cmd_auth() -> None:
     _import_cookie(value)
 
 
-async def scrape(page, debug_dump: Path | None = None) -> dict:
-    from playwright.async_api import TimeoutError as PwTimeout
-
-    await page.goto("https://claude.ai/settings/usage", wait_until="domcontentloaded")
-
-    if "/login" in page.url or "/auth" in page.url:
-        return {}
-
-    try:
-        await page.wait_for_load_state("networkidle", timeout=10000)
-    except PwTimeout:
-        pass
-
-    result: dict = {
-        "_schema_version": 1,
-        "_updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "_source": "playwright",
-        "session": {},
-        "weekly": {},
-        "monthly_spend": None,
-        "balance": None,
-        "extensions": {},
-    }
-
-    content = await page.content()
-
-    if debug_dump:
-        debug_dump.parent.mkdir(parents=True, exist_ok=True)
-        debug_dump.write_text(content, encoding="utf-8")
-        print(f"[quota] Debug HTML dumped to {debug_dump}", flush=True)
-
-    sm = re.search(r"(?:current session|session)[^\n%]{0,80}?(\d+)\s*%", content, re.I)
-    if not sm:
-        sm = re.search(r"(\d+)\s*%\s*used[^\n]{0,60}(?:session|resets in)", content, re.I)
-    if sm:
-        result["session"]["used_pct"] = float(sm.group(1))
-
-    rm = re.search(r"resets in\s+([\dhmins ]+)", content, re.I)
-    if rm:
-        sec = _parse_reset_sec(rm.group(1))
-        if sec:
-            result["session"]["resets_in_sec"] = sec
-            from datetime import timedelta
-
-            result["session"]["resets_at"] = (datetime.now(timezone.utc) + timedelta(seconds=sec)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-
-    wm = re.search(r"(?:weekly|all models)[^\n%]{0,120}?(\d+)\s*%", content, re.I)
-    if wm:
-        result["weekly"]["all_models"] = {"used_pct": float(wm.group(1))}
-
-    wsm = re.search(r"sonnet[^\n%]{0,80}?(\d+)\s*%", content, re.I)
-    if wsm:
-        result["weekly"]["sonnet"] = {"used_pct": float(wsm.group(1))}
-
-    spend_m2 = re.search(r"([€$£])(\d+(?:\.\d+)?)\s*(?:\n|spent)[^\n]{0,100}?([€$£])(\d+(?:\.\d+)?)", content, re.I)
-    if spend_m2:
-        sym = spend_m2.group(1)
-        cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
-        amt, lim = float(spend_m2.group(2)), float(spend_m2.group(4))
-        result["monthly_spend"] = {
-            "amount": amt,
-            "limit": lim,
-            "currency": cur,
-            "used_pct": round(amt / lim * 100, 1) if lim else 0,
-        }
-
-    # Monthly spend limit (text: "Monthly spend limit\n€100" or "€100\nMonthly spend limit")
-    limit_m = re.search(r"monthly\s+spend\s+limit\s*([€$£])([\d.]+)", content, re.I)
-    if not limit_m:
-        limit_m = re.search(r"([€$£])([\d.]+)\s*monthly\s+spend\s+limit", content, re.I)
-    if limit_m:
-        result["_spend_limit_raw"] = float(limit_m.group(2))
-
-    # Current balance (text: "€99.95\nCurrent balance" or "Current balance\n€99.95")
-    bal_m = re.search(r"([€$£])([\d.]+)\s*(?:\n|current)\s*balance", content, re.I)
-    if not bal_m:
-        bal_m = re.search(r"balance[^\n€$£]{0,30}([€$£])([\d.]+)", content, re.I)
-    if bal_m:
-        result["balance"] = float(bal_m.group(2))
-
-    bars = await page.query_selector_all('[role="progressbar"]')
-    for bar in bars:
-        now_str = await bar.get_attribute("aria-valuenow")
-        max_str = await bar.get_attribute("aria-valuemax")
-        # parent[2] has the label text: "Current session | ... | 50% used"
-        label_el = await page.evaluate(
-            "(el) => { let p = el.parentElement; for(let i=0;i<2;i++){p=p&&p.parentElement;} return p ? p.innerText : ''; }",
-            bar,
-        )
-        if now_str and max_str:
-            try:
-                pct = round(float(now_str) / float(max_str) * 100, 1)
-                label = (label_el or "").lower()
-
-                # Parse reset time from label text (e.g. "Resets in 1 hr 39 min" or "Resets Fri 10:00 AM")
-                reset_match = re.search(r"resets?\s+in\s+([\dhmins ]+)", label, re.I)
-                reset_date_match = re.search(r"resets?\s+(\w{3}\s+[\d:]+\s*(?:am|pm)?|\w{3}\s+\d+)", label, re.I)
-
-                if "session" in label:
-                    result["session"]["used_pct"] = pct
-                    if reset_match:
-                        sec = _parse_reset_sec(reset_match.group(1))
-                        if sec:
-                            result["session"]["resets_in_sec"] = sec
-                            from datetime import timedelta
-
-                            result["session"]["resets_at"] = (
-                                datetime.now(timezone.utc) + timedelta(seconds=sec)
-                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                elif "sonnet" in label:
-                    result["weekly"].setdefault("sonnet", {})["used_pct"] = pct
-                    if reset_date_match:
-                        result["weekly"]["sonnet"]["resets"] = reset_date_match.group(1).strip()
-
-                elif "all model" in label:
-                    result["weekly"].setdefault("all_models", {})["used_pct"] = pct
-                    if reset_date_match:
-                        result["weekly"]["all_models"]["resets"] = reset_date_match.group(1).strip()
-
-                elif "spent" in label or "€" in label or "$" in label or "£" in label:
-                    # Monthly spend bar: "€39.58 spent | ... | 40% used"
-                    spend_match = re.search(r"([€$£])([\d.]+)\s*spent", label, re.I)
-                    if spend_match:
-                        sym = spend_match.group(1)
-                        cur = {"€": "EUR", "$": "USD", "£": "GBP"}.get(sym, "USD")
-                        amt = float(spend_match.group(2))
-                        limit_val = float(max_str) if float(max_str) > 1 else 0
-                        # Compute limit from pct: amt / (pct/100) = limit
-                        if pct > 0:
-                            limit_val = round(amt / (pct / 100), 2)
-                        result["monthly_spend"] = {
-                            "amount": amt,
-                            "limit": limit_val,
-                            "currency": cur,
-                            "used_pct": pct,
-                        }
-                        if reset_date_match:
-                            result["monthly_spend"]["resets"] = reset_date_match.group(1).strip()
-            except (ValueError, ZeroDivisionError):
-                pass
-
-    # Use the text-scraped spend limit if we found it (more accurate than calculation)
-    if result.get("_spend_limit_raw") and result.get("monthly_spend"):
-        result["monthly_spend"]["limit"] = result["_spend_limit_raw"]
-    result.pop("_spend_limit_raw", None)
-
-    return result
-
-
 async def _run_daemon(output: Path, poll_sec: int):
-    """Headless scraper loop using saved auth state."""
-    from playwright.async_api import async_playwright
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
-        ctx = await browser.new_context(
-            storage_state=str(_STATE_FILE),
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        )
-        page = await ctx.new_page()
-
-        while True:
-            try:
-                data = await scrape(page)
-                if not data:
-                    print("[quota] Not logged in. Run:  agentihooks quota auth", flush=True)
+    """API-based polling loop."""
+    while True:
+        try:
+            sk = _load_session_key()
+            if not sk:
+                print("[quota] No session key. Run:  agentihooks quota auth", flush=True)
+            else:
+                data = await _fetch_usage(sk)
+                if data is None:
+                    print("[quota] API call failed — session may be expired. Run:  agentihooks quota auth", flush=True)
                 elif data.get("session") or data.get("weekly"):
                     _write_atomic(output, data)
                     s = data.get("session", {})
                     print(f"[quota] ok  session={s.get('used_pct', '?')}%  updated={data['_updated']}", flush=True)
                 else:
-                    print("[quota] No quota data found — page structure may have changed.", flush=True)
-            except Exception as e:
-                print(f"[quota] error: {e}", flush=True)
-            await asyncio.sleep(poll_sec)
+                    print("[quota] No quota data in API response.", flush=True)
+        except Exception as e:
+            print(f"[quota] error: {e}", flush=True)
+        await asyncio.sleep(poll_sec)
 
 
 def _start_daemon(poll: int = 60) -> None:
@@ -356,7 +397,6 @@ def _start_daemon(poll: int = 60) -> None:
 
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Resolve paths for the subprocess
     python = sys.executable
     watcher = str(Path(__file__).resolve())
     output = os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json"))
@@ -375,30 +415,16 @@ def _start_daemon(poll: int = 60) -> None:
     print(f"  Stop:   kill {proc.pid}", flush=True)
 
 
-async def _cmd_dump_async(out: Path) -> None:
-    """One-shot: navigate to the usage page and dump raw HTML for debugging."""
-    from playwright.async_api import async_playwright
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
-        ctx = await browser.new_context(
-            storage_state=str(_STATE_FILE),
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        )
-        page = await ctx.new_page()
-        data = await scrape(page, debug_dump=out)
-        print(f"[quota] Scrape result keys: session={bool(data.get('session'))}, weekly={bool(data.get('weekly'))}", flush=True)
-        await ctx.close()
-        await browser.close()
-
-
 def cmd_dump() -> None:
-    """Dump the raw usage page HTML to ~/.agentihooks/usage_debug.html for inspection."""
-    if not _is_authenticated():
+    """One-shot: fetch usage via API and print raw JSON."""
+    sk = _load_session_key()
+    if not sk:
         sys.exit("[quota] Not authenticated. Run: agentihooks quota auth")
-    out = Path.home() / ".agentihooks" / "usage_debug.html"
-    asyncio.run(_cmd_dump_async(out))
-    print(f"[quota] Inspect with: cat {out} | grep -i 'session\\|usage\\|progress\\|pct\\|percent'", flush=True)
+    data = asyncio.run(_fetch_usage(sk))
+    if data:
+        print(json.dumps(data, indent=2))
+    else:
+        print("[quota] API call failed — session may be expired.", flush=True)
 
 
 def cmd_stop() -> None:
@@ -423,19 +449,27 @@ def main():
     ap.add_argument("--poll", type=int, default=int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60")))
     ap.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--auth", action="store_true", help="Open your browser + paste session cookie")
-    ap.add_argument("--dump-html", action="store_true", dest="dump_html", help="Dump usage page HTML for debugging")
+    ap.add_argument("--dump-html", action="store_true", dest="dump_html", help="Dump raw API JSON for debugging")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies", help="Paste sessionKey only")
+    ap.add_argument(
+        "action",
+        nargs="?",
+        choices=["watch", "auth", "import-cookies", "status", "logs", "stop"],
+        help="watch (default) — start background daemon; auth — open browser + paste cookie; "
+        "import-cookies — paste only; status — print quota; logs — tail daemon log; "
+        "stop — kill daemon; dump-html — dump raw API JSON for debugging",
+    )
     args = ap.parse_args()
 
-    if args.auth:
+    if args.auth or args.action == "auth":
         cmd_auth()
         return
 
-    if args.dump_html:
+    if args.dump_html or args.action == "dump-html":
         cmd_dump()
         return
 
-    if args.import_cookies:
+    if args.import_cookies or args.action == "import-cookies":
         print("Chrome: F12 → Application → Cookies → https://claude.ai → sessionKey")
         print()
         try:
@@ -447,12 +481,30 @@ def main():
         _import_cookie(value)
         return
 
+    if args.action == "status":
+        out = Path(args.output).expanduser()
+        if out.exists():
+            print(out.read_text())
+        else:
+            print("[quota] No data yet.", flush=True)
+        return
+
+    if args.action == "logs":
+        if _LOG_FILE.exists():
+            os.execvp("tail", ["tail", "-f", str(_LOG_FILE)])
+        else:
+            print("[quota] No log file yet.", flush=True)
+        return
+
+    if args.action == "stop":
+        cmd_stop()
+        return
+
     if args.foreground:
-        # Called by _start_daemon — run the actual loop
         asyncio.run(_run_daemon(Path(args.output).expanduser(), args.poll))
         return
 
-    # Default: start the daemon (auto-detaches)
+    # Default: start the daemon
     if not _is_authenticated():
         print("[quota] Not authenticated yet. Run first:", flush=True)
         print("  agentihooks quota auth", flush=True)
