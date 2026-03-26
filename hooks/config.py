@@ -138,6 +138,14 @@ FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
 
 MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
 
+# =============================================================================
+# RETRY CIRCUIT BREAKER
+# =============================================================================
+RETRY_BREAKER_ENABLED = _env_bool("RETRY_BREAKER_ENABLED", "true")
+RETRY_BREAKER_MAX = int(os.getenv("RETRY_BREAKER_MAX", "3"))
+RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "5"))
+RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))

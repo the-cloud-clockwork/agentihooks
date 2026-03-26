@@ -331,6 +331,17 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
+    # Clear retry breaker state for this session
+    from hooks.config import RETRY_BREAKER_ENABLED
+
+    if RETRY_BREAKER_ENABLED:
+        try:
+            from hooks.context.retry_breaker import clear_session_state
+
+            clear_session_state(session_id)
+        except Exception:
+            pass
+
 
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
@@ -444,6 +455,19 @@ def on_pre_tool_use(payload: dict) -> None:
 
     inject_memory(tool_name=tool_name, session_id=session_id)
 
+    # Retry circuit breaker — hard block on excessive retries
+    from hooks.config import RETRY_BREAKER_ENABLED
+
+    if RETRY_BREAKER_ENABLED:
+        try:
+            from hooks.context.retry_breaker import check_hard_block
+
+            check_hard_block(payload)  # raises BlockAction if count >= hard max
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("retry_breaker pre-tool failed", {"error": str(e)})
+
 
 def on_post_tool_use(payload: dict) -> None:
     """Handle PostToolUse event."""
@@ -492,6 +516,17 @@ def on_post_tool_use(payload: dict) -> None:
     from hooks.tool_memory import record_error
 
     record_error(payload)
+
+    # Retry circuit breaker — track failures and inject research instructions
+    from hooks.config import RETRY_BREAKER_ENABLED
+
+    if RETRY_BREAKER_ENABLED:
+        try:
+            from hooks.context.retry_breaker import on_post_tool_result
+
+            on_post_tool_result(payload)
+        except Exception as e:
+            log("retry_breaker post-tool failed", {"error": str(e)})
 
 
 def on_stop(payload: dict) -> None:
