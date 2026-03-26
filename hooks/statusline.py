@@ -127,10 +127,19 @@ def main() -> None:
         if used_pct is None:
             used_pct = 0.0
 
-        # Prefer summing all token types from current_usage — total_input_tokens
-        # in the payload only counts *uncached* tokens (often just 1 for cached
-        # sessions), making fill% appear 0% despite heavy context usage.
-        if current_usage and ctx_size:
+        # Trust Claude Code's native used_percentage as the primary source —
+        # it reflects actual context fill and drops correctly after /compact.
+        # Only fall back to current_usage sums when used_percentage is missing,
+        # since current_usage tokens are cumulative session counters that never
+        # decrease and would show inflated values after compaction.
+        if used_pct > 0 and ctx_size:
+            total = ctx_size
+            used = int(total * used_pct / 100)
+        elif total_input and ctx_size:
+            used = total_input
+            total = ctx_size
+            used_pct = used / total * 100
+        elif current_usage and ctx_size:
             _uncached = current_usage.get("input_tokens", 0) or 0
             _cache_cr = current_usage.get("cache_creation_input_tokens", 0) or 0
             _cache_rd = current_usage.get("cache_read_input_tokens", 0) or 0
@@ -138,10 +147,6 @@ def main() -> None:
             used = _computed if _computed > 0 else (total_input or 0)
             total = ctx_size
             used_pct = used / total * 100 if total else 0.0
-        elif total_input and ctx_size:
-            used = total_input
-            total = ctx_size
-            used_pct = used / total * 100
         elif total_input and used_pct > 0:
             total = int(total_input / used_pct * 100)
             used = total_input
