@@ -15,13 +15,13 @@
 - Do NOT run `git merge`, `git rebase`, or `gh pr merge`
 
 ## Retry Circuit Breaker (CRITICAL)
-- If the same operation fails 3+ times in a row, DO NOT keep retrying
+- If the same operation fails 5+ times in a row, DO NOT keep retrying
 - Launch 2 `error-researcher` agents (subagent_type="error-researcher", model="haiku") in parallel to search the web
   - Agent 1: search for the exact error message
   - Agent 2: search for the tool/command + common causes
 - Wait for results, then apply findings with a DIFFERENT approach
 - If error-researcher agent is unavailable, use WebSearch directly
-- The hook system enforces this — a hard block activates at 5 consecutive failures
+- The hook system enforces this — a hard block activates at 10 consecutive failures
 
 ## Security
 - Never handle real credentials, API keys, tokens, or passwords in plaintext

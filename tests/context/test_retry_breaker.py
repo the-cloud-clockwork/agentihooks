@@ -67,6 +67,80 @@ class TestComputeOperationKey:
         assert _compute_operation_key("mcp__github-list_issues", {}) == "mcp__github-list_issues"
 
 
+class TestSubcommandGrouping:
+    """DevOps tools use subcommand-level grouping."""
+
+    def test_terraform_subcommands(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "terraform plan"}) == "bash:terraform:plan"
+        assert _compute_operation_key("Bash", {"command": "terraform apply -auto-approve"}) == "bash:terraform:apply"
+        assert _compute_operation_key("Bash", {"command": "terraform destroy"}) == "bash:terraform:destroy"
+        assert _compute_operation_key("Bash", {"command": "terraform init"}) == "bash:terraform:init"
+
+    def test_kubectl_subcommands(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "kubectl apply -f deploy.yaml"}) == "bash:kubectl:apply"
+        assert _compute_operation_key("Bash", {"command": "kubectl get pods -n prod"}) == "bash:kubectl:get"
+        assert _compute_operation_key("Bash", {"command": "kubectl delete pod my-pod"}) == "bash:kubectl:delete"
+
+    def test_kubectl_alias(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "k apply -f deploy.yaml"}) == "bash:k:apply"
+        assert _compute_operation_key("Bash", {"command": "k get pods"}) == "bash:k:get"
+
+    def test_argocd_two_level(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "argocd app sync myapp"}) == "bash:argocd:app:sync"
+        assert _compute_operation_key("Bash", {"command": "argocd app get myapp"}) == "bash:argocd:app:get"
+        assert _compute_operation_key("Bash", {"command": "argocd cluster list"}) == "bash:argocd:cluster:list"
+
+    def test_aws_two_level(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "aws s3 cp file.txt s3://bucket/"}) == "bash:aws:s3:cp"
+        assert _compute_operation_key("Bash", {"command": "aws ec2 describe-instances"}) == "bash:aws:ec2:describe-instances"
+        assert _compute_operation_key("Bash", {"command": "aws sts get-caller-identity"}) == "bash:aws:sts:get-caller-identity"
+
+    def test_helm(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "helm install my-release chart/"}) == "bash:helm:install"
+        assert _compute_operation_key("Bash", {"command": "helm upgrade my-release chart/"}) == "bash:helm:upgrade"
+
+    def test_docker(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "docker build -t myimg ."}) == "bash:docker:build"
+        assert _compute_operation_key("Bash", {"command": "docker push myimg"}) == "bash:docker:push"
+
+    def test_gcloud(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "gcloud compute instances list"}) == "bash:gcloud:compute"
+
+    def test_az(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "az vm list"}) == "bash:az:vm"
+
+    def test_non_subcommand_tools_unchanged(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Bash", {"command": "npm install"}) == "bash:npm"
+        assert _compute_operation_key("Bash", {"command": "pip install flask"}) == "bash:pip"
+        assert _compute_operation_key("Bash", {"command": "cargo build"}) == "bash:cargo"
+
+    def test_subcommand_with_flags_only(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        # No subcommand token (only flags) — falls back to base only
+        assert _compute_operation_key("Bash", {"command": "terraform --version"}) == "bash:terraform"
+
+
 class TestComputeErrorKey:
     def test_strips_numbers(self):
         from hooks.context.retry_breaker import _compute_error_key
@@ -187,11 +261,11 @@ class TestBreakerTrip:
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="trip-thresh")
-        on_post_tool_result(payload)  # 1
-        on_post_tool_result(payload)  # 2
+        for _ in range(4):
+            on_post_tool_result(payload)
         assert mock_inject.call_count == 0
 
-        on_post_tool_result(payload)  # 3 — trips
+        on_post_tool_result(payload)  # 5 — trips
         assert mock_inject.call_count == 1
 
     @patch("hooks.context.retry_breaker._inject_breaker_message")
@@ -199,10 +273,10 @@ class TestBreakerTrip:
         from hooks.context.retry_breaker import on_post_tool_result
 
         payload = self._make_error_payload(session_id="trip-keeps")
-        for _ in range(5):
+        for _ in range(7):
             on_post_tool_result(payload)
 
-        # Fires every time count >= 3 (at counts 3, 4, 5)
+        # Fires every time count >= 5 (at counts 5, 6, 7)
         assert mock_inject.call_count == 3
 
     @patch("hooks.common.inject_banner")
@@ -224,7 +298,7 @@ class TestHardBlock:
         from hooks.hook_manager import BlockAction
 
         _set_state("block-session", "bash:npm", {
-            "count": 5,
+            "count": 10,
             "last_error_key": "enoent",
             "last_error_text": "ENOENT not found",
             "last_input": "npm install",
@@ -246,7 +320,7 @@ class TestHardBlock:
         from hooks.context.retry_breaker import _set_state, check_hard_block
 
         _set_state("noblock-session", "bash:npm", {
-            "count": 4,
+            "count": 9,
             "last_error_key": "enoent",
             "last_error_text": "ENOENT not found",
             "last_input": "npm install",

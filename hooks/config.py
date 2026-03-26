@@ -142,8 +142,8 @@ MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
 # RETRY CIRCUIT BREAKER
 # =============================================================================
 RETRY_BREAKER_ENABLED = _env_bool("RETRY_BREAKER_ENABLED", "true")
-RETRY_BREAKER_MAX = int(os.getenv("RETRY_BREAKER_MAX", "3"))
-RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "5"))
+RETRY_BREAKER_MAX = int(os.getenv("RETRY_BREAKER_MAX", "5"))
+RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "10"))
 RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 
 # Console quota display
