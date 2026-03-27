@@ -1,7 +1,8 @@
 """Tests for hooks.context.retry_breaker — Retry Circuit Breaker."""
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 # Import module once so we can clear its state reliably
 import hooks.context.retry_breaker as _breaker_mod
@@ -195,7 +196,7 @@ class TestFailureTracking:
         }
 
     def test_increments_on_same_error(self):
-        from hooks.context.retry_breaker import _get_state, on_post_tool_result, _compute_operation_key
+        from hooks.context.retry_breaker import _compute_operation_key, _get_state, on_post_tool_result
 
         payload = self._make_error_payload(session_id="incr-session")
         on_post_tool_result(payload)
@@ -206,7 +207,7 @@ class TestFailureTracking:
         assert state["count"] == 2
 
     def test_resets_on_different_error(self):
-        from hooks.context.retry_breaker import _get_state, on_post_tool_result, _compute_operation_key
+        from hooks.context.retry_breaker import _compute_operation_key, _get_state, on_post_tool_result
 
         payload1 = self._make_error_payload(error_text="ENOENT not found", session_id="diff-err")
         payload2 = self._make_error_payload(error_text="permission denied", session_id="diff-err")
@@ -220,7 +221,7 @@ class TestFailureTracking:
         assert state["count"] == 1  # Reset because different error
 
     def test_resets_on_success(self):
-        from hooks.context.retry_breaker import _get_state, on_post_tool_result, _compute_operation_key
+        from hooks.context.retry_breaker import _compute_operation_key, _get_state, on_post_tool_result
 
         error_payload = self._make_error_payload(session_id="succ-reset")
         success_payload = self._make_success_payload(session_id="succ-reset")
@@ -337,7 +338,7 @@ class TestHardBlock:
 
 class TestClearState:
     def test_clears_memory(self):
-        from hooks.context.retry_breaker import _set_state, _get_state, clear_session_state
+        from hooks.context.retry_breaker import _get_state, _set_state, clear_session_state
 
         _set_state("clear-session", "bash:npm", {"count": 3, "last_error_key": "x", "last_error_text": "y", "last_input": "z"})
         assert _get_state("clear-session", "bash:npm")["count"] == 3

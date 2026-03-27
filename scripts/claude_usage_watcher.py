@@ -18,7 +18,6 @@ import asyncio
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
