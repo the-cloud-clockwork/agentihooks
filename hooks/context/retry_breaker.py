@@ -33,24 +33,24 @@ _BASH_SKIP_TOKENS = frozenset({"sudo", "env", "cd", "nohup", "time", "nice"})
 # Without this, `terraform plan` and `terraform apply` would share a counter.
 _SUBCOMMAND_TOOLS: dict[str, int] = {
     # DevOps / IaC
-    "terraform": 1,       # terraform plan, terraform apply, terraform destroy
-    "tofu": 1,            # OpenTofu (same subcommands as terraform)
-    "pulumi": 1,          # pulumi up, pulumi preview, pulumi destroy
+    "terraform": 1,  # terraform plan, terraform apply, terraform destroy
+    "tofu": 1,  # OpenTofu (same subcommands as terraform)
+    "pulumi": 1,  # pulumi up, pulumi preview, pulumi destroy
     # Kubernetes
-    "kubectl": 1,         # kubectl apply, kubectl get, kubectl delete
-    "k": 1,               # kubectl alias
-    "helm": 1,            # helm install, helm upgrade, helm rollback
-    "kustomize": 1,       # kustomize build, kustomize edit
+    "kubectl": 1,  # kubectl apply, kubectl get, kubectl delete
+    "k": 1,  # kubectl alias
+    "helm": 1,  # helm install, helm upgrade, helm rollback
+    "kustomize": 1,  # kustomize build, kustomize edit
     # GitOps / CD
-    "argocd": 2,          # argocd app sync, argocd app get
-    "flux": 1,            # flux reconcile, flux get
+    "argocd": 2,  # argocd app sync, argocd app get
+    "flux": 1,  # flux reconcile, flux get
     # Cloud CLIs
-    "aws": 2,             # aws s3 cp, aws ec2 describe-instances
-    "gcloud": 1,          # gcloud compute instances list
-    "az": 1,              # az vm list, az group create
+    "aws": 2,  # aws s3 cp, aws ec2 describe-instances
+    "gcloud": 1,  # gcloud compute instances list
+    "az": 1,  # az vm list, az group create
     # Containers
-    "docker": 1,          # docker build, docker run, docker push
-    "podman": 1,          # podman build, podman run
+    "docker": 1,  # docker build, docker run, docker push
+    "podman": 1,  # podman build, podman run
     "docker-compose": 1,  # docker-compose up, docker-compose down
 }
 
