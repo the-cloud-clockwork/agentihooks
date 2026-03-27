@@ -103,8 +103,14 @@ class TestSubcommandGrouping:
         from hooks.context.retry_breaker import _compute_operation_key
 
         assert _compute_operation_key("Bash", {"command": "aws s3 cp file.txt s3://bucket/"}) == "bash:aws:s3:cp"
-        assert _compute_operation_key("Bash", {"command": "aws ec2 describe-instances"}) == "bash:aws:ec2:describe-instances"
-        assert _compute_operation_key("Bash", {"command": "aws sts get-caller-identity"}) == "bash:aws:sts:get-caller-identity"
+        assert (
+            _compute_operation_key("Bash", {"command": "aws ec2 describe-instances"})
+            == "bash:aws:ec2:describe-instances"
+        )
+        assert (
+            _compute_operation_key("Bash", {"command": "aws sts get-caller-identity"})
+            == "bash:aws:sts:get-caller-identity"
+        )
 
     def test_helm(self):
         from hooks.context.retry_breaker import _compute_operation_key
@@ -179,7 +185,9 @@ class TestComputeErrorKey:
 
 
 class TestFailureTracking:
-    def _make_error_payload(self, tool_name="Bash", command="npm install", error_text="ENOENT not found", session_id="track-session"):
+    def _make_error_payload(
+        self, tool_name="Bash", command="npm install", error_text="ENOENT not found", session_id="track-session"
+    ):
         return {
             "tool_name": tool_name,
             "tool_input": {"command": command} if tool_name == "Bash" else {},
@@ -298,12 +306,16 @@ class TestHardBlock:
         from hooks.context.retry_breaker import _set_state, check_hard_block
         from hooks.hook_manager import BlockAction
 
-        _set_state("block-session", "bash:npm", {
-            "count": 10,
-            "last_error_key": "enoent",
-            "last_error_text": "ENOENT not found",
-            "last_input": "npm install",
-        })
+        _set_state(
+            "block-session",
+            "bash:npm",
+            {
+                "count": 10,
+                "last_error_key": "enoent",
+                "last_error_text": "ENOENT not found",
+                "last_input": "npm install",
+            },
+        )
 
         payload = {
             "tool_name": "Bash",
@@ -320,12 +332,16 @@ class TestHardBlock:
     def test_does_not_block_below_hard_max(self):
         from hooks.context.retry_breaker import _set_state, check_hard_block
 
-        _set_state("noblock-session", "bash:npm", {
-            "count": 9,
-            "last_error_key": "enoent",
-            "last_error_text": "ENOENT not found",
-            "last_input": "npm install",
-        })
+        _set_state(
+            "noblock-session",
+            "bash:npm",
+            {
+                "count": 9,
+                "last_error_key": "enoent",
+                "last_error_text": "ENOENT not found",
+                "last_input": "npm install",
+            },
+        )
 
         payload = {
             "tool_name": "Bash",
@@ -340,7 +356,9 @@ class TestClearState:
     def test_clears_memory(self):
         from hooks.context.retry_breaker import _get_state, _set_state, clear_session_state
 
-        _set_state("clear-session", "bash:npm", {"count": 3, "last_error_key": "x", "last_error_text": "y", "last_input": "z"})
+        _set_state(
+            "clear-session", "bash:npm", {"count": 3, "last_error_key": "x", "last_error_text": "y", "last_input": "z"}
+        )
         assert _get_state("clear-session", "bash:npm")["count"] == 3
 
         clear_session_state("clear-session")
