@@ -33,6 +33,14 @@ _USAGE_TEXT = """Examples:
         Covers secrets, build artefacts, binaries, venvs, and IDE noise.
         --force overwrites an existing file.
 
+
+    agentihooks connector [link|unlink|list|inspect]
+        Manage external connectors (MCP/permissions adapters).
+        Connectors are directories with connector.yml + per-profile permissions.
+          agentihooks connector list                  # list linked connectors
+          agentihooks connector link /path/to/dir     # link a connector
+          agentihooks connector unlink <name>         # unlink by name
+          agentihooks connector inspect /path/to/dir  # preview merge
     agentihooks --loadenv [PATH] [-- COMMAND [ARGS...]]
         Load ~/.agentihooks/.env (or PATH) into the environment, then:
           - If COMMAND given: exec it with the loaded vars (use in aliases).
@@ -55,8 +63,9 @@ import shutil
 import sys
 from collections.abc import Callable
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+import yaml
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -288,6 +297,270 @@ def _state_remove_mcp(mcp_path: Path) -> None:
         paths.remove(path_str)
         state["mcpFiles"] = paths
         _save_state(state)
+
+
+
+# ---------------------------------------------------------------------------
+# Connector helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
+    """Load linked connectors and return merged (env_dict, deny_list) for *profile_name*.
+
+    Connectors are external directories registered in state.json that provide
+    per-profile permissions.deny rules and env var overrides. They are additive
+    only — they append deny rules and merge env vars into the existing settings.
+    """
+    state = _load_state()
+    connectors = state.get("connectors", {})
+    if not connectors:
+        return {}, []
+
+    merged_env: dict[str, str] = {}
+    merged_deny: list[str] = []
+
+    for name, info in connectors.items():
+        conn_dir = Path(info["path"])
+        conn_yml = conn_dir / "connector.yml"
+        if not conn_yml.exists():
+            print(f"  [WARN] Connector '{name}' at {conn_dir} missing connector.yml — skipping")
+            continue
+        if not conn_dir.is_dir():
+            print(f"  [WARN] Connector '{name}' path {conn_dir} not found — skipping")
+            continue
+
+        try:
+            meta = yaml.safe_load(conn_yml.read_text())
+        except Exception as exc:
+            print(f"  [WARN] Connector '{name}' connector.yml parse error: {exc} — skipping")
+            continue
+
+        # Base env (applied to all profiles)
+        base_env = (meta.get("base") or {}).get("env", {})
+        merged_env.update(base_env)
+
+        # Profile-specific permissions
+        profile_dir = conn_dir / "profiles" / profile_name
+        if profile_dir.is_dir():
+            perms_file = profile_dir / "permissions.json"
+            if perms_file.exists():
+                try:
+                    perms = json.loads(perms_file.read_text())
+                    merged_deny.extend(perms.get("deny", []))
+                except (json.JSONDecodeError, OSError) as exc:
+                    print(f"  [WARN] Connector '{name}' permissions.json error: {exc}")
+
+            env_file = profile_dir / "env.json"
+            if env_file.exists():
+                try:
+                    env_data = json.loads(env_file.read_text())
+                    merged_env.update(env_data)
+                except (json.JSONDecodeError, OSError) as exc:
+                    print(f"  [WARN] Connector '{name}' env.json error: {exc}")
+
+    return merged_env, merged_deny
+
+
+def cmd_connector(action: str, path: str | None = None, name: str | None = None) -> None:
+    """Handle 'agentihooks connector' subcommands."""
+    if action == "link":
+        _connector_link(Path(path).expanduser().resolve() if path else None)
+    elif action == "unlink":
+        _connector_unlink(name or "")
+    elif action == "list":
+        _connector_list()
+    elif action == "inspect":
+        _connector_inspect(Path(path).expanduser().resolve() if path else None)
+    else:
+        print(f"Unknown connector action: {action}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _connector_link(conn_dir: Path | None) -> None:
+    """Link an external connector directory into state.json."""
+    if conn_dir is None:
+        print("ERROR: Provide the path to a connector directory.", file=sys.stderr)
+        sys.exit(1)
+
+    conn_yml = conn_dir / "connector.yml"
+    if not conn_yml.exists():
+        print(f"ERROR: {conn_dir} does not contain a connector.yml", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        meta = yaml.safe_load(conn_yml.read_text())
+    except Exception as exc:
+        print(f"ERROR: Failed to parse connector.yml: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    conn_name = meta.get("name", conn_dir.name)
+    state = _load_state()
+    connectors = state.setdefault("connectors", {})
+
+    if conn_name in connectors:
+        existing = connectors[conn_name]["path"]
+        print(f"Connector '{conn_name}' already linked at {existing}")
+        print(f"Updating path to {conn_dir}")
+
+    connectors[conn_name] = {
+        "path": str(conn_dir),
+        "linked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_state(state)
+
+    # Show summary
+    desc = meta.get("description", "")
+    version = meta.get("version", "?")
+    profiles_dir = conn_dir / "profiles"
+    profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
+
+    print(f"[OK] Linked connector '{conn_name}' v{version}")
+    if desc:
+        print(f"     {desc}")
+    if profile_names:
+        print(f"     Profiles: {', '.join(profile_names)}")
+    print()
+    print("Run 'agentihooks global' to apply connector rules to your settings.")
+
+
+def _connector_unlink(conn_name: str) -> None:
+    """Unlink a connector by name."""
+    if not conn_name:
+        print("ERROR: Provide the connector name to unlink.", file=sys.stderr)
+        sys.exit(1)
+
+    state = _load_state()
+    connectors = state.get("connectors", {})
+
+    if conn_name not in connectors:
+        print(f"Connector '{conn_name}' is not linked.", file=sys.stderr)
+        available = list(connectors.keys())
+        if available:
+            print(f"Linked connectors: {', '.join(available)}")
+        sys.exit(1)
+
+    del connectors[conn_name]
+    _save_state(state)
+    print(f"[OK] Unlinked connector '{conn_name}'")
+    print()
+    print("Run 'agentihooks global' to remove connector rules from your settings.")
+
+
+def _connector_list() -> None:
+    """List all linked connectors."""
+    state = _load_state()
+    connectors = state.get("connectors", {})
+
+    if not connectors:
+        print("No connectors linked.")
+        print()
+        print("Link one with:")
+        print("  agentihooks connector link /path/to/connector")
+        return
+
+    print(f"Linked connectors ({len(connectors)}):")
+    print()
+    for name, info in connectors.items():
+        conn_dir = Path(info["path"])
+        linked_at = info.get("linked_at", "?")
+        exists = conn_dir.is_dir()
+        status = "OK" if exists else "MISSING"
+
+        print(f"  {name}")
+        print(f"    Path:   {conn_dir}")
+        print(f"    Linked: {linked_at}")
+        print(f"    Status: {status}")
+
+        if exists:
+            conn_yml = conn_dir / "connector.yml"
+            if conn_yml.exists():
+                try:
+                    meta = yaml.safe_load(conn_yml.read_text())
+                    desc = meta.get("description", "")
+                    version = meta.get("version", "?")
+                    if desc:
+                        print(f"    Desc:   {desc}")
+                    print(f"    Version: {version}")
+                except Exception:
+                    pass
+
+            profiles_dir = conn_dir / "profiles"
+            if profiles_dir.is_dir():
+                profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir())
+                if profile_names:
+                    print(f"    Profiles: {', '.join(profile_names)}")
+        print()
+
+
+def _connector_inspect(conn_dir: Path | None) -> None:
+    """Preview what a connector would merge for each profile."""
+    if conn_dir is None:
+        print("ERROR: Provide the path to a connector directory.", file=sys.stderr)
+        sys.exit(1)
+
+    conn_yml = conn_dir / "connector.yml"
+    if not conn_yml.exists():
+        print(f"ERROR: {conn_dir} does not contain a connector.yml", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        meta = yaml.safe_load(conn_yml.read_text())
+    except Exception as exc:
+        print(f"ERROR: Failed to parse connector.yml: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    conn_name = meta.get("name", conn_dir.name)
+    desc = meta.get("description", "")
+    version = meta.get("version", "?")
+    base_env = (meta.get("base") or {}).get("env", {})
+
+    print(f"Connector: {conn_name} v{version}")
+    if desc:
+        print(f"  {desc}")
+    print()
+
+    if base_env:
+        print("Base env (all profiles):")
+        for k, v in base_env.items():
+            print(f"  {k}={v}")
+        print()
+
+    profiles_dir = conn_dir / "profiles"
+    if not profiles_dir.is_dir():
+        print("No profile directories found.")
+        return
+
+    for profile_dir in sorted(profiles_dir.iterdir()):
+        if not profile_dir.is_dir():
+            continue
+        profile_name = profile_dir.name
+        print(f"Profile: {profile_name}")
+
+        perms_file = profile_dir / "permissions.json"
+        if perms_file.exists():
+            try:
+                perms = json.loads(perms_file.read_text())
+                deny = perms.get("deny", [])
+                if deny:
+                    print(f"  Deny rules ({len(deny)}):")
+                    for rule in deny:
+                        print(f"    - {rule}")
+            except Exception as exc:
+                print(f"  [ERROR] permissions.json: {exc}")
+
+        env_file = profile_dir / "env.json"
+        if env_file.exists():
+            try:
+                env_data = json.loads(env_file.read_text())
+                if env_data:
+                    print(f"  Env overrides:")
+                    for k, v in env_data.items():
+                        print(f"    {k}={v}")
+            except Exception as exc:
+                print(f"  [ERROR] env.json: {exc}")
+
+        print()
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +903,15 @@ def install_global(args: argparse.Namespace) -> None:
         rendered = _deep_merge(rendered, overrides)
         print(f"Applied profile overrides: {overrides_path}")
 
+
+    # --- 1c. Apply linked connectors (additive: env vars + deny rules) ---
+    conn_env, conn_deny = _load_connectors(profile_name)
+    if conn_env:
+        rendered.setdefault("env", {}).update(conn_env)
+        print(f"  [OK] Connector env: {list(conn_env.keys())}")
+    if conn_deny:
+        rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
+        print(f"  [OK] Connector deny rules: {len(conn_deny)}")
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
     personal = _preserve_personal_keys(existing_settings_path)
@@ -1761,6 +2043,16 @@ def main() -> None:
         help=f"Directory to scan for MCP files (default: {AGENTIHOOKS_STATE_DIR})",
     )
 
+
+    conn_p = sub.add_parser("connector", help="Manage external connectors (MCP/permissions adapters)")
+    conn_sub = conn_p.add_subparsers(dest="connector_action")
+    conn_link = conn_sub.add_parser("link", help="Link a connector directory")
+    conn_link.add_argument("connector_path", help="Path to connector directory")
+    conn_unlink = conn_sub.add_parser("unlink", help="Unlink a connector by name")
+    conn_unlink.add_argument("connector_name", help="Connector name")
+    conn_sub.add_parser("list", help="List linked connectors")
+    conn_inspect = conn_sub.add_parser("inspect", help="Preview what a connector would merge")
+    conn_inspect.add_argument("connector_path", help="Path to connector directory")
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
         "path",
@@ -1823,6 +2115,11 @@ def main() -> None:
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "quota":
         cmd_quota(args)
+    elif args.command == "connector":
+        action = getattr(args, "connector_action", None) or "list"
+        conn_path = getattr(args, "connector_path", None)
+        conn_name = getattr(args, "connector_name", None)
+        cmd_connector(action, path=conn_path, name=conn_name)
 
 
 if __name__ == "__main__":
