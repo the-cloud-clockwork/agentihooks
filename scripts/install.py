@@ -302,9 +302,6 @@ def _state_remove_mcp(mcp_path: Path) -> None:
         _save_state(state)
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Bundle helpers
 # ---------------------------------------------------------------------------
@@ -462,6 +459,7 @@ def _bundle_list() -> None:
             for name in conn_names:
                 print(f"  {name}")
             print()
+
 
 # ---------------------------------------------------------------------------
 # Connector helpers
@@ -737,7 +735,6 @@ def _connector_inspect(conn_dir: Path | None) -> None:
         print()
 
 
-
 def _connector_new(
     conn_name: str | None = None,
     conn_path: str | None = None,
@@ -926,23 +923,14 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     local_settings: dict = {}
 
     # Disabled MCP servers (merge all sources)
-    all_disabled = list(dict.fromkeys(
-        conn_disabled + repo_disabled
-    ))
+    all_disabled = list(dict.fromkeys(conn_disabled + repo_disabled))
     if all_disabled:
         local_settings["disabledMcpjsonServers"] = all_disabled
 
     # Permissions — merge profile + connector + repo overrides
     perms: dict = {}
-    all_deny = (
-        profile_overrides.get("permissions", {}).get("deny", [])
-        + conn_deny
-        + repo_deny
-    )
-    all_ask = (
-        profile_overrides.get("permissions", {}).get("ask", [])
-        + repo_ask
-    )
+    all_deny = profile_overrides.get("permissions", {}).get("deny", []) + conn_deny + repo_deny
+    all_ask = profile_overrides.get("permissions", {}).get("ask", []) + repo_ask
     default_mode = profile_overrides.get("permissions", {}).get("defaultMode")
 
     if all_deny:
@@ -995,6 +983,7 @@ def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
                 f.write(f"\n{entry}\n")
             print(f"  [OK] Added {entry} to .gitignore")
     # Don't create .gitignore if it doesn't exist — not our file to create
+
 
 # User env file (~/.agentihooks/.env)
 # ---------------------------------------------------------------------------
@@ -1351,7 +1340,6 @@ def install_global(args: argparse.Namespace) -> None:
         overrides = load_json(overrides_path)
         rendered = _deep_merge(rendered, overrides)
         print(f"Applied profile overrides: {overrides_path}")
-
 
     # --- 1c. Apply linked connectors (additive: env vars + deny rules + disabled servers) ---
     conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
@@ -2497,10 +2485,9 @@ def main() -> None:
         help=f"Directory to scan for MCP files (default: {AGENTIHOOKS_STATE_DIR})",
     )
 
-
-
-
-    init_p = sub.add_parser("init", help="Set up per-repo agentihooks config (.agentihooks.json → .claude/settings.local.json)")
+    init_p = sub.add_parser(
+        "init", help="Set up per-repo agentihooks config (.agentihooks.json → .claude/settings.local.json)"
+    )
     init_p.add_argument("--repo", default=None, help="Target repo directory (default: cwd)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
