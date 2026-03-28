@@ -5,7 +5,6 @@
   "permissions": {
     "defaultMode": "default",
     "ask": [
-      "Bash(git push *)",
       "Bash(git reset --hard*)",
       "Bash(git checkout -- *)",
       "Bash(rm -rf *)",
