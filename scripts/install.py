@@ -307,20 +307,21 @@ def _state_remove_mcp(mcp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
-    """Load linked connectors and return merged (env_dict, deny_list) for *profile_name*.
+def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
+    """Load linked connectors and return merged (env_dict, deny_list, disabled_servers) for *profile_name*.
 
     Connectors are external directories registered in state.json that provide
-    per-profile permissions.deny rules and env var overrides. They are additive
-    only — they append deny rules and merge env vars into the existing settings.
+    per-profile permissions.deny rules, disabledMcpjsonServers, and env var
+    overrides. They are additive only — they append rules and merge env vars.
     """
     state = _load_state()
     connectors = state.get("connectors", {})
     if not connectors:
-        return {}, []
+        return {}, [], []
 
     merged_env: dict[str, str] = {}
     merged_deny: list[str] = []
+    merged_disabled_servers: list[str] = []
 
     for name, info in connectors.items():
         conn_dir = Path(info["path"])
@@ -342,7 +343,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
         base_env = (meta.get("base") or {}).get("env", {})
         merged_env.update(base_env)
 
-        # Profile-specific permissions
+        # Profile-specific settings
         profile_dir = conn_dir / "profiles" / profile_name
         if profile_dir.is_dir():
             perms_file = profile_dir / "permissions.json"
@@ -350,6 +351,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
                 try:
                     perms = json.loads(perms_file.read_text())
                     merged_deny.extend(perms.get("deny", []))
+                    merged_disabled_servers.extend(perms.get("disabledMcpjsonServers", []))
                 except (json.JSONDecodeError, OSError) as exc:
                     print(f"  [WARN] Connector '{name}' permissions.json error: {exc}")
 
@@ -361,7 +363,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
                 except (json.JSONDecodeError, OSError) as exc:
                     print(f"  [WARN] Connector '{name}' env.json error: {exc}")
 
-    return merged_env, merged_deny
+    return merged_env, merged_deny, merged_disabled_servers
 
 
 def cmd_connector(action: str, path: str | None = None, name: str | None = None, **kwargs) -> None:
@@ -1033,14 +1035,19 @@ def install_global(args: argparse.Namespace) -> None:
         print(f"Applied profile overrides: {overrides_path}")
 
 
-    # --- 1c. Apply linked connectors (additive: env vars + deny rules) ---
-    conn_env, conn_deny = _load_connectors(profile_name)
+    # --- 1c. Apply linked connectors (additive: env vars + deny rules + disabled servers) ---
+    conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
     if conn_env:
         rendered.setdefault("env", {}).update(conn_env)
         print(f"  [OK] Connector env: {list(conn_env.keys())}")
     if conn_deny:
         rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
         print(f"  [OK] Connector deny rules: {len(conn_deny)}")
+    if conn_disabled:
+        existing_disabled = rendered.get("disabledMcpjsonServers", [])
+        merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
+        rendered["disabledMcpjsonServers"] = merged_disabled
+        print(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
     personal = _preserve_personal_keys(existing_settings_path)
