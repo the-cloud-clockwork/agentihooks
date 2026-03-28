@@ -96,28 +96,42 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 ## CLI
 
 ```bash
+# Core
 agentihooks global [--profile <name>]   # install/re-apply to ~/.claude
-agentihooks project <path>              # write .mcp.json into a project
+agentihooks init [--profile <name>]     # set up per-repo config → .claude/settings.local.json
+agentihooks --list-profiles             # show all profiles (built-in + bundle)
+agentihooks --query                     # print active profile name
+
+# Bundle (external profiles + connectors in one directory)
+agentihooks bundle link <path>          # link a bundle directory
+agentihooks bundle list                 # show bundle contents
+agentihooks bundle unlink               # remove bundle
+
+# Connectors (MCP deny rules + env vars per profile)
+agentihooks connector list              # list linked connectors
+agentihooks connector link <path>       # link a connector directory
+agentihooks connector unlink <name>     # unlink by name
+agentihooks connector inspect <path>    # preview what a connector would merge
+agentihooks connector new               # interactive scaffold
+agentihooks connector new --name x ...  # headless scaffold (for agents/scripts)
+
+# MCP server files
 agentihooks mcp                         # list MCP files in ~/.agentihooks/
-agentihooks mcp install                 # two-stage: pick file → pick servers
-agentihooks mcp uninstall               # two-stage: pick file → pick servers to remove
+agentihooks mcp install                 # pick file → pick servers
+agentihooks mcp uninstall               # pick file → remove servers
 agentihooks mcp add <path>              # install a file directly by path
 agentihooks mcp sync                    # re-apply all installed MCP files
-agentihooks quota                       # start background quota watcher daemon
-agentihooks quota auth                  # open browser, paste sessionKey, import cookie, start daemon
-agentihooks quota import-cookies        # paste sessionKey without opening browser
-agentihooks quota status                # print last known quota JSON
-agentihooks quota logs                  # tail -f daemon log
-agentihooks quota stop                  # kill daemon
-agentihooks connector list               # list linked connectors
-agentihooks connector link <path>        # link a connector directory
-agentihooks connector unlink <name>      # unlink by name
-agentihooks connector inspect <path>     # preview what a connector would merge
-agentihooks connector new                # interactive scaffold
-agentihooks connector new --name x ...   # headless scaffold (for agents/scripts)
-agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
+
+# Project
+agentihooks project <path>              # write .mcp.json into a project
+agentihooks ignore [path] [--force]     # create .claudeignore
+
+# Quota
+agentihooks quota [auth|status|logs|stop]
+
+# Utilities
 agentihooks uninstall                   # remove everything
-agentihooks --loadenv                   # install agentienv shell function into ~/.bashrc
+agentihooks --loadenv                   # load ~/.agentihooks/.env into shell
 ```
 
 Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
@@ -152,33 +166,67 @@ Complete table covering all 50+ variables across every integration: [Configurati
 
 ## Profiles
 
-Profiles bundle a system prompt (`CLAUDE.md`), MCP category selection, and model settings. Switch with `agentihooks global --profile <name>`.
+Profiles bundle permissions, env vars, a system prompt (`CLAUDE.md`), and MCP settings. Each profile defines a permission tier:
 
-## Connectors
+| Profile | Mode | Deny | Ask | Best for |
+|---------|------|------|-----|----------|
+| **default** | `default` | — | git push, rm -rf, docker rm, kubectl delete | Daily development |
+| **coding** | `acceptEdits` | Protected branch pushes, git merge, gh CLI | git push, rm -rf, docker, kubectl | Focused coding, CI agents |
+| **admin** | `auto` | — | force push, rm -rf / | Infrastructure ops |
 
-Connectors are external adapters that extend profiles with `permissions.deny` rules and env vars. They live outside the agentihooks repo — in your project repos or a shared tools directory.
+Permission evaluation order: **deny > ask > allow** (first match wins).
+
+Switch profiles: `agentihooks global --profile <name>`. Per-repo override: `agentihooks init --profile <name>`.
+
+Profiles come from two sources:
+- **Built-in** — `profiles/` in the agentihooks repo (default, coding, admin)
+- **Bundle** — external directory linked via `agentihooks bundle link`
+
+`agentihooks --list-profiles` shows both.
+
+## Bundles
+
+A **bundle** is a single external directory containing all your personal customizations — custom profiles, connectors, and MCP configs. Link it once and everything is auto-discovered.
 
 ```
-my-connector/
-  connector.yml              # name, description, base env vars
+my-tools/.agentihooks/          ← this IS the bundle
   profiles/
-    default/permissions.json  # {"deny": ["mcp__server__tool-.*"]}
-    coding/permissions.json
+    infra-ops/                   # custom profile
+      profile.yml
+      settings.overrides.json
+      .claude/CLAUDE.md
+  connectors/
+    my-mcp-filter/               # MCP deny rules per profile
+      connector.yml
+      profiles/default/permissions.json
+      profiles/coding/permissions.json
 ```
 
 ```bash
-# Create a new connector (interactive or headless)
-agentihooks connector new
-agentihooks connector new --name my-mcp --path ~/tools/connectors --profiles default,coding --link
-
-# Link, inspect, manage
-agentihooks connector link /path/to/connector
-agentihooks connector inspect /path/to/connector
-agentihooks connector list
-agentihooks connector unlink my-mcp
+agentihooks bundle link ~/dev/my-tools/.agentihooks   # link once
+agentihooks --list-profiles                           # shows built-in + bundle
+agentihooks global --profile infra-ops                # use a bundle profile
 ```
 
-When you run `agentihooks global --profile <name>`, linked connectors are merged additively — deny rules appended, env vars merged. Full docs: [Connectors](docs/connectors.md).
+Connectors inside the bundle are auto-linked — no separate `connector link` needed. Full docs: [Bundles](docs/bundles.md), [Connectors](docs/connectors.md).
+
+## Per-Repo Config
+
+Drop a `.agentihooks.json` in any repo to override the global profile:
+
+```json
+{
+  "profile": "coding",
+  "disabledMcpServers": ["gateway-media"],
+  "permissions": { "deny": ["Bash(terraform apply *)"] }
+}
+```
+
+```bash
+agentihooks init --profile coding   # creates .agentihooks.json + .claude/settings.local.json
+```
+
+This writes `.claude/settings.local.json` — the highest-priority user settings file in Claude Code. It merges the profile's permissions + connector rules + your repo overrides. Run once per repo; re-run after changing connectors or profiles.
 
 ## Portability
 

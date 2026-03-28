@@ -2,6 +2,12 @@
 
 Connectors are external adapters that extend agentihooks profiles with additional permissions, deny rules, and environment variables. They live **outside** the agentihooks repo — in your project repos, a shared tools repo, or anywhere on disk.
 
+## Connectors and Bundles
+
+Connectors can live standalone (linked individually) or inside a **bundle** — a single directory that agentihooks auto-discovers. When you run `agentihooks bundle link ~/path/.agentihooks`, all connectors in `connectors/` are auto-linked.
+
+See [Bundles](bundles.md) for the bundle system docs.
+
 ## Why Connectors?
 
 When you connect MCP servers with hundreds of tools (e.g., a LiteLLM gateway with 400+ tools), every tool schema loads into Claude Code's context window. `permissions.deny` regex patterns (Claude Code v2.1.78+) remove denied tools from model context entirely — not just block calls, but strip them from the token budget.
@@ -44,13 +50,17 @@ The `base.env` block is merged into `settings.json` regardless of which profile 
 ```json
 {
   "deny": [
-    "mcp__gateway-prod__mediagen-.*",
-    "mcp__gateway-prod__router-.*"
+    "mcp__gateway-prod__mediagen-*",
+    "mcp__gateway-prod__router-*"
+  ],
+  "disabledMcpjsonServers": [
+    "gateway-dev"
   ]
 }
 ```
 
-Patterns are regex, matching against Claude Code tool names. Format: `mcp__<server-entry>__<mcp-server>-<tool-name>`.
+- **`deny`** — glob patterns (not regex) matching Claude Code tool names. Denied tools are stripped from model context (v2.1.78+).
+- **`disabledMcpjsonServers`** — server names to disable entirely. Prevents connection = zero tokens. Format: `mcp__<server-entry>__<mcp-server>-<tool-name>`.
 
 ## env.json (optional)
 
@@ -161,9 +171,9 @@ base:
 ```json
 {
   "deny": [
-    "mcp__gateway-prod__mediagen-.*",
-    "mcp__gateway-prod__paper2slides-.*",
-    "mcp__gateway-prod__router-.*"
+    "mcp__gateway-prod__mediagen-*",
+    "mcp__gateway-prod__paper2slides-*",
+    "mcp__gateway-prod__router-*"
   ]
 }
 ```
@@ -172,12 +182,12 @@ base:
 ```json
 {
   "deny": [
-    "mcp__gateway-prod__mediagen-.*",
-    "mcp__gateway-prod__paper2slides-.*",
-    "mcp__gateway-prod__router-.*",
-    "mcp__gateway-prod__atlassian-.*",
-    "mcp__gateway-prod__grafana-.*",
-    "mcp__gateway-prod__litellm_tools-.*"
+    "mcp__gateway-prod__mediagen-*",
+    "mcp__gateway-prod__paper2slides-*",
+    "mcp__gateway-prod__router-*",
+    "mcp__gateway-prod__atlassian-*",
+    "mcp__gateway-prod__grafana-*",
+    "mcp__gateway-prod__litellm_tools-*"
   ]
 }
 ```
