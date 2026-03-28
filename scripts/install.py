@@ -67,6 +67,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -727,7 +728,7 @@ def _connector_inspect(conn_dir: Path | None) -> None:
             try:
                 env_data = json.loads(env_file.read_text())
                 if env_data:
-                    print(f"  Env overrides:")
+                    print("  Env overrides:")
                     for k, v in env_data.items():
                         print(f"    {k}={v}")
             except Exception as exc:
@@ -836,14 +837,14 @@ def _connector_new(
     print()
     print("Structure:")
     print(f"  {conn_dir}/")
-    print(f"    connector.yml")
+    print("    connector.yml")
     for profile_name in profiles:
         print(f"    profiles/{profile_name}/permissions.json")
     print()
     print("Next steps:")
-    print(f"  1. Edit profiles/*/permissions.json with deny rules")
+    print("  1. Edit profiles/*/permissions.json with deny rules")
     print(f"  2. agentihooks connector link {conn_dir}")
-    print(f"  3. agentihooks global --profile <name>")
+    print("  3. agentihooks global --profile <name>")
 
     # --- Auto-link ---
     if auto_link:
@@ -1250,7 +1251,6 @@ def list_profiles() -> None:
         print("No profiles found.")
         return
 
-    bundle = _get_bundle_path()
     print("Available profiles:\n")
     for name in profiles:
         profile_dir = _resolve_profile_dir(name)
