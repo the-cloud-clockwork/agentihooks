@@ -109,6 +109,12 @@ agentihooks quota import-cookies        # paste sessionKey without opening brows
 agentihooks quota status                # print last known quota JSON
 agentihooks quota logs                  # tail -f daemon log
 agentihooks quota stop                  # kill daemon
+agentihooks connector list               # list linked connectors
+agentihooks connector link <path>        # link a connector directory
+agentihooks connector unlink <name>      # unlink by name
+agentihooks connector inspect <path>     # preview what a connector would merge
+agentihooks connector new                # interactive scaffold
+agentihooks connector new --name x ...   # headless scaffold (for agents/scripts)
 agentihooks ignore [path] [--force]     # create .claudeignore in cwd (or given path)
 agentihooks uninstall                   # remove everything
 agentihooks --loadenv                   # install agentienv shell function into ~/.bashrc
@@ -147,6 +153,32 @@ Complete table covering all 50+ variables across every integration: [Configurati
 ## Profiles
 
 Profiles bundle a system prompt (`CLAUDE.md`), MCP category selection, and model settings. Switch with `agentihooks global --profile <name>`.
+
+## Connectors
+
+Connectors are external adapters that extend profiles with `permissions.deny` rules and env vars. They live outside the agentihooks repo — in your project repos or a shared tools directory.
+
+```
+my-connector/
+  connector.yml              # name, description, base env vars
+  profiles/
+    default/permissions.json  # {"deny": ["mcp__server__tool-.*"]}
+    coding/permissions.json
+```
+
+```bash
+# Create a new connector (interactive or headless)
+agentihooks connector new
+agentihooks connector new --name my-mcp --path ~/tools/connectors --profiles default,coding --link
+
+# Link, inspect, manage
+agentihooks connector link /path/to/connector
+agentihooks connector inspect /path/to/connector
+agentihooks connector list
+agentihooks connector unlink my-mcp
+```
+
+When you run `agentihooks global --profile <name>`, linked connectors are merged additively — deny rules appended, env vars merged. Full docs: [Connectors](docs/connectors.md).
 
 ## Portability
 
