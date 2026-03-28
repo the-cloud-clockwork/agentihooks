@@ -65,7 +65,19 @@ Per-profile env var overrides. Merged into `settings.json` `env` block.
 ## CLI Commands
 
 ```bash
-# Link a connector (registers path in ~/.agentihooks/state.json)
+# Create a new connector (interactive)
+agentihooks connector new
+
+# Create a new connector (headless — for agents/scripts)
+agentihooks connector new \
+  --name my-mcp \
+  --path ~/dev/tools/connectors \
+  --description "My MCP filter" \
+  --profiles default,coding,admin \
+  --base-env ENABLE_CLAUDEAI_MCP_SERVERS=false \
+  --link
+
+# Link an existing connector (registers path in ~/.agentihooks/state.json)
 agentihooks connector link /path/to/my-connector
 
 # List linked connectors
@@ -77,6 +89,21 @@ agentihooks connector inspect /path/to/my-connector
 # Remove a connector
 agentihooks connector unlink my-connector
 ```
+
+### Headless Mode
+
+All `connector new` flags:
+
+| Flag | Required (headless) | Description |
+|------|---------------------|-------------|
+| `--name` | Yes | Connector name (lowercase, hyphens) |
+| `--path` | Yes | Parent directory — connector created as `<path>/<name>/` |
+| `--description` | No | Human-readable description |
+| `--profiles` | No | Comma-separated profile names (default: all available) |
+| `--base-env` | No | Base env vars as `KEY=VAL,KEY2=VAL2` |
+| `--link` | No | Auto-link after creation |
+
+If `--name` or `--path` are missing and stdin is a TTY, it falls back to interactive prompts. If stdin is not a TTY (piped/agent), it exits with an error.
 
 ## How It Works
 

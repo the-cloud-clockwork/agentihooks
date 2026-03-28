@@ -41,6 +41,8 @@ _USAGE_TEXT = """Examples:
           agentihooks connector link /path/to/dir     # link a connector
           agentihooks connector unlink <name>         # unlink by name
           agentihooks connector inspect /path/to/dir  # preview merge
+          agentihooks connector new                   # interactive scaffold
+          agentihooks connector new --name x --path . # headless scaffold
     agentihooks --loadenv [PATH] [-- COMMAND [ARGS...]]
         Load ~/.agentihooks/.env (or PATH) into the environment, then:
           - If COMMAND given: exec it with the loaded vars (use in aliases).
@@ -362,7 +364,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str]]:
     return merged_env, merged_deny
 
 
-def cmd_connector(action: str, path: str | None = None, name: str | None = None) -> None:
+def cmd_connector(action: str, path: str | None = None, name: str | None = None, **kwargs) -> None:
     """Handle 'agentihooks connector' subcommands."""
     if action == "link":
         _connector_link(Path(path).expanduser().resolve() if path else None)
@@ -372,6 +374,15 @@ def cmd_connector(action: str, path: str | None = None, name: str | None = None)
         _connector_list()
     elif action == "inspect":
         _connector_inspect(Path(path).expanduser().resolve() if path else None)
+    elif action == "new":
+        _connector_new(
+            conn_name=name,
+            conn_path=path,
+            description=kwargs.get("description"),
+            profiles_list=kwargs.get("profiles"),
+            base_env_str=kwargs.get("base_env"),
+            auto_link=kwargs.get("auto_link", False),
+        )
     else:
         print(f"Unknown connector action: {action}", file=sys.stderr)
         sys.exit(1)
@@ -561,6 +572,124 @@ def _connector_inspect(conn_dir: Path | None) -> None:
                 print(f"  [ERROR] env.json: {exc}")
 
         print()
+
+
+
+def _connector_new(
+    conn_name: str | None = None,
+    conn_path: str | None = None,
+    description: str | None = None,
+    profiles_list: str | None = None,
+    base_env_str: str | None = None,
+    auto_link: bool = False,
+) -> None:
+    """Create a new connector scaffold — interactive or headless.
+
+    Headless mode (all args provided):
+        agentihooks connector new --name my-mcp --path ~/dev/tools/connectors --description "..." --profiles default,coding --base-env KEY=VAL,KEY2=VAL2 --link
+
+    Interactive mode (missing args → prompt user):
+        agentihooks connector new
+    """
+    interactive = sys.stdin.isatty()
+
+    # --- Name ---
+    if not conn_name:
+        if not interactive:
+            print("ERROR: --name required in headless mode.", file=sys.stderr)
+            sys.exit(1)
+        conn_name = input("Connector name (lowercase, hyphens): ").strip()
+        if not conn_name:
+            print("ERROR: Name cannot be empty.", file=sys.stderr)
+            sys.exit(1)
+
+    # --- Path ---
+    if not conn_path:
+        if not interactive:
+            print("ERROR: --path required in headless mode.", file=sys.stderr)
+            sys.exit(1)
+        default_path = str(Path.cwd() / "connectors")
+        conn_path = input(f"Parent directory [{default_path}]: ").strip() or default_path
+
+    parent = Path(conn_path).expanduser().resolve()
+    conn_dir = parent / conn_name
+
+    if conn_dir.exists():
+        print(f"ERROR: {conn_dir} already exists.", file=sys.stderr)
+        sys.exit(1)
+
+    # --- Description ---
+    if not description:
+        if interactive:
+            description = input("Description (optional): ").strip()
+        description = description or f"Connector: {conn_name}"
+
+    # --- Profiles ---
+    available = _available_profiles()
+    if not profiles_list:
+        if interactive:
+            print(f"Available profiles: {', '.join(available)}")
+            profiles_list = input(f"Profiles to create (comma-separated) [{','.join(available)}]: ").strip()
+        if not profiles_list:
+            profiles_list = ",".join(available)
+
+    profiles = [p.strip() for p in profiles_list.split(",") if p.strip()]
+
+    # --- Base env ---
+    base_env: dict[str, str] = {}
+    if base_env_str:
+        for pair in base_env_str.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                base_env[k.strip()] = v.strip()
+    elif interactive:
+        print("Base env vars (applied to all profiles). Empty line to finish.")
+        while True:
+            pair = input("  KEY=VALUE: ").strip()
+            if not pair:
+                break
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                base_env[k.strip()] = v.strip()
+            else:
+                print("  Invalid format — use KEY=VALUE")
+
+    # --- Create structure ---
+    conn_dir.mkdir(parents=True)
+
+    # connector.yml
+    yml_data = {"name": conn_name, "description": description, "version": "1.0.0"}
+    if base_env:
+        yml_data["base"] = {"env": base_env}
+
+    (conn_dir / "connector.yml").write_text(yaml.dump(yml_data, default_flow_style=False, sort_keys=False))
+
+    # profiles
+    for profile_name in profiles:
+        profile_dir = conn_dir / "profiles" / profile_name
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "permissions.json").write_text(json.dumps({"deny": []}, indent=2) + "\n")
+
+    print(f"[OK] Created connector at {conn_dir}")
+    print()
+    print("Structure:")
+    print(f"  {conn_dir}/")
+    print(f"    connector.yml")
+    for profile_name in profiles:
+        print(f"    profiles/{profile_name}/permissions.json")
+    print()
+    print("Next steps:")
+    print(f"  1. Edit profiles/*/permissions.json with deny rules")
+    print(f"  2. agentihooks connector link {conn_dir}")
+    print(f"  3. agentihooks global --profile <name>")
+
+    # --- Auto-link ---
+    if auto_link:
+        _connector_link(conn_dir)
+    elif interactive:
+        answer = input("\nLink this connector now? [y/N] ").strip().lower()
+        if answer == "y":
+            _connector_link(conn_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -2053,6 +2182,13 @@ def main() -> None:
     conn_sub.add_parser("list", help="List linked connectors")
     conn_inspect = conn_sub.add_parser("inspect", help="Preview what a connector would merge")
     conn_inspect.add_argument("connector_path", help="Path to connector directory")
+    conn_new = conn_sub.add_parser("new", help="Create a new connector scaffold (interactive or headless)")
+    conn_new.add_argument("--name", dest="new_name", help="Connector name (headless mode)")
+    conn_new.add_argument("--path", dest="new_path", help="Parent directory for the connector (headless mode)")
+    conn_new.add_argument("--description", dest="new_description", help="Connector description (headless mode)")
+    conn_new.add_argument("--profiles", dest="new_profiles", help="Comma-separated profile names (headless mode)")
+    conn_new.add_argument("--base-env", dest="new_base_env", help="Base env vars as KEY=VAL,KEY2=VAL2 (headless mode)")
+    conn_new.add_argument("--link", dest="new_auto_link", action="store_true", help="Auto-link after creation")
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
         "path",
@@ -2117,9 +2253,17 @@ def main() -> None:
         cmd_quota(args)
     elif args.command == "connector":
         action = getattr(args, "connector_action", None) or "list"
-        conn_path = getattr(args, "connector_path", None)
-        conn_name = getattr(args, "connector_name", None)
-        cmd_connector(action, path=conn_path, name=conn_name)
+        conn_path = getattr(args, "connector_path", None) or getattr(args, "new_path", None)
+        conn_name = getattr(args, "connector_name", None) or getattr(args, "new_name", None)
+        cmd_connector(
+            action,
+            path=conn_path,
+            name=conn_name,
+            description=getattr(args, "new_description", None),
+            profiles=getattr(args, "new_profiles", None),
+            base_env=getattr(args, "new_base_env", None),
+            auto_link=getattr(args, "new_auto_link", False),
+        )
 
 
 if __name__ == "__main__":
