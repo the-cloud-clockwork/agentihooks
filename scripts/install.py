@@ -302,6 +302,166 @@ def _state_remove_mcp(mcp_path: Path) -> None:
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Bundle helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_bundle_path() -> Path | None:
+    """Return the linked bundle path from state.json, or None."""
+    state = _load_state()
+    bundle = state.get("bundle")
+    if bundle:
+        p = Path(bundle["path"])
+        if p.is_dir():
+            return p
+    return None
+
+
+def _resolve_profile_dir(profile_name: str) -> Path | None:
+    """Resolve a profile name to its directory — built-in first, then bundle."""
+    # Built-in profiles
+    local = PROFILES_DIR / profile_name
+    if local.is_dir():
+        return local
+    # Bundle profiles
+    bundle = _get_bundle_path()
+    if bundle:
+        bp = bundle / "profiles" / profile_name
+        if bp.is_dir():
+            return bp
+    return None
+
+
+def cmd_bundle(action: str, path: str | None = None) -> None:
+    """Handle 'agentihooks bundle' subcommands."""
+    if action == "link":
+        _bundle_link(Path(path).expanduser().resolve() if path else None)
+    elif action == "unlink":
+        _bundle_unlink()
+    elif action == "list":
+        _bundle_list()
+    else:
+        print(f"Unknown bundle action: {action}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _bundle_link(bundle_dir: Path | None) -> None:
+    """Link a bundle directory."""
+    if bundle_dir is None:
+        print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
+        sys.exit(1)
+
+    if not bundle_dir.is_dir():
+        print(f"ERROR: {bundle_dir} is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    state = _load_state()
+    old_bundle = state.get("bundle")
+    if old_bundle:
+        print(f"Replacing existing bundle: {old_bundle['path']}")
+
+    state["bundle"] = {
+        "path": str(bundle_dir),
+        "linked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Auto-discover and register connectors from bundle
+    conn_dir = bundle_dir / "connectors"
+    if conn_dir.is_dir():
+        connectors = state.setdefault("connectors", {})
+        for item in sorted(conn_dir.iterdir()):
+            if item.is_dir() and (item / "connector.yml").exists():
+                try:
+                    meta = yaml.safe_load((item / "connector.yml").read_text())
+                    conn_name = meta.get("name", item.name)
+                    connectors[conn_name] = {
+                        "path": str(item),
+                        "linked_at": datetime.now(timezone.utc).isoformat(),
+                        "source": "bundle",
+                    }
+                    print(f"  [OK] Auto-linked connector: {conn_name}")
+                except Exception as exc:
+                    print(f"  [WARN] Skipped {item.name}: {exc}")
+
+    _save_state(state)
+
+    # Summary
+    profiles_dir = bundle_dir / "profiles"
+    profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
+
+    print(f"[OK] Linked bundle: {bundle_dir}")
+    if profile_names:
+        print(f"     Profiles: {', '.join(profile_names)}")
+    print()
+    print("Run 'agentihooks global --profile <name>' to apply.")
+
+
+def _bundle_unlink() -> None:
+    """Unlink the current bundle."""
+    state = _load_state()
+    bundle = state.get("bundle")
+    if not bundle:
+        print("No bundle linked.")
+        return
+
+    bundle_path = bundle["path"]
+
+    # Remove bundle-sourced connectors
+    connectors = state.get("connectors", {})
+    to_remove = [name for name, info in connectors.items() if info.get("source") == "bundle"]
+    for name in to_remove:
+        del connectors[name]
+        print(f"  [OK] Removed bundle connector: {name}")
+
+    del state["bundle"]
+    _save_state(state)
+    print(f"[OK] Unlinked bundle: {bundle_path}")
+    print()
+    print("Run 'agentihooks global' to remove bundle settings.")
+
+
+def _bundle_list() -> None:
+    """Show the linked bundle and its contents."""
+    bundle = _get_bundle_path()
+    if not bundle:
+        print("No bundle linked.")
+        print()
+        print("Link one with:")
+        print("  agentihooks bundle link /path/to/.agentihooks")
+        return
+
+    state = _load_state()
+    linked_at = state.get("bundle", {}).get("linked_at", "?")
+
+    print(f"Bundle: {bundle}")
+    print(f"Linked: {linked_at}")
+    print()
+
+    # Profiles
+    profiles_dir = bundle / "profiles"
+    if profiles_dir.is_dir():
+        profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir())
+        if profile_names:
+            print(f"Profiles ({len(profile_names)}):")
+            for name in profile_names:
+                desc = _read_profile_description(profiles_dir / name)
+                desc_str = f" — {desc}" if desc else ""
+                print(f"  {name}{desc_str}")
+            print()
+
+    # Connectors
+    conn_dir = bundle / "connectors"
+    if conn_dir.is_dir():
+        conn_names = sorted(d.name for d in conn_dir.iterdir() if d.is_dir() and (d / "connector.yml").exists())
+        if conn_names:
+            print(f"Connectors ({len(conn_names)}):")
+            for name in conn_names:
+                print(f"  {name}")
+            print()
+
 # ---------------------------------------------------------------------------
 # Connector helpers
 # ---------------------------------------------------------------------------
@@ -695,6 +855,146 @@ def _connector_new(
 
 
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Per-repo config (agentihooks init)
+# ---------------------------------------------------------------------------
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """Set up per-repo agentihooks config → .claude/settings.local.json."""
+    repo_dir = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
+    config_path = repo_dir / ".agentihooks.json"
+    profile_arg = args.profile
+    interactive = sys.stdin.isatty()
+
+    # Create .agentihooks.json if missing
+    if not config_path.exists():
+        if not profile_arg:
+            if interactive:
+                available = _available_profiles()
+                print(f"Available profiles: {', '.join(available)}")
+                profile_arg = input(f"Profile for this repo [{available[0] if available else 'default'}]: ").strip()
+            if not profile_arg:
+                profile_arg = "default"
+
+        config = {"profile": profile_arg}
+        config_path.write_text(json.dumps(config, indent=2) + "\n")
+        print(f"[OK] Created {config_path}")
+    else:
+        config = json.loads(config_path.read_text())
+        if profile_arg:
+            config["profile"] = profile_arg
+        print(f"[OK] Read {config_path}")
+
+    # Resolve and write .claude/settings.local.json
+    _write_project_settings(repo_dir, config, dry_run=getattr(args, "dry_run", False))
+
+
+def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = False) -> None:
+    """Build and write .claude/settings.local.json from per-repo config."""
+    profile_name = config.get("profile", "default")
+
+    # Validate profile
+    profile_dir = _resolve_profile_dir(profile_name)
+    if profile_dir is None:
+        print(f"  [WARN] Profile '{profile_name}' not found — using default")
+        profile_dir = _resolve_profile_dir("default") or PROFILES_DIR / "default"
+        profile_name = "default"
+
+    # Load profile overrides
+    overrides_path = profile_dir / "settings.overrides.json"
+    profile_overrides = {}
+    if overrides_path.exists():
+        try:
+            profile_overrides = load_json(overrides_path)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Load connector rules for this profile
+    conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
+
+    # Per-repo overrides from .agentihooks.json
+    repo_disabled = config.get("disabledMcpServers", [])
+    repo_deny = config.get("permissions", {}).get("deny", [])
+    repo_ask = config.get("permissions", {}).get("ask", [])
+    repo_env = config.get("env", {})
+
+    # Build settings.local.json — only the delta
+    local_settings: dict = {}
+
+    # Disabled MCP servers (merge all sources)
+    all_disabled = list(dict.fromkeys(
+        conn_disabled + repo_disabled
+    ))
+    if all_disabled:
+        local_settings["disabledMcpjsonServers"] = all_disabled
+
+    # Permissions — merge profile + connector + repo overrides
+    perms: dict = {}
+    all_deny = (
+        profile_overrides.get("permissions", {}).get("deny", [])
+        + conn_deny
+        + repo_deny
+    )
+    all_ask = (
+        profile_overrides.get("permissions", {}).get("ask", [])
+        + repo_ask
+    )
+    default_mode = profile_overrides.get("permissions", {}).get("defaultMode")
+
+    if all_deny:
+        perms["deny"] = list(dict.fromkeys(all_deny))
+    if all_ask:
+        perms["ask"] = list(dict.fromkeys(all_ask))
+    if default_mode:
+        perms["defaultMode"] = default_mode
+    if perms:
+        local_settings["permissions"] = perms
+
+    # Env — merge connector + repo
+    all_env = {}
+    all_env.update(conn_env)
+    all_env.update(repo_env)
+    if all_env:
+        local_settings["env"] = all_env
+
+    if dry_run:
+        print(json.dumps(local_settings, indent=2))
+        return
+
+    # Write
+    claude_dir = repo_dir / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    out_path = claude_dir / "settings.local.json"
+    save_json(out_path, local_settings)
+
+    print(f"[OK] Wrote {out_path}")
+    print(f"     Profile: {profile_name}")
+    if all_disabled:
+        print(f"     Disabled servers: {all_disabled}")
+    if all_deny:
+        print(f"     Deny rules: {len(all_deny)}")
+    if all_ask:
+        print(f"     Ask rules: {len(all_ask)}")
+
+    # Ensure .gitignore covers settings.local.json
+    _ensure_local_settings_gitignored(repo_dir)
+
+
+def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
+    """Ensure .claude/settings.local.json is gitignored."""
+    entry = ".claude/settings.local.json"
+    gitignore = repo_dir / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if entry not in content:
+            with open(gitignore, "a") as f:
+                f.write(f"\n{entry}\n")
+            print(f"  [OK] Added {entry} to .gitignore")
+    # Don't create .gitignore if it doesn't exist — not our file to create
+
 # User env file (~/.agentihooks/.env)
 # ---------------------------------------------------------------------------
 
@@ -896,8 +1196,14 @@ def substitute_paths(obj: object, src: str = "/app", dst: str = str(AGENTIHOOKS_
 
 
 def _available_profiles() -> list[str]:
-    """Return profile names (dirs under profiles/ excluding _base)."""
-    return sorted(d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_"))
+    """Return profile names from built-in profiles/ and linked bundle."""
+    names = {d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_")}
+    bundle = _get_bundle_path()
+    if bundle:
+        bp = bundle / "profiles"
+        if bp.is_dir():
+            names.update(d.name for d in bp.iterdir() if d.is_dir() and not d.name.startswith("_"))
+    return sorted(names)
 
 
 def _read_profile_field(profile_dir: Path, field: str) -> str:
@@ -938,20 +1244,30 @@ def query_active_profile() -> None:
 
 
 def list_profiles() -> None:
-    """Print all available profiles and exit."""
+    """Print all available profiles (built-in + bundle) and exit."""
     profiles = _available_profiles()
     if not profiles:
-        print("No profiles found in profiles/ (only _base exists).")
+        print("No profiles found.")
         return
-    print(f"Available profiles ({PROFILES_DIR}):\n")
+
+    bundle = _get_bundle_path()
+    print("Available profiles:\n")
     for name in profiles:
-        desc = _read_profile_description(PROFILES_DIR / name)
+        profile_dir = _resolve_profile_dir(name)
+        if not profile_dir:
+            continue
+        desc = _read_profile_description(profile_dir)
+        # Determine source
+        if (PROFILES_DIR / name).is_dir():
+            source = "built-in"
+        else:
+            source = "bundle"
         marker = ""
-        claude_md = PROFILES_DIR / name / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
+        claude_md = profile_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
         if not claude_md.exists():
             marker = f"  [no {_CLAUDE_MD_NAME}]"
-        desc_str = f"  — {desc}" if desc else ""
-        print(f"  {name}{desc_str}{marker}")
+        desc_str = f" — {desc}" if desc else ""
+        print(f"  {name} ({source}){desc_str}{marker}")
     print()
 
 
@@ -1000,16 +1316,18 @@ def _backup_settings(existing_path: Path) -> None:
 def install_global(args: argparse.Namespace) -> None:
     profile_name: str = args.profile
 
-    # Validate profile exists
-    profile_dir = PROFILES_DIR / profile_name
-    if not profile_dir.is_dir():
+    # Validate profile exists (built-in or bundle)
+    profile_dir = _resolve_profile_dir(profile_name)
+    if profile_dir is None:
         available = _available_profiles()
         print(f"ERROR: Profile '{profile_name}' not found.", file=sys.stderr)
         print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
 
+    profile_source = "built-in" if (PROFILES_DIR / profile_name).is_dir() else "bundle"
     print(f"agentihooks root : {AGENTIHOOKS_ROOT}")
     print(f"Target           : {CLAUDE_HOME}")
+    print(f"Profile source   : {profile_source}")
     print(f"Profile          : {profile_name}")
     # Resolve canonical Python: ~/.agentihooks/.venv wins over sys.executable
     # so that `agentihooks global` (run via uv tool from any project venv) always
@@ -1028,7 +1346,7 @@ def install_global(args: argparse.Namespace) -> None:
     rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)  # NOSONAR
 
     # --- 1b. Apply per-profile overrides (e.g. env vars like AGENTIHOOKS_SECRETS_MODE) ---
-    overrides_path = PROFILES_DIR / profile_name / "settings.overrides.json"
+    overrides_path = profile_dir / "settings.overrides.json"
     if overrides_path.exists():
         overrides = load_json(overrides_path)
         rendered = _deep_merge(rendered, overrides)
@@ -1214,7 +1532,7 @@ def _install_user_mcp(profile_name: str) -> None:
     Reads ``mcp_categories`` from ``profile.yml`` (defaults to ``all``)
     and builds the hooks-utils MCP server config dynamically.
     """
-    profile_dir = PROFILES_DIR / profile_name
+    profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
     mcp_categories = _read_profile_field(profile_dir, "mcp_categories") or "all"
     mcp_config = _build_mcp_config(mcp_categories)
     _merge_mcp_to_user_scope(mcp_config["mcpServers"])
@@ -1755,9 +2073,9 @@ def install_project(args: argparse.Namespace) -> None:
         print(f"ERROR: Project path is not a directory: {project_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Validate profile
-    profile_dir = PROFILES_DIR / profile_name
-    if not profile_dir.is_dir():
+    # Validate profile (built-in or bundle)
+    profile_dir = _resolve_profile_dir(profile_name)
+    if profile_dir is None:
         available = _available_profiles()
         print(f"ERROR: Profile '{profile_name}' not found.", file=sys.stderr)
         print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
@@ -2180,6 +2498,18 @@ def main() -> None:
     )
 
 
+
+
+    init_p = sub.add_parser("init", help="Set up per-repo agentihooks config (.agentihooks.json → .claude/settings.local.json)")
+    init_p.add_argument("--repo", default=None, help="Target repo directory (default: cwd)")
+    init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
+    init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
+    bundle_p = sub.add_parser("bundle", help="Manage external bundle (profiles + connectors)")
+    bundle_sub = bundle_p.add_subparsers(dest="bundle_action")
+    bundle_link = bundle_sub.add_parser("link", help="Link a bundle directory")
+    bundle_link.add_argument("bundle_path", help="Path to bundle directory")
+    bundle_sub.add_parser("unlink", help="Unlink the current bundle")
+    bundle_sub.add_parser("list", help="Show linked bundle contents")
     conn_p = sub.add_parser("connector", help="Manage external connectors (MCP/permissions adapters)")
     conn_sub = conn_p.add_subparsers(dest="connector_action")
     conn_link = conn_sub.add_parser("link", help="Link a connector directory")
@@ -2258,6 +2588,14 @@ def main() -> None:
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "quota":
         cmd_quota(args)
+    elif args.command == "init":
+        # Map init_profile to profile for cmd_init
+        args.profile = getattr(args, "init_profile", None)
+        cmd_init(args)
+    elif args.command == "bundle":
+        action = getattr(args, "bundle_action", None) or "list"
+        bundle_path = getattr(args, "bundle_path", None)
+        cmd_bundle(action, path=bundle_path)
     elif args.command == "connector":
         action = getattr(args, "connector_action", None) or "list"
         conn_path = getattr(args, "connector_path", None) or getattr(args, "new_path", None)

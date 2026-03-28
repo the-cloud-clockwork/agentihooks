@@ -1,5 +1,12 @@
 {
   "env": {
     "AGENTIHOOKS_SECRETS_MODE": "warn"
+  },
+  "permissions": {
+    "defaultMode": "auto",
+    "ask": [
+      "Bash(rm -rf /)*",
+      "Bash(git push *--force*)"
+    ]
   }
 }

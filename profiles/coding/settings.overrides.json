@@ -3,6 +3,7 @@
     "AGENTIHOOKS_SECRETS_MODE": "strict"
   },
   "permissions": {
+    "defaultMode": "acceptEdits",
     "deny": [
       "Bash(git push * main*)",
       "Bash(git push * master*)",
@@ -19,6 +20,12 @@
       "Bash(git push *--force*)",
       "Bash(git merge*)",
       "Bash(gh *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(rm -rf *)",
+      "Bash(docker *)",
+      "Bash(kubectl *)"
     ]
   }
 }
