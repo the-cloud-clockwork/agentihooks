@@ -942,10 +942,17 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     if perms:
         local_settings["permissions"] = perms
 
-    # Env — merge connector + repo
+    # Env — merge connector + repo + otel
     all_env = {}
     all_env.update(conn_env)
     all_env.update(repo_env)
+
+    # OTEL overrides from .agentihooks.json otel section
+    otel_cfg = config.get("otel", {})
+    if otel_cfg:
+        otel_env = _build_otel_env({"otel": otel_cfg})
+        all_env.update(otel_env)
+
     if all_env:
         local_settings["env"] = all_env
 
@@ -1298,6 +1305,40 @@ def _backup_settings(existing_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# OTEL env vars builder
+# ---------------------------------------------------------------------------
+
+
+def _build_otel_env(profile_data: dict) -> dict:
+    """Build OTEL env vars from profile otel config.
+
+    Reads the ``otel:`` section from a profile.yml and returns a dict
+    of env vars to inject into settings.json ``env`` block.
+    """
+    otel_cfg = profile_data.get("otel", {})
+    if not otel_cfg.get("enabled", True):
+        return {}
+
+    env: dict[str, str] = {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": otel_cfg.get("protocol", "grpc"),
+        "OTEL_LOG_TOOL_DETAILS": "1",
+    }
+
+    endpoint = otel_cfg.get("endpoint")
+    if endpoint:
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint
+
+    attrs = otel_cfg.get("resource_attributes", {})
+    if attrs:
+        env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(f"{k}={v}" for k, v in attrs.items())
+
+    return env
+
+
+# ---------------------------------------------------------------------------
 # Global install
 # ---------------------------------------------------------------------------
 
@@ -1354,6 +1395,18 @@ def install_global(args: argparse.Namespace) -> None:
         merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
         rendered["disabledMcpjsonServers"] = merged_disabled
         print(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
+
+    # --- 1d. OTEL baseline env vars from profile ---
+    profile_yml_path = profile_dir / "profile.yml"
+    if profile_yml_path.exists():
+        import yaml
+
+        profile_data = yaml.safe_load(profile_yml_path.read_text()) or {}
+        otel_env = _build_otel_env(profile_data)
+        if otel_env:
+            rendered.setdefault("env", {}).update(otel_env)
+            print(f"  [OK] OTEL env: {list(otel_env.keys())}")
+
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
     personal = _preserve_personal_keys(existing_settings_path)

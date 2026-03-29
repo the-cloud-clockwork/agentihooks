@@ -150,3 +150,11 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
+
+# =============================================================================
+# OTEL — Custom hook telemetry (Layer 2)
+# Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
+# These control agentihooks-specific OTEL emission.
+# =============================================================================
+OTEL_HOOKS_ENABLED = _env_bool("OTEL_HOOKS_ENABLED", "true")
+OTEL_HOOKS_SERVICE_NAME = os.getenv("OTEL_HOOKS_SERVICE_NAME", "agentihooks")

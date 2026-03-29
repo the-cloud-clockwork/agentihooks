@@ -3,6 +3,14 @@ name: default
 description: "Autonomous coding worker"
 mcp_categories: all
 
+# -- otel fields (read by install.py for settings.json env block) --
+otel:
+  enabled: true
+  endpoint: ""
+  protocol: grpc
+  resource_attributes:
+    agent.type: default
+
 # -- agenticore fields (read by agenticore, not agentihooks) --
 claude:
   model: sonnet

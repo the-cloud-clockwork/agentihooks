@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from hooks.observability import otel
+
 # Add parent directory to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -281,6 +283,10 @@ def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
+    otel.emit_event("agentihooks.session.started", {
+        "session.id": session_id,
+        "agent.name": os.environ.get("AGENT_NAME", "unknown"),
+    })
 
     # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
@@ -398,6 +404,12 @@ def on_pre_tool_use(payload: dict) -> None:
                         "Use environment variables instead."
                     )
                 else:
+                    otel.emit_event("agentihooks.guardrail.secret_detected", {
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": tool_name,
+                        "secret_types": names,
+                        "action": "block",
+                    })
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in Bash command ({names}). "
                         "Never pass credentials as inline command arguments. "
@@ -418,6 +430,12 @@ def on_pre_tool_use(payload: dict) -> None:
                         "Use environment variables instead."
                     )
                 else:
+                    otel.emit_event("agentihooks.guardrail.secret_detected", {
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": tool_name,
+                        "secret_types": names,
+                        "action": "block",
+                    })
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in {tool_name} content ({names}). "
                         "Never write credential values to files. "
@@ -445,6 +463,10 @@ def on_pre_tool_use(payload: dict) -> None:
 
                 check_and_block_redundant_read(payload)  # raises BlockAction if blocked
         except BlockAction:
+            otel.emit_event("agentihooks.guardrail.read_deduplicated", {
+                "session.id": payload.get("session_id", ""),
+                "file_path": payload.get("tool_input", {}).get("file_path", ""),
+            })
             raise
         except Exception as e:
             log("file_read_cache check failed", {"error": str(e)})
@@ -464,6 +486,10 @@ def on_pre_tool_use(payload: dict) -> None:
 
             check_hard_block(payload)  # raises BlockAction if count >= hard max
         except BlockAction:
+            otel.emit_event("agentihooks.guardrail.retry_blocked", {
+                "session.id": payload.get("session_id", ""),
+                "tool_name": payload.get("tool_name", "unknown"),
+            })
             raise
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
@@ -494,6 +520,10 @@ def on_post_tool_use(payload: dict) -> None:
                 if filtered is not None:
                     import json as _json
 
+                    otel.emit_event("agentihooks.context.output_filtered", {
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": tool_name,
+                    })
                     print(_json.dumps({"additionalContext": filtered}))
         except Exception as e:
             log("bash_output_filter failed", {"error": str(e)})
@@ -516,6 +546,17 @@ def on_post_tool_use(payload: dict) -> None:
     from hooks.tool_memory import record_error
 
     record_error(payload)
+
+    # Emit OTEL event if error was recorded
+    if payload.get("tool_output", ""):
+        tool_output = payload.get("tool_output", "")
+        is_error = payload.get("is_error", False)
+        exit_code = payload.get("tool_input", {}).get("exitCode")
+        if is_error or (exit_code and str(exit_code) != "0"):
+            otel.emit_event("agentihooks.error.recorded", {
+                "session.id": payload.get("session_id", ""),
+                "tool_name": payload.get("tool_name", "unknown"),
+            })
 
     # Retry circuit breaker — track failures and inject research instructions
     from hooks.config import RETRY_BREAKER_ENABLED
@@ -545,6 +586,11 @@ def on_stop(payload: dict) -> None:
             "duration_ms": metrics.get("duration_ms"),
         },
     )
+    otel.emit_event("agentihooks.session.ended", {
+        "session.id": session_id,
+        "num_turns": str(metrics.get("num_turns", 0)),
+        "duration_ms": str(metrics.get("duration_ms", 0)),
+    })
 
     # Check for errors and notify
     notify_on_error(transcript_path)

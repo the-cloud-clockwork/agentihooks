@@ -162,6 +162,13 @@ def update_context_metrics(payload: dict) -> str:
             }
             persist_token_metrics(session_id, metrics)
 
+            # Bridge to OTEL gauges
+            from hooks.observability import otel
+
+            otel.record_gauge("agentihooks.tokens.fill_pct", fill_pct, {"session.id": session_id})
+            if burn_rate is not None:
+                otel.record_gauge("agentihooks.tokens.burn_rate", burn_rate, {"session.id": session_id})
+
         return status_line
 
     except Exception as e:
