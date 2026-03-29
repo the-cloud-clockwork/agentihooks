@@ -548,15 +548,13 @@ def on_post_tool_use(payload: dict) -> None:
     record_error(payload)
 
     # Emit OTEL event if error was recorded
-    if payload.get("tool_output", ""):
-        tool_output = payload.get("tool_output", "")
-        is_error = payload.get("is_error", False)
-        exit_code = payload.get("tool_input", {}).get("exitCode")
-        if is_error or (exit_code and str(exit_code) != "0"):
-            otel.emit_event("agentihooks.error.recorded", {
-                "session.id": payload.get("session_id", ""),
-                "tool_name": payload.get("tool_name", "unknown"),
-            })
+    is_error = payload.get("is_error", False)
+    exit_code = payload.get("tool_input", {}).get("exitCode")
+    if is_error or (exit_code and str(exit_code) != "0"):
+        otel.emit_event("agentihooks.error.recorded", {
+            "session.id": payload.get("session_id", ""),
+            "tool_name": payload.get("tool_name", "unknown"),
+        })
 
     # Retry circuit breaker — track failures and inject research instructions
     from hooks.config import RETRY_BREAKER_ENABLED

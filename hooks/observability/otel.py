@@ -94,14 +94,26 @@ def init() -> None:
         _log_emitter = lp.get_logger("agentihooks")
 
         def _shutdown():
+            try:
+                tp.force_flush(timeout_millis=2000)
+            except Exception:
+                pass
             tp.shutdown()
+            try:
+                mp.force_flush(timeout_millis=2000)
+            except Exception:
+                pass
             mp.shutdown()
+            try:
+                lp.force_flush(timeout_millis=2000)
+            except Exception:
+                pass
             lp.shutdown()
 
         atexit.register(_shutdown)
 
-    except ImportError:
-        pass  # OTEL SDK not installed — all functions remain no-ops
+    except Exception:
+        pass  # OTEL SDK not installed or init failed — all functions remain no-ops
 
 
 def get_tracer():
