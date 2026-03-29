@@ -1335,6 +1335,17 @@ def _build_otel_env(profile_data: dict) -> dict:
     if attrs:
         env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(f"{k}={v}" for k, v in attrs.items())
 
+    # Langfuse destination (traces only, OTLP HTTP)
+    langfuse = otel_cfg.get("langfuse", {})
+    if langfuse.get("enabled"):
+        env["OTEL_LANGFUSE_ENABLED"] = "1"
+        if langfuse.get("endpoint"):
+            env["OTEL_LANGFUSE_ENDPOINT"] = langfuse["endpoint"]
+        if langfuse.get("public_key"):
+            env["OTEL_LANGFUSE_PUBLIC_KEY"] = langfuse["public_key"]
+        if langfuse.get("secret_key"):
+            env["OTEL_LANGFUSE_SECRET_KEY"] = langfuse["secret_key"]
+
     return env
 
 

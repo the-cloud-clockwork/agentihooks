@@ -10,6 +10,11 @@ otel:
   protocol: grpc
   resource_attributes:
     agent.type: default
+  langfuse:
+    enabled: false
+    endpoint: ""
+    public_key: ""
+    secret_key: ""
 
 # -- agenticore fields (read by agenticore, not agentihooks) --
 claude:

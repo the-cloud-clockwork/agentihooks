@@ -29,6 +29,9 @@ from typing import Any
 
 from hooks.observability import otel
 
+# Session-level trace span for Langfuse (stored across hook invocations via env)
+_session_span = None
+
 # Add parent directory to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -287,6 +290,15 @@ def on_session_start(payload: dict) -> None:
         "session.id": session_id,
         "agent.name": os.environ.get("AGENT_NAME", "unknown"),
     })
+
+    # Start a trace span for the session (visible in Langfuse)
+    tracer = otel.get_tracer()
+    if tracer:
+        global _session_span
+        _session_span = tracer.start_span("agentihooks.session", attributes={
+            "session.id": session_id,
+            "agent.name": os.environ.get("AGENT_NAME", "unknown"),
+        })
 
     # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
@@ -589,6 +601,14 @@ def on_stop(payload: dict) -> None:
         "num_turns": str(metrics.get("num_turns", 0)),
         "duration_ms": str(metrics.get("duration_ms", 0)),
     })
+
+    # End the session trace span (for Langfuse)
+    global _session_span
+    if _session_span is not None:
+        _session_span.set_attribute("num_turns", metrics.get("num_turns", 0))
+        _session_span.set_attribute("duration_ms", metrics.get("duration_ms", 0))
+        _session_span.end()
+        _session_span = None
 
     # Check for errors and notify
     notify_on_error(transcript_path)

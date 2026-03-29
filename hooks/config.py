@@ -158,3 +158,9 @@ CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
 # =============================================================================
 OTEL_HOOKS_ENABLED = _env_bool("OTEL_HOOKS_ENABLED", "true")
 OTEL_HOOKS_SERVICE_NAME = os.getenv("OTEL_HOOKS_SERVICE_NAME", "agentihooks")
+
+# Langfuse OTEL destination (traces only, OTLP HTTP)
+OTEL_LANGFUSE_ENABLED = _env_bool("OTEL_LANGFUSE_ENABLED", "false")
+OTEL_LANGFUSE_ENDPOINT = os.getenv("OTEL_LANGFUSE_ENDPOINT", "")
+OTEL_LANGFUSE_PUBLIC_KEY = os.getenv("OTEL_LANGFUSE_PUBLIC_KEY", "")
+OTEL_LANGFUSE_SECRET_KEY = os.getenv("OTEL_LANGFUSE_SECRET_KEY", "")

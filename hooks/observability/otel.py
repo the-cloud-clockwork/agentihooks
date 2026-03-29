@@ -82,6 +82,33 @@ def init() -> None:
         trace.set_tracer_provider(tp)
         _tracer = trace.get_tracer("agentihooks")
 
+        # Langfuse — additional trace exporter (OTLP HTTP only, traces only)
+        from hooks.config import (
+            OTEL_LANGFUSE_ENABLED,
+            OTEL_LANGFUSE_ENDPOINT,
+            OTEL_LANGFUSE_PUBLIC_KEY,
+            OTEL_LANGFUSE_SECRET_KEY,
+        )
+
+        if OTEL_LANGFUSE_ENABLED and OTEL_LANGFUSE_ENDPOINT:
+            import base64
+
+            auth = base64.b64encode(
+                f"{OTEL_LANGFUSE_PUBLIC_KEY}:{OTEL_LANGFUSE_SECRET_KEY}".encode()
+            ).decode()
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter as LangfuseSpanExporter,
+            )
+
+            langfuse_exporter = LangfuseSpanExporter(
+                endpoint=f"{OTEL_LANGFUSE_ENDPOINT}/v1/traces",
+                headers={
+                    "Authorization": f"Basic {auth}",
+                    "x-langfuse-ingestion-version": "4",
+                },
+            )
+            tp.add_span_processor(SimpleSpanProcessor(langfuse_exporter))
+
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=60_000)
         mp = MeterProvider(resource=resource, metric_readers=[reader])
