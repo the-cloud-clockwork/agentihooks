@@ -29,8 +29,6 @@ from typing import Any
 
 from hooks.observability import otel
 
-# Session-level trace span for Langfuse (stored across hook invocations via env)
-_session_span = None
 
 # Add parent directory to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -291,14 +289,14 @@ def on_session_start(payload: dict) -> None:
         "agent.name": os.environ.get("AGENT_NAME", "unknown"),
     })
 
-    # Start a trace span for the session (visible in Langfuse)
+    # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
-        global _session_span
-        _session_span = tracer.start_span("agentihooks.session", attributes={
+        with tracer.start_as_current_span("agentihooks.session.start", attributes={
             "session.id": session_id,
             "agent.name": os.environ.get("AGENT_NAME", "unknown"),
-        })
+        }):
+            pass  # span auto-ends on context exit → exported immediately
 
     # Log output token limit so Claude is aware of response size constraints
     log_claude_max_output_tokens()
@@ -422,6 +420,14 @@ def on_pre_tool_use(payload: dict) -> None:
                         "secret_types": names,
                         "action": "block",
                     })
+                    _tracer = otel.get_tracer()
+                    if _tracer:
+                        with _tracer.start_as_current_span("agentihooks.guardrail.secret_blocked", attributes={
+                            "session.id": payload.get("session_id", ""),
+                            "tool_name": tool_name,
+                            "secret_types": names,
+                        }):
+                            pass
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in Bash command ({names}). "
                         "Never pass credentials as inline command arguments. "
@@ -502,6 +508,13 @@ def on_pre_tool_use(payload: dict) -> None:
                 "session.id": payload.get("session_id", ""),
                 "tool_name": payload.get("tool_name", "unknown"),
             })
+            _tracer = otel.get_tracer()
+            if _tracer:
+                with _tracer.start_as_current_span("agentihooks.guardrail.retry_blocked", attributes={
+                    "session.id": payload.get("session_id", ""),
+                    "tool_name": payload.get("tool_name", "unknown"),
+                }):
+                    pass
             raise
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
@@ -602,13 +615,15 @@ def on_stop(payload: dict) -> None:
         "duration_ms": str(metrics.get("duration_ms", 0)),
     })
 
-    # End the session trace span (for Langfuse)
-    global _session_span
-    if _session_span is not None:
-        _session_span.set_attribute("num_turns", metrics.get("num_turns", 0))
-        _session_span.set_attribute("duration_ms", metrics.get("duration_ms", 0))
-        _session_span.end()
-        _session_span = None
+    # Emit a trace span for session end (visible in Langfuse)
+    tracer = otel.get_tracer()
+    if tracer:
+        with tracer.start_as_current_span("agentihooks.session.stop", attributes={
+            "session.id": session_id,
+            "num_turns": metrics.get("num_turns", 0),
+            "duration_ms": metrics.get("duration_ms", 0),
+        }):
+            pass
 
     # Check for errors and notify
     notify_on_error(transcript_path)

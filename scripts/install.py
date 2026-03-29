@@ -1231,13 +1231,20 @@ def query_active_profile() -> None:
         print("unmanaged  (CLAUDE.md is not a symlink — installed manually)")
         return
     target = claude_md.resolve()
-    try:
-        # Expect: <root>/profiles/<name>/.claude/CLAUDE.md
-        rel = target.relative_to(PROFILES_DIR)
-        profile_name = rel.parts[0]
-        print(profile_name)
-    except ValueError:
-        print(f"unknown  (symlink points outside profiles/: {target})")
+    # Check built-in profiles first, then bundle
+    search_dirs = [PROFILES_DIR]
+    bundle = _get_bundle_path()
+    if bundle:
+        search_dirs.append(bundle / "profiles")
+    for search_dir in search_dirs:
+        try:
+            rel = target.relative_to(search_dir)
+            profile_name = rel.parts[0]
+            print(profile_name)
+            return
+        except ValueError:
+            continue
+    print(f"unknown  (symlink points outside profiles/: {target})")
 
 
 def list_profiles() -> None:
@@ -1456,7 +1463,8 @@ def install_global(args: argparse.Namespace) -> None:
     )
 
     # --- 7. Symlink CLAUDE.md from the chosen profile ---
-    profile_claude_md = PROFILES_DIR / profile_name / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
+    _resolved_profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
+    profile_claude_md = _resolved_profile_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
     claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     _install_claude_md(profile_claude_md, claude_md_dst, profile_name)
 
