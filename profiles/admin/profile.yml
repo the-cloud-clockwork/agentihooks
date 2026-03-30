@@ -3,6 +3,9 @@ name: admin
 description: "Admin — minimal guardrails, secrets warn-only"
 mcp_categories: all
 
+# -- MCP blacklist-by-default: only these servers stay enabled per-project --
+enabledMcpServers: []
+
 # -- otel fields (read by install.py for settings.json env block) --
 otel:
   enabled: true

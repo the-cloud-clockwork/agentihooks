@@ -392,7 +392,7 @@ No Chromium/Playwright browser is used for authentication. The `auth` subcommand
 When enabled (set `CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json` in `~/.agentihooks/.env`), the statusline displays quota information on line 3:
 
 ```
-session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
 ```
 
 ### Configuration

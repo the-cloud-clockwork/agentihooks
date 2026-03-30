@@ -35,6 +35,15 @@ LOG_FILE = AGENTIHOOKS_STATE_DIR / "logs" / "sync-daemon.log"
 LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 
+# Claude Code user config — for MCP server tracking
+def _resolve_claude_json() -> Path:
+    home_dir = os.environ.get("CLAUDE_HOME")
+    if home_dir:
+        return Path(home_dir) / ".claude.json"
+    return Path.home() / ".claude.json"
+
+CLAUDE_JSON = _resolve_claude_json()
+
 DEFAULT_POLL_SEC = 60
 
 # ---------------------------------------------------------------------------
@@ -416,6 +425,65 @@ def _execute_actions(actions: dict, state: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# MCP server tracking — additive-only blacklisting
+# ---------------------------------------------------------------------------
+
+
+def _get_all_known_mcp_names_from_claude_json() -> set[str]:
+    """Read ALL MCP server names from ~/.claude.json."""
+    data = _load_json(CLAUDE_JSON)
+    names = set(data.get("mcpServers", {}).keys())
+    names.update(data.get("claudeAiMcpEverConnected", []))
+    return names
+
+
+def _check_new_mcp_servers(known_servers_file: Path) -> None:
+    """Detect new MCP servers and add them to disabledMcpServers in all projects.
+
+    Additive-only: never removes from disabledMcpServers (preserves UI toggles).
+    """
+    current = _get_all_known_mcp_names_from_claude_json()
+    if not current:
+        return
+
+    # Load previously known servers
+    known_data = _load_json(known_servers_file)
+    previously_known = set(known_data.get("knownMcpServers", []))
+
+    if not previously_known:
+        # First run — just save baseline, don't blacklist everything
+        known_data["knownMcpServers"] = sorted(current)
+        _write_atomic(known_servers_file, known_data)
+        _log(f"MCP tracking: baseline set with {len(current)} servers")
+        return
+
+    new_servers = current - previously_known
+    if not new_servers:
+        return
+
+    _log(f"MCP tracking: {len(new_servers)} new server(s): {sorted(new_servers)}")
+
+    # Add new servers to disabledMcpServers in all project entries
+    data = _load_json(CLAUDE_JSON)
+    projects = data.get("projects", {})
+    updated_count = 0
+    for proj_path, proj_data in projects.items():
+        existing_disabled = set(proj_data.get("disabledMcpServers", []))
+        to_add = new_servers - existing_disabled
+        if to_add:
+            proj_data["disabledMcpServers"] = sorted(existing_disabled | to_add)
+            updated_count += 1
+
+    if updated_count:
+        _write_atomic(CLAUDE_JSON, data)
+        _log(f"MCP tracking: added {len(new_servers)} new server(s) to disabledMcpServers in {updated_count} project(s)")
+
+    # Update known servers
+    known_data["knownMcpServers"] = sorted(current)
+    _write_atomic(known_servers_file, known_data)
+
+
+# ---------------------------------------------------------------------------
 # Main daemon loop
 # ---------------------------------------------------------------------------
 
@@ -523,6 +591,12 @@ def _run_daemon(poll_sec: int) -> None:
             _save_hashes(new_hashes)
             old_hashes = new_hashes
             old_source_map = dict(source_files)
+
+            # Check for new MCP servers (additive blacklisting)
+            try:
+                _check_new_mcp_servers(HASH_FILE)
+            except Exception as mcp_err:
+                _log(f"MCP tracking error: {mcp_err}")
 
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")

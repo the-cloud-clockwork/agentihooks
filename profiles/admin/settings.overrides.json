@@ -1,6 +1,7 @@
 {
   "env": {
-    "AGENTIHOOKS_SECRETS_MODE": "warn"
+    "AGENTIHOOKS_SECRETS_MODE": "warn",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
   },
   "permissions": {
     "defaultMode": "auto",

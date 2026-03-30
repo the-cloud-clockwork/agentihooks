@@ -150,7 +150,7 @@ class TestDetectVenv:
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         with patch("pathlib.Path.home", return_value=fake_home):
-            with patch("os.getcwd", return_value=str(tmp_path)):
+            with patch("pathlib.Path.cwd", return_value=tmp_path):
                 with patch.dict("os.environ", {}, clear=True):
                     result = install._detect_venv()
         assert result == venv

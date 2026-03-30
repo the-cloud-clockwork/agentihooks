@@ -178,7 +178,7 @@ This lets you spot runaway token consumption in real time — a `burn: 45K/turn`
 A background daemon scrapes your Claude.ai usage page and surfaces plan-level quota on statusline Line 3:
 
 ```
-quota: session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+quota: session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
 ```
 
 You see your weekly quota percentage, per-model breakdown, extra usage spend, and reset times — all color-coded (green < 60%, yellow < 80%, red above).

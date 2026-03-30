@@ -29,7 +29,9 @@ def load_quota() -> Optional[dict]:
     if not updated_str:
         return {"stale": True}
     try:
-        updated = datetime.fromisoformat(updated_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+        updated = datetime.fromisoformat(updated_str.rstrip("Z")).replace(
+            tzinfo=timezone.utc
+        )
     except ValueError:
         return {"stale": True}
     if (datetime.now(timezone.utc) - updated).total_seconds() > stale_sec:
@@ -50,7 +52,7 @@ def _dur(sec: int) -> str:
 def fmt_quota(data: dict) -> str:
     """Compact quota string — caller applies ANSI color.
 
-    Output: session:50% [1h35m] | weekly: all:34% sonnet:5% | extra: €40/100 (40%) resets Apr 1 | balance:€100
+    Output: session:50% [1h35m] | all:34% sonnet:5% | extra: €40/100 (40%) resets Apr 1 | balance:€100
     """
     if data.get("stale"):
         return "stale"
@@ -81,7 +83,7 @@ def fmt_quota(data: dict) -> str:
             t += f" resets {sn['resets']}"
         wk_parts.append(t)
     if wk_parts:
-        parts.append("weekly: " + " | ".join(wk_parts))
+        parts.append(" | ".join(wk_parts))
 
     # Extra usage / monthly spend
     spend = data.get("monthly_spend")
@@ -99,7 +101,9 @@ def fmt_quota(data: dict) -> str:
     # Balance
     balance = data.get("balance")
     if balance is not None:
-        sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(data.get("monthly_spend", {}).get("currency", ""), "")
+        sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(
+            data.get("monthly_spend", {}).get("currency", ""), ""
+        )
         parts.append(f"balance:{sym}{balance}")
 
     return " | ".join(parts)

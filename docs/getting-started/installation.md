@@ -135,7 +135,7 @@ All hooks and the MCP server auto-load this file at import time (plus any `~/.ag
 The statusline can show your Anthropic console usage on line 3. Example output:
 
 ```
-session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
 ```
 
 This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes claude.ai/settings/usage headlessly via Playwright. Auth uses your real system browser — no Chromium login required.

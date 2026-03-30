@@ -988,10 +988,18 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     # Build settings.local.json — only the delta
     local_settings: dict = {}
 
-    # Disabled MCP servers (merge all sources)
+    # Disabled MCP servers (project-scope .mcp.json only — for connectors)
     all_disabled = list(dict.fromkeys(conn_disabled + repo_disabled))
     if all_disabled:
         local_settings["disabledMcpjsonServers"] = all_disabled
+
+    # Blacklist-all-by-default: disable every known MCP in ~/.claude.json
+    # projects block, except those the profile whitelists.
+    all_known = _get_all_known_mcp_names()
+    profile_enabled = _get_profile_enabled_servers(profile_dir)
+    to_disable = sorted(all_known - (profile_enabled or set()))
+    if not dry_run:
+        _write_project_disabled_mcps(repo_dir, to_disable)
 
     # Permissions — merge profile + connector + repo overrides
     perms: dict = {}
@@ -1035,7 +1043,9 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     print(f"[OK] Wrote {out_path}")
     print(f"     Profile: {profile_name}")
     if all_disabled:
-        print(f"     Disabled servers: {all_disabled}")
+        print(f"     Disabled .mcp.json servers: {all_disabled}")
+    if to_disable:
+        print(f"     Blacklisted MCPs ({len(to_disable)}): {to_disable[:5]}{'...' if len(to_disable) > 5 else ''}")
     if all_deny:
         print(f"     Deny rules: {len(all_deny)}")
     if all_ask:
@@ -1557,6 +1567,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         else:
             print(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
 
+    # --- 9c. Blacklist all MCPs across all projects ---
+    print()
+    print("Applying MCP blacklist to all projects...")
+    _blacklist_all_projects_mcps(profile_dir)
+
     # --- 10. Install agentihooks CLI tool to ~/.local/bin ---
     print()
     _install_cli_tool()
@@ -1600,6 +1615,103 @@ def _resolve_claude_json() -> Path:
 
 
 _CLAUDE_JSON = _resolve_claude_json()
+
+def _get_user_scope_mcp_names() -> set[str]:
+    """Return the set of MCP server names defined in ~/.claude.json."""
+    if not _CLAUDE_JSON.exists():
+        return set()
+    try:
+        data = load_json(_CLAUDE_JSON)
+        return set(data.get("mcpServers", {}).keys())
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def _get_all_known_mcp_names() -> set[str]:
+    """Return ALL known MCP server names from ~/.claude.json.
+
+    Includes root mcpServers keys AND claudeAiMcpEverConnected entries.
+    """
+    if not _CLAUDE_JSON.exists():
+        return set()
+    try:
+        data = load_json(_CLAUDE_JSON)
+        names = set(data.get("mcpServers", {}).keys())
+        names.update(data.get("claudeAiMcpEverConnected", []))
+        return names
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
+    """Read enabledMcpServers whitelist from profile.yml.
+
+    Returns set of server names to keep enabled, or None if field absent.
+    """
+    yml_path = profile_dir / "profile.yml"
+    if not yml_path.exists():
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(yml_path.read_text()) or {}
+        enabled = data.get("enabledMcpServers")
+        if enabled is None:
+            return None
+        return set(enabled) if enabled else set()
+    except (OSError, Exception):
+        return None
+
+
+def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> None:
+    """Write disabledMcpServers to ~/.claude.json projects[path] block."""
+    if not _CLAUDE_JSON.exists():
+        return
+    try:
+        data = load_json(_CLAUDE_JSON)
+        projects = data.setdefault("projects", {})
+        proj = projects.setdefault(str(repo_path), {})
+        proj["disabledMcpServers"] = disabled_names
+        save_json(_CLAUDE_JSON, data)
+        print(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  [WARN] Could not update ~/.claude.json: {e}")
+
+
+
+def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
+    """Blacklist all known MCPs in every project entry in ~/.claude.json.
+
+    Called by 'agentihooks global' to ensure every project starts with all
+    MCPs disabled except those the profile whitelists.
+    """
+    if not _CLAUDE_JSON.exists():
+        return
+    try:
+        data = load_json(_CLAUDE_JSON)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    projects = data.get("projects", {})
+    if not projects:
+        return
+
+    all_known = _get_all_known_mcp_names()
+    if not all_known:
+        return
+
+    profile_enabled = _get_profile_enabled_servers(profile_dir)
+    to_disable = sorted(all_known - (profile_enabled or set()))
+
+    updated = 0
+    for proj_path, proj_data in projects.items():
+        if not isinstance(proj_data, dict):
+            continue
+        proj_data["disabledMcpServers"] = to_disable
+        updated += 1
+
+    if updated:
+        save_json(_CLAUDE_JSON, data)
+        print(f"  [OK] Blacklisted {len(to_disable)} MCPs across {updated} project(s) in ~/.claude.json")
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:

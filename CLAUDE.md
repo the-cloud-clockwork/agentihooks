@@ -101,7 +101,7 @@ Three subsystems, all gated by `TOKEN_CONTROL_ENABLED`:
 `hooks/quota.py` reads a JSON file written by `scripts/claude_usage_watcher.py` and surfaces Anthropic console usage on statusline line 3. Example output:
 
 ```
-session:53% [1h] | weekly: all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
 ```
 
 The watcher (`scripts/claude_usage_watcher.py`) is a headless Playwright daemon that scrapes claude.ai/settings/usage. Auth uses your real browser — no Chromium login flow. The CLI manages the daemon lifecycle:
