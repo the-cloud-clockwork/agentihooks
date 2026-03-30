@@ -59,9 +59,12 @@ Data directory: defaults to ~/.agentihooks/
 """
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import shutil
+import signal
 import sys
 from collections.abc import Callable
 from copy import deepcopy
@@ -300,6 +303,64 @@ def _state_remove_mcp(mcp_path: Path) -> None:
         paths.remove(path_str)
         state["mcpFiles"] = paths
         _save_state(state)
+
+
+# ---------------------------------------------------------------------------
+# Target registry (sync daemon)
+# ---------------------------------------------------------------------------
+
+_SYNC_LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
+
+
+def _register_target_global(profile: str) -> None:
+    """Record the global install as a sync daemon target."""
+    state = _load_state()
+    targets = state.setdefault("targets", {})
+    targets["global"] = {
+        "path": str(CLAUDE_HOME),
+        "profile": profile,
+        "installed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_state(state)
+
+
+def _register_target_project(project_path: Path, profile: str) -> None:
+    """Record a project install as a sync daemon target."""
+    state = _load_state()
+    targets = state.setdefault("targets", {})
+    projects = targets.setdefault("projects", {})
+    projects[str(project_path)] = {
+        "profile": profile,
+        "installed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_state(state)
+
+
+def _unregister_target_project(project_path: Path) -> None:
+    """Remove a project from the sync daemon targets."""
+    state = _load_state()
+    targets = state.get("targets", {})
+    projects = targets.get("projects", {})
+    projects.pop(str(project_path), None)
+    _save_state(state)
+
+
+@contextlib.contextmanager
+def _sync_lock(*, blocking: bool = True):
+    """Advisory file lock for install/sync operations.
+
+    The sync daemon uses ``blocking=False`` and skips the cycle on contention.
+    Manual installs use the default ``blocking=True`` to wait for the lock.
+    """
+    _SYNC_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(_SYNC_LOCK_FILE, "w")  # noqa: SIM115
+    try:
+        flags = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, flags)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1362,6 +1423,11 @@ def _build_otel_env(profile_data: dict) -> dict:
 
 
 def install_global(args: argparse.Namespace) -> None:
+    with _sync_lock():
+        _install_global_inner(args)
+
+
+def _install_global_inner(args: argparse.Namespace) -> None:
     profile_name: str = args.profile
 
     # Validate profile exists (built-in or bundle)
@@ -1493,6 +1559,9 @@ def install_global(args: argparse.Namespace) -> None:
     # --- 11. Seed ~/.agentihooks/.env from .env.example (first run only) ---
     print()
     _seed_user_env_file()
+
+    # --- 12. Register as sync daemon target ---
+    _register_target_global(profile_name)
 
     # --- Done ---
     print()
@@ -2123,6 +2192,11 @@ def uninstall_global(args: argparse.Namespace) -> None:
 
 
 def install_project(args: argparse.Namespace) -> None:
+    with _sync_lock():
+        _install_project_inner(args)
+
+
+def _install_project_inner(args: argparse.Namespace) -> None:
     project_path = Path(args.path).expanduser().resolve()
     profile_name = args.profile
 
@@ -2155,6 +2229,9 @@ def install_project(args: argparse.Namespace) -> None:
     print(f"[OK] Wrote {mcp_dst}")
     print()
     print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify the hooks-utils server.")
+
+    # Register as sync daemon target
+    _register_target_project(project_path, profile_name)
 
 
 # ---------------------------------------------------------------------------
@@ -2422,6 +2499,91 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
+def cmd_daemon(args: "argparse.Namespace") -> None:
+    """Launch or interact with the sync daemon."""
+    daemon_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
+    if not daemon_script.exists():
+        print(f"ERROR: sync daemon not found at {daemon_script}", file=sys.stderr)
+        sys.exit(1)
+
+    python = str(_detect_venv() or sys.executable)
+    pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
+    log_file = AGENTIHOOKS_STATE_DIR / "logs" / "sync-daemon.log"
+    hash_file = AGENTIHOOKS_STATE_DIR / "sync-hashes.json"
+
+    if args.action == "logs":
+        if not log_file.exists():
+            print("No log file yet. Start the daemon first:  agentihooks daemon start")
+            sys.exit(0)
+        os.execlp("tail", "tail", "-f", str(log_file))
+
+    elif args.action == "stop":
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, signal.SIGTERM)
+                pid_file.unlink(missing_ok=True)
+                print(f"[sync] Daemon stopped (PID {pid}).")
+            except (ProcessLookupError, ValueError):
+                pid_file.unlink(missing_ok=True)
+                print("[sync] No daemon running (stale PID cleaned up).")
+        else:
+            print("[sync] No daemon running.")
+
+    elif args.action == "status":
+        state = _load_state()
+        targets = state.get("targets", {})
+
+        # PID status
+        running = False
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                running = True
+                print(f"[sync] Daemon running (PID {pid})")
+            except (ProcessLookupError, ValueError):
+                pid_file.unlink(missing_ok=True)
+                print("[sync] Daemon not running (stale PID cleaned up)")
+        else:
+            print("[sync] Daemon not running")
+
+        # Targets
+        g = targets.get("global")
+        if g:
+            print(f"  Global target: {g['path']} (profile: {g['profile']})")
+        else:
+            print("  Global target: not registered (run 'agentihooks global' first)")
+        projects = targets.get("projects", {})
+        if projects:
+            print(f"  Project targets: {len(projects)}")
+            for p, info in projects.items():
+                exists = Path(p).exists()
+                marker = "" if exists else " [PATH MISSING]"
+                print(f"    {p} (profile: {info['profile']}){marker}")
+        else:
+            print("  Project targets: none")
+
+        # Hash file
+        if hash_file.exists():
+            try:
+                hdata = load_json(hash_file)
+                n = len(hdata.get("hashes", {}))
+                print(f"  Watching {n} source file(s)")
+                print(f"  Last scan: {hdata.get('_updated', 'unknown')}")
+            except (json.JSONDecodeError, OSError):
+                print("  Hash file: corrupt")
+        else:
+            print("  Hash file: not yet created")
+
+    else:  # start
+        cmd = [python, str(daemon_script)]
+        if args.foreground:
+            cmd.append("--foreground")
+        cmd += ["--poll", str(args.poll)]
+        os.execv(python, cmd)
+
+
 def cmd_quota(args: "argparse.Namespace") -> None:
     """Launch or interact with the Claude.ai quota watcher."""
     watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
@@ -2611,6 +2773,22 @@ def main() -> None:
     )
     quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
+    daemon_p = sub.add_parser("daemon", help="Manage the sync daemon (auto-propagation)")
+    daemon_p.add_argument(
+        "action",
+        nargs="?",
+        default="start",
+        choices=["start", "stop", "status", "logs"],
+        help="start (default) — start background sync daemon; stop — kill daemon; status — show daemon state; logs — tail daemon log",
+    )
+    daemon_p.add_argument(
+        "--poll",
+        type=int,
+        default=int(os.environ.get("AGENTIHOOKS_SYNC_POLL_SEC", "60")),
+        help="Poll interval in seconds (default: 60, env: AGENTIHOOKS_SYNC_POLL_SEC)",
+    )
+    daemon_p.add_argument("--foreground", action="store_true", help="Run in foreground (for debugging)")
+
     args = parser.parse_args(_argv)
 
     if args.loadenv is not None:
@@ -2668,6 +2846,8 @@ def main() -> None:
             base_env=getattr(args, "new_base_env", None),
             auto_link=getattr(args, "new_auto_link", False),
         )
+    elif args.command == "daemon":
+        cmd_daemon(args)
 
 
 if __name__ == "__main__":
