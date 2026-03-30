@@ -123,8 +123,26 @@ _BOLD = "\033[1m"
 _DIM = "\033[2m"
 _GREEN = "\033[32m"
 _YELLOW = "\033[33m"
+_RED = "\033[31m"
 _CYAN = "\033[36m"
 _RESET = "\033[0m"
+
+_TAG_COLORS = {
+    "[OK]": _GREEN,
+    "[--]": _DIM,
+    "[!!]": _YELLOW,
+    "[RM]": _RED,
+    "[WARN]": _YELLOW,
+}
+
+
+def _cprint(msg: str, **kwargs) -> None:
+    """Print with auto-colored status tags."""
+    for tag, color in _TAG_COLORS.items():
+        if tag in msg:
+            print(f"{color}{msg}{_RESET}", **kwargs)
+            return
+    print(msg, **kwargs)
 
 # ---------------------------------------------------------------------------
 # .claudeignore template
@@ -439,7 +457,7 @@ def _bundle_link(bundle_dir: Path | None) -> None:
     profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
     has_claude = (bundle_dir / ".claude").is_dir()
 
-    print(f"[OK] Linked bundle: {bundle_dir}")
+    _cprint(f"[OK] Linked bundle: {bundle_dir}")
     if profile_names:
         print(f"     Profiles: {', '.join(profile_names)}")
     if has_claude:
@@ -463,11 +481,11 @@ def _bundle_unlink() -> None:
     to_remove = [name for name, info in connectors.items() if info.get("source") == "bundle"]
     for name in to_remove:
         del connectors[name]
-        print(f"  [OK] Removed bundle connector: {name}")
+        _cprint(f"  [OK] Removed bundle connector: {name}")
 
     del state["bundle"]
     _save_state(state)
-    print(f"[OK] Unlinked bundle: {bundle_path}")
+    _cprint(f"[OK] Unlinked bundle: {bundle_path}")
     print()
     print("Run 'agentihooks init' to remove bundle settings.")
 
@@ -537,16 +555,16 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
         conn_dir = Path(info["path"])
         conn_yml = conn_dir / "connector.yml"
         if not conn_yml.exists():
-            print(f"  [WARN] Connector '{name}' at {conn_dir} missing connector.yml — skipping")
+            _cprint(f"  [WARN] Connector '{name}' at {conn_dir} missing connector.yml — skipping")
             continue
         if not conn_dir.is_dir():
-            print(f"  [WARN] Connector '{name}' path {conn_dir} not found — skipping")
+            _cprint(f"  [WARN] Connector '{name}' path {conn_dir} not found — skipping")
             continue
 
         try:
             meta = yaml.safe_load(conn_yml.read_text())
         except Exception as exc:
-            print(f"  [WARN] Connector '{name}' connector.yml parse error: {exc} — skipping")
+            _cprint(f"  [WARN] Connector '{name}' connector.yml parse error: {exc} — skipping")
             continue
 
         # Base env (applied to all profiles)
@@ -558,7 +576,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
         if not profile_dir.is_dir():
             fallback = conn_dir / "profiles" / "default"
             if fallback.is_dir():
-                print(f"  [--] Connector '{name}': no profile '{profile_name}', falling back to 'default'")
+                _cprint(f"  [--] Connector '{name}': no profile '{profile_name}', falling back to 'default'")
                 profile_dir = fallback
         if profile_dir.is_dir():
             perms_file = profile_dir / "permissions.json"
@@ -568,7 +586,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
                     merged_deny.extend(perms.get("deny", []))
                     merged_disabled_servers.extend(perms.get("disabledMcpjsonServers", []))
                 except (json.JSONDecodeError, OSError) as exc:
-                    print(f"  [WARN] Connector '{name}' permissions.json error: {exc}")
+                    _cprint(f"  [WARN] Connector '{name}' permissions.json error: {exc}")
 
             env_file = profile_dir / "env.json"
             if env_file.exists():
@@ -576,7 +594,7 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
                     env_data = json.loads(env_file.read_text())
                     merged_env.update(env_data)
                 except (json.JSONDecodeError, OSError) as exc:
-                    print(f"  [WARN] Connector '{name}' env.json error: {exc}")
+                    _cprint(f"  [WARN] Connector '{name}' env.json error: {exc}")
 
     return merged_env, merged_deny, merged_disabled_servers
 
@@ -643,7 +661,7 @@ def _connector_link(conn_dir: Path | None) -> None:
     profiles_dir = conn_dir / "profiles"
     profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
 
-    print(f"[OK] Linked connector '{conn_name}' v{version}")
+    _cprint(f"[OK] Linked connector '{conn_name}' v{version}")
     if desc:
         print(f"     {desc}")
     if profile_names:
@@ -670,7 +688,7 @@ def _connector_unlink(conn_name: str) -> None:
 
     del connectors[conn_name]
     _save_state(state)
-    print(f"[OK] Unlinked connector '{conn_name}'")
+    _cprint(f"[OK] Unlinked connector '{conn_name}'")
     print()
     print("Run 'agentihooks init' to remove connector rules from your settings.")
 
@@ -886,7 +904,7 @@ def _connector_new(
         profile_dir.mkdir(parents=True)
         (profile_dir / "permissions.json").write_text(json.dumps({"deny": []}, indent=2) + "\n")
 
-    print(f"[OK] Created connector at {conn_dir}")
+    _cprint(f"[OK] Created connector at {conn_dir}")
     print()
     print("Structure:")
     print(f"  {conn_dir}/")
@@ -994,7 +1012,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                print(f"\n{_GREEN}[OK] Quota daemon started (PID {proc.pid}).{_RESET}")
+                _cprint(f"\n{_GREEN}[OK] Quota daemon started (PID {proc.pid}).{_RESET}")
         else:
             print(f"\n{_DIM}[--] Quota daemon already running.{_RESET}")
 
@@ -1053,7 +1071,7 @@ def _update_bashrc_block() -> None:
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
     sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
     _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
-    print(f"{_YELLOW}[OK] agentihooks block written to {_BASHRC}{_RESET}")
+    _cprint(f"{_YELLOW}[OK] agentihooks block written to {_BASHRC}{_RESET}")
     print(f"{_DIM}     run: source ~/.bashrc{_RESET}")
 
 
@@ -1076,12 +1094,12 @@ def cmd_init(args: argparse.Namespace) -> None:
 
         config = {"profile": profile_arg}
         config_path.write_text(json.dumps(config, indent=2) + "\n")
-        print(f"[OK] Created {config_path}")
+        _cprint(f"[OK] Created {config_path}")
     else:
         config = json.loads(config_path.read_text())
         if profile_arg:
             config["profile"] = profile_arg
-        print(f"[OK] Read {config_path}")
+        _cprint(f"[OK] Read {config_path}")
 
     # Resolve and write .claude/settings.local.json
     _write_project_settings(repo_dir, config, dry_run=getattr(args, "dry_run", False))
@@ -1094,7 +1112,7 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     # Validate profile
     profile_dir = _resolve_profile_dir(profile_name)
     if profile_dir is None:
-        print(f"  [WARN] Profile '{profile_name}' not found — using default")
+        _cprint(f"  [WARN] Profile '{profile_name}' not found — using default")
         profile_dir = _resolve_profile_dir("default") or PROFILES_DIR / "default"
         profile_name = "default"
 
@@ -1173,7 +1191,7 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     out_path = claude_dir / "settings.local.json"
     save_json(out_path, local_settings)
 
-    print(f"[OK] Wrote {out_path}")
+    _cprint(f"[OK] Wrote {out_path}")
     print(f"     Profile: {profile_name}")
     if all_disabled:
         print(f"     Disabled .mcp.json servers: {all_disabled}")
@@ -1197,7 +1215,7 @@ def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
         if entry not in content:
             with open(gitignore, "a") as f:
                 f.write(f"\n{entry}\n")
-            print(f"  [OK] Added {entry} to .gitignore")
+            _cprint(f"  [OK] Added {entry} to .gitignore")
     # Don't create .gitignore if it doesn't exist — not our file to create
 
 
@@ -1216,14 +1234,14 @@ def _seed_user_env_file() -> None:
     """
     AGENTIHOOKS_STATE_DIR.mkdir(parents=True, exist_ok=True)
     if _ENV_FILE_DST.exists():
-        print(f"  [--] {_ENV_FILE_DST} already exists — not overwritten (your file)")
+        _cprint(f"  [--] {_ENV_FILE_DST} already exists — not overwritten (your file)")
         return
     if _ENV_EXAMPLE_SRC.exists():
         shutil.copy2(_ENV_EXAMPLE_SRC, _ENV_FILE_DST)
-        print(f"  [OK] Created {_ENV_FILE_DST}")
+        _cprint(f"  [OK] Created {_ENV_FILE_DST}")
         print(f"       Configure your integrations: {_ENV_FILE_DST}")
     else:
-        print(f"  [!!] .env.example not found — could not seed {_ENV_FILE_DST}")
+        _cprint(f"  [!!] .env.example not found — could not seed {_ENV_FILE_DST}")
 
 
 # ---------------------------------------------------------------------------
@@ -1238,7 +1256,7 @@ _BLOCK_END = "# === end-agentihooks ==="
 def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) -> None:
     """Write a managed alias block into ~/.bashrc so `agentienv` sources the .env."""
     if not env_file.is_file():
-        print(f"[!!] env file not found: {env_file}", file=sys.stderr)
+        _cprint(f"[!!] env file not found: {env_file}", file=sys.stderr)
         sys.exit(1)
 
     env_dir = env_file.parent
@@ -1283,12 +1301,12 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
             elif not inside:
                 new_lines.append(line)
         _BASHRC.write_text("".join(new_lines), encoding="utf-8")
-        print(f"[OK] Updated agentihooks block in {_BASHRC}")
+        _cprint(f"[OK] Updated agentihooks block in {_BASHRC}")
     else:
         # Append new block
         sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
         _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
-        print(f"[OK] Added agentihooks block to {_BASHRC}")
+        _cprint(f"[OK] Added agentihooks block to {_BASHRC}")
 
     print()
     print("Now reload your shell and use:")
@@ -1350,7 +1368,7 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
 
     uv = shutil.which("uv")
     if not uv:
-        print("  [!!] uv not found — skipping requirements install.")
+        _cprint("  [!!] uv not found — skipping requirements install.")
         return
 
     for req in req_files:
@@ -1361,7 +1379,7 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
             return
 
         if answer != "y":
-            print("  [--] Skipped.")
+            _cprint("  [--] Skipped.")
             continue
 
         if force:
@@ -1370,7 +1388,7 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
         else:
             python = _detect_venv()
             if python is None:
-                print("  [!!] No virtual environment found.")
+                _cprint("  [!!] No virtual environment found.")
                 print("       Create and activate one first:")
                 print("         python3 -m venv .venv && source .venv/bin/activate")
                 print("       Or use --force to install into system Python (Docker/CI).")
@@ -1382,9 +1400,9 @@ def _prompt_install_requirements(*, force: bool = False) -> None:
             capture_output=False,
         )
         if result.returncode == 0:
-            print(f"  [OK] Installed {req}")
+            _cprint(f"  [OK] Installed {req}")
         else:
-            print(f"  [!!] uv pip install failed (exit {result.returncode})")
+            _cprint(f"  [!!] uv pip install failed (exit {result.returncode})")
 
 
 # ---------------------------------------------------------------------------
@@ -1608,15 +1626,15 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
     if conn_env:
         rendered.setdefault("env", {}).update(conn_env)
-        print(f"  [OK] Connector env: {list(conn_env.keys())}")
+        _cprint(f"  [OK] Connector env: {list(conn_env.keys())}")
     if conn_deny:
         rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
-        print(f"  [OK] Connector deny rules: {len(conn_deny)}")
+        _cprint(f"  [OK] Connector deny rules: {len(conn_deny)}")
     if conn_disabled:
         existing_disabled = rendered.get("disabledMcpjsonServers", [])
         merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
         rendered["disabledMcpjsonServers"] = merged_disabled
-        print(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
+        _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
 
     # --- 1d. OTEL baseline env vars from profile ---
     profile_yml_path = profile_dir / "profile.yml"
@@ -1627,7 +1645,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         otel_env = _build_otel_env(profile_data)
         if otel_env:
             rendered.setdefault("env", {}).update(otel_env)
-            print(f"  [OK] OTEL env: {list(otel_env.keys())}")
+            _cprint(f"  [OK] OTEL env: {list(otel_env.keys())}")
 
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
@@ -1640,7 +1658,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _backup_settings(existing_settings_path)
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
     save_json(existing_settings_path, merged)
-    print(f"[OK] Wrote {existing_settings_path}")
+    _cprint(f"[OK] Wrote {existing_settings_path}")
 
     # --- 4. Symlink skills/agents/commands (3 layers: agentihooks → bundle → profile) ---
     _resolved_profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
@@ -1680,9 +1698,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                 servers = mcp_data.get("mcpServers", {})
                 if servers:
                     _merge_mcp_to_user_scope(servers)
-                    print(f"  [OK] Bundle MCP servers: {', '.join(servers.keys())}")
+                    _cprint(f"  [OK] Bundle MCP servers: {', '.join(servers.keys())}")
             except (json.JSONDecodeError, OSError) as exc:
-                print(f"  [WARN] Could not read bundle .mcp.json: {exc}")
+                _cprint(f"  [WARN] Could not read bundle .mcp.json: {exc}")
     # Layer 3: profile-specific .claude/.mcp.json
     profile_mcp = _resolved_profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
     if profile_mcp.exists():
@@ -1691,9 +1709,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             servers = mcp_data.get("mcpServers", {})
             if servers:
                 _merge_mcp_to_user_scope(servers)
-                print(f"  [OK] Profile MCP servers: {', '.join(servers.keys())}")
+                _cprint(f"  [OK] Profile MCP servers: {', '.join(servers.keys())}")
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"  [WARN] Could not read profile .mcp.json: {exc}")
+            _cprint(f"  [WARN] Could not read profile .mcp.json: {exc}")
 
     # --- 7. Re-apply any custom MCPs tracked in state.json ---
     if STATE_JSON.exists():
@@ -1708,7 +1726,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             print()
             manage_user_mcp(mcp_path)
         else:
-            print(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
+            _cprint(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
 
     # --- 9c. Blacklist all MCPs across all projects ---
     print()
@@ -1800,7 +1818,7 @@ def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
     except OSError:
         return None
     except Exception as exc:
-        print(f"  [WARN] Could not parse enabledMcpServers from {yml_path}: {exc}")
+        _cprint(f"  [WARN] Could not parse enabledMcpServers from {yml_path}: {exc}")
         return None
 
 
@@ -1814,9 +1832,9 @@ def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> 
         proj = projects.setdefault(str(repo_path), {})
         proj["disabledMcpServers"] = disabled_names
         save_json(_CLAUDE_JSON, data)
-        print(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
+        _cprint(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
     except (json.JSONDecodeError, OSError) as e:
-        print(f"  [WARN] Could not update ~/.claude.json: {e}")
+        _cprint(f"  [WARN] Could not update ~/.claude.json: {e}")
 
 
 
@@ -1853,7 +1871,7 @@ def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
 
     if updated:
         save_json(_CLAUDE_JSON, data)
-        print(f"  [OK] Blacklisted {len(to_disable)} MCPs across {updated} project(s) in ~/.claude.json")
+        _cprint(f"  [OK] Blacklisted {len(to_disable)} MCPs across {updated} project(s) in ~/.claude.json")
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:
@@ -1871,17 +1889,17 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
     existing["mcpServers"] = existing_servers
     save_json(_CLAUDE_JSON, existing)
     if added:
-        print(f"  [OK] Added user-scope MCP servers  : {', '.join(added)}")
+        _cprint(f"  [OK] Added user-scope MCP servers  : {', '.join(added)}")
     if updated:
-        print(f"  [OK] Updated user-scope MCP servers: {', '.join(updated)}")
+        _cprint(f"  [OK] Updated user-scope MCP servers: {', '.join(updated)}")
     if not added and not updated:
-        print(f"  [--] User-scope MCP servers unchanged: {', '.join(servers.keys())}")
+        _cprint(f"  [--] User-scope MCP servers unchanged: {', '.join(servers.keys())}")
 
 
 def _remove_mcp_from_user_scope(servers: dict) -> None:
     """Remove *servers* keys from the top-level mcpServers of ~/.claude.json."""
     if not _CLAUDE_JSON.exists():
-        print("  [--] ~/.claude.json does not exist — nothing to remove.")
+        _cprint("  [--] ~/.claude.json does not exist — nothing to remove.")
         return
     existing: dict = load_json(_CLAUDE_JSON)
     existing_servers: dict = existing.get("mcpServers", {})
@@ -1895,9 +1913,9 @@ def _remove_mcp_from_user_scope(servers: dict) -> None:
     existing["mcpServers"] = existing_servers
     save_json(_CLAUDE_JSON, existing)
     if removed:
-        print(f"  [OK] Removed user-scope MCP servers: {', '.join(removed)}")
+        _cprint(f"  [OK] Removed user-scope MCP servers: {', '.join(removed)}")
     if missing:
-        print(f"  [--] Not found (already removed?)  : {', '.join(missing)}")
+        _cprint(f"  [--] Not found (already removed?)  : {', '.join(missing)}")
 
 
 def _build_mcp_config(mcp_categories: str) -> dict:
@@ -1944,7 +1962,7 @@ def manage_user_mcp(mcp_path: Path, *, uninstall: bool = False) -> None:
 
     servers: dict = raw.get("mcpServers", {})
     if not servers:
-        print(f"  [--] No mcpServers found in {mcp_path} — nothing to do.")
+        _cprint(f"  [--] No mcpServers found in {mcp_path} — nothing to do.")
         return
 
     action = "Uninstalling" if uninstall else "Installing"
@@ -1968,23 +1986,23 @@ def sync_user_mcp() -> None:
     state = _load_state()
     paths: list[str] = state.get("mcpFiles", [])
     if not paths:
-        print(f"  [--] No MCP files tracked in {STATE_JSON} — nothing to sync.")
+        _cprint(f"  [--] No MCP files tracked in {STATE_JSON} — nothing to sync.")
         return
 
     print(f"Syncing {len(paths)} tracked MCP file(s) from {STATE_JSON}:")
     for path_str in paths:
         p = Path(path_str)
         if not p.exists():
-            print(f"  [!!] Skipping missing file: {path_str}")
+            _cprint(f"  [!!] Skipping missing file: {path_str}")
             continue
         try:
             raw = load_json(p)
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"  [!!] Cannot read {path_str}: {exc}")
+            _cprint(f"  [!!] Cannot read {path_str}: {exc}")
             continue
         servers: dict = raw.get("mcpServers", {})
         if not servers:
-            print(f"  [--] No mcpServers in {path_str} — skipping.")
+            _cprint(f"  [--] No mcpServers in {path_str} — skipping.")
             continue
         print(f"  From {p.name}: {', '.join(servers.keys())}")
         _merge_mcp_to_user_scope(servers)
@@ -2061,7 +2079,7 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
 
     lib_path = lib_path.expanduser().resolve()
     if not lib_path.is_dir():
-        print(f"[!!] Not a directory: {lib_path}", file=sys.stderr)
+        _cprint(f"[!!] Not a directory: {lib_path}", file=sys.stderr)
         sys.exit(1)
 
     # Keep only files that contain mcpServers
@@ -2129,7 +2147,7 @@ def _install_cli_tool() -> None:
 
     uv = shutil.which("uv")
     if not uv:
-        print("  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/")
+        _cprint("  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/")
         print("       Then re-run: uv run agentihooks init")
         return
 
@@ -2140,9 +2158,9 @@ def _install_cli_tool() -> None:
         text=True,
     )
     if result.returncode == 0:
-        print("  [OK] CLI installed via: uv tool install --editable .")
+        _cprint("  [OK] CLI installed via: uv tool install --editable .")
     else:
-        print(f"  [!!] uv tool install failed: {result.stderr.strip()}")
+        _cprint(f"  [!!] uv tool install failed: {result.stderr.strip()}")
 
 
 def _uninstall_cli_tool() -> None:
@@ -2151,7 +2169,7 @@ def _uninstall_cli_tool() -> None:
 
     uv = shutil.which("uv")
     if not uv:
-        print("  [!!] uv not found — cannot uninstall CLI automatically.")
+        _cprint("  [!!] uv not found — cannot uninstall CLI automatically.")
         print(f"       Remove manually: uv tool uninstall {_CLI_NAME}")
         return
 
@@ -2161,13 +2179,13 @@ def _uninstall_cli_tool() -> None:
         text=True,
     )
     if result.returncode == 0:
-        print(f"  [OK] Uninstalled CLI via: uv tool uninstall {_CLI_NAME}")
+        _cprint(f"  [OK] Uninstalled CLI via: uv tool uninstall {_CLI_NAME}")
     else:
         stderr = result.stderr.strip()
         if "not installed" in stderr.lower():
-            print(f"  [--] {_CLI_NAME} was not installed via uv tool (skipping)")
+            _cprint(f"  [--] {_CLI_NAME} was not installed via uv tool (skipping)")
         else:
-            print(f"  [!!] uv tool uninstall failed: {stderr}")
+            _cprint(f"  [!!] uv tool uninstall failed: {stderr}")
 
 
 # ---------------------------------------------------------------------------
@@ -2197,7 +2215,7 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str) -> int:
             continue
         if any(target.startswith(root) for root in managed_roots):
             link.unlink()
-            print(f"  [RM] Removed {label} symlink: {link.name}")
+            _cprint(f"  [RM] Removed {label} symlink: {link.name}")
             count += 1
     return count
 
@@ -2212,26 +2230,26 @@ def _cleanup_stale_links(dst_dir: Path, src_dir: Path, filter_fn: Callable[[Path
         target = link.resolve()
         if not link.exists():
             link.unlink()
-            print(f"  [RM] Removed broken symlink: {link.name}")
+            _cprint(f"  [RM] Removed broken symlink: {link.name}")
         elif target.parent.resolve() == src_dir.resolve() and filter_fn and not filter_fn(target):
             link.unlink()
-            print(f"  [RM] Removed stale symlink: {link.name}")
+            _cprint(f"  [RM] Removed stale symlink: {link.name}")
 
 
 def _link_item(item: Path, link: Path, label: str) -> None:
     """Create or update a single symlink *link* → *item*."""
     if link.is_symlink():
         if link.resolve() == item.resolve():
-            print(f"  [--] {label} '{item.name}' already linked → {item}")
+            _cprint(f"  [--] {label} '{item.name}' already linked → {item}")
         else:
             link.unlink()
             link.symlink_to(item)
-            print(f"  [OK] Re-linked {label} '{item.name}' → {item}")
+            _cprint(f"  [OK] Re-linked {label} '{item.name}' → {item}")
     elif link.exists():
-        print(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
+        _cprint(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
     else:
         link.symlink_to(item)
-        print(f"  [OK] Linked {label} '{item.name}' → {item}")
+        _cprint(f"  [OK] Linked {label} '{item.name}' → {item}")
 
 
 def _symlink_dir_contents(
@@ -2274,12 +2292,12 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
 
     if not src.exists():
-        print(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
+        _cprint(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
     if dst.is_symlink():
         if dst.resolve() == src.resolve():
-            print(f"  [--] {_CLAUDE_MD_NAME} already linked → {src}")
+            _cprint(f"  [--] {_CLAUDE_MD_NAME} already linked → {src}")
             return
         dst.unlink()
 
@@ -2291,7 +2309,7 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
         dst.unlink()
 
     dst.symlink_to(src)
-    print(f"  [OK] Linked {_CLAUDE_MD_NAME} → {src}")
+    _cprint(f"  [OK] Linked {_CLAUDE_MD_NAME} → {src}")
 
 
 def _cleanup_stale_claude_md_symlink() -> None:
@@ -2303,7 +2321,7 @@ def _cleanup_stale_claude_md_symlink() -> None:
     # Remove if it points into any profiles/ directory (built-in or bundle)
     if "profiles/" in target_str or "profiles\\" in target_str:
         claude_md.unlink()
-        print(f"  [OK] Removed stale {_CLAUDE_MD_NAME} symlink → {target_str}")
+        _cprint(f"  [OK] Removed stale {_CLAUDE_MD_NAME} symlink → {target_str}")
 
 
 # ---------------------------------------------------------------------------
@@ -2451,7 +2469,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     # --- 3. Remove settings.json ---
     if remove_settings:
         settings_path.unlink()
-        print(f"[OK] Removed {settings_path}")
+        _cprint(f"[OK] Removed {settings_path}")
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 
@@ -2465,13 +2483,13 @@ def uninstall_global(args: argparse.Namespace) -> None:
     ]:
         n = _remove_agentihooks_symlinks(dst_dir, label)
         if n == 0:
-            print(f"  [--] No {label} symlinks found in {dst_dir}")
+            _cprint(f"  [--] No {label} symlinks found in {dst_dir}")
 
     # --- 5. Remove CLAUDE.md symlink (stale) + active system prompt ---
     print()
     if remove_claude_md:
         claude_md_dst.unlink()
-        print(f"[OK] Removed stale {claude_md_dst}")
+        _cprint(f"[OK] Removed stale {claude_md_dst}")
     else:
         print(f"[--] Skipped {claude_md_dst} (not a managed symlink)")
 
@@ -2481,12 +2499,12 @@ def uninstall_global(args: argparse.Namespace) -> None:
         print(f"Removing {len(managed_servers)} MCP server(s) from {_CLAUDE_JSON}:")
         _remove_mcp_from_user_scope(managed_servers)
     else:
-        print(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
+        _cprint(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
 
     # --- 7. Stop quota + sync daemons ---
     print()
     if _quota_stop_daemon():
-        print("[OK] Quota daemon stopped.")
+        _cprint("[OK] Quota daemon stopped.")
     else:
         print("[--] Quota daemon not running.")
     sync_pid = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
@@ -2496,13 +2514,13 @@ def uninstall_global(args: argparse.Namespace) -> None:
             pid = int(sync_pid.read_text().strip())
             os.kill(pid, signal.SIGTERM)
             sync_pid.unlink(missing_ok=True)
-            print(f"[OK] Sync daemon stopped (PID {pid}).")
+            _cprint(f"[OK] Sync daemon stopped (PID {pid}).")
         except (ProcessLookupError, ValueError):
             sync_pid.unlink(missing_ok=True)
 
     # --- 8. Remove bashrc block ---
     if _remove_bashrc_block():
-        print(f"[OK] Removed agentihooks block from {_BASHRC}")
+        _cprint(f"[OK] Removed agentihooks block from {_BASHRC}")
 
     # --- 9. Uninstall CLI ---
     print()
@@ -2558,7 +2576,7 @@ def _install_project_inner(args: argparse.Namespace) -> None:
             sys.exit(0)
 
     save_json(mcp_dst, rendered_mcp)
-    print(f"[OK] Wrote {mcp_dst}")
+    _cprint(f"[OK] Wrote {mcp_dst}")
     print()
     print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify the hooks-utils server.")
 
@@ -2782,7 +2800,7 @@ def cmd_mcp_action(action: str, scan_dir: Path | None = None, *, mcp_path: Path 
                 sys.exit(1)
             selected_file, all_servers = installed[idx]
         if not all_servers:
-            print(f"  [!!] Cannot read servers from {selected_file} — removing from tracking.")
+            _cprint(f"  [!!] Cannot read servers from {selected_file} — removing from tracking.")
             _state_remove_mcp(selected_file)
             return
         # Stage 2 — pick server(s) to remove
@@ -2822,12 +2840,12 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     dest = target_dir / ".claudeignore"
 
     if dest.exists() and not force:
-        print(f"  [--] {dest} already exists — use --force to overwrite")
+        _cprint(f"  [--] {dest} already exists — use --force to overwrite")
         return
 
     action = "Overwrote" if dest.exists() else "Created"
     dest.write_text(CLAUDEIGNORE_TEMPLATE, encoding="utf-8")
-    print(f"  [OK] {action} {dest}")
+    _cprint(f"  [OK] {action} {dest}")
     print("       Edit it to add project-specific exclusions.")
 
 
