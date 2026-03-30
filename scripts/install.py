@@ -3008,6 +3008,45 @@ def cmd_quota(args: "argparse.Namespace") -> None:
         print(_json.dumps(data, indent=2))
 
     else:  # watch (default)
+        # If already running, show status + available commands
+        pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                print(f"[quota] Daemon running (PID {pid}), account: {active}")
+                usage_file = Path(os.getenv(
+                    "CLAUDE_USAGE_FILE",
+                    str(AGENTIHOOKS_STATE_DIR / "claude_usage.json"),
+                ))
+                if usage_file.exists():
+                    import json as _json2
+                    try:
+                        data = _json2.loads(usage_file.read_text())
+                        s = data.get("session", {})
+                        w = (data.get("weekly") or {}).get("all_models", {})
+                        parts = []
+                        if s.get("used_pct") is not None:
+                            parts.append(f"session:{s['used_pct']:.0f}%")
+                        if w.get("used_pct") is not None:
+                            parts.append(f"weekly:{w['used_pct']:.0f}%")
+                        if parts:
+                            print(f"  {' | '.join(parts)}")
+                    except (json.JSONDecodeError, OSError):
+                        pass
+                print()
+                print("Commands:")
+                print("  agentihooks quota status       # full quota JSON")
+                print("  agentihooks quota list          # show accounts")
+                print("  agentihooks quota switch [NAME] # switch account")
+                print("  agentihooks quota auth [NAME]   # add/update account")
+                print("  agentihooks quota restart       # restart daemon")
+                print("  agentihooks quota stop          # stop daemon")
+                print("  agentihooks quota logs          # tail daemon log")
+                print("  agentihooks quota remove NAME   # delete account")
+                return
+            except (ProcessLookupError, ValueError, PermissionError):
+                pid_file.unlink(missing_ok=True)
         _quota_start_daemon(python, watcher, args.poll)
 
 
