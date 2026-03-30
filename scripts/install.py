@@ -1008,7 +1008,9 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
         profile_name = "default"
 
     # Load profile overrides
-    overrides_path = profile_dir / "settings.overrides.json"
+    overrides_path = profile_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
+    if not overrides_path.exists():
+        overrides_path = profile_dir / "settings.overrides.json"
     profile_overrides = {}
     if overrides_path.exists():
         try:
@@ -1339,28 +1341,14 @@ def _read_profile_description(profile_dir: Path) -> str:
 
 def query_active_profile() -> None:
     """Print the currently installed global profile and exit."""
-    claude_md = CLAUDE_HOME / _CLAUDE_MD_NAME
-    if not claude_md.exists():
+    state = _load_state()
+    targets = state.get("targets", {})
+    global_target = targets.get("global", {})
+    profile_name = global_target.get("profile")
+    if profile_name:
+        print(profile_name)
+    else:
         print("not installed")
-        return
-    if not claude_md.is_symlink():
-        print("unmanaged  (CLAUDE.md is not a symlink — installed manually)")
-        return
-    target = claude_md.resolve()
-    # Check built-in profiles first, then bundle
-    search_dirs = [PROFILES_DIR]
-    bundle = _get_bundle_path()
-    if bundle:
-        search_dirs.append(bundle / "profiles")
-    for search_dir in search_dirs:
-        try:
-            rel = target.relative_to(search_dir)
-            profile_name = rel.parts[0]
-            print(profile_name)
-            return
-        except ValueError:
-            continue
-    print(f"unknown  (symlink points outside profiles/: {target})")
 
 
 def list_profiles() -> None:
@@ -1382,7 +1370,7 @@ def list_profiles() -> None:
         else:
             source = "bundle"
         marker = ""
-        claude_md = profile_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
+        claude_md = profile_dir / _CLAUDE_MD_NAME
         if not claude_md.exists():
             marker = f"  [no {_CLAUDE_MD_NAME}]"
         desc_str = f" — {desc}" if desc else ""
@@ -1515,7 +1503,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)  # NOSONAR
 
     # --- 1b. Apply per-profile overrides (e.g. env vars like AGENTIHOOKS_SECRETS_MODE) ---
-    overrides_path = profile_dir / "settings.overrides.json"
+    overrides_path = profile_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
+    if not overrides_path.exists():
+        overrides_path = profile_dir / "settings.overrides.json"
     if overrides_path.exists():
         overrides = load_json(overrides_path)
         rendered = _deep_merge(rendered, overrides)
@@ -1578,10 +1568,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         if (_resolved_profile_dir / _CLAUDE_SUBDIR / subdir).is_dir():
             _symlink_dir_contents(_resolved_profile_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"profile {label}", filter_fn=filter_fn)
 
-    # --- 5. Symlink CLAUDE.md from the chosen profile ---
-    profile_claude_md = _resolved_profile_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
-    claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-    _install_claude_md(profile_claude_md, claude_md_dst, profile_name)
+    # --- 5. Install SYSTEM.md (profile system prompt) ---
+    _cleanup_stale_claude_md_symlink()
+    _install_system_prompt(_resolved_profile_dir, profile_name)
 
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
@@ -1647,7 +1636,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print()
     print("Verification steps:")
     print(f"  ls -la {existing_settings_path}")
-    print(f"  ls -la {claude_md_dst}")
+    claude_md = CLAUDE_HOME / _CLAUDE_MD_NAME
+    if claude_md.is_symlink():
+        print(f"  ls -la {claude_md}  # system prompt (→ profile CLAUDE.md)")
     print("  Open Claude Code in any project → run /status (hooks should be active)")
     print("  Run /skills to list installed skills")
     print()
@@ -2179,43 +2170,47 @@ def _symlink_dir_contents(
             _link_item(item, dst_dir / item.name, label)
 
 
-def _install_claude_md(src: Path, dst: Path, profile_name: str) -> None:
-    """Symlink *dst* (~/.claude/CLAUDE.md) → *src* (profile CLAUDE.md)."""
+def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
+    """Symlink ~/.claude/CLAUDE.md → profile's CLAUDE.md (at profile root).
+
+    Convention-based: if profiles/<name>/CLAUDE.md exists, it is symlinked
+    as ~/.claude/CLAUDE.md so Claude Code loads it automatically every session.
+    The source file lives at the profile root (not inside .claude/).
+    """
+    src = profile_dir / _CLAUDE_MD_NAME
+    dst = CLAUDE_HOME / _CLAUDE_MD_NAME
+
     if not src.exists():
-        print(f"  [!!] Profile {_CLAUDE_MD_NAME} not found at {src} — skipping.")
-        print(f"       Available profiles: {_available_profiles()}")
+        print(f"  [--] No {_SYSTEM_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
     if dst.is_symlink():
         if dst.resolve() == src.resolve():
             print(f"  [--] {_CLAUDE_MD_NAME} already linked → {src}")
-        else:
-            dst.unlink()
-            dst.symlink_to(src)
-            print(f"  [OK] Re-linked {_CLAUDE_MD_NAME} → {src}")
-        return
+            return
+        dst.unlink()
 
     if dst.exists():
-        print(f"\nA {_CLAUDE_MD_NAME} already exists at {dst}.")
-        answer = (
-            input(f"Replace with symlink to profiles/{profile_name}/{_CLAUDE_SUBDIR}/{_CLAUDE_MD_NAME}? [y/N] ")
-            .strip()
-            .lower()
-        )
-        if answer == "y":
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup = dst.with_suffix(f".md.bak.{timestamp}")
-            shutil.copy2(dst, backup)
-            print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
-            dst.unlink()
-            dst.symlink_to(src)
-            print(f"  [OK] Linked {_CLAUDE_MD_NAME} → {src}")
-        else:
-            print(f"  [--] Skipped {_CLAUDE_MD_NAME} linking.")
-        return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = dst.with_suffix(f".md.bak.{timestamp}")
+        shutil.copy2(dst, backup)
+        print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
+        dst.unlink()
 
     dst.symlink_to(src)
     print(f"  [OK] Linked {_CLAUDE_MD_NAME} → {src}")
+
+
+def _cleanup_stale_claude_md_symlink() -> None:
+    """Remove ~/.claude/CLAUDE.md if it is a stale profile symlink."""
+    claude_md = CLAUDE_HOME / _CLAUDE_MD_NAME
+    if not claude_md.is_symlink():
+        return
+    target_str = str(claude_md.resolve())
+    # Remove if it points into any profiles/ directory (built-in or bundle)
+    if "profiles/" in target_str or "profiles\\" in target_str:
+        claude_md.unlink()
+        print(f"  [OK] Removed stale {_CLAUDE_MD_NAME} symlink → {target_str}")
 
 
 # ---------------------------------------------------------------------------
@@ -2263,7 +2258,6 @@ def uninstall_global(args: argparse.Namespace) -> None:
     agents_dir = CLAUDE_HOME / "agents"
     commands_dir = CLAUDE_HOME / "commands"
     claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-
     # --- Audit ---
     remove_settings = False
     if settings_path.exists():
@@ -2298,7 +2292,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print(f"  {agents_dir}/  → {n_agents} symlink(s)")
     print(f"  {commands_dir}/  → {n_commands} symlink(s)")
     if remove_claude_md:
-        print(f"  {claude_md_dst}  (symlink → profiles/)")
+        print(f"  {claude_md_dst}  (stale symlink → profiles/)")
     else:
         print(f"  {claude_md_dst}  [SKIP — not a managed symlink]")
     if managed_servers:
@@ -2334,11 +2328,11 @@ def uninstall_global(args: argparse.Namespace) -> None:
         if n == 0:
             print(f"  [--] No {label} symlinks found in {dst_dir}")
 
-    # --- 5. Remove CLAUDE.md symlink ---
+    # --- 5. Remove CLAUDE.md symlink (stale) + active system prompt ---
     print()
     if remove_claude_md:
         claude_md_dst.unlink()
-        print(f"[OK] Removed {claude_md_dst}")
+        print(f"[OK] Removed stale {claude_md_dst}")
     else:
         print(f"[--] Skipped {claude_md_dst} (not a managed symlink)")
 

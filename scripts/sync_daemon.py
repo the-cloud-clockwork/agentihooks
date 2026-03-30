@@ -125,8 +125,8 @@ def _collect_source_files(state: dict) -> dict[str, list[str]]:
             cat = f"profile:{pname}"
             for candidate in [
                 profile_dir / "profile.yml",
-                profile_dir / "settings.overrides.json",
-                profile_dir / ".claude" / "CLAUDE.md",
+                profile_dir / ".claude" / "settings.overrides.json",
+                profile_dir / "CLAUDE.md",
             ]:
                 if candidate.exists():
                     _add(candidate, cat)
@@ -145,8 +145,8 @@ def _collect_source_files(state: dict) -> dict[str, list[str]]:
                     cat = f"profile:{pname}"
                     for candidate in [
                         profile_dir / "profile.yml",
-                        profile_dir / "settings.overrides.json",
-                        profile_dir / ".claude" / "CLAUDE.md",
+                        profile_dir / ".claude" / "settings.overrides.json",
+                        profile_dir / "CLAUDE.md",
                     ]:
                         if candidate.exists():
                             _add(candidate, cat, "bundle")
