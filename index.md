@@ -35,7 +35,7 @@ pip install agentihooks
 Then wire everything into Claude Code in one command:
 
 ```bash
-agentihooks global
+agentihooks init
 ```
 
 That's it. Hooks are active and 26 MCP tools are registered the next time you start `claude`.
@@ -69,13 +69,13 @@ Profiles set the agent's personality and tool permissions. The default profile w
 
 ```bash
 # See what's available
-agentihooks global --list-profiles
+agentihooks init --list-profiles
 
 # Install with a specific profile
-agentihooks global --profile coding
+agentihooks init --profile coding
 
 # Check which profile is active
-agentihooks global --query
+agentihooks init --query
 ```
 
 ---
@@ -86,7 +86,7 @@ Claude Code expands `${VAR}` in MCP configs from its own process environment. Th
 
 ```bash
 # One-time setup — writes a managed block to ~/.bashrc
-agentihooks --loadenv
+agentihooks init
 
 # Reload your shell
 source ~/.bashrc
@@ -144,8 +144,8 @@ database  compute  observability  utilities
 Don't want a global install? Wire the MCP server into a single project instead:
 
 ```bash
-agentihooks project ~/dev/my-project
-agentihooks project ~/dev/my-project --profile coding
+agentihooks init --repo ~/dev/my-project
+agentihooks init --repo ~/dev/my-project --profile coding
 ```
 
 This writes a `.mcp.json` directly into the project directory.
@@ -173,7 +173,7 @@ agentihooks mcp add /path/to/.mcp.json
 agentihooks mcp sync
 ```
 
-Registered files are tracked in `~/.agentihooks/state.json` and re-applied automatically on every `agentihooks global` run.
+Registered files are tracked in `~/.agentihooks/state.json` and re-applied automatically on every `agentihooks init` run.
 
 ---
 
@@ -190,12 +190,12 @@ AgentiHooks is a platform, not just a tool. Fork the repo and you immediately in
 
 1. Create `hooks/mcp/mytools.py` with a `register(server)` function
 2. Add `"mytools": "hooks.mcp.mytools"` to `_registry.py`
-3. Run `agentihooks global` — your tools are live
+3. Run `agentihooks init` — your tools are live
 
 **Add your own profile:**
 
 Create a directory under `profiles/<name>/` with `profile.yml`, `.mcp.json`,
-and `.claude/CLAUDE.md`. Run `agentihooks global --profile <name>`.
+and `.claude/CLAUDE.md`. Run `agentihooks init --profile <name>`.
 
 **Stay merge-friendly:**
 

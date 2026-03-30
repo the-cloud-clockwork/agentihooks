@@ -18,6 +18,6 @@ Instructions for the agent go here.
 
 ## Installation
 
-Running `python scripts/install.py global` from the agentihooks root will
+Running `python agentihooks init` from the agentihooks root will
 symlink each `.md` file here into `~/.claude/agents/`, making it available
 as a subagent type in every Claude Code session on this machine.

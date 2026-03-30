@@ -48,10 +48,10 @@ uv venv ~/.agentihooks/.venv
 uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
 # 2. Install hooks + settings + MCP into ~/.claude
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
-`agentihooks global` wires hooks into `~/.claude/settings.json`, symlinks skills/agents, merges MCP servers into `~/.claude.json`, and installs the CLI globally. **Critically, every hook command in `settings.json` is written with the Python that ran the installer** — so by running the installer from `~/.agentihooks/.venv`, all hook subprocesses find the right packages regardless of which shell or virtual environment is active when Claude Code fires them.
+`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents, merges MCP servers into `~/.claude.json`, and installs the CLI globally. **Critically, every hook command in `settings.json` is written with the Python that ran the installer** — so by running the installer from `~/.agentihooks/.venv`, all hook subprocesses find the right packages regardless of which shell or virtual environment is active when Claude Code fires them.
 
 Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/installation/) for the full step-by-step walkthrough including Redis setup and quota display.
 
@@ -97,7 +97,7 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 
 ```bash
 # Core
-agentihooks global [--profile <name>]   # install/re-apply to ~/.claude
+agentihooks init [--profile <name>]   # install/re-apply to ~/.claude
 agentihooks init [--profile <name>]     # set up per-repo config → .claude/settings.local.json
 agentihooks --list-profiles             # show all profiles (built-in + bundle)
 agentihooks --query                     # print active profile name
@@ -123,7 +123,7 @@ agentihooks mcp add <path>              # install a file directly by path
 agentihooks mcp sync                    # re-apply all installed MCP files
 
 # Project
-agentihooks project <path>              # write .mcp.json into a project
+agentihooks init --repo <path>              # write .mcp.json into a project
 agentihooks ignore [path] [--force]     # create .claudeignore
 
 # Sync Daemon (auto-propagation)
@@ -137,7 +137,7 @@ agentihooks quota [auth|status|logs|stop]
 
 # Utilities
 agentihooks uninstall                   # remove everything
-agentihooks --loadenv                   # load ~/.agentihooks/.env into shell
+agentihooks init                   # load ~/.agentihooks/.env into shell
 ```
 
 Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
@@ -151,8 +151,8 @@ All integrations are configured via environment variables. Key ones:
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root for logs, memory, and state |
 | `CLAUDE_CODE_HOME_DIR` | `$HOME` | Home-directory root override (`.claude` appended automatically) |
 | `AGENTIHOOKS_CLAUDE_HOME` | `~/.claude` | Legacy: direct path to `.claude` directory |
-| `AGENTIHOOKS_PROFILE` | `default` | Profile to use for `agentihooks global` / `project` (env alternative to `--profile`) |
-| `AGENTIHOOKS_MCP_FILE` | — | Path to an MCP JSON file to auto-merge during `agentihooks global` |
+| `AGENTIHOOKS_PROFILE` | `default` | Profile to use for `agentihooks init` / `project` (env alternative to `--profile`) |
+| `AGENTIHOOKS_MCP_FILE` | — | Path to an MCP JSON file to auto-merge during `agentihooks init` |
 | `MCP_CATEGORIES` | `all` | Comma-separated list of tool categories to load |
 | `LOG_ENABLED` | `true` | Enable hook logging |
 | `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest on Stop |
@@ -182,7 +182,7 @@ Profiles bundle permissions, env vars, a system prompt (`CLAUDE.md`), and MCP se
 
 Permission evaluation order: **deny > ask > allow** (first match wins).
 
-Switch profiles: `agentihooks global --profile <name>`. Per-repo override: `agentihooks init --profile <name>`.
+Switch profiles: `agentihooks init --profile <name>`. Per-repo override: `agentihooks init --profile <name>`.
 
 Profiles come from two sources:
 - **Built-in** — `profiles/` in the agentihooks repo (default, coding, admin)
@@ -211,7 +211,7 @@ my-tools/.agentihooks/          ← this IS the bundle
 ```bash
 agentihooks bundle link ~/dev/my-tools/.agentihooks   # link once
 agentihooks --list-profiles                           # shows built-in + bundle
-agentihooks global --profile infra-ops                # use a bundle profile
+agentihooks init --profile infra-ops                # use a bundle profile
 ```
 
 Connectors inside the bundle are auto-linked — no separate `connector link` needed. Full docs: [Bundles](docs/bundles.md), [Connectors](docs/connectors.md).
@@ -258,13 +258,13 @@ To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate t
 ```bash
 uv venv ~/.agentihooks/.venv
 uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
 **Install the `agentienv` shell function** (sources `.env` into any shell on demand — also auto-called on every new shell):
 
 ```bash
-agentihooks --loadenv   # writes managed block to ~/.bashrc
+agentihooks init   # writes managed block to ~/.bashrc
 source ~/.bashrc
 agentienv          # load vars into current shell before launching claude
 ```

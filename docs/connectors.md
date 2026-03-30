@@ -119,7 +119,7 @@ If `--name` or `--path` are missing and stdin is a TTY, it falls back to interac
 
 1. You run `agentihooks connector link /path/to/connector`
 2. Agentihooks saves the **path** in `~/.agentihooks/state.json` — no files are copied
-3. When you run `agentihooks global --profile default`:
+3. When you run `agentihooks init --profile default`:
    - Base settings loaded
    - Profile overrides applied
    - **Connectors merged** — for each linked connector with a `profiles/default/` directory:
@@ -195,5 +195,5 @@ base:
 Link it, reinstall, done:
 ```bash
 agentihooks connector link /path/to/my-gateway-filter
-agentihooks global --profile default
+agentihooks init --profile default
 ```

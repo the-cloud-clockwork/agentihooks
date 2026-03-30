@@ -63,7 +63,7 @@ Verify:
 Always run the installer **from the `~/.agentihooks/.venv` Python** — the installer bakes `sys.executable` into every hook command it writes.
 
 ```bash
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
 This single command:
@@ -190,20 +190,20 @@ The statusline will then display quota information on line 3, color-coded by usa
 ## Using a specific profile
 
 ```bash
-~/.agentihooks/.venv/bin/python scripts/install.py global --profile coding
+agentihooks init --profile coding
 ```
 
 Or use the `AGENTIHOOKS_PROFILE` environment variable:
 
 ```bash
 export AGENTIHOOKS_PROFILE=coding
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
 List available profiles:
 
 ```bash
-~/.agentihooks/.venv/bin/python scripts/install.py global --list-profiles
+agentihooks init --list-profiles
 ```
 
 ---
@@ -213,7 +213,7 @@ List available profiles:
 To wire the MCP server for a single project (without global install):
 
 ```bash
-~/.agentihooks/.venv/bin/python scripts/install.py project ~/dev/my-project
+agentihooks init --repo ~/dev/my-project
 ```
 
 This writes a `.mcp.json` into the target project directory.
@@ -242,7 +242,7 @@ correct home-directory root — agentihooks appends `.claude` automatically:
 
 ```bash
 CLAUDE_CODE_HOME_DIR=/shared/home \
-  ~/.agentihooks/.venv/bin/python scripts/install.py global
+  agentihooks init
 # installs into /shared/home/.claude/
 ```
 
@@ -261,7 +261,7 @@ Set `AGENTIHOOKS_MCP_FILE` to have the installer automatically merge an external
 
 ```bash
 export AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
 The path is recorded in `state.json` so future installs re-apply it automatically.

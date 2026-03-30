@@ -55,19 +55,19 @@ GRAFANA_URL=http://10.10.30.130:3000
 GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
 ```
 
-The file is seeded from `.env.example` on first `agentihooks global` and is **never overwritten** on subsequent runs.
+The file is seeded from `.env.example` on first `agentihooks init` and is **never overwritten** on subsequent runs.
 
 **To move to a new machine:** copy `~/.agentihooks/.env` alongside the repo clone.
 
 ---
 
-## Loading env vars into your shell (`--loadenv`)
+## Loading env vars into your shell (`init`)
 
-Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `--loadenv` installs a **shell function** (not an alias) that sources `.env` into any shell on demand — and also auto-calls it so vars load in every new shell automatically.
+Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `init` installs a **shell function** (not an alias) that sources `.env` into any shell on demand — and also auto-calls it so vars load in every new shell automatically.
 
 ```bash
 # Install the function (one time — writes a managed block to ~/.bashrc)
-agentihooks --loadenv
+agentihooks init
 
 # Reload your shell
 source ~/.bashrc
@@ -86,11 +86,11 @@ The function written to `~/.bashrc` defines `agentienv()` which:
 
 The block ends with a bare `agentienv` call so the vars are loaded automatically in every new shell.
 
-The block is **idempotent** — re-running `--loadenv` updates the block in place rather than appending. Keep your own aliases outside the markers.
+The block is **idempotent** — re-running `init` updates the block in place rather than appending. Keep your own aliases outside the markers.
 
 ### Auto-installing requirements
 
-After writing the alias, `--loadenv` scans `~/.agentihooks/` and the saved `mcpLibPath` for any `requirements.txt` and offers to install each one:
+After writing the alias, `init` scans `~/.agentihooks/` and the saved `mcpLibPath` for any `requirements.txt` and offers to install each one:
 
 ```
 Found /home/user/.agentitools/requirements.txt — install with uv? [y/N]
@@ -102,7 +102,7 @@ Requirements are installed with `uv pip install` into the active virtual environ
 [!!] No virtual environment found.
      Create and activate one first:
        python3 -m venv .venv && source .venv/bin/activate
-     Then re-run: agentihooks --loadenv
+     Then re-run: agentihooks init
 ```
 
 ---
@@ -148,7 +148,7 @@ Enter file number (1-2, or q to quit):
 
 After picking a file, a second prompt lets you choose which servers to install (`0` = all, or specific numbers/comma list).
 
-`[installed]` marks files already tracked in `state.json`. Installed servers are merged into `~/.claude.json` and re-applied automatically on `agentihooks global`.
+`[installed]` marks files already tracked in `state.json`. Installed servers are merged into `~/.claude.json` and re-applied automatically on `agentihooks init`.
 
 For `uninstall`, the file is removed from tracking only if **all** its servers were uninstalled.
 
@@ -201,12 +201,12 @@ uv sync --all-extras
 cp /path/to/backup/.env ~/.agentihooks/.env
 
 # 5. Install hooks, skills, agents, MCPs
-uv run agentihooks global
+uv run agentihooks init
 
 # 6. Install the agentienv shell function + requirements
-#    (activate a venv first so --loadenv can install packages)
+#    (activate a venv first so init can install packages)
 python3 -m venv .venv && source .venv/bin/activate
-agentihooks --loadenv   # writes function + auto-call, offers to install requirements.txt
+agentihooks init   # writes function + auto-call, offers to install requirements.txt
 source ~/.bashrc
 
 # 7. Load env vars and launch Claude Code
@@ -225,8 +225,8 @@ Everything restored. No manual settings editing, no hunting for which keys go wh
 
 1. Keep `.env.example` up to date in the repo with all variable names (no values)
 2. Share values via a secrets manager (1Password, AWS Secrets Manager, Vault)
-3. Each developer runs `agentihooks global` and populates `~/.agentihooks/.env`
-4. Each developer runs `agentihooks --loadenv` to install the `agentienv` shell function
+3. Each developer runs `agentihooks init` and populates `~/.agentihooks/.env`
+4. Each developer runs `agentihooks init` to install the `agentienv` shell function
 5. Keep curated `.mcp.json` files in a shared repo or distribute them to each developer
 6. Each developer drops them into `~/.agentihooks/` and runs `agentihooks mcp install`
 

@@ -18,14 +18,14 @@ All environment variables recognized by AgentiHooks, grouped by integration. Var
 
 ## Install & Automation
 
-These variables control how `agentihooks global` and `agentihooks project` install and configure Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` and `agentihooks init --repo` install and configure Claude Code. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLAUDE_CODE_HOME_DIR` | `$HOME` | Home-directory root override. When set, agentihooks targets `$CLAUDE_CODE_HOME_DIR/.claude` for all install operations. Use when `$HOME` differs from where Claude Code stores its config (e.g. shared volumes). |
 | `AGENTIHOOKS_CLAUDE_HOME` | `~/.claude` | Legacy: direct path to the `.claude` directory. `CLAUDE_CODE_HOME_DIR` takes priority if both are set. |
 | `AGENTIHOOKS_PROFILE` | `default` | Profile to use when `--profile` is not passed on the command line. Controls which `CLAUDE.md`, settings overrides, and MCP category selection are applied. |
-| `AGENTIHOOKS_MCP_FILE` | — | Absolute path to an MCP JSON file. When set, `agentihooks global` automatically merges the servers from this file into user-scope config (`~/.claude.json`). The path is recorded in `state.json` so subsequent `agentihooks global` or `agentihooks --sync` re-applies it. Useful for CI/Docker automation where a gateway MCP file is injected at container start. |
+| `AGENTIHOOKS_MCP_FILE` | — | Absolute path to an MCP JSON file. When set, `agentihooks init` automatically merges the servers from this file into user-scope config (`~/.claude.json`). The path is recorded in `state.json` so subsequent `agentihooks init` or `agentihooks --sync` re-applies it. Useful for CI/Docker automation where a gateway MCP file is injected at container start. |
 
 ---
 

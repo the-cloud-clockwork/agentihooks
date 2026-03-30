@@ -85,7 +85,7 @@ The agent's system prompt. This is what Claude Code loads as its operating instr
 ## Listing profiles
 
 ```bash
-agentihooks global --list-profiles
+agentihooks init --list-profiles
 ```
 
 Example output:
@@ -103,14 +103,14 @@ Available profiles:
 Re-run the global install with `--profile`:
 
 ```bash
-agentihooks global --profile coding
+agentihooks init --profile coding
 ```
 
 Or set the `AGENTIHOOKS_PROFILE` environment variable so you don't have to pass `--profile` every time:
 
 ```bash
 export AGENTIHOOKS_PROFILE=coding
-agentihooks global
+agentihooks init
 ```
 
 This is especially useful in CI/Docker automation where the profile is set once in the container environment.
@@ -127,7 +127,7 @@ The switch takes effect on the next Claude Code session.
 ## Querying the active profile
 
 ```bash
-agentihooks global --query
+agentihooks init --query
 ```
 
 ---
@@ -141,11 +141,11 @@ agentihooks global --query
 
 2. Edit `profiles/myprofile/profile.yml` to set model, turns, and categories.
 
-3. Edit `profiles/myprofile/.claude/CLAUDE.md` with your custom system prompt.
+3. Edit `profiles/myprofile/CLAUDE.md` with your custom system prompt.
 
 4. Install the new profile:
    ```bash
-   agentihooks global --profile myprofile
+   agentihooks init --profile myprofile
    ```
 
 {: .note }

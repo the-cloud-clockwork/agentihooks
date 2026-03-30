@@ -49,7 +49,7 @@ Hooks are wired in `~/.claude/settings.json` under the `hooks` key. Each entry m
 }
 ```
 
-The install script (`agentihooks global`) writes this configuration automatically.
+The install script (`agentihooks init`) writes this configuration automatically.
 
 ## Hook array behavior
 

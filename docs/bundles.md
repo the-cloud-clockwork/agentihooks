@@ -12,7 +12,7 @@ agentihooks bundle link ~/dev/my-tools/.agentihooks
 agentihooks --list-profiles
 
 # Use a bundle profile
-agentihooks global --profile my-custom-profile
+agentihooks init --profile my-custom-profile
 
 # Per-repo override
 cd ~/dev/some-project
@@ -43,7 +43,7 @@ my-tools/.agentihooks/              ← the bundle directory
 1. `agentihooks bundle link <path>` stores the path in `~/.agentihooks/state.json`
 2. Connectors inside `connectors/` are **auto-linked** — no separate `connector link` needed
 3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles` and `global --profile`
-4. `agentihooks global --profile <name>` checks built-in profiles first, then bundle
+4. `agentihooks init --profile <name>` checks built-in profiles first, then bundle
 
 Only **one bundle** can be linked at a time.
 
@@ -57,7 +57,7 @@ agentihooks bundle unlink         # Remove the bundle (auto-unlinks bundle conne
 
 ## Profile Resolution Order
 
-When you run `agentihooks global --profile X`:
+When you run `agentihooks init --profile X`:
 
 1. Check `profiles/X` in the agentihooks repo (built-in)
 2. Check `profiles/X` in the linked bundle
@@ -108,14 +108,14 @@ uv venv ~/.agentihooks/.venv
 uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
 # 2. Install globally
-agentihooks global
+agentihooks init
 
 # 3. Clone your tools repo and link the bundle
 git clone https://github.com/you/my-tools ~/dev/my-tools
 agentihooks bundle link ~/dev/my-tools/.agentihooks
 
 # 4. Reinstall with bundle
-agentihooks global --profile default
+agentihooks init --profile default
 
 # Done — all profiles, connectors, and MCP rules active
 ```

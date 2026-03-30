@@ -27,15 +27,10 @@ uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 ~/.agentihooks/.venv/bin/python -m ruff check .
 
 # Install agentihooks globally (hooks + settings + MCP into ~/.claude)
-# Must be run from the venv Python — bakes sys.executable into hook commands in settings.json
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init --profile colt
 
 # Install into a specific project
-~/.agentihooks/.venv/bin/python scripts/install.py project /path/to/repo
-
-# Manage MCP server files interactively
-agentihooks mcp install
-agentihooks mcp list
+agentihooks init --repo /path/to/repo
 ```
 
 ## Architecture
@@ -48,7 +43,7 @@ agentihooks mcp list
 
 ### Entry points
 
-- **`agentihooks` CLI** → `scripts/install.py:main()` — installs hooks/settings/MCPs, manages MCP server files, handles `--loadenv`
+- **`agentihooks` CLI** → `scripts/install.py:main()` — installs hooks/settings/MCPs, manages MCP server files, manages profiles/bundles
 - **Lifecycle hooks** → all 10 Claude Code hook events point to `~/.agentihooks/.venv/bin/python -m hooks` → `hooks/__main__.py` → `hooks/hook_manager.py:main()`
 - **StatusLine** → `hooks/statusline.py` — reads JSON from stdin each turn, outputs 2–3 line status bar (not a hook event; configured via `settings.json` `statusLine` key)
 - **Quota watcher** → `scripts/claude_usage_watcher.py` — async Playwright daemon; scrapes claude.ai/settings/usage, writes `~/.agentihooks/claude_usage.json`
@@ -82,9 +77,21 @@ All token control, Redis, and feature flags are read from these files. There is 
 
 ### Profile system
 
-Profiles live in `profiles/<name>/` and contain:
-- `profile.yml` — metadata + `mcp_categories` field
-- `.claude/CLAUDE.md` — symlinked to `~/.claude/CLAUDE.md` on install
+Profiles mirror the Claude Code project structure:
+```
+profiles/<name>/
+├── CLAUDE.md                    # system prompt (→ ~/.claude/CLAUDE.md)
+├── profile.yml                  # agentihooks metadata
+└── .claude/
+    ├── settings.overrides.json  # merged into ~/.claude/settings.json
+    ├── .mcp.json                # profile MCP servers
+    ├── skills/                  # → ~/.claude/skills/
+    ├── agents/                  # → ~/.claude/agents/
+    ├── commands/                # → ~/.claude/commands/
+    └── rules/                   # → ~/.claude/rules/
+```
+
+3-layer merge: agentihooks built-in → bundle global → profile-specific.
 
 `_base` is not a profile; it holds `settings.base.json` which every install derives from. Current profiles: `default`, `admin`, `coding`.
 
@@ -110,21 +117,25 @@ The watcher (`scripts/claude_usage_watcher.py`) is a headless Playwright daemon 
 # Install Playwright's browser (one-time)
 ~/.agentihooks/.venv/bin/python -m playwright install chromium
 
-# Auth: opens YOUR browser (Chrome on Windows, Safari/Chrome on Mac),
-# prompts for sessionKey cookie paste, imports it, starts daemon
-agentihooks quota auth
+# Multi-account: add accounts by name
+agentihooks quota auth personal    # add/update "personal" account
+agentihooks quota auth team        # add "team" account
 
-# Or import sessionKey without opening browser
-agentihooks quota import-cookies
+# Manage accounts
+agentihooks quota list             # show all accounts, mark active
+agentihooks quota switch           # interactive picker
+agentihooks quota switch team      # switch + restart daemon
 
-# Other daemon commands
-agentihooks quota            # start background daemon (auto-detaches, PID file, logs)
-agentihooks quota status     # print last known quota JSON
-agentihooks quota logs       # tail -f daemon log
-agentihooks quota stop       # kill daemon
+# Daemon commands
+agentihooks quota                  # status if running, start if not
+agentihooks quota restart          # stop + start
+agentihooks quota status           # full quota JSON
+agentihooks quota logs             # tail -f daemon log
+agentihooks quota stop             # kill daemon
+agentihooks quota remove <name>    # delete account
 ```
 
-Auth flow: `quota auth` opens the real system browser to claude.ai (via `cmd.exe /c start` on Windows/WSL, `open` on Mac). User copies the `sessionKey` cookie from Chrome DevTools (F12 → Application → Cookies → claude.ai → sessionKey). The cookie is saved via Playwright's `storage_state` JSON file at `~/.agentihooks/claude_auth_state.json`. Headless Chromium is only used for background scraping.
+Auth flow: `quota auth <name>` opens the system browser to claude.ai. User copies the `sessionKey` cookie from Chrome DevTools (F12 → Application → Cookies → claude.ai → sessionKey). The cookie is saved to `~/.agentihooks/quota-accounts/<name>.json`. Active account tracked in `state.json`.
 
 Enable in `~/.agentihooks/.env`:
 ```bash
@@ -139,7 +150,7 @@ CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
 
 **How it works:**
 
-1. Every `agentihooks global` and `agentihooks project <path>` call registers the target in `state.json` under a new `targets` key (profile used, path installed to).
+1. Every `agentihooks init` and `agentihooks init --repo <path>` call registers the target in `state.json` under a new `targets` key (profile used, path installed to).
 2. The daemon hashes every source file (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env` files) using SHA-256.
 3. Each file is tagged with categories (`base`, `profile:{name}`, `connector:{name}`, `mcp_files`, `env`, `bundle`).
 4. On each poll cycle, the daemon recomputes hashes. If any hash changed, it resolves which categories are affected, determines which targets depend on those categories, and re-runs the install pipeline for those targets.
@@ -155,7 +166,7 @@ CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
 | `.env` files | Global + ALL projects |
 | Bundle directory | Global + ALL projects |
 
-**Concurrency:** An advisory file lock at `~/.agentihooks/sync.lock` (via `fcntl.flock`) prevents the daemon and manual `agentihooks global`/`project` commands from writing simultaneously. The daemon uses non-blocking acquisition — skips the cycle on contention.
+**Concurrency:** An advisory file lock at `~/.agentihooks/sync.lock` (via `fcntl.flock`) prevents the daemon and manual `agentihooks init`/`project` commands from writing simultaneously. The daemon uses non-blocking acquisition — skips the cycle on contention.
 
 **State files:**
 - PID: `~/.agentihooks/sync-daemon.pid`

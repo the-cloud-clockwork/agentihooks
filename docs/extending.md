@@ -143,7 +143,7 @@ Add the event to `profiles/_base/settings.base.json`:
 }
 ```
 
-Re-run `agentihooks global` to apply the updated settings.
+Re-run `agentihooks init` to apply the updated settings.
 
 ### 4. Exit code behavior
 

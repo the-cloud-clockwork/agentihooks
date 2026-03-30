@@ -7,7 +7,7 @@ permalink: /docs/mcp-tools/
 
 # MCP Tools
 
-The AgentiHooks MCP server exposes tools across **8 categories**. The server is started by `python -m hooks.mcp` and registered automatically during `agentihooks global`.
+The AgentiHooks MCP server exposes tools across **8 categories**. The server is started by `python -m hooks.mcp` and registered automatically during `agentihooks init`.
 
 ## Categories
 

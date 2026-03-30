@@ -6,7 +6,7 @@ nav_order: 3
 # CLI Commands
 {: .no_toc }
 
-The `agentihooks` CLI is installed globally via `uv tool install --editable .` as part of `agentihooks global`. All subcommands are idempotent.
+The `agentihooks` CLI is installed globally via `uv tool install --editable .` as part of `agentihooks init`. All subcommands are idempotent.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -16,12 +16,12 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 ---
 
-## `agentihooks global`
+## `agentihooks init`
 
 Install hooks, skills, agents, and `CLAUDE.md` into `~/.claude`.
 
 ```bash
-agentihooks global [--profile <name>] [--list-profiles] [--query]
+agentihooks init [--profile <name>] [--list-profiles] [--query]
 ```
 
 ### What it does
@@ -57,32 +57,32 @@ agentihooks global [--profile <name>] [--list-profiles] [--query]
 
 ```bash
 # Install with default profile
-agentihooks global
+agentihooks init
 
 # Install with the coding profile
-agentihooks global --profile coding
+agentihooks init --profile coding
 
 # Same, using the environment variable
-AGENTIHOOKS_PROFILE=coding agentihooks global
+AGENTIHOOKS_PROFILE=coding agentihooks init
 
 # Auto-merge a gateway MCP file during install
-AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json agentihooks global
+AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json agentihooks init
 
 # List available profiles
-agentihooks global --list-profiles
+agentihooks init --list-profiles
 
 # Query active profile
-agentihooks global --query
+agentihooks init --query
 ```
 
 ---
 
-## `agentihooks project`
+## `agentihooks init --repo`
 
 Write a rendered `.mcp.json` into a specific project directory.
 
 ```bash
-agentihooks project <path> [--profile <name>]
+agentihooks init --repo <path> [--profile <name>]
 ```
 
 This makes agentihooks MCP tools available in a single project without a global install. The `.mcp.json` is written to `<path>/.mcp.json`.
@@ -96,8 +96,8 @@ This makes agentihooks MCP tools available in a single project without a global 
 ### Example
 
 ```bash
-agentihooks project ~/dev/my-project
-agentihooks project ~/dev/my-project --profile coding
+agentihooks init --repo ~/dev/my-project
+agentihooks init --repo ~/dev/my-project --profile coding
 ```
 
 ---
@@ -269,7 +269,7 @@ For `uninstall`: the file is removed from `state.json` only if **all** of its se
 | `install` | Two-stage: pick a file, then pick which servers to install |
 | `uninstall` | Two-stage: pick an installed file, then pick which servers to remove |
 | `add <path>` | Install a specific file directly by path (all servers, no prompting) |
-| `sync` | Re-apply all tracked MCP files from `state.json` (called automatically by `agentihooks global`) |
+| `sync` | Re-apply all tracked MCP files from `state.json` (called automatically by `agentihooks init`) |
 
 ### Flags
 
@@ -324,8 +324,8 @@ agentihooks daemon stop            # kill daemon
 ### Target registration
 
 Targets are registered automatically:
-- `agentihooks global` registers `~/.claude/` as the global target with the chosen profile.
-- `agentihooks project <path>` registers the project path with the chosen profile.
+- `agentihooks init` registers `~/.claude/` as the global target with the chosen profile.
+- `agentihooks init --repo <path>` registers the project path with the chosen profile.
 
 Registered targets are stored in `~/.agentihooks/state.json` under the `targets` key:
 
@@ -411,12 +411,12 @@ session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am |
 
 ---
 
-## `agentihooks --loadenv`
+## `agentihooks init`
 
 Installs an `agentienv` **shell function** (not an alias) into `~/.bashrc` that sources all `.env` files from `~/.agentihooks/` into the current shell on demand. The function is also **auto-called** at the end of the managed block so vars load in every new shell automatically.
 
 ```bash
-agentihooks --loadenv
+agentihooks init
 ```
 
 ### What it writes
@@ -452,7 +452,7 @@ This loads `~/.agentihooks/.env` first, then any additional `*.env` files (e.g.,
 
 ```bash
 # Install the alias (one time)
-agentihooks --loadenv
+agentihooks init
 
 # Reload your shell
 source ~/.bashrc
@@ -472,16 +472,16 @@ Claude Code expands `${VAR}` in MCP server configs from its own process environm
 Pass a different env file path to point the alias elsewhere:
 
 ```bash
-agentihooks --loadenv /path/to/other.env
+agentihooks init /path/to/other.env
 ```
 
 ### Managed block
 
-The `# === agentihooks === / # === end-agentihooks ===` markers make the block idempotent and upgradeable — re-running `--loadenv` replaces the block contents rather than appending. Keep your own aliases **outside** the markers.
+The `# === agentihooks === / # === end-agentihooks ===` markers make the block idempotent and upgradeable — re-running `init` replaces the block contents rather than appending. Keep your own aliases **outside** the markers.
 
 ### Auto-installing requirements
 
-After writing the alias, `--loadenv` scans `~/.agentihooks/` and the saved `mcpLibPath` for `requirements.txt` files and offers to install each:
+After writing the alias, `init` scans `~/.agentihooks/` and the saved `mcpLibPath` for `requirements.txt` files and offers to install each:
 
 ```
 Found /home/user/.agentitools/requirements.txt — install with uv? [y/N]

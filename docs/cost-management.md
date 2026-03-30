@@ -266,7 +266,7 @@ Everything except quota monitoring works out of the box after installation:
 
 ```bash
 # Install agentihooks — all cost features are enabled by default
-~/.agentihooks/.venv/bin/python scripts/install.py global
+agentihooks init
 ```
 
 To add quota monitoring (playwright ships with the package — no extras needed):

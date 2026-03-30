@@ -15,6 +15,6 @@ Example structure:
 
 ## Installation
 
-Running `python scripts/install.py global` from the agentihooks root will
+Running `python agentihooks init` from the agentihooks root will
 symlink each skill directory here into `~/.claude/skills/`, making it
 available in every Claude Code session on this machine.
