@@ -6,7 +6,7 @@ nav_order: 2
 # Hook Events
 {: .no_toc }
 
-AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
+AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine** is not a hook event -- it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -20,8 +20,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 
 | Exit code | Meaning |
 |-----------|---------|
-| `0` | Allow — Claude Code proceeds normally |
-| `2` | Block — Claude Code cancels the action and displays the hook's **stderr** as a warning |
+| `0` | Allow -- Claude Code proceeds normally |
+| `2` | Block -- Claude Code cancels the action and displays the hook's **stderr** as a warning |
 
 > **Note:** `BlockAction` exceptions print to **stderr** (not stdout). This ensures Claude Code displays the block reason cleanly rather than showing "No stderr output".
 
@@ -80,7 +80,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 **Handler actions:**
 
 1. Scans the prompt for secrets and credentials using regex patterns
-2. If secrets are detected: injects a warning into the context (does **not** block — warnings only at this stage)
+2. If secrets are detected: injects a warning into the context (does **not** block -- warnings only at this stage)
 
 ---
 
@@ -100,14 +100,14 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 **Handler actions:**
 
 1. Logs the transcript entry
-2. **Secret scanning** — scans `tool_input` for credentials; exits with code `2` (block) if found
-3. **File read deduplication** — if `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: checks whether the file was already read this session and is unmodified (by mtime). If so, exits with code `2` and tells Claude to use the content already in context
-4. **Tool memory injection** — looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
+2. **Secret scanning** -- scans `tool_input` for credentials; exits with code `2` (block) if found
+3. **File read deduplication** -- if `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: checks whether the file was already read this session and is unmodified (by mtime). If so, exits with code `2` and tells Claude to use the content already in context
+4. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
 
 **Exit codes used:**
 
-- `0` — tool is safe to run
-- `2` — secret detected **or** redundant file read blocked; action blocked with explanation
+- `0` -- tool is safe to run
+- `2` -- secret detected **or** redundant file read blocked; action blocked with explanation
 
 ---
 
@@ -183,7 +183,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 }
 ```
 
-Claude Code pipes a JSON payload to `hooks/statusline.py` on every turn. The script reads the payload and prints 2–3 lines to stdout that appear in the terminal status bar.
+Claude Code pipes a JSON payload to `hooks/statusline.py` on every turn. The script reads the payload and prints 2-3 lines to stdout that appear in the terminal status bar.
 
 **Payload fields:**
 
@@ -191,26 +191,26 @@ Claude Code pipes a JSON payload to `hooks/statusline.py` on every turn. The scr
 |-------|------|-------------|
 | `session_id` | string | Session identifier |
 | `context_window` | object | `{context_window_size, total_input_tokens, used_percentage, current_usage, ...}` |
-| `model` | object | `{display_name, ...}` — active model |
+| `model` | object | `{display_name, ...}` -- active model |
 | `cost` | object | `{total_cost_usd, total_duration_ms, total_api_duration_ms, total_lines_added, total_lines_removed}` |
-| `worktree` | object | Active worktree info (name, path) — if in a worktree |
-| `vim` | object | Vim mode info (`{mode}`) — if vim keybindings are active |
+| `worktree` | object | Active worktree info (name, path) -- if in a worktree |
+| `vim` | object | Vim mode info (`{mode}`) -- if vim keybindings are active |
 
 **Output (printed to stdout):**
 
-Line 1 — context fill bar, model, cost, duration:
+Line 1 -- context fill bar, model, cost, duration:
 ```
-████████░░░░░░░ 54% | claude-sonnet-4-6 | $0.0231 | 12s
+########## 54% | claude-sonnet-4-6 | $0.0231 | 12s
 ```
 
-Line 2 — token counts, burn rate, lines changed, cache ratio, git branch:
+Line 2 -- token counts, burn rate, lines changed, cache ratio, git branch:
 ```
 ctx: 540K/1M | burn: 23K/turn | +12-3 | cache: 67% | main
 ```
 
-Line 3 (conditional) — threshold warning if fill % crosses `TOKEN_WARN_PCT` or `TOKEN_CRITICAL_PCT`:
+Line 3 (conditional) -- threshold warning if fill % crosses `TOKEN_WARN_PCT` or `TOKEN_CRITICAL_PCT`, or quota display if enabled:
 ```
-⚠️  CONTEXT 61% — consider /compact soon
+CONTEXT 61% -- consider /compact soon
 ```
 
 **Key implementation detail:** `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` rather than using the payload's `used_percentage` field, which can carry stale values from the previous session's final state.
@@ -227,7 +227,7 @@ Configure via [`TOKEN_CONTROL_ENABLED`, `TOKEN_MONITOR_ENABLED`, `TOKEN_WARN_PCT
 
 **When:** Claude Code sends a notification (e.g., requesting user attention).
 
-**Payload fields:** varies — the entire notification data object.
+**Payload fields:** varies -- the entire notification data object.
 
 **Handler actions:**
 
@@ -289,7 +289,7 @@ sequenceDiagram
         StatusLine->>Agent: inject warning line (first threshold crossing only)
         Agent->>PreToolUse: about to Read file.py
         PreToolUse->>Redis: was file.py read + unmodified?
-        Redis-->>PreToolUse: yes → BlockAction (exit 2 via stderr)
+        Redis-->>PreToolUse: yes -> BlockAction (exit 2 via stderr)
         PreToolUse-->>Agent: "already in context, use it"
         Agent->>PostToolUse: Bash docker logs ... output
         PostToolUse->>Agent: re-emit truncated output via additionalContext
@@ -298,7 +298,7 @@ sequenceDiagram
     SessionEnd->>Redis: delete file_cache + file_mtime keys
 ```
 
-Configure via the [Token Control](configuration/#token-control) environment variables.
+Configure via the [Token Control](../reference/configuration/#token-control) environment variables.
 
 ---
 

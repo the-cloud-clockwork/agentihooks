@@ -54,7 +54,7 @@ The install script (`agentihooks init`) writes this configuration automatically.
 ## Hook array behavior
 
 {: .important }
-Hook arrays are **replaced, not merged**, across scopes. All hooks must live in `~/.claude/settings.json` — project-level settings cannot append to user-level hooks.
+Hook arrays are **replaced, not merged**, across scopes. All hooks must live in `~/.claude/settings.json` -- project-level settings cannot append to user-level hooks.
 
 ## Pages in this section
 

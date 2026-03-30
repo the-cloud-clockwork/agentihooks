@@ -18,14 +18,14 @@ All environment variables recognized by AgentiHooks, grouped by integration. Var
 
 ## Install & Automation
 
-These variables control how `agentihooks init` and `agentihooks init --repo` install and configure Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` installs and configures Claude Code. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLAUDE_CODE_HOME_DIR` | `$HOME` | Home-directory root override. When set, agentihooks targets `$CLAUDE_CODE_HOME_DIR/.claude` for all install operations. Use when `$HOME` differs from where Claude Code stores its config (e.g. shared volumes). |
 | `AGENTIHOOKS_CLAUDE_HOME` | `~/.claude` | Legacy: direct path to the `.claude` directory. `CLAUDE_CODE_HOME_DIR` takes priority if both are set. |
 | `AGENTIHOOKS_PROFILE` | `default` | Profile to use when `--profile` is not passed on the command line. Controls which `CLAUDE.md`, settings overrides, and MCP category selection are applied. |
-| `AGENTIHOOKS_MCP_FILE` | — | Absolute path to an MCP JSON file. When set, `agentihooks init` automatically merges the servers from this file into user-scope config (`~/.claude.json`). The path is recorded in `state.json` so subsequent `agentihooks init` or `agentihooks --sync` re-applies it. Useful for CI/Docker automation where a gateway MCP file is injected at container start. |
+| `AGENTIHOOKS_MCP_FILE` | -- | Absolute path to an MCP JSON file. When set, `agentihooks init` automatically merges the servers from this file into user-scope config (`~/.claude.json`). The path is recorded in `state.json` so subsequent runs re-apply it. Useful for CI/Docker automation where a gateway MCP file is injected at container start. |
 
 ---
 
@@ -35,8 +35,8 @@ These variables control how `agentihooks init` and `agentihooks init --repo` ins
 |----------|---------|-------------|
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root directory for all runtime data: logs, memory, state. Set to a shared mount for Kubernetes deployments. |
 | `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `aws,email,messaging,storage,database,compute,observability,utilities`. |
-| `ALLOWED_TOOLS` | — | Legacy: comma-separated list of specific tool names. Takes precedence over category filtering after categories are loaded. |
-| `ENABLE_TOOL_SEARCH` | `true` | Set in the `env` block of `settings.json`. Makes all MCP tools lazy-loaded on demand — shown as "(loaded on-demand)" in `/context`. Eliminates approximately 79K token upfront cost from MCP tool schemas. |
+| `ALLOWED_TOOLS` | -- | Legacy: comma-separated list of specific tool names. Takes precedence over category filtering after categories are loaded. |
+| `ENABLE_TOOL_SEARCH` | `true` | Set in the `env` block of `settings.json`. Makes all MCP tools lazy-loaded on demand -- shown as "(loaded on-demand)" in `/context`. Eliminates approximately 79K token upfront cost from MCP tool schemas. |
 
 ---
 
@@ -59,7 +59,7 @@ These variables control how `agentihooks init` and `agentihooks init --repo` ins
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest to memory store on `Stop` event. |
-| `REDIS_URL` | — | Redis connection string. Format: `redis://:PASSWORD@host:port/db`. Used by token monitor (burn rate), file read cache (dedup), and warning edge-triggers. All features degrade gracefully when Redis is unavailable. Uses DB0 on the shared Redis instance (same as agenticore). Leave unset to use in-memory/JSONL fallback. |
+| `REDIS_URL` | -- | Redis connection string. Format: `redis://:PASSWORD@host:port/db`. Used by token monitor (burn rate), file read cache (dedup), and warning edge-triggers. All features degrade gracefully when Redis is unavailable. Uses DB0 on the shared Redis instance (same as agenticore). Leave unset to use in-memory/JSONL fallback. |
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
@@ -108,9 +108,17 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLAUDE_USAGE_FILE` | — | Path to the quota JSON file written by the watcher daemon (e.g. `~/.agentihooks/claude_usage.json`). Must be set in `~/.agentihooks/.env` to enable the statusline quota display. |
+| `CLAUDE_USAGE_FILE` | -- | Path to the quota JSON file written by the watcher daemon (e.g. `~/.agentihooks/claude_usage.json`). Must be set in `~/.agentihooks/.env` to enable the statusline quota display. |
 | `CLAUDE_USAGE_STALE_SEC` | `300` | Data older than this many seconds is shown as "stale" on the statusline. |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | How often (seconds) the background daemon polls claude.ai/settings/usage. |
+
+---
+
+## Sync Daemon
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_SYNC_POLL_SEC` | `60` | How often (seconds) the sync daemon polls for source file changes. |
 
 ---
 
@@ -128,11 +136,11 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTICORE_CORRELATION_ID` | — | Correlation ID for distributed tracing. Injected into outgoing payloads. |
-| `AGENTICORE_CLAUDE_SESSION_ID` | — | Claude Code session ID override. |
+| `AGENTICORE_CORRELATION_ID` | -- | Correlation ID for distributed tracing. Injected into outgoing payloads. |
+| `AGENTICORE_CLAUDE_SESSION_ID` | -- | Claude Code session ID override. |
 | `AGENTICORE_AGENT` | `unknown` | Agent identifier tag. |
 | `AGENT_NAME` | `Agent` | Agent display name for notifications and logs. |
-| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | — | Output token limit. Injected into session context if set. |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | -- | Output token limit. Injected into session context if set. |
 
 ---
 
@@ -140,12 +148,12 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SMTP_SERVER` | — | SMTP server hostname. |
+| `SMTP_SERVER` | -- | SMTP server hostname. |
 | `SMTP_PORT` | `25` | SMTP port. |
-| `SMTP_SERVER_IP` | — | Optional fallback IP for the SMTP server. |
-| `SMTP_USER` | — | SMTP username (authenticated mode only). |
-| `SMTP_PASS` | — | SMTP password (authenticated mode only). |
-| `SENDER_EMAIL` | — | From address for all outgoing email. |
+| `SMTP_SERVER_IP` | -- | Optional fallback IP for the SMTP server. |
+| `SMTP_USER` | -- | SMTP username (authenticated mode only). |
+| `SMTP_PASS` | -- | SMTP password (authenticated mode only). |
+| `SENDER_EMAIL` | -- | From address for all outgoing email. |
 
 ---
 
@@ -155,18 +163,18 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SQS_QUEUE_URL` | — | Full SQS queue URL. |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual send. |
+| `SQS_QUEUE_URL` | -- | Full SQS queue URL. |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual send. |
 
 ### Webhook
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WEBHOOK_URL` | — | Default webhook endpoint URL. |
+| `WEBHOOK_URL` | -- | Default webhook endpoint URL. |
 | `WEBHOOK_AUTH_HEADER` | `X-Auth-Token` | Authentication header name. |
-| `WEBHOOK_AUTH_TOKEN` | — | Authentication token value. |
+| `WEBHOOK_AUTH_TOKEN` | -- | Authentication token value. |
 | `WEBHOOK_TIMEOUT` | `30` | Request timeout in seconds. |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual send. |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual send. |
 
 ---
 
@@ -174,8 +182,8 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STORAGE_URL` | — | S3 URL or endpoint (e.g., `s3://my-bucket`). |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual upload. |
+| `STORAGE_URL` | -- | S3 URL or endpoint (e.g., `s3://my-bucket`). |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual upload. |
 
 ---
 
@@ -185,23 +193,23 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DYNAMODB_TABLE_NAME` | — | DynamoDB table name. |
+| `DYNAMODB_TABLE_NAME` | -- | DynamoDB table name. |
 | `DYNAMODB_PARTITION_KEY` | `session_id` | Partition key attribute name. |
-| `DYNAMODB_SORT_KEY` | — | Sort key attribute name. Omit for tables with no sort key. |
-| `DYNAMODB_ENDPOINT_URL` | — | Custom DynamoDB endpoint (for DynamoDB Local in testing). |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual write. |
+| `DYNAMODB_SORT_KEY` | -- | Sort key attribute name. Omit for tables with no sort key. |
+| `DYNAMODB_ENDPOINT_URL` | -- | Custom DynamoDB endpoint (for DynamoDB Local in testing). |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual write. |
 
 ### PostgreSQL
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_HOST` | — | Database host. |
-| `POSTGRES_NAME` | — | Database name. |
-| `POSTGRES_USERNAME` | — | Username. |
-| `POSTGRES_PASSWORD` | — | Password. |
+| `POSTGRES_HOST` | -- | Database host. |
+| `POSTGRES_NAME` | -- | Database name. |
+| `POSTGRES_USERNAME` | -- | Username. |
+| `POSTGRES_PASSWORD` | -- | Password. |
 | `POSTGRES_PORT` | `5432` | Port. |
-| `POSTGRES_TABLE` | — | Default table name. |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual write. |
+| `POSTGRES_TABLE` | -- | Default table name. |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual write. |
 
 ---
 
@@ -209,9 +217,9 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LAMBDA_FUNCTION_NAME` | — | Lambda function ARN or name. |
+| `LAMBDA_FUNCTION_NAME` | -- | Lambda function ARN or name. |
 | `LAMBDA_INVOCATION_TYPE` | `RequestResponse` | Default invocation type. `RequestResponse` (sync) or `Event` (async). |
-| `IS_EVALUATION` | `false` | Evaluation mode — skips actual invocation. |
+| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual invocation. |
 
 ---
 

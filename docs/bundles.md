@@ -1,12 +1,12 @@
 # Bundles
 
-A bundle is a single external directory containing all your personal agentihooks customizations — custom profiles, connectors, and MCP configs. Agentihooks is the engine; the bundle is your data.
+A bundle is a single external directory containing all your personal agentihooks customizations -- custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.
 
 ## Quick Start
 
 ```bash
-# Link your bundle (one time)
-agentihooks bundle link ~/dev/my-tools/.agentihooks
+# Link your bundle and install (one command)
+agentihooks init --bundle ~/dev/my-tools
 
 # See everything available
 agentihooks --list-profiles
@@ -14,46 +14,59 @@ agentihooks --list-profiles
 # Use a bundle profile
 agentihooks init --profile my-custom-profile
 
-# Per-repo override
-cd ~/dev/some-project
-agentihooks init --profile coding
+# Per-repo config
+agentihooks init --repo ~/dev/some-project
 ```
 
 ## Bundle Layout
 
 ```
-my-tools/.agentihooks/              ← the bundle directory
-  profiles/
-    infra-ops/                       # custom profile
-      profile.yml                    # name, description, mcp_categories
-      settings.overrides.json        # permissions, env vars
-      .claude/CLAUDE.md              # system prompt
-    restricted/
-      ...
-  connectors/
-    my-mcp-filter/                   # MCP tool deny rules
-      connector.yml
-      profiles/
-        default/permissions.json
-        coding/permissions.json
+my-tools/                                   <- the bundle directory
+├── .claude/                                # Bundle-global assets (layer 2 of 3-layer merge)
+│   ├── .mcp.json                           # Bundle MCP servers
+│   ├── skills/                             # Bundle-global skills
+│   ├── agents/                             # Bundle-global agents
+│   ├── commands/                           # Bundle-global commands
+│   └── rules/                              # Bundle-global rules
+└── profiles/
+    ├── infra-ops/                           # Custom profile
+    │   ├── CLAUDE.md                        # System prompt (at profile ROOT)
+    │   ├── profile.yml                      # name, description, mcp_categories, claude launch config
+    │   └── .claude/
+    │       ├── settings.overrides.json      # Per-profile settings overrides
+    │       ├── .mcp.json                    # Profile MCP servers
+    │       ├── skills/                      # Profile-specific skills
+    │       ├── agents/                      # Profile-specific agents
+    │       ├── commands/                    # Profile-specific commands
+    │       └── rules/                       # Profile-specific rules
+    └── restricted/
+        └── ...                              # Same structure
 ```
 
 ## How It Works
 
-1. `agentihooks bundle link <path>` stores the path in `~/.agentihooks/state.json`
-2. Connectors inside `connectors/` are **auto-linked** — no separate `connector link` needed
-3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles` and `global --profile`
+1. `agentihooks init --bundle <path>` stores the bundle path in `~/.agentihooks/state.json` and runs the global install
+2. On subsequent `agentihooks init` runs, the linked bundle is automatically used
+3. Profiles inside `profiles/` are **auto-discovered** by `--list-profiles`
 4. `agentihooks init --profile <name>` checks built-in profiles first, then bundle
 
 Only **one bundle** can be linked at a time.
 
-## CLI
+## 3-Layer Merge
 
-```bash
-agentihooks bundle link <path>    # Link a bundle directory
-agentihooks bundle list           # Show bundle contents (profiles + connectors)
-agentihooks bundle unlink         # Remove the bundle (auto-unlinks bundle connectors)
-```
+When `agentihooks init` runs, skills, agents, commands, rules, and MCP servers are merged from three layers:
+
+| Layer | Source | Description |
+|-------|--------|-------------|
+| 1 (base) | agentihooks `.claude/` | Built-in assets from the agentihooks repo |
+| 2 (bundle) | bundle `.claude/` | Bundle-global customizations |
+| 3 (profile) | `profiles/<name>/.claude/` | Profile-specific overrides |
+
+Later layers override earlier ones. This lets you start with the agentihooks base, add team customizations via the bundle, and fine-tune per profile.
+
+For settings, the merge order is: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL.
+
+For MCP servers: hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
 
 ## Profile Resolution Order
 
@@ -67,22 +80,11 @@ Built-in profiles always take precedence. Name your bundle profiles to avoid con
 
 ## Per-Repo Config
 
-After linking a bundle and setting a global profile, you can override per repo with `.agentihooks.json`:
+After linking a bundle and setting a global profile, you can configure per repo:
 
-```json
-{
-  "profile": "coding",
-  "disabledMcpServers": ["gateway-media"],
-  "permissions": {
-    "deny": ["Bash(terraform apply *)"],
-    "ask": ["Bash(terraform plan *)"]
-  },
-  "env": {
-    "CUSTOM_VAR": "value"
-  }
+```bash
+agentihooks init --repo ~/dev/my-project
 ```
-
-Apply with `agentihooks init` — writes `.claude/settings.local.json` (highest priority settings file in Claude Code). The profile's permissions + connector rules + repo overrides are all merged.
 
 ## Permission Tiers
 
@@ -90,13 +92,11 @@ Built-in profiles define escalating permission tiers:
 
 | Profile | Mode | Deny | Ask |
 |---------|------|------|-----|
-| default | `default` | — | git push, rm -rf, docker rm, kubectl delete |
+| default | `default` | -- | git push, rm -rf, docker rm, kubectl delete |
 | coding | `acceptEdits` | Protected branch pushes, merge, gh CLI | git push, rm -rf, docker, kubectl |
-| admin | `auto` | — | force push, rm -rf / |
+| admin | `auto` | -- | force push, rm -rf / |
 
 Evaluation order: **deny > ask > allow** (first match wins).
-
-Connectors add MCP-specific deny rules on top. Per-repo config adds more. Rules only stack — you can't relax restrictions, only add them. To relax, use a less restrictive profile.
 
 ## New Machine Setup
 
@@ -107,15 +107,12 @@ cd agentihooks
 uv venv ~/.agentihooks/.venv
 uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
-# 2. Install globally
-agentihooks init
-
-# 3. Clone your tools repo and link the bundle
+# 2. Clone your tools repo and install with bundle
 git clone https://github.com/you/my-tools ~/dev/my-tools
-agentihooks bundle link ~/dev/my-tools/.agentihooks
+agentihooks init --bundle ~/dev/my-tools --profile default
 
-# 4. Reinstall with bundle
-agentihooks init --profile default
+# 3. Reload shell
+source ~/.bashrc
 
-# Done — all profiles, connectors, and MCP rules active
+# Done -- all profiles, skills, agents, commands, rules, and MCPs active
 ```

@@ -60,7 +60,7 @@ Verify:
 
 ## 4. Run the global install
 
-Always run the installer **from the `~/.agentihooks/.venv` Python** — the installer bakes `sys.executable` into every hook command it writes.
+Always run the installer **from the `~/.agentihooks/.venv` Python** -- the installer bakes `sys.executable` into every hook command it writes.
 
 ```bash
 agentihooks init
@@ -69,14 +69,18 @@ agentihooks init
 This single command:
 
 1. Reads `profiles/_base/settings.base.json` (the canonical settings source)
-2. Substitutes `/app` placeholders with the real repo path and `__PYTHON__` with `~/.agentihooks/.venv/bin/python`
-3. Writes `~/.claude/settings.json` with hook wiring and tool permissions
-4. Symlinks skills, agents, and commands from `.claude/` into `~/.claude/`
-5. Symlinks `~/.claude/CLAUDE.md` to the chosen profile's system prompt
-6. Merges profile `.mcp.json` into `~/.claude.json` (user-scope MCP servers)
-7. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+2. Merges settings: base -> profile `.claude/settings.overrides.json` -> OTEL
+3. Substitutes `/app` placeholders with the real repo path and `__PYTHON__` with `~/.agentihooks/.venv/bin/python`
+4. Writes `~/.claude/settings.json` with hook wiring and tool permissions
+5. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> profile-specific)
+6. Symlinks `~/.claude/CLAUDE.md` to the chosen profile's `CLAUDE.md` (at profile root)
+7. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
+8. Applies MCP blacklist across all projects
+9. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+10. Auto-starts quota and sync daemons
+11. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 
-The install is **idempotent** — re-running is safe. Settings are only backed up on the first run.
+The install is **idempotent** -- re-running is safe. Settings are only backed up on the first run.
 
 {: .note }
 If you ever recreate the venv or change its location, re-run the installer from the new Python. The hook commands in `settings.json` will be updated automatically.
@@ -113,7 +117,7 @@ The agent should list tools from agentihooks (e.g., `hooks_list_tools`, `get_env
 On first install, `~/.agentihooks/.env` is seeded from `.env.example`. Edit it to configure integrations. Minimum recommended settings:
 
 ```bash
-# Redis — enables burn rate tracking, file read cache, warning edge-triggers
+# Redis -- enables burn rate tracking, file read cache, warning edge-triggers
 REDIS_URL=redis://:PASSWORD@host:port/0
 
 # Token control
@@ -135,10 +139,10 @@ All hooks and the MCP server auto-load this file at import time (plus any `~/.ag
 The statusline can show your Anthropic console usage on line 3. Example output:
 
 ```
-session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: €40/99 (40%) resets apr 1
+session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: $40/99 (40%) resets apr 1
 ```
 
-This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes claude.ai/settings/usage headlessly via Playwright. Auth uses your real system browser — no Chromium login required.
+This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes claude.ai/settings/usage headlessly via Playwright. Auth uses your real system browser -- no Chromium login required.
 
 ### Install Playwright's browser
 
@@ -148,19 +152,28 @@ This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes c
 
 ### Authenticate and start the daemon
 
-The `quota auth` command opens YOUR real browser (Chrome on Windows/WSL via `cmd.exe /c start`, Safari/Chrome on Mac via `open`) to claude.ai. You then copy the `sessionKey` cookie from Chrome DevTools (F12 → Application → Cookies → claude.ai → sessionKey), paste it when prompted, and the daemon starts automatically.
+The `quota auth` command opens YOUR real browser (Chrome on Windows/WSL via `cmd.exe /c start`, Safari/Chrome on Mac via `open`) to claude.ai. You then copy the `sessionKey` cookie from Chrome DevTools (F12 -> Application -> Cookies -> claude.ai -> sessionKey), paste it when prompted, and the daemon starts automatically.
 
 ```bash
 agentihooks quota auth
 ```
 
-The cookie is saved as a Playwright storage state file at `~/.agentihooks/claude_auth_state.json`. Headless Chromium is only used for background scraping — your login happens in your real browser.
+The cookie is saved as a Playwright storage state file at `~/.agentihooks/quota-accounts/<name>.json`. Headless Chromium is only used for background scraping -- your login happens in your real browser.
 
-Alternatively, import the sessionKey without opening a browser:
+### Multi-account quota
+
+You can authenticate multiple accounts and switch between them:
 
 ```bash
-agentihooks quota import-cookies
+agentihooks quota auth work          # authenticate as "work"
+agentihooks quota auth personal      # authenticate as "personal"
+agentihooks quota list               # show all accounts
+agentihooks quota switch personal    # switch active account
+agentihooks quota restart            # restart daemon with current account
+agentihooks quota remove personal    # remove an account
 ```
+
+Account credentials are stored at `~/.agentihooks/quota-accounts/<name>.json`.
 
 ### Daemon management
 
@@ -203,20 +216,32 @@ agentihooks init
 List available profiles:
 
 ```bash
-agentihooks init --list-profiles
+agentihooks --list-profiles
 ```
 
 ---
 
-## Install MCP tools into a specific project
+## Using a bundle
 
-To wire the MCP server for a single project (without global install):
+Link your external customization bundle on first install:
+
+```bash
+agentihooks init --bundle ~/dev/my-tools
+```
+
+After linking, future runs of `agentihooks init` will use the linked bundle automatically. See [Bundles](../bundles.md) for details.
+
+---
+
+## Install into a specific project
+
+To wire the MCP server and profile config for a single project:
 
 ```bash
 agentihooks init --repo ~/dev/my-project
 ```
 
-This writes a `.mcp.json` into the target project directory.
+This writes project-level configuration into the target project directory.
 
 ---
 
@@ -238,7 +263,7 @@ MCP_CATEGORIES=aws,utilities ~/.agentihooks/.venv/bin/python -m hooks.mcp
 
 By default the installer targets `~/.claude`. If `$HOME` differs from where
 Claude Code actually stores its config, set `CLAUDE_CODE_HOME_DIR` to the
-correct home-directory root — agentihooks appends `.claude` automatically:
+correct home-directory root -- agentihooks appends `.claude` automatically:
 
 ```bash
 CLAUDE_CODE_HOME_DIR=/shared/home \
@@ -255,19 +280,6 @@ The legacy `AGENTIHOOKS_CLAUDE_HOME` still works and points directly at the
 
 ---
 
-## Auto-merge an MCP file during install
-
-Set `AGENTIHOOKS_MCP_FILE` to have the installer automatically merge an external MCP file into `~/.claude.json`:
-
-```bash
-export AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json
-agentihooks init
-```
-
-The path is recorded in `state.json` so future installs re-apply it automatically.
-
----
-
 ## Uninstall
 
 To remove everything agentihooks installed:
@@ -278,5 +290,7 @@ agentihooks uninstall
 
 Add `--yes` to skip the confirmation prompt.
 
+This removes: settings, all symlinks, CLAUDE.md, MCP server registrations, stops all daemons (quota + sync), removes the bashrc block, and uninstalls the CLI. User data in `~/.agentihooks/state.json` is preserved.
+
 {: .warning }
-This removes hooks, skills, agents, CLAUDE.md, and MCP server registrations. User data in `~/.agentihooks/` is **not** removed — delete it manually with `rm -rf ~/.agentihooks` if desired.
+To fully remove all user data, delete `~/.agentihooks` manually with `rm -rf ~/.agentihooks`.

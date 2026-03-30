@@ -7,7 +7,7 @@ parent: Getting Started
 # Portability & Reusability
 {: .no_toc }
 
-AgentiHooks is designed to travel with you. One data directory, one env file, and an idempotent install command let you reproduce a complete Claude Code environment on any machine — or share a setup across a team.
+AgentiHooks is designed to travel with you. One data directory, one env file, and an idempotent install command let you reproduce a complete Claude Code environment on any machine -- or share a setup across a team.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -23,15 +23,17 @@ Everything user-specific lives in a single directory:
 
 ```
 ~/.agentihooks/
-├── .env          # Main credentials (always loaded first)
-├── *.env         # Companion env files (auto-sourced alphabetically after .env)
-├── *.json        # Drop MCP server files here → agentihooks mcp install
-├── state.json    # Tracks installed MCP files and other state
-├── logs/         # Hook + MCP log files
-└── memory/       # Per-project agent memory files
+├── .env                # Main credentials (always loaded first)
+├── *.env               # Companion env files (auto-sourced alphabetically after .env)
+├── state.json          # Tracks installed state, bundle path, targets
+├── quota-accounts/     # Multi-account quota credentials
+│   ├── work.json
+│   └── personal.json
+├── logs/               # Hook + MCP + daemon log files
+└── memory/             # Per-project agent memory files
 ```
 
-`agentihooks uninstall` never touches this directory — your credentials and memory survive reinstalls.
+`agentihooks uninstall` never touches this directory -- your credentials and memory survive reinstalls.
 
 To fully reset: `rm -rf ~/.agentihooks`
 
@@ -61,98 +63,57 @@ The file is seeded from `.env.example` on first `agentihooks init` and is **neve
 
 ---
 
-## Loading env vars into your shell (`init`)
+## Loading env vars into your shell
 
-Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `init` installs a **shell function** (not an alias) that sources `.env` into any shell on demand — and also auto-calls it so vars load in every new shell automatically.
+Claude Code expands `${VAR}` in MCP configs from its own process environment at startup. `agentihooks init` automatically writes a managed block to `~/.bashrc` that defines the `agentienv` shell function and the `agenti` alias. The function is auto-called in every new shell so vars are loaded automatically.
+
+### What init writes to ~/.bashrc
+
+A managed block between `# === agentihooks ===` and `# === end-agentihooks ===` markers:
 
 ```bash
-# Install the function (one time — writes a managed block to ~/.bashrc)
-agentihooks init
+# === agentihooks ===
+agentienv() {
+  # sources ~/.agentihooks/.env first, then all *.env files alphabetically
+  ...
+}
+alias agenti='agentihooks claude'
+agentienv
+# === end-agentihooks ===
+```
 
-# Reload your shell
+The `agentienv()` function:
+1. Sources `~/.agentihooks/.env`
+2. Sources all `*.env` files alphabetically from the same directory
+3. Reports how many files were loaded
+
+The trailing `agentienv` call means vars are loaded automatically in every new shell -- no manual invocation needed unless you add new env files mid-session.
+
+The block is **idempotent** -- re-running `agentihooks init` updates the block in place rather than appending. Keep your own aliases outside the markers.
+
+### Usage
+
+```bash
+# After first install, reload your shell
 source ~/.bashrc
 
 # Vars are already loaded automatically. Call agentienv manually only
 # if you add new env files mid-session:
 agentienv
+
+# Launch claude with profile flags
+agenti
 ```
 
-Then launch `claude` from that shell — all `${VAR}` placeholders in your MCP configs resolve correctly.
+Then launch `claude` (or `agenti`) from that shell -- all `${VAR}` placeholders in your MCP configs resolve correctly.
 
-The function written to `~/.bashrc` defines `agentienv()` which:
-1. Sources `~/.agentihooks/.env`
-2. Sources all `*.env` files alphabetically from the same directory
-3. Reports how many files were loaded
+### Why this exists
 
-The block ends with a bare `agentienv` call so the vars are loaded automatically in every new shell.
-
-The block is **idempotent** — re-running `init` updates the block in place rather than appending. Keep your own aliases outside the markers.
-
-### Auto-installing requirements
-
-After writing the alias, `init` scans `~/.agentihooks/` and the saved `mcpLibPath` for any `requirements.txt` and offers to install each one:
-
-```
-Found /home/user/.agentitools/requirements.txt — install with uv? [y/N]
-```
-
-Requirements are installed with `uv pip install` into the active virtual environment. If no venv is active and no `.venv` exists in the current directory, installation is refused to avoid polluting system Python:
-
-```
-[!!] No virtual environment found.
-     Create and activate one first:
-       python3 -m venv .venv && source .venv/bin/activate
-     Then re-run: agentihooks init
-```
+Claude Code expands `${VAR}` in MCP server configs from its own process environment at startup. Variables defined only in hook subprocesses arrive too late. `agentienv` loads them into the launching shell so `claude` inherits them.
 
 ---
 
-## Managing MCP server files (`agentihooks mcp`)
-
-Drop `.json` files with a `mcpServers` key into `~/.agentihooks/`, then use the interactive MCP manager to install or remove them.
-
-```bash
-# List available MCP files
-agentihooks mcp
-
-# Interactive install — pick from the list
-agentihooks mcp install
-
-# Interactive uninstall — pick from installed files
-agentihooks mcp uninstall
-
-# Install a specific file directly by path
-agentihooks mcp add ~/Downloads/my-servers.json
-
-# Re-apply all installed files after changes
-agentihooks mcp sync
-```
-
-Output:
-
-```
-MCP files in /home/user/.agentihooks:
-
-  1. anton-mcp.json  [installed]
-     • anton
-     • litellm
-     • matrix
-     • github
-  2. staging-mcp.json
-     • staging-api
-     • staging-db
-     • staging-cache
-
-Enter file number (1-2, or q to quit):
-```
-
-After picking a file, a second prompt lets you choose which servers to install (`0` = all, or specific numbers/comma list).
-
-`[installed]` marks files already tracked in `state.json`. Installed servers are merged into `~/.claude.json` and re-applied automatically on `agentihooks init`.
-
-For `uninstall`, the file is removed from tracking only if **all** its servers were uninstalled.
-
-### Companion `.env` files
+## Companion `.env` files
 
 Drop a `.env` file alongside your MCP JSON to provide the env vars it needs:
 
@@ -165,22 +126,8 @@ Drop a `.env` file alongside your MCP JSON to provide the env vars it needs:
 ```
 
 Companion env files are auto-sourced by:
-- **Hook runtime** — `hooks/config.py` loads `~/.agentihooks/.env` first, then all `*.env` files alphabetically
-- **`agentienv` shell function** — sources `.env` then all `*.env` files so `${VAR}` placeholders in MCP configs resolve at Claude Code startup
-
-The `mcp list` output shows detected companion env files:
-
-```
-  1. anton-mcp.json  [installed]
-     • anton
-     • litellm
-     • matrix
-     env: anton-mcp.env
-```
-
-To scan a different directory: `agentihooks mcp list --dir /path/to/mcp-library/`
-
-Restart Claude Code after any install/uninstall for changes to take effect.
+- **Hook runtime** -- `hooks/config.py` loads `~/.agentihooks/.env` first, then all `*.env` files alphabetically
+- **`agentienv` shell function** -- sources `.env` then all `*.env` files so `${VAR}` placeholders in MCP configs resolve at Claude Code startup
 
 ---
 
@@ -194,30 +141,33 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/The-Cloud-Clock-Work/agentihooks
 cd agentihooks
 
-# 3. Install dependencies
-uv sync --all-extras
+# 3. Create the venv and install
+uv venv ~/.agentihooks/.venv
+uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
 # 4. Copy your env file (from backup, 1Password, etc.)
 cp /path/to/backup/.env ~/.agentihooks/.env
 
-# 5. Install hooks, skills, agents, MCPs
-uv run agentihooks init
+# 5. Install everything (hooks, skills, agents, MCPs, bashrc, daemons)
+agentihooks init
 
-# 6. Install the agentienv shell function + requirements
-#    (activate a venv first so init can install packages)
-python3 -m venv .venv && source .venv/bin/activate
-agentihooks init   # writes function + auto-call, offers to install requirements.txt
+# 6. Reload shell to pick up agentienv + agenti alias
 source ~/.bashrc
 
-# 7. Load env vars and launch Claude Code
-agentienv && claude
-
-# 8. Drop MCP files into ~/.agentihooks/ and install
-cp /path/to/my-servers.json ~/.agentihooks/
-agentihooks mcp install
+# 7. Launch Claude Code
+agenti
 ```
 
 Everything restored. No manual settings editing, no hunting for which keys go where.
+
+If you use a bundle:
+
+```bash
+# Clone your tools repo and install with bundle
+git clone https://github.com/you/my-tools ~/dev/my-tools
+agentihooks init --bundle ~/dev/my-tools --profile coding
+source ~/.bashrc
+```
 
 ---
 
@@ -226,8 +176,7 @@ Everything restored. No manual settings editing, no hunting for which keys go wh
 1. Keep `.env.example` up to date in the repo with all variable names (no values)
 2. Share values via a secrets manager (1Password, AWS Secrets Manager, Vault)
 3. Each developer runs `agentihooks init` and populates `~/.agentihooks/.env`
-4. Each developer runs `agentihooks init` to install the `agentienv` shell function
-5. Keep curated `.mcp.json` files in a shared repo or distribute them to each developer
-6. Each developer drops them into `~/.agentihooks/` and runs `agentihooks mcp install`
+4. The bashrc block is written automatically -- just `source ~/.bashrc`
+5. If using a bundle, each developer clones the bundle repo and runs `agentihooks init --bundle <path>`
 
 The repo stays credential-free. `~/.agentihooks/.env` is on each developer's machine only.

@@ -6,7 +6,7 @@ nav_order: 8
 # Extending AgentiHooks
 {: .no_toc }
 
-AgentiHooks is designed to be extended. This page covers the two main extension points: adding a new MCP tool category and adding a new hook handler.
+AgentiHooks is designed to be extended. This page covers the main extension points: adding a new MCP tool category, adding a new hook handler, and adding custom skills/agents/commands/rules via the bundle system.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -147,10 +147,53 @@ Re-run `agentihooks init` to apply the updated settings.
 
 ### 4. Exit code behavior
 
-- Exit `0` (or no call to `sys.exit`) — allow Claude Code to proceed
-- Exit `2` — block the action (Claude Code injects stdout as a warning)
+- Exit `0` (or no call to `sys.exit`) -- allow Claude Code to proceed
+- Exit `2` -- block the action (Claude Code injects stdout as a warning)
 
 Exit code `2` is only meaningful for `PreToolUse` and `UserPromptSubmit`.
+
+---
+
+## Adding custom assets via bundles
+
+The 3-layer merge system lets you add custom skills, agents, commands, and rules without modifying the agentihooks repo.
+
+### Bundle-global assets (layer 2)
+
+Place assets in the bundle's `.claude/` directory. These are available to all profiles:
+
+```
+my-bundle/
+└── .claude/
+    ├── skills/
+    │   └── my-skill/
+    │       └── SKILL.md
+    ├── agents/
+    │   └── my-agent.md
+    ├── commands/
+    │   └── my-command/
+    │       └── COMMAND.md
+    └── rules/
+        └── my-rules.md
+```
+
+### Profile-specific assets (layer 3)
+
+Place assets in the profile's `.claude/` directory. These are only available when that profile is active:
+
+```
+my-bundle/
+└── profiles/
+    └── coding/
+        └── .claude/
+            ├── skills/
+            │   └── coding-skill/
+            │       └── SKILL.md
+            └── rules/
+                └── coding-rules.md
+```
+
+After adding assets, run `agentihooks init` to re-symlink. The sync daemon will also pick up changes within 60s if running.
 
 ---
 

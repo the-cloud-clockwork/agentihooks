@@ -6,33 +6,28 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clock-work.github.io/agentihooks/)
 
-Hook system and MCP tool server for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents. Designed to work with [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) and meant to be forked and extended for custom workflows.
-
-**agentihooks** intercepts every Claude Code lifecycle event (session start/end, tool use, prompts, stops) and provides 26 MCP tools across 8 categories for interacting with external services. A built-in **Token Control Layer** monitors context window usage, truncates verbose command output, deduplicates file reads, and warns before quota exhaustion — targeting 30–50% token reduction in agentic sessions.
+Hook system and MCP tool server for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Intercepts every lifecycle event (session start/end, tool use, prompts, stops), provides MCP tools for external services, and includes a **Token Control Layer** that monitors context window usage, truncates verbose output, deduplicates file reads, and warns before quota exhaustion.
 
 > **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
->
-> **Cost management guide:** [the-cloud-clock-work.github.io/agentihooks/docs/cost-management/](https://the-cloud-clock-work.github.io/agentihooks/docs/cost-management/) — see how AgentiHooks saves 100K–250K tokens per session
 
 ## Architecture
 
 ```
 Claude Code
-  │
-  ├── Hook Events (stdin JSON) ──► python -m hooks ──► hook_manager.py
-  │     SessionStart, PreToolUse,       │
-  │     PostToolUse, Stop, ...          ├── transcript logging
-  │     (10 events total)               ├── tool error memory
-  │                                     ├── token control layer
-  │                                     ├── metrics parsing
-  │                                     └── email notifications
-  │
-  ├── statusLine (native setting) ──► python -m hooks.statusline
-  │     pipes JSON on every turn        └── 2-3 line status bar (ctx%, burn rate, cost, git)
-  │
-  └── MCP Tools ──► python -m hooks.mcp ──► 8 category modules
-        aws, email, messaging,                │
-        database, compute, ...                └── hooks/integrations/*
+  |
+  |-- Hook Events (stdin JSON) --> python -m hooks --> hook_manager.py
+  |     SessionStart, PreToolUse,       |
+  |     PostToolUse, Stop, ...         |-- transcript logging
+  |     (10 events total)              |-- tool error memory
+  |                                    |-- token control layer
+  |                                    |-- metrics parsing
+  |
+  |-- statusLine (native setting) --> python -m hooks.statusline
+  |     pipes JSON on every turn       --> 2-3 line status bar (ctx%, burn rate, cost, git)
+  |
+  +-- MCP Tools --> python -m hooks.mcp --> category modules
+        aws, email, messaging,               --> hooks/integrations/*
+        database, compute, ...
 ```
 
 ## Quick Start
@@ -43,7 +38,7 @@ Claude Code
 git clone https://github.com/The-Cloud-Clock-Work/agentihooks
 cd agentihooks
 
-# 1. Create the dedicated venv at ~/.agentihooks/.venv and install everything
+# 1. Create the dedicated venv and install everything
 uv venv ~/.agentihooks/.venv
 uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 
@@ -51,9 +46,123 @@ uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 agentihooks init
 ```
 
-`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents, merges MCP servers into `~/.claude.json`, and installs the CLI globally. **Critically, every hook command in `settings.json` is written with the Python that ran the installer** — so by running the installer from `~/.agentihooks/.venv`, all hook subprocesses find the right packages regardless of which shell or virtual environment is active when Claude Code fires them.
+`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, installs the CLI globally, and auto-starts background daemons. Every hook command is written with the Python that ran the installer, so all subprocesses find the right packages regardless of which shell or venv is active.
 
-Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/installation/) for the full step-by-step walkthrough including Redis setup and quota display.
+Re-run any time -- it is idempotent. See [Installation](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/installation/) for a full walkthrough.
+
+## CLI
+
+```bash
+# Install / re-install
+agentihooks init                             # global install with default profile
+agentihooks init --bundle ~/my-tools         # first-time: link bundle + install
+agentihooks init --profile coding            # use a specific profile
+agentihooks init --repo /path/to/repo        # per-repo config
+
+# Launch claude with profile flags
+agentihooks claude                           # reads profile.yml -> CLI flags
+agenti                                       # alias (after source ~/.bashrc)
+
+# Uninstall
+agentihooks uninstall [--yes]                # remove everything
+
+# Multi-account quota watcher
+agentihooks quota auth <name>                # add/update account
+agentihooks quota list                       # show all accounts
+agentihooks quota switch [name]              # switch active account
+agentihooks quota restart                    # stop + start daemon
+agentihooks quota status                     # show current usage
+agentihooks quota logs                       # tail daemon log
+agentihooks quota stop                       # kill daemon
+agentihooks quota remove <name>              # delete account
+
+# Sync daemon (auto-propagation)
+agentihooks daemon start                     # start background daemon (60s poll)
+agentihooks daemon status                    # show targets + watched files
+agentihooks daemon logs                      # tail daemon log
+agentihooks daemon stop                      # kill daemon
+
+# Utilities
+agentihooks ignore [path] [--force]          # create .claudeignore
+agentihooks --list-profiles                  # show available profiles
+agentihooks --query                          # print active profile name
+```
+
+CLI output uses colored markers: `[OK]` green, `[--]` dim, `[!!]` yellow, `[RM]` red.
+
+## What `init` Does
+
+1. Links bundle (if `--bundle` provided)
+2. Merges settings: `settings.base.json` -> profile `settings.overrides.json` -> OTEL config
+3. Symlinks skills, agents, commands, and rules (3-layer merge)
+4. Symlinks `CLAUDE.md` from profile root to `~/.claude/CLAUDE.md`
+5. Installs MCP servers (hooks-utils + bundle + profile)
+6. Applies MCP blacklist to all registered projects
+7. Installs CLI globally via `uv tool`
+8. Auto-starts quota daemon (if accounts exist) and sync daemon
+9. Writes bashrc block (`agentienv` shell function + `agenti` alias)
+
+## Profiles
+
+Profiles mirror the Claude Code project structure:
+
+```
+profiles/<name>/
+|-- CLAUDE.md                    # system prompt (-> ~/.claude/CLAUDE.md)
+|-- profile.yml                  # agentihooks metadata + claude flags
++-- .claude/
+    |-- settings.overrides.json  # merged into ~/.claude/settings.json
+    |-- .mcp.json                # profile MCP servers
+    |-- skills/                  # -> ~/.claude/skills/
+    |-- agents/                  # -> ~/.claude/agents/
+    |-- commands/                # -> ~/.claude/commands/
+    +-- rules/                   # -> ~/.claude/rules/
+```
+
+Built-in profiles: `default`, `coding`, `admin`. Bundle profiles are discovered automatically.
+
+**3-layer merge:** agentihooks built-in -> bundle global `.claude/` -> profile-specific `.claude/`. Applies to skills, agents, commands, rules, and MCP servers.
+
+Switch profiles: `agentihooks init --profile <name>`. List all: `agentihooks --list-profiles`.
+
+### `agentihooks claude`
+
+Reads the `claude:` section from the active profile's `profile.yml` and maps fields to CLI flags:
+
+| profile.yml field | CLI flag |
+|---|---|
+| `permission_mode: bypassPermissions` | `--dangerously-skip-permissions` |
+| `model: sonnet` | `--model sonnet` |
+| `effort: high` | `--effort high` |
+| `worktree: true` | `--worktree` |
+
+Also loads env vars from `~/.agentihooks/.env` and companion `*.env` files before exec. Extra arguments are passed through: `agentihooks claude --verbose`.
+
+## Bundles
+
+A **bundle** is an external directory containing custom profiles and shared assets. Link it once; everything is auto-discovered.
+
+```
+my-bundle/
+|-- .claude/                     # global assets shared by all profiles
+|   |-- skills/
+|   |-- agents/
+|   |-- commands/
+|   |-- rules/
+|   +-- .mcp.json                # bundle-wide MCP servers
++-- profiles/
+    +-- infra-ops/               # custom profile
+        |-- CLAUDE.md
+        |-- profile.yml
+        +-- .claude/
+            +-- settings.overrides.json
+```
+
+```bash
+agentihooks init --bundle ~/dev/my-bundle    # link bundle + install
+agentihooks --list-profiles                  # shows built-in + bundle profiles
+agentihooks init --profile infra-ops         # use a bundle profile
+```
 
 ## Hook Events
 
@@ -61,24 +170,70 @@ Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-
 
 | Event | What happens |
 |-------|-------------|
-| `SessionStart` | Injects session awareness, MCP hygiene reminder, thinking/effort guidance, MCP surface area warning |
-| `PreToolUse` | Secret scan (blocks on detection), file read deduplication, injects tool error memory |
-| `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors, context audit tracking, subagent effort check |
-| `Stop` | Scans transcript for errors, parses metrics, auto-saves memory, emits context audit report |
-| `SessionEnd` | Logs transcript, clears file read cache, clears context audit |
+| `SessionStart` | Injects session awareness, MCP hygiene reminder, MCP surface area warning |
+| `PreToolUse` | Secret scan (blocks on detection), file read deduplication, tool error memory |
+| `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
+| `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
+| `SessionEnd` | Logs transcript, clears file read cache |
 | `SubagentStop` | Logs subagent transcript |
 | `UserPromptSubmit` | Warns on detected secrets |
 | `Notification` | Logs notifications |
 | `PreCompact` | Logs before context compaction |
 | `PermissionRequest` | Logs permission requests |
 
-**StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by `hooks/statusline.py`. It emits a 2–3 line terminal status bar with context fill %, burn rate, cost, cache ratio, git branch, peak/off-peak indicator, and smart compact suggestions on every turn.
+**StatusLine** is not a hook event -- it is a native Claude Code setting handled by `hooks/statusline.py`. Emits a 2-3 line terminal status bar with context fill %, burn rate, cost, cache ratio, git branch, and quota.
 
-Full payload schemas and handler details: [Hook Events](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/events/)
+## Multi-Account Quota
+
+The quota watcher is a headless Playwright daemon that scrapes claude.ai/settings/usage and writes JSON for the statusline. Supports multiple accounts.
+
+```bash
+# One-time: install Playwright's browser
+~/.agentihooks/.venv/bin/python -m playwright install chromium
+
+# Add accounts
+agentihooks quota auth personal     # opens browser, prompts for sessionKey
+agentihooks quota auth team         # add another account
+
+# Manage
+agentihooks quota list              # show all, mark active
+agentihooks quota switch team       # switch + restart daemon
+agentihooks quota remove personal   # delete account
+```
+
+Accounts are stored in `~/.agentihooks/quota-accounts/<name>.json`. Enable in `~/.agentihooks/.env`:
+
+```bash
+CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
+```
+
+Statusline output example:
+```
+session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am
+```
+
+## Sync Daemon
+
+`scripts/sync_daemon.py` watches 27+ source files across all 3 layers (built-in, bundle, profile) and auto-propagates changes to every registered target within one poll cycle. Additive only -- never deletes user files.
+
+```bash
+agentihooks daemon start            # start (60s default poll)
+agentihooks daemon status           # show targets + watched files
+agentihooks daemon stop             # kill daemon
+```
+
+| Source change | Affected targets |
+|---|---|
+| `settings.base.json` | Global + ALL projects |
+| `profiles/{X}/*` | Targets using profile X |
+| `.env` files | Global + ALL projects |
+| Bundle directory | Global + ALL projects |
+
+An advisory file lock (`~/.agentihooks/sync.lock`) prevents concurrent writes between the daemon and manual `agentihooks init` commands.
 
 ## MCP Tool Categories
 
-26 tools across 8 categories, selectively loaded via `MCP_CATEGORIES`:
+Tools exposed by the `hooks-utils` MCP server, selectively loaded via `MCP_CATEGORIES`:
 
 | Category | Tools | Description |
 |----------|------:|-------------|
@@ -91,142 +246,26 @@ Full payload schemas and handler details: [Hook Events](https://the-cloud-clock-
 | `observability` | 7 | Timers, metrics, structured logging, container log tailing |
 | `utilities` | 3 | Markdown writer, env vars, tool listing |
 
-Per-tool signatures, parameters, and environment variables: [MCP Tools](https://the-cloud-clock-work.github.io/agentihooks/docs/mcp-tools/)
-
-## CLI
-
-```bash
-# Core
-agentihooks init [--profile <name>]          # install/re-apply to ~/.claude
-agentihooks init --bundle <path>             # first-time: link bundle + global install
-agentihooks init --repo <path>               # per-repo config → .claude/settings.local.json
-agentihooks --list-profiles                  # show all profiles (built-in + bundle)
-agentihooks --query                          # print active profile name
-
-# Token optimization tools
-agentihooks lint-claude [path]               # analyze CLAUDE.md token cost, suggest skill extraction
-agentihooks extract-skill "Section" --name x # extract a section into a skill
-agentihooks mcp report                       # show per-server MCP tool count + estimated token cost
-
-# Sync Daemon (auto-propagation)
-agentihooks daemon start                     # start background daemon (60s poll)
-agentihooks daemon status                    # show targets + watched files
-agentihooks daemon logs                      # tail daemon log
-agentihooks daemon stop                      # kill daemon
-
-# Quota (multi-account)
-agentihooks quota auth <name>                # add/update account
-agentihooks quota list                       # show all accounts
-agentihooks quota switch [name]              # switch active account
-agentihooks quota status                     # show current usage
-agentihooks quota logs                       # tail daemon log
-agentihooks quota stop                       # kill daemon
-
-# Other
-agentihooks claude                           # launch claude with profile flags
-agentihooks ignore [path] [--force]          # create .claudeignore
-agentihooks uninstall                        # remove everything
-```
-
-Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
-
 ## Configuration
 
-All integrations are configured via environment variables. Key ones:
+All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root for logs, memory, and state |
-| `CLAUDE_CODE_HOME_DIR` | `$HOME` | Home-directory root override (`.claude` appended automatically) |
-| `AGENTIHOOKS_CLAUDE_HOME` | `~/.claude` | Legacy: direct path to `.claude` directory |
-| `AGENTIHOOKS_PROFILE` | `default` | Profile to use for `agentihooks init` / `project` (env alternative to `--profile`) |
-| `AGENTIHOOKS_MCP_FILE` | — | Path to an MCP JSON file to auto-merge during `agentihooks init` |
-| `MCP_CATEGORIES` | `all` | Comma-separated list of tool categories to load |
-| `LOG_ENABLED` | `true` | Enable hook logging |
-| `MEMORY_AUTO_SAVE` | `true` | Auto-save session digest on Stop |
-| `REDIS_URL` | — | Redis connection string — format: `redis://:PASSWORD@host:port/db`. Used by token monitor (burn rate), file read cache (dedup), and warning edge-triggers. Graceful degradation when unavailable. |
+| `MCP_CATEGORIES` | `all` | Comma-separated tool categories to load |
 | `TOKEN_CONTROL_ENABLED` | `true` | Master switch for the token control layer |
-| `TOKEN_WARN_PCT` | `60` | Context fill % that triggers a warning injection |
+| `TOKEN_WARN_PCT` | `60` | Context fill % that triggers a warning |
 | `TOKEN_CRITICAL_PCT` | `80` | Context fill % that triggers a critical banner |
-| `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output (docker logs, git log, etc.) |
-| `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads within a session |
-| `MCP_HYGIENE_ENABLED` | `true` | Inject MCP server usage reminder at session start |
-| `ENABLE_TOOL_SEARCH` | `true` | Make all MCP tools lazy-loaded on demand (set in `env` block of `settings.json`); eliminates ~79K token upfront cost from MCP tool schemas |
-| `CONTEXT_AUDIT_ENABLED` | `true` | Track per-tool token consumption across sessions |
-| `CONTEXT_AUDIT_THRESHOLD_PCT` | `70` | Emit audit report on Stop when context fill exceeds this % |
-| `EFFORT_POLICY_ENABLED` | `true` | Inject thinking/effort guidance at session start |
-| `DEFAULT_EFFORT` | `medium` | Default reasoning effort level (low/medium/high) |
-| `PEAK_HOURS_ENABLED` | `true` | Show peak/off-peak indicator on statusline |
-| `PEAK_HOURS_TZ` | `US/Pacific` | Timezone for peak hour detection |
-| `MCP_TOOL_WARN_THRESHOLD` | `40` | Warn at session start if total MCP tools exceed this |
-| `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
-| `CLAUDE_USAGE_FILE` | — | Path to quota JSON file (e.g. `~/.agentihooks/claude_usage.json`). Must be set to enable statusline line 3 quota display. |
-| `CLAUDE_USAGE_STALE_SEC` | `300` | Quota data older than this (seconds) shows "stale" on statusline |
-| `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher daemon poll interval (seconds) |
+| `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
+| `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
+| `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
+| `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
+| `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |
+| `AGENTIHOOKS_SYNC_POLL_SEC` | `60` | Sync daemon poll interval |
+| `ENABLE_TOOL_SEARCH` | `true` | Lazy-load MCP tools on demand |
 
-Complete table covering all 50+ variables across every integration: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
-
-## Profiles
-
-Profiles bundle permissions, env vars, a system prompt (`CLAUDE.md`), and MCP settings. Each profile defines a permission tier:
-
-| Profile | Mode | Deny | Ask | Best for |
-|---------|------|------|-----|----------|
-| **default** | `default` | — | git push, rm -rf, docker rm, kubectl delete | Daily development |
-| **coding** | `acceptEdits` | Protected branch pushes, git merge, gh CLI | git push, rm -rf, docker, kubectl | Focused coding, CI agents |
-| **admin** | `auto` | — | force push, rm -rf / | Infrastructure ops |
-
-Permission evaluation order: **deny > ask > allow** (first match wins).
-
-Switch profiles: `agentihooks init --profile <name>`. Per-repo override: `agentihooks init --profile <name>`.
-
-Profiles come from two sources:
-- **Built-in** — `profiles/` in the agentihooks repo (default, coding, admin)
-- **Bundle** — external directory linked via `agentihooks bundle link`
-
-`agentihooks --list-profiles` shows both.
-
-## Bundles
-
-A **bundle** is a single external directory containing all your personal customizations — custom profiles, connectors, and MCP configs. Link it once and everything is auto-discovered.
-
-```
-my-tools/.agentihooks/          ← this IS the bundle
-  profiles/
-    infra-ops/                   # custom profile
-      profile.yml
-      CLAUDE.md
-  connectors/
-    my-mcp-filter/               # MCP deny rules per profile
-      connector.yml
-      profiles/default/permissions.json
-```
-
-```bash
-agentihooks init --bundle ~/dev/my-tools/.agentihooks   # link bundle + install
-agentihooks --list-profiles                              # shows built-in + bundle
-agentihooks init --profile infra-ops                     # use a bundle profile
-```
-
-Connectors inside the bundle are auto-linked. Full docs: [Bundles](docs/bundles.md), [Connectors](docs/connectors.md).
-
-## Per-Repo Config
-
-Drop a `.agentihooks.json` in any repo to override the global profile:
-
-```json
-{
-  "profile": "coding",
-  "disabledMcpServers": ["gateway-media"],
-  "permissions": { "deny": ["Bash(terraform apply *)"] }
-}
-```
-
-```bash
-agentihooks init --profile coding   # creates .agentihooks.json + .claude/settings.local.json
-```
-
-This writes `.claude/settings.local.json` — the highest-priority user settings file in Claude Code. It merges the profile's permissions + connector rules + your repo overrides. Run once per repo; re-run after changing connectors or profiles.
+Complete table: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
 ## Portability
 
@@ -234,20 +273,21 @@ Everything user-specific lives in `~/.agentihooks/`:
 
 ```
 ~/.agentihooks/
-├── .venv/                     # Canonical Python venv — all hook subprocesses run from here
-├── .env                       # Main credentials (seeded from .env.example, loaded first)
-├── *.env                      # Companion env files (auto-sourced after .env)
-├── *.json                     # Drop MCP server files here → agentihooks mcp install
-├── state.json                 # Tracked MCP files and other state
-├── logs/                      # Hook + MCP logs
-│   └── quota-watcher.log      # Quota watcher daemon log
-├── memory/                    # Cross-session agent memory
-├── claude_auth_state.json     # Playwright storage state (sessionKey cookie for quota watcher)
-├── claude_usage.json          # Written by quota watcher daemon; read by statusline (optional)
-└── quota-watcher.pid          # Daemon PID file
+|-- .venv/                     # canonical Python venv
+|-- .env                       # main env vars (loaded first)
+|-- *.env                      # companion env files (auto-sourced)
+|-- state.json                 # install state, targets, active profile
+|-- logs/                      # hook + daemon logs
+|-- memory/                    # cross-session agent memory
+|-- quota-accounts/            # multi-account auth state
+|   +-- <name>.json
+|-- claude_usage.json          # written by quota daemon, read by statusline
+|-- sync-daemon.pid            # sync daemon PID
+|-- sync-hashes.json           # daemon file hashes
++-- sync.lock                  # advisory lock
 ```
 
-To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer. Done:
+To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer:
 
 ```bash
 uv venv ~/.agentihooks/.venv
@@ -255,21 +295,13 @@ uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 agentihooks init
 ```
 
-**Install the `agentienv` shell function** (sources `.env` into any shell on demand — also auto-called on every new shell):
+## Per-Repo Config
 
 ```bash
-agentihooks init   # writes managed block to ~/.bashrc
-source ~/.bashrc
-agentienv          # load vars into current shell before launching claude
+agentihooks init --repo /path/to/repo    # per-repo config with profile picker
 ```
 
-**Analyze MCP token cost:**
-
-```bash
-agentihooks mcp report      # per-server tool count + estimated schema tokens
-```
-
-Details: [Portability & Reusability](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/portability/)
+This writes `.claude/settings.local.json` in the target repo -- the highest-priority settings file in Claude Code. It merges the profile's permissions and MCP overrides into the repo scope.
 
 ## Extending
 
@@ -277,17 +309,12 @@ Add a new MCP tool category with a `register(server)` function + one line in `_r
 
 Guide: [Extending AgentiHooks](https://the-cloud-clock-work.github.io/agentihooks/docs/extending/)
 
-## Code Quality
-
-Continuously analyzed by [SonarQube](https://sonar.homeofanton.com/dashboard?id=agentihooks).
-
 ## Related Projects
 
 | Project | Description |
 |---------|-------------|
 | [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) | Claude Code runner and orchestrator |
 | [agentibridge](https://github.com/The-Cloud-Clock-Work/agentibridge) | MCP server for session persistence and remote control |
-| [agentihub](https://github.com/The-Cloud-Clock-Work/agentihub) (private) | Agent identities — CLAUDE.md, workflows, evaluation. Provisioned directly by agenticore. |
 
 ## License
 
