@@ -118,6 +118,14 @@ PERSONAL_KEYS = {"model", "autoUpdatesChannel", "skipDangerousModePermissionProm
 MANAGED_BY_KEY = "_managedBy"
 MANAGED_BY_VALUE = "agentihooks/scripts/install.py"
 
+# ANSI colors for terminal output
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_CYAN = "\033[36m"
+_RESET = "\033[0m"
+
 # ---------------------------------------------------------------------------
 # .claudeignore template
 # ---------------------------------------------------------------------------
@@ -986,9 +994,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                print(f"\n[OK] Quota daemon started (PID {proc.pid}).")
+                print(f"\n{_GREEN}[OK] Quota daemon started (PID {proc.pid}).{_RESET}")
         else:
-            print(f"\n[--] Quota daemon already running.")
+            print(f"\n{_DIM}[--] Quota daemon already running.{_RESET}")
 
     # --- Update bashrc block (agentienv + agenti alias) ---
     if _ENV_FILE_DST.is_file():
@@ -1045,7 +1053,8 @@ def _update_bashrc_block() -> None:
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
     sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
     _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
-    print(f"[OK] agentihooks block written to {_BASHRC}")
+    print(f"{_YELLOW}[OK] agentihooks block written to {_BASHRC}{_RESET}")
+    print(f"{_DIM}     run: source ~/.bashrc{_RESET}")
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -1566,7 +1575,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     profile_source = "built-in" if (PROFILES_DIR / profile_name).is_dir() else "bundle"
-    print(f"agentihooks root : {AGENTIHOOKS_ROOT}")
+    print(f"{_BOLD}agentihooks root{_RESET} : {AGENTIHOOKS_ROOT}")
     print(f"Target           : {CLAUDE_HOME}")
     print(f"Profile source   : {profile_source}")
     print(f"Profile          : {profile_name}")
@@ -1719,21 +1728,16 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # --- Done ---
     print()
-    print("Installation complete.")
+    print(f"{_GREEN}{_BOLD}Installation complete.{_RESET}")
     print()
-    print("Verification steps:")
-    print(f"  ls -la {existing_settings_path}")
+    print(f"{_DIM}Verify:{_RESET}")
+    print(f"  {_DIM}ls -la {existing_settings_path}{_RESET}")
     claude_md = CLAUDE_HOME / _CLAUDE_MD_NAME
     if claude_md.is_symlink():
-        print(f"  ls -la {claude_md}  # system prompt (→ profile CLAUDE.md)")
-    print("  Open Claude Code in any project → run /status (hooks should be active)")
-    print("  Run /skills to list installed skills")
+        print(f"  {_DIM}ls -la {claude_md}{_RESET}")
     print()
-    print("To update after settings.base.json changes:")
-    print("  agentihooks init")
-    print()
-    print("Launch claude with profile flags:")
-    print("  agentihooks claude   # or just: agenti (after source ~/.bashrc)")
+    print(f"Launch:  {_CYAN}agentihooks claude{_RESET}   {_DIM}# or: agenti (after source ~/.bashrc){_RESET}")
+    print(f"Re-run:  {_DIM}agentihooks init{_RESET}")
 
 
 # ---------------------------------------------------------------------------
