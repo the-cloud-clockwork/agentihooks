@@ -995,8 +995,29 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _update_bashrc_block()
 
 
+def _remove_bashrc_block() -> bool:
+    """Remove the managed agentihooks block from ~/.bashrc. Returns True if found."""
+    if not _BASHRC.exists():
+        return False
+    text = _BASHRC.read_text(encoding="utf-8")
+    if _BLOCK_START not in text:
+        return False
+    lines = text.splitlines(keepends=True)
+    new_lines = []
+    inside = False
+    for line in lines:
+        if line.rstrip() == _BLOCK_START:
+            inside = True
+        elif line.rstrip() == _BLOCK_END:
+            inside = False
+        elif not inside:
+            new_lines.append(line)
+    _BASHRC.write_text("".join(new_lines), encoding="utf-8")
+    return True
+
+
 def _update_bashrc_block() -> None:
-    """Write/update the managed agentihooks block in ~/.bashrc."""
+    """Remove old block then append fresh one at the end of ~/.bashrc."""
     env_file = _ENV_FILE_DST
     env_dir = env_file.parent
     block = (
@@ -1019,26 +1040,12 @@ def _update_bashrc_block() -> None:
         f"{_BLOCK_END}\n"
     )
 
+    # Always remove first, then append at the end
+    _remove_bashrc_block()
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
-
-    if _BLOCK_START in bashrc_text:
-        lines = bashrc_text.splitlines(keepends=True)
-        new_lines = []
-        inside = False
-        for line in lines:
-            if line.rstrip() == _BLOCK_START:
-                inside = True
-                new_lines.append(block)
-            elif line.rstrip() == _BLOCK_END:
-                inside = False
-            elif not inside:
-                new_lines.append(line)
-        _BASHRC.write_text("".join(new_lines), encoding="utf-8")
-        print(f"[OK] Updated agentihooks block in {_BASHRC}")
-    else:
-        sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
-        _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
-        print(f"[OK] Added agentihooks block to {_BASHRC}")
+    sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
+    _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
+    print(f"[OK] agentihooks block written to {_BASHRC}")
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -2489,7 +2496,11 @@ def uninstall_global(args: argparse.Namespace) -> None:
         except (ProcessLookupError, ValueError):
             sync_pid.unlink(missing_ok=True)
 
-    # --- 8. Uninstall CLI ---
+    # --- 8. Remove bashrc block ---
+    if _remove_bashrc_block():
+        print(f"[OK] Removed agentihooks block from {_BASHRC}")
+
+    # --- 9. Uninstall CLI ---
     print()
     _uninstall_cli_tool()
 
