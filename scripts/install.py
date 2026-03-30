@@ -1576,9 +1576,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
     _install_user_mcp(profile_name)
-    # Layer 2: bundle top-level .mcp.json (all profiles)
+    # Layer 2: bundle .claude/.mcp.json (all profiles), fallback to root .mcp.json
     if bundle_dir:
-        bundle_mcp = bundle_dir / _MCP_JSON_NAME
+        bundle_mcp = bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+        if not bundle_mcp.exists():
+            bundle_mcp = bundle_dir / _MCP_JSON_NAME
         if bundle_mcp.exists():
             try:
                 mcp_data = load_json(bundle_mcp)
@@ -2182,7 +2184,7 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
 
     if not src.exists():
-        print(f"  [--] No {_SYSTEM_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
+        print(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
     if dst.is_symlink():
