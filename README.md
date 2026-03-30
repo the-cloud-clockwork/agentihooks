@@ -61,18 +61,18 @@ Re-run any time — it's idempotent. See [Installation](https://the-cloud-clock-
 
 | Event | What happens |
 |-------|-------------|
-| `SessionStart` | Injects session awareness, MCP hygiene reminder |
+| `SessionStart` | Injects session awareness, MCP hygiene reminder, thinking/effort guidance, MCP surface area warning |
 | `PreToolUse` | Secret scan (blocks on detection), file read deduplication, injects tool error memory |
-| `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
-| `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
-| `SessionEnd` | Logs transcript, clears file read cache |
+| `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors, context audit tracking, subagent effort check |
+| `Stop` | Scans transcript for errors, parses metrics, auto-saves memory, emits context audit report |
+| `SessionEnd` | Logs transcript, clears file read cache, clears context audit |
 | `SubagentStop` | Logs subagent transcript |
 | `UserPromptSubmit` | Warns on detected secrets |
 | `Notification` | Logs notifications |
 | `PreCompact` | Logs before context compaction |
 | `PermissionRequest` | Logs permission requests |
 
-**StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by `hooks/statusline.py`. It emits a 2–3 line terminal status bar with context fill %, burn rate, cost, cache ratio, and git branch on every turn. `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` to avoid stale payload values.
+**StatusLine** is not a hook event — it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by `hooks/statusline.py`. It emits a 2–3 line terminal status bar with context fill %, burn rate, cost, cache ratio, git branch, peak/off-peak indicator, and smart compact suggestions on every turn.
 
 Full payload schemas and handler details: [Hook Events](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/events/)
 
@@ -97,47 +97,35 @@ Per-tool signatures, parameters, and environment variables: [MCP Tools](https://
 
 ```bash
 # Core
-agentihooks init [--profile <name>]   # install/re-apply to ~/.claude
-agentihooks init [--profile <name>]     # set up per-repo config → .claude/settings.local.json
-agentihooks --list-profiles             # show all profiles (built-in + bundle)
-agentihooks --query                     # print active profile name
+agentihooks init [--profile <name>]          # install/re-apply to ~/.claude
+agentihooks init --bundle <path>             # first-time: link bundle + global install
+agentihooks init --repo <path>               # per-repo config → .claude/settings.local.json
+agentihooks --list-profiles                  # show all profiles (built-in + bundle)
+agentihooks --query                          # print active profile name
 
-# Bundle (external profiles + connectors in one directory)
-agentihooks bundle link <path>          # link a bundle directory
-agentihooks bundle list                 # show bundle contents
-agentihooks bundle unlink               # remove bundle
-
-# Connectors (MCP deny rules + env vars per profile)
-agentihooks connector list              # list linked connectors
-agentihooks connector link <path>       # link a connector directory
-agentihooks connector unlink <name>     # unlink by name
-agentihooks connector inspect <path>    # preview what a connector would merge
-agentihooks connector new               # interactive scaffold
-agentihooks connector new --name x ...  # headless scaffold (for agents/scripts)
-
-# MCP server files
-agentihooks mcp                         # list MCP files in ~/.agentihooks/
-agentihooks mcp install                 # pick file → pick servers
-agentihooks mcp uninstall               # pick file → remove servers
-agentihooks mcp add <path>              # install a file directly by path
-agentihooks mcp sync                    # re-apply all installed MCP files
-
-# Project
-agentihooks init --repo <path>              # write .mcp.json into a project
-agentihooks ignore [path] [--force]     # create .claudeignore
+# Token optimization tools
+agentihooks lint-claude [path]               # analyze CLAUDE.md token cost, suggest skill extraction
+agentihooks extract-skill "Section" --name x # extract a section into a skill
+agentihooks mcp report                       # show per-server MCP tool count + estimated token cost
 
 # Sync Daemon (auto-propagation)
-agentihooks daemon                      # start background daemon (60s poll)
-agentihooks daemon status               # show targets + watched files
-agentihooks daemon logs                 # tail daemon log
-agentihooks daemon stop                 # kill daemon
+agentihooks daemon start                     # start background daemon (60s poll)
+agentihooks daemon status                    # show targets + watched files
+agentihooks daemon logs                      # tail daemon log
+agentihooks daemon stop                      # kill daemon
 
-# Quota
-agentihooks quota [auth|status|logs|stop]
+# Quota (multi-account)
+agentihooks quota auth <name>                # add/update account
+agentihooks quota list                       # show all accounts
+agentihooks quota switch [name]              # switch active account
+agentihooks quota status                     # show current usage
+agentihooks quota logs                       # tail daemon log
+agentihooks quota stop                       # kill daemon
 
-# Utilities
-agentihooks uninstall                   # remove everything
-agentihooks init                   # load ~/.agentihooks/.env into shell
+# Other
+agentihooks claude                           # launch claude with profile flags
+agentihooks ignore [path] [--force]          # create .claudeignore
+agentihooks uninstall                        # remove everything
 ```
 
 Full reference: [CLI Commands](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/cli-commands/)
@@ -164,6 +152,14 @@ All integrations are configured via environment variables. Key ones:
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads within a session |
 | `MCP_HYGIENE_ENABLED` | `true` | Inject MCP server usage reminder at session start |
 | `ENABLE_TOOL_SEARCH` | `true` | Make all MCP tools lazy-loaded on demand (set in `env` block of `settings.json`); eliminates ~79K token upfront cost from MCP tool schemas |
+| `CONTEXT_AUDIT_ENABLED` | `true` | Track per-tool token consumption across sessions |
+| `CONTEXT_AUDIT_THRESHOLD_PCT` | `70` | Emit audit report on Stop when context fill exceeds this % |
+| `EFFORT_POLICY_ENABLED` | `true` | Inject thinking/effort guidance at session start |
+| `DEFAULT_EFFORT` | `medium` | Default reasoning effort level (low/medium/high) |
+| `PEAK_HOURS_ENABLED` | `true` | Show peak/off-peak indicator on statusline |
+| `PEAK_HOURS_TZ` | `US/Pacific` | Timezone for peak hour detection |
+| `MCP_TOOL_WARN_THRESHOLD` | `40` | Warn at session start if total MCP tools exceed this |
+| `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
 | `CLAUDE_USAGE_FILE` | — | Path to quota JSON file (e.g. `~/.agentihooks/claude_usage.json`). Must be set to enable statusline line 3 quota display. |
 | `CLAUDE_USAGE_STALE_SEC` | `300` | Quota data older than this (seconds) shows "stale" on statusline |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher daemon poll interval (seconds) |
@@ -199,22 +195,20 @@ my-tools/.agentihooks/          ← this IS the bundle
   profiles/
     infra-ops/                   # custom profile
       profile.yml
-      settings.overrides.json
-      .claude/CLAUDE.md
+      CLAUDE.md
   connectors/
     my-mcp-filter/               # MCP deny rules per profile
       connector.yml
       profiles/default/permissions.json
-      profiles/coding/permissions.json
 ```
 
 ```bash
-agentihooks bundle link ~/dev/my-tools/.agentihooks   # link once
-agentihooks --list-profiles                           # shows built-in + bundle
-agentihooks init --profile infra-ops                # use a bundle profile
+agentihooks init --bundle ~/dev/my-tools/.agentihooks   # link bundle + install
+agentihooks --list-profiles                              # shows built-in + bundle
+agentihooks init --profile infra-ops                     # use a bundle profile
 ```
 
-Connectors inside the bundle are auto-linked — no separate `connector link` needed. Full docs: [Bundles](docs/bundles.md), [Connectors](docs/connectors.md).
+Connectors inside the bundle are auto-linked. Full docs: [Bundles](docs/bundles.md), [Connectors](docs/connectors.md).
 
 ## Per-Repo Config
 
@@ -269,13 +263,10 @@ source ~/.bashrc
 agentienv          # load vars into current shell before launching claude
 ```
 
-**Manage MCP server files** — drop `.json` files into `~/.agentihooks/`:
+**Analyze MCP token cost:**
 
 ```bash
-agentihooks mcp             # list available MCP files
-agentihooks mcp install     # interactive: pick one to install
-agentihooks mcp uninstall   # interactive: pick one to remove
-agentihooks mcp add <path>  # install directly by path
+agentihooks mcp report      # per-server tool count + estimated schema tokens
 ```
 
 Details: [Portability & Reusability](https://the-cloud-clock-work.github.io/agentihooks/docs/getting-started/portability/)

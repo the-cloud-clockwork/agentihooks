@@ -152,6 +152,38 @@ CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
 
 # =============================================================================
+# CONTEXT AUDIT — per-tool token consumption tracking
+# =============================================================================
+CONTEXT_AUDIT_ENABLED = _env_bool("CONTEXT_AUDIT_ENABLED", "true")
+CONTEXT_AUDIT_THRESHOLD_PCT: int = int(os.getenv("CONTEXT_AUDIT_THRESHOLD_PCT", "70"))
+
+# =============================================================================
+# THINKING / EFFORT POLICY
+# =============================================================================
+EFFORT_POLICY_ENABLED = _env_bool("EFFORT_POLICY_ENABLED", "true")
+DEFAULT_EFFORT: str = os.getenv("DEFAULT_EFFORT", "medium")
+THINKING_BUDGET_TOKENS: int = int(os.getenv("THINKING_BUDGET_TOKENS", "0"))
+
+# =============================================================================
+# PEAK / OFF-PEAK AWARENESS
+# =============================================================================
+PEAK_HOURS_ENABLED = _env_bool("PEAK_HOURS_ENABLED", "true")
+PEAK_HOURS_START: int = int(os.getenv("PEAK_HOURS_START", "9"))
+PEAK_HOURS_END: int = int(os.getenv("PEAK_HOURS_END", "17"))
+PEAK_HOURS_TZ: str = os.getenv("PEAK_HOURS_TZ", "US/Pacific")
+
+# =============================================================================
+# MCP SURFACE AREA WARNING
+# =============================================================================
+MCP_TOOL_WARN_THRESHOLD: int = int(os.getenv("MCP_TOOL_WARN_THRESHOLD", "40"))
+MCP_SCHEMA_AVG_TOKENS: int = int(os.getenv("MCP_SCHEMA_AVG_TOKENS", "150"))
+
+# =============================================================================
+# SMART COMPACT SUGGESTIONS
+# =============================================================================
+COMPACT_SUGGEST_ENABLED = _env_bool("COMPACT_SUGGEST_ENABLED", "true")
+
+# =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
 # These control agentihooks-specific OTEL emission.

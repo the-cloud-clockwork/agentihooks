@@ -40,7 +40,12 @@ AgentiHooks solves all four.
 | **Bash output filtering** | Verbose docker/kubectl/git/test/build output flooding context | **5K–50K tokens per command** |
 | **File read deduplication** | Claude re-reading the same unchanged file multiple times | **2K–20K tokens per duplicate read** |
 | **MCP lazy loading** | 26 MCP tool schemas loaded upfront every turn | **~79K tokens per session** |
-| **Context threshold warnings** | Session running to 100% and resetting (losing all context) | **Entire session cost** |
+| **Smart compact suggestions** | Generic "/compact" warnings that don't tell you what to drop | **Faster, more effective compaction** |
+| **Context audit tracking** | No visibility into what tools consume the most context | **Informed compaction decisions** |
+| **Thinking/effort policy** | Extended thinking burning tens of thousands of output tokens | **10K–50K tokens per over-think** |
+| **Peak hour awareness** | Running expensive jobs during peak billing hours | **Session budget preservation** |
+| **MCP surface area reporting** | Heavy MCP servers silently consuming context every turn | **10K–100K tokens per session** |
+| **CLAUDE.md linting** | Bloated CLAUDE.md paying tokens on every turn | **500–5K tokens per turn** |
 | **MCP hygiene reminders** | Unused MCP servers contributing schema tokens every turn | **10K–100K tokens per session** |
 
 {: .important }
@@ -244,6 +249,112 @@ agentihooks quota auth
 
 ---
 
+### 7. Context audit tracking
+
+Tracks cumulative byte output per tool type across the session. When context fill exceeds the audit threshold on Stop, a report is logged showing the top 5 consumers.
+
+```
+Context audit (fill: 82%, total tool output: 245K):
+  Read: 120K (49%)
+  Bash: 65K (27%)
+  Agent: 38K (16%)
+  Edit: 12K (5%)
+  Grep: 10K (4%)
+```
+
+| Variable | Default | What it controls |
+|----------|---------|-----------------|
+| `CONTEXT_AUDIT_ENABLED` | `true` | Enable per-tool tracking |
+| `CONTEXT_AUDIT_THRESHOLD_PCT` | `70` | Emit report when fill exceeds this % |
+
+---
+
+### 8. Smart compact suggestions
+
+Replaces generic "/compact" warnings with actionable suggestions based on context audit data:
+
+```
+⚠️ CONTEXT 65% — consider /compact soon — top consumers: Read (50K), Bash (32K), Agent (28K)
+```
+
+| Variable | Default | What it controls |
+|----------|---------|-----------------|
+| `COMPACT_SUGGEST_ENABLED` | `true` | Use smart suggestions vs generic warnings |
+
+---
+
+### 9. Thinking/effort policy
+
+Injects effort guidance at session start based on profile settings. Warns when subagents are spawned with unnecessarily expensive models.
+
+```
+TOKEN EFFICIENCY: Default effort: medium. Reserve high/ultrathink for complex
+architectural decisions. Prefer Sonnet for implementation; reserve Opus for planning.
+```
+
+| Variable | Default | What it controls |
+|----------|---------|-----------------|
+| `EFFORT_POLICY_ENABLED` | `true` | Inject effort guidance at session start |
+| `DEFAULT_EFFORT` | `medium` | Default reasoning depth (low/medium/high) |
+| `THINKING_BUDGET_TOKENS` | `0` | Advisory token ceiling (0 = no limit) |
+
+---
+
+### 10. Peak/off-peak awareness
+
+Detects Anthropic's peak billing hours (weekday business hours US Pacific) and shows an indicator on the statusline. When session usage is high during peak hours, adds a warning.
+
+```
+quota: session:62% [1h] | PEAK — sessions burn faster during business hours
+```
+
+| Variable | Default | What it controls |
+|----------|---------|-----------------|
+| `PEAK_HOURS_ENABLED` | `true` | Show peak indicator on statusline |
+| `PEAK_HOURS_START` | `9` | Peak start hour |
+| `PEAK_HOURS_END` | `17` | Peak end hour |
+| `PEAK_HOURS_TZ` | `US/Pacific` | Timezone for peak calculation |
+
+---
+
+### 11. MCP surface area reporting
+
+CLI tool that analyzes MCP server configurations and reports estimated token overhead. Also warns at session start if total tools exceed a threshold.
+
+```bash
+agentihooks mcp report
+```
+
+```
+MCP Surface Area Report
+Total: 9 servers, ~112 tools, ~16,800 schema tokens
+
+Server                         Source   Tools   ~Tokens
+hooks-utils                      user      32     4,800
+github                           user      40     6,000
+...
+```
+
+| Variable | Default | What it controls |
+|----------|---------|-----------------|
+| `MCP_TOOL_WARN_THRESHOLD` | `40` | Warn at session start if total tools exceed this |
+| `MCP_SCHEMA_AVG_TOKENS` | `150` | Estimated tokens per tool schema |
+
+---
+
+### 12. CLAUDE.md linting and skill extraction
+
+CLI tool that analyzes CLAUDE.md token cost and suggests extracting workflow-specific sections into on-demand skills.
+
+```bash
+agentihooks lint-claude                           # analyze ~/.claude/CLAUDE.md
+agentihooks extract-skill "Commands" --name cmds  # extract to skill
+```
+
+Moving workflow-specific content from CLAUDE.md (loaded every turn) to skills (loaded on demand) reduces base context cost by 500–5K tokens per turn.
+
+---
+
 ## Everything at a glance
 
 | Layer | Feature | Default | Tokens saved | Config |
@@ -252,9 +363,14 @@ agentihooks quota auth
 | **Input** | File read dedup | On | 2K–20K/read | `FILE_READ_CACHE_ENABLED` |
 | **Schema** | MCP lazy loading | On | ~79K/session | `ENABLE_TOOL_SEARCH` |
 | **Schema** | MCP hygiene reminder | On | 10K–100K/session | `MCP_HYGIENE_ENABLED` |
+| **Schema** | MCP surface area reporting | On | 10K–100K/session | `MCP_TOOL_WARN_THRESHOLD` |
 | **Awareness** | Statusline cost/burn | On | Prevents waste | `TOKEN_MONITOR_ENABLED` |
-| **Awareness** | Context warnings | On | Prevents resets | `TOKEN_WARN_PCT` / `TOKEN_CRITICAL_PCT` |
+| **Awareness** | Context warnings (smart) | On | Prevents resets | `COMPACT_SUGGEST_ENABLED` |
+| **Awareness** | Context audit | On | Informed compaction | `CONTEXT_AUDIT_ENABLED` |
+| **Awareness** | Peak hour indicator | On | Budget preservation | `PEAK_HOURS_ENABLED` |
 | **Awareness** | Console quota display | Opt-in | Prevents limit hits | `CLAUDE_USAGE_FILE` |
+| **Decode** | Thinking/effort policy | On | 10K–50K/over-think | `EFFORT_POLICY_ENABLED` |
+| **Startup** | CLAUDE.md linting | CLI | 500–5K/turn | `agentihooks lint-claude` |
 
 **Master switch:** Set `TOKEN_CONTROL_ENABLED=false` to disable all token control features at once. Individual features can be toggled independently.
 

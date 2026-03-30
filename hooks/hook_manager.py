@@ -312,6 +312,42 @@ def on_session_start(payload: dict) -> None:
             "Model guidance: use Sonnet 4.6 for implementation; reserve Opus 4.6 for plan mode (Shift+Tab)."
         )
 
+    # Thinking/effort policy guidance
+    try:
+        from hooks.config import EFFORT_POLICY_ENABLED, DEFAULT_EFFORT, THINKING_BUDGET_TOKENS
+
+        if EFFORT_POLICY_ENABLED:
+            from hooks.context.thinking_policy import get_thinking_guidance
+            from hooks.common import inject_context as _inject
+
+            guidance = get_thinking_guidance(DEFAULT_EFFORT, THINKING_BUDGET_TOKENS)
+            if guidance:
+                _inject(guidance)
+    except Exception as e:
+        log("thinking_policy injection failed", {"error": str(e)})
+
+    # MCP surface area warning
+    try:
+        from hooks.config import MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location(
+            "mcp_reporter",
+            str(Path(__file__).resolve().parent.parent / "scripts" / "mcp_reporter.py"),
+        )
+        if _spec and _spec.loader:
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+
+            servers = _mod.load_all_mcp_configs()
+            if servers:
+                warning = _mod.generate_warning(servers, MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS)
+                if warning:
+                    from hooks.common import inject_context as _inject2
+
+                    _inject2(warning)
+    except Exception as e:
+        log("mcp_reporter warning failed", {"error": str(e)})
+
 
 def on_session_end(payload: dict) -> None:
     """Handle SessionEnd event."""
@@ -355,6 +391,17 @@ def on_session_end(payload: dict) -> None:
             from hooks.context.retry_breaker import clear_session_state
 
             clear_session_state(session_id)
+        except Exception:
+            pass
+
+    # Clear context audit state for this session
+    from hooks.config import CONTEXT_AUDIT_ENABLED
+
+    if CONTEXT_AUDIT_ENABLED:
+        try:
+            from hooks.observability.context_audit import clear_session_audit
+
+            clear_session_audit(session_id)
         except Exception:
             pass
 
@@ -592,6 +639,34 @@ def on_post_tool_use(payload: dict) -> None:
         except Exception as e:
             log("retry_breaker post-tool failed", {"error": str(e)})
 
+    # Context audit — record tool output size
+    try:
+        from hooks.config import CONTEXT_AUDIT_ENABLED
+
+        if CONTEXT_AUDIT_ENABLED:
+            from hooks.observability.context_audit import record_tool_usage
+
+            output = payload.get("tool_output", "")
+            output_size = len(output.encode("utf-8")) if isinstance(output, str) else len(str(output))
+            if payload.get("session_id") and output_size > 0:
+                record_tool_usage(payload["session_id"], tool_name, output_size)
+    except Exception as e:
+        log("context_audit record failed", {"error": str(e)})
+
+    # Thinking/effort policy — check subagent effort alignment
+    try:
+        from hooks.config import EFFORT_POLICY_ENABLED, DEFAULT_EFFORT
+
+        if EFFORT_POLICY_ENABLED and tool_name == "Agent":
+            from hooks.context.thinking_policy import check_subagent_effort
+            from hooks.common import inject_context as _inject_effort
+
+            warning = check_subagent_effort(payload.get("tool_input", {}), DEFAULT_EFFORT)
+            if warning:
+                _inject_effort(warning)
+    except Exception as e:
+        log("thinking_policy check failed", {"error": str(e)})
+
 
 def on_stop(payload: dict) -> None:
     """Handle Stop event."""
@@ -649,6 +724,24 @@ def on_stop(payload: dict) -> None:
             auto_save_session(session_id, transcript_path)
     except Exception as e:
         log("Memory auto-save failed", {"error": str(e)})
+
+    # Context audit — emit report if fill_pct exceeds threshold
+    try:
+        from hooks.config import CONTEXT_AUDIT_ENABLED, CONTEXT_AUDIT_THRESHOLD_PCT
+
+        if CONTEXT_AUDIT_ENABLED and session_id:
+            from hooks.observability.context_audit import get_audit_summary, format_audit_report
+            from hooks.observability.token_monitor import get_context_fill_pct
+
+            fill_pct = get_context_fill_pct(payload)
+            if fill_pct is not None and fill_pct >= CONTEXT_AUDIT_THRESHOLD_PCT:
+                summary = get_audit_summary(session_id)
+                if summary:
+                    report = format_audit_report(summary, fill_pct)
+                    if report:
+                        log("Context audit report", {"fill_pct": fill_pct, "report": report})
+    except Exception as e:
+        log("context_audit report failed", {"error": str(e)})
 
 
 def on_subagent_stop(payload: dict) -> None:

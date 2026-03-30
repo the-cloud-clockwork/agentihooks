@@ -131,3 +131,8 @@ For answers to common questions about this code of conduct, see the FAQ at
 [Mozilla CoC]: https://github.com/mozilla/diversity
 [FAQ]: https://www.contributor-covenant.org/faq
 [translations]: https://www.contributor-covenant.org/translations
+
+### Sweep — 2026-03-31
+- **Issues found:** 8 (quality: 4, compliance: 2, integration: 2)
+- **Fixed:** 7
+- **Remaining:** config.py inline comment stripping for # in unquoted values (pre-existing, not new code)

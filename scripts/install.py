@@ -3298,6 +3298,20 @@ def main() -> None:
     )
     daemon_p.add_argument("--foreground", action="store_true", help="Run in foreground (for debugging)")
 
+    # ── Token optimization CLI tools ──────────────────────────────────
+    lint_p = sub.add_parser("lint-claude", help="Analyze CLAUDE.md token cost and suggest skill extraction")
+    lint_p.add_argument("lint_path", nargs="?", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
+
+    extract_p = sub.add_parser("extract-skill", help="Extract a CLAUDE.md section into a skill")
+    extract_p.add_argument("section", help="Section heading to extract (e.g. \"Commands\")")
+    extract_p.add_argument("--name", required=True, help="Skill name for the output directory")
+    extract_p.add_argument("--source", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
+    extract_p.add_argument("--output-dir", default=None, help="Output directory (default: source's .claude/commands/)")
+
+    mcp_p = sub.add_parser("mcp", help="MCP surface area analysis")
+    mcp_p.add_argument("mcp_action", choices=["report"], help="Action to perform")
+    mcp_p.add_argument("--project", default=None, help="Project path to include (default: CWD)")
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -3331,6 +3345,37 @@ def main() -> None:
         cmd_claude(extra)
     elif args.command == "daemon":
         cmd_daemon(args)
+    elif args.command == "lint-claude":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.claude_linter import lint_report, format_report
+
+        lint_path = Path(args.lint_path).expanduser().resolve() if args.lint_path else Path.home() / ".claude" / "CLAUDE.md"
+        if not lint_path.exists():
+            print(f"Error: {lint_path} not found", file=sys.stderr)
+            sys.exit(1)
+        report = lint_report(lint_path)
+        print(format_report(report))
+    elif args.command == "extract-skill":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.claude_linter import extract_to_skill
+
+        source = Path(args.source).expanduser().resolve() if args.source else Path.home() / ".claude" / "CLAUDE.md"
+        if not source.exists():
+            print(f"Error: {source} not found", file=sys.stderr)
+            sys.exit(1)
+        output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
+        try:
+            result = extract_to_skill(source, args.section, args.name, output_dir)
+            print(f"Extracted \"{args.section}\" → {result}")
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.command == "mcp":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.mcp_reporter import load_all_mcp_configs, generate_report
+
+        servers = load_all_mcp_configs(args.project)
+        print(generate_report(servers))
 
 
 if __name__ == "__main__":

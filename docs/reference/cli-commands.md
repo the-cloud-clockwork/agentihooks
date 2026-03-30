@@ -494,6 +494,95 @@ Found /home/user/.agentitools/requirements.txt — install with uv? [y/N]
 
 ---
 
+## `agentihooks lint-claude`
+
+Analyze a CLAUDE.md file for token cost and suggest sections to extract into on-demand skills.
+
+```bash
+agentihooks lint-claude [path]
+```
+
+Defaults to `~/.claude/CLAUDE.md` if no path is given.
+
+### Output
+
+- Total character and token estimate
+- Per-section breakdown with classification (always-needed vs workflow-specific)
+- Extraction candidates with token savings estimate
+
+### Example
+
+```
+CLAUDE.md Lint Report: /home/user/.claude/CLAUDE.md
+Total: 11,235 chars ≈ 2,808 tokens
+
+Section                                    Tokens       Type
+──────────────────────────────────────── ──────── ──────────
+*Commands                                     224   workflow
+ Architecture                                   4     always
+...
+
+Extraction candidates (8 sections, ~2,164 tokens):
+  * "Commands" (224 tokens, lines 5-35)
+  ...
+```
+
+---
+
+## `agentihooks extract-skill`
+
+Extract a section from CLAUDE.md into a standalone skill directory.
+
+```bash
+agentihooks extract-skill "<Section Heading>" --name <skill-name> [--source <path>] [--output-dir <path>]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Required. Name for the skill directory. |
+| `--source` | Path to CLAUDE.md (default: `~/.claude/CLAUDE.md`). |
+| `--output-dir` | Output directory (default: source's `.claude/commands/`). |
+
+The section is removed from the source CLAUDE.md and written as a SKILL.md in the new skill directory.
+
+---
+
+## `agentihooks mcp report`
+
+Analyze MCP server configurations and report estimated token overhead.
+
+```bash
+agentihooks mcp report [--project <path>]
+```
+
+### What it shows
+
+- Per-server tool count (introspected for hooks-utils, heuristic for external servers)
+- Estimated schema token cost per server
+- Total tool and token overhead
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--project` | Project path to include in the scan (default: CWD). |
+
+### Example
+
+```
+MCP Surface Area Report
+Total: 9 servers, ~112 tools, ~16,800 schema tokens
+
+Server                         Source   Tools   ~Tokens
+hooks-utils                      user      32     4,800
+github                           user      40     6,000
+...
+```
+
+---
+
 ## Standalone Python execution
 
 The hook and MCP server modules can be run directly with Python:

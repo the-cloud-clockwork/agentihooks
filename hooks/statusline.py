@@ -274,16 +274,32 @@ def main() -> None:
 
                 warn, level = should_warn_context(float(used_pct), session_id)
                 if warn:
-                    if level == "critical":
-                        warn_msg = (
-                            f"{_RED}{_BOLD}🚨 CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
-                        )
-                    else:
-                        warn_msg = f"{_YELLOW}⚠️  CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}"
+                    # Smart compact suggestion (uses context audit data if available)
+                    try:
+                        from hooks.config import COMPACT_SUGGEST_ENABLED
+
+                        if COMPACT_SUGGEST_ENABLED:
+                            from hooks.observability.context_audit import get_audit_summary
+                            from hooks.context.compact_advisor import format_suggestion
+
+                            audit = get_audit_summary(session_id)
+                            suggestion = format_suggestion(float(used_pct), level, audit if audit else None)
+                            color = _RED + _BOLD if level == "critical" else _YELLOW
+                            warn_msg = f"{color}{suggestion}{_RESET}"
+                        else:
+                            raise ImportError("disabled")
+                    except Exception:
+                        # Fallback to generic warning
+                        if level == "critical":
+                            warn_msg = (
+                                f"{_RED}{_BOLD}CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
+                            )
+                        else:
+                            warn_msg = f"{_YELLOW}CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}"
             except Exception:
                 pass
 
-        # ── LINE 3: quota + optional context warning ──────────────────
+        # ── LINE 3: quota + peak indicator + optional context warning ──
         quota_str = ""
         try:
             from hooks.quota import fmt_quota, load_quota
@@ -310,12 +326,34 @@ def main() -> None:
         except Exception:
             pass
 
-        if quota_str and warn_msg:
-            print(f"{quota_str}  {_DIM}|{_RESET}  {warn_msg}")
-        elif quota_str:
-            print(quota_str)
-        elif warn_msg:
-            print(warn_msg)
+        # Peak/off-peak indicator (with usage-based warning when session is high)
+        peak_str = ""
+        try:
+            from hooks.config import PEAK_HOURS_ENABLED, PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ
+
+            if PEAK_HOURS_ENABLED:
+                from hooks.observability.peak_hours import is_peak_now, peak_warning
+
+                if is_peak_now(PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ):
+                    # Try usage-based warning first (includes session percentage context)
+                    pw = None
+                    try:
+                        qd_for_peak = load_quota() if "load_quota" in dir() else None
+                        session_pct = float(qd_for_peak.get("session", {}).get("used_pct", 0)) if qd_for_peak and not qd_for_peak.get("stale") else 0
+                        pw = peak_warning(session_pct, PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ)
+                    except Exception:
+                        pass
+                    if pw:
+                        peak_str = f"{_YELLOW}{pw}{_RESET}"
+                    else:
+                        peak_str = f"{_YELLOW}PEAK{_RESET}"
+        except Exception:
+            pass
+
+        # Assemble line 3
+        parts_3 = [p for p in (quota_str, peak_str, warn_msg) if p]
+        if parts_3:
+            print(f"  {_DIM}|{_RESET}  ".join(parts_3))
 
     except Exception as e:
         print(f"ctx: err ({e})")

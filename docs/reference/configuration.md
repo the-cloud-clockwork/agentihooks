@@ -87,6 +87,18 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 | `FILE_READ_CACHE_BACKEND` | `redis` | Cache backend. `redis` uses the configured `REDIS_URL`; any other value forces the in-process memory fallback. |
 | `FILE_READ_CACHE_TTL` | `21600` | TTL (seconds) for Redis cache keys (6 hours). |
 | `MCP_HYGIENE_ENABLED` | `true` | Inject an MCP server usage reminder at `SessionStart` prompting Claude to disable unused servers via `/mcp`. |
+| `CONTEXT_AUDIT_ENABLED` | `true` | Track cumulative byte output per tool type across the session. Emits an audit report on Stop when fill exceeds `CONTEXT_AUDIT_THRESHOLD_PCT`. |
+| `CONTEXT_AUDIT_THRESHOLD_PCT` | `70` | Context fill % threshold for emitting the audit report on Stop. |
+| `COMPACT_SUGGEST_ENABLED` | `true` | Replace generic "/compact" warnings with smart suggestions showing top context consumers from audit data. |
+| `EFFORT_POLICY_ENABLED` | `true` | Inject thinking/effort guidance at `SessionStart` based on `DEFAULT_EFFORT`. Warns on PostToolUse when Agent tool spawns with unnecessarily expensive models. |
+| `DEFAULT_EFFORT` | `medium` | Default reasoning effort level: `low`, `medium`, or `high`. Controls guidance injected at session start. |
+| `THINKING_BUDGET_TOKENS` | `0` | Advisory thinking token ceiling per response. 0 = no limit. |
+| `PEAK_HOURS_ENABLED` | `true` | Show peak/off-peak indicator on statusline line 3. Detects Anthropic peak billing hours (weekday business hours). |
+| `PEAK_HOURS_START` | `9` | Peak start hour (in target timezone). |
+| `PEAK_HOURS_END` | `17` | Peak end hour (exclusive). |
+| `PEAK_HOURS_TZ` | `US/Pacific` | IANA timezone name for peak hour detection. |
+| `MCP_TOOL_WARN_THRESHOLD` | `40` | Warn at `SessionStart` if total MCP tools across all servers exceed this count. |
+| `MCP_SCHEMA_AVG_TOKENS` | `150` | Estimated tokens per MCP tool schema (used in `agentihooks mcp report`). |
 
 ---
 
