@@ -1197,6 +1197,8 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
         f'  echo "[agentienv] loaded $_aih_count env file(s) from {env_dir}"\n'
         f"}}\n"
         f"agentienv\n"
+        f'# alias: launch claude with profile flags + env\n'
+        f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
@@ -2877,6 +2879,68 @@ def _quota_start_daemon(python: str, watcher: Path, poll: int = 60) -> None:
     os.execv(python, cmd)
 
 
+def cmd_claude(extra_args: list[str]) -> None:
+    """Launch claude with flags from the active profile's claude: section."""
+    state = _load_state()
+    profile_name = state.get("targets", {}).get("global", {}).get("profile", "default")
+    profile_dir = _resolve_profile_dir(profile_name)
+
+    claude_flags: dict = {}
+    if profile_dir:
+        yml = profile_dir / "profile.yml"
+        if yml.exists():
+            try:
+                data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+                claude_flags = data.get("claude", {}) or {}
+            except (yaml.YAMLError, OSError):
+                pass
+
+    # Map profile.yml fields → claude CLI flags
+    cmd = ["claude"]
+
+    # Permission mode — special mapping
+    perm = claude_flags.get("permission_mode")
+    if perm == "bypassPermissions":
+        cmd.append("--dangerously-skip-permissions")
+    elif perm and perm != "default":
+        cmd.extend(["--permission-mode", perm])
+
+    # Simple key→flag mappings
+    for key, flag in {"model": "--model", "effort": "--effort"}.items():
+        val = claude_flags.get(key)
+        if val is not None:
+            cmd.extend([flag, str(val)])
+
+    # Boolean flags
+    if claude_flags.get("worktree"):
+        cmd.append("--worktree")
+
+    # Append system prompt from profile
+    if profile_dir:
+        system_prompt = profile_dir / "CLAUDE.md"
+        if system_prompt.exists():
+            cmd.extend(["--append-system-prompt-file", str(system_prompt)])
+
+    # Pass through any extra args from the user
+    cmd.extend(extra_args)
+
+    # Source env first, then exec claude
+    env_file = _ENV_FILE_DST
+    if env_file.is_file():
+        from dotenv import dotenv_values
+        for k, v in dotenv_values(env_file).items():
+            if v is not None:
+                os.environ[k] = v
+        # Also load companion .env files
+        for f in sorted(env_file.parent.glob("*.env")):
+            if f != env_file:
+                for k, v in dotenv_values(f).items():
+                    if v is not None:
+                        os.environ[k] = v
+
+    os.execvp("claude", cmd)
+
+
 def cmd_quota(args: "argparse.Namespace") -> None:
     """Launch or interact with the Claude.ai quota watcher."""
     watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
@@ -3097,6 +3161,9 @@ def main() -> None:
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
+
+    sub.add_parser("claude", help="Launch claude with profile flags (model, permission-mode, effort, etc.)")
+
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
         "path",
@@ -3171,6 +3238,14 @@ def main() -> None:
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "quota":
         cmd_quota(args)
+    elif args.command == "claude":
+        # Pass everything after "claude" as extra args
+        try:
+            idx = sys.argv.index("claude")
+            extra = sys.argv[idx + 1:]
+        except ValueError:
+            extra = []
+        cmd_claude(extra)
     elif args.command == "daemon":
         cmd_daemon(args)
 
