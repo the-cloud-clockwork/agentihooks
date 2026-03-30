@@ -1038,7 +1038,7 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     all_known = _get_all_known_mcp_names()
     profile_enabled = _get_profile_enabled_servers(profile_dir)
     to_disable = sorted(all_known - (profile_enabled or set()))
-    if not dry_run:
+    if not dry_run and all_known:
         _write_project_disabled_mcps(repo_dir, to_disable)
 
     # Permissions — merge profile + connector + repo overrides
@@ -1716,7 +1716,10 @@ def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
         if enabled is None:
             return None
         return set(enabled) if enabled else set()
-    except (OSError, Exception):
+    except OSError:
+        return None
+    except Exception as exc:
+        print(f"  [WARN] Could not parse enabledMcpServers from {yml_path}: {exc}")
         return None
 
 
