@@ -462,7 +462,7 @@ def _bundle_unlink() -> None:
     _save_state(state)
     print(f"[OK] Unlinked bundle: {bundle_path}")
     print()
-    print("Run 'agentihooks global' to remove bundle settings.")
+    print("Run 'agentihooks init' to remove bundle settings.")
 
 
 def _bundle_list() -> None:
@@ -642,7 +642,7 @@ def _connector_link(conn_dir: Path | None) -> None:
     if profile_names:
         print(f"     Profiles: {', '.join(profile_names)}")
     print()
-    print("Run 'agentihooks global' to apply connector rules to your settings.")
+    print("Run 'agentihooks init' to apply connector rules to your settings.")
 
 
 def _connector_unlink(conn_name: str) -> None:
@@ -665,7 +665,7 @@ def _connector_unlink(conn_name: str) -> None:
     _save_state(state)
     print(f"[OK] Unlinked connector '{conn_name}'")
     print()
-    print("Run 'agentihooks global' to remove connector rules from your settings.")
+    print("Run 'agentihooks init' to remove connector rules from your settings.")
 
 
 def _connector_list() -> None:
@@ -890,7 +890,7 @@ def _connector_new(
     print("Next steps:")
     print("  1. Edit profiles/*/permissions.json with deny rules")
     print(f"  2. agentihooks connector link {conn_dir}")
-    print("  3. agentihooks global --profile <name>")
+    print("  3. agentihooks init --profile <name>")
 
     # --- Auto-link ---
     if auto_link:
@@ -1513,7 +1513,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print(f"Profile source   : {profile_source}")
     print(f"Profile          : {profile_name}")
     # Resolve canonical Python: ~/.agentihooks/.venv wins over sys.executable
-    # so that `agentihooks global` (run via uv tool from any project venv) always
+    # so that `agentihooks init` (run via uv tool from any project venv) always
     # bakes the right path into hook commands.
     _canonical_python = str(_detect_venv() or sys.executable)
     print(f"Python           : {_canonical_python}")
@@ -1672,7 +1672,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print("  Run /skills to list installed skills")
     print()
     print("To update after settings.base.json changes:")
-    print("  agentihooks global")
+    print("  agentihooks init")
     print()
     print("Shell tip: wrap Claude Code to load MCP keys from ~/.agentihooks/.env:")
     print("  alias cc='agentihooks --loadenv -- claude'")
@@ -1762,7 +1762,7 @@ def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> 
 def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
     """Blacklist all known MCPs in every project entry in ~/.claude.json.
 
-    Called by 'agentihooks global' to ensure every project starts with all
+    Called by 'agentihooks init' to ensure every project starts with all
     MCPs disabled except those the profile whitelists.
     """
     if not _CLAUDE_JSON.exists():
@@ -2069,7 +2069,7 @@ def _install_cli_tool() -> None:
     uv = shutil.which("uv")
     if not uv:
         print("  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/")
-        print("       Then re-run: uv run agentihooks global")
+        print("       Then re-run: uv run agentihooks init")
         return
 
     result = subprocess.run(
@@ -2820,7 +2820,7 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
         if g:
             print(f"  Global target: {g['path']} (profile: {g['profile']})")
         else:
-            print("  Global target: not registered (run 'agentihooks global' first)")
+            print("  Global target: not registered (run 'agentihooks init' first)")
         projects = targets.get("projects", {})
         if projects:
             print(f"  Project targets: {len(projects)}")
