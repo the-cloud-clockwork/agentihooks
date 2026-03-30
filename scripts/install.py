@@ -1012,6 +1012,7 @@ def _update_bashrc_block() -> None:
         f'    [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{ . "$f" 2>/dev/null; _c=$((_c + 1)); }}\n'
         f"  done\n"
         f"  set +a\n"
+        f'  echo "[agentienv] loaded $_c env file(s) from {env_dir}"\n'
         f"}}\n"
         f"agentienv\n"
         f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
