@@ -2342,7 +2342,19 @@ def uninstall_global(args: argparse.Namespace) -> None:
     # Remove CLAUDE.md if it's a symlink pointing into any profiles/ directory
     remove_claude_md = claude_md_dst.is_symlink() and "profiles/" in str(claude_md_dst.resolve())
 
+    # Only count servers that are both managed AND actually present in ~/.claude.json
     managed_servers = _collect_all_managed_mcp_servers()
+    installed_names = _get_user_scope_mcp_names()
+    managed_servers = {k: v for k, v in managed_servers.items() if k in installed_names}
+
+    # Early exit if nothing to do
+    total_work = (
+        int(remove_settings) + n_skills + n_agents + n_commands + n_rules
+        + int(remove_claude_md) + len(managed_servers)
+    )
+    if total_work == 0:
+        print("Nothing to uninstall — agentihooks is not installed.")
+        return
 
     # --- Summary ---
     print("agentihooks uninstall")
