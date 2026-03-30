@@ -23,25 +23,6 @@ Commands:
         Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
         MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
 
-    agentihooks global [--profile NAME]
-        Low-level install (init calls this). Re-run after editing
-        settings.base.json or profile configs.
-
-    agentihooks project <path> [--profile NAME]
-        Install a profile's .mcp.json into a target project.
-
-    agentihooks mcp [list|install|uninstall|sync|add] [--dir PATH]
-        Manage standalone MCP server files from ~/.agentihooks/:
-          agentihooks mcp              # list available files
-          agentihooks mcp install      # pick one to install
-          agentihooks mcp add <path>   # install by path
-
-    agentihooks bundle [link|unlink|list]
-        Manage the linked bundle (profiles + shared .claude/ assets).
-
-    agentihooks connector [link|unlink|list|inspect|new]
-        Manage external connectors (MCP/permissions adapters).
-
     agentihooks daemon [start|stop|status|logs]
         Manage the sync daemon (auto-propagates source changes).
 
@@ -2879,7 +2860,7 @@ def main() -> None:
     _argv = _argv[:_sep] if _sep is not None else _argv
 
     parser = argparse.ArgumentParser(
-        description="Install agentihooks settings/hooks/skills/agents to ~/.claude or a project.",
+        description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_USAGE_TEXT,
     )
@@ -2907,46 +2888,9 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command")
 
-    glob_p = sub.add_parser("global", help="Install hooks + skills + agents into ~/.claude")
-    glob_p.add_argument(
-        "--profile",
-        default=os.environ.get("AGENTIHOOKS_PROFILE", "default"),
-        help=f"Profile whose CLAUDE.md to link (default: 'default', env: AGENTIHOOKS_PROFILE). Available: {', '.join(_available_profiles())}",
-    )
-
-    proj = sub.add_parser("project", help="Install a profile's .mcp.json into a target project")
-    proj.add_argument("path", help="Target project directory")
-    proj.add_argument(
-        "--profile",
-        default=os.environ.get("AGENTIHOOKS_PROFILE", "default"),
-        help="Profile to use (default: 'default', env: AGENTIHOOKS_PROFILE)",
-    )
 
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
-
-    mcp_p = sub.add_parser(
-        "mcp",
-        help="Manage MCP server files (list, install, uninstall, sync, add)",
-    )
-    mcp_p.add_argument(
-        "action",
-        nargs="?",
-        default="list",
-        choices=["list", "install", "uninstall", "sync", "add"],
-        help="Action to perform (default: list)",
-    )
-    mcp_p.add_argument(
-        "mcp_path",
-        nargs="?",
-        default=None,
-        help="Path to MCP file (only used with 'add' action)",
-    )
-    mcp_p.add_argument(
-        "--dir",
-        default=None,
-        help=f"Directory to scan for MCP files (default: {AGENTIHOOKS_STATE_DIR})",
-    )
 
     init_p = sub.add_parser(
         "init", help="Initialize agentihooks (global setup from bundle, or per-repo config with --repo)"
@@ -2955,28 +2899,6 @@ def main() -> None:
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
-    bundle_p = sub.add_parser("bundle", help="Manage external bundle (profiles + connectors)")
-    bundle_sub = bundle_p.add_subparsers(dest="bundle_action")
-    bundle_link = bundle_sub.add_parser("link", help="Link a bundle directory")
-    bundle_link.add_argument("bundle_path", help="Path to bundle directory")
-    bundle_sub.add_parser("unlink", help="Unlink the current bundle")
-    bundle_sub.add_parser("list", help="Show linked bundle contents")
-    conn_p = sub.add_parser("connector", help="Manage external connectors (MCP/permissions adapters)")
-    conn_sub = conn_p.add_subparsers(dest="connector_action")
-    conn_link = conn_sub.add_parser("link", help="Link a connector directory")
-    conn_link.add_argument("connector_path", help="Path to connector directory")
-    conn_unlink = conn_sub.add_parser("unlink", help="Unlink a connector by name")
-    conn_unlink.add_argument("connector_name", help="Connector name")
-    conn_sub.add_parser("list", help="List linked connectors")
-    conn_inspect = conn_sub.add_parser("inspect", help="Preview what a connector would merge")
-    conn_inspect.add_argument("connector_path", help="Path to connector directory")
-    conn_new = conn_sub.add_parser("new", help="Create a new connector scaffold (interactive or headless)")
-    conn_new.add_argument("--name", dest="new_name", help="Connector name (headless mode)")
-    conn_new.add_argument("--path", dest="new_path", help="Parent directory for the connector (headless mode)")
-    conn_new.add_argument("--description", dest="new_description", help="Connector description (headless mode)")
-    conn_new.add_argument("--profiles", dest="new_profiles", help="Comma-separated profile names (headless mode)")
-    conn_new.add_argument("--base-env", dest="new_base_env", help="Base env vars as KEY=VAL,KEY2=VAL2 (headless mode)")
-    conn_new.add_argument("--link", dest="new_auto_link", action="store_true", help="Auto-link after creation")
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
         "path",
@@ -3041,40 +2963,15 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    if args.command == "global":
-        install_global(args)
-    elif args.command == "project":
-        install_project(args)
-    elif args.command == "uninstall":
+    if args.command == "uninstall":
         uninstall_global(args)
-    elif args.command == "mcp":
-        scan_dir = Path(args.dir).expanduser().resolve() if args.dir else None
-        mcp_path = Path(args.mcp_path).expanduser().resolve() if args.mcp_path else None
-        cmd_mcp_action(args.action, scan_dir, mcp_path=mcp_path)
+    elif args.command == "init":
+        args.profile = getattr(args, "init_profile", None)
+        cmd_init_unified(args)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "quota":
         cmd_quota(args)
-    elif args.command == "init":
-        args.profile = getattr(args, "init_profile", None)
-        cmd_init_unified(args)
-    elif args.command == "bundle":
-        action = getattr(args, "bundle_action", None) or "list"
-        bundle_path = getattr(args, "bundle_path", None)
-        cmd_bundle(action, path=bundle_path)
-    elif args.command == "connector":
-        action = getattr(args, "connector_action", None) or "list"
-        conn_path = getattr(args, "connector_path", None) or getattr(args, "new_path", None)
-        conn_name = getattr(args, "connector_name", None) or getattr(args, "new_name", None)
-        cmd_connector(
-            action,
-            path=conn_path,
-            name=conn_name,
-            description=getattr(args, "new_description", None),
-            profiles=getattr(args, "new_profiles", None),
-            base_env=getattr(args, "new_base_env", None),
-            auto_link=getattr(args, "new_auto_link", False),
-        )
     elif args.command == "daemon":
         cmd_daemon(args)
 
