@@ -1016,6 +1016,32 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         else:
             print(f"\n{_DIM}[--] Quota daemon already running.{_RESET}")
 
+    # --- Auto-start sync daemon ---
+    sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
+    sync_running = False
+    if sync_pid_file.exists():
+        try:
+            pid = int(sync_pid_file.read_text().strip())
+            os.kill(pid, 0)
+            sync_running = True
+        except (ProcessLookupError, ValueError, PermissionError):
+            sync_pid_file.unlink(missing_ok=True)
+    if not sync_running:
+        sync_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
+        if sync_script.exists():
+            import subprocess as _sp2
+            python = str(_detect_venv() or sys.executable)
+            proc = _sp2.Popen(
+                [python, str(sync_script)],
+                stdin=_sp2.DEVNULL,
+                stdout=_sp2.DEVNULL,
+                stderr=_sp2.DEVNULL,
+                start_new_session=True,
+            )
+            _cprint(f"[OK] Sync daemon started (PID {proc.pid}).")
+    else:
+        print(f"{_DIM}[--] Sync daemon already running.{_RESET}")
+
     # --- Update bashrc block (agentienv + agenti alias) ---
     if _ENV_FILE_DST.is_file():
         _update_bashrc_block()
