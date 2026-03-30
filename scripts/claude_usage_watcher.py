@@ -23,9 +23,58 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-_STATE_FILE = Path.home() / ".agentihooks" / "claude_auth_state.json"
-_LOG_FILE = Path.home() / ".agentihooks" / "logs" / "quota-watcher.log"
-_PID_FILE = Path.home() / ".agentihooks" / "quota-watcher.pid"
+_AGENTIHOOKS_DIR = Path.home() / ".agentihooks"
+_LEGACY_STATE_FILE = _AGENTIHOOKS_DIR / "claude_auth_state.json"
+_ACCOUNTS_DIR = _AGENTIHOOKS_DIR / "quota-accounts"
+_STATE_JSON = _AGENTIHOOKS_DIR / "state.json"
+_LOG_FILE = _AGENTIHOOKS_DIR / "logs" / "quota-watcher.log"
+_PID_FILE = _AGENTIHOOKS_DIR / "quota-watcher.pid"
+
+
+def _active_account_name() -> str:
+    """Return the active quota account name from state.json."""
+    if _STATE_JSON.exists():
+        try:
+            state = json.loads(_STATE_JSON.read_text())
+            return state.get("active_quota_account", "default")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return "default"
+
+
+def _set_active_account(name: str) -> None:
+    """Set the active quota account in state.json."""
+    state = {}
+    if _STATE_JSON.exists():
+        try:
+            state = json.loads(_STATE_JSON.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    state["active_quota_account"] = name
+    _STATE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    _STATE_JSON.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _auth_state_path(account: str | None = None) -> Path:
+    """Return the auth state file for the given (or active) account."""
+    name = account or _active_account_name()
+
+    # Migration: if accounts dir doesn't exist but legacy file does
+    if not _ACCOUNTS_DIR.exists() and _LEGACY_STATE_FILE.exists():
+        import shutil
+        _ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_LEGACY_STATE_FILE, _ACCOUNTS_DIR / "default.json")
+        _set_active_account("default")
+        print("[quota] Migrated auth -> quota-accounts/default.json", flush=True)
+
+    return _ACCOUNTS_DIR / f"{name}.json"
+
+
+def _list_accounts() -> list[str]:
+    """Return sorted list of account names."""
+    if not _ACCOUNTS_DIR.exists():
+        return []
+    return sorted(p.stem for p in _ACCOUNTS_DIR.glob("*.json"))
 
 _BASE_URL = "https://claude.ai"
 
@@ -71,7 +120,7 @@ def _open_browser(url: str) -> None:
 
 
 def _is_authenticated() -> bool:
-    return _STATE_FILE.exists()
+    return _auth_state_path().exists()
 
 
 def _daemon_running() -> int | None:
@@ -87,11 +136,12 @@ def _daemon_running() -> int | None:
 
 
 def _load_session_key() -> str | None:
-    """Extract sessionKey from the saved auth state file."""
-    if not _STATE_FILE.exists():
+    """Extract sessionKey from the active account's auth state file."""
+    state_file = _auth_state_path()
+    if not state_file.exists():
         return None
     try:
-        state = json.loads(_STATE_FILE.read_text())
+        state = json.loads(state_file.read_text())
         for c in state.get("cookies", []):
             if c["name"] == "sessionKey":
                 return c["value"]
@@ -100,8 +150,8 @@ def _load_session_key() -> str | None:
     return None
 
 
-def _save_session_key(session_key: str) -> None:
-    """Save sessionKey to the auth state file (minimal format)."""
+def _save_session_key(session_key: str, account: str | None = None) -> None:
+    """Save sessionKey to the given (or active) account's auth state file."""
     state = {
         "cookies": [
             {
@@ -116,8 +166,9 @@ def _save_session_key(session_key: str) -> None:
         ],
         "origins": [],
     }
-    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    target = _auth_state_path(account)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 async def _api_get(session_key: str, path: str) -> dict | None:
@@ -324,11 +375,13 @@ def _validate_session_key(session_key: str) -> bool:
     return asyncio.run(_check())
 
 
-def _import_cookie(session_key: str) -> None:
-    """Validate sessionKey via API, save to state file, restart daemon."""
+def _import_cookie(session_key: str, account: str | None = None) -> None:
+    """Validate sessionKey via API, save to account file, restart daemon."""
+    name = account or _active_account_name()
     if _validate_session_key(session_key):
-        _save_session_key(session_key)
-        print(f"[quota] Auth saved to {_STATE_FILE}", flush=True)
+        _save_session_key(session_key, account=name)
+        _set_active_account(name)
+        print(f"[quota] Auth saved to quota-accounts/{name}.json", flush=True)
         print("[quota] Authenticated.", flush=True)
 
         existing = _daemon_running()
@@ -346,8 +399,10 @@ def _import_cookie(session_key: str) -> None:
         sys.exit(1)
 
 
-def cmd_auth() -> None:
+def cmd_auth(account: str | None = None) -> None:
     """Open the real system browser to claude.ai, then prompt for the cookie."""
+    name = account or _active_account_name()
+    print(f"[quota] Account: {name}", flush=True)
     print("Opening claude.ai in your browser...", flush=True)
     _open_browser("https://claude.ai")
     print()
@@ -361,7 +416,7 @@ def cmd_auth() -> None:
         sys.exit("\nAborted.")
     if not value:
         sys.exit("No value entered.")
-    _import_cookie(value)
+    _import_cookie(value, account=name)
 
 
 async def _run_daemon(output: Path, poll_sec: int):
@@ -450,6 +505,7 @@ def main():
     ap.add_argument("--auth", action="store_true", help="Open your browser + paste session cookie")
     ap.add_argument("--dump-html", action="store_true", dest="dump_html", help="Dump raw API JSON for debugging")
     ap.add_argument("--import-cookies", action="store_true", dest="import_cookies", help="Paste sessionKey only")
+    ap.add_argument("--account", default=None, help="Account name for auth operations")
     ap.add_argument(
         "action",
         nargs="?",
@@ -461,7 +517,7 @@ def main():
     args = ap.parse_args()
 
     if args.auth or args.action == "auth":
-        cmd_auth()
+        cmd_auth(account=args.account)
         return
 
     if args.dump_html or args.action == "dump-html":
@@ -477,7 +533,7 @@ def main():
             sys.exit("\nAborted.")
         if not value:
             sys.exit("No value entered.")
-        _import_cookie(value)
+        _import_cookie(value, account=args.account)
         return
 
     if args.action == "status":

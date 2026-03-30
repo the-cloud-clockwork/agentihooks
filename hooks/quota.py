@@ -36,6 +36,14 @@ def load_quota() -> Optional[dict]:
         return {"stale": True}
     if (datetime.now(timezone.utc) - updated).total_seconds() > stale_sec:
         return {"stale": True}
+    # Include active account name
+    state_file = Path.home() / ".agentihooks" / "state.json"
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            data["_account"] = state.get("active_quota_account", "default")
+        except (json.JSONDecodeError, OSError):
+            pass
     return data
 
 
@@ -57,6 +65,9 @@ def fmt_quota(data: dict) -> str:
     if data.get("stale"):
         return "stale"
     parts = []
+    acct = data.get("_account")
+    if acct and acct != "default":
+        parts.append(f"[{acct}]")
 
     # Session
     session = data.get("session") or {}
