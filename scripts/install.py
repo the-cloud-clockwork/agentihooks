@@ -2089,7 +2089,7 @@ def _uninstall_cli_tool() -> None:
 
 
 def _remove_agentihooks_symlinks(dst_dir: Path, label: str) -> int:
-    """Remove symlinks in *dst_dir* whose resolved target is inside AGENTIHOOKS_ROOT.
+    """Remove symlinks in *dst_dir* managed by agentihooks (built-in or bundle).
 
     Returns the count of removed links. Non-symlinks and symlinks pointing
     elsewhere are left untouched (user-created links stay safe).
@@ -2097,15 +2097,18 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str) -> int:
     if not dst_dir.exists():
         return 0
     count = 0
-    root_str = str(AGENTIHOOKS_ROOT)
+    managed_roots = [str(AGENTIHOOKS_ROOT)]
+    bundle = _get_bundle_path()
+    if bundle:
+        managed_roots.append(str(bundle))
     for link in sorted(dst_dir.iterdir()):
         if not link.is_symlink():
             continue
         try:
-            target = link.resolve()
+            target = str(link.resolve())
         except OSError:
             continue
-        if str(target).startswith(root_str):
+        if any(target.startswith(root) for root in managed_roots):
             link.unlink()
             print(f"  [RM] Removed {label} symlink: {link.name}")
             count += 1
@@ -2270,18 +2273,25 @@ def uninstall_global(args: argparse.Namespace) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    def _count_agentihooks_symlinks(d: Path) -> int:
+    def _count_managed_symlinks(d: Path) -> int:
         if not d.exists():
             return 0
-        root_str = str(AGENTIHOOKS_ROOT)
-        return sum(1 for lnk in d.iterdir() if lnk.is_symlink() and str(lnk.resolve()).startswith(root_str))
+        managed_roots = [str(AGENTIHOOKS_ROOT)]
+        bundle = _get_bundle_path()
+        if bundle:
+            managed_roots.append(str(bundle))
+        return sum(
+            1 for lnk in d.iterdir()
+            if lnk.is_symlink() and any(str(lnk.resolve()).startswith(r) for r in managed_roots)
+        )
 
-    n_skills = _count_agentihooks_symlinks(skills_dir)
-    n_agents = _count_agentihooks_symlinks(agents_dir)
-    n_commands = _count_agentihooks_symlinks(commands_dir)
-    n_rules = _count_agentihooks_symlinks(rules_dir)
+    n_skills = _count_managed_symlinks(skills_dir)
+    n_agents = _count_managed_symlinks(agents_dir)
+    n_commands = _count_managed_symlinks(commands_dir)
+    n_rules = _count_managed_symlinks(rules_dir)
 
-    remove_claude_md = claude_md_dst.is_symlink() and str(claude_md_dst.resolve()).startswith(str(PROFILES_DIR))
+    # Remove CLAUDE.md if it's a symlink pointing into any profiles/ directory
+    remove_claude_md = claude_md_dst.is_symlink() and "profiles/" in str(claude_md_dst.resolve())
 
     managed_servers = _collect_all_managed_mcp_servers()
 
