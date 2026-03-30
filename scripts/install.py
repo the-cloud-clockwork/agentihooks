@@ -1557,6 +1557,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         ("skills", "skill", lambda p: p.is_dir()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
+        ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
         dst = CLAUDE_HOME / subdir
         # Layer 1: agentihooks built-in
@@ -2257,6 +2258,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     skills_dir = CLAUDE_HOME / "skills"
     agents_dir = CLAUDE_HOME / "agents"
     commands_dir = CLAUDE_HOME / "commands"
+    rules_dir = CLAUDE_HOME / "rules"
     claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     # --- Audit ---
     remove_settings = False
@@ -2275,6 +2277,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     n_skills = _count_agentihooks_symlinks(skills_dir)
     n_agents = _count_agentihooks_symlinks(agents_dir)
     n_commands = _count_agentihooks_symlinks(commands_dir)
+    n_rules = _count_agentihooks_symlinks(rules_dir)
 
     remove_claude_md = claude_md_dst.is_symlink() and str(claude_md_dst.resolve()).startswith(str(PROFILES_DIR))
 
@@ -2291,6 +2294,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print(f"  {skills_dir}/  → {n_skills} symlink(s)")
     print(f"  {agents_dir}/  → {n_agents} symlink(s)")
     print(f"  {commands_dir}/  → {n_commands} symlink(s)")
+    print(f"  {rules_dir}/  → {n_rules} symlink(s)")
     if remove_claude_md:
         print(f"  {claude_md_dst}  (stale symlink → profiles/)")
     else:
@@ -2323,6 +2327,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
         (skills_dir, "skill"),
         (agents_dir, "agent"),
         (commands_dir, "command"),
+        (rules_dir, "rule"),
     ]:
         n = _remove_agentihooks_symlinks(dst_dir, label)
         if n == 0:
