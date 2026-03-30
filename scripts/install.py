@@ -427,35 +427,20 @@ def _bundle_link(bundle_dir: Path | None) -> None:
         "linked_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Auto-discover and register connectors from bundle
-    conn_dir = bundle_dir / "connectors"
-    if conn_dir.is_dir():
-        connectors = state.setdefault("connectors", {})
-        for item in sorted(conn_dir.iterdir()):
-            if item.is_dir() and (item / "connector.yml").exists():
-                try:
-                    meta = yaml.safe_load((item / "connector.yml").read_text())
-                    conn_name = meta.get("name", item.name)
-                    connectors[conn_name] = {
-                        "path": str(item),
-                        "linked_at": datetime.now(timezone.utc).isoformat(),
-                        "source": "bundle",
-                    }
-                    print(f"  [OK] Auto-linked connector: {conn_name}")
-                except Exception as exc:
-                    print(f"  [WARN] Skipped {item.name}: {exc}")
-
     _save_state(state)
 
     # Summary
     profiles_dir = bundle_dir / "profiles"
     profile_names = sorted(p.name for p in profiles_dir.iterdir() if p.is_dir()) if profiles_dir.is_dir() else []
+    has_claude = (bundle_dir / ".claude").is_dir()
 
     print(f"[OK] Linked bundle: {bundle_dir}")
     if profile_names:
         print(f"     Profiles: {', '.join(profile_names)}")
+    if has_claude:
+        print(f"     Global .claude/: skills, commands, agents")
     print()
-    print("Run 'agentihooks global --profile <name>' to apply.")
+    print("Run 'agentihooks init' to apply.")
 
 
 def _bundle_unlink() -> None:
@@ -924,6 +909,61 @@ def _connector_new(
 # ---------------------------------------------------------------------------
 # Per-repo config (agentihooks init)
 # ---------------------------------------------------------------------------
+
+
+def cmd_init_unified(args: argparse.Namespace) -> None:
+    """Unified init command — routes to global or per-repo install.
+
+    agentihooks init --bundle <path>    → link bundle + global install
+    agentihooks init                    → re-run global install (bundle must be linked)
+    agentihooks init --repo <path>      → per-repo config with profile picker
+    """
+    bundle_path = getattr(args, "bundle", None)
+    repo_path = getattr(args, "repo", None)
+
+    if repo_path:
+        # Per-repo mode — delegate to existing cmd_init
+        cmd_init(args)
+        return
+
+    # Global mode
+    if bundle_path:
+        # First-time: link bundle, then global install
+        bundle_dir = Path(bundle_path).expanduser().resolve()
+        if not bundle_dir.is_dir():
+            print(f"ERROR: Bundle directory not found: {bundle_dir}", file=sys.stderr)
+            sys.exit(1)
+        # Check for profiles/ dir in bundle (new structure) or .agentihooks/ (legacy)
+        if not (bundle_dir / "profiles").is_dir():
+            # Maybe they pointed at the old .agentihooks subdir?
+            if (bundle_dir.parent / "profiles").is_dir():
+                print(f"HINT: Point --bundle at the repo root, not .agentihooks/")
+            print(f"ERROR: No profiles/ directory found in {bundle_dir}", file=sys.stderr)
+            sys.exit(1)
+        _bundle_link(bundle_dir)
+        print()
+
+    # Check bundle is linked
+    bundle = _get_bundle_path()
+    if not bundle:
+        print("ERROR: No bundle linked. Run: agentihooks init --bundle /path/to/bundle", file=sys.stderr)
+        sys.exit(1)
+
+    # Resolve profile
+    profile_name = args.profile
+    if not profile_name:
+        interactive = sys.stdin.isatty()
+        if interactive:
+            available = _available_profiles()
+            print(f"Available profiles: {', '.join(available)}")
+            default_profile = os.environ.get("AGENTIHOOKS_PROFILE", "default")
+            profile_name = input(f"Profile [{default_profile}]: ").strip() or default_profile
+        else:
+            profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "default")
+
+    # Build args for _install_global_inner
+    global_args = argparse.Namespace(profile=profile_name)
+    install_global(global_args)
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -1519,40 +1559,58 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     save_json(existing_settings_path, merged)
     print(f"[OK] Wrote {existing_settings_path}")
 
-    # --- 4. Symlink skills (directories only) ---
-    _symlink_dir_contents(
-        AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / "skills",
-        CLAUDE_HOME / "skills",
-        label="skill",
-        filter_fn=lambda p: p.is_dir(),
-    )
-
-    # --- 5. Symlink agents (.md files only, excluding README.md) ---
-    _symlink_dir_contents(
-        AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / "agents",
-        CLAUDE_HOME / "agents",
-        label="agent",
-        filter_fn=lambda p: p.suffix == ".md" and p.name != "README.md",
-    )
-
-    # --- 6. Symlink commands (.md files only, excluding README.md) ---
-    _symlink_dir_contents(
-        AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / "commands",
-        CLAUDE_HOME / "commands",
-        label="command",
-        filter_fn=lambda p: p.suffix == ".md" and p.name != "README.md",
-    )
-
-    # --- 7. Symlink CLAUDE.md from the chosen profile ---
+    # --- 4. Symlink skills/agents/commands (3 layers: agentihooks → bundle → profile) ---
     _resolved_profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
+    bundle_dir = _get_bundle_path()
+
+    for subdir, label, filter_fn in [
+        ("skills", "skill", lambda p: p.is_dir()),
+        ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
+        ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
+    ]:
+        dst = CLAUDE_HOME / subdir
+        # Layer 1: agentihooks built-in
+        _symlink_dir_contents(AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / subdir, dst, label=label, filter_fn=filter_fn)
+        # Layer 2: bundle top-level .claude/ (inherits to all profiles)
+        if bundle_dir and (bundle_dir / _CLAUDE_SUBDIR / subdir).is_dir():
+            _symlink_dir_contents(bundle_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"bundle {label}", filter_fn=filter_fn)
+        # Layer 3: profile-specific .claude/ (overrides bundle)
+        if (_resolved_profile_dir / _CLAUDE_SUBDIR / subdir).is_dir():
+            _symlink_dir_contents(_resolved_profile_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"profile {label}", filter_fn=filter_fn)
+
+    # --- 5. Symlink CLAUDE.md from the chosen profile ---
     profile_claude_md = _resolved_profile_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME
     claude_md_dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     _install_claude_md(profile_claude_md, claude_md_dst, profile_name)
 
-    # --- 8. Install profile MCP servers to user scope (~/.claude.json) ---
+    # --- 6. Install MCP servers to user scope (~/.claude.json) ---
+    # Layer 1: hooks-utils from agentihooks
     _install_user_mcp(profile_name)
+    # Layer 2: bundle top-level .mcp.json (all profiles)
+    if bundle_dir:
+        bundle_mcp = bundle_dir / _MCP_JSON_NAME
+        if bundle_mcp.exists():
+            try:
+                mcp_data = load_json(bundle_mcp)
+                servers = mcp_data.get("mcpServers", {})
+                if servers:
+                    _merge_mcp_to_user_scope(servers)
+                    print(f"  [OK] Bundle MCP servers: {', '.join(servers.keys())}")
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"  [WARN] Could not read bundle .mcp.json: {exc}")
+    # Layer 3: profile-specific .claude/.mcp.json
+    profile_mcp = _resolved_profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+    if profile_mcp.exists():
+        try:
+            mcp_data = load_json(profile_mcp)
+            servers = mcp_data.get("mcpServers", {})
+            if servers:
+                _merge_mcp_to_user_scope(servers)
+                print(f"  [OK] Profile MCP servers: {', '.join(servers.keys())}")
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  [WARN] Could not read profile .mcp.json: {exc}")
 
-    # --- 9. Re-apply any custom MCPs tracked in state.json ---
+    # --- 7. Re-apply any custom MCPs tracked in state.json ---
     if STATE_JSON.exists():
         print()
         sync_user_mcp()
@@ -2837,9 +2895,10 @@ def main() -> None:
     )
 
     init_p = sub.add_parser(
-        "init", help="Set up per-repo agentihooks config (.agentihooks.json → .claude/settings.local.json)"
+        "init", help="Initialize agentihooks (global setup from bundle, or per-repo config with --repo)"
     )
-    init_p.add_argument("--repo", default=None, help="Target repo directory (default: cwd)")
+    init_p.add_argument("--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)")
+    init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
     bundle_p = sub.add_parser("bundle", help="Manage external bundle (profiles + connectors)")
@@ -2943,9 +3002,8 @@ def main() -> None:
     elif args.command == "quota":
         cmd_quota(args)
     elif args.command == "init":
-        # Map init_profile to profile for cmd_init
         args.profile = getattr(args, "init_profile", None)
-        cmd_init(args)
+        cmd_init_unified(args)
     elif args.command == "bundle":
         action = getattr(args, "bundle_action", None) or "list"
         bundle_path = getattr(args, "bundle_path", None)
