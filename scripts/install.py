@@ -563,8 +563,13 @@ def _load_connectors(profile_name: str) -> tuple[dict, list[str], list[str]]:
         base_env = (meta.get("base") or {}).get("env", {})
         merged_env.update(base_env)
 
-        # Profile-specific settings
+        # Profile-specific settings (fall back to "default" if exact profile missing)
         profile_dir = conn_dir / "profiles" / profile_name
+        if not profile_dir.is_dir():
+            fallback = conn_dir / "profiles" / "default"
+            if fallback.is_dir():
+                print(f"  [--] Connector '{name}': no profile '{profile_name}', falling back to 'default'")
+                profile_dir = fallback
         if profile_dir.is_dir():
             perms_file = profile_dir / "permissions.json"
             if perms_file.exists():
