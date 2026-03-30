@@ -169,6 +169,46 @@ def _collect_source_files(state: dict) -> dict[str, list[str]]:
         if p.exists():
             _add(p, "mcp_files")
 
+    # Bundle .claude/ asset directories (skills, agents, commands, rules, .mcp.json)
+    # Use a manifest hash (sorted listing) so adds/removes trigger re-sync
+    if bundle_info:
+        bundle_path = Path(bundle_info["path"])
+        bundle_claude = bundle_path / ".claude"
+        if bundle_claude.is_dir():
+            for subdir in ("skills", "agents", "commands", "rules"):
+                d = bundle_claude / subdir
+                if d.is_dir():
+                    # Create a pseudo-file entry: hash the directory listing
+                    manifest = str(d) + "/__manifest__"
+                    files[manifest] = ["bundle"]
+            mcp = bundle_claude / ".mcp.json"
+            if mcp.exists():
+                _add(mcp, "bundle")
+
+        # Profile .claude/ asset directories
+        active_profile = state.get("targets", {}).get("global", {}).get("profile")
+        if active_profile:
+            for search in [bundle_path / "profiles", PROFILES_DIR]:
+                pd = search / active_profile / ".claude"
+                if pd.is_dir():
+                    for subdir in ("skills", "agents", "commands", "rules"):
+                        d = pd / subdir
+                        if d.is_dir():
+                            manifest = str(d) + "/__manifest__"
+                            files[manifest] = [f"profile:{active_profile}"]
+                    mcp = pd / ".mcp.json"
+                    if mcp.exists():
+                        _add(mcp, f"profile:{active_profile}")
+
+    # agentihooks built-in .claude/ asset directories
+    ah_claude = AGENTIHOOKS_ROOT / ".claude"
+    if ah_claude.is_dir():
+        for subdir in ("skills", "agents", "commands", "rules"):
+            d = ah_claude / subdir
+            if d.is_dir():
+                manifest = str(d) + "/__manifest__"
+                files[manifest] = ["base"]
+
     # Env files
     env_main = AGENTIHOOKS_STATE_DIR / ".env"
     if env_main.exists():
@@ -215,10 +255,23 @@ def _add_connector_files(
 # ---------------------------------------------------------------------------
 
 
+def _dir_manifest_hash(dir_path: Path) -> str | None:
+    """Hash a sorted listing of directory children (names only)."""
+    if not dir_path.is_dir():
+        return None
+    import hashlib
+    names = sorted(p.name for p in dir_path.iterdir() if not p.name.startswith("."))
+    return hashlib.sha256("\n".join(names).encode()).hexdigest()
+
+
 def _compute_hashes(source_files: dict[str, list[str]]) -> dict[str, str]:
     result = {}
     for path_str in source_files:
-        h = _sha256(Path(path_str))
+        if path_str.endswith("/__manifest__"):
+            dir_path = Path(path_str.removesuffix("/__manifest__"))
+            h = _dir_manifest_hash(dir_path)
+        else:
+            h = _sha256(Path(path_str))
         if h is not None:
             result[path_str] = h
     return result
