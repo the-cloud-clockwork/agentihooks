@@ -2229,26 +2229,49 @@ def _collect_all_managed_mcp_servers() -> dict:
 
     Collects servers from:
     1. The hooks-utils server (generated from profile mcp_categories)
-    2. All files tracked in ~/.agentihooks/state.json mcpFiles
+    2. Bundle .claude/.mcp.json (or root .mcp.json)
+    3. Profile .claude/.mcp.json
+    4. All files tracked in ~/.agentihooks/state.json mcpFiles
 
     Returns a merged {name: config} dict.
     """
     merged: dict = {}
 
-    # --- hooks-utils server (always present, categories don't matter for uninstall) ---
+    # --- 1. hooks-utils server ---
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
-    # --- State-tracked MCP files ---
+    # --- 2. Bundle .mcp.json ---
+    bundle_dir = _get_bundle_path()
+    if bundle_dir:
+        for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
+            if candidate.exists():
+                try:
+                    merged.update(load_json(candidate).get("mcpServers", {}))
+                except (json.JSONDecodeError, OSError):
+                    pass
+                break
+
+    # --- 3. Profile .mcp.json ---
     state = _load_state()
+    profile_name = state.get("targets", {}).get("global", {}).get("profile")
+    if profile_name:
+        profile_dir = _resolve_profile_dir(profile_name)
+        if profile_dir:
+            profile_mcp = profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+            if profile_mcp.exists():
+                try:
+                    merged.update(load_json(profile_mcp).get("mcpServers", {}))
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+    # --- 4. State-tracked MCP files ---
     for path_str in state.get("mcpFiles", []):
         p = Path(path_str)
         if not p.exists():
             continue
         try:
-            raw = load_json(p)
-            for name, cfg in raw.get("mcpServers", {}).items():
-                merged[name] = cfg
+            merged.update(load_json(p).get("mcpServers", {}))
         except (json.JSONDecodeError, OSError):
             pass
 
