@@ -3224,6 +3224,12 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 def main() -> None:
     _argv = sys.argv[1:]
 
+    # Fast path: "agentihooks claude ..." bypasses argparse entirely
+    # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
+    if _argv and _argv[0] == "claude":
+        cmd_claude(_argv[1:])
+        return
+
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3312,6 +3318,8 @@ def main() -> None:
     mcp_p.add_argument("mcp_action", choices=["report"], help="Action to perform")
     mcp_p.add_argument("--project", default=None, help="Project path to include (default: CWD)")
 
+    sub.add_parser("status", help="Show installation health, cost guardrails, and system state")
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -3376,6 +3384,11 @@ def main() -> None:
 
         servers = load_all_mcp_configs(args.project)
         print(generate_report(servers))
+    elif args.command == "status":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.status_checker import run_all_checks, format_cli
+
+        print(format_cli(run_all_checks()))
 
 
 if __name__ == "__main__":
