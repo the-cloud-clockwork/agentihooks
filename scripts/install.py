@@ -32,10 +32,9 @@ Commands:
     agentihooks ignore [path] [--force]
         Create a .claudeignore in the current directory.
 
-    agentihooks --loadenv [PATH] [-- COMMAND [ARGS...]]
-        Load ~/.agentihooks/.env into the environment:
-          agentihooks --loadenv -- claude    # launch claude with MCP keys
-          eval $(agentihooks --loadenv)      # export into current shell
+    agentihooks claude [extra flags]
+        Launch claude with profile flags (model, permissions, effort, etc.)
+        Alias: agenti (added to ~/.bashrc by init)
 
     agentihooks --list-profiles     # show available profiles
     agentihooks --query             # print active profile name
@@ -991,6 +990,55 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         else:
             print(f"\n[--] Quota daemon already running.")
 
+    # --- Update bashrc block (agentienv + agenti alias) ---
+    if _ENV_FILE_DST.is_file():
+        _update_bashrc_block()
+
+
+def _update_bashrc_block() -> None:
+    """Write/update the managed agentihooks block in ~/.bashrc."""
+    env_file = _ENV_FILE_DST
+    env_dir = env_file.parent
+    block = (
+        f"{_BLOCK_START}\n"
+        f"agentienv() {{\n"
+        f'  if [[ ! -f "{env_file}" ]]; then\n'
+        f"    return 0\n"
+        f"  fi\n"
+        f"  set -a\n"
+        f'  . "{env_file}" 2>/dev/null || {{ set +a; return 1; }}\n'
+        f"  local _c=1\n"
+        f'  for f in "{env_dir}"/*.env; do\n'
+        f'    [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{ . "$f" 2>/dev/null; _c=$((_c + 1)); }}\n'
+        f"  done\n"
+        f"  set +a\n"
+        f"}}\n"
+        f"agentienv\n"
+        f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
+        f"{_BLOCK_END}\n"
+    )
+
+    bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
+
+    if _BLOCK_START in bashrc_text:
+        lines = bashrc_text.splitlines(keepends=True)
+        new_lines = []
+        inside = False
+        for line in lines:
+            if line.rstrip() == _BLOCK_START:
+                inside = True
+                new_lines.append(block)
+            elif line.rstrip() == _BLOCK_END:
+                inside = False
+            elif not inside:
+                new_lines.append(line)
+        _BASHRC.write_text("".join(new_lines), encoding="utf-8")
+        print(f"[OK] Updated agentihooks block in {_BASHRC}")
+    else:
+        sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
+        _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
+        print(f"[OK] Added agentihooks block to {_BASHRC}")
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     """Set up per-repo agentihooks config → .claude/settings.local.json."""
@@ -1676,9 +1724,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print("To update after settings.base.json changes:")
     print("  agentihooks init")
     print()
-    print("Shell tip: wrap Claude Code to load MCP keys from ~/.agentihooks/.env:")
-    print("  alias cc='agentihooks --loadenv -- claude'")
-    print("  Or for eval mode: eval $(agentihooks --loadenv)")
+    print("Launch claude with profile flags:")
+    print("  agentihooks claude   # or just: agenti (after source ~/.bashrc)")
 
 
 # ---------------------------------------------------------------------------
@@ -3115,11 +3162,7 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 
 
 def main() -> None:
-    # Split argv on '--' so everything after it becomes the exec command.
     _argv = sys.argv[1:]
-    _sep = _argv.index("--") if "--" in _argv else None
-    _exec_cmd: list[str] = _argv[_sep + 1 :] if _sep is not None else []
-    _argv = _argv[:_sep] if _sep is not None else _argv
 
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
@@ -3135,18 +3178,6 @@ def main() -> None:
         "--query",
         action="store_true",
         help="Print the currently active global profile name and exit",
-    )
-    parser.add_argument(
-        "--loadenv",
-        nargs="?",
-        const="",
-        metavar="PATH",
-        help="Install agentienv alias into ~/.bashrc and offer to install requirements.txt",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="With --loadenv: install requirements into system Python (for Docker/CI, skips venv check)",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -3208,14 +3239,6 @@ def main() -> None:
     daemon_p.add_argument("--foreground", action="store_true", help="Run in foreground (for debugging)")
 
     args = parser.parse_args(_argv)
-
-    if args.loadenv is not None:
-        _cmd_loadenv(
-            Path(args.loadenv).expanduser() if args.loadenv else _ENV_FILE_DST,
-            _exec_cmd,
-            force=args.force,
-        )
-        return
 
     if args.list_profiles:
         list_profiles()
