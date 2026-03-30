@@ -71,6 +71,16 @@ FALSE_POSITIVE_PATTERNS = [
     "on error",
     "error log",
     "error_log",
+    # Monitoring / diagnostic output (BTRFS, NVMe, system stats)
+    "io_errs",
+    "media_errors",
+    "corruption_errs",
+    "generation_errs",
+    "flush_io_errs",
+    "num_err_log_entries",
+    "error_count",
+    "errors finding",
+    "finding 0 errors",
 ]
 
 
@@ -107,6 +117,14 @@ def _is_error(tool_result, strict=False):
     # MCP responses contain arbitrary user content that triggers false positives.
     if strict:
         return False, ""
+
+    # If Bash exited with code 0, trust the exit code over string matching.
+    # Successful commands often contain words like "error" in their output
+    # (e.g., btrfs stats: "write_io_errs 0", nvme: "media_errors 0").
+    if isinstance(tool_result, dict):
+        exit_code = tool_result.get("exitCode", tool_result.get("exit_code"))
+        if exit_code is not None and exit_code == 0:
+            return False, ""
 
     # String pattern matching (Bash tools only — structured output)
     result_str = str(tool_result).lower()
