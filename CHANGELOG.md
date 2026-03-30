@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Sync daemon (`agentihooks daemon`)** — background daemon that watches all source files feeding the install pipeline (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env`) and auto-propagates changes to all registered downstream consumers. Uses SHA-256 hashing with category-based change detection. Targets are registered automatically by `agentihooks global` and `agentihooks project`. Configurable poll interval (default 60s, env: `AGENTIHOOKS_SYNC_POLL_SEC`). Advisory file lock prevents concurrent writes. State: PID at `~/.agentihooks/sync-daemon.pid`, hashes at `~/.agentihooks/sync-hashes.json`, log at `~/.agentihooks/logs/sync-daemon.log`.
+- **Target registry in `state.json`** — `agentihooks global` and `agentihooks project <path>` now register their targets (path + profile) in `state.json` under a new `targets` key. The sync daemon uses this registry to know what to re-install when source files change.
 - **`agentihooks mcp` two-stage interactive flow** — `mcp install` and `mcp uninstall` now use a two-stage UX: Stage 1 picks a file (auto-displayed if only one exists; numbered list with `•` bullet-point server names otherwise); Stage 2 picks which servers to install/remove (`0`=all, `N`=specific, comma-separated). A file is removed from tracking on uninstall only if all its servers were removed.
 - **`agentihooks mcp list`** — servers are now displayed as `•` bullet points instead of a count string.
 - **Token Control Layer** — new subsystem in `v0.3.0+` targeting 30–50% token reduction in agentic sessions. All features are individually disableable:

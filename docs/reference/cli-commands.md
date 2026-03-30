@@ -294,6 +294,71 @@ agentihooks mcp sync
 
 ---
 
+## `agentihooks daemon`
+
+Manage the sync daemon that watches all source files (profiles, settings, connectors, bundles, MCPs, `.env`) and auto-propagates changes to all registered downstream consumers.
+
+```bash
+agentihooks daemon                 # start background daemon (60s poll)
+agentihooks daemon status          # show targets, watched files, last scan
+agentihooks daemon logs            # tail -f daemon log
+agentihooks daemon stop            # kill daemon
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `start` *(default)* | Start the background daemon. Auto-detaches, writes PID to `~/.agentihooks/sync-daemon.pid`, logs to `~/.agentihooks/logs/sync-daemon.log`. |
+| `stop` | Kill the running daemon using the PID from `~/.agentihooks/sync-daemon.pid`. |
+| `status` | Show daemon PID, registered targets (global + projects), watched file count, and last scan timestamp. Flags `[PATH MISSING]` for project paths that no longer exist. |
+| `logs` | Runs `tail -f` on `~/.agentihooks/logs/sync-daemon.log`. |
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--poll N` | `60` | Poll interval in seconds. Also configurable via `AGENTIHOOKS_SYNC_POLL_SEC` env var. |
+| `--foreground` | — | Run in foreground instead of daemonizing. Useful for debugging. |
+
+### Target registration
+
+Targets are registered automatically:
+- `agentihooks global` registers `~/.claude/` as the global target with the chosen profile.
+- `agentihooks project <path>` registers the project path with the chosen profile.
+
+Registered targets are stored in `~/.agentihooks/state.json` under the `targets` key:
+
+```json
+{
+  "targets": {
+    "global": { "path": "/home/user/.claude", "profile": "default" },
+    "projects": {
+      "/home/user/dev/my-project": { "profile": "coding" }
+    }
+  }
+}
+```
+
+### Propagation rules
+
+| Source change | Affected targets |
+|---|---|
+| `settings.base.json` | Global + all projects + MCP sync |
+| Profile files (`profile.yml`, `settings.overrides.json`, `CLAUDE.md`) | Targets using that profile |
+| Connector files (`connector.yml`, `permissions.json`, `env.json`) | Global + all projects |
+| MCP files (tracked in `state.json`) | MCP sync only (`~/.claude.json`) |
+| `.env` files in `~/.agentihooks/` | Global + all projects |
+| Bundle directory contents | Global + all projects |
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_SYNC_POLL_SEC` | `60` | Daemon poll interval in seconds. |
+
+---
+
 ## `agentihooks quota`
 
 Manage the background quota watcher daemon that scrapes claude.ai/settings/usage and writes `~/.agentihooks/claude_usage.json` for the statusline.

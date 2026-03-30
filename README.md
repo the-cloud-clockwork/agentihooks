@@ -126,6 +126,12 @@ agentihooks mcp sync                    # re-apply all installed MCP files
 agentihooks project <path>              # write .mcp.json into a project
 agentihooks ignore [path] [--force]     # create .claudeignore
 
+# Sync Daemon (auto-propagation)
+agentihooks daemon                      # start background daemon (60s poll)
+agentihooks daemon status               # show targets + watched files
+agentihooks daemon logs                 # tail daemon log
+agentihooks daemon stop                 # kill daemon
+
 # Quota
 agentihooks quota [auth|status|logs|stop]
 

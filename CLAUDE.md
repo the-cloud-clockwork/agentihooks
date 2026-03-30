@@ -133,6 +133,50 @@ CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
 # CLAUDE_USAGE_POLL_SEC=60     # daemon poll interval (default)
 ```
 
+### Sync Daemon (auto-propagation)
+
+`scripts/sync_daemon.py` is a background daemon that watches all source files feeding the install pipeline and auto-propagates changes to every registered downstream consumer. If you have 5 repos consuming agentihooks, all 5 are updated within one poll cycle when any source config changes.
+
+**How it works:**
+
+1. Every `agentihooks global` and `agentihooks project <path>` call registers the target in `state.json` under a new `targets` key (profile used, path installed to).
+2. The daemon hashes every source file (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env` files) using SHA-256.
+3. Each file is tagged with categories (`base`, `profile:{name}`, `connector:{name}`, `mcp_files`, `env`, `bundle`).
+4. On each poll cycle, the daemon recomputes hashes. If any hash changed, it resolves which categories are affected, determines which targets depend on those categories, and re-runs the install pipeline for those targets.
+
+**Propagation rules:**
+
+| Source change | Affected targets |
+|---|---|
+| `settings.base.json` | Global + ALL projects + MCP sync |
+| `profiles/{X}/*` | Targets using profile X |
+| Connector files | Global + ALL projects |
+| MCP files (`.json`) | MCP sync only |
+| `.env` files | Global + ALL projects |
+| Bundle directory | Global + ALL projects |
+
+**Concurrency:** An advisory file lock at `~/.agentihooks/sync.lock` (via `fcntl.flock`) prevents the daemon and manual `agentihooks global`/`project` commands from writing simultaneously. The daemon uses non-blocking acquisition — skips the cycle on contention.
+
+**State files:**
+- PID: `~/.agentihooks/sync-daemon.pid`
+- Log: `~/.agentihooks/logs/sync-daemon.log`
+- Hashes: `~/.agentihooks/sync-hashes.json` (separate from `state.json` to avoid write contention)
+- Lock: `~/.agentihooks/sync.lock`
+
+```bash
+agentihooks daemon              # start background daemon (default 60s poll)
+agentihooks daemon status       # show targets, watched files, last scan
+agentihooks daemon logs         # tail -f daemon log
+agentihooks daemon stop         # kill daemon
+agentihooks daemon start --poll 30          # custom poll interval
+agentihooks daemon start --foreground       # debug mode
+```
+
+Configure poll interval in `~/.agentihooks/.env`:
+```bash
+# AGENTIHOOKS_SYNC_POLL_SEC=60   # daemon poll interval (default)
+```
+
 ### Redis
 
 `hooks/_redis.py` provides `get_redis()` (lazy singleton, returns `None` on any connection failure) and `redis_key(type, id)` which prefixes with `agenticore:`. All Redis usage degrades gracefully — features still work without it, just with less persistence.
