@@ -37,7 +37,7 @@ PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 
 # Claude Code user config — for MCP server tracking
 def _resolve_claude_json() -> Path:
-    home_dir = os.environ.get("CLAUDE_HOME")
+    home_dir = os.environ.get("CLAUDE_CODE_HOME_DIR")
     if home_dir:
         return Path(home_dir) / ".claude.json"
     return Path.home() / ".claude.json"
@@ -594,7 +594,7 @@ def _run_daemon(poll_sec: int) -> None:
 
             # Check for new MCP servers (additive blacklisting)
             try:
-                _check_new_mcp_servers(HASH_FILE)
+                _check_new_mcp_servers(AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
             except Exception as mcp_err:
                 _log(f"MCP tracking error: {mcp_err}")
 

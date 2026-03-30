@@ -6,7 +6,7 @@
   "permissions": {
     "defaultMode": "auto",
     "ask": [
-      "Bash(rm -rf /)*",
+      "Bash(rm -rf /*)",
       "Bash(git push *--force*)"
     ]
   }
