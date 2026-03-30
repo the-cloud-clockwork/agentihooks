@@ -7,55 +7,72 @@ exit
 
 # NOTE: The triple-quoted polyglot string above becomes __doc__ in Python,
 # so the real usage text is stored in _USAGE_TEXT and used as the argparse epilog.
-_USAGE_TEXT = """Examples:
-    agentihooks global [--profile default]
-        Install hooks, skills, agents, and CLAUDE.md into ~/.claude.
-        --profile selects which profile's CLAUDE.md to link (default: 'default').
-        Available profiles: agentihooks --list-profiles
+_USAGE_TEXT = """
+Quick start:
+    agentihooks init --bundle /path/to/bundle --profile colt
+    agentihooks init --profile colt          # re-run (bundle already linked)
+    agentihooks init --repo /path/to/repo    # per-repo config
 
-    agentihooks project <path> [--profile default]
-        Install a profile's .mcp.json into a target project directory.
+Commands:
+    agentihooks init [--bundle PATH] [--profile NAME] [--repo PATH]
+        First-time setup or re-install. Links a bundle, selects a profile,
+        and installs everything into ~/.claude: hooks, settings, skills,
+        agents, commands, rules, CLAUDE.md, and MCP servers.
 
     agentihooks uninstall [--yes]
-        Remove all agentihooks artifacts installed by 'agentihooks global'.
+        Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
+        MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
+
+    agentihooks global [--profile NAME]
+        Low-level install (init calls this). Re-run after editing
+        settings.base.json or profile configs.
+
+    agentihooks project <path> [--profile NAME]
+        Install a profile's .mcp.json into a target project.
 
     agentihooks mcp [list|install|uninstall|sync|add] [--dir PATH]
-        Manage MCP server files from ~/.agentihooks/ (or --dir).
-        Drop .json files with mcpServers into the directory, then:
-          agentihooks mcp              # list available MCP files
+        Manage standalone MCP server files from ~/.agentihooks/:
+          agentihooks mcp              # list available files
           agentihooks mcp install      # pick one to install
-          agentihooks mcp uninstall    # pick one to remove
-          agentihooks mcp sync         # re-apply all installed files
-          agentihooks mcp add <path>   # install a file directly by path
+          agentihooks mcp add <path>   # install by path
+
+    agentihooks bundle [link|unlink|list]
+        Manage the linked bundle (profiles + shared .claude/ assets).
+
+    agentihooks connector [link|unlink|list|inspect|new]
+        Manage external connectors (MCP/permissions adapters).
+
+    agentihooks daemon [start|stop|status|logs]
+        Manage the sync daemon (auto-propagates source changes).
+
+    agentihooks quota [auth|status|stop|logs]
+        Manage the Claude.ai console quota watcher.
 
     agentihooks ignore [path] [--force]
-        Create a .claudeignore in the current directory (or given path).
-        Covers secrets, build artefacts, binaries, venvs, and IDE noise.
-        --force overwrites an existing file.
+        Create a .claudeignore in the current directory.
 
-
-    agentihooks connector [link|unlink|list|inspect]
-        Manage external connectors (MCP/permissions adapters).
-        Connectors are directories with connector.yml + per-profile permissions.
-          agentihooks connector list                  # list linked connectors
-          agentihooks connector link /path/to/dir     # link a connector
-          agentihooks connector unlink <name>         # unlink by name
-          agentihooks connector inspect /path/to/dir  # preview merge
-          agentihooks connector new                   # interactive scaffold
-          agentihooks connector new --name x --path . # headless scaffold
     agentihooks --loadenv [PATH] [-- COMMAND [ARGS...]]
-        Load ~/.agentihooks/.env (or PATH) into the environment, then:
-          - If COMMAND given: exec it with the loaded vars (use in aliases).
-          - If no COMMAND: print 'export KEY=VALUE' lines for eval $().
-        Examples:
-          agentihooks --loadenv -- claude
-          eval $(agentihooks --loadenv)
+        Load ~/.agentihooks/.env into the environment:
+          agentihooks --loadenv -- claude    # launch claude with MCP keys
+          eval $(agentihooks --loadenv)      # export into current shell
 
-Re-run 'agentihooks global' after any changes to settings.base.json.
-The script is idempotent.
+    agentihooks --list-profiles     # show available profiles
+    agentihooks --query             # print active profile name
 
-Data directory: defaults to ~/.agentihooks/
-  Override: export AGENTIHOOKS_HOME=/mnt/shared  (K8s / shared filesystem)
+Profile layout (mirrors Claude Code project structure):
+    profiles/<name>/
+    ├── CLAUDE.md                    # system prompt (→ ~/.claude/CLAUDE.md)
+    ├── profile.yml                  # agentihooks metadata
+    └── .claude/
+        ├── settings.overrides.json  # merged into ~/.claude/settings.json
+        ├── .mcp.json                # profile MCP servers
+        ├── skills/                  # → ~/.claude/skills/
+        ├── agents/                  # → ~/.claude/agents/
+        ├── commands/                # → ~/.claude/commands/
+        └── rules/                   # → ~/.claude/rules/
+
+3-layer merge: agentihooks built-in → bundle global → profile-specific.
+All commands are idempotent. Data directory: ~/.agentihooks/
 """
 
 import argparse
