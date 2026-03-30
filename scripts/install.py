@@ -963,6 +963,34 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     global_args = argparse.Namespace(profile=profile_name)
     install_global(global_args)
 
+    # --- Auto-start daemons if accounts/config exist ---
+    accounts_dir = AGENTIHOOKS_STATE_DIR / "quota-accounts"
+    if accounts_dir.exists() and any(accounts_dir.glob("*.json")):
+        pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
+        already_running = False
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                already_running = True
+            except (ProcessLookupError, ValueError, PermissionError):
+                pid_file.unlink(missing_ok=True)
+        if not already_running:
+            watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
+            python = str(_detect_venv() or sys.executable)
+            if watcher.exists():
+                import subprocess
+                proc = subprocess.Popen(
+                    [python, str(watcher)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                print(f"\n[OK] Quota daemon started (PID {proc.pid}).")
+        else:
+            print(f"\n[--] Quota daemon already running.")
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     """Set up per-repo agentihooks config → .claude/settings.local.json."""
@@ -2382,7 +2410,24 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
 
-    # --- 7. Uninstall CLI ---
+    # --- 7. Stop quota + sync daemons ---
+    print()
+    if _quota_stop_daemon():
+        print("[OK] Quota daemon stopped.")
+    else:
+        print("[--] Quota daemon not running.")
+    sync_pid = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
+    if sync_pid.exists():
+        import signal
+        try:
+            pid = int(sync_pid.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            sync_pid.unlink(missing_ok=True)
+            print(f"[OK] Sync daemon stopped (PID {pid}).")
+        except (ProcessLookupError, ValueError):
+            sync_pid.unlink(missing_ok=True)
+
+    # --- 8. Uninstall CLI ---
     print()
     _uninstall_cli_tool()
 
