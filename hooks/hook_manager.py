@@ -29,7 +29,6 @@ from typing import Any
 
 from hooks.observability import otel
 
-
 # Add parent directory to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -314,11 +313,11 @@ def on_session_start(payload: dict) -> None:
 
     # Thinking/effort policy guidance
     try:
-        from hooks.config import EFFORT_POLICY_ENABLED, DEFAULT_EFFORT, THINKING_BUDGET_TOKENS
+        from hooks.config import DEFAULT_EFFORT, EFFORT_POLICY_ENABLED, THINKING_BUDGET_TOKENS
 
         if EFFORT_POLICY_ENABLED:
-            from hooks.context.thinking_policy import get_thinking_guidance
             from hooks.common import inject_context as _inject
+            from hooks.context.thinking_policy import get_thinking_guidance
 
             guidance = get_thinking_guidance(DEFAULT_EFFORT, THINKING_BUDGET_TOKENS)
             if guidance:
@@ -328,8 +327,9 @@ def on_session_start(payload: dict) -> None:
 
     # MCP surface area warning
     try:
-        from hooks.config import MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS
         import importlib.util
+
+        from hooks.config import MCP_SCHEMA_AVG_TOKENS, MCP_TOOL_WARN_THRESHOLD
         _spec = importlib.util.spec_from_file_location(
             "mcp_reporter",
             str(Path(__file__).resolve().parent.parent / "scripts" / "mcp_reporter.py"),
@@ -655,11 +655,11 @@ def on_post_tool_use(payload: dict) -> None:
 
     # Thinking/effort policy — check subagent effort alignment
     try:
-        from hooks.config import EFFORT_POLICY_ENABLED, DEFAULT_EFFORT
+        from hooks.config import DEFAULT_EFFORT, EFFORT_POLICY_ENABLED
 
         if EFFORT_POLICY_ENABLED and tool_name == "Agent":
-            from hooks.context.thinking_policy import check_subagent_effort
             from hooks.common import inject_context as _inject_effort
+            from hooks.context.thinking_policy import check_subagent_effort
 
             warning = check_subagent_effort(payload.get("tool_input", {}), DEFAULT_EFFORT)
             if warning:
@@ -730,7 +730,7 @@ def on_stop(payload: dict) -> None:
         from hooks.config import CONTEXT_AUDIT_ENABLED, CONTEXT_AUDIT_THRESHOLD_PCT
 
         if CONTEXT_AUDIT_ENABLED and session_id:
-            from hooks.observability.context_audit import get_audit_summary, format_audit_report
+            from hooks.observability.context_audit import format_audit_report, get_audit_summary
             from hooks.observability.token_monitor import get_context_fill_pct
 
             fill_pct = get_context_fill_pct(payload)

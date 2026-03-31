@@ -461,7 +461,7 @@ def _bundle_link(bundle_dir: Path | None) -> None:
     if profile_names:
         print(f"     Profiles: {', '.join(profile_names)}")
     if has_claude:
-        print(f"     Global .claude/: skills, commands, agents")
+        print("     Global .claude/: skills, commands, agents")
     print()
     print("Run 'agentihooks init' to apply.")
 
@@ -960,7 +960,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         if not (bundle_dir / "profiles").is_dir():
             # Maybe they pointed at the old .agentihooks subdir?
             if (bundle_dir.parent / "profiles").is_dir():
-                print(f"HINT: Point --bundle at the repo root, not .agentihooks/")
+                print("HINT: Point --bundle at the repo root, not .agentihooks/")
             print(f"ERROR: No profiles/ directory found in {bundle_dir}", file=sys.stderr)
             sys.exit(1)
         _bundle_link(bundle_dir)
@@ -991,7 +991,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     accounts_dir = AGENTIHOOKS_STATE_DIR / "quota-accounts"
     if accounts_dir.exists() and any(accounts_dir.glob("*.json")):
         pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
-        already_running = False
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
@@ -1017,7 +1016,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     # --- Auto-start sync daemon ---
     sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
-    sync_running = False
     if sync_pid_file.exists():
         try:
             pid = int(sync_pid_file.read_text().strip())
@@ -2910,12 +2908,10 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
         targets = state.get("targets", {})
 
         # PID status
-        running = False
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)
-                running = True
                 print(f"[sync] Daemon running (PID {pid})")
             except (ProcessLookupError, ValueError):
                 pid_file.unlink(missing_ok=True)
@@ -3354,7 +3350,7 @@ def main() -> None:
         cmd_daemon(args)
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-        from scripts.claude_linter import lint_report, format_report
+        from scripts.claude_linter import format_report, lint_report
 
         lint_path = Path(args.lint_path).expanduser().resolve() if args.lint_path else Path.home() / ".claude" / "CLAUDE.md"
         if not lint_path.exists():
@@ -3379,13 +3375,13 @@ def main() -> None:
             sys.exit(1)
     elif args.command == "mcp":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-        from scripts.mcp_reporter import load_all_mcp_configs, generate_report
+        from scripts.mcp_reporter import generate_report, load_all_mcp_configs
 
         servers = load_all_mcp_configs(args.project)
         print(generate_report(servers))
     elif args.command == "status":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-        from scripts.status_checker import run_all_checks, format_cli
+        from scripts.status_checker import format_cli, run_all_checks
 
         print(format_cli(run_all_checks()))
 

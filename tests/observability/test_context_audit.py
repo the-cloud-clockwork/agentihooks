@@ -19,7 +19,7 @@ class TestContextAudit:
         context_audit._memory_audit.clear()
 
     def test_record_and_get_summary(self):
-        from hooks.observability.context_audit import record_tool_usage, get_audit_summary
+        from hooks.observability.context_audit import get_audit_summary, record_tool_usage
 
         sid = "audit-test-record-001"
         with patch("hooks._redis.get_redis", return_value=None):
@@ -39,7 +39,7 @@ class TestContextAudit:
             assert get_audit_summary("audit-test-nonexist-002") == {}
 
     def test_ignores_zero_or_negative(self):
-        from hooks.observability.context_audit import record_tool_usage, get_audit_summary
+        from hooks.observability.context_audit import get_audit_summary, record_tool_usage
 
         sid = "audit-test-zero-003"
         with patch("hooks.observability.context_audit.get_redis", return_value=None):
@@ -48,7 +48,7 @@ class TestContextAudit:
             assert get_audit_summary(sid) == {}
 
     def test_ignores_empty_params(self):
-        from hooks.observability.context_audit import record_tool_usage, get_audit_summary
+        from hooks.observability.context_audit import get_audit_summary, record_tool_usage
 
         with patch("hooks.observability.context_audit.get_redis", return_value=None):
             record_tool_usage("", "Read", 100)
@@ -71,7 +71,7 @@ class TestContextAudit:
         assert format_audit_report({}, 50.0) == ""
 
     def test_clear_session_audit(self):
-        from hooks.observability.context_audit import record_tool_usage, get_audit_summary, clear_session_audit
+        from hooks.observability.context_audit import clear_session_audit, get_audit_summary, record_tool_usage
 
         sid = "audit-test-clear-005"
         with patch("hooks.observability.context_audit.get_redis", return_value=None):
@@ -80,7 +80,7 @@ class TestContextAudit:
             assert get_audit_summary(sid) == {}
 
     def test_session_isolation(self):
-        from hooks.observability.context_audit import record_tool_usage, get_audit_summary
+        from hooks.observability.context_audit import get_audit_summary, record_tool_usage
 
         with patch("hooks.observability.context_audit.get_redis", return_value=None):
             record_tool_usage("audit-test-iso-a-006", "Read", 1000)

@@ -198,11 +198,11 @@ def check_guardrails() -> dict[str, Any]:
     try:
         from hooks.config import (
             BASH_FILTER_ENABLED,
-            FILE_READ_CACHE_ENABLED,
+            COMPACT_SUGGEST_ENABLED,
             CONTEXT_AUDIT_ENABLED,
             EFFORT_POLICY_ENABLED,
+            FILE_READ_CACHE_ENABLED,
             PEAK_HOURS_ENABLED,
-            COMPACT_SUGGEST_ENABLED,
         )
         flags = {
             "bash_filter": BASH_FILTER_ENABLED,
@@ -434,9 +434,9 @@ def check_mcp() -> dict[str, Any]:
 
 def check_quota() -> dict[str, Any]:
     try:
-        from hooks.quota import load_quota, fmt_quota
+        from hooks.config import PEAK_HOURS_END, PEAK_HOURS_START, PEAK_HOURS_TZ
         from hooks.observability.peak_hours import peak_indicator
-        from hooks.config import PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ
+        from hooks.quota import fmt_quota, load_quota
 
         qd = load_quota()
         peak = peak_indicator(PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ)
@@ -604,9 +604,9 @@ def format_cli(results: dict[str, Any]) -> str:
 
     header = f"{total} servers"
     if enabled == total:
-        header += f" (all enabled)"
+        header += " (all enabled)"
     elif enabled == 0:
-        header += f" (all disabled here)"
+        header += " (all disabled here)"
     else:
         header += f" ({enabled} enabled, {disabled} disabled)"
 

@@ -11,7 +11,6 @@ Falls back to an in-process dict when Redis is unavailable.
 """
 
 from hooks._redis import get_redis, redis_key
-from hooks.common import log
 
 # In-process fallback: {session_id: {tool_name: cumulative_bytes}}
 _memory_audit: dict[str, dict[str, int]] = {}

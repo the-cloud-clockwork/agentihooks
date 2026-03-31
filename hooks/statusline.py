@@ -279,8 +279,8 @@ def main() -> None:
                         from hooks.config import COMPACT_SUGGEST_ENABLED
 
                         if COMPACT_SUGGEST_ENABLED:
-                            from hooks.observability.context_audit import get_audit_summary
                             from hooks.context.compact_advisor import format_suggestion
+                            from hooks.observability.context_audit import get_audit_summary
 
                             audit = get_audit_summary(session_id)
                             suggestion = format_suggestion(float(used_pct), level, audit if audit else None)
@@ -329,7 +329,7 @@ def main() -> None:
         # Peak/off-peak indicator (with usage-based warning when session is high)
         peak_str = ""
         try:
-            from hooks.config import PEAK_HOURS_ENABLED, PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ
+            from hooks.config import PEAK_HOURS_ENABLED, PEAK_HOURS_END, PEAK_HOURS_START, PEAK_HOURS_TZ
 
             if PEAK_HOURS_ENABLED:
                 from hooks.observability.peak_hours import is_peak_now, peak_warning

@@ -1,19 +1,18 @@
 """Tests for scripts/sync_daemon.py — file discovery, hashing, change detection, propagation."""
 
 import json
+
+# Import the daemon module under test
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# Import the daemon module under test
-import sys
-
 _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 import sync_daemon
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

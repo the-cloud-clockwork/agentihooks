@@ -5,8 +5,6 @@ MCP merging, settings generation, and profile structure conventions.
 """
 
 import json
-import os
-import shutil
 import sys
 from pathlib import Path
 from unittest.mock import patch

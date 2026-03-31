@@ -26,13 +26,13 @@ class TestClaudeLinter:
         assert sections[1].heading == "Architecture"
 
     def test_classify_always_section(self):
-        from scripts.claude_linter import classify_section, Section
+        from scripts.claude_linter import Section, classify_section
 
         s = Section(heading="Architecture", level=2, content="## Architecture\nDesign patterns.", start_line=1, end_line=3)
         assert classify_section(s) == "always"
 
     def test_classify_workflow_section(self):
-        from scripts.claude_linter import classify_section, Section
+        from scripts.claude_linter import Section, classify_section
 
         # Must be >400 chars (>100 tokens) with multiple workflow signals
         content = (
@@ -47,7 +47,7 @@ class TestClaudeLinter:
         assert classify_section(s) == "workflow"
 
     def test_short_section_is_always(self):
-        from scripts.claude_linter import classify_section, Section
+        from scripts.claude_linter import Section, classify_section
 
         s = Section(heading="Short", level=2, content="## Short\nSmall.", start_line=1, end_line=2)
         assert classify_section(s) == "always"
@@ -72,7 +72,7 @@ class TestClaudeLinter:
         assert len(report.sections) == 2
 
     def test_format_report(self, tmp_path):
-        from scripts.claude_linter import lint_report, format_report
+        from scripts.claude_linter import format_report, lint_report
 
         md = tmp_path / "CLAUDE.md"
         md.write_text("# Project\n\n## Commands\nRun tests.\n\n## Architecture\nDesign.\n")

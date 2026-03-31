@@ -55,8 +55,9 @@ def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
         # hooks-utils: count from registry
         if name == "hooks-utils":
             try:
-                from hooks.mcp._registry import CATEGORY_MODULES
                 import os
+
+                from hooks.mcp._registry import CATEGORY_MODULES
                 cats = os.getenv("MCP_CATEGORIES", "all")
                 if cats.lower() == "all":
                     # Each category module has ~3-4 tools on average

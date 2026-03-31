@@ -1,8 +1,7 @@
 """Tests for scripts.status_checker."""
 
 import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -51,8 +50,8 @@ class TestCheckHooks:
 
 class TestCheckPython:
     def test_venv_exists(self, tmp_path):
+
         from scripts.status_checker import check_python
-        import subprocess
 
         venv_bin = tmp_path / ".venv" / "bin"
         venv_bin.mkdir(parents=True)
@@ -80,8 +79,9 @@ class TestCheckPython:
 
 class TestCheckDaemons:
     def test_running_daemons(self, tmp_path):
-        from scripts.status_checker import check_daemons
         import os
+
+        from scripts.status_checker import check_daemons
 
         pid = os.getpid()
         (tmp_path / "sync-daemon.pid").write_text(str(pid))
@@ -141,7 +141,6 @@ class TestCheckMcp:
     def test_with_servers(self, tmp_path):
         from scripts.status_checker import check_mcp
 
-        claude_json = Path.home() / ".claude.json"
         fake_json = tmp_path / ".claude.json"
         fake_json.write_text(json.dumps({"mcpServers": {
             "test-server": {"command": "python3 -m test"},
@@ -170,7 +169,7 @@ class TestCheckOtel:
 
 class TestFormatters:
     def test_format_cli_produces_string(self):
-        from scripts.status_checker import run_all_checks, format_cli
+        from scripts.status_checker import format_cli, run_all_checks
 
         with patch("hooks._redis.get_redis", return_value=None):
             results = run_all_checks()
@@ -180,7 +179,7 @@ class TestFormatters:
             assert "Hooks" in output
 
     def test_format_json_valid(self):
-        from scripts.status_checker import run_all_checks, format_json
+        from scripts.status_checker import format_json, run_all_checks
 
         with patch("hooks._redis.get_redis", return_value=None):
             results = run_all_checks()
