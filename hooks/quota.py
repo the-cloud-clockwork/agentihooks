@@ -29,9 +29,7 @@ def load_quota() -> Optional[dict]:
     if not updated_str:
         return {"stale": True}
     try:
-        updated = datetime.fromisoformat(updated_str.rstrip("Z")).replace(
-            tzinfo=timezone.utc
-        )
+        updated = datetime.fromisoformat(updated_str.rstrip("Z")).replace(tzinfo=timezone.utc)
     except ValueError:
         return {"stale": True}
     if (datetime.now(timezone.utc) - updated).total_seconds() > stale_sec:
@@ -112,9 +110,7 @@ def fmt_quota(data: dict) -> str:
     # Balance
     balance = data.get("balance")
     if balance is not None:
-        sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(
-            data.get("monthly_spend", {}).get("currency", ""), ""
-        )
+        sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(data.get("monthly_spend", {}).get("currency", ""), "")
         parts.append(f"balance:{sym}{balance}")
 
     return " | ".join(parts)

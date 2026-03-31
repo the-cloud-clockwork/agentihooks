@@ -35,12 +35,14 @@ LOG_FILE = AGENTIHOOKS_STATE_DIR / "logs" / "sync-daemon.log"
 LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 
+
 # Claude Code user config — for MCP server tracking
 def _resolve_claude_json() -> Path:
     home_dir = os.environ.get("CLAUDE_CODE_HOME_DIR")
     if home_dir:
         return Path(home_dir) / ".claude.json"
     return Path.home() / ".claude.json"
+
 
 CLAUDE_JSON = _resolve_claude_json()
 
@@ -221,9 +223,7 @@ def _collect_source_files(state: dict) -> dict[str, list[str]]:
     return files
 
 
-def _add_connector_files(
-    conn_dir: Path, name: str, files: dict[str, list[str]], *, is_bundle: bool
-) -> None:
+def _add_connector_files(conn_dir: Path, name: str, files: dict[str, list[str]], *, is_bundle: bool) -> None:
     categories = [f"connector:{name}"]
     if is_bundle:
         categories.append("bundle")
@@ -260,6 +260,7 @@ def _dir_manifest_hash(dir_path: Path) -> str | None:
     if not dir_path.is_dir():
         return None
     import hashlib
+
     names = sorted(p.name for p in dir_path.iterdir() if not p.name.startswith("."))
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
@@ -283,15 +284,16 @@ def _load_hashes() -> dict[str, str]:
 
 
 def _save_hashes(hashes: dict[str, str]) -> None:
-    _write_atomic(HASH_FILE, {
-        "_updated": datetime.now(timezone.utc).isoformat(),
-        "hashes": hashes,
-    })
+    _write_atomic(
+        HASH_FILE,
+        {
+            "_updated": datetime.now(timezone.utc).isoformat(),
+            "hashes": hashes,
+        },
+    )
 
 
-def _diff_hashes(
-    old: dict[str, str], new: dict[str, str]
-) -> tuple[list[str], list[str], list[str]]:
+def _diff_hashes(old: dict[str, str], new: dict[str, str]) -> tuple[list[str], list[str], list[str]]:
     """Returns (changed, added, removed) file path lists."""
     all_keys = set(old) | set(new)
     changed, added, removed = [], [], []
@@ -441,6 +443,7 @@ def _execute_actions(actions: dict, state: dict) -> dict:
                 ns = argparse.Namespace(profile=profile, path=proj_path)
                 # Bypass interactive confirmation for overwrites
                 import builtins
+
                 original_input = builtins.input
                 builtins.input = lambda *a, **kw: "y"
                 try:
@@ -529,7 +532,9 @@ def _check_new_mcp_servers(known_servers_file: Path) -> None:
 
     if updated_count:
         _write_atomic(CLAUDE_JSON, data)
-        _log(f"MCP tracking: added {len(new_servers)} new server(s) to disabledMcpServers in {updated_count} project(s)")
+        _log(
+            f"MCP tracking: added {len(new_servers)} new server(s) to disabledMcpServers in {updated_count} project(s)"
+        )
 
     # Update known servers
     known_data["knownMcpServers"] = sorted(current)
@@ -571,7 +576,9 @@ def _run_daemon(poll_sec: int) -> None:
             all_changed = changed + added
             if all_changed or removed:
                 affected = _determine_affected_categories(
-                    all_changed, source_files, removed_files=removed,
+                    all_changed,
+                    source_files,
+                    removed_files=removed,
                 )
                 actions = _determine_actions(affected, state)
                 if any([actions["reinstall_global"], actions["reinstall_projects"], actions["sync_mcp"]]):
@@ -617,8 +624,10 @@ def _run_daemon(poll_sec: int) -> None:
             if all_changed or removed:
                 # For removed files, look up categories from the old source map
                 affected = _determine_affected_categories(
-                    all_changed, source_files,
-                    removed_files=removed, old_source_map=old_source_map,
+                    all_changed,
+                    source_files,
+                    removed_files=removed,
+                    old_source_map=old_source_map,
                 )
                 _log(f"Affected categories: {sorted(affected)}")
                 actions = _determine_actions(affected, state)
@@ -654,6 +663,7 @@ def _run_daemon(poll_sec: int) -> None:
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
             import traceback
+
             traceback.print_exc()
 
     _log("Sync daemon stopped")

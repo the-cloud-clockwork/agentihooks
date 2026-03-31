@@ -62,6 +62,7 @@ def _auth_state_path(account: str | None = None) -> Path:
     # Migration: if accounts dir doesn't exist but legacy file does
     if not _ACCOUNTS_DIR.exists() and _LEGACY_STATE_FILE.exists():
         import shutil
+
         _ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(_LEGACY_STATE_FILE, _ACCOUNTS_DIR / "default.json")
         _set_active_account("default")
@@ -75,6 +76,7 @@ def _list_accounts() -> list[str]:
     if not _ACCOUNTS_DIR.exists():
         return []
     return sorted(p.stem for p in _ACCOUNTS_DIR.glob("*.json"))
+
 
 _BASE_URL = "https://claude.ai"
 

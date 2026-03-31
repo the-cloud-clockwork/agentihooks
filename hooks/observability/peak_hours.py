@@ -21,10 +21,12 @@ def is_peak_now(start_hour: int = 9, end_hour: int = 17, tz_name: str = "US/Paci
     """
     try:
         from zoneinfo import ZoneInfo
+
         tz = ZoneInfo(tz_name)
     except (ImportError, KeyError):
         # zoneinfo not available or bad tz — fall back to UTC
         from datetime import timezone
+
         tz = timezone.utc
 
     now = datetime.now(tz)
@@ -43,8 +45,9 @@ def peak_indicator(start_hour: int = 9, end_hour: int = 17, tz_name: str = "US/P
     return "off-peak"
 
 
-def peak_warning(session_pct: float, start_hour: int = 9, end_hour: int = 17,
-                 tz_name: str = "US/Pacific") -> Optional[str]:
+def peak_warning(
+    session_pct: float, start_hour: int = 9, end_hour: int = 17, tz_name: str = "US/Pacific"
+) -> Optional[str]:
     """Return warning string if peak hours AND session usage is high.
 
     Args:

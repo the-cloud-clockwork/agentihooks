@@ -339,7 +339,11 @@ def main() -> None:
                     pw = None
                     try:
                         qd_for_peak = load_quota() if "load_quota" in dir() else None
-                        session_pct = float(qd_for_peak.get("session", {}).get("used_pct", 0)) if qd_for_peak and not qd_for_peak.get("stale") else 0
+                        session_pct = (
+                            float(qd_for_peak.get("session", {}).get("used_pct", 0))
+                            if qd_for_peak and not qd_for_peak.get("stale")
+                            else 0
+                        )
                         pw = peak_warning(session_pct, PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ)
                     except Exception:
                         pass

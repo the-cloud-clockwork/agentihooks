@@ -27,6 +27,7 @@ def record_tool_usage(session_id: str, tool_name: str, output_size_bytes: int) -
             key = redis_key("context_audit", session_id)
             r.hincrby(key, tool_name, output_size_bytes)
             from hooks.config import TOKEN_REDIS_TTL
+
             r.expire(key, TOKEN_REDIS_TTL)
             return
         except Exception:
@@ -49,8 +50,7 @@ def get_audit_summary(session_id: str) -> dict[str, int]:
         try:
             key = redis_key("context_audit", session_id)
             raw = r.hgetall(key)
-            return {k.decode() if isinstance(k, bytes) else k:
-                    int(v) for k, v in raw.items()}
+            return {k.decode() if isinstance(k, bytes) else k: int(v) for k, v in raw.items()}
         except Exception:
             pass
 

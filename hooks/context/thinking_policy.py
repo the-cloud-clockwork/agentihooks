@@ -32,9 +32,7 @@ def get_thinking_guidance(default_effort: str, budget: int) -> str:
             "Reserve high/ultrathink for complex architectural decisions or debugging. "
             "Prefer Sonnet for implementation; reserve Opus for planning."
         ),
-        "high": (
-            "Default effort: high. Full reasoning enabled."
-        ),
+        "high": ("Default effort: high. Full reasoning enabled."),
     }
     parts.append(effort_guidance.get(default_effort, effort_guidance["medium"]))
 

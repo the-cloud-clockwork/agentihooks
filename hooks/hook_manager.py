@@ -283,18 +283,24 @@ def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
-    otel.emit_event("agentihooks.session.started", {
-        "session.id": session_id,
-        "agent.name": os.environ.get("AGENT_NAME", "unknown"),
-    })
+    otel.emit_event(
+        "agentihooks.session.started",
+        {
+            "session.id": session_id,
+            "agent.name": os.environ.get("AGENT_NAME", "unknown"),
+        },
+    )
 
     # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
-        with tracer.start_as_current_span("agentihooks.session.start", attributes={
-            "session.id": session_id,
-            "agent.name": os.environ.get("AGENT_NAME", "unknown"),
-        }):
+        with tracer.start_as_current_span(
+            "agentihooks.session.start",
+            attributes={
+                "session.id": session_id,
+                "agent.name": os.environ.get("AGENT_NAME", "unknown"),
+            },
+        ):
             pass  # span auto-ends on context exit → exported immediately
 
     # Log output token limit so Claude is aware of response size constraints
@@ -330,6 +336,7 @@ def on_session_start(payload: dict) -> None:
         import importlib.util
 
         from hooks.config import MCP_SCHEMA_AVG_TOKENS, MCP_TOOL_WARN_THRESHOLD
+
         _spec = importlib.util.spec_from_file_location(
             "mcp_reporter",
             str(Path(__file__).resolve().parent.parent / "scripts" / "mcp_reporter.py"),
@@ -461,19 +468,25 @@ def on_pre_tool_use(payload: dict) -> None:
                         "Use environment variables instead."
                     )
                 else:
-                    otel.emit_event("agentihooks.guardrail.secret_detected", {
-                        "session.id": payload.get("session_id", ""),
-                        "tool_name": tool_name,
-                        "secret_types": names,
-                        "action": "block",
-                    })
-                    _tracer = otel.get_tracer()
-                    if _tracer:
-                        with _tracer.start_as_current_span("agentihooks.guardrail.secret_blocked", attributes={
+                    otel.emit_event(
+                        "agentihooks.guardrail.secret_detected",
+                        {
                             "session.id": payload.get("session_id", ""),
                             "tool_name": tool_name,
                             "secret_types": names,
-                        }):
+                            "action": "block",
+                        },
+                    )
+                    _tracer = otel.get_tracer()
+                    if _tracer:
+                        with _tracer.start_as_current_span(
+                            "agentihooks.guardrail.secret_blocked",
+                            attributes={
+                                "session.id": payload.get("session_id", ""),
+                                "tool_name": tool_name,
+                                "secret_types": names,
+                            },
+                        ):
                             pass
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in Bash command ({names}). "
@@ -495,12 +508,15 @@ def on_pre_tool_use(payload: dict) -> None:
                         "Use environment variables instead."
                     )
                 else:
-                    otel.emit_event("agentihooks.guardrail.secret_detected", {
-                        "session.id": payload.get("session_id", ""),
-                        "tool_name": tool_name,
-                        "secret_types": names,
-                        "action": "block",
-                    })
+                    otel.emit_event(
+                        "agentihooks.guardrail.secret_detected",
+                        {
+                            "session.id": payload.get("session_id", ""),
+                            "tool_name": tool_name,
+                            "secret_types": names,
+                            "action": "block",
+                        },
+                    )
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in {tool_name} content ({names}). "
                         "Never write credential values to files. "
@@ -528,10 +544,13 @@ def on_pre_tool_use(payload: dict) -> None:
 
                 check_and_block_redundant_read(payload)  # raises BlockAction if blocked
         except BlockAction:
-            otel.emit_event("agentihooks.guardrail.read_deduplicated", {
-                "session.id": payload.get("session_id", ""),
-                "file_path": payload.get("tool_input", {}).get("file_path", ""),
-            })
+            otel.emit_event(
+                "agentihooks.guardrail.read_deduplicated",
+                {
+                    "session.id": payload.get("session_id", ""),
+                    "file_path": payload.get("tool_input", {}).get("file_path", ""),
+                },
+            )
             raise
         except Exception as e:
             log("file_read_cache check failed", {"error": str(e)})
@@ -551,16 +570,22 @@ def on_pre_tool_use(payload: dict) -> None:
 
             check_hard_block(payload)  # raises BlockAction if count >= hard max
         except BlockAction:
-            otel.emit_event("agentihooks.guardrail.retry_blocked", {
-                "session.id": payload.get("session_id", ""),
-                "tool_name": payload.get("tool_name", "unknown"),
-            })
-            _tracer = otel.get_tracer()
-            if _tracer:
-                with _tracer.start_as_current_span("agentihooks.guardrail.retry_blocked", attributes={
+            otel.emit_event(
+                "agentihooks.guardrail.retry_blocked",
+                {
                     "session.id": payload.get("session_id", ""),
                     "tool_name": payload.get("tool_name", "unknown"),
-                }):
+                },
+            )
+            _tracer = otel.get_tracer()
+            if _tracer:
+                with _tracer.start_as_current_span(
+                    "agentihooks.guardrail.retry_blocked",
+                    attributes={
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": payload.get("tool_name", "unknown"),
+                    },
+                ):
                     pass
             raise
         except Exception as e:
@@ -592,10 +617,13 @@ def on_post_tool_use(payload: dict) -> None:
                 if filtered is not None:
                     import json as _json
 
-                    otel.emit_event("agentihooks.context.output_filtered", {
-                        "session.id": payload.get("session_id", ""),
-                        "tool_name": tool_name,
-                    })
+                    otel.emit_event(
+                        "agentihooks.context.output_filtered",
+                        {
+                            "session.id": payload.get("session_id", ""),
+                            "tool_name": tool_name,
+                        },
+                    )
                     print(_json.dumps({"additionalContext": filtered}))
         except Exception as e:
             log("bash_output_filter failed", {"error": str(e)})
@@ -623,10 +651,13 @@ def on_post_tool_use(payload: dict) -> None:
     is_error = payload.get("is_error", False)
     exit_code = payload.get("tool_input", {}).get("exitCode")
     if is_error or (exit_code and str(exit_code) != "0"):
-        otel.emit_event("agentihooks.error.recorded", {
-            "session.id": payload.get("session_id", ""),
-            "tool_name": payload.get("tool_name", "unknown"),
-        })
+        otel.emit_event(
+            "agentihooks.error.recorded",
+            {
+                "session.id": payload.get("session_id", ""),
+                "tool_name": payload.get("tool_name", "unknown"),
+            },
+        )
 
     # Retry circuit breaker — track failures and inject research instructions
     from hooks.config import RETRY_BREAKER_ENABLED
@@ -684,20 +715,26 @@ def on_stop(payload: dict) -> None:
             "duration_ms": metrics.get("duration_ms"),
         },
     )
-    otel.emit_event("agentihooks.session.ended", {
-        "session.id": session_id,
-        "num_turns": str(metrics.get("num_turns", 0)),
-        "duration_ms": str(metrics.get("duration_ms", 0)),
-    })
+    otel.emit_event(
+        "agentihooks.session.ended",
+        {
+            "session.id": session_id,
+            "num_turns": str(metrics.get("num_turns", 0)),
+            "duration_ms": str(metrics.get("duration_ms", 0)),
+        },
+    )
 
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
-        with tracer.start_as_current_span("agentihooks.session.stop", attributes={
-            "session.id": session_id,
-            "num_turns": metrics.get("num_turns", 0),
-            "duration_ms": metrics.get("duration_ms", 0),
-        }):
+        with tracer.start_as_current_span(
+            "agentihooks.session.stop",
+            attributes={
+                "session.id": session_id,
+                "num_turns": metrics.get("num_turns", 0),
+                "duration_ms": metrics.get("duration_ms", 0),
+            },
+        ):
             pass
 
     # Check for errors and notify

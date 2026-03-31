@@ -93,9 +93,7 @@ def init() -> None:
         if OTEL_LANGFUSE_ENABLED and OTEL_LANGFUSE_ENDPOINT:
             import base64
 
-            auth = base64.b64encode(
-                f"{OTEL_LANGFUSE_PUBLIC_KEY}:{OTEL_LANGFUSE_SECRET_KEY}".encode()
-            ).decode()
+            auth = base64.b64encode(f"{OTEL_LANGFUSE_PUBLIC_KEY}:{OTEL_LANGFUSE_SECRET_KEY}".encode()).decode()
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
                 OTLPSpanExporter as LangfuseSpanExporter,
             )

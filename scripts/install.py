@@ -144,6 +144,7 @@ def _cprint(msg: str, **kwargs) -> None:
             return
     print(msg, **kwargs)
 
+
 # ---------------------------------------------------------------------------
 # .claudeignore template
 # ---------------------------------------------------------------------------
@@ -1003,6 +1004,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             python = str(_detect_venv() or sys.executable)
             if watcher.exists():
                 import subprocess
+
                 proc = subprocess.Popen(
                     [python, str(watcher)],
                     stdin=subprocess.DEVNULL,
@@ -1027,6 +1029,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         sync_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
         if sync_script.exists():
             import subprocess as _sp2
+
             python = str(_detect_venv() or sys.executable)
             proc = _sp2.Popen(
                 [python, str(sync_script)],
@@ -1303,7 +1306,7 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
         f'  echo "[agentienv] loaded $_aih_count env file(s) from {env_dir}"\n'
         f"}}\n"
         f"agentienv\n"
-        f'# alias: launch claude with profile flags + env\n'
+        f"# alias: launch claude with profile flags + env\n"
         f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
@@ -1698,10 +1701,14 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         _symlink_dir_contents(AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / subdir, dst, label=label, filter_fn=filter_fn)
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
         if bundle_dir and (bundle_dir / _CLAUDE_SUBDIR / subdir).is_dir():
-            _symlink_dir_contents(bundle_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"bundle {label}", filter_fn=filter_fn)
+            _symlink_dir_contents(
+                bundle_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"bundle {label}", filter_fn=filter_fn
+            )
         # Layer 3: profile-specific .claude/ (overrides bundle)
         if (_resolved_profile_dir / _CLAUDE_SUBDIR / subdir).is_dir():
-            _symlink_dir_contents(_resolved_profile_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"profile {label}", filter_fn=filter_fn)
+            _symlink_dir_contents(
+                _resolved_profile_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"profile {label}", filter_fn=filter_fn
+            )
 
     # --- 5. Install SYSTEM.md (profile system prompt) ---
     _cleanup_stale_claude_md_symlink()
@@ -1796,6 +1803,7 @@ def _resolve_claude_json() -> Path:
 
 _CLAUDE_JSON = _resolve_claude_json()
 
+
 def _get_user_scope_mcp_names() -> set[str]:
     """Return the set of MCP server names defined in ~/.claude.json."""
     if not _CLAUDE_JSON.exists():
@@ -1833,6 +1841,7 @@ def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
         return None
     try:
         import yaml
+
         data = yaml.safe_load(yml_path.read_text()) or {}
         enabled = data.get("enabledMcpServers")
         if enabled is None:
@@ -1858,7 +1867,6 @@ def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> 
         _cprint(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
     except (json.JSONDecodeError, OSError) as e:
         _cprint(f"  [WARN] Could not update ~/.claude.json: {e}")
-
 
 
 def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
@@ -2432,7 +2440,8 @@ def uninstall_global(args: argparse.Namespace) -> None:
         if bundle:
             managed_roots.append(str(bundle))
         return sum(
-            1 for lnk in d.iterdir()
+            1
+            for lnk in d.iterdir()
             if lnk.is_symlink() and any(str(lnk.resolve()).startswith(r) for r in managed_roots)
         )
 
@@ -2451,8 +2460,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
 
     # Early exit if nothing to do
     total_work = (
-        int(remove_settings) + n_skills + n_agents + n_commands + n_rules
-        + int(remove_claude_md) + len(managed_servers)
+        int(remove_settings) + n_skills + n_agents + n_commands + n_rules + int(remove_claude_md) + len(managed_servers)
     )
     if total_work == 0:
         print("Nothing to uninstall — agentihooks is not installed.")
@@ -2533,6 +2541,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     sync_pid = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
     if sync_pid.exists():
         import signal
+
         try:
             pid = int(sync_pid.read_text().strip())
             os.kill(pid, signal.SIGTERM)
@@ -3030,6 +3039,7 @@ def cmd_claude(extra_args: list[str]) -> None:
     env_file = _ENV_FILE_DST
     if env_file.is_file():
         from dotenv import dotenv_values
+
         for k, v in dotenv_values(env_file).items():
             if v is not None:
                 os.environ[k] = v
@@ -3181,12 +3191,15 @@ def cmd_quota(args: "argparse.Namespace") -> None:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)
                 print(f"[quota] Daemon running (PID {pid}), account: {active}")
-                usage_file = Path(os.getenv(
-                    "CLAUDE_USAGE_FILE",
-                    str(AGENTIHOOKS_STATE_DIR / "claude_usage.json"),
-                ))
+                usage_file = Path(
+                    os.getenv(
+                        "CLAUDE_USAGE_FILE",
+                        str(AGENTIHOOKS_STATE_DIR / "claude_usage.json"),
+                    )
+                )
                 if usage_file.exists():
                     import json as _json2
+
                     try:
                         data = _json2.loads(usage_file.read_text())
                         s = data.get("session", {})
@@ -3242,14 +3255,15 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command")
 
-
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     init_p = sub.add_parser(
         "init", help="Initialize agentihooks (global setup from bundle, or per-repo config with --repo)"
     )
-    init_p.add_argument("--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)")
+    init_p.add_argument(
+        "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
+    )
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
@@ -3277,7 +3291,19 @@ def main() -> None:
         "action",
         nargs="?",
         default="watch",
-        choices=["watch", "auth", "import-cookies", "status", "logs", "stop", "list", "switch", "restart", "remove", "dump-html"],
+        choices=[
+            "watch",
+            "auth",
+            "import-cookies",
+            "status",
+            "logs",
+            "stop",
+            "list",
+            "switch",
+            "restart",
+            "remove",
+            "dump-html",
+        ],
         help="watch | auth | switch | list | restart | stop | status | logs | remove | import-cookies | dump-html",
     )
     quota_p.add_argument("quota_account", nargs="?", default=None, help="Account name (for auth, switch, remove)")
@@ -3304,7 +3330,7 @@ def main() -> None:
     lint_p.add_argument("lint_path", nargs="?", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
 
     extract_p = sub.add_parser("extract-skill", help="Extract a CLAUDE.md section into a skill")
-    extract_p.add_argument("section", help="Section heading to extract (e.g. \"Commands\")")
+    extract_p.add_argument("section", help='Section heading to extract (e.g. "Commands")')
     extract_p.add_argument("--name", required=True, help="Skill name for the output directory")
     extract_p.add_argument("--source", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
     extract_p.add_argument("--output-dir", default=None, help="Output directory (default: source's .claude/commands/)")
@@ -3342,7 +3368,7 @@ def main() -> None:
         # Pass everything after "claude" as extra args
         try:
             idx = sys.argv.index("claude")
-            extra = sys.argv[idx + 1:]
+            extra = sys.argv[idx + 1 :]
         except ValueError:
             extra = []
         cmd_claude(extra)
@@ -3352,7 +3378,9 @@ def main() -> None:
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report
 
-        lint_path = Path(args.lint_path).expanduser().resolve() if args.lint_path else Path.home() / ".claude" / "CLAUDE.md"
+        lint_path = (
+            Path(args.lint_path).expanduser().resolve() if args.lint_path else Path.home() / ".claude" / "CLAUDE.md"
+        )
         if not lint_path.exists():
             print(f"Error: {lint_path} not found", file=sys.stderr)
             sys.exit(1)
@@ -3369,7 +3397,7 @@ def main() -> None:
         output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
         try:
             result = extract_to_skill(source, args.section, args.name, output_dir)
-            print(f"Extracted \"{args.section}\" → {result}")
+            print(f'Extracted "{args.section}" → {result}')
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)

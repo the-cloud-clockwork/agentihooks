@@ -14,6 +14,7 @@ from typing import Optional
 @dataclass
 class Section:
     """A markdown section (H2 level)."""
+
     heading: str
     level: int  # 2 for ##, 3 for ###
     content: str
@@ -28,6 +29,7 @@ class Section:
 @dataclass
 class Report:
     """Lint report for a CLAUDE.md file."""
+
     path: str
     total_chars: int
     total_tokens: int
@@ -83,13 +85,15 @@ def parse_sections(md_path: Path) -> list[Section]:
         if m:
             # Save previous section
             if current_heading:
-                sections.append(Section(
-                    heading=current_heading,
-                    level=current_level,
-                    content="\n".join(current_lines),
-                    start_line=current_start + 1,
-                    end_line=i,
-                ))
+                sections.append(
+                    Section(
+                        heading=current_heading,
+                        level=current_level,
+                        content="\n".join(current_lines),
+                        start_line=current_start + 1,
+                        end_line=i,
+                    )
+                )
             current_heading = m.group(2).strip()
             current_level = len(m.group(1))
             current_start = i
@@ -99,13 +103,15 @@ def parse_sections(md_path: Path) -> list[Section]:
 
     # Save last section
     if current_heading:
-        sections.append(Section(
-            heading=current_heading,
-            level=current_level,
-            content="\n".join(current_lines),
-            start_line=current_start + 1,
-            end_line=len(lines),
-        ))
+        sections.append(
+            Section(
+                heading=current_heading,
+                level=current_level,
+                content="\n".join(current_lines),
+                start_line=current_start + 1,
+                end_line=len(lines),
+            )
+        )
 
     return sections
 
@@ -175,14 +181,16 @@ def format_report(report: Report) -> str:
 
     if report.extraction_candidates:
         savings = sum(s.tokens for s in report.extraction_candidates)
-        lines.extend([
-            "",
-            f"Extraction candidates ({len(report.extraction_candidates)} sections, ~{savings:,} tokens):",
-        ])
+        lines.extend(
+            [
+                "",
+                f"Extraction candidates ({len(report.extraction_candidates)} sections, ~{savings:,} tokens):",
+            ]
+        )
         for s in report.extraction_candidates:
-            lines.append(f"  * \"{s.heading}\" ({s.tokens:,} tokens, lines {s.start_line}-{s.end_line})")
+            lines.append(f'  * "{s.heading}" ({s.tokens:,} tokens, lines {s.start_line}-{s.end_line})')
         lines.append("")
-        lines.append("Extract with: agentihooks extract-skill \"<Section Heading>\" --name <skill-name>")
+        lines.append('Extract with: agentihooks extract-skill "<Section Heading>" --name <skill-name>')
     else:
         lines.extend(["", "No extraction candidates found — CLAUDE.md looks lean."])
 
@@ -219,10 +227,7 @@ def extract_to_skill(
 
     if target is None:
         available = [s.heading for s in sections]
-        raise ValueError(
-            f"Section \"{section_heading}\" not found. "
-            f"Available sections: {', '.join(available)}"
-        )
+        raise ValueError(f'Section "{section_heading}" not found. Available sections: {", ".join(available)}')
 
     # Create skill directory
     if output_dir is None:

@@ -47,6 +47,7 @@ def _cprint(msg: str) -> str:
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
+
 def _load_state() -> dict:
     if STATE_JSON.exists():
         try:
@@ -69,6 +70,7 @@ def _check_pid(pid_file: Path) -> dict:
 
 
 # ── Individual check functions ──────────────────────────────────────────
+
 
 def check_profile() -> dict[str, Any]:
     state = _load_state()
@@ -110,7 +112,8 @@ def check_python() -> dict[str, Any]:
     try:
         result = subprocess.run(
             [python_path, "--version"],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
         version = result.stdout.decode().strip() or result.stderr.decode().strip()
         return {"path": python_path, "version": version, "ok": result.returncode == 0}
@@ -155,6 +158,7 @@ def check_daemons() -> dict[str, Any]:
 def check_redis() -> dict[str, Any]:
     try:
         from hooks._redis import get_redis
+
         r = get_redis()
         if r is None:
             return {"connected": False, "keys": {}, "ok": False}
@@ -178,6 +182,7 @@ def check_redis() -> dict[str, Any]:
 def check_otel() -> dict[str, Any]:
     try:
         from hooks.config import OTEL_HOOKS_ENABLED
+
         return {"enabled": OTEL_HOOKS_ENABLED, "ok": True}
     except Exception:
         return {"enabled": False, "ok": True}
@@ -204,6 +209,7 @@ def check_guardrails() -> dict[str, Any]:
             FILE_READ_CACHE_ENABLED,
             PEAK_HOURS_ENABLED,
         )
+
         flags = {
             "bash_filter": BASH_FILTER_ENABLED,
             "file_dedup": FILE_READ_CACHE_ENABLED,
@@ -247,14 +253,21 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
 
     try:
         # Initialize
-        init_resp = requests.post(url, headers=resolved_headers, json={
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "agentihooks-status", "version": "1.0"},
+        init_resp = requests.post(
+            url,
+            headers=resolved_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agentihooks-status", "version": "1.0"},
+                },
             },
-        }, timeout=5)
+            timeout=5,
+        )
         if init_resp.status_code != 200:
             return None
 
@@ -264,9 +277,16 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
             resolved_headers["Mcp-Session-Id"] = sid
 
         # tools/list
-        tools_resp = requests.post(url, headers=resolved_headers, json={
-            "jsonrpc": "2.0", "id": 2, "method": "tools/list",
-        }, timeout=5)
+        tools_resp = requests.post(
+            url,
+            headers=resolved_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+            },
+            timeout=5,
+        )
         if tools_resp.status_code != 200:
             return None
 
@@ -323,10 +343,16 @@ def _save_tool_cache(server_tools: dict[str, Optional[int]]) -> None:
 
     try:
         AGENTIHOOKS_HOME.mkdir(parents=True, exist_ok=True)
-        _MCP_CACHE_FILE.write_text(json.dumps({
-            "_cached_at": datetime.now(timezone.utc).isoformat(),
-            "servers": {k: v for k, v in server_tools.items() if v is not None},
-        }, indent=2), encoding="utf-8")
+        _MCP_CACHE_FILE.write_text(
+            json.dumps(
+                {
+                    "_cached_at": datetime.now(timezone.utc).isoformat(),
+                    "servers": {k: v for k, v in server_tools.items() if v is not None},
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     except OSError:
         pass
 
@@ -454,12 +480,14 @@ def check_session(session_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {"id": session_id, "ok": False}
     try:
         from hooks._redis import get_redis, redis_key
+
         r = get_redis()
         if r is None:
             result["error"] = "Redis unavailable"
             # Try in-memory fallback for context audit
             try:
                 from hooks.observability.context_audit import get_audit_summary
+
                 audit = get_audit_summary(session_id)
                 if audit:
                     result["tool_audit"] = audit
@@ -481,6 +509,7 @@ def check_session(session_id: str) -> dict[str, Any]:
         # Context audit
         try:
             from hooks.observability.context_audit import get_audit_summary
+
             audit = get_audit_summary(session_id)
             if audit:
                 result["tool_audit"] = audit
@@ -501,6 +530,7 @@ def check_session(session_id: str) -> dict[str, Any]:
 
 # ── Orchestrator ────────────────────────────────────────────────────────
 
+
 def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
     results: dict[str, Any] = {
         "profile": check_profile(),
@@ -519,6 +549,7 @@ def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
 
 
 # ── Formatters ──────────────────────────────────────────────────────────
+
 
 def _fmt_bytes(n: int) -> str:
     if n >= 1_000_000:
@@ -666,6 +697,7 @@ def format_json(results: dict[str, Any]) -> str:
 
 
 # ── CLI entrypoint ──────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="agentihooks status checker")
