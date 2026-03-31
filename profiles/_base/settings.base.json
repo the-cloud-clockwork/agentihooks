@@ -1,7 +1,6 @@
 {
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
-  "model": "sonnet",
   "permissions": {
     "allow": [
       "Bash(*)",
@@ -22,15 +21,105 @@
     "ENABLE_TOOL_SEARCH": "auto:5"
   },
   "hooks": {
-    "SessionStart":      [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "SessionEnd":        [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "PreToolUse":        [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "PostToolUse":       [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "Stop":              [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "SubagentStop":      [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "UserPromptSubmit":  [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "Notification":      [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "PreCompact":        [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}],
-    "PermissionRequest": [{"hooks": [{"type": "command", "command": "cd /app && __PYTHON__ -m hooks"}]}]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ]
   }
 }
