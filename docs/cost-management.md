@@ -408,4 +408,12 @@ agentihooks quota auth
 echo 'CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json' >> ~/.agentihooks/.env
 ```
 
-That's it. Open Claude Code and watch your statusline -- you'll see exactly where every token goes.
+Verify everything is working:
+
+```bash
+agentihooks status
+```
+
+This shows your full system health: profile, hooks, Python, daemons, Redis, OTEL, all 6 cost guardrails with descriptions, your entire MCP fleet with real tool counts (queried via MCP protocol, cached 1h), per-project enabled/disabled state, and quota summary with peak/off-peak indicator.
+
+Inside a Claude session, use `/agentihooks` for the same diagnostics plus live session metrics (context fill, burn rate, per-tool consumption).

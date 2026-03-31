@@ -82,6 +82,14 @@ agentihooks daemon status                    # show targets + watched files
 agentihooks daemon logs                      # tail daemon log
 agentihooks daemon stop                      # kill daemon
 
+# Status & diagnostics
+agentihooks status                           # full system health + MCP fleet + guardrails + quota
+
+# Token optimization
+agentihooks lint-claude [path]               # analyze CLAUDE.md token cost
+agentihooks extract-skill "Section" --name x # extract section to on-demand skill
+agentihooks mcp report                       # MCP surface area report
+
 # Utilities
 agentihooks ignore [path] [--force]          # create .claudeignore
 agentihooks --list-profiles                  # show available profiles
@@ -231,6 +239,35 @@ agentihooks daemon stop             # kill daemon
 
 An advisory file lock (`~/.agentihooks/sync.lock`) prevents concurrent writes between the daemon and manual `agentihooks init` commands.
 
+## Status & Diagnostics
+
+`agentihooks status` validates your entire installation and shows the real state of your MCP fleet:
+
+```
+[OK] Profile: colt (bundle: ~/dev/agentihooks-bundle)
+[OK] Hooks: 10/10 wired in settings.json
+[OK] Python: uv/tools/agentihooks/bin/python3 (Python 3.11.15)
+[OK] Daemons: sync (PID 1234), quota (PID 5678)
+[OK] Redis: connected — 3568 keys (memory: 3540, file_cache: 14)
+[OK] OTEL: enabled
+[OK] Cost guardrails: 6/6 active
+     + bash_filter: Truncates verbose bash output
+     + file_dedup: Blocks re-reading unchanged files
+     + context_audit: Tracks per-tool token consumption
+     + effort_policy: Thinking/effort guidance, expensive subagent warnings
+     + peak_hours: Peak billing indicator on statusline
+     + compact_suggest: Smart /compact suggestions from audit data
+[OK] MCP: 9 servers (all disabled here) — 450 tools total, 0 active here
+     - hooks-utils [stdio] (25 tools)
+     - gateway-core [http] (93 tools)
+     - gateway-infra [http] (131 tools)
+     ...
+```
+
+The MCP check reads `~/.claude.json` for server configs, resolves `${ENV_VAR}` auth from your shell environment, queries each HTTP server via MCP protocol (`initialize` + `tools/list`) for real tool counts, and caches results for 1 hour at `~/.agentihooks/mcp-tool-cache.json`. Per-project blacklists are read from `~/.claude.json` projects block.
+
+**In-session skill:** Use `/agentihooks` inside Claude Code to see the same diagnostics plus live session metrics (context fill, burn rate, per-tool consumption from the context audit).
+
 ## MCP Tool Categories
 
 Tools exposed by the `hooks-utils` MCP server, selectively loaded via `MCP_CATEGORIES`:
@@ -259,6 +296,11 @@ All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 | `TOKEN_CRITICAL_PCT` | `80` | Context fill % that triggers a critical banner |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
+| `CONTEXT_AUDIT_ENABLED` | `true` | Track per-tool token consumption across sessions |
+| `EFFORT_POLICY_ENABLED` | `true` | Inject thinking/effort guidance at session start |
+| `DEFAULT_EFFORT` | `medium` | Default reasoning effort (low/medium/high) |
+| `PEAK_HOURS_ENABLED` | `true` | Show peak/off-peak billing indicator |
+| `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
 | `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
 | `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |
@@ -284,7 +326,8 @@ Everything user-specific lives in `~/.agentihooks/`:
 |-- claude_usage.json          # written by quota daemon, read by statusline
 |-- sync-daemon.pid            # sync daemon PID
 |-- sync-hashes.json           # daemon file hashes
-+-- sync.lock                  # advisory lock
+|-- sync.lock                  # advisory lock
++-- mcp-tool-cache.json        # cached MCP tool counts (1h TTL, auto-refreshed)
 ```
 
 To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer:

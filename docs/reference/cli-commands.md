@@ -358,6 +358,40 @@ agentihooks --query
 
 ---
 
+## `agentihooks status`
+
+Show full system health, MCP fleet inventory with real tool counts, cost guardrails, and quota.
+
+```bash
+agentihooks status
+```
+
+### What it checks
+
+| Check | What it does |
+|-------|-------------|
+| **Profile** | Reads `state.json` for active profile and bundle path |
+| **Hooks** | Parses `~/.claude/settings.json`, counts hook event entries (expect 10/10) |
+| **Python** | Extracts the Python binary from hook commands and verifies it runs |
+| **Daemons** | Checks PID files for sync and quota daemons, verifies processes are alive |
+| **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
+| **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
+| **Guardrails** | Lists all 6 cost guardrails with descriptions and enabled/disabled state |
+| **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, checks per-project blacklists, shows fleet total vs active in current project |
+| **Quota** | Loads quota data, shows session/weekly/spend with peak/off-peak indicator |
+
+### MCP fleet introspection
+
+The status checker connects to every HTTP MCP server (even disabled ones) to get real tool counts. Auth tokens are resolved from `${ENV_VAR}` references in `~/.claude.json` headers using env vars loaded by `agentienv`. Results are cached at `~/.agentihooks/mcp-tool-cache.json` with a 1-hour TTL.
+
+Per-project blacklists are read from the `projects` block in `~/.claude.json` (the blacklist-all-by-default mechanism). The output shows fleet total (all servers) vs active tools (enabled in current project context).
+
+### In-session skill
+
+The `/agentihooks` skill (delivered via the bundle at `.claude/skills/agentihooks/`) runs the same checker inside a Claude Code session with `--session $CLAUDE_SESSION_ID --json`, adding live session metrics: context fill %, burn rate, per-tool consumption from the context audit, and warning levels.
+
+---
+
 ## `agentihooks lint-claude`
 
 Analyze a CLAUDE.md file for token cost and suggest sections to extract into on-demand skills.
