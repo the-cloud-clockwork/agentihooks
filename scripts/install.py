@@ -966,11 +966,10 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _bundle_link(bundle_dir)
         print()
 
-    # Check bundle is linked
+    # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
     if not bundle:
-        print("ERROR: No bundle linked. Run: agentihooks init --bundle /path/to/bundle", file=sys.stderr)
-        sys.exit(1)
+        print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
 
     # Resolve profile
     profile_name = args.profile
