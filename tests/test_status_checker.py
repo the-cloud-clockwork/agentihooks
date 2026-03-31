@@ -57,11 +57,20 @@ class TestCheckPython:
         venv_bin.mkdir(parents=True)
         (venv_bin / "python3").write_text("#!/usr/bin/env python3")
 
+        # Create a fake settings.json with hook commands pointing to our python
+        claude_home = tmp_path / ".claude"
+        claude_home.mkdir()
+        fake_python = str(venv_bin / "python3")
+        (claude_home / "settings.json").write_text(json.dumps({
+            "hooks": {"PreToolUse": [{"hooks": [{"command": f"{fake_python} -m hooks"}]}]}
+        }))
+
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = b"Python 3.12.0"
         mock_result.stderr = b""
         with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path), \
+             patch("scripts.status_checker.CLAUDE_HOME", claude_home), \
              patch("subprocess.run", return_value=mock_result):
             result = check_python()
             assert result["ok"] is True
