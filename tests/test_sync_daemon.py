@@ -212,13 +212,18 @@ class TestDetermineAffectedCategories:
     def test_removed_file_with_old_map(self):
         old_map = {"/deleted": ["profile:default", "bundle"]}
         result = sync_daemon._determine_affected_categories(
-            [], {}, removed_files=["/deleted"], old_source_map=old_map,
+            [],
+            {},
+            removed_files=["/deleted"],
+            old_source_map=old_map,
         )
         assert result == {"profile:default", "bundle"}
 
     def test_removed_file_without_old_map_falls_back_to_base(self):
         result = sync_daemon._determine_affected_categories(
-            [], {}, removed_files=["/deleted"],
+            [],
+            {},
+            removed_files=["/deleted"],
         )
         assert result == {"base"}
 
@@ -304,6 +309,7 @@ class TestTargetRegistration:
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
         import install
+
         self.install = install
 
     def test_register_global(self, tmp_path):
@@ -345,9 +351,7 @@ class TestTargetRegistration:
 
     def test_unregister_project(self, tmp_path):
         state_file = tmp_path / "state.json"
-        state_file.write_text(json.dumps({
-            "targets": {"projects": {"/my/project": {"profile": "default"}}}
-        }))
+        state_file.write_text(json.dumps({"targets": {"projects": {"/my/project": {"profile": "default"}}}}))
 
         original_state = self.install.STATE_JSON
         original_dir = self.install.AGENTIHOOKS_STATE_DIR

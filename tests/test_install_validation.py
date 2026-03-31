@@ -67,11 +67,9 @@ def install_env(tmp_path):
     # Bundle rule
     (bundle_claude / "rules" / "python.md").write_text("# Python Rules\n")
     # Bundle MCP
-    (bundle_claude / ".mcp.json").write_text(json.dumps({
-        "mcpServers": {
-            "bundle-server": {"type": "http", "url": "http://localhost:9090/mcp/"}
-        }
-    }))
+    (bundle_claude / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"bundle-server": {"type": "http", "url": "http://localhost:9090/mcp/"}}})
+    )
 
     # --- Layer 3: profile (in bundle) ---
     profile = bundle / "profiles" / "test-profile"
@@ -94,15 +92,11 @@ def install_env(tmp_path):
     # Profile rule
     (profile_claude / "rules" / "git-workflow.md").write_text("# Git Workflow\n")
     # Profile settings overrides
-    (profile_claude / "settings.overrides.json").write_text(json.dumps({
-        "env": {"PROFILE_VAR": "test-value"}
-    }))
+    (profile_claude / "settings.overrides.json").write_text(json.dumps({"env": {"PROFILE_VAR": "test-value"}}))
     # Profile .mcp.json
-    (profile_claude / ".mcp.json").write_text(json.dumps({
-        "mcpServers": {
-            "profile-server": {"type": "http", "url": "http://localhost:8080/mcp/"}
-        }
-    }))
+    (profile_claude / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"profile-server": {"type": "http", "url": "http://localhost:8080/mcp/"}}})
+    )
     # Profile.yml
     (profile / "profile.yml").write_text(
         "name: test-profile\n"
@@ -116,18 +110,26 @@ def install_env(tmp_path):
     # --- Base settings ---
     base_dir = agentihooks_root / "profiles" / "_base"
     base_dir.mkdir(parents=True)
-    (base_dir / "settings.base.json").write_text(json.dumps({
-        "hooks": {},
-        "env": {"BASE_VAR": "base-value"},
-    }))
+    (base_dir / "settings.base.json").write_text(
+        json.dumps(
+            {
+                "hooks": {},
+                "env": {"BASE_VAR": "base-value"},
+            }
+        )
+    )
 
     # State dir
     state_dir = tmp_path / ".agentihooks"
     state_dir.mkdir()
-    (state_dir / "state.json").write_text(json.dumps({
-        "bundle": {"path": str(bundle), "linked_at": "2026-01-01T00:00:00+00:00"},
-        "mcpFiles": [],
-    }))
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "bundle": {"path": str(bundle), "linked_at": "2026-01-01T00:00:00+00:00"},
+                "mcpFiles": [],
+            }
+        )
+    )
 
     # Claude.json (user MCP scope)
     claude_json = tmp_path / ".claude.json"
@@ -223,9 +225,7 @@ class TestSymlinkMerge:
             ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ]:
             dst = claude_home / subdir
-            install._symlink_dir_contents(
-                ah_root / ".claude" / subdir, dst, label=label, filter_fn=filter_fn
-            )
+            install._symlink_dir_contents(ah_root / ".claude" / subdir, dst, label=label, filter_fn=filter_fn)
             if (bundle / ".claude" / subdir).is_dir():
                 install._symlink_dir_contents(
                     bundle / ".claude" / subdir, dst, label=f"bundle {label}", filter_fn=filter_fn
@@ -350,9 +350,7 @@ class TestSettingsOverrides:
         """If .claude/settings.overrides.json doesn't exist, check root."""
         profile = install_env["profile"]
         # Move overrides to root
-        (profile / ".claude" / "settings.overrides.json").rename(
-            profile / "settings.overrides.json"
-        )
+        (profile / ".claude" / "settings.overrides.json").rename(profile / "settings.overrides.json")
         # The install code should find it at root
         overrides_path = profile / ".claude" / "settings.overrides.json"
         if not overrides_path.exists():
@@ -385,15 +383,11 @@ class TestMcpMerge:
         claude_json = install_env["claude_json"]
         with patch.object(install, "_CLAUDE_JSON", claude_json):
             # Merge bundle MCPs
-            bundle_mcp = json.loads(
-                (install_env["bundle"] / ".claude" / ".mcp.json").read_text()
-            )
+            bundle_mcp = json.loads((install_env["bundle"] / ".claude" / ".mcp.json").read_text())
             install._merge_mcp_to_user_scope(bundle_mcp["mcpServers"])
 
             # Merge profile MCPs
-            profile_mcp = json.loads(
-                (install_env["profile"] / ".claude" / ".mcp.json").read_text()
-            )
+            profile_mcp = json.loads((install_env["profile"] / ".claude" / ".mcp.json").read_text())
             install._merge_mcp_to_user_scope(profile_mcp["mcpServers"])
 
         result = json.loads(claude_json.read_text())
@@ -410,9 +404,7 @@ class TestActiveProfileDetection:
     """Test query_active_profile reads from state.json."""
 
     def test_reads_from_state(self, install_env, capsys):
-        with patch.object(install, "_load_state", return_value={
-            "targets": {"global": {"profile": "colt"}}
-        }):
+        with patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "colt"}}}):
             install.query_active_profile()
         assert capsys.readouterr().out.strip() == "colt"
 

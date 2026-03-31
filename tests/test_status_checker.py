@@ -61,17 +61,19 @@ class TestCheckPython:
         claude_home = tmp_path / ".claude"
         claude_home.mkdir()
         fake_python = str(venv_bin / "python3")
-        (claude_home / "settings.json").write_text(json.dumps({
-            "hooks": {"PreToolUse": [{"hooks": [{"command": f"{fake_python} -m hooks"}]}]}
-        }))
+        (claude_home / "settings.json").write_text(
+            json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": f"{fake_python} -m hooks"}]}]}})
+        )
 
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = b"Python 3.12.0"
         mock_result.stderr = b""
-        with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path), \
-             patch("scripts.status_checker.CLAUDE_HOME", claude_home), \
-             patch("subprocess.run", return_value=mock_result):
+        with (
+            patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path),
+            patch("scripts.status_checker.CLAUDE_HOME", claude_home),
+            patch("subprocess.run", return_value=mock_result),
+        ):
             result = check_python()
             assert result["ok"] is True
             assert "python3" in result["path"]
@@ -133,14 +135,17 @@ class TestCheckGuardrails:
     def test_all_enabled(self):
         from scripts.status_checker import check_guardrails
 
-        with patch.dict("os.environ", {
-            "BASH_FILTER_ENABLED": "true",
-            "FILE_READ_CACHE_ENABLED": "true",
-            "CONTEXT_AUDIT_ENABLED": "true",
-            "EFFORT_POLICY_ENABLED": "true",
-            "PEAK_HOURS_ENABLED": "true",
-            "COMPACT_SUGGEST_ENABLED": "true",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "BASH_FILTER_ENABLED": "true",
+                "FILE_READ_CACHE_ENABLED": "true",
+                "CONTEXT_AUDIT_ENABLED": "true",
+                "EFFORT_POLICY_ENABLED": "true",
+                "PEAK_HOURS_ENABLED": "true",
+                "COMPACT_SUGGEST_ENABLED": "true",
+            },
+        ):
             result = check_guardrails()
             assert result["active"] == 6
             assert result["total"] == 6
@@ -151,12 +156,20 @@ class TestCheckMcp:
         from scripts.status_checker import check_mcp
 
         fake_json = tmp_path / ".claude.json"
-        fake_json.write_text(json.dumps({"mcpServers": {
-            "test-server": {"command": "python3 -m test"},
-            "test-http": {"url": "http://localhost:8080/mcp"},
-        }}))
-        with patch("scripts.status_checker.Path.home", return_value=tmp_path), \
-             patch("scripts.status_checker.CLAUDE_HOME", tmp_path / ".claude"):
+        fake_json.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "test-server": {"command": "python3 -m test"},
+                        "test-http": {"url": "http://localhost:8080/mcp"},
+                    }
+                }
+            )
+        )
+        with (
+            patch("scripts.status_checker.Path.home", return_value=tmp_path),
+            patch("scripts.status_checker.CLAUDE_HOME", tmp_path / ".claude"),
+        ):
             (tmp_path / ".claude").mkdir()
             result = check_mcp()
             assert result["total"] == 2
@@ -208,10 +221,39 @@ class TestFormatters:
             "daemons": {"sync": {"pid": None, "alive": False}, "quota": {"pid": None, "alive": False}, "ok": False},
             "redis": {"connected": False, "session_count": 0, "ok": False},
             "otel": {"enabled": False, "ok": True},
-            "guardrails": {"active": 6, "total": 6, "details": {"bash_filter": True, "file_dedup": True, "context_audit": True, "effort_policy": True, "peak_hours": True, "compact_suggest": True}, "ok": True},
-            "mcp": {"total": 2, "enabled": 2, "disabled": 0, "servers": {"s1": {"type": "stdio", "source": "user", "enabled": True}, "s2": {"type": "http", "source": "user", "enabled": True}}, "ok": True},
+            "guardrails": {
+                "active": 6,
+                "total": 6,
+                "details": {
+                    "bash_filter": True,
+                    "file_dedup": True,
+                    "context_audit": True,
+                    "effort_policy": True,
+                    "peak_hours": True,
+                    "compact_suggest": True,
+                },
+                "ok": True,
+            },
+            "mcp": {
+                "total": 2,
+                "enabled": 2,
+                "disabled": 0,
+                "servers": {
+                    "s1": {"type": "stdio", "source": "user", "enabled": True},
+                    "s2": {"type": "http", "source": "user", "enabled": True},
+                },
+                "ok": True,
+            },
             "quota": {"summary": "(not configured)", "peak": "off-peak", "ok": False},
-            "session": {"id": "test-123", "fill_pct": 42.5, "burn_rate": 1200, "used": 50000, "remaining": 67000, "tool_audit": {"Bash": 30000, "Read": 20000}, "ok": True},
+            "session": {
+                "id": "test-123",
+                "fill_pct": 42.5,
+                "burn_rate": 1200,
+                "used": 50000,
+                "remaining": 67000,
+                "tool_audit": {"Bash": 30000, "Read": 20000},
+                "ok": True,
+            },
         }
         output = format_cli(results)
         assert "Session metrics" in output

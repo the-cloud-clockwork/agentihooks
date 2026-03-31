@@ -12,10 +12,12 @@ class TestContextAudit:
 
     def setup_method(self):
         from hooks.observability import context_audit
+
         context_audit._memory_audit.clear()
 
     def teardown_method(self):
         from hooks.observability import context_audit
+
         context_audit._memory_audit.clear()
 
     def test_record_and_get_summary(self):

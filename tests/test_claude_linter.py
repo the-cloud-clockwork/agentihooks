@@ -28,7 +28,9 @@ class TestClaudeLinter:
     def test_classify_always_section(self):
         from scripts.claude_linter import Section, classify_section
 
-        s = Section(heading="Architecture", level=2, content="## Architecture\nDesign patterns.", start_line=1, end_line=3)
+        s = Section(
+            heading="Architecture", level=2, content="## Architecture\nDesign patterns.", start_line=1, end_line=3
+        )
         assert classify_section(s) == "always"
 
     def test_classify_workflow_section(self):

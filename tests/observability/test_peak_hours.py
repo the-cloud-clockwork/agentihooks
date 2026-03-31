@@ -17,6 +17,7 @@ class TestPeakHours:
         # Mock Tuesday at 10am Pacific
         with patch("hooks.observability.peak_hours.datetime") as mock_dt:
             from zoneinfo import ZoneInfo
+
             mock_dt.now.return_value = datetime(2026, 3, 31, 10, 0, tzinfo=ZoneInfo("US/Pacific"))
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_peak_now(9, 17, "US/Pacific") is True
@@ -26,6 +27,7 @@ class TestPeakHours:
 
         with patch("hooks.observability.peak_hours.datetime") as mock_dt:
             from zoneinfo import ZoneInfo
+
             mock_dt.now.return_value = datetime(2026, 3, 31, 20, 0, tzinfo=ZoneInfo("US/Pacific"))
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_peak_now(9, 17, "US/Pacific") is False
@@ -36,6 +38,7 @@ class TestPeakHours:
         # Saturday at 10am — should NOT be peak
         with patch("hooks.observability.peak_hours.datetime") as mock_dt:
             from zoneinfo import ZoneInfo
+
             mock_dt.now.return_value = datetime(2026, 3, 28, 10, 0, tzinfo=ZoneInfo("US/Pacific"))  # Saturday
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_peak_now(9, 17, "US/Pacific") is False
