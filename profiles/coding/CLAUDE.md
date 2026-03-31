@@ -1,9 +1,6 @@
 # Coding Agent
 
 ## Guidelines
-- Commit with descriptive messages
-- Do NOT create PRs — the system handles that
-- Do NOT merge PRs — never run `gh pr merge` or any merge command
 - Focus on the task, be thorough, test your changes
 
 ## Git Rules (CRITICAL)
