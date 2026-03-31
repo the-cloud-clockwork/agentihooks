@@ -21,7 +21,7 @@ otel:
 
 # -- agenticore fields (read by agenticore, not agentihooks) --
 claude:
-  model: sonnet
+  model: Default
   max_turns: 80
   permission_mode: bypassPermissions
   no_session_persistence: true
