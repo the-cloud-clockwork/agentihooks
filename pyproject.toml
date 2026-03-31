@@ -1,6 +1,6 @@
 [project]
 name = "agentihooks"
-version = "0.3.1"
+version = "1.0.0"
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
