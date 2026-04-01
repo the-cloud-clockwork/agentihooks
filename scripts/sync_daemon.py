@@ -541,6 +541,47 @@ def _check_new_mcp_servers(known_servers_file: Path) -> None:
     _write_atomic(known_servers_file, known_data)
 
 
+def _check_new_projects(known_servers_file: Path) -> None:
+    """Backfill disabledMcpServers for project entries that are missing it.
+
+    Claude Code auto-creates project entries when opening new directories,
+    but those entries have no disabledMcpServers — leaving all MCPs enabled.
+    This function detects such entries and backfills the full blacklist.
+    """
+    if not CLAUDE_JSON.exists():
+        return
+
+    data = _load_json(CLAUDE_JSON)
+    projects = data.get("projects", {})
+    if not projects:
+        return
+
+    known_data = _load_json(known_servers_file)
+    all_servers = set(known_data.get("knownMcpServers", []))
+    if not all_servers:
+        # Fall back to reading directly from ~/.claude.json
+        all_servers = _get_all_known_mcp_names_from_claude_json()
+    if not all_servers:
+        return
+
+    to_disable = sorted(all_servers)
+    backfilled = []
+
+    for proj_path, proj_data in projects.items():
+        if not isinstance(proj_data, dict):
+            continue
+        existing = proj_data.get("disabledMcpServers")
+        if not existing:  # missing key or empty list
+            proj_data["disabledMcpServers"] = to_disable
+            backfilled.append(proj_path)
+
+    if backfilled:
+        _write_atomic(CLAUDE_JSON, data)
+        for p in backfilled:
+            _log(f"  Backfilled: {p}")
+        _log(f"New project check: blacklisted {len(to_disable)} MCPs in {len(backfilled)} new project(s)")
+
+
 # ---------------------------------------------------------------------------
 # Main daemon loop
 # ---------------------------------------------------------------------------
@@ -610,55 +651,57 @@ def _run_daemon(poll_sec: int) -> None:
             new_hashes = _compute_hashes(source_files)
             changed, added, removed = _diff_hashes(old_hashes, new_hashes)
 
-            if not changed and not added and not removed:
-                continue
+            if changed or added or removed:
+                for f in changed:
+                    _log(f"  CHANGED: {f}")
+                for f in added:
+                    _log(f"  ADDED: {f}")
+                for f in removed:
+                    _log(f"  REMOVED: {f}")
 
-            for f in changed:
-                _log(f"  CHANGED: {f}")
-            for f in added:
-                _log(f"  ADDED: {f}")
-            for f in removed:
-                _log(f"  REMOVED: {f}")
+                all_changed = changed + added
+                if all_changed or removed:
+                    affected = _determine_affected_categories(
+                        all_changed,
+                        source_files,
+                        removed_files=removed,
+                        old_source_map=old_source_map,
+                    )
+                    _log(f"Affected categories: {sorted(affected)}")
+                    actions = _determine_actions(affected, state)
 
-            all_changed = changed + added
-            if all_changed or removed:
-                # For removed files, look up categories from the old source map
-                affected = _determine_affected_categories(
-                    all_changed,
-                    source_files,
-                    removed_files=removed,
-                    old_source_map=old_source_map,
-                )
-                _log(f"Affected categories: {sorted(affected)}")
-                actions = _determine_actions(affected, state)
+                    action_desc = []
+                    if actions["reinstall_global"]:
+                        action_desc.append("global")
+                    if actions["reinstall_projects"]:
+                        action_desc.append(f"{len(actions['reinstall_projects'])} project(s)")
+                    if actions["sync_mcp"]:
+                        action_desc.append("mcp_sync")
 
-                action_desc = []
-                if actions["reinstall_global"]:
-                    action_desc.append("global")
-                if actions["reinstall_projects"]:
-                    action_desc.append(f"{len(actions['reinstall_projects'])} project(s)")
-                if actions["sync_mcp"]:
-                    action_desc.append("mcp_sync")
-
-                if action_desc:
-                    _log(f"Actions: {', '.join(action_desc)}")
-                    summary = _execute_actions(actions, state)
-                    if summary["errors"]:
-                        _log(f"Completed with {len(summary['errors'])} error(s)")
+                    if action_desc:
+                        _log(f"Actions: {', '.join(action_desc)}")
+                        summary = _execute_actions(actions, state)
+                        if summary["errors"]:
+                            _log(f"Completed with {len(summary['errors'])} error(s)")
+                        else:
+                            _log("All actions completed successfully")
                     else:
-                        _log("All actions completed successfully")
-                else:
-                    _log("No actions needed (no matching targets)")
+                        _log("No actions needed (no matching targets)")
 
-            _save_hashes(new_hashes)
-            old_hashes = new_hashes
-            old_source_map = dict(source_files)
+                _save_hashes(new_hashes)
+                old_hashes = new_hashes
+                old_source_map = dict(source_files)
 
-            # Check for new MCP servers (additive blacklisting)
+            # Always check for new MCP servers and new projects (every cycle)
+            known_servers_file = AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json"
             try:
-                _check_new_mcp_servers(AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
+                _check_new_mcp_servers(known_servers_file)
             except Exception as mcp_err:
                 _log(f"MCP tracking error: {mcp_err}")
+            try:
+                _check_new_projects(known_servers_file)
+            except Exception as proj_err:
+                _log(f"New project check error: {proj_err}")
 
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
