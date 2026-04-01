@@ -179,7 +179,7 @@ agentihooks init --profile infra-ops         # use a bundle profile
 | Event | What happens |
 |-------|-------------|
 | `SessionStart` | Injects session awareness, MCP hygiene reminder, MCP surface area warning |
-| `PreToolUse` | Secret scan (blocks on detection), file read deduplication, tool error memory |
+| `PreToolUse` | Secret scan (blocks on detection), file read deduplication, CLAUDE.md sanity check, tool error memory |
 | `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
 | `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
 | `SessionEnd` | Logs transcript, clears file read cache |
@@ -250,13 +250,14 @@ An advisory file lock (`~/.agentihooks/sync.lock`) prevents concurrent writes be
 [OK] Daemons: sync (PID 1234), quota (PID 5678)
 [OK] Redis: connected — 3568 keys (memory: 3540, file_cache: 14)
 [OK] OTEL: enabled
-[OK] Cost guardrails: 6/6 active
+[OK] Cost guardrails: 7/7 active
      + bash_filter: Truncates verbose bash output
      + file_dedup: Blocks re-reading unchanged files
      + context_audit: Tracks per-tool token consumption
      + effort_policy: Thinking/effort guidance, expensive subagent warnings
      + peak_hours: Peak billing indicator on statusline
      + compact_suggest: Smart /compact suggestions from audit data
+     + claude_md_sanity: Blocks CLAUDE.md edits exceeding 200 lines
 [OK] MCP: 9 servers (all disabled here) — 450 tools total, 0 active here
      - hooks-utils [stdio] (25 tools)
      - gateway-core [http] (93 tools)
@@ -301,6 +302,8 @@ All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 | `DEFAULT_EFFORT` | `medium` | Default reasoning effort (low/medium/high) |
 | `PEAK_HOURS_ENABLED` | `true` | Show peak/off-peak billing indicator |
 | `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
+| `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Block edits that would bloat CLAUDE.md past line limit |
+| `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Max allowed lines in CLAUDE.md / CLAUDE.local.md |
 | `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
 | `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |

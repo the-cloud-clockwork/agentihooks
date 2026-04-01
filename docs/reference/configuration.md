@@ -114,6 +114,19 @@ Controls the console quota display on statusline line 3, powered by `scripts/cla
 
 ---
 
+## CLAUDE.md Sanity Check
+
+Guardrail that prevents agents from bloating `CLAUDE.md` and `CLAUDE.local.md` files past a configurable line limit. Runs on every `PreToolUse` event for `Write` and `Edit` tools. **Enabled by default.**
+
+For `Write`: counts lines in the new content. For `Edit`: reads the current file from disk, simulates the replacement, and counts resulting lines. If the result exceeds the limit, the tool call is blocked (exit code `2`) with a message telling the agent the current/resulting line count and the cap.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Enable/disable the guardrail. Set `false` or `0` to allow unrestricted edits. |
+| `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Maximum allowed lines in `CLAUDE.md` / `CLAUDE.local.md` files. |
+
+---
+
 ## Sync Daemon
 
 | Variable | Default | Description |

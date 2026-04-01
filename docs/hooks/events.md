@@ -102,7 +102,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 1. Logs the transcript entry
 2. **Secret scanning** -- scans `tool_input` for credentials; exits with code `2` (block) if found
 3. **File read deduplication** -- if `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: checks whether the file was already read this session and is unmodified (by mtime). If so, exits with code `2` and tells Claude to use the content already in context
-4. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
+4. **CLAUDE.md sanity check** -- if `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK=true` (default) and `tool_name` is `Write` or `Edit` targeting a `CLAUDE.md` or `CLAUDE.local.md` file: simulates the resulting file and exits with code `2` if it would exceed `AGENTIHOOKS_CLAUDE_MD_MAXLINES` (default `200`). Prevents agents from bloating critical config files
+5. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
 
 **Exit codes used:**
 
