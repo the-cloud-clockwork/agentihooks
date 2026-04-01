@@ -1018,6 +1018,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     # --- Auto-start sync daemon ---
     sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
+    sync_running = False
     if sync_pid_file.exists():
         try:
             pid = int(sync_pid_file.read_text().strip())
