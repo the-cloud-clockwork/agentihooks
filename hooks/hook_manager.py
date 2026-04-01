@@ -555,6 +555,28 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("file_read_cache check failed", {"error": str(e)})
 
+    # CLAUDE.md sanity check — block edits that would bloat CLAUDE.md
+    if tool_name in ("Write", "Edit"):
+        try:
+            from hooks.config import CLAUDE_MD_SANITY_CHECK
+
+            if CLAUDE_MD_SANITY_CHECK:
+                from hooks.context.claude_md_sanity import check_claude_md_write
+
+                check_claude_md_write(payload)
+        except BlockAction:
+            otel.emit_event(
+                "agentihooks.guardrail.claude_md_blocked",
+                {
+                    "session.id": payload.get("session_id", ""),
+                    "tool_name": tool_name,
+                    "file_path": payload.get("tool_input", {}).get("file_path", ""),
+                },
+            )
+            raise
+        except Exception as e:
+            log("claude_md_sanity check failed", {"error": str(e)})
+
     # Inject tool memory (past errors) into Claude's context
     # Only injects once per tool per session to avoid noise
     from hooks.tool_memory import inject_memory

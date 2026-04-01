@@ -146,47 +146,24 @@ CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
 
 ### Sync Daemon (auto-propagation)
 
-`scripts/sync_daemon.py` is a background daemon that watches all source files feeding the install pipeline and auto-propagates changes to every registered downstream consumer. If you have 5 repos consuming agentihooks, all 5 are updated within one poll cycle when any source config changes.
-
-**How it works:**
-
-1. Every `agentihooks init` and `agentihooks init --repo <path>` call registers the target in `state.json` under a new `targets` key (profile used, path installed to).
-2. The daemon hashes every source file (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env` files) using SHA-256.
-3. Each file is tagged with categories (`base`, `profile:{name}`, `connector:{name}`, `mcp_files`, `env`, `bundle`).
-4. On each poll cycle, the daemon recomputes hashes. If any hash changed, it resolves which categories are affected, determines which targets depend on those categories, and re-runs the install pipeline for those targets.
-
-**Propagation rules:**
-
-| Source change | Affected targets |
-|---|---|
-| `settings.base.json` | Global + ALL projects + MCP sync |
-| `profiles/{X}/*` | Targets using profile X |
-| Connector files | Global + ALL projects |
-| MCP files (`.json`) | MCP sync only |
-| `.env` files | Global + ALL projects |
-| Bundle directory | Global + ALL projects |
-
-**Concurrency:** An advisory file lock at `~/.agentihooks/sync.lock` (via `fcntl.flock`) prevents the daemon and manual `agentihooks init`/`project` commands from writing simultaneously. The daemon uses non-blocking acquisition — skips the cycle on contention.
-
-**State files:**
-- PID: `~/.agentihooks/sync-daemon.pid`
-- Log: `~/.agentihooks/logs/sync-daemon.log`
-- Hashes: `~/.agentihooks/sync-hashes.json` (separate from `state.json` to avoid write contention)
-- Lock: `~/.agentihooks/sync.lock`
+`scripts/sync_daemon.py` watches source files and auto-propagates changes to all registered targets. Each `agentihooks init` registers the target in `state.json`. The daemon hashes sources (SHA-256), detects changes per category (`base`, `profile:{name}`, `connector`, `mcp_files`, `env`, `bundle`), and re-runs the install pipeline for affected targets. Uses `~/.agentihooks/sync.lock` (advisory flock) for concurrency.
 
 ```bash
-agentihooks daemon              # start background daemon (default 60s poll)
-agentihooks daemon status       # show targets, watched files, last scan
-agentihooks daemon logs         # tail -f daemon log
-agentihooks daemon stop         # kill daemon
-agentihooks daemon start --poll 30          # custom poll interval
-agentihooks daemon start --foreground       # debug mode
+agentihooks daemon              # start (default 60s poll)
+agentihooks daemon status|logs|stop
+agentihooks daemon start --poll 30 --foreground   # custom interval / debug
 ```
 
-Configure poll interval in `~/.agentihooks/.env`:
-```bash
-# AGENTIHOOKS_SYNC_POLL_SEC=60   # daemon poll interval (default)
-```
+### CLAUDE.md Sanity Check
+
+`hooks/context/claude_md_sanity.py` — PreToolUse guardrail that blocks Write/Edit operations on `CLAUDE.md` and `CLAUDE.local.md` if the resulting file would exceed a configurable line limit. Enabled by default.
+
+| Env var | Default | Description |
+|---|---|---|
+| `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Enable/disable the guardrail (0/1) |
+| `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Max allowed lines in CLAUDE.md files |
+
+On violation: raises `BlockAction` (exit 2) with a message telling the agent the current/resulting line count and the cap. The agent must trim the file before retrying.
 
 ### Redis
 
