@@ -286,7 +286,7 @@ def main() -> None:
             except Exception:
                 pass
 
-        # Peak hours indicator — uses native session rate limit for context
+        # Peak/off-peak indicator — uses native session rate limit for context
         try:
             from hooks.config import PEAK_HOURS_ENABLED, PEAK_HOURS_END, PEAK_HOURS_START, PEAK_HOURS_TZ
 
@@ -298,10 +298,12 @@ def main() -> None:
                     session_pct = five_h.get("used_percentage", 0) or 0
                     if session_pct > 50:
                         parts_3.append(
-                            f"{_YELLOW}PEAK — sessions burn faster during business hours{_RESET}"
+                            f"{_YELLOW}PEAK — sessions burn faster until {PEAK_HOURS_END}am PT{_RESET}"
                         )
                     else:
-                        parts_3.append(f"{_YELLOW}PEAK{_RESET}")
+                        parts_3.append(f"{_YELLOW}PEAK {PEAK_HOURS_START}am-{PEAK_HOURS_END}am PT{_RESET}")
+                else:
+                    parts_3.append(f"{_GREEN}OFF-PEAK — full session rate{_RESET}")
         except Exception:
             pass
 

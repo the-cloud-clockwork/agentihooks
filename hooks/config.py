@@ -168,8 +168,8 @@ THINKING_BUDGET_TOKENS: int = int(os.getenv("THINKING_BUDGET_TOKENS", "0"))
 # PEAK / OFF-PEAK AWARENESS
 # =============================================================================
 PEAK_HOURS_ENABLED = _env_bool("PEAK_HOURS_ENABLED", "true")
-PEAK_HOURS_START: int = int(os.getenv("PEAK_HOURS_START", "9"))
-PEAK_HOURS_END: int = int(os.getenv("PEAK_HOURS_END", "17"))
+PEAK_HOURS_START: int = int(os.getenv("PEAK_HOURS_START", "5"))
+PEAK_HOURS_END: int = int(os.getenv("PEAK_HOURS_END", "11"))
 PEAK_HOURS_TZ: str = os.getenv("PEAK_HOURS_TZ", "US/Pacific")
 
 # =============================================================================
