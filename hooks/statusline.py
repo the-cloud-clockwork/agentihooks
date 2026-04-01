@@ -7,16 +7,23 @@ Usage (set in settings.json):
     "statusLine": {"type": "command", "command": "cd /app && __PYTHON__ -m hooks.statusline"}
 
 Supports ANSI colors and multiple output lines (each print = a row).
+
+Native fields used from Claude Code's statusline JSON:
+  - context_window.used_percentage, context_window_size, current_usage
+  - cost.total_cost_usd, total_duration_ms, total_api_duration_ms
+  - rate_limits.five_hour.used_percentage/resets_at
+  - rate_limits.seven_day.used_percentage/resets_at
+  - model.display_name, vim.mode, worktree.*
 """
 
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Load ~/.agentihooks/.env so TOKEN_WARN_PCT etc. are available
 import hooks.config  # noqa: F401 — side effect: loads env
 
 # ---------------------------------------------------------------------------
@@ -54,20 +61,20 @@ def _dur(ms: float) -> str:
     return f"{hours:.1f}h"
 
 
+def _pct_color(pct: float) -> str:
+    """Return ANSI color code based on percentage threshold."""
+    if pct >= 80:
+        return _RED
+    if pct >= 60:
+        return _YELLOW
+    return _GREEN
+
+
 def _progress_bar(pct: float, width: int = 15) -> str:
     """Render a visual progress bar with color based on fill level."""
     filled = int(width * pct / 100)
     empty = width - filled
-
-    if pct >= 80:
-        color = _RED
-    elif pct >= 60:
-        color = _YELLOW
-    else:
-        color = _GREEN
-
-    bar = f"{color}{'█' * filled}{_DIM}{'░' * empty}{_RESET}"
-    return bar
+    return f"{_pct_color(pct)}{'█' * filled}{_DIM}{'░' * empty}{_RESET}"
 
 
 def _git_branch() -> str:
@@ -98,6 +105,51 @@ def _cache_ratio(current_usage: dict) -> str:
     return f"{ratio:.0f}%"
 
 
+def _fmt_resets_at(epoch: float) -> str:
+    """Format a reset epoch timestamp as relative time or short date."""
+    now = datetime.now(timezone.utc)
+    reset = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    delta = reset - now
+    secs = int(delta.total_seconds())
+    if secs <= 0:
+        return "now"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    if secs < 86400:
+        h = secs // 3600
+        m = (secs % 3600) // 60
+        return f"{h}h{m:02d}m" if m else f"{h}h"
+    return reset.strftime("%a %H:%M").lower()
+
+
+def _rate_limit_str(rate_limits: dict) -> str:
+    """Format native rate_limits into a compact colored string.
+
+    Maps Claude Code's JSON keys to descriptive labels matching the /config UI:
+      five_hour  → "session"   (Current session window)
+      seven_day  → "weekly"    (Current week, all models)
+    """
+    parts = []
+
+    for key, label in [("five_hour", "session"), ("seven_day", "weekly")]:
+        window = rate_limits.get(key)
+        if not window:
+            continue
+        pct = window.get("used_percentage")
+        if pct is None:
+            continue
+
+        part = f"{label}:{_pct_color(pct)}{pct:.0f}%{_RESET}"
+
+        resets_at = window.get("resets_at")
+        if resets_at:
+            part += f" {_DIM}[{_fmt_resets_at(resets_at)}]{_RESET}"
+
+        parts.append(part)
+
+    return " | ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -117,45 +169,14 @@ def main() -> None:
         model_data = payload.get("model") or {}
         worktree = payload.get("worktree")
         vim = payload.get("vim")
+        rate_limits = payload.get("rate_limits") or {}
 
-        # Context window
-        used_pct = cw.get("used_percentage")
-        ctx_size = cw.get("context_window_size")
-        total_input = cw.get("total_input_tokens")
+        # Context window — trust Claude Code's native used_percentage
+        used_pct = cw.get("used_percentage") or 0.0
+        ctx_size = cw.get("context_window_size") or 0
         current_usage = cw.get("current_usage") or {}
-
-        if used_pct is None:
-            used_pct = 0.0
-
-        # Trust Claude Code's native used_percentage as the primary source —
-        # it reflects actual context fill and drops correctly after /compact.
-        # Only fall back to current_usage sums when used_percentage is missing,
-        # since current_usage tokens are cumulative session counters that never
-        # decrease and would show inflated values after compaction.
-        if used_pct > 0 and ctx_size:
-            total = ctx_size
-            used = int(total * used_pct / 100)
-        elif total_input and ctx_size:
-            used = total_input
-            total = ctx_size
-            used_pct = used / total * 100
-        elif current_usage and ctx_size:
-            _uncached = current_usage.get("input_tokens", 0) or 0
-            _cache_cr = current_usage.get("cache_creation_input_tokens", 0) or 0
-            _cache_rd = current_usage.get("cache_read_input_tokens", 0) or 0
-            _computed = _uncached + _cache_cr + _cache_rd
-            used = _computed if _computed > 0 else (total_input or 0)
-            total = ctx_size
-            used_pct = used / total * 100 if total else 0.0
-        elif total_input and used_pct > 0:
-            total = int(total_input / used_pct * 100)
-            used = total_input
-        else:
-            used = cw.get("used", 0) or 0
-            remaining = cw.get("remaining", 0) or 0
-            total = used + remaining
-            if total > 0:
-                used_pct = used / total * 100
+        used = int(ctx_size * used_pct / 100) if ctx_size else 0
+        total = ctx_size
 
         # Model
         model_name = model_data.get("display_name", "")
@@ -166,43 +187,6 @@ def main() -> None:
         api_ms = cost_data.get("total_api_duration_ms")
         lines_added = cost_data.get("total_lines_added", 0) or 0
         lines_removed = cost_data.get("total_lines_removed", 0) or 0
-
-        # ── Persist metrics to Redis (for burn rate tracking) ──────────
-        session_id = payload.get("session_id", "")
-        if session_id:
-            try:
-                import time
-
-                from hooks.observability.token_monitor import persist_token_metrics
-
-                remaining = max(0, (total or 0) - (used or 0))
-                from hooks._redis import get_redis
-
-                prev_used = None
-                r = get_redis()
-                if r is not None:
-                    from hooks._redis import redis_key
-
-                    val = r.hget(redis_key("tokens", session_id), "used")
-                    if val:
-                        prev_used = float(val)
-
-                burn_rate = max(0, used - prev_used) if prev_used is not None else None
-
-                persist_token_metrics(
-                    session_id,
-                    {
-                        "used": used,
-                        "remaining": remaining,
-                        "fill_pct": round(used_pct, 2),
-                        "burn_rate": int(burn_rate) if burn_rate is not None else 0,
-                        "last_updated": time.time(),
-                    },
-                )
-            except Exception:
-                burn_rate = None
-        else:
-            burn_rate = None
 
         # ── LINE 1: Context bar + model + cost ─────────────────────────
         bar = _progress_bar(used_pct)
@@ -215,8 +199,7 @@ def main() -> None:
             line1_parts.append(f"{_GREEN}${cost_usd:.4f}{_RESET}")
 
         if duration_ms:
-            dur_str = _dur(duration_ms)
-            line1_parts.append(f"{_DIM}{dur_str}{_RESET}")
+            line1_parts.append(f"{_DIM}{_dur(duration_ms)}{_RESET}")
 
         print(" | ".join(line1_parts))
 
@@ -224,11 +207,8 @@ def main() -> None:
         line2_parts = []
 
         # Token counts
-        line2_parts.append(f"{_DIM}ctx:{_RESET} {_fmt(used)}/{_fmt(total)}")
-
-        # Burn rate (if Redis available)
-        if burn_rate is not None and burn_rate > 0:
-            line2_parts.append(f"{_DIM}burn:{_RESET} {_fmt(int(burn_rate))}/turn")
+        if total:
+            line2_parts.append(f"{_DIM}ctx:{_RESET} {_fmt(used)}/{_fmt(total)}")
 
         # Lines changed
         if lines_added or lines_removed:
@@ -262,19 +242,27 @@ def main() -> None:
                 color = _GREEN if mode == "NORMAL" else _YELLOW
                 line2_parts.append(f"{color}{mode}{_RESET}")
 
-        print(" | ".join(line2_parts))
+        if line2_parts:
+            print(" | ".join(line2_parts))
 
-        # ── LINE 3 (conditional): Threshold warning ────────────────────
+        # ── LINE 3: Rate limits (native) + context warning ────────────
+        parts_3 = []
+
+        # Native rate limits from Claude Code
+        rl_str = _rate_limit_str(rate_limits)
+        if rl_str:
+            parts_3.append(rl_str)
+
+        # Context threshold warning (compact advisor)
         from hooks.config import TOKEN_CONTROL_ENABLED, TOKEN_MONITOR_ENABLED
 
-        warn_msg = ""
+        session_id = payload.get("session_id", "")
         if TOKEN_CONTROL_ENABLED and TOKEN_MONITOR_ENABLED and session_id:
             try:
                 from hooks.observability.token_monitor import should_warn_context
 
                 warn, level = should_warn_context(float(used_pct), session_id)
                 if warn:
-                    # Smart compact suggestion (uses context audit data if available)
                     try:
                         from hooks.config import COMPACT_SUGGEST_ENABLED
 
@@ -285,77 +273,38 @@ def main() -> None:
                             audit = get_audit_summary(session_id)
                             suggestion = format_suggestion(float(used_pct), level, audit if audit else None)
                             color = _RED + _BOLD if level == "critical" else _YELLOW
-                            warn_msg = f"{color}{suggestion}{_RESET}"
+                            parts_3.append(f"{color}{suggestion}{_RESET}")
                         else:
                             raise ImportError("disabled")
                     except Exception:
-                        # Fallback to generic warning
                         if level == "critical":
-                            warn_msg = (
+                            parts_3.append(
                                 f"{_RED}{_BOLD}CONTEXT {used_pct:.0f}% — /compact now or start new session{_RESET}"
                             )
                         else:
-                            warn_msg = f"{_YELLOW}CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}"
+                            parts_3.append(f"{_YELLOW}CONTEXT {used_pct:.0f}% — consider /compact soon{_RESET}")
             except Exception:
                 pass
 
-        # ── LINE 3: quota + peak indicator + optional context warning ──
-        quota_str = ""
-        try:
-            from hooks.quota import fmt_quota, load_quota
-
-            qd = load_quota()
-            if qd is not None:
-                raw = fmt_quota(qd)
-                if raw == "stale":
-                    quota_str = f"{_DIM}quota: stale{_RESET}"
-                elif raw:
-                    # color s:XX% and w:XX% by threshold
-                    def _cpct(label: str, pct_str: str) -> str:
-                        try:
-                            v = float(pct_str.rstrip("%"))
-                        except ValueError:
-                            return f"{label}{pct_str}"
-                        c = _GREEN if v < 60 else (_YELLOW if v < 80 else _RED)
-                        return f"{label}{c}{pct_str}{_RESET}"
-
-                    import re
-
-                    colored = re.sub(r"(s:|w:)(\d+%)", lambda m: _cpct(m.group(1), m.group(2)), raw)
-                    quota_str = f"{_DIM}quota:{_RESET} {colored}"
-        except Exception:
-            pass
-
-        # Peak/off-peak indicator (with usage-based warning when session is high)
-        peak_str = ""
+        # Peak hours indicator — uses native session rate limit for context
         try:
             from hooks.config import PEAK_HOURS_ENABLED, PEAK_HOURS_END, PEAK_HOURS_START, PEAK_HOURS_TZ
 
             if PEAK_HOURS_ENABLED:
-                from hooks.observability.peak_hours import is_peak_now, peak_warning
+                from hooks.observability.peak_hours import is_peak_now
 
                 if is_peak_now(PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ):
-                    # Try usage-based warning first (includes session percentage context)
-                    pw = None
-                    try:
-                        qd_for_peak = load_quota() if "load_quota" in dir() else None
-                        session_pct = (
-                            float(qd_for_peak.get("session", {}).get("used_pct", 0))
-                            if qd_for_peak and not qd_for_peak.get("stale")
-                            else 0
+                    five_h = rate_limits.get("five_hour", {})
+                    session_pct = five_h.get("used_percentage", 0) or 0
+                    if session_pct > 50:
+                        parts_3.append(
+                            f"{_YELLOW}PEAK — sessions burn faster during business hours{_RESET}"
                         )
-                        pw = peak_warning(session_pct, PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ)
-                    except Exception:
-                        pass
-                    if pw:
-                        peak_str = f"{_YELLOW}{pw}{_RESET}"
                     else:
-                        peak_str = f"{_YELLOW}PEAK{_RESET}"
+                        parts_3.append(f"{_YELLOW}PEAK{_RESET}")
         except Exception:
             pass
 
-        # Assemble line 3
-        parts_3 = [p for p in (quota_str, peak_str, warn_msg) if p]
         if parts_3:
             print(f"  {_DIM}|{_RESET}  ".join(parts_3))
 
