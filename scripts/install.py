@@ -992,6 +992,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     accounts_dir = AGENTIHOOKS_STATE_DIR / "quota-accounts"
     if accounts_dir.exists() and any(accounts_dir.glob("*.json")):
         pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
+        already_running = False
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
@@ -3308,10 +3309,7 @@ def cmd_migrate(args) -> None:
         basename = repo.name
 
         # Find old entries matching by basename (different path, same repo name)
-        candidates = [
-            p for p in projects
-            if Path(p).name == basename and p != new_path
-        ]
+        candidates = [p for p in projects if Path(p).name == basename and p != new_path]
 
         if not candidates:
             skipped.append((basename, "no old entry found"))
