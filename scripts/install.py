@@ -1774,6 +1774,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # --- 12. Register as sync daemon target ---
     _register_target_global(profile_name)
+    _snapshot_claude_json()
 
     # --- Done ---
     print()
@@ -1868,6 +1869,35 @@ def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> 
         _cprint(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
     except (json.JSONDecodeError, OSError) as e:
         _cprint(f"  [WARN] Could not update ~/.claude.json: {e}")
+
+
+def _snapshot_claude_json() -> None:
+    """Capture key metadata from ~/.claude.json into state.json for drift detection."""
+    if not _CLAUDE_JSON.exists():
+        return
+    try:
+        data = load_json(_CLAUDE_JSON)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    snapshot: dict = {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "mcp_servers": sorted(data.get("mcpServers", {}).keys()),
+        "projects": {},
+        "ever_connected": sorted(data.get("claudeAiMcpEverConnected", [])),
+    }
+    for path, proj in data.get("projects", {}).items():
+        if not isinstance(proj, dict):
+            continue
+        disabled = proj.get("disabledMcpServers", [])
+        snapshot["projects"][path] = {
+            "disabled_mcp_count": len(disabled),
+            "has_disabled_list": bool(disabled),
+        }
+
+    state = _load_state()
+    state["claude_json_snapshot"] = snapshot
+    _save_state(state)
 
 
 def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
@@ -2615,6 +2645,7 @@ def _install_project_inner(args: argparse.Namespace) -> None:
 
     # Register as sync daemon target
     _register_target_project(project_path, profile_name)
+    _snapshot_claude_json()
 
 
 # ---------------------------------------------------------------------------
@@ -3230,6 +3261,132 @@ def cmd_quota(args: "argparse.Namespace") -> None:
         _quota_start_daemon(python, watcher, args.poll)
 
 
+# ---------------------------------------------------------------------------
+# migrate — fix ~/.claude.json project entries after repos move
+# ---------------------------------------------------------------------------
+
+
+def cmd_migrate(args) -> None:
+    """Remap ~/.claude.json project entries when repos move to a new parent dir."""
+    target = Path(args.target_path).expanduser().resolve()
+    dry_run = getattr(args, "dry_run", False)
+
+    if not target.exists():
+        print(f"Error: {target} does not exist", file=sys.stderr)
+        sys.exit(1)
+
+    # Determine repos to migrate
+    if (target / ".git").exists():
+        repos = [target]
+    else:
+        repos = sorted(p for p in target.iterdir() if p.is_dir() and (p / ".git").exists())
+        if not repos:
+            print(f"Error: no git repos found under {target}", file=sys.stderr)
+            sys.exit(1)
+
+    # Load ~/.claude.json
+    if not _CLAUDE_JSON.exists():
+        print("Error: ~/.claude.json not found", file=sys.stderr)
+        sys.exit(1)
+    try:
+        data = load_json(_CLAUDE_JSON)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error reading ~/.claude.json: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    projects = data.get("projects", {})
+    if not projects:
+        print("No project entries in ~/.claude.json — nothing to migrate.")
+        return
+
+    # Build remap table: new_path → old_path
+    remap: list[tuple[str, str]] = []  # (old, new)
+    skipped: list[tuple[str, str]] = []  # (repo_name, reason)
+
+    for repo in repos:
+        new_path = str(repo)
+        basename = repo.name
+
+        # Find old entries matching by basename (different path, same repo name)
+        candidates = [
+            p for p in projects
+            if Path(p).name == basename and p != new_path
+        ]
+
+        if not candidates:
+            skipped.append((basename, "no old entry found"))
+            continue
+
+        # Filter: skip if old path still exists on disk (different repo, not a move)
+        moved = [c for c in candidates if not Path(c).exists()]
+        if not moved:
+            skipped.append((basename, f"old path(s) still exist on disk: {candidates}"))
+            continue
+
+        # Remap each old entry → new path (merge into existing new entry if present)
+        for old_path in moved:
+            remap.append((old_path, new_path))
+
+    if not remap:
+        print("Nothing to migrate.")
+        if skipped:
+            print("\nSkipped:")
+            for name, reason in skipped:
+                print(f"  {name}: {reason}")
+        return
+
+    # Print remap table
+    print(f"\n{'OLD PATH':<60} → NEW PATH")
+    print("─" * 120)
+    for old, new in remap:
+        print(f"  {old:<58} → {new}")
+    print()
+
+    if dry_run:
+        print("[DRY RUN] No changes written.")
+        return
+
+    # Apply remaps
+    for old, new in remap:
+        old_data = projects.pop(old, {})
+        new_data = projects.get(new, {})
+        # Merge: old data is base, new data (if any) overrides
+        merged = {**old_data, **new_data}
+        projects[new] = merged
+
+    # Re-apply MCP blacklist for all remapped projects
+    all_known = _get_all_known_mcp_names()
+    # Resolve active profile for the whitelist
+    state = _load_state()
+    active_profile = state.get("targets", {}).get("global", {}).get("profile", "default")
+    profile_dir = _resolve_profile_dir(active_profile) or PROFILES_DIR / "default"
+    profile_enabled = _get_profile_enabled_servers(profile_dir)
+    to_disable = sorted(all_known - (profile_enabled or set()))
+
+    for _old, new in remap:
+        proj = projects.setdefault(new, {})
+        proj["disabledMcpServers"] = to_disable
+
+    # Save
+    data["projects"] = projects
+    save_json(_CLAUDE_JSON, data)
+    print(f"[OK] Migrated {len(remap)} project(s) in ~/.claude.json")
+    print(f"[OK] Applied MCP blacklist ({len(to_disable)} servers) to migrated projects")
+
+    # Register targets in state.json
+    for _old, new in remap:
+        _register_target_project(Path(new), active_profile)
+    print(f"[OK] Registered {len(remap)} target(s) in state.json")
+
+    _snapshot_claude_json()
+    print("[OK] Updated claude_json_snapshot in state.json")
+
+    if skipped:
+        print("\nSkipped:")
+        for name, reason in skipped:
+            print(f"  {name}: {reason}")
+
+
 def main() -> None:
     _argv = sys.argv[1:]
 
@@ -3342,6 +3499,10 @@ def main() -> None:
 
     sub.add_parser("status", help="Show installation health, cost guardrails, and system state")
 
+    p_migrate = sub.add_parser("migrate", help="Fix ~/.claude.json project entries after repos move")
+    p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
+    p_migrate.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -3413,6 +3574,8 @@ def main() -> None:
         from scripts.status_checker import format_cli, run_all_checks
 
         print(format_cli(run_all_checks()))
+    elif args.command == "migrate":
+        cmd_migrate(args)
 
 
 if __name__ == "__main__":

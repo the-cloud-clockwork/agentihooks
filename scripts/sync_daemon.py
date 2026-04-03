@@ -541,6 +541,55 @@ def _check_new_mcp_servers(known_servers_file: Path) -> None:
     _write_atomic(known_servers_file, known_data)
 
 
+def _update_claude_json_snapshot() -> None:
+    """Update the claude_json_snapshot in state.json with current ~/.claude.json metadata."""
+    if not CLAUDE_JSON.exists():
+        return
+
+    data = _load_json(CLAUDE_JSON)
+    if not data:
+        return
+
+    snapshot: dict = {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "mcp_servers": sorted(data.get("mcpServers", {}).keys()),
+        "projects": {},
+        "ever_connected": sorted(data.get("claudeAiMcpEverConnected", [])),
+    }
+    for path, proj in data.get("projects", {}).items():
+        if not isinstance(proj, dict):
+            continue
+        disabled = proj.get("disabledMcpServers", [])
+        snapshot["projects"][path] = {
+            "disabled_mcp_count": len(disabled),
+            "has_disabled_list": bool(disabled),
+        }
+
+    state = _load_json(STATE_JSON)
+    old_snapshot = state.get("claude_json_snapshot", {})
+
+    old_projects = set(old_snapshot.get("projects", {}).keys())
+    new_projects = set(snapshot["projects"].keys())
+    added = new_projects - old_projects
+    removed = old_projects - new_projects
+    old_mcps = set(old_snapshot.get("mcp_servers", []))
+    new_mcps = set(snapshot["mcp_servers"])
+    new_servers = new_mcps - old_mcps
+    gone_servers = old_mcps - new_mcps
+
+    if added:
+        _log(f"Snapshot: {len(added)} new project(s): {', '.join(sorted(added)[:5])}")
+    if removed:
+        _log(f"Snapshot: {len(removed)} removed project(s): {', '.join(sorted(removed)[:5])}")
+    if new_servers:
+        _log(f"Snapshot: {len(new_servers)} new MCP server(s): {', '.join(sorted(new_servers))}")
+    if gone_servers:
+        _log(f"Snapshot: {len(gone_servers)} removed MCP server(s): {', '.join(sorted(gone_servers))}")
+
+    state["claude_json_snapshot"] = snapshot
+    _write_atomic(STATE_JSON, state)
+
+
 def _check_new_projects(known_servers_file: Path) -> None:
     """Backfill disabledMcpServers for project entries that are missing it.
 
@@ -702,6 +751,10 @@ def _run_daemon(poll_sec: int) -> None:
                 _check_new_projects(known_servers_file)
             except Exception as proj_err:
                 _log(f"New project check error: {proj_err}")
+            try:
+                _update_claude_json_snapshot()
+            except Exception as snap_err:
+                _log(f"Snapshot update error: {snap_err}")
 
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
