@@ -1,7 +1,8 @@
 """Tests for CLAUDE.md sanity check guardrail."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from hooks.hook_manager import BlockAction
 
