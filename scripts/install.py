@@ -70,6 +70,39 @@ from pathlib import Path
 
 import yaml
 
+
+def _get_version() -> str:
+    """Read agentihooks version from importlib or pyproject.toml."""
+    try:
+        from importlib.metadata import version
+
+        return version("agentihooks")
+    except Exception:
+        pass
+    toml = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if toml.exists():
+        for line in toml.read_text().splitlines():
+            if line.startswith("version"):
+                return line.split('"')[1]
+    return "unknown"
+
+
+def _get_version() -> str:
+    """Read version from importlib or pyproject.toml."""
+    try:
+        from importlib.metadata import version
+
+        return version("agentihooks")
+    except Exception:
+        pass
+    toml = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if toml.exists():
+        for line in toml.read_text().splitlines():
+            if line.startswith("version"):
+                return line.split('"')[1]
+    return "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -2634,15 +2667,41 @@ def _install_project_inner(args: argparse.Namespace) -> None:
 
     mcp_dst = project_path / _MCP_JSON_NAME
     if mcp_dst.exists():
-        answer = input(f"{_MCP_JSON_NAME} already exists at {mcp_dst}. Overwrite? [y/N] ").strip().lower()
-        if answer != "y":
-            print("Aborted.")
-            sys.exit(0)
+        # Never overwrite — merge new keys only
+        try:
+            existing_mcp = load_json(mcp_dst)
+        except (json.JSONDecodeError, OSError):
+            existing_mcp = {}
 
-    save_json(mcp_dst, rendered_mcp)
-    _cprint(f"[OK] Wrote {mcp_dst}")
+        existing_servers = existing_mcp.get("mcpServers", {})
+        new_servers = rendered_mcp.get("mcpServers", {})
+        keys_to_add = {k: v for k, v in new_servers.items() if k not in existing_servers}
+
+        if keys_to_add:
+            answer = (
+                input(
+                    f"{_MCP_JSON_NAME} exists at {mcp_dst}.\n"
+                    f"  New servers to add: {', '.join(keys_to_add.keys())}\n"
+                    f"  Merge? [y/N] "
+                )
+                .strip()
+                .lower()
+            )
+            if answer == "y":
+                existing_servers.update(keys_to_add)
+                existing_mcp["mcpServers"] = existing_servers
+                save_json(mcp_dst, existing_mcp)
+                _cprint(f"[OK] Merged {len(keys_to_add)} server(s) into {mcp_dst}")
+            else:
+                _cprint(f"[--] Skipped {mcp_dst} (no changes)")
+        else:
+            _cprint(f"[--] {mcp_dst} already has all servers — no changes")
+    else:
+        save_json(mcp_dst, rendered_mcp)
+        _cprint(f"[OK] Created {mcp_dst}")
+
     print()
-    print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify the hooks-utils server.")
+    print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify.")
 
     # Register as sync daemon target
     _register_target_project(project_path, profile_name)
