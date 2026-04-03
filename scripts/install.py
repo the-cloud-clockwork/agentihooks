@@ -29,6 +29,10 @@ Commands:
     agentihooks quota [auth|status|stop|logs]
         Manage the Claude.ai console quota watcher.
 
+    agentihooks prune [-v]
+        Remove stale MCP entries from disabledMcpServers, known-mcp-servers.json,
+        and settings.local.json. Also runs automatically on every daemon cycle.
+
     agentihooks ignore [path] [--force]
         Create a .claudeignore in the current directory.
 
@@ -2982,15 +2986,32 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
         os.execlp("tail", "tail", "-f", str(log_file))
 
     elif args.action == "stop":
+        stopped = []
+        # Kill PID from file
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, signal.SIGTERM)
-                pid_file.unlink(missing_ok=True)
-                print(f"[sync] Daemon stopped (PID {pid}).")
+                stopped.append(pid)
             except (ProcessLookupError, ValueError):
-                pid_file.unlink(missing_ok=True)
-                print("[sync] No daemon running (stale PID cleaned up).")
+                pass
+            pid_file.unlink(missing_ok=True)
+        # Kill any orphaned daemon processes
+        import subprocess as _sp
+        try:
+            result = _sp.run(
+                ["pgrep", "-f", "sync_daemon.py.*--foreground"],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.strip().splitlines():
+                orphan_pid = int(line.strip())
+                if orphan_pid not in stopped:
+                    os.kill(orphan_pid, signal.SIGTERM)
+                    stopped.append(orphan_pid)
+        except (OSError, ValueError):
+            pass
+        if stopped:
+            print(f"[sync] Daemon stopped (PID(s): {', '.join(str(p) for p in stopped)}).")
         else:
             print("[sync] No daemon running.")
 
@@ -3555,6 +3576,9 @@ def main() -> None:
 
     sub.add_parser("status", help="Show installation health, cost guardrails, and system state")
 
+    prune_p = sub.add_parser("prune", help="Remove stale MCP entries from all config files")
+    prune_p.add_argument("--verbose", "-v", action="store_true", help="Show details of each pruned entry")
+
     p_migrate = sub.add_parser("migrate", help="Fix ~/.claude.json project entries after repos move")
     p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
     p_migrate.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
@@ -3656,6 +3680,26 @@ def main() -> None:
         from scripts.status_checker import format_cli, run_all_checks
 
         print(format_cli(run_all_checks()))
+    elif args.command == "prune":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.sync_daemon import _prune_stale_mcp_servers, _get_valid_mcp_names
+
+        known_servers_file = AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json"
+        verbose = getattr(args, "verbose", False)
+        valid = _get_valid_mcp_names()
+        print(f"Valid MCP servers ({len(valid)}): {', '.join(sorted(valid))}")
+        summary = _prune_stale_mcp_servers(known_servers_file, verbose=True)
+        total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"]
+        if total == 0:
+            print("No stale MCP entries found — everything is clean.")
+        else:
+            print(f"\nPruned {total} stale entries:")
+            if summary["pruned_disabled"]:
+                print(f"  disabledMcpServers: {summary['pruned_disabled']} entries from {summary['projects_touched']} project(s)")
+            if summary["pruned_known"]:
+                print(f"  known-mcp-servers.json: {summary['pruned_known']} entries")
+            if summary["pruned_settings"]:
+                print(f"  settings.local.json: {summary['pruned_settings']} entries")
     elif args.command == "migrate":
         cmd_migrate(args)
 

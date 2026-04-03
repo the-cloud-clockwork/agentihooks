@@ -473,23 +473,139 @@ def _execute_actions(actions: dict, state: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# MCP server tracking — additive-only blacklisting
+# MCP server tracking
 # ---------------------------------------------------------------------------
 
 
-def _get_all_known_mcp_names_from_claude_json() -> set[str]:
-    """Read ALL MCP server names from ~/.claude.json."""
+def _get_valid_mcp_names() -> set[str]:
+    """Return the set of MCP server names that actually exist right now.
+
+    Sources of truth:
+    1. ~/.claude.json top-level mcpServers (globally registered)
+    2. .mcp.json files in registered project directories
+
+    Excludes claude.ai web-session entries entirely.
+    """
     data = _load_json(CLAUDE_JSON)
-    names = set(data.get("mcpServers", {}).keys())
-    names.update(data.get("claudeAiMcpEverConnected", []))
+    # Global servers (exclude claude.ai web-session entries)
+    valid = {
+        name for name in data.get("mcpServers", {}).keys()
+        if not name.startswith("claude.ai ")
+    }
+    # Project .mcp.json files
+    for proj_path in data.get("projects", {}):
+        mcp_file = Path(proj_path) / ".mcp.json"
+        if mcp_file.exists():
+            proj_mcp = _load_json(mcp_file)
+            valid.update(proj_mcp.get("mcpServers", {}).keys())
+    return valid
+
+
+def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False) -> dict:
+    """Remove stale MCP entries from all tracking locations.
+
+    Prunes:
+    1. disabledMcpServers in every project entry in ~/.claude.json
+    2. known-mcp-servers.json
+    3. settings.local.json files in project .claude/ dirs
+
+    Returns summary dict with counts.
+    """
+    valid = _get_valid_mcp_names()
+    summary = {"pruned_disabled": 0, "pruned_known": 0, "pruned_settings": 0, "projects_touched": 0}
+
+    if not valid:
+        _log("Prune: no valid MCP servers found — skipping (safety)")
+        return summary
+
+    # 1. Prune disabledMcpServers in ~/.claude.json projects
+    data = _load_json(CLAUDE_JSON)
+    projects = data.get("projects", {})
+    claude_json_dirty = False
+    for proj_path, proj_data in projects.items():
+        if not isinstance(proj_data, dict):
+            continue
+        disabled = proj_data.get("disabledMcpServers", [])
+        if not disabled:
+            continue
+        cleaned = [s for s in disabled if s in valid]
+        removed_count = len(disabled) - len(cleaned)
+        if removed_count > 0:
+            proj_data["disabledMcpServers"] = sorted(cleaned)
+            summary["pruned_disabled"] += removed_count
+            summary["projects_touched"] += 1
+            claude_json_dirty = True
+            if verbose:
+                stale = set(disabled) - valid
+                _log(f"  Pruned {removed_count} stale entries from {proj_path}: {sorted(stale)}")
+
+    if claude_json_dirty:
+        _write_atomic(CLAUDE_JSON, data)
+
+    # 2. Prune known-mcp-servers.json
+    known_data = _load_json(known_servers_file)
+    known_list = set(known_data.get("knownMcpServers", []))
+    stale_known = known_list - valid
+    if stale_known:
+        known_data["knownMcpServers"] = sorted(known_list - stale_known)
+        _write_atomic(known_servers_file, known_data)
+        summary["pruned_known"] = len(stale_known)
+        if verbose:
+            _log(f"  Pruned {len(stale_known)} from known-mcp-servers.json: {sorted(stale_known)}")
+
+    # 3. Prune settings.local.json files in projects
+    for proj_path in projects:
+        settings_file = Path(proj_path) / ".claude" / "settings.local.json"
+        if not settings_file.exists():
+            continue
+        settings = _load_json(settings_file)
+        dirty = False
+        for key in ("disabledMcpjsonServers", "enabledMcpjsonServers"):
+            entries = settings.get(key, [])
+            if not entries:
+                continue
+            # For settings.local.json, validate against that project's .mcp.json
+            proj_mcp_file = Path(proj_path) / ".mcp.json"
+            proj_mcp_names = set()
+            if proj_mcp_file.exists():
+                proj_mcp_names = set(_load_json(proj_mcp_file).get("mcpServers", {}).keys())
+            # Also include global servers as valid
+            all_valid_for_project = valid | proj_mcp_names
+            cleaned = [s for s in entries if s in all_valid_for_project]
+            removed = len(entries) - len(cleaned)
+            if removed > 0:
+                settings[key] = sorted(cleaned)
+                dirty = True
+                summary["pruned_settings"] += removed
+                if verbose:
+                    stale_entries = set(entries) - all_valid_for_project
+                    _log(f"  Pruned {removed} from {settings_file}: {sorted(stale_entries)}")
+        if dirty:
+            _write_atomic(settings_file, settings)
+
+    total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"]
+    if total > 0:
+        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings)")
+
+    return summary
+
+
+def _get_all_known_mcp_names_from_claude_json() -> set[str]:
+    """Read local MCP server names from ~/.claude.json.
+
+    Excludes claude.ai web-session entries — those are managed by claude.ai,
+    not local config, and should not be tracked or blacklisted.
+    """
+    data = _load_json(CLAUDE_JSON)
+    names = {
+        name for name in data.get("mcpServers", {}).keys()
+        if not name.startswith("claude.ai ")
+    }
     return names
 
 
 def _check_new_mcp_servers(known_servers_file: Path) -> None:
-    """Detect new MCP servers and add them to disabledMcpServers in all projects.
-
-    Additive-only: never removes from disabledMcpServers (preserves UI toggles).
-    """
+    """Detect new MCP servers and add them to disabledMcpServers in all projects."""
     current = _get_all_known_mcp_names_from_claude_json()
     if not current:
         return
@@ -602,6 +718,8 @@ def _check_new_projects(known_servers_file: Path) -> None:
     if not all_servers:
         # Fall back to reading directly from ~/.claude.json
         all_servers = _get_all_known_mcp_names_from_claude_json()
+    # Never backfill claude.ai web-session entries
+    all_servers = {s for s in all_servers if not s.startswith("claude.ai ")}
     if not all_servers:
         return
 
@@ -747,6 +865,11 @@ def _run_daemon(poll_sec: int) -> None:
                 _update_claude_json_snapshot()
             except Exception as snap_err:
                 _log(f"Snapshot update error: {snap_err}")
+            # Prune LAST — after all additions, so we don't fight with backfill
+            try:
+                _prune_stale_mcp_servers(known_servers_file)
+            except Exception as prune_err:
+                _log(f"MCP prune error: {prune_err}")
 
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
