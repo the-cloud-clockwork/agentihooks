@@ -439,28 +439,20 @@ def _execute_actions(actions: dict, state: dict) -> dict:
             proj_info = targets.get("projects", {}).get(proj_path, {})
             profile = proj_info.get("profile", "default")
             try:
-                _log(f"Re-installing project {proj_path} (profile={profile})")
-                ns = argparse.Namespace(profile=profile, path=proj_path)
-                # Bypass interactive confirmation for overwrites
-                import builtins
-
-                original_input = builtins.input
-                builtins.input = lambda *a, **kw: "y"
-                try:
-                    install._install_project_inner(ns)
-                finally:
-                    builtins.input = original_input
-                summary["projects_reinstalled"].append(proj_path)
-                _log(f"Project re-install complete: {proj_path}")
-            except SystemExit as e:
-                if e.code and e.code != 0:
-                    _log(f"ERROR re-installing project {proj_path}: exit code {e.code}")
-                    summary["errors"].append(f"project:{proj_path}: exit {e.code}")
+                _log(f"Syncing project settings {proj_path} (profile={profile})")
+                # Read per-repo config if it exists, otherwise use profile only
+                config_path = p / ".agentihooks.json"
+                if config_path.exists():
+                    config = json.loads(config_path.read_text())
+                    config.setdefault("profile", profile)
                 else:
-                    summary["projects_reinstalled"].append(proj_path)
-                    _log(f"Project re-install complete: {proj_path} (sys.exit caught)")
+                    config = {"profile": profile}
+                # Only sync settings — do NOT create/overwrite .mcp.json
+                install._write_project_settings(p, config)
+                summary["projects_reinstalled"].append(proj_path)
+                _log(f"Project settings sync complete: {proj_path}")
             except Exception as e:
-                _log(f"ERROR re-installing project {proj_path}: {e}")
+                _log(f"ERROR syncing project {proj_path}: {e}")
                 summary["errors"].append(f"project:{proj_path}: {e}")
 
         if actions["sync_mcp"]:
