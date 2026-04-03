@@ -297,9 +297,7 @@ def main() -> None:
                     five_h = rate_limits.get("five_hour", {})
                     session_pct = five_h.get("used_percentage", 0) or 0
                     if session_pct > 50:
-                        parts_3.append(
-                            f"{_YELLOW}PEAK — sessions burn faster until {PEAK_HOURS_END}am PT{_RESET}"
-                        )
+                        parts_3.append(f"{_YELLOW}PEAK — sessions burn faster until {PEAK_HOURS_END}am PT{_RESET}")
                     else:
                         parts_3.append(f"{_YELLOW}PEAK {PEAK_HOURS_START}am-{PEAK_HOURS_END}am PT{_RESET}")
                 else:
