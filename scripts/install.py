@@ -87,22 +87,6 @@ def _get_version() -> str:
     return "unknown"
 
 
-def _get_version() -> str:
-    """Read version from importlib or pyproject.toml."""
-    try:
-        from importlib.metadata import version
-
-        return version("agentihooks")
-    except Exception:
-        pass
-    toml = Path(__file__).resolve().parent.parent / "pyproject.toml"
-    if toml.exists():
-        for line in toml.read_text().splitlines():
-            if line.startswith("version"):
-                return line.split('"')[1]
-    return "unknown"
-
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1810,6 +1794,12 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _register_target_global(profile_name)
     _snapshot_claude_json()
 
+    # --- Track version in state.json ---
+    state = _load_state()
+    state["version"] = _get_version()
+    state["installed_at"] = datetime.now(timezone.utc).isoformat()
+    _save_state(state)
+
     # --- Done ---
     print()
     print(f"{_GREEN}{_BOLD}Installation complete.{_RESET}")
@@ -3468,7 +3458,16 @@ def main() -> None:
         action="store_true",
         help="Print the currently active global profile name and exit",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"agentihooks {_get_version()}",
+    )
     sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("version", help="Print version")
+    update_p = sub.add_parser("update", help="Self-update agentihooks")
+    update_p.add_argument("--source", default="", help="Custom pip source (default: editable reinstall)")
 
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
@@ -3574,7 +3573,33 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    if args.command == "uninstall":
+    if args.command == "version":
+        print(f"agentihooks {_get_version()}")
+    elif args.command == "update":
+        import subprocess as _sp
+
+        ver_before = _get_version()
+        print(f"Current version: {ver_before}")
+        source = getattr(args, "source", "") or "."
+        root = Path(__file__).resolve().parent.parent
+        cmd = ["uv", "tool", "install", "--editable", "--force", str(root)]
+        print(f"Running: {' '.join(cmd)}")
+        result = _sp.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            ver_after = _get_version()
+            if ver_after != ver_before:
+                print(f"Updated: {ver_before} -> {ver_after}")
+            else:
+                print("Already up to date.")
+            # Update state.json with new version
+            state = _load_state()
+            state["version"] = ver_after
+            state["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _save_state(state)
+        else:
+            print(f"Update failed:\n{result.stderr}", file=sys.stderr)
+            sys.exit(1)
+    elif args.command == "uninstall":
         uninstall_global(args)
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
