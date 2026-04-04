@@ -501,6 +501,47 @@ def _get_valid_mcp_names() -> set[str]:
     return valid
 
 
+def _snapshot_project_enabled_mcps() -> None:
+    """Read ~/.claude.json and record which MCPs each project has enabled into state.json.
+
+    This runs at the start of every poll cycle so that user-enabled MCPs are
+    captured before any write operations can overwrite them.
+    Only updates projects already registered in state.json targets.
+    """
+    data = _load_json(CLAUDE_JSON)
+    all_servers = set(data.get("mcpServers", {}).keys())
+    all_servers = {s for s in all_servers if not s.startswith("claude.ai ")}
+    if not all_servers:
+        return
+
+    projects = data.get("projects", {})
+    if not projects:
+        return
+
+    state = _load_json(STATE_JSON)
+    targets = state.get("targets", {})
+    state_projects = targets.get("projects", {})
+    if not state_projects:
+        return
+
+    changed = False
+    for proj_path, proj_data in projects.items():
+        if not isinstance(proj_data, dict):
+            continue
+        if proj_path not in state_projects:
+            continue
+        disabled = set(proj_data.get("disabledMcpServers", []))
+        enabled = sorted(all_servers - disabled)
+        prev = state_projects[proj_path].get("enabled_mcps")
+        if prev != enabled:
+            state_projects[proj_path]["enabled_mcps"] = enabled
+            changed = True
+
+    if changed:
+        _write_atomic(STATE_JSON, state)
+        _log("Snapshot: updated per-project enabled_mcps in state.json")
+
+
 def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False) -> dict:
     """Remove stale MCP entries from all tracking locations.
 
@@ -583,9 +624,28 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
         if dirty:
             _write_atomic(settings_file, settings)
 
-    total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"]
+    # 4. Prune enabled_mcps in state.json — remove servers that no longer exist
+    state = _load_json(STATE_JSON)
+    state_projects = state.get("targets", {}).get("projects", {})
+    state_dirty = False
+    pruned_enabled = 0
+    for proj_path, proj_info in state_projects.items():
+        enabled = proj_info.get("enabled_mcps", [])
+        if not enabled:
+            continue
+        cleaned = [s for s in enabled if s in valid]
+        removed = len(enabled) - len(cleaned)
+        if removed > 0:
+            proj_info["enabled_mcps"] = cleaned
+            pruned_enabled += removed
+            state_dirty = True
+    if state_dirty:
+        _write_atomic(STATE_JSON, state)
+    summary["pruned_enabled"] = pruned_enabled
+
+    total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"] + pruned_enabled
     if total > 0:
-        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings)")
+        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings, {pruned_enabled} enabled)")
 
     return summary
 
@@ -850,6 +910,12 @@ def _run_daemon(poll_sec: int) -> None:
                 _save_hashes(new_hashes)
                 old_hashes = new_hashes
                 old_source_map = dict(source_files)
+
+            # Snapshot per-project enabled MCPs BEFORE any writes
+            try:
+                _snapshot_project_enabled_mcps()
+            except Exception as snap_mcps_err:
+                _log(f"Enabled MCP snapshot error: {snap_mcps_err}")
 
             # Always check for new MCP servers and new projects (every cycle)
             known_servers_file = AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json"

@@ -1885,16 +1885,30 @@ def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
 
 
 def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> None:
-    """Write disabledMcpServers to ~/.claude.json projects[path] block."""
+    """Write disabledMcpServers to ~/.claude.json projects[path] block.
+
+    Respects per-project user-enabled MCPs tracked in state.json —
+    any server the user manually enabled for this project stays enabled.
+    """
     if not _CLAUDE_JSON.exists():
         return
     try:
+        # Read per-project enabled MCPs from state and subtract them
+        state = _load_state()
+        proj_state = state.get("targets", {}).get("projects", {}).get(str(repo_path), {})
+        user_enabled = set(proj_state.get("enabled_mcps", []))
+        final_disabled = sorted(set(disabled_names) - user_enabled)
+
         data = load_json(_CLAUDE_JSON)
         projects = data.setdefault("projects", {})
         proj = projects.setdefault(str(repo_path), {})
-        proj["disabledMcpServers"] = disabled_names
+        proj["disabledMcpServers"] = final_disabled
         save_json(_CLAUDE_JSON, data)
-        _cprint(f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(disabled_names)} servers)")
+        kept = len(disabled_names) - len(final_disabled)
+        msg = f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(final_disabled)} servers)"
+        if kept:
+            msg += f" — kept {kept} user-enabled"
+        _cprint(msg)
     except (json.JSONDecodeError, OSError) as e:
         _cprint(f"  [WARN] Could not update ~/.claude.json: {e}")
 
@@ -1952,16 +1966,21 @@ def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
     profile_enabled = _get_profile_enabled_servers(profile_dir)
     to_disable = sorted(all_known - (profile_enabled or set()))
 
+    # Read per-project enabled MCPs from state so we don't overwrite user choices
+    state = _load_state()
+    state_projects = state.get("targets", {}).get("projects", {})
+
     updated = 0
     for proj_path, proj_data in projects.items():
         if not isinstance(proj_data, dict):
             continue
-        proj_data["disabledMcpServers"] = to_disable
+        user_enabled = set(state_projects.get(proj_path, {}).get("enabled_mcps", []))
+        proj_data["disabledMcpServers"] = sorted(set(to_disable) - user_enabled)
         updated += 1
 
     if updated:
         save_json(_CLAUDE_JSON, data)
-        _cprint(f"  [OK] Blacklisted {len(to_disable)} MCPs across {updated} project(s) in ~/.claude.json")
+        _cprint(f"  [OK] Blacklisted MCPs across {updated} project(s) in ~/.claude.json (respecting per-project enables)")
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:
