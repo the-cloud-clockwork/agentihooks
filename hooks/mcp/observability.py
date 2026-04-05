@@ -51,8 +51,11 @@ def register(mcp):
                     continue
 
                 # Filter by session_id
+                payload = entry.get("payload") or {}
+                if isinstance(payload, str):
+                    payload = {}
                 if session_id:
-                    entry_sid = (entry.get("payload") or {}).get("session_id", "")
+                    entry_sid = payload.get("session_id", "")
                     if session_id not in entry_sid:
                         continue
 
@@ -60,7 +63,7 @@ def register(mcp):
 
                 # Filter by level keyword
                 if level and level.lower() not in msg.lower():
-                    payload_str = json.dumps(entry.get("payload", {})).lower()
+                    payload_str = json.dumps(payload).lower()
                     if level.lower() not in payload_str:
                         continue
 
