@@ -47,7 +47,9 @@ def register(mcp):
                     continue
                 try:
                     entry = json.loads(line)
-                except json.JSONDecodeError:
+                    if not isinstance(entry, dict):
+                        continue
+                except (json.JSONDecodeError, ValueError):
                     continue
 
                 # Filter by session_id
