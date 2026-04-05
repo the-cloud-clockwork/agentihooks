@@ -14,6 +14,12 @@ agentihooks --list-profiles
 # Use a bundle profile
 agentihooks init --profile my-custom-profile
 
+# Chain multiple profiles (comma-separated)
+agentihooks init --profile coding,my-custom-profile
+
+# Update bundle from remote
+agentihooks bundle pull
+
 # Per-repo config
 agentihooks init --repo ~/dev/some-project
 ```

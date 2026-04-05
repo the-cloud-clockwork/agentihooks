@@ -60,7 +60,7 @@ All paths use `/app` as a placeholder. The install script substitutes `/app` wit
 
 ### `CLAUDE.md` (at profile root)
 
-The agent's system prompt. This file lives at the **profile root** (not inside `.claude/`). The install script symlinks `~/.claude/CLAUDE.md` to the chosen profile's `CLAUDE.md`.
+The agent's system prompt. This file lives at the **profile root** (not inside `.claude/`). The install script copies it to `~/.claude/CLAUDE.md` (as a real file, not a symlink, for WSL/Windows compatibility). In chain mode, multiple profiles' CLAUDE.md files are concatenated.
 
 ### `.claude/settings.overrides.json`
 
@@ -145,11 +145,11 @@ agentihooks init
 This is especially useful in CI/Docker automation where the profile is set once in the container environment.
 
 Either way, the command atomically:
-1. Replaces the `~/.claude/CLAUDE.md` symlink
+1. Writes `~/.claude/CLAUDE.md` (copy for single profile, concatenation for chains)
 2. Updates `MCP_CATEGORIES` in the hook environment
-3. Re-merges settings overrides
-4. Re-symlinks skills, agents, commands, and rules (3-layer merge)
-5. Re-merges MCP servers
+3. Re-merges settings overrides (sequential deep merge across all chained profiles)
+4. Re-symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
+5. Re-merges MCP servers (additive across chain)
 
 The switch takes effect on the next Claude Code session.
 
@@ -196,3 +196,88 @@ For example, `permission_mode: bypassPermissions` in profile.yml translates to `
 
 {: .note }
 Profiles affect the **agent's persona, tool access, and asset selection** but not the underlying hook behavior. Hooks are always wired from `_base/settings.base.json` regardless of profile.
+
+---
+
+## Profile chaining
+
+You can combine multiple profiles by separating them with commas:
+
+```bash
+agentihooks init --profile coding,colt
+```
+
+Profiles are applied **left to right** — the last profile has highest priority for simple values, and all profiles contribute additively for hooks, rules, skills, agents, commands, and MCP servers.
+
+### How chaining works
+
+Given `--profile coding,colt`:
+
+```
+settings.base.json                    ← base hooks + defaults
+        ↓
+coding/settings.overrides.json        ← merged on top (dicts merge, hooks append)
+        ↓
+colt/settings.overrides.json          ← merged on top (dicts merge, hooks append)
+        ↓
+~/.claude/settings.json               ← final result
+```
+
+### Per-entity behavior in chains
+
+| Entity | Chain behavior |
+|--------|---------------|
+| **Settings** | Sequential deep merge — each profile merges on top. Dicts combine, hooks append, simple values = last wins. |
+| **Rules/Skills/Agents/Commands** | Additive across all profiles. Same filename = later profile wins. |
+| **CLAUDE.md** | **Concatenated** into one file with `---` separators and `<!-- profile: name -->` markers. All profiles' system prompts are active. |
+| **MCP servers** | Additive — all profiles' servers accumulate. |
+| **Connectors / OTEL** | Last profile in chain provides these. |
+
+### CLAUDE.md concatenation
+
+In chain mode, all profiles' `CLAUDE.md` files are concatenated into a single real file at `~/.claude/CLAUDE.md`. Each section is marked with an HTML comment:
+
+```markdown
+<!-- profile: coding -->
+# Coding Agent
+...
+
+---
+
+<!-- profile: colt -->
+# Colt Profile
+...
+```
+
+Claude Code loads the entire file as its system prompt, so instructions from all chained profiles are active simultaneously.
+
+{: .note }
+In single-profile mode, `CLAUDE.md` is a direct copy of the source file. In chain mode, it's a rendered concatenation. Both are real files (not symlinks) for WSL/Windows compatibility. The sync daemon detects source changes and re-renders automatically.
+
+### Querying the active chain
+
+```bash
+agentihooks --query
+```
+
+Single profile output:
+```
+colt
+```
+
+Chain output:
+```
+chain: [coding, colt]
+```
+
+### Example: combining a coding base with operator customizations
+
+```bash
+agentihooks init --profile coding,colt
+```
+
+This gives you:
+- **coding's** git safety rules, retry breaker, security rules
+- **colt's** operator behavioral model, delegation map, response template
+- Both profiles' settings merged (hooks appended, env vars combined)
+- Both profiles' rules, skills, agents, commands all present

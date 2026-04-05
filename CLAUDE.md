@@ -91,9 +91,9 @@ profiles/<name>/
     └── rules/                   # → ~/.claude/rules/
 ```
 
-3-layer merge: agentihooks built-in → bundle global → profile-specific.
+3-layer merge: agentihooks built-in → bundle global → profile-specific. Profiles can be chained with commas: `--profile coding,colt` applies each profile's assets and settings sequentially (hooks append, CLAUDE.md files concatenated, rules/skills additive).
 
-`_base` is not a profile; it holds `settings.base.json` which every install derives from. Current profiles: `default`, `admin`, `coding`.
+`_base` is not a profile; it holds `settings.base.json` which every install derives from. Current profiles: `default`, `admin`, `coding`. CLAUDE.md is always written as a real file (not a symlink) for WSL/Windows compatibility.
 
 ### Token Control Layer
 

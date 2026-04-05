@@ -76,6 +76,13 @@ agentihooks quota logs                       # tail daemon log
 agentihooks quota stop                       # kill daemon
 agentihooks quota remove <name>              # delete account
 
+# Bundle management
+agentihooks bundle list                      # show linked bundle + profiles
+agentihooks bundle pull                      # git pull the linked bundle
+agentihooks bundle pull --rebase             # git pull --rebase
+agentihooks bundle link ~/dev/my-tools       # link a bundle directory
+agentihooks bundle unlink                    # unlink current bundle
+
 # Sync daemon (auto-propagation)
 agentihooks daemon start                     # start background daemon (60s poll)
 agentihooks daemon status                    # show targets + watched files
@@ -101,9 +108,9 @@ CLI output uses colored markers: `[OK]` green, `[--]` dim, `[!!]` yellow, `[RM]`
 ## What `init` Does
 
 1. Links bundle (if `--bundle` provided)
-2. Merges settings: `settings.base.json` -> profile `settings.overrides.json` -> OTEL config
-3. Symlinks skills, agents, commands, and rules (3-layer merge)
-4. Symlinks `CLAUDE.md` from profile root to `~/.claude/CLAUDE.md`
+2. Merges settings: `settings.base.json` -> each profile's `settings.overrides.json` (chained) -> OTEL config
+3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
+4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md` (copy for single profile, concatenated for chains)
 5. Installs MCP servers (hooks-utils + bundle + profile)
 6. Applies MCP blacklist to all registered projects
 7. Installs CLI globally via `uv tool`
@@ -131,7 +138,9 @@ Built-in profiles: `default`, `coding`, `admin`. Bundle profiles are discovered 
 
 **3-layer merge:** agentihooks built-in -> bundle global `.claude/` -> profile-specific `.claude/`. Applies to skills, agents, commands, rules, and MCP servers.
 
-Switch profiles: `agentihooks init --profile <name>`. List all: `agentihooks --list-profiles`.
+Switch profiles: `agentihooks init --profile <name>`. Chain profiles: `agentihooks init --profile coding,colt`. List all: `agentihooks --list-profiles`.
+
+**Profile chaining:** Comma-separated profiles are applied left to right. Settings deep-merge sequentially (hooks append), rules/skills/agents/commands accumulate additively, CLAUDE.md files are concatenated into one file with `---` separators. Query: `agentihooks --query` shows `chain: [coding, colt]`.
 
 ### `agentihooks claude`
 
@@ -184,7 +193,7 @@ AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CL
 | **Commands** (`commands/*.md`) | Additive | Later layer overwrites symlink | Same filename = profile version wins |
 | **Settings** (`settings.json`) | Deep merge | Dicts merge, hook arrays append, other arrays replace | See key-by-key table below |
 | **MCP servers** (`.mcp.json`) | Additive | Same server name = later layer overwrites | Different server names accumulate |
-| **CLAUDE.md** | Single file | Profile replaces entirely | No merging -- the profile's `CLAUDE.md` is symlinked as-is |
+| **CLAUDE.md** | Copy (single) / Concatenate (chain) | Last profile wins (single); all profiles merged (chain) | Written as a real file, not a symlink (WSL/Windows compatible) |
 | **.env files** | Load order | Later file overrides same key | `~/.agentihooks/.env` first, then `*.env` alphabetically |
 
 **Key implication for rules:** If your bundle defines `rules/python-files.md` and your profile also defines `rules/python-files.md`, the profile version wins (Layer 3 re-links over Layer 2). To add rules without overriding, use unique filenames. All rules from all layers with distinct names coexist in `~/.claude/rules/`.

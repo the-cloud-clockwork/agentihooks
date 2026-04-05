@@ -31,8 +31,8 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 3. Substitutes `/app` -> real repo path and `__PYTHON__` -> venv Python in all commands
 4. Preserves personal keys (`model`, `autoUpdatesChannel`, `skipDangerousModePermissionPrompt`) from any pre-existing unmanaged settings
 5. Writes `~/.claude/settings.json` with hook wiring and tool permissions
-6. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> profile-specific)
-7. Symlinks `~/.claude/CLAUDE.md` -> chosen profile's `CLAUDE.md` (at profile root)
+6. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> each profile in chain)
+7. Writes `~/.claude/CLAUDE.md` -- single profile: file copy; chained profiles: concatenated with `---` separators and `<!-- profile: name -->` markers
 8. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
 9. Applies MCP blacklist across all projects (`disabledMcpServers`)
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
@@ -44,7 +44,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
-| `--profile <name>` | Profile to install (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
+| `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,colt` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--repo <path>` | Target repo directory for per-repo configuration |
 
 ### Environment variables
@@ -348,12 +348,61 @@ agentihooks --list-profiles
 
 ---
 
+## `agentihooks bundle`
+
+Manage the linked bundle directory.
+
+```bash
+agentihooks bundle <action> [path] [--rebase]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `link <path>` | Link a bundle directory. Stores the path in `state.json`. |
+| `unlink` | Unlink the current bundle. |
+| `list` | Show the linked bundle path, linked date, and available profiles. |
+| `pull` | Run `git pull` on the linked bundle directory. |
+| `pull --rebase` | Run `git pull --rebase` on the linked bundle directory. |
+
+### Examples
+
+```bash
+# Link a bundle
+agentihooks bundle link ~/dev/my-tools
+
+# Update bundle from remote
+agentihooks bundle pull
+
+# Update with rebase
+agentihooks bundle pull --rebase
+
+# Show bundle info
+agentihooks bundle list
+
+# Unlink
+agentihooks bundle unlink
+```
+
+---
+
 ## `agentihooks --query`
 
-Print the currently active profile name and exit.
+Print the currently active profile (or chain) and exit.
 
 ```bash
 agentihooks --query
+```
+
+Single profile output:
+```
+colt
+```
+
+Chain output:
+```
+chain: [coding, colt]
 ```
 
 ---
@@ -433,7 +482,7 @@ agentihooks extract-skill "<Section Heading>" --name <skill-name> [--source <pat
 The hook and MCP server modules can be run directly with Python:
 
 ```bash
-# Run the MCP tool server (all 26 tools)
+# Run the MCP tool server (all 15 tools)
 python -m hooks.mcp
 
 # Run with specific categories
