@@ -6,7 +6,7 @@ nav_order: 10
 # Observability Tools
 {: .no_toc }
 
-The Observability category provides timing utilities, metrics aggregation, structured logging, and container log tailing across Docker, Kubernetes, and AWS ECS.
+The Observability category provides session log diagnostics and container log tailing across Docker, Kubernetes, and AWS ECS.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -20,92 +20,32 @@ The Observability category provides timing utilities, metrics aggregation, struc
 
 | Tool | Description |
 |------|-------------|
-| `metrics_start_timer()` | Start a named timer |
-| `metrics_stop_timer()` | Stop a timer and get elapsed time |
-| `metrics_create_collector()` | Create or get a named metrics collector |
-| `metrics_get_summary()` | Get aggregated stats from a collector |
-| `log_message()` | Write a structured log entry |
-| `log_command_output()` | Log command output (gated by env var) |
+| `read_session_logs()` | Read hooks log entries filtered by session, level, or event |
 | `tail_container_logs()` | Tail logs from Docker, Kubernetes, or ECS |
 
 ---
 
 ## Tool reference
 
-### `metrics_start_timer`
+### `read_session_logs`
 
 ```python
-metrics_start_timer(name: str = "") -> str
+read_session_logs(
+    session_id: str = "",
+    level: str = "",
+    event: str = "",
+    tail: int = 100
+) -> str
 ```
 
-Starts a named timer. The returned `timer_id` is used to stop it.
+Reads the hooks log (`~/.agentihooks/logs/hooks.log`) and returns matching entries. Every hook event is recorded here: MCP failures, secrets warnings, context refresh, retry breaker trips, file read cache blocks, token warnings, and more.
 
-**Returns:** JSON with `timer_id`, `started_at` (ISO 8601)
+- **`session_id`** — filter by session (partial match, e.g. `"e361d38d"`)
+- **`level`** — filter by keyword in message or payload (e.g. `"error"`, `"warning"`, `"failed"`, `"blocked"`)
+- **`event`** — filter by event type in message (e.g. `"Pre tool use"`, `"context_refresh"`)
+- **`tail`** — return the most recent N matching entries (default: 100)
 
----
-
-### `metrics_stop_timer`
-
-```python
-metrics_stop_timer(timer_id: str) -> str
-```
-
-Stops the timer and returns elapsed time.
-
-**Returns:** JSON with `timer_id`, `started_at`, `elapsed_ms`, `elapsed_s`
-
----
-
-### `metrics_create_collector`
-
-```python
-metrics_create_collector(name: str = "default") -> str
-```
-
-Creates or retrieves a named metrics collector. Multiple timers can be recorded against a single collector for aggregate statistics.
-
-**Returns:** JSON with `name`, `metrics_count`
-
----
-
-### `metrics_get_summary`
-
-```python
-metrics_get_summary(collector_name: str = "default") -> str
-```
-
-Returns aggregate statistics across all timers recorded to the collector.
-
-**Returns:** JSON with `name`, `summary` containing:
-- `count` — number of measurements
-- `avg_ms` — average elapsed time
-- `p95_ms` — 95th percentile
-- `p99_ms` — 99th percentile
-- `success_rate` — fraction of successful measurements
-
----
-
-### `log_message`
-
-```python
-log_message(message: str, payload: str = "{}") -> str
-```
-
-Writes a structured log entry to the hooks log file. `payload` is a JSON string of additional fields to include.
-
-**Returns:** JSON with `logged` (bool), `timestamp`, `message`
-
----
-
-### `log_command_output`
-
-```python
-log_command_output(script_name: str, output: str) -> str
-```
-
-Logs command output. Only writes when `LOG_HOOKS_COMMANDS=true` — otherwise a no-op. Useful for conditional verbosity.
-
-**Returns:** JSON with `logged` (bool), `script_name`, `output_length`
+**Returns:** JSON with `count`, `total_matches`, `entries` (list of log entry dicts)
 
 ---
 
@@ -176,6 +116,4 @@ Reads CloudWatch Logs for the ECS task. `cluster`, `log_group`, and `region` are
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLAUDE_HOOK_LOG_FILE` | No | `~/.agentihooks/logs/hooks.log` | Log file path for `log_message` |
-| `LOG_HOOKS_COMMANDS` | No | `false` | Enable `log_command_output` writes |
-| `LOG_USE_COLORS` | No | `true` | ANSI colors in log output (disable for CloudWatch) |
+| `CLAUDE_HOOK_LOG_FILE` | No | `~/.agentihooks/logs/hooks.log` | Log file path for `read_session_logs` |

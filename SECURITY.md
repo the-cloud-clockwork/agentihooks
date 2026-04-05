@@ -19,7 +19,7 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 agentihooks runs as a hook system and MCP server inside Claude Code agent containers. Keep in mind:
 
-- **MCP tools execute with the agent's permissions** -- tools like `filesystem_delete` are restricted to `/tmp` by design
+- **MCP tools execute with the agent's permissions** -- tools like `storage_upload_path` operate under the agent's credentials
 - **Integration credentials** (GitHub App, AWS, SMTP, etc.) are read from environment variables, never hardcoded
 - **No telemetry or phone-home code** exists in this project
 - **Redis connections** are optional and default to localhost

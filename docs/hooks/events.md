@@ -62,7 +62,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 1. Parses the transcript to extract metrics (`num_turns`, `duration_ms`)
 2. Logs all transcript entries to the hooks log
 3. If `FILE_READ_CACHE_ENABLED=true`: clears the file read cache for this session from Redis
-4. Cleans up the `/tmp/<session_id>/` directory
+4. If `CONTEXT_REFRESH_ENABLED=true`: clears the turn counter state (Redis key + file)
+5. Cleans up the `/tmp/<session_id>/` directory
 
 ---
 
@@ -81,6 +82,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 
 1. Scans the prompt for secrets and credentials using regex patterns
 2. If secrets are detected: injects a warning into the context (does **not** block -- warnings only at this stage)
+3. If `CONTEXT_REFRESH_ENABLED=true`: increments a per-session turn counter and, every `CONTEXT_REFRESH_INTERVAL` turns (default 20), re-injects all rules files (`~/.claude/rules/*.md` and optionally `.claude/rules/*.md`) into the context to combat attention decay in long sessions
 
 ---
 

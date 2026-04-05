@@ -21,7 +21,6 @@ The Database category covers DynamoDB and PostgreSQL integrations. All tools sup
 | Tool | Description |
 |------|-------------|
 | `dynamodb_put_item()` | Write an item to DynamoDB |
-| `postgres_insert()` | Insert a row into PostgreSQL as JSONB |
 | `postgres_execute()` | Execute a parameterized SQL query |
 
 ---
@@ -43,18 +42,6 @@ dynamodb_put_item(
 Writes a JSON item to DynamoDB. Falls back to `DYNAMODB_TABLE_NAME`, `DYNAMODB_PARTITION_KEY`, and `DYNAMODB_SORT_KEY` env vars when parameters are omitted. When `enrich=True`, merges `conversation_map.json` fields into the item.
 
 **Returns:** JSON with `success` (bool), `table_name`, `partition_key`, `partition_key_value`, `sort_key`, `sort_key_value`, `error`
-
----
-
-### `postgres_insert`
-
-```python
-postgres_insert(table: str, payload: str, enrich: bool = False) -> str
-```
-
-Inserts a JSON payload into the specified PostgreSQL table as a JSONB column. When `enrich=True`, merges session state into the payload before insert.
-
-**Returns:** JSON with `success` (bool), `table_name`, `rows_affected`, `error`
 
 ---
 

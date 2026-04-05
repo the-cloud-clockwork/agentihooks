@@ -21,7 +21,6 @@ The Email category provides SMTP email sending with support for plain text, HTML
 | Tool | Description |
 |------|-------------|
 | `email_send()` | Send an email with flexible content options |
-| `email_send_markdown_file()` | Send an email from a local markdown file |
 
 ---
 
@@ -50,23 +49,6 @@ Sends an email. Content priority: `html` > `markdown` > `body`. Supply exactly o
 - **`template`** — HTML template with `{{placeholder}}` substitution
 
 `to` accepts a single address or comma-separated list.
-
-**Returns:** JSON with `success` (bool), `recipients_count`, `error`
-
----
-
-### `email_send_markdown_file`
-
-```python
-email_send_markdown_file(
-    to: str,
-    subject: str,
-    file_path: str,
-    title: str = ""
-) -> str
-```
-
-Reads a local markdown file, converts it to styled HTML, and sends it as an email.
 
 **Returns:** JSON with `success` (bool), `recipients_count`, `error`
 

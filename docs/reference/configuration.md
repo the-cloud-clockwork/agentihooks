@@ -49,7 +49,7 @@ These variables control how `agentihooks init` installs and configures Claude Co
 | `AGENT_LOG_FILE` | `~/.agentihooks/logs/agent.log` | Agent transcript log file path. |
 | `LOG_TRANSCRIPT` | `true` | Auto-log conversation transcript entries on each hook event. |
 | `STREAM_AGENT_LOG` | `true` | Stream transcript to `AGENT_LOG_FILE` in real-time. |
-| `LOG_HOOKS_COMMANDS` | `false` | Enable `log_command_output` writes (verbose mode). |
+| `LOG_HOOKS_COMMANDS` | `false` | Enable verbose command output logging. |
 | `LOG_USE_COLORS` | `true` | ANSI colors in log output. Set `false` for CloudWatch Logs. |
 
 ---
@@ -124,6 +124,18 @@ For `Write`: counts lines in the new content. For `Edit`: reads the current file
 |----------|---------|-------------|
 | `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Enable/disable the guardrail. Set `false` or `0` to allow unrestricted edits. |
 | `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Maximum allowed lines in `CLAUDE.md` / `CLAUDE.local.md` files. |
+
+---
+
+## Context Refresh
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTEXT_REFRESH_ENABLED` | `true` | Enable/disable periodic rules re-injection on `UserPromptSubmit`. |
+| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N user messages. |
+| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Directory to load global/profile rules from. |
+| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject `.claude/rules/*.md` from the current working directory. |
+| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Maximum total characters injected per refresh (~2000 tokens). |
 
 ---
 

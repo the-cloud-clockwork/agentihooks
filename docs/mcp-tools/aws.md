@@ -22,7 +22,6 @@ The AWS category provides utilities for reading and navigating AWS CLI configura
 |------|-------------|
 | `aws_get_profiles()` | List all AWS profile names from config |
 | `aws_get_account_id()` | Get account ID and role ARN for a specific profile |
-| `aws_get_all_accounts()` | Get all accounts with their IDs |
 | `aws_find_account()` | Find accounts by ID or profile name pattern |
 
 ---
@@ -50,18 +49,6 @@ aws_get_account_id(profile: str, config_path: str = "") -> str
 Parses the role ARN for the named profile to extract the account ID.
 
 **Returns:** JSON with `profile`, `account_id`, `role_arn`
-
----
-
-### `aws_get_all_accounts`
-
-```python
-aws_get_all_accounts(config_path: str = "") -> str
-```
-
-Returns all profiles with their associated account IDs in a single call.
-
-**Returns:** JSON with `count`, `config_path`, `accounts` (list of objects with `profile`, `account_id`, `role_arn`)
 
 ---
 

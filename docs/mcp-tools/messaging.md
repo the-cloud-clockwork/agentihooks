@@ -21,7 +21,6 @@ The Messaging category provides SQS queue integration and generic HTTP webhook c
 | Tool | Description |
 |------|-------------|
 | `sqs_send_message()` | Send a message to an SQS queue |
-| `sqs_load_state()` | Load agent state from `.agent-state.json` |
 | `webhook_send()` | Send an HTTP request to a webhook endpoint |
 
 ---
@@ -37,18 +36,6 @@ sqs_send_message(message_body: str, enrich: bool = True) -> str
 Sends a JSON message to the configured SQS queue. When `enrich=True` (default), fields from `.agent-state.json` are merged into the payload before sending.
 
 **Returns:** JSON with `success` (bool), `message_id`, `enriched` (bool), `state_fields`, `error`
-
----
-
-### `sqs_load_state`
-
-```python
-sqs_load_state(session_id: str) -> str
-```
-
-Reads and returns the agent state file for the given session. Useful for inspecting what fields would be merged during enrichment.
-
-**Returns:** JSON with `found` (bool), `state` (dict), `error`
 
 ---
 

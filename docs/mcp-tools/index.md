@@ -15,11 +15,11 @@ The AgentiHooks MCP server exposes tools across **8 categories**. The server is 
 |----------|-------------|
 | [AWS](aws.md) | Profile listing, account ID lookup, account discovery |
 | [Email](email.md) | SMTP send with plain text / HTML / markdown options |
-| [Messaging](messaging.md) | SQS message send + state load, webhook HTTP calls |
+| [Messaging](messaging.md) | SQS message send, webhook HTTP calls |
 | [Storage](storage.md) | S3 upload |
-| [Database](database.md) | DynamoDB put, PostgreSQL insert + execute |
+| [Database](database.md) | DynamoDB put, PostgreSQL execute |
 | [Compute](compute.md) | AWS Lambda invocation (sync + async) |
-| [Observability](observability.md) | Timers, metrics collector, log write, container log tailing |
+| [Observability](observability.md) | Session log diagnostics, container log tailing |
 | [Utilities](utilities.md) | Markdown writer, env vars, tool listing |
 
 ---
