@@ -401,6 +401,17 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
+    # Clear context refresh turn counter for this session
+    from hooks.config import CONTEXT_REFRESH_ENABLED
+
+    if CONTEXT_REFRESH_ENABLED:
+        try:
+            from hooks.context.context_refresh import clear_session_state as clear_refresh
+
+            clear_refresh(session_id)
+        except Exception:
+            pass
+
     # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -420,23 +431,34 @@ def on_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
 
-    if SECRETS_MODE == "off":
+    # --- Secrets scanning ---
+    if SECRETS_MODE != "off":
+        prompt = payload.get("prompt", "")
+        if prompt:
+            from hooks.common import inject_context
+            from hooks.secrets import scan
+
+            hits = scan(prompt, mode=SECRETS_MODE)
+            if hits:
+                names = ", ".join(hits)
+                inject_context(
+                    f"WARNING: Possible secret(s) detected in prompt ({names}). "
+                    "Do not process, echo, or store credential values. "
+                    "Ask the user to use environment variables instead."
+                )
+    else:
         log("Secrets scanning skipped (mode=off)")
-        return
 
-    prompt = payload.get("prompt", "")
-    if prompt:
-        from hooks.common import inject_context
-        from hooks.secrets import scan
+    # --- Context refresh: re-inject rules every N turns ---
+    from hooks.config import CONTEXT_REFRESH_ENABLED
 
-        hits = scan(prompt, mode=SECRETS_MODE)
-        if hits:
-            names = ", ".join(hits)
-            inject_context(
-                f"WARNING: Possible secret(s) detected in prompt ({names}). "
-                "Do not process, echo, or store credential values. "
-                "Ask the user to use environment variables instead."
-            )
+    if CONTEXT_REFRESH_ENABLED:
+        try:
+            from hooks.context.context_refresh import maybe_refresh
+
+            maybe_refresh(session_id)
+        except Exception as e:
+            log("context_refresh failed", {"error": str(e)})
 
 
 def on_pre_tool_use(payload: dict) -> None:

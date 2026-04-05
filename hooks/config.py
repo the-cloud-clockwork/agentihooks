@@ -190,6 +190,17 @@ CLAUDE_MD_SANITY_CHECK = _env_bool("AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK", "true")
 CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 
 # =============================================================================
+# CONTEXT REFRESH — periodic rules re-injection for long sessions
+# =============================================================================
+CONTEXT_REFRESH_ENABLED = _env_bool("CONTEXT_REFRESH_ENABLED", "true")
+CONTEXT_REFRESH_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_INTERVAL", "20"))
+CONTEXT_REFRESH_RULES_DIR: str = os.getenv(
+    "CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules")
+)
+CONTEXT_REFRESH_INCLUDE_PROJECT = _env_bool("CONTEXT_REFRESH_INCLUDE_PROJECT", "true")
+CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "8000"))
+
+# =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
 # These control agentihooks-specific OTEL emission.
