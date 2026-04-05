@@ -56,7 +56,7 @@ agentihooks init --repo /path/to/repo
 |---|---|---|
 | `SessionStart` | `on_session_start` | Injects context (token limit, working dir), MCP hygiene message, logs max output tokens |
 | `SessionEnd` | `on_session_end` | Saves memory, clears file read cache, logs session summary |
-| `UserPromptSubmit` | `on_user_prompt_submit` | Injects tool memory context panel |
+| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scanning, context refresh (rules re-injection every N turns) |
 | `PreToolUse` | `on_pre_tool_use` | Secrets scanning, file read cache block (raises `BlockAction` → exit 2 → stderr) |
 | `PostToolUse` | `on_post_tool_use` | Bash output filtering, marks files as read in cache, transcript logging |
 | `Stop` / `SubagentStop` | `on_stop` / `on_subagent_stop` | Memory auto-save, cost logging |
@@ -102,6 +102,18 @@ Three subsystems, all gated by `TOKEN_CONTROL_ENABLED`:
 - **`hooks/observability/token_monitor.py`** — computes `fill_pct` and `burn_rate` (delta from previous turn), persists to Redis `agenticore:tokens:{session_id}`. `should_warn_context()` is edge-triggered (one warn per threshold crossing per session via `agenticore:token_warn:{session_id}`).
 - **`hooks/context/bash_output_filter.py`** — detects docker/kubectl/git-log/test-runner/build output by command string, truncates with notices. Returns `None` if output is already under limits (no unnecessary modification).
 - **`hooks/context/file_read_cache.py`** — Redis Set + mtime Hash per session (`agenticore:file_cache:{sid}`, `agenticore:file_mtime:{sid}`). `check_and_block_redundant_read()` raises `BlockAction` if a file was already read and hasn't changed on disk since. Falls back to in-memory dict when Redis is unavailable.
+
+### Context Refresh (attention decay mitigation)
+
+`hooks/context/context_refresh.py` — re-injects rules files into Claude's live context every N turns to combat attention decay in long sessions. On `UserPromptSubmit`, a persistent turn counter (Redis + file fallback at `~/.agentihooks/ctx_refresh_{session_id}.json`) increments; at each interval, all `*.md` from the rules dir are loaded, YAML frontmatter stripped, and injected via `inject_banner()`. State cleaned up on `SessionEnd`.
+
+| Env var | Default | Description |
+|---|---|---|
+| `CONTEXT_REFRESH_ENABLED` | `true` | Enable/disable periodic re-injection |
+| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject every N user messages |
+| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory |
+| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject `.claude/rules/*.md` from CWD |
+| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max chars per refresh (~2000 tokens) |
 
 ### Console Quota Display (opt-in)
 
