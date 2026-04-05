@@ -172,6 +172,25 @@ agentihooks --list-profiles                  # shows built-in + bundle profiles
 agentihooks init --profile infra-ops         # use a bundle profile
 ```
 
+## Entity Merge Behavior
+
+AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CLAUDE.md) are installed through a 3-layer merge: **agentihooks built-in -> bundle global -> profile-specific**. Each entity type has different merge semantics:
+
+| Entity | Merge type | Same-name collision | Notes |
+|--------|-----------|---------------------|-------|
+| **Rules** (`rules/*.md`) | Additive | Later layer overwrites symlink | All layers' unique files coexist in `~/.claude/rules/` |
+| **Skills** (`skills/`) | Additive | Later layer overwrites symlink | Directory-based; same directory name = override |
+| **Agents** (`agents/*.md`) | Additive | Later layer overwrites symlink | Same filename = profile version wins |
+| **Commands** (`commands/*.md`) | Additive | Later layer overwrites symlink | Same filename = profile version wins |
+| **Settings** (`settings.json`) | Deep merge | Override wins per key | Dicts merge recursively; **arrays are replaced, not appended** (e.g. hook arrays) |
+| **MCP servers** (`.mcp.json`) | Additive | Same server name = later layer overwrites | Different server names accumulate |
+| **CLAUDE.md** | Single file | Profile replaces entirely | No merging -- the profile's `CLAUDE.md` is symlinked as-is |
+| **.env files** | Load order | Later file overrides same key | `~/.agentihooks/.env` first, then `*.env` alphabetically |
+
+**Key implication for hooks:** Hook arrays in `settings.json` are **replaced, not merged** across layers. If a profile's `settings.overrides.json` defines a hook array, it completely replaces the base array. This is why all hook definitions must live in `settings.base.json` -- they cannot be partially overridden per-profile.
+
+**Key implication for rules:** If your bundle defines `rules/python-files.md` and your profile also defines `rules/python-files.md`, the profile version wins (Layer 3 re-links over Layer 2). To add rules without overriding, use unique filenames. All rules from all layers with distinct names coexist in `~/.claude/rules/`.
+
 ## Hook Events
 
 10 lifecycle events, all handled by `python -m hooks`:
@@ -182,9 +201,9 @@ agentihooks init --profile infra-ops         # use a bundle profile
 | `PreToolUse` | Secret scan (blocks on detection), file read deduplication, CLAUDE.md sanity check, tool error memory |
 | `PostToolUse` | Truncates verbose bash output, marks files read, records tool errors |
 | `Stop` | Scans transcript for errors, parses metrics, auto-saves memory |
-| `SessionEnd` | Logs transcript, clears file read cache |
+| `SessionEnd` | Logs transcript, clears file read cache, clears context refresh state |
 | `SubagentStop` | Logs subagent transcript |
-| `UserPromptSubmit` | Warns on detected secrets |
+| `UserPromptSubmit` | Warns on detected secrets, context refresh (rules re-injection every N turns) |
 | `Notification` | Logs notifications |
 | `PreCompact` | Logs before context compaction |
 | `PermissionRequest` | Logs permission requests |
@@ -275,13 +294,13 @@ Tools exposed by the `hooks-utils` MCP server, selectively loaded via `MCP_CATEG
 
 | Category | Tools | Description |
 |----------|------:|-------------|
-| `aws` | 4 | Profile listing, account discovery |
-| `email` | 2 | SMTP send with text / HTML / markdown |
-| `messaging` | 3 | SQS + webhook with state enrichment |
+| `aws` | 3 | Profile listing, account discovery |
+| `email` | 1 | SMTP send with text / HTML / markdown |
+| `messaging` | 2 | SQS + webhook with state enrichment |
 | `storage` | 1 | S3 upload |
-| `database` | 3 | DynamoDB put, PostgreSQL insert + execute |
+| `database` | 2 | DynamoDB put, PostgreSQL execute |
 | `compute` | 1 | Lambda invocation (sync/async) |
-| `observability` | 7 | Timers, metrics, structured logging, container log tailing |
+| `observability` | 2 | Session log diagnostics, container log tailing |
 | `utilities` | 3 | Markdown writer, env vars, tool listing |
 
 ## Configuration
@@ -304,6 +323,8 @@ All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 | `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
 | `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Block edits that would bloat CLAUDE.md past line limit |
 | `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Max allowed lines in CLAUDE.md / CLAUDE.local.md |
+| `CONTEXT_REFRESH_ENABLED` | `true` | Re-inject rules every N turns for attention decay mitigation |
+| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject every N user messages |
 | `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
 | `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |
