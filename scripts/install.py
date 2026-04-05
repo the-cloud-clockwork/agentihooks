@@ -453,7 +453,7 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
     return None
 
 
-def cmd_bundle(action: str, path: str | None = None) -> None:
+def cmd_bundle(action: str, path: str | None = None, rebase: bool = False) -> None:
     """Handle 'agentihooks bundle' subcommands."""
     if action == "link":
         _bundle_link(Path(path).expanduser().resolve() if path else None)
@@ -461,9 +461,44 @@ def cmd_bundle(action: str, path: str | None = None) -> None:
         _bundle_unlink()
     elif action == "list":
         _bundle_list()
+    elif action == "pull":
+        _bundle_pull(rebase=rebase)
     else:
         print(f"Unknown bundle action: {action}", file=sys.stderr)
         sys.exit(1)
+
+
+def _bundle_pull(rebase: bool = False) -> None:
+    """Git pull the linked bundle directory."""
+    import subprocess as _sp
+
+    bundle_dir = _get_bundle_path()
+    if not bundle_dir:
+        print("No bundle linked.", file=sys.stderr)
+        sys.exit(1)
+
+    if not (bundle_dir / ".git").exists():
+        print(f"ERROR: {bundle_dir} is not a git repository.", file=sys.stderr)
+        sys.exit(1)
+
+    cmd = ["git", "-C", str(bundle_dir), "pull"]
+    if rebase:
+        cmd.append("--rebase")
+
+    print(f"Pulling bundle: {bundle_dir}")
+    print(f"  $ {' '.join(cmd)}")
+    result = _sp.run(cmd, capture_output=True, text=True)
+
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.stderr.strip():
+        print(result.stderr.strip())
+
+    if result.returncode != 0:
+        print("ERROR: git pull failed.", file=sys.stderr)
+        sys.exit(1)
+
+    _cprint("[OK] Bundle updated.")
 
 
 def _bundle_link(bundle_dir: Path | None) -> None:
@@ -3536,6 +3571,15 @@ def main() -> None:
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
 
+    bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (link, unlink, list, pull)")
+    bundle_p.add_argument(
+        "action",
+        choices=["link", "unlink", "list", "pull"],
+        help="link <path> | unlink | list | pull",
+    )
+    bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
+    bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
+
     sub.add_parser("claude", help="Launch claude with profile flags (model, permission-mode, effort, etc.)")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
@@ -3658,6 +3702,8 @@ def main() -> None:
             sys.exit(1)
     elif args.command == "uninstall":
         uninstall_global(args)
+    elif args.command == "bundle":
+        cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
         cmd_init_unified(args)
