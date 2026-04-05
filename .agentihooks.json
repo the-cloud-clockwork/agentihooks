@@ -1,0 +1,7 @@
+{
+  "profile": "default",
+  "enabledMcpServers": [
+    "hooks-utils",
+    "gateway-core"
+  ]
+}

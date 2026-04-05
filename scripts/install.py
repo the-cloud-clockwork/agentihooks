@@ -1243,10 +1243,11 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
         local_settings["disabledMcpjsonServers"] = all_disabled
 
     # Blacklist-all-by-default: disable every known MCP in ~/.claude.json
-    # projects block, except those the profile whitelists.
+    # projects block, except those the profile or repo whitelists.
     all_known = _get_all_known_mcp_names()
-    profile_enabled = _get_profile_enabled_servers(profile_dir)
-    to_disable = sorted(all_known - (profile_enabled or set()))
+    profile_enabled = _get_profile_enabled_servers(profile_dir) or set()
+    repo_enabled = set(config.get("enabledMcpServers", []))
+    to_disable = sorted(all_known - profile_enabled - repo_enabled)
     if not dry_run and all_known:
         _write_project_disabled_mcps(repo_dir, to_disable)
 
@@ -1265,8 +1266,9 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     if perms:
         local_settings["permissions"] = perms
 
-    # Env — merge connector + repo + otel
+    # Env — merge profile + connector + repo + otel
     all_env = {}
+    all_env.update(profile_overrides.get("env", {}))
     all_env.update(conn_env)
     all_env.update(repo_env)
 
@@ -1293,12 +1295,17 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     print(f"     Profile: {profile_name}")
     if all_disabled:
         print(f"     Disabled .mcp.json servers: {all_disabled}")
+    all_enabled = profile_enabled | repo_enabled
+    if all_enabled:
+        print(f"     Enabled MCPs ({len(all_enabled)}): {sorted(all_enabled)}")
     if to_disable:
         print(f"     Blacklisted MCPs ({len(to_disable)}): {to_disable[:5]}{'...' if len(to_disable) > 5 else ''}")
     if all_deny:
         print(f"     Deny rules: {len(all_deny)}")
     if all_ask:
         print(f"     Ask rules: {len(all_ask)}")
+    if all_env:
+        print(f"     Env vars: {len(all_env)}")
 
     # Ensure .gitignore covers settings.local.json
     _ensure_local_settings_gitignored(repo_dir)
@@ -1517,6 +1524,45 @@ def substitute_paths(obj: object, src: str = "/app", dst: str = str(AGENTIHOOKS_
     if isinstance(obj, list):
         return [substitute_paths(item, src, dst) for item in obj]
     return obj
+
+
+def _resolve_profile_hook_paths(settings: dict, profile_dir: Path) -> dict:
+    """Resolve relative paths in hook commands against the profile's root directory.
+
+    Profile settings.overrides.json may contain hook commands with relative paths
+    like ``bash profiles/patch-mode/hooks/foo.sh``. These need to be absolute so
+    they work regardless of the user's CWD when Claude runs.
+    """
+    hooks = settings.get("hooks")
+    if not hooks or not isinstance(hooks, dict):
+        return settings
+
+    settings = deepcopy(settings)
+    for _event, matchers in settings["hooks"].items():
+        if not isinstance(matchers, list):
+            continue
+        for matcher in matchers:
+            for hook in matcher.get("hooks", []):
+                cmd = hook.get("command")
+                if not cmd or not isinstance(cmd, str):
+                    continue
+                # Split to find the script path (e.g. "bash profiles/foo/bar.sh")
+                parts = cmd.split()
+                for i, part in enumerate(parts):
+                    # Skip flags and the interpreter itself
+                    if part.startswith("-") or i == 0:
+                        continue
+                    # Check relative to profile dir, bundle root (profiles/..), and agentihooks root
+                    for base in (profile_dir, profile_dir.parent.parent, AGENTIHOOKS_ROOT):
+                        candidate = base / part
+                        if candidate.exists():
+                            parts[i] = str(candidate.resolve())
+                            break
+                    else:
+                        continue
+                    break
+                hook["command"] = " ".join(parts)
+    return settings
 
 
 def _available_profiles() -> list[str]:
@@ -1740,6 +1786,8 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             overrides_path = pdir / "settings.overrides.json"
         if overrides_path.exists():
             overrides = load_json(overrides_path)
+            # Resolve relative paths in hook commands against the profile's root
+            overrides = _resolve_profile_hook_paths(overrides, pdir)
             rendered = _deep_merge(rendered, overrides)
             print(f"Applied profile overrides: {overrides_path}")
 
@@ -3632,6 +3680,7 @@ def main() -> None:
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
     )
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
+    init_p.add_argument("--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
 
@@ -3770,6 +3819,8 @@ def main() -> None:
         cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
+        if getattr(args, "local", False) and not args.repo:
+            args.repo = "."
         cmd_init_unified(args)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
