@@ -187,9 +187,25 @@ AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CL
 | **CLAUDE.md** | Single file | Profile replaces entirely | No merging -- the profile's `CLAUDE.md` is symlinked as-is |
 | **.env files** | Load order | Later file overrides same key | `~/.agentihooks/.env` first, then `*.env` alphabetically |
 
-**Key implication for hooks:** Hook arrays in `settings.json` are **replaced, not merged** across layers. If a profile's `settings.overrides.json` defines a hook array, it completely replaces the base array. This is why all hook definitions must live in `settings.base.json` -- they cannot be partially overridden per-profile.
-
 **Key implication for rules:** If your bundle defines `rules/python-files.md` and your profile also defines `rules/python-files.md`, the profile version wins (Layer 3 re-links over Layer 2). To add rules without overriding, use unique filenames. All rules from all layers with distinct names coexist in `~/.claude/rules/`.
+
+### Settings.json key-by-key merge reference
+
+`settings.base.json` is the source of truth. Running `agentihooks init` or the sync daemon deep-merges profile/bundle `settings.overrides.json` on top. The merge behavior depends on the **type** of each key:
+
+| Key | Type | Merge behavior | Safe to override? |
+|-----|------|----------------|-------------------|
+| `autoUpdatesChannel` | string | Replaced | Yes |
+| `skipDangerousModePermissionPrompt` | bool | Replaced | Yes |
+| `model` | string | Replaced | Yes — common profile override |
+| `env` | dict | **Key-by-key merge** — new keys added, existing keys overwritten, unmentioned keys kept | Yes — add or override env vars freely |
+| `permissions` | dict | **Key-by-key merge** at dict level | Partially |
+| `permissions.allow` | **array** | **Replaced entirely** — override nukes the base array | Dangerous — must include all base entries if overriding |
+| `statusLine` | dict | **Key-by-key merge** | Not recommended |
+| `hooks` | dict | **Key-by-key merge** at the dict level | Partially |
+| `hooks.PreToolUse` (etc.) | **array** | **Replaced entirely** — override nukes the base hook commands | Never — all hooks must live in `settings.base.json` |
+
+**The rule:** Dicts merge (keys combine). Arrays replace (the whole list is swapped). A profile `settings.overrides.json` should only set simple values and `env.*` keys. Never define `hooks.*` or `permissions.allow` unless you copy the full base array into your override.
 
 ## Hook Events
 
