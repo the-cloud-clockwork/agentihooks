@@ -75,42 +75,6 @@ def register(mcp):
             return json.dumps({"success": False, "error": str(e)})
 
     @mcp.tool()
-    def aws_get_all_accounts(config_path: str = "") -> str:
-        """Get all AWS accounts from config.
-
-        Args:
-            config_path: Optional path to AWS config file
-
-        Returns:
-            JSON with list of accounts (profile, account_id, role_arn)
-        """
-        try:
-            from hooks.integrations.aws import AWSConfigParser, get_all_aws_accounts
-
-            accounts = get_all_aws_accounts(config_path if config_path else None)
-            parser = AWSConfigParser.get_parser(config_path if config_path else None)
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "count": len(accounts),
-                    "config_path": parser.config_path,
-                    "accounts": [
-                        {
-                            "profile": acc.profile,
-                            "account_id": acc.account_id,
-                            "role_arn": acc.role_arn,
-                        }
-                        for acc in accounts
-                    ],
-                }
-            )
-
-        except Exception as e:
-            log("MCP aws_get_all_accounts failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
     def aws_find_account(
         pattern: str = "",
         account_id: str = "",

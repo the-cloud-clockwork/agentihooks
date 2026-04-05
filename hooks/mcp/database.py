@@ -62,52 +62,6 @@ def register(mcp):
             return json.dumps({"success": False, "error": str(e)})
 
     @mcp.tool()
-    def postgres_insert(
-        table: str,
-        payload: str,
-        enrich: bool = False,
-    ) -> str:
-        """Insert a row into PostgreSQL table.
-
-        Inserts JSON data as a JSONB row into the specified table.
-        Supports state enrichment from conversation_map.json.
-
-        Args:
-            table: Table name to insert into
-            payload: JSON string with row data
-            enrich: If True, enriches payload with state from conversation_map.json (default: False)
-
-        Returns:
-            JSON with success status, table_name, and rows_affected
-        """
-        try:
-            from hooks.integrations.postgres import insert
-
-            payload_dict = json.loads(payload)
-
-            result = insert(
-                table=table,
-                payload=payload_dict,
-                enrich_from_state=enrich,
-            )
-
-            return json.dumps(
-                {
-                    "success": result.success,
-                    "table_name": result.table_name,
-                    "rows_affected": result.rows_affected,
-                    "error": result.error,
-                }
-            )
-
-        except json.JSONDecodeError as e:
-            log("MCP postgres_insert JSON parse failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": f"Invalid JSON: {str(e)}"})
-        except Exception as e:
-            log("MCP postgres_insert failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
     def postgres_execute(
         query: str,
         params: str = "[]",

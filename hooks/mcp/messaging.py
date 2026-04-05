@@ -44,42 +44,6 @@ def register(mcp):
             return json.dumps({"success": False, "error": str(e)})
 
     @mcp.tool()
-    def sqs_load_state(session_id: str) -> str:
-        """Load agent state from .agent-state.json file.
-
-        Args:
-            session_id: Session ID to load state for
-
-        Returns:
-            JSON with state data (session_id, command, user, etc.) or error
-        """
-        try:
-            from hooks.integrations.sqs import load_state
-
-            state = load_state(session_id)
-
-            if state:
-                return json.dumps(
-                    {
-                        "success": True,
-                        "found": True,
-                        "state": state,
-                    }
-                )
-            else:
-                return json.dumps(
-                    {
-                        "success": True,
-                        "found": False,
-                        "error": ".agent-state.json not found",
-                    }
-                )
-
-        except Exception as e:
-            log("MCP sqs_load_state failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
     def webhook_send(
         payload: str,
         method: str = "POST",

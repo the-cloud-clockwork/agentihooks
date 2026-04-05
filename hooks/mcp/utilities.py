@@ -104,16 +104,13 @@ def register(mcp):
             "aws": [
                 "aws_get_profiles",
                 "aws_get_account_id",
-                "aws_get_all_accounts",
                 "aws_find_account",
             ],
             "email": [
                 "email_send",
-                "email_send_markdown_file",
             ],
             "messaging": [
                 "sqs_send_message",
-                "sqs_load_state",
                 "webhook_send",
             ],
             "storage": [
@@ -121,19 +118,13 @@ def register(mcp):
             ],
             "database": [
                 "dynamodb_put_item",
-                "postgres_insert",
                 "postgres_execute",
             ],
             "compute": [
                 "lambda_invoke_function",
             ],
             "observability": [
-                "metrics_start_timer",
-                "metrics_stop_timer",
-                "metrics_create_collector",
-                "metrics_get_summary",
-                "log_message",
-                "log_command_output",
+                "read_session_logs",
                 "tail_container_logs",
             ],
             "utilities": [
