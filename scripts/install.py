@@ -1818,25 +1818,30 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             if f.name.startswith("_profile-") and f.name.endswith(".md") and f.is_symlink():
                 f.unlink()
 
-    first_claude_md_installed = False
-    for pname, pdir in profile_dirs:
-        claude_md_src = pdir / _CLAUDE_MD_NAME
-        if not claude_md_src.exists():
-            continue
-        if not first_claude_md_installed:
-            # First profile with CLAUDE.md → symlink as ~/.claude/CLAUDE.md
-            _install_system_prompt(pdir, pname)
-            first_claude_md_installed = True
-        else:
-            # Additional profiles → symlink into rules/ so they're loaded as rules
-            # and refreshed by context refresh every N turns
-            rules_dir.mkdir(parents=True, exist_ok=True)
-            rule_link = rules_dir / f"_profile-{pname}.md"
-            _link_item(claude_md_src, rule_link, f"profile({pname}) CLAUDE.md → rule")
+    if len(profile_chain) == 1:
+        # Single profile: symlink as before
+        _install_system_prompt(profile_dirs[0][1], profile_dirs[0][0])
+    else:
+        # Chain mode: concatenate all CLAUDE.md files into one rendered file
+        claude_md_parts: list[str] = []
+        for pname, pdir in profile_dirs:
+            claude_md_src = pdir / _CLAUDE_MD_NAME
+            if claude_md_src.exists():
+                content = claude_md_src.read_text().strip()
+                if content:
+                    claude_md_parts.append(f"<!-- profile: {pname} -->\n{content}")
 
-    if not first_claude_md_installed:
-        # Fallback: use last profile dir even if no CLAUDE.md
-        _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
+        if claude_md_parts:
+            dst = CLAUDE_HOME / _CLAUDE_MD_NAME
+            # Remove stale symlink if present
+            if dst.is_symlink():
+                dst.unlink()
+            dst.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
+            sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
+            _cprint(f"[OK] Wrote chained CLAUDE.md ({' + '.join(sources)})")
+        else:
+            # No CLAUDE.md in any profile — try last profile as fallback
+            _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
 
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
