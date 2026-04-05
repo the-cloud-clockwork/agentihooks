@@ -1549,15 +1549,20 @@ def _read_profile_description(profile_dir: Path) -> str:
 
 
 def query_active_profile() -> None:
-    """Print the currently installed global profile and exit."""
+    """Print the currently installed global profile (or chain) and exit."""
     state = _load_state()
     targets = state.get("targets", {})
     global_target = targets.get("global", {})
     profile_name = global_target.get("profile")
-    if profile_name:
-        print(profile_name)
-    else:
+    if not profile_name:
         print("not installed")
+        return
+
+    chain = [p.strip() for p in profile_name.split(",") if p.strip()]
+    if len(chain) > 1:
+        print(f"chain: [{', '.join(chain)}]")
+    else:
+        print(profile_name)
 
 
 def list_profiles() -> None:
@@ -1680,24 +1685,41 @@ def install_global(args: argparse.Namespace) -> None:
 
 
 def _install_global_inner(args: argparse.Namespace) -> None:
-    profile_name: str = args.profile
+    profile_input: str = args.profile
 
-    # Validate profile exists (built-in or bundle)
-    profile_dir = _resolve_profile_dir(profile_name)
-    if profile_dir is None:
-        available = _available_profiles()
-        print(f"ERROR: Profile '{profile_name}' not found.", file=sys.stderr)
-        print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
+    # --- Parse profile chain (comma-separated) ---
+    profile_chain = [p.strip() for p in profile_input.split(",") if p.strip()]
+    if not profile_chain:
+        print("ERROR: No profile specified.", file=sys.stderr)
         sys.exit(1)
 
-    profile_source = "built-in" if (PROFILES_DIR / profile_name).is_dir() else "bundle"
+    # Validate all profiles exist
+    profile_dirs: list[tuple[str, Path]] = []
+    for pname in profile_chain:
+        pdir = _resolve_profile_dir(pname)
+        if pdir is None:
+            available = _available_profiles()
+            print(f"ERROR: Profile '{pname}' not found.", file=sys.stderr)
+            print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
+            sys.exit(1)
+        profile_dirs.append((pname, pdir))
+
+    # For display and state storage, use the full chain string
+    profile_name = ",".join(profile_chain)
+    primary_profile = profile_chain[0]
+
+    profile_sources = []
+    for pname, _ in profile_dirs:
+        src = "built-in" if (PROFILES_DIR / pname).is_dir() else "bundle"
+        profile_sources.append(f"{pname} ({src})")
+
     print(f"{_BOLD}agentihooks root{_RESET} : {AGENTIHOOKS_ROOT}")
     print(f"Target           : {CLAUDE_HOME}")
-    print(f"Profile source   : {profile_source}")
-    print(f"Profile          : {profile_name}")
-    # Resolve canonical Python: ~/.agentihooks/.venv wins over sys.executable
-    # so that `agentihooks init` (run via uv tool from any project venv) always
-    # bakes the right path into hook commands.
+    if len(profile_chain) > 1:
+        print(f"Profile chain    : {' → '.join(profile_sources)}")
+    else:
+        print(f"Profile source   : {profile_sources[0]}")
+        print(f"Profile          : {profile_name}")
     _canonical_python = str(_detect_venv() or sys.executable)
     print(f"Python           : {_canonical_python}")
     print()
@@ -1708,20 +1730,22 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     raw_settings = load_json(BASE_SETTINGS)
-    rendered: dict = substitute_paths(raw_settings)  # NOSONAR — intentional object→dict cast
-    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)  # NOSONAR
+    rendered: dict = substitute_paths(raw_settings)
+    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)
 
-    # --- 1b. Apply per-profile overrides (e.g. env vars like AGENTIHOOKS_SECRETS_MODE) ---
-    overrides_path = profile_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
-    if not overrides_path.exists():
-        overrides_path = profile_dir / "settings.overrides.json"
-    if overrides_path.exists():
-        overrides = load_json(overrides_path)
-        rendered = _deep_merge(rendered, overrides)
-        print(f"Applied profile overrides: {overrides_path}")
+    # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
+    for pname, pdir in profile_dirs:
+        overrides_path = pdir / _CLAUDE_SUBDIR / "settings.overrides.json"
+        if not overrides_path.exists():
+            overrides_path = pdir / "settings.overrides.json"
+        if overrides_path.exists():
+            overrides = load_json(overrides_path)
+            rendered = _deep_merge(rendered, overrides)
+            print(f"Applied profile overrides: {overrides_path}")
 
-    # --- 1c. Apply linked connectors (additive: env vars + deny rules + disabled servers) ---
-    conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
+    # --- 1c. Apply linked connectors (from last profile in chain) ---
+    last_profile = profile_chain[-1]
+    conn_env, conn_deny, conn_disabled = _load_connectors(last_profile)
     if conn_env:
         rendered.setdefault("env", {}).update(conn_env)
         _cprint(f"  [OK] Connector env: {list(conn_env.keys())}")
@@ -1734,16 +1758,18 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         rendered["disabledMcpjsonServers"] = merged_disabled
         _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
 
-    # --- 1d. OTEL baseline env vars from profile ---
-    profile_yml_path = profile_dir / "profile.yml"
-    if profile_yml_path.exists():
-        import yaml
+    # --- 1d. OTEL baseline env vars (from last profile with a profile.yml) ---
+    for _pname, pdir in reversed(profile_dirs):
+        profile_yml_path = pdir / "profile.yml"
+        if profile_yml_path.exists():
+            import yaml
 
-        profile_data = yaml.safe_load(profile_yml_path.read_text()) or {}
-        otel_env = _build_otel_env(profile_data)
-        if otel_env:
-            rendered.setdefault("env", {}).update(otel_env)
-            _cprint(f"  [OK] OTEL env: {list(otel_env.keys())}")
+            profile_data = yaml.safe_load(profile_yml_path.read_text()) or {}
+            otel_env = _build_otel_env(profile_data)
+            if otel_env:
+                rendered.setdefault("env", {}).update(otel_env)
+                _cprint(f"  [OK] OTEL env: {list(otel_env.keys())}")
+            break
 
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
@@ -1758,8 +1784,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     save_json(existing_settings_path, merged)
     _cprint(f"[OK] Wrote {existing_settings_path}")
 
-    # --- 4. Symlink skills/agents/commands (3 layers: agentihooks → bundle → profile) ---
-    _resolved_profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
+    # --- 4. Symlink skills/agents/commands/rules (layers: agentihooks → bundle → each profile in chain) ---
     bundle_dir = _get_bundle_path()
 
     for subdir, label, filter_fn in [
@@ -1776,19 +1801,46 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _symlink_dir_contents(
                 bundle_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"bundle {label}", filter_fn=filter_fn
             )
-        # Layer 3: profile-specific .claude/ (overrides bundle)
-        if (_resolved_profile_dir / _CLAUDE_SUBDIR / subdir).is_dir():
-            _symlink_dir_contents(
-                _resolved_profile_dir / _CLAUDE_SUBDIR / subdir, dst, label=f"profile {label}", filter_fn=filter_fn
-            )
+        # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
+        for pname, pdir in profile_dirs:
+            if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
+                chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
+                _symlink_dir_contents(
+                    pdir / _CLAUDE_SUBDIR / subdir, dst, label=chain_label, filter_fn=filter_fn
+                )
 
-    # --- 5. Install SYSTEM.md (profile system prompt) ---
+    # --- 5. Install CLAUDE.md (first profile = symlink, rest = rules) ---
     _cleanup_stale_claude_md_symlink()
-    _install_system_prompt(_resolved_profile_dir, profile_name)
+    # Remove any previous chain-injected CLAUDE.md rules
+    rules_dir = CLAUDE_HOME / "rules"
+    if rules_dir.is_dir():
+        for f in rules_dir.iterdir():
+            if f.name.startswith("_profile-") and f.name.endswith(".md") and f.is_symlink():
+                f.unlink()
+
+    first_claude_md_installed = False
+    for pname, pdir in profile_dirs:
+        claude_md_src = pdir / _CLAUDE_MD_NAME
+        if not claude_md_src.exists():
+            continue
+        if not first_claude_md_installed:
+            # First profile with CLAUDE.md → symlink as ~/.claude/CLAUDE.md
+            _install_system_prompt(pdir, pname)
+            first_claude_md_installed = True
+        else:
+            # Additional profiles → symlink into rules/ so they're loaded as rules
+            # and refreshed by context refresh every N turns
+            rules_dir.mkdir(parents=True, exist_ok=True)
+            rule_link = rules_dir / f"_profile-{pname}.md"
+            _link_item(claude_md_src, rule_link, f"profile({pname}) CLAUDE.md → rule")
+
+    if not first_claude_md_installed:
+        # Fallback: use last profile dir even if no CLAUDE.md
+        _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
 
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
-    _install_user_mcp(profile_name)
+    _install_user_mcp(last_profile)
     # Layer 2: bundle .claude/.mcp.json (all profiles), fallback to root .mcp.json
     if bundle_dir:
         bundle_mcp = bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
@@ -1803,17 +1855,19 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                     _cprint(f"  [OK] Bundle MCP servers: {', '.join(servers.keys())}")
             except (json.JSONDecodeError, OSError) as exc:
                 _cprint(f"  [WARN] Could not read bundle .mcp.json: {exc}")
-    # Layer 3: profile-specific .claude/.mcp.json
-    profile_mcp = _resolved_profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
-    if profile_mcp.exists():
-        try:
-            mcp_data = load_json(profile_mcp)
-            servers = mcp_data.get("mcpServers", {})
-            if servers:
-                _merge_mcp_to_user_scope(servers)
-                _cprint(f"  [OK] Profile MCP servers: {', '.join(servers.keys())}")
-        except (json.JSONDecodeError, OSError) as exc:
-            _cprint(f"  [WARN] Could not read profile .mcp.json: {exc}")
+    # Layer 3+: each profile's .mcp.json (chained)
+    for pname, pdir in profile_dirs:
+        profile_mcp = pdir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+        if profile_mcp.exists():
+            try:
+                mcp_data = load_json(profile_mcp)
+                servers = mcp_data.get("mcpServers", {})
+                if servers:
+                    _merge_mcp_to_user_scope(servers)
+                    chain_label = f"Profile({pname})" if len(profile_chain) > 1 else "Profile"
+                    _cprint(f"  [OK] {chain_label} MCP servers: {', '.join(servers.keys())}")
+            except (json.JSONDecodeError, OSError) as exc:
+                _cprint(f"  [WARN] Could not read profile .mcp.json: {exc}")
 
     # --- 7. Re-apply any custom MCPs tracked in state.json ---
     if STATE_JSON.exists():
@@ -1833,7 +1887,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # --- 9c. Blacklist all MCPs across all projects ---
     print()
     print("Applying MCP blacklist to all projects...")
-    _blacklist_all_projects_mcps(profile_dir)
+    _blacklist_all_projects_mcps(profile_dirs[-1][1])
 
     # --- 10. Install agentihooks CLI tool to ~/.local/bin ---
     print()
