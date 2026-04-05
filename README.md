@@ -182,7 +182,7 @@ AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CL
 | **Skills** (`skills/`) | Additive | Later layer overwrites symlink | Directory-based; same directory name = override |
 | **Agents** (`agents/*.md`) | Additive | Later layer overwrites symlink | Same filename = profile version wins |
 | **Commands** (`commands/*.md`) | Additive | Later layer overwrites symlink | Same filename = profile version wins |
-| **Settings** (`settings.json`) | Deep merge | Override wins per key | Dicts merge recursively; **arrays are replaced, not appended** (e.g. hook arrays) |
+| **Settings** (`settings.json`) | Deep merge | Dicts merge, hook arrays append, other arrays replace | See key-by-key table below |
 | **MCP servers** (`.mcp.json`) | Additive | Same server name = later layer overwrites | Different server names accumulate |
 | **CLAUDE.md** | Single file | Profile replaces entirely | No merging -- the profile's `CLAUDE.md` is symlinked as-is |
 | **.env files** | Load order | Later file overrides same key | `~/.agentihooks/.env` first, then `*.env` alphabetically |
@@ -200,12 +200,12 @@ AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CL
 | `model` | string | Replaced | Yes — common profile override |
 | `env` | dict | **Key-by-key merge** — new keys added, existing keys overwritten, unmentioned keys kept | Yes — add or override env vars freely |
 | `permissions` | dict | **Key-by-key merge** at dict level | Partially |
-| `permissions.allow` | **array** | **Replaced entirely** — override nukes the base array | Dangerous — must include all base entries if overriding |
+| `permissions.allow` | **array** | **Replaced entirely** — profile's array is the full list | Yes — define the complete permissions you want |
 | `statusLine` | dict | **Key-by-key merge** | Not recommended |
-| `hooks` | dict | **Key-by-key merge** at the dict level | Partially |
-| `hooks.PreToolUse` (etc.) | **array** | **Replaced entirely** — override nukes the base hook commands | Never — all hooks must live in `settings.base.json` |
+| `hooks` | dict | **Key-by-key merge** at the dict level | Yes |
+| `hooks.PreToolUse` (etc.) | **array** | **Appended** — profile hooks added after base hooks | Yes — only define your extra hooks, base hooks are preserved |
 
-**The rule:** Dicts merge (keys combine). Arrays replace (the whole list is swapped). A profile `settings.overrides.json` should only set simple values and `env.*` keys. Never define `hooks.*` or `permissions.allow` unless you copy the full base array into your override.
+**The rule:** Dicts merge (keys combine). Hook arrays append (profile hooks are added after base hooks). All other arrays replace (profile's list wins). Profiles only need to define what's unique to them — base hooks are always preserved.
 
 ## Hook Events
 

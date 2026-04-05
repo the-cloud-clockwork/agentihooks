@@ -166,6 +166,71 @@ class TestDetectVenv:
 
 
 # ---------------------------------------------------------------------------
+# _deep_merge
+# ---------------------------------------------------------------------------
+
+
+class TestDeepMerge:
+    def test_simple_values_override_wins(self):
+        base = {"model": "sonnet", "flag": True}
+        override = {"model": "opus"}
+        result = install._deep_merge(base, override)
+        assert result["model"] == "opus"
+        assert result["flag"] is True
+
+    def test_dicts_merge_key_by_key(self):
+        base = {"env": {"A": "1", "B": "2"}}
+        override = {"env": {"B": "99", "C": "3"}}
+        result = install._deep_merge(base, override)
+        assert result["env"] == {"A": "1", "B": "99", "C": "3"}
+
+    def test_hooks_arrays_append(self):
+        base = {
+            "hooks": {
+                "PreToolUse": [{"hooks": [{"command": "python -m hooks"}]}],
+                "Stop": [{"hooks": [{"command": "python -m hooks"}]}],
+            }
+        }
+        override = {
+            "hooks": {
+                "PreToolUse": [{"hooks": [{"command": "my-linter.sh"}]}],
+            }
+        }
+        result = install._deep_merge(base, override)
+        # PreToolUse: base + profile appended
+        assert len(result["hooks"]["PreToolUse"]) == 2
+        assert result["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "python -m hooks"
+        assert result["hooks"]["PreToolUse"][1]["hooks"][0]["command"] == "my-linter.sh"
+        # Stop: untouched
+        assert len(result["hooks"]["Stop"]) == 1
+
+    def test_permissions_allow_replaced(self):
+        base = {"permissions": {"allow": ["Bash(*)", "Read(*)"]}}
+        override = {"permissions": {"allow": ["Bash(*)"]}}
+        result = install._deep_merge(base, override)
+        assert result["permissions"]["allow"] == ["Bash(*)"]
+
+    def test_non_hook_arrays_replaced(self):
+        base = {"other": [1, 2, 3]}
+        override = {"other": [4, 5]}
+        result = install._deep_merge(base, override)
+        assert result["other"] == [4, 5]
+
+    def test_hooks_new_event_added(self):
+        base = {"hooks": {"Stop": [{"hooks": [{"command": "base"}]}]}}
+        override = {"hooks": {"NewEvent": [{"hooks": [{"command": "new"}]}]}}
+        result = install._deep_merge(base, override)
+        assert "Stop" in result["hooks"]
+        assert "NewEvent" in result["hooks"]
+
+    def test_base_not_mutated(self):
+        base = {"hooks": {"PreToolUse": [{"hooks": [{"command": "base"}]}]}}
+        override = {"hooks": {"PreToolUse": [{"hooks": [{"command": "extra"}]}]}}
+        install._deep_merge(base, override)
+        assert len(base["hooks"]["PreToolUse"]) == 1
+
+
+# ---------------------------------------------------------------------------
 # _prompt_install_requirements
 # ---------------------------------------------------------------------------
 

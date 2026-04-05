@@ -285,12 +285,26 @@ def save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge *override* into *base* (override wins)."""
+def _deep_merge(base: dict, override: dict, _parent_key: str = "") -> dict:
+    """Recursively merge *override* into *base*.
+
+    Merge rules:
+    - Dicts: recursive key-by-key merge (additive, non-destructive)
+    - Arrays under ``hooks.*``: **append** (base hooks stay, profile hooks added)
+    - All other values: override wins (last layer takes precedence)
+    """
     merged = deepcopy(base)
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = _deep_merge(merged[key], value, _parent_key=key)
+        elif (
+            _parent_key == "hooks"
+            and key in merged
+            and isinstance(merged[key], list)
+            and isinstance(value, list)
+        ):
+            # Hook arrays: append profile hooks after base hooks
+            merged[key] = deepcopy(merged[key]) + deepcopy(value)
         else:
             merged[key] = deepcopy(value)
     return merged
