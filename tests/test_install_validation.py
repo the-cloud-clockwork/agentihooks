@@ -291,15 +291,15 @@ class TestSymlinkMerge:
 
 
 class TestClaudeMdLinking:
-    """Test CLAUDE.md is symlinked from profile root to ~/.claude/."""
+    """Test CLAUDE.md is copied from profile root to ~/.claude/."""
 
-    def test_links_from_profile_root(self, install_env):
+    def test_copies_from_profile_root(self, install_env):
         profile = install_env["profile"]
         dst = install_env["claude_home"] / "CLAUDE.md"
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._install_system_prompt(profile, "test-profile")
-        assert dst.is_symlink()
-        assert dst.resolve() == (profile / "CLAUDE.md").resolve()
+        assert dst.exists() and not dst.is_symlink()
+        assert dst.read_text() == (profile / "CLAUDE.md").read_text()
 
     def test_idempotent(self, install_env):
         profile = install_env["profile"]
@@ -307,7 +307,7 @@ class TestClaudeMdLinking:
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._install_system_prompt(profile, "test-profile")
             install._install_system_prompt(profile, "test-profile")
-        assert dst.is_symlink()
+        assert dst.exists() and not dst.is_symlink()
 
     def test_skips_when_no_claude_md(self, install_env):
         profile = install_env["profile"]

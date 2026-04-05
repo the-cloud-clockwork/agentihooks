@@ -2499,11 +2499,11 @@ def _symlink_dir_contents(
 
 
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
-    """Symlink ~/.claude/CLAUDE.md → profile's CLAUDE.md (at profile root).
+    """Copy profile's CLAUDE.md to ~/.claude/CLAUDE.md.
 
-    Convention-based: if profiles/<name>/CLAUDE.md exists, it is symlinked
-    as ~/.claude/CLAUDE.md so Claude Code loads it automatically every session.
-    The source file lives at the profile root (not inside .claude/).
+    Writes a real file (not a symlink) so it resolves correctly across
+    WSL/Windows boundaries and VS Code \\\\wsl.localhost paths.
+    The sync daemon detects source changes and re-copies automatically.
     """
     src = profile_dir / _CLAUDE_MD_NAME
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
@@ -2512,21 +2512,26 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
         _cprint(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
-    if dst.is_symlink():
-        if dst.resolve() == src.resolve():
-            _cprint(f"  [--] {_CLAUDE_MD_NAME} already linked → {src}")
-            return
-        dst.unlink()
+    new_content = src.read_text()
 
-    if dst.exists():
+    # Check if content is already up to date
+    if dst.exists() and not dst.is_symlink():
+        if dst.read_text() == new_content:
+            _cprint(f"  [--] {_CLAUDE_MD_NAME} already up to date (from {profile_name})")
+            return
+
+    # Remove stale symlink or backup existing file
+    if dst.is_symlink():
+        dst.unlink()
+    elif dst.exists():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup = dst.with_suffix(f".md.bak.{timestamp}")
         shutil.copy2(dst, backup)
         print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
         dst.unlink()
 
-    dst.symlink_to(src)
-    _cprint(f"  [OK] Linked {_CLAUDE_MD_NAME} → {src}")
+    dst.write_text(new_content)
+    _cprint(f"  [OK] Wrote {_CLAUDE_MD_NAME} (from {profile_name})")
 
 
 def _cleanup_stale_claude_md_symlink() -> None:
