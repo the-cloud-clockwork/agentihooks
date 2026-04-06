@@ -453,6 +453,24 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
     return None
 
 
+def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
+    """Resolve a comma-separated profile chain to a list of (name, path) tuples.
+
+    Returns an empty list if any profile in the chain cannot be resolved.
+    """
+    chain = [p.strip() for p in profile_input.split(",") if p.strip()]
+    if not chain:
+        return []
+    dirs: list[tuple[str, Path]] = []
+    for name in chain:
+        d = _resolve_profile_dir(name)
+        if d is None:
+            _cprint(f"  [WARN] Profile '{name}' in chain '{profile_input}' not found — skipping chain")
+            return []
+        dirs.append((name, d))
+    return dirs
+
+
 def cmd_bundle(action: str, path: str | None = None, rebase: bool = False) -> None:
     """Handle 'agentihooks bundle' subcommands."""
     if action == "link":
@@ -1214,26 +1232,35 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     """Build and write .claude/settings.local.json from per-repo config."""
     profile_name = config.get("profile", "default")
 
-    # Validate profile
-    profile_dir = _resolve_profile_dir(profile_name)
-    if profile_dir is None:
+    # Resolve profile chain (comma-separated) or single profile
+    profile_dirs = _resolve_profile_chain(profile_name)
+    if not profile_dirs:
         _cprint(f"  [WARN] Profile '{profile_name}' not found — using default")
-        profile_dir = _resolve_profile_dir("default") or PROFILES_DIR / "default"
+        profile_dirs = _resolve_profile_chain("default")
+        if not profile_dirs:
+            profile_dirs = [("default", PROFILES_DIR / "default")]
         profile_name = "default"
 
-    # Load profile overrides
-    overrides_path = profile_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
-    if not overrides_path.exists():
-        overrides_path = profile_dir / "settings.overrides.json"
-    profile_overrides = {}
-    if overrides_path.exists():
-        try:
-            profile_overrides = load_json(overrides_path)
-        except (json.JSONDecodeError, OSError):
-            pass
+    # Load profile overrides (merged across chain)
+    profile_overrides: dict = {}
+    for _pname, pdir in profile_dirs:
+        overrides_path = pdir / _CLAUDE_SUBDIR / "settings.overrides.json"
+        if not overrides_path.exists():
+            overrides_path = pdir / "settings.overrides.json"
+        if overrides_path.exists():
+            try:
+                ovr = load_json(overrides_path)
+                # Deep merge: env and permissions are dicts, rest is overwrite
+                for key in ("env", "permissions"):
+                    if key in ovr and key in profile_overrides:
+                        profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
+                profile_overrides.update({k: v for k, v in ovr.items() if k not in ("env", "permissions")})
+            except (json.JSONDecodeError, OSError):
+                pass
 
-    # Load connector rules for this profile
-    conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
+    # Load connector rules for this profile (use primary profile name)
+    primary_profile = profile_dirs[-1][0]
+    conn_env, conn_deny, conn_disabled = _load_connectors(primary_profile)
 
     # Per-repo overrides from .agentihooks.json
     repo_disabled = config.get("disabledMcpServers", [])
@@ -1252,7 +1279,12 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     # Blacklist-all-by-default: disable every known MCP in ~/.claude.json
     # projects block, except those the profile or repo whitelists.
     all_known = _get_all_known_mcp_names()
-    profile_enabled = _get_profile_enabled_servers(profile_dir) or set()
+    # Union enabledMcpServers across all profiles in the chain
+    profile_enabled: set[str] = set()
+    for _pname, pdir in profile_dirs:
+        pe = _get_profile_enabled_servers(pdir)
+        if pe:
+            profile_enabled |= pe
     repo_enabled = set(config.get("enabledMcpServers", []))
     # Also respect child project whitelists so parent never blocks their servers
     try:
@@ -1320,20 +1352,42 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     if all_env:
         print(f"     Env vars: {len(all_env)}")
 
-    # Ensure .gitignore covers settings.local.json
+    # Generate CLAUDE.local.md from profile chain
+    if not dry_run:
+        claude_local_md = claude_dir / "CLAUDE.local.md"
+        claude_md_parts: list[str] = []
+        for pname, pdir in profile_dirs:
+            src = pdir / _CLAUDE_MD_NAME
+            if src.exists():
+                content = src.read_text().strip()
+                if content:
+                    if len(profile_dirs) > 1:
+                        claude_md_parts.append(f"<!-- profile: {pname} -->\n{content}")
+                    else:
+                        claude_md_parts.append(content)
+        if claude_md_parts:
+            claude_local_md.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
+            sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
+            _cprint(f"  [OK] Wrote CLAUDE.local.md ({' + '.join(sources)})")
+
+    # Ensure .gitignore covers settings.local.json and CLAUDE.local.md
     _ensure_local_settings_gitignored(repo_dir)
 
 
 def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
-    """Ensure .claude/settings.local.json is gitignored."""
-    entry = ".claude/settings.local.json"
+    """Ensure .claude/settings.local.json and CLAUDE.local.md are gitignored."""
+    entries = [".claude/settings.local.json", ".claude/CLAUDE.local.md"]
     gitignore = repo_dir / ".gitignore"
     if gitignore.exists():
         content = gitignore.read_text()
-        if entry not in content:
+        added = []
+        for entry in entries:
+            if entry not in content:
+                added.append(entry)
+        if added:
             with open(gitignore, "a") as f:
-                f.write(f"\n{entry}\n")
-            _cprint(f"  [OK] Added {entry} to .gitignore")
+                f.write("\n" + "\n".join(added) + "\n")
+            _cprint(f"  [OK] Added {', '.join(added)} to .gitignore")
     # Don't create .gitignore if it doesn't exist — not our file to create
 
 
@@ -2169,12 +2223,20 @@ def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
             continue
         user_enabled = set(state_projects.get(proj_path, {}).get("enabled_mcps", []))
         child_enabled = _collect_child_enabled_mcps(Path(proj_path), all_project_paths)
-        # Read this project's own .agentihooks.json whitelist
+        # Read this project's own .agentihooks.json whitelist + profile override
         own_enabled: set[str] = set()
         own_config = Path(proj_path) / ".agentihooks.json"
         if own_config.exists():
             try:
-                own_enabled = set(load_json(own_config).get("enabledMcpServers", []))
+                cfg = load_json(own_config)
+                own_enabled = set(cfg.get("enabledMcpServers", []))
+                # If project specifies a profile, use its enabledMcpServers too
+                proj_profile = cfg.get("profile")
+                if proj_profile:
+                    for _pname, pdir in _resolve_profile_chain(proj_profile):
+                        pe = _get_profile_enabled_servers(pdir)
+                        if pe:
+                            own_enabled |= pe
             except (json.JSONDecodeError, OSError):
                 pass
         proj_data["disabledMcpServers"] = sorted(base_disabled - user_enabled - child_enabled - own_enabled)
