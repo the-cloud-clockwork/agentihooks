@@ -1247,7 +1247,13 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     all_known = _get_all_known_mcp_names()
     profile_enabled = _get_profile_enabled_servers(profile_dir) or set()
     repo_enabled = set(config.get("enabledMcpServers", []))
-    to_disable = sorted(all_known - profile_enabled - repo_enabled)
+    # Also respect child project whitelists so parent never blocks their servers
+    try:
+        all_project_paths = set(load_json(_CLAUDE_JSON).get("projects", {}).keys()) if _CLAUDE_JSON.exists() else set()
+    except (json.JSONDecodeError, OSError):
+        all_project_paths = set()
+    child_enabled = _collect_child_enabled_mcps(repo_dir, all_project_paths)
+    to_disable = sorted(all_known - profile_enabled - repo_enabled - child_enabled)
     if not dry_run and all_known:
         _write_project_disabled_mcps(repo_dir, to_disable)
 
@@ -2098,6 +2104,29 @@ def _snapshot_claude_json() -> None:
     _save_state(state)
 
 
+def _collect_child_enabled_mcps(parent_path: Path, all_project_paths: set[str]) -> set[str]:
+    """Return the union of enabledMcpServers from child project .agentihooks.json files.
+
+    When a parent project computes its disabledMcpServers, it must not block
+    servers that child projects explicitly whitelist — otherwise Claude Code's
+    upward settings resolution will override the child's whitelist.
+    """
+    prefix = str(parent_path) + "/"
+    enabled: set[str] = set()
+    for candidate in all_project_paths:
+        if not candidate.startswith(prefix):
+            continue
+        child_config = Path(candidate) / ".agentihooks.json"
+        if not child_config.exists():
+            continue
+        try:
+            data = load_json(child_config)
+            enabled.update(data.get("enabledMcpServers", []))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return enabled
+
+
 def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
     """Blacklist all known MCPs in every project entry in ~/.claude.json.
 
@@ -2119,19 +2148,29 @@ def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
     if not all_known:
         return
 
-    profile_enabled = _get_profile_enabled_servers(profile_dir)
-    to_disable = sorted(all_known - (profile_enabled or set()))
+    profile_enabled = _get_profile_enabled_servers(profile_dir) or set()
+    base_disabled = all_known - profile_enabled
 
     # Read per-project enabled MCPs from state so we don't overwrite user choices
     state = _load_state()
     state_projects = state.get("targets", {}).get("projects", {})
+    all_project_paths = set(projects.keys())
 
     updated = 0
     for proj_path, proj_data in projects.items():
         if not isinstance(proj_data, dict):
             continue
         user_enabled = set(state_projects.get(proj_path, {}).get("enabled_mcps", []))
-        proj_data["disabledMcpServers"] = sorted(set(to_disable) - user_enabled)
+        child_enabled = _collect_child_enabled_mcps(Path(proj_path), all_project_paths)
+        # Read this project's own .agentihooks.json whitelist
+        own_enabled: set[str] = set()
+        own_config = Path(proj_path) / ".agentihooks.json"
+        if own_config.exists():
+            try:
+                own_enabled = set(load_json(own_config).get("enabledMcpServers", []))
+            except (json.JSONDecodeError, OSError):
+                pass
+        proj_data["disabledMcpServers"] = sorted(base_disabled - user_enabled - child_enabled - own_enabled)
         updated += 1
 
     if updated:
@@ -3611,9 +3650,11 @@ def cmd_migrate(args) -> None:
     profile_enabled = _get_profile_enabled_servers(profile_dir)
     to_disable = sorted(all_known - (profile_enabled or set()))
 
+    all_project_paths = set(projects.keys())
     for _old, new in remap:
         proj = projects.setdefault(new, {})
-        proj["disabledMcpServers"] = to_disable
+        child_enabled = _collect_child_enabled_mcps(Path(new), all_project_paths)
+        proj["disabledMcpServers"] = sorted(set(to_disable) - child_enabled)
 
     # Save
     data["projects"] = projects

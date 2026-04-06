@@ -731,12 +731,27 @@ def _check_new_mcp_servers(known_servers_file: Path) -> None:
     _log(f"MCP tracking: {len(new_servers)} new server(s): {sorted(new_servers)}")
 
     # Add new servers to disabledMcpServers in all project entries
+    # Respect per-project and child-project whitelists
+    _ensure_install_importable()
+    import install
+
     data = _load_json(CLAUDE_JSON)
     projects = data.get("projects", {})
+    all_project_paths = set(projects.keys())
     updated_count = 0
     for proj_path, proj_data in projects.items():
         existing_disabled = set(proj_data.get("disabledMcpServers", []))
-        to_add = new_servers - existing_disabled
+        # Read own whitelist
+        own_enabled: set[str] = set()
+        proj_config = Path(proj_path) / ".agentihooks.json"
+        if proj_config.exists():
+            try:
+                own_enabled = set(json.loads(proj_config.read_text()).get("enabledMcpServers", []))
+            except (json.JSONDecodeError, OSError):
+                pass
+        child_enabled = install._collect_child_enabled_mcps(Path(proj_path), all_project_paths)
+        protected = own_enabled | child_enabled
+        to_add = new_servers - existing_disabled - protected
         if to_add:
             proj_data["disabledMcpServers"] = sorted(existing_disabled | to_add)
             updated_count += 1
@@ -826,7 +841,10 @@ def _check_new_projects(known_servers_file: Path) -> None:
     if not all_servers:
         return
 
-    to_disable = sorted(all_servers)
+    _ensure_install_importable()
+    import install
+
+    all_project_paths = set(projects.keys())
     backfilled = []
 
     for proj_path, proj_data in projects.items():
@@ -834,7 +852,17 @@ def _check_new_projects(known_servers_file: Path) -> None:
             continue
         existing = proj_data.get("disabledMcpServers")
         if not existing:  # missing key or empty list
-            proj_data["disabledMcpServers"] = to_disable
+            # Respect own and child whitelists when backfilling
+            own_enabled: set[str] = set()
+            proj_config = Path(proj_path) / ".agentihooks.json"
+            if proj_config.exists():
+                try:
+                    own_enabled = set(json.loads(proj_config.read_text()).get("enabledMcpServers", []))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            child_enabled = install._collect_child_enabled_mcps(Path(proj_path), all_project_paths)
+            effective = sorted(all_servers - own_enabled - child_enabled)
+            proj_data["disabledMcpServers"] = effective
             backfilled.append(proj_path)
 
     if backfilled:
