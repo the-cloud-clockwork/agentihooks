@@ -1087,32 +1087,39 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         else:
             print(f"\n{_DIM}[--] Quota daemon already running.{_RESET}")
 
-    # --- Auto-start sync daemon ---
+    # --- Restart sync daemon (always restart on init to pick up code changes) ---
     sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
-    sync_running = False
+    old_pid = None
     if sync_pid_file.exists():
         try:
-            pid = int(sync_pid_file.read_text().strip())
-            os.kill(pid, 0)
-            sync_running = True
+            old_pid = int(sync_pid_file.read_text().strip())
+            os.kill(old_pid, 0)  # check if alive
         except (ProcessLookupError, ValueError, PermissionError):
+            old_pid = None
             sync_pid_file.unlink(missing_ok=True)
-    if not sync_running:
-        sync_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
-        if sync_script.exists():
-            import subprocess as _sp2
 
-            python = str(_detect_venv() or sys.executable)
-            proc = _sp2.Popen(
-                [python, str(sync_script)],
-                stdin=_sp2.DEVNULL,
-                stdout=_sp2.DEVNULL,
-                stderr=_sp2.DEVNULL,
-                start_new_session=True,
-            )
-            _cprint(f"[OK] Sync daemon started (PID {proc.pid}).")
-    else:
-        print(f"{_DIM}[--] Sync daemon already running.{_RESET}")
+    sync_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
+    if sync_script.exists():
+        import subprocess as _sp2
+
+        # Kill old daemon so the new one picks up code changes
+        if old_pid is not None:
+            try:
+                os.kill(old_pid, signal.SIGTERM)
+                _cprint(f"{_DIM}[--] Stopped old sync daemon (PID {old_pid}).{_RESET}")
+            except (ProcessLookupError, PermissionError):
+                pass
+            sync_pid_file.unlink(missing_ok=True)
+
+        python = str(_detect_venv() or sys.executable)
+        proc = _sp2.Popen(
+            [python, str(sync_script)],
+            stdin=_sp2.DEVNULL,
+            stdout=_sp2.DEVNULL,
+            stderr=_sp2.DEVNULL,
+            start_new_session=True,
+        )
+        _cprint(f"[OK] Sync daemon started (PID {proc.pid}).")
 
     # --- Update bashrc block (agentienv + agenti alias) ---
     if _ENV_FILE_DST.is_file():
