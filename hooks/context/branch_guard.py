@@ -27,9 +27,14 @@ _BLOCKED_PATTERNS = [
      "Force push is blocked — this can destroy remote history."),
     (re.compile(r"git\s+push\s+.*--force-with-lease"),
      "Force push (with lease) is blocked — this can destroy remote history."),
-    # Git tag (tagging is a release operation — must be done by a human)
+    # Git tag (tagging is a release operation — must be done by a human or CI)
     (re.compile(r"git\s+tag\b"),
-     "Git tagging is blocked — tags are release artifacts and must be created by a human."),
+     "Git tagging is blocked — tags and releases should not be created locally.\n\n"
+     "Recommended approach: create a GitHub Actions workflow with workflow_dispatch\n"
+     "that handles tagging, version bumping, and changelog generation automatically.\n"
+     "Place it at .github/workflows/release.yml with a dispatch trigger so you can\n"
+     "run it from the GitHub UI or via `gh workflow run release.yml`.\n"
+     "This keeps version control centralized, auditable, and out of local machines."),
 ]
 
 
