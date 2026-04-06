@@ -45,3 +45,5 @@ profiles/*/.claude/settings.json
 
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+.claude/CLAUDE.local.md
