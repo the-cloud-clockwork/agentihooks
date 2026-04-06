@@ -542,10 +542,28 @@ def _snapshot_project_enabled_mcps() -> None:
         _log("Snapshot: updated per-project enabled_mcps in state.json")
 
 
+def _get_managed_mcp_names() -> set[str]:
+    """Return server names that agentihooks sources currently define.
+
+    Unlike _get_valid_mcp_names() (which reads ~/.claude.json as truth),
+    this reads the actual source files: bundle .mcp.json, profile .mcp.json,
+    hooks-utils, and state-tracked mcpFiles.
+    """
+    try:
+        _ensure_install_importable()
+        import install
+        return set(install._collect_all_managed_mcp_servers().keys())
+    except Exception as exc:
+        _log(f"Warning: could not collect managed MCP names: {exc}")
+        return set()
+
+
 def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False) -> dict:
     """Remove stale MCP entries from all tracking locations.
 
     Prunes:
+    0. Orphaned mcpServers in ~/.claude.json (managed by agentihooks but
+       no longer defined in any source file)
     1. disabledMcpServers in every project entry in ~/.claude.json
     2. known-mcp-servers.json
     3. settings.local.json files in project .claude/ dirs
@@ -553,11 +571,36 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
     Returns summary dict with counts.
     """
     valid = _get_valid_mcp_names()
-    summary = {"pruned_disabled": 0, "pruned_known": 0, "pruned_settings": 0, "projects_touched": 0}
+    summary = {"pruned_disabled": 0, "pruned_known": 0, "pruned_settings": 0, "projects_touched": 0, "pruned_orphaned": 0}
 
     if not valid:
         _log("Prune: no valid MCP servers found — skipping (safety)")
         return summary
+
+    # 0. Remove orphaned mcpServers from ~/.claude.json
+    #    A server is orphaned if it exists in ~/.claude.json mcpServers but is
+    #    NOT defined in any agentihooks source (bundle, profile, mcpFiles, hooks-utils).
+    #    We only remove servers that agentihooks could have added — skip anything
+    #    that starts with "claude.ai " (web-session managed).
+    managed = _get_managed_mcp_names()
+    if managed:
+        data = _load_json(CLAUDE_JSON)
+        current_servers = data.get("mcpServers", {})
+        orphaned = {
+            name for name in current_servers
+            if not name.startswith("claude.ai ") and name not in managed
+        }
+        if orphaned:
+            for name in orphaned:
+                del current_servers[name]
+            _write_atomic(CLAUDE_JSON, data)
+            summary["pruned_orphaned"] = len(orphaned)
+            # Also remove from valid set so downstream prune steps don't keep them
+            valid -= orphaned
+            _log(f"Prune: removed {len(orphaned)} orphaned mcpServers from ~/.claude.json: {sorted(orphaned)}")
+            if verbose:
+                for name in sorted(orphaned):
+                    _log(f"  Removed orphaned server: {name}")
 
     # 1. Prune disabledMcpServers in ~/.claude.json projects
     data = _load_json(CLAUDE_JSON)
@@ -643,9 +686,9 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
         _write_atomic(STATE_JSON, state)
     summary["pruned_enabled"] = pruned_enabled
 
-    total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"] + pruned_enabled
+    total = summary["pruned_orphaned"] + summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"] + pruned_enabled
     if total > 0:
-        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings, {pruned_enabled} enabled)")
+        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_orphaned']} orphaned, {summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings, {pruned_enabled} enabled)")
 
     return summary
 
