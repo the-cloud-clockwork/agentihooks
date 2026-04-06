@@ -1,6 +1,6 @@
 """Branch Guard — blocks destructive git operations on main/master.
 
-Prevents merges into main/master, hard resets, and force pushes.
+Prevents merges into main/master, hard resets, force pushes, and git tagging.
 Read-only operations (checkout, switch, pull) are allowed.
 Normal pushes are allowed — branch protection is a remote concern.
 
@@ -27,6 +27,9 @@ _BLOCKED_PATTERNS = [
      "Force push is blocked — this can destroy remote history."),
     (re.compile(r"git\s+push\s+.*--force-with-lease"),
      "Force push (with lease) is blocked — this can destroy remote history."),
+    # Git tag (tagging is a release operation — must be done by a human)
+    (re.compile(r"git\s+tag\b"),
+     "Git tagging is blocked — tags are release artifacts and must be created by a human."),
 ]
 
 
