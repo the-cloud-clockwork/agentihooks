@@ -139,16 +139,23 @@ database  compute  observability  utilities
 
 ---
 
-## Per-project MCP tools
+## Per-project configuration
 
-Don't want a global install? Wire the MCP server into a single project instead:
+Each project can have its own profile, MCP whitelist, and system prompt via `.agentihooks.json`:
 
 ```bash
-agentihooks init --repo ~/dev/my-project
-agentihooks init --repo ~/dev/my-project --profile coding
+# Create per-project config
+cat > .agentihooks.json << 'EOF'
+{"profile": "coding", "enabledMcpServers": ["gateway-core", "hooks-utils"]}
+EOF
+
+# Generate settings.local.json + CLAUDE.local.md
+agentihooks init --local
 ```
 
-This writes a `.mcp.json` directly into the project directory.
+This generates `.claude/settings.local.json` (env, permissions, MCP whitelist) and `.claude/CLAUDE.local.md` (profile system prompt) — both gitignored automatically.
+
+See [Per-Project Configuration]({{ site.baseurl }}/docs/getting-started/per-project/) for the full guide.
 
 ---
 

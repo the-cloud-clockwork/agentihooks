@@ -58,6 +58,8 @@ agentihooks init                             # global install with default profi
 agentihooks init --bundle ~/my-tools         # first-time: link bundle + install
 agentihooks init --profile coding            # use a specific profile
 agentihooks init --repo /path/to/repo        # per-repo config
+agentihooks init --local                     # per-repo config for current directory
+agentihooks init --local --profile coding    # override profile for current project
 
 # Launch claude with profile flags
 agentihooks claude                           # reads profile.yml -> CLI flags
@@ -112,10 +114,12 @@ CLI output uses colored markers: `[OK]` green, `[--]` dim, `[!!]` yellow, `[RM]`
 3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
 4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md` (copy for single profile, concatenated for chains)
 5. Installs MCP servers (hooks-utils + bundle + profile)
-6. Applies MCP blacklist to all registered projects
-7. Installs CLI globally via `uv tool`
-8. Auto-starts quota daemon (if accounts exist) and sync daemon
-9. Writes bashrc block (`agentienv` shell function + `agenti` alias)
+6. Applies hierarchy-aware MCP blacklist to all registered projects (respects per-project `.agentihooks.json` whitelists)
+7. Prunes orphaned MCP servers from `~/.claude.json` (servers no longer defined in any source)
+8. Installs CLI globally via `uv tool`
+9. Restarts sync daemon (always — picks up code changes)
+10. Auto-starts quota daemon (if accounts exist)
+11. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
 ## Profiles
 
@@ -266,7 +270,12 @@ session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am
 
 ## Sync Daemon
 
-`scripts/sync_daemon.py` watches 27+ source files across all 3 layers (built-in, bundle, profile) and auto-propagates changes to every registered target within one poll cycle. Additive only -- never deletes user files.
+`scripts/sync_daemon.py` watches 27+ source files across all 3 layers (built-in, bundle, profile) and auto-propagates changes to every registered target within one poll cycle. The daemon is always restarted on `agentihooks init` to ensure it runs the latest code.
+
+The daemon also performs automatic maintenance:
+- **Orphan pruning** — removes MCP servers from `~/.claude.json` that are no longer defined in any source file
+- **Hierarchy-aware blacklisting** — new MCP servers are disabled in all projects except those that whitelist them via `.agentihooks.json`
+- **New project detection** — auto-blacklists MCPs for newly discovered project entries, respecting per-project whitelists
 
 ```bash
 agentihooks daemon start            # start (60s default poll)
@@ -376,7 +385,8 @@ Everything user-specific lives in `~/.agentihooks/`:
 |-- sync-daemon.pid            # sync daemon PID
 |-- sync-hashes.json           # daemon file hashes
 |-- sync.lock                  # advisory lock
-+-- mcp-tool-cache.json        # cached MCP tool counts (1h TTL, auto-refreshed)
+|-- mcp-tool-cache.json        # cached MCP tool counts (1h TTL, auto-refreshed)
++-- known-mcp-servers.json     # tracked server names for orphan detection
 ```
 
 To move to a new machine: clone the repo, copy `~/.agentihooks/.env`, recreate the venv, run the installer:
@@ -391,9 +401,62 @@ agentihooks init
 
 ```bash
 agentihooks init --repo /path/to/repo    # per-repo config with profile picker
+agentihooks init --local                 # shorthand for --repo . (current directory)
 ```
 
-This writes `.claude/settings.local.json` in the target repo -- the highest-priority settings file in Claude Code. It merges the profile's permissions and MCP overrides into the repo scope.
+This reads `.agentihooks.json` from the repo root and generates:
+- `.claude/settings.local.json` — permissions, env vars, MCP whitelist
+- `.claude/CLAUDE.local.md` — profile system prompt (concatenated for chains)
+
+Both files are gitignored automatically.
+
+### `.agentihooks.json`
+
+```json
+{
+  "profile": "coding",
+  "enabledMcpServers": [
+    "gateway-publish",
+    "gateway-core",
+    "gateway-pm"
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `profile` | Profile name or comma-separated chain (e.g. `"coding,colt"`). Overrides the global profile for this project. |
+| `enabledMcpServers` | MCP servers to whitelist for this project. All other servers are disabled by default. |
+| `disabledMcpServers` | Additional servers to disable (project-scope `.mcp.json` connectors). |
+| `permissions.deny` | Extra tool patterns to deny. |
+| `permissions.ask` | Extra tool patterns requiring confirmation. |
+| `env` | Additional env vars merged into `settings.local.json`. |
+| `otel` | OpenTelemetry overrides for this project. |
+
+### Profile override
+
+The `profile` field controls which profile's settings are applied to this project:
+- **Settings overrides** — env vars, permissions from the profile's `settings.overrides.json`
+- **CLAUDE.local.md** — generated from the profile's `CLAUDE.md` (concatenated for chains)
+- **MCP whitelist** — the profile's `enabledMcpServers` from `profile.yml` are unioned with the repo's whitelist
+
+```bash
+# Query the active profile for the current directory
+agentihooks --query
+# coding (local)       <-- reads .agentihooks.json
+# colt (global)        <-- falls back to global if no local config
+```
+
+### Hierarchy-aware MCP blacklist
+
+When parent and child projects both exist in `~/.claude.json`, the parent's disabled list automatically excludes servers that any child project whitelists. This prevents Claude Code's upward settings resolution from overriding child whitelists.
+
+```
+/agentihub                     → all MCPs disabled EXCEPT those child projects whitelist
+/agentihub/agents/pub/package  → gateway-publish, gateway-core, gateway-pm enabled
+```
+
+The parent will NOT block `gateway-publish`, `gateway-core`, or `gateway-pm` — even though they aren't in its own whitelist.
 
 ## Extending
 

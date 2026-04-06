@@ -75,10 +75,12 @@ This single command:
 5. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> profile-specific)
 6. Symlinks `~/.claude/CLAUDE.md` to the chosen profile's `CLAUDE.md` (at profile root)
 7. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
-8. Applies MCP blacklist across all projects
-9. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
-10. Auto-starts quota and sync daemons
-11. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
+8. Applies hierarchy-aware MCP blacklist across all projects (respects per-project `.agentihooks.json` whitelists)
+9. Prunes orphaned MCP servers from `~/.claude.json`
+10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+11. Restarts sync daemon (always — picks up code changes)
+12. Auto-starts quota daemon (if accounts exist)
+13. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 
 The install is **idempotent** -- re-running is safe. Settings are only backed up on the first run.
 
@@ -238,10 +240,16 @@ After linking, future runs of `agentihooks init` will use the linked bundle auto
 To wire the MCP server and profile config for a single project:
 
 ```bash
-agentihooks init --repo ~/dev/my-project
+agentihooks init --repo ~/dev/my-project    # target a specific path
+agentihooks init --local                     # shorthand for --repo . (current directory)
+agentihooks init --local --profile coding    # override profile for this project
 ```
 
-This writes project-level configuration into the target project directory.
+This reads `.agentihooks.json` from the project root and generates:
+- `.claude/settings.local.json` — permissions, env vars, MCP whitelist
+- `.claude/CLAUDE.local.md` — profile system prompt (concatenated for chains)
+
+Both files are auto-gitignored. See [Per-Project Configuration](per-project.md) for the full guide.
 
 ---
 

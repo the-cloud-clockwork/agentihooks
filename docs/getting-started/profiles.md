@@ -161,6 +161,20 @@ The switch takes effect on the next Claude Code session.
 agentihooks --query
 ```
 
+The command checks the current directory for `.agentihooks.json` first. If a local profile is set, it shows:
+
+```
+coding (local)
+```
+
+Otherwise it falls back to the global profile:
+
+```
+colt (global)
+```
+
+See [Per-Project Configuration](per-project.md) for details on local profile overrides.
+
 ---
 
 ## Launching Claude with profile flags

@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Per-project profile override** — `.agentihooks.json` `profile` field controls which profile generates `settings.local.json` and `CLAUDE.local.md` per project. Supports profile chains.
+- **`CLAUDE.local.md` generation** — `agentihooks init --local` generates `.claude/CLAUDE.local.md` from the resolved profile's `CLAUDE.md`. Auto-gitignored.
+- **Hierarchy-aware MCP blacklist** — parent projects exclude MCP servers that child projects whitelist via `.agentihooks.json`.
+- **Orphaned MCP server pruning** — sync daemon removes stale servers from `~/.claude.json` not defined in any source file.
+- **`--query` CWD awareness** — reads `.agentihooks.json` from current directory first, shows `coding (local)` vs `colt (global)`.
+- **Daemon restart on init** — always kills and restarts sync daemon to pick up code changes.
+- **Per-project docs page** — new `docs/getting-started/per-project.md`.
 - **Sync daemon (`agentihooks daemon`)** — background daemon that watches all source files feeding the install pipeline (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env`) and auto-propagates changes to all registered downstream consumers. Uses SHA-256 hashing with category-based change detection. Targets are registered automatically by `agentihooks init` and `agentihooks init --repo`. Configurable poll interval (default 60s, env: `AGENTIHOOKS_SYNC_POLL_SEC`). Advisory file lock prevents concurrent writes. State: PID at `~/.agentihooks/sync-daemon.pid`, hashes at `~/.agentihooks/sync-hashes.json`, log at `~/.agentihooks/logs/sync-daemon.log`.
 - **Target registry in `state.json`** — `agentihooks init` and `agentihooks init --repo <path>` now register their targets (path + profile) in `state.json` under a new `targets` key. The sync daemon uses this registry to know what to re-install when source files change.
 - **`agentihooks mcp` two-stage interactive flow** — `mcp install` and `mcp uninstall` now use a two-stage UX: Stage 1 picks a file (auto-displayed if only one exists; numbered list with `•` bullet-point server names otherwise); Stage 2 picks which servers to install/remove (`0`=all, `N`=specific, comma-separated). A file is removed from tracking on uninstall only if all its servers were removed.

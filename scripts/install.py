@@ -1662,20 +1662,38 @@ def _read_profile_description(profile_dir: Path) -> str:
 
 
 def query_active_profile() -> None:
-    """Print the currently installed global profile (or chain) and exit."""
-    state = _load_state()
-    targets = state.get("targets", {})
-    global_target = targets.get("global", {})
-    profile_name = global_target.get("profile")
+    """Print the active profile for the current directory, falling back to global."""
+    # Check CWD for .agentihooks.json first
+    cwd = Path.cwd()
+    local_config = cwd / ".agentihooks.json"
+    source = "global"
+    profile_name = None
+
+    if local_config.exists():
+        try:
+            cfg = load_json(local_config)
+            profile_name = cfg.get("profile")
+            if profile_name:
+                source = "local"
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Fall back to global state
+    if not profile_name:
+        state = _load_state()
+        targets = state.get("targets", {})
+        global_target = targets.get("global", {})
+        profile_name = global_target.get("profile")
+
     if not profile_name:
         print("not installed")
         return
 
     chain = [p.strip() for p in profile_name.split(",") if p.strip()]
     if len(chain) > 1:
-        print(f"chain: [{', '.join(chain)}]")
+        print(f"chain: [{', '.join(chain)}] ({source})")
     else:
-        print(profile_name)
+        print(f"{profile_name} ({source})")
 
 
 def list_profiles() -> None:
