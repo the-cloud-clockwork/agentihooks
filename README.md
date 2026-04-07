@@ -239,6 +239,41 @@ AgentiHooks entities (rules, skills, agents, commands, settings, MCP servers, CL
 
 **StatusLine** is not a hook event -- it is a native Claude Code setting handled by `hooks/statusline.py`. Emits a 2-3 line terminal status bar with context fill %, burn rate, cost, cache ratio, git branch, and quota.
 
+## Context Preprocessor — Token Compression
+
+AgentiHooks includes a built-in **Context Preprocessor** that compresses injected content using LLM-native token compression. It exploits how transformer models process subword tokens — abbreviated forms like "auth" activate the same semantic representations as "authentication", saving tokens without losing meaning.
+
+### Estimated Token Savings
+
+| Level | Name | Savings per Injection | Per 100-Turn Session | Best For |
+|-------|------|----------------------|---------------------|----------|
+| 0 | `off` | 0% | 0 tokens | Debugging, transparency |
+| 1 | `light` | ~5-10% | ~200-500 tokens | Minimal overhead, safe for all content |
+| 2 | `standard` | ~10-20% | ~2,000-4,000 tokens | **Recommended** — good balance of compression and readability |
+| 3 | `aggressive` | ~20-35% | ~4,000-8,000 tokens | Long sessions, large rule sets, cost optimization |
+
+With `CONTEXT_COMPRESSION_SCOPE=all`, compression extends beyond context refresh to **all injected content**: session start banners, tool output, secrets warnings, circuit breaker messages, and more — multiplying savings across every hook event.
+
+### Safety Guarantees
+
+The preprocessor **never modifies** critical operational tokens:
+- Negation words (`never`, `don't`, `not`, `without`)
+- Action verbs (`push`, `delete`, `commit`, `deploy`)
+- Code blocks, CLI commands, file paths
+- Environment variable names, numbers, thresholds
+
+### Quick Setup
+
+```bash
+# In ~/.agentihooks/.env
+CONTEXT_REFRESH_COMPRESSION=standard    # compression level (default: standard)
+CONTEXT_COMPRESSION_SCOPE=all           # compress all injections, not just refresh
+```
+
+Full architecture: [Context Preprocessor Docs](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/context-preprocessor/)
+
+---
+
 ## Multi-Account Quota
 
 The quota watcher is a headless Playwright daemon that scrapes claude.ai/settings/usage and writes JSON for the statusline. Supports multiple accounts.

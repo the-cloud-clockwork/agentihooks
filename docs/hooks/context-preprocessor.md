@@ -40,14 +40,17 @@ Future: the preprocessor is designed as a standalone service that can process an
 
 ## Compression Levels
 
-| Level | Name | Transforms | Expected Reduction |
-|-------|------|------------|-------------------|
-| 0 | `off` | None (passthrough) | 0% |
-| 1 | `light` | Strip markdown formatting | 25-30% |
-| 2 | `standard` | Level 1 + remove filler words + apply abbreviation dictionary | 35-45% |
-| 3 | `aggressive` | Level 2 + internal vowel removal on long common words | 45-55% |
+| Level | Name | Transforms | Token Savings | Per 100-Turn Session |
+|-------|------|------------|--------------|---------------------|
+| 0 | `off` | None (passthrough) | 0% | 0 tokens |
+| 1 | `light` | Strip markdown formatting | ~5-10% | ~200-500 tokens |
+| 2 | `standard` | Level 1 + remove filler words + apply abbreviation dictionary | ~10-20% | ~2,000-4,000 tokens |
+| 3 | `aggressive` | Level 2 + internal vowel removal on long common words | ~20-35% | ~4,000-8,000 tokens |
 
-Default is `off`. Set `CONTEXT_REFRESH_COMPRESSION=standard` in `~/.agentihooks/.env` for the recommended balance of compression and readability.
+{: .highlight }
+**Default is `standard`.** Set `CONTEXT_COMPRESSION_SCOPE=all` in `~/.agentihooks/.env` to extend compression beyond refresh to all hook injections and tool output.
+
+Session savings scale with: number of rules, CLAUDE.md size, session length, and how many injections fire. With `scope=all`, savings compound across every `inject_context`, `inject_banner`, and `additionalContext` call in the hook system.
 
 ---
 
