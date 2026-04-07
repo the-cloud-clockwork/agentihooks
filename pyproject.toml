@@ -1,6 +1,6 @@
 [project]
 name = "agentihooks"
-version = "1.5.1"
+version = "1.6.0"
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -59,10 +59,11 @@ agentihooks = "scripts.install:main"
 include = ["hooks*", "scripts*", "profiles*"]
 
 [tool.setuptools.package-data]
+"hooks.context" = ["data/*.json"]
 "profiles._base" = ["*.json"]
-"profiles.default" = ["*.yml", "*.json", ".claude/CLAUDE.md"]
-"profiles.admin" = ["*.yml", "*.json", ".claude/CLAUDE.md"]
-"profiles.coding" = ["*.yml", "*.json", ".claude/CLAUDE.md"]
+"profiles.default" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
+"profiles.admin" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
+"profiles.coding" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
 
 [project.urls]
 Homepage = "https://github.com/The-Cloud-Clock-Work/agentihooks"
