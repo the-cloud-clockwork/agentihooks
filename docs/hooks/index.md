@@ -62,4 +62,7 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
 | [Context Preprocessor](context-preprocessor.md) | Token compression for mid-session context refresh injections |
-| [Broadcast System](broadcast.md) | Real-time messaging to all active sessions — alerts, policy changes, emergency stops |
+| [**Broadcast System**](broadcast.md) | **Real-time fleet messaging** — send a message to every active Claude Code session simultaneously. Deploy freezes, incident response, credential rotation, team coordination. |
+
+{: .highlight }
+**Broadcast System** is one of AgentiHooks' most powerful features. One command reaches every active session — no servers, no daemons, no pub/sub infrastructure required. [Learn more →](broadcast.md)

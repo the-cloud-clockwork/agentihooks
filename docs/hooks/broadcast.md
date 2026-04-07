@@ -8,6 +8,8 @@ permalink: /docs/hooks/broadcast/
 # Broadcast System
 {: .no_toc }
 
+Send a message. Every active Claude Code session sees it — on the next hook event, before the next tool call. No servers, no daemons, no pub/sub infrastructure. Just a shared file and a hook.
+
 ## Table of contents
 {: .no_toc .text-delta }
 
@@ -40,34 +42,158 @@ agentihooks broadcast              ~/.agentihooks/                 Session 1 ─
 
 ---
 
-## Concepts
+## Quick Start
 
-### Severity Levels
+```bash
+# Tell every active session to stop deploying — right now
+agentihooks broadcast -s critical "Production incident — read-only mode. Do NOT deploy."
 
-| Severity | Injection points | Frequency | Use case |
-|----------|-----------------|-----------|----------|
-| `critical` | `UserPromptSubmit` (stdout) + `PreToolUse` (additionalContext) | Every turn + every tool call | Production incidents, credential rotation, emergency stops |
-| `alert` | `UserPromptSubmit` (stdout) | Every turn until TTL expires | Deploy freezes, maintenance windows, policy changes |
-| `info` | `UserPromptSubmit` (stdout) | Once per session | Informational — system status, reminders |
+# Declare a deploy freeze for the night
+agentihooks broadcast -s alert -t 8h "Deploy freeze until 06:00. No pushes to any branch."
 
-**Critical** broadcasts are the most aggressive — the agent sees the message before every user turn AND before every tool call. An agent making 5 tool calls per turn sees the critical message 6 times. It cannot miss it.
+# Natural language — let Haiku figure out the right severity and TTL
+agentihooks broadcast emit "we have a prod incident, all agents should halt any deployments"
 
-### Delivery Modes
+# Check what's active
+agentihooks broadcast --list
 
-| Mode | Behavior | Controlled by |
-|------|----------|---------------|
-| **One-shot** | Injected once per session, then marked as delivered | Default for `info` severity |
-| **Persistent** | Re-injected on every applicable hook event until TTL expires | `--persistent` flag or `critical`/`alert` severity |
+# Lift it early
+agentihooks broadcast --clear
+```
 
-### Time-to-Live (TTL)
+---
 
-Every broadcast has a TTL. After expiry, the message is no longer injected and is cleaned up lazily (any hook process that reads the file removes expired entries).
+## Use Cases
 
-| Severity | Default TTL | Typical range |
-|----------|-------------|---------------|
-| `critical` | 30 minutes | 5 min – 2 hours |
-| `alert` | 1 hour | 15 min – 8 hours |
-| `info` | 4 hours | 1 hour – 24 hours |
+### Deploy Freeze
+
+It's 11pm. You're freezing deploys until after a maintenance window.
+
+```bash
+agentihooks broadcast -s alert -t 8h \
+  "Deploy freeze in effect until 06:00 UTC. Do NOT push, deploy, or restart any service."
+```
+
+Every agent — whether working on frontend, backend, or infra — sees the banner on their next turn. Alert severity means it re-injects every turn until the TTL expires. You don't have to remember to cancel it.
+
+---
+
+### Production Incident
+
+The database is degraded. You need every agent to stop making writes immediately.
+
+```bash
+agentihooks broadcast -s critical \
+  "INCIDENT: DB-PROD is degraded. Read-only mode — do NOT execute writes, migrations, or deploys."
+```
+
+Critical severity fires on every turn **and** before every tool call. An agent mid-task, about to run `kubectl apply`, sees the message before the tool executes. It cannot miss it.
+
+When the incident is resolved:
+
+```bash
+agentihooks broadcast --clear
+```
+
+---
+
+### Credential Rotation
+
+Credentials are being rotated. Agents using the old values need to know.
+
+```bash
+agentihooks broadcast -s critical -t 30m \
+  "Credential rotation in progress. GITHUB_TOKEN and REGISTRY_TOKEN are being cycled. Pause any tasks requiring those credentials."
+```
+
+The 30-minute TTL matches the rotation window. After that, the message self-cleans.
+
+---
+
+### Maintenance Window
+
+You're upgrading the Kubernetes cluster. Agents should not schedule new workloads.
+
+```bash
+agentihooks broadcast -s alert -t 2h \
+  "K8s cluster maintenance 02:00–04:00 UTC. Do not apply manifests or trigger rollouts."
+```
+
+---
+
+### Team Coordination
+
+Multiple engineers, multiple sessions, one shared instruction.
+
+```bash
+agentihooks broadcast -s info \
+  "QA environment is reserved for release testing until 17:00. Use staging-dev for feature work."
+```
+
+Info severity delivers once per session — it's a heads-up, not a repeated warning. Each session sees it exactly once.
+
+---
+
+### AI-Assisted Broadcast
+
+Not sure what severity to pick? Use the `emit` subcommand. It sends your natural language to Claude Haiku, which constructs the right broadcast and fires it.
+
+```bash
+agentihooks broadcast emit "sonarqube is down, agents should skip code quality scans for now"
+# → severity: info, ttl: 4h, message: "SonarQube is currently unavailable. Skip code quality scan steps."
+
+agentihooks broadcast emit "prod is down, stop everything"
+# → severity: critical, ttl: 30m, message: "Production incident in progress. Halt all deploys and destructive operations."
+```
+
+`emit` runs Haiku in a sandboxed subprocess with `Bash(agentihooks*)` as the only permitted tool — it can only call back into the agentihooks CLI. No rogue actions, no context leakage.
+
+---
+
+## Severity Levels
+
+| Severity | When agents see it | Persistent | Default TTL | Use for |
+|----------|--------------------|------------|-------------|---------|
+| `critical` | Every turn + every tool call | Yes | 30 min | Production incidents, credential rotation, emergency stops |
+| `alert` | Every turn | Yes | 1 hour | Deploy freezes, maintenance windows, policy changes |
+| `info` | Once per session | No | 4 hours | FYI notices, status updates, reminders |
+
+**Critical** is the most aggressive. The agent sees the message before every user turn AND before every tool call. An agent making 5 tool calls per turn sees the critical message 6 times. It cannot miss it.
+
+---
+
+## CLI Reference
+
+### `agentihooks broadcast`
+
+```
+agentihooks broadcast [OPTIONS] MESSAGE
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-s`, `--severity` | `alert` | Severity level: `critical`, `alert`, `info` |
+| `-t`, `--ttl` | (per severity) | Time-to-live: `30m`, `1h`, `4h`, `24h`, or integer seconds |
+| `--persistent` | (per severity) | Force persistent re-injection on every applicable event |
+| `--source` | `operator` | Source tag: `operator`, `system`, `cron`, `api` |
+| `--list` | | Show all active broadcasts with IDs and expiry times |
+| `--clear` | | Clear all active broadcasts |
+| `--clear ID` | | Clear a specific broadcast by ID |
+
+### `agentihooks broadcast emit`
+
+```
+agentihooks broadcast emit "NATURAL LANGUAGE DESCRIPTION"
+```
+
+Sends the description to Claude Haiku, which determines the right severity, TTL, and message text, then fires the broadcast. Haiku runs sandboxed with `Bash(agentihooks*)` only.
+
+```bash
+# Examples
+agentihooks broadcast emit "deploy freeze tonight, no pushes"
+agentihooks broadcast emit "prod incident, all agents stop"
+agentihooks broadcast emit "sonarqube is back up"
+```
 
 ---
 
@@ -99,14 +225,14 @@ Location: `~/.agentihooks/broadcast.json`
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string (UUID) | Unique message identifier |
-| `message` | string | The broadcast content (what the agent sees) |
+| `message` | string | The broadcast content seen by each agent |
 | `severity` | string | `critical`, `alert`, or `info` |
 | `persistent` | boolean | If true, re-inject every applicable event until TTL. If false, inject once per session. |
 | `source` | string | Who sent it: `operator`, `system`, `cron`, `api` |
 | `created_at` | ISO 8601 | When the message was created |
 | `ttl_seconds` | integer | Time-to-live in seconds |
 | `expires_at` | ISO 8601 | Computed expiry timestamp |
-| `delivered_to` | array | Session IDs that have received this message (for one-shot delivery tracking) |
+| `delivered_to` | array | Session IDs that have received this message (one-shot delivery tracking) |
 
 ### Active Session Registry
 
@@ -146,7 +272,7 @@ For `alert` and `info` severity. Uses `inject_banner()` to print a formatted ban
 
 **PreToolUse (additionalContext JSON)**
 
-For `critical` severity only. Returns JSON that Claude Code appends to the tool's context:
+For `critical` severity only. Returns JSON that Claude Code appends to the tool's context — fires before EVERY tool call, meaning the agent sees the critical message mid-reasoning, not just at turn start.
 
 ```json
 {
@@ -157,11 +283,9 @@ For `critical` severity only. Returns JSON that Claude Code appends to the tool'
 }
 ```
 
-This fires before EVERY tool call, meaning the agent sees the critical message mid-reasoning — not just at the start of the next turn.
-
 **SessionStart (stdout)**
 
-Delivers any pending broadcasts to new or resuming sessions immediately.
+Delivers any pending broadcasts to new or resuming sessions immediately on startup.
 
 ### Concurrency Safety
 
@@ -176,65 +300,7 @@ Multiple sessions may read and write `broadcast.json` simultaneously. Safety is 
 No dedicated cleanup process. Every hook invocation that reads `broadcast.json`:
 1. Filters out expired messages (current time > `expires_at`)
 2. Rewrites the file if any messages were removed
-3. This means expired broadcasts are cleaned up within seconds of expiry (the next hook event triggers it)
-
----
-
-## CLI
-
-### `agentihooks broadcast`
-
-Send a message to all active Claude Code sessions.
-
-```
-agentihooks broadcast [OPTIONS] MESSAGE
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-s`, `--severity` | `alert` | Severity level: `critical`, `alert`, `info` |
-| `-t`, `--ttl` | (per severity) | Time-to-live: `30m`, `1h`, `4h`, `24h`, or seconds |
-| `--persistent` | (per severity) | Force persistent mode (re-inject every event) |
-| `--source` | `operator` | Source tag: `operator`, `system`, `cron`, `api` |
-| `--list` | | Show all active broadcasts |
-| `--clear` | | Clear all active broadcasts |
-| `--clear ID` | | Clear a specific broadcast by ID |
-
-### Examples
-
-```bash
-# Emergency: all agents stop deploying
-agentihooks broadcast -s critical "Production incident — read-only mode, do NOT deploy"
-
-# Deploy freeze for the night
-agentihooks broadcast -s alert -t 8h "Deploy freeze until 6am"
-
-# Informational notice
-agentihooks broadcast -s info "SonarQube is down, skip CI validation"
-
-# Persistent rule override
-agentihooks broadcast --persistent -t 2h "Do NOT push to any branch until further notice"
-
-# List active broadcasts
-agentihooks broadcast --list
-
-# Clear all
-agentihooks broadcast --clear
-
-# Clear specific
-agentihooks broadcast --clear f47ac10b-58cc-4372-a567-0e02b2c3d479
-```
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BROADCAST_ENABLED` | `true` | Enable/disable the broadcast system |
-| `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Path to the broadcast file. Set to a shared mount for multi-node. |
-| `BROADCAST_MAX_MESSAGES` | `50` | Maximum concurrent broadcasts (oldest expire first) |
-| `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on PreToolUse (additionalContext) |
+3. Expired broadcasts are cleaned up within seconds of expiry — the next hook event triggers it
 
 ---
 
@@ -272,15 +338,26 @@ PreToolUse fires
 
 ---
 
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BROADCAST_ENABLED` | `true` | Enable/disable the broadcast system entirely |
+| `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Path to the broadcast file. Point to a shared mount for multi-node. |
+| `BROADCAST_MAX_MESSAGES` | `50` | Maximum concurrent active broadcasts (oldest expire first at the limit) |
+| `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on PreToolUse via additionalContext |
+
+---
+
 ## Scale: From Laptop to Kubernetes
 
-### Single machine (1-20 sessions)
+### Single machine (1–20 sessions)
 
-File-based. `~/.agentihooks/broadcast.json` on local disk. All sessions read the same file. Atomic writes + flock for safety.
+File-based. `~/.agentihooks/broadcast.json` on local disk. All sessions read the same file. Atomic writes + flock for safety. Zero configuration needed.
 
-### Shared filesystem (20-200 sessions)
+### Shared filesystem (20–200 sessions)
 
-NFS or EFS mount. Point `BROADCAST_FILE` to a shared path. All pods/nodes read the same file. Works with the same file-based implementation — NFS supports flock on most configurations.
+NFS or EFS mount. Point `BROADCAST_FILE` to a shared path. All pods and nodes read the same file. Works with the same file-based implementation — NFS supports flock on most configurations.
 
 ```bash
 BROADCAST_FILE=/mnt/shared/agentihooks/broadcast.json
@@ -329,11 +406,7 @@ On `SessionStart`, the hook registers the session:
 
 ### Deregistration
 
-On `SessionEnd`, the hook removes the session entry.
-
-### Stale detection
-
-On read, any session whose PID is no longer alive is removed. This handles crashed sessions that never fired `SessionEnd`.
+On `SessionEnd`, the hook removes the session entry. Stale sessions (PID no longer alive) are removed lazily on the next read — this handles crashed sessions that never fired `SessionEnd`.
 
 ### Visibility
 
@@ -341,7 +414,6 @@ On read, any session whose PID is no longer alive is removed. This handles crash
 agentihooks status
 ```
 
-Shows:
 ```
 [OK] Active sessions: 4
      + sess-abc123 (PID 12345) ~/dev/my-project [claude-opus-4-6] 2h ago
@@ -354,10 +426,10 @@ Shows:
 
 ## Limitations
 
-- **Not real-time push**: Broadcasts are pulled on hook events, not pushed. An idle session (no user input, no tool calls) won't see a broadcast until the next event fires. Worst case latency = time until user's next message.
-- **10,000 char cap**: Claude Code limits hook stdout/additionalContext to 10,000 characters per event. Broadcasts must be concise.
-- **File locking on NFS**: Some NFS configurations don't support `flock()`. In those environments, use Redis instead.
-- **No selective targeting**: Broadcasts go to ALL sessions. There is no per-session or per-project targeting (by design — the PA system is for fleet-wide announcements).
+- **Pull, not push**: Broadcasts are pulled on hook events. An idle session (no user input, no tool calls) won't see a broadcast until the next event fires. Worst-case latency = time until the user's next message.
+- **10,000 char cap**: Claude Code limits hook stdout and additionalContext to 10,000 characters per event. Broadcasts must be concise.
+- **NFS flock**: Some NFS configurations don't support `flock()`. Use Redis in those environments.
+- **No selective targeting**: Broadcasts go to ALL sessions. There is no per-session or per-project targeting — the PA system is for fleet-wide announcements by design.
 
 ---
 
