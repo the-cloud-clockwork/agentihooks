@@ -3753,6 +3753,67 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 # ---------------------------------------------------------------------------
 
 
+def _cmd_broadcast(args: argparse.Namespace) -> None:
+    """Handle the broadcast CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context.broadcast import clear_broadcasts, create_broadcast, list_broadcasts
+
+    if getattr(args, "bcast_list", False):
+        msgs = list_broadcasts()
+        if not msgs:
+            print("No active broadcasts.")
+            return
+        for m in msgs:
+            sev = m.get("severity", "?").upper()
+            mid = m.get("id", "?")
+            msg = m.get("message", "")
+            exp = m.get("expires_at", "")
+            pers = " [persistent]" if m.get("persistent") else ""
+            print(f"  [{sev}] {mid} — {msg}{pers}  (expires: {exp})")
+        return
+
+    bcast_clear = getattr(args, "bcast_clear", None)
+    if bcast_clear is not None:
+        if bcast_clear == "__ALL__":
+            clear_broadcasts()
+            print("All broadcasts cleared.")
+        else:
+            clear_broadcasts(message_id=bcast_clear)
+            print(f"Broadcast {bcast_clear} cleared.")
+        return
+
+    message = getattr(args, "message", None)
+    if not message:
+        print("Error: message is required (or use --list / --clear)", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse TTL string
+    ttl_seconds = 0
+    ttl_raw = getattr(args, "ttl", None)
+    if ttl_raw:
+        _ttl_map = {"m": 60, "h": 3600, "d": 86400}
+        if ttl_raw[-1] in _ttl_map and ttl_raw[:-1].isdigit():
+            ttl_seconds = int(ttl_raw[:-1]) * _ttl_map[ttl_raw[-1]]
+        elif ttl_raw.isdigit():
+            ttl_seconds = int(ttl_raw)
+        else:
+            print(f"Error: invalid TTL '{ttl_raw}'. Use: 5m, 30m, 1h, 8h, 24h, or seconds.", file=sys.stderr)
+            sys.exit(1)
+
+    msg_id = create_broadcast(
+        message,
+        severity=args.severity,
+        ttl_seconds=ttl_seconds,
+        source=args.source,
+        persistent=args.persistent or None,
+    )
+    if msg_id:
+        print(f"Broadcast created: {msg_id} [{args.severity}]")
+    else:
+        print("Error: failed to create broadcast.", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_migrate(args) -> None:
     """Remap ~/.claude.json project entries when repos move to a new parent dir."""
     target = Path(args.target_path).expanduser().resolve()
@@ -4028,6 +4089,15 @@ def main() -> None:
     p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
     p_migrate.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
 
+    bcast_p = sub.add_parser("broadcast", help="Send a message to all active Claude Code sessions")
+    bcast_p.add_argument("message", nargs="?", default=None, help="Message to broadcast")
+    bcast_p.add_argument("-s", "--severity", default="alert", choices=["critical", "alert", "info"])
+    bcast_p.add_argument("-t", "--ttl", default=None, help="TTL: 5m, 30m, 1h, 8h, 24h, or seconds")
+    bcast_p.add_argument("--persistent", action="store_true", default=False)
+    bcast_p.add_argument("--source", default="operator")
+    bcast_p.add_argument("--list", action="store_true", dest="bcast_list")
+    bcast_p.add_argument("--clear", nargs="?", const="__ALL__", default=None, dest="bcast_clear")
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -4155,6 +4225,8 @@ def main() -> None:
                 print(f"  settings.local.json: {summary['pruned_settings']} entries")
     elif args.command == "migrate":
         cmd_migrate(args)
+    elif args.command == "broadcast":
+        _cmd_broadcast(args)
 
 
 if __name__ == "__main__":

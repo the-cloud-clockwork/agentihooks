@@ -547,6 +547,21 @@ def check_session(session_id: str) -> dict[str, Any]:
 # ── Orchestrator ────────────────────────────────────────────────────────
 
 
+def check_broadcast() -> dict[str, Any]:
+    try:
+        from hooks.config import BROADCAST_ENABLED
+
+        if not BROADCAST_ENABLED:
+            return {"enabled": False, "sessions": 0, "messages": 0, "ok": True}
+        from hooks.context.broadcast import get_active_sessions, list_broadcasts
+
+        sessions = get_active_sessions(cleanup=True)
+        msgs = list_broadcasts()
+        return {"enabled": True, "sessions": len(sessions), "messages": len(msgs), "ok": True}
+    except Exception:
+        return {"enabled": False, "sessions": 0, "messages": 0, "ok": True}
+
+
 def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
     results: dict[str, Any] = {
         "profile": check_profile(),
@@ -558,6 +573,7 @@ def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
         "guardrails": check_guardrails(),
         "mcp": check_mcp(),
         "quota": check_quota(),
+        "broadcast": check_broadcast(),
     }
     if session_id:
         results["session"] = check_session(session_id)
@@ -621,6 +637,13 @@ def format_cli(results: dict[str, Any]) -> str:
         lines.append(_cprint("[OK] OTEL: enabled"))
     else:
         lines.append(_cprint("[--] OTEL: disabled"))
+
+    # Broadcast
+    b = results.get("broadcast", {})
+    if b.get("enabled"):
+        lines.append(_cprint(f"[OK] Broadcast: {b['sessions']} sessions, {b['messages']} messages"))
+    else:
+        lines.append(_cprint("[--] Broadcast: disabled"))
 
     # Guardrails
     g = results["guardrails"]

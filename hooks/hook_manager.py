@@ -331,6 +331,18 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("thinking_policy injection failed", {"error": str(e)})
 
+    # --- Broadcast: register session + deliver pending ---
+    from hooks.config import BROADCAST_ENABLED
+
+    if BROADCAST_ENABLED:
+        try:
+            from hooks.context.broadcast import check_and_inject_broadcasts, register_session
+
+            register_session(session_id, pid=os.getppid(), cwd=payload.get("cwd", ""), model=payload.get("model", ""))
+            check_and_inject_broadcasts(session_id)
+        except Exception as e:
+            log("broadcast session_start failed", {"error": str(e)})
+
     # MCP surface area warning
     try:
         import importlib.util
@@ -423,6 +435,17 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
+    # --- Broadcast: deregister session ---
+    from hooks.config import BROADCAST_ENABLED
+
+    if BROADCAST_ENABLED:
+        try:
+            from hooks.context.broadcast import deregister_session
+
+            deregister_session(session_id)
+        except Exception as e:
+            log("broadcast session_end failed", {"error": str(e)})
+
 
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
@@ -459,6 +482,17 @@ def on_user_prompt_submit(payload: dict) -> None:
             maybe_refresh(session_id, project_dir=payload.get("cwd", ""))
         except Exception as e:
             log("context_refresh failed", {"error": str(e)})
+
+    # --- Broadcast: inject pending messages ---
+    from hooks.config import BROADCAST_ENABLED
+
+    if BROADCAST_ENABLED:
+        try:
+            from hooks.context.broadcast import check_and_inject_broadcasts
+
+            check_and_inject_broadcasts(session_id)
+        except Exception as e:
+            log("broadcast user_prompt failed", {"error": str(e)})
 
 
 def on_pre_tool_use(payload: dict) -> None:
@@ -656,6 +690,30 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
+
+    # --- Broadcast: critical alerts on every tool call ---
+    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED
+
+    if BROADCAST_ENABLED and BROADCAST_CRITICAL_ON_PRETOOL:
+        try:
+            from hooks.context.broadcast import get_pretool_context
+
+            _broadcast_ctx = get_pretool_context(session_id)
+            if _broadcast_ctx:
+                import json as _json
+
+                print(
+                    _json.dumps(
+                        {
+                            "hookSpecificOutput": {
+                                "hookEventName": "PreToolUse",
+                                "additionalContext": _broadcast_ctx,
+                            }
+                        }
+                    )
+                )
+        except Exception as e:
+            log("broadcast pretool failed", {"error": str(e)})
 
 
 def on_post_tool_use(payload: dict) -> None:
