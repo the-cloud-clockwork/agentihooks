@@ -43,6 +43,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 2. Injects a context message into Claude's context window with session awareness
 3. Logs output token limit awareness if `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is set
 4. If `MCP_HYGIENE_ENABLED=true`: injects a reminder to disable unused MCP servers via `/mcp` to reduce per-turn token overhead
+5. If `BROADCAST_ENABLED=true`: registers session in active-sessions.json and delivers any pending one-shot broadcasts
 
 ---
 
@@ -63,7 +64,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 2. Logs all transcript entries to the hooks log
 3. If `FILE_READ_CACHE_ENABLED=true`: clears the file read cache for this session from Redis
 4. If `CONTEXT_REFRESH_ENABLED=true`: clears the turn counter state (Redis key + file)
-5. Cleans up the `/tmp/<session_id>/` directory
+5. If `BROADCAST_ENABLED=true`: deregisters session from active-sessions.json
+6. Cleans up the `/tmp/<session_id>/` directory
 
 ---
 
@@ -87,6 +89,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
    - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`)
    - Both combat attention decay in long sessions where early-loaded instructions lose influence
    - Content is compressed via the [Context Preprocessor](context-preprocessor.md) (default level: `standard`; set `CONTEXT_REFRESH_COMPRESSION=off` to disable)
+4. If `BROADCAST_ENABLED=true`: checks for undelivered [broadcasts](broadcast.md) and injects them as banners. Critical+persistent broadcasts are injected on every turn; info broadcasts are delivered once per session.
 
 ---
 
@@ -110,6 +113,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 3. **File read deduplication** -- if `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: checks whether the file was already read this session and is unmodified (by mtime). If so, exits with code `2` and tells Claude to use the content already in context
 4. **CLAUDE.md sanity check** -- if `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK=true` (default) and `tool_name` is `Write` or `Edit` targeting a `CLAUDE.md` or `CLAUDE.local.md` file: simulates the resulting file and exits with code `2` if it would exceed `AGENTIHOOKS_CLAUDE_MD_MAXLINES` (default `200`). Prevents agents from bloating critical config files
 5. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
+6. **Version guard** -- if `tool_name` is `Write` or `Edit` targeting a version-managed manifest (`pyproject.toml`, `package.json`, etc.): blocks version field modifications (version bumping must go through the release workflow)
+7. If `BROADCAST_ENABLED=true` and `BROADCAST_CRITICAL_ON_PRETOOL=true`: checks for critical+persistent [broadcasts](broadcast.md) and injects them via `additionalContext` JSON. This ensures the agent sees critical messages before every tool call, not just at the start of each turn.
 
 **Exit codes used:**
 

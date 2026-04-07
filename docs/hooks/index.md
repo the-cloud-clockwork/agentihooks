@@ -62,3 +62,4 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
 | [Context Preprocessor](context-preprocessor.md) | Token compression for mid-session context refresh injections |
+| [Broadcast System](broadcast.md) | Real-time messaging to all active sessions — alerts, policy changes, emergency stops |

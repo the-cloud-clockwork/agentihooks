@@ -284,6 +284,37 @@ Full architecture: [Context Preprocessor Docs](https://the-cloud-clock-work.gith
 
 ---
 
+## Broadcast System — Real-Time Fleet Messaging
+
+Send messages to **all active Claude Code sessions simultaneously**. A PA system for your AI workforce.
+
+```bash
+# Emergency stop
+agentihooks broadcast -s critical "Production incident — read-only mode, do NOT deploy"
+
+# Deploy freeze
+agentihooks broadcast -s alert -t 8h "Deploy freeze until 6am"
+
+# Informational
+agentihooks broadcast -s info "SonarQube is down, skip CI validation"
+
+# Manage
+agentihooks broadcast --list       # show active broadcasts
+agentihooks broadcast --clear      # clear all
+```
+
+| Severity | Where agents see it | Frequency |
+|----------|-------------------|-----------|
+| `critical` | Every user turn + every tool call | Maximum saturation |
+| `alert` | Every user turn | Persistent until TTL |
+| `info` | Once per session | One-shot delivery |
+
+Works on a single machine (file-based), shared filesystems (NFS/EFS), or at Kubernetes scale (Redis). Every agent that fires a hook event picks up the broadcast — no sockets, no pub/sub infrastructure needed.
+
+Full architecture: [Broadcast System Docs](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/broadcast/)
+
+---
+
 ## Multi-Account Quota
 
 The quota watcher is a headless Playwright daemon that scrapes claude.ai/settings/usage and writes JSON for the statusline. Supports multiple accounts.

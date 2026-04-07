@@ -160,6 +160,19 @@ Combats attention decay in long sessions by periodically re-injecting rules and 
 
 ---
 
+## Broadcast System
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BROADCAST_ENABLED` | `true` | Enable/disable the broadcast system. |
+| `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Path to the broadcast file. Set to a shared mount for multi-node deployments. |
+| `BROADCAST_MAX_MESSAGES` | `50` | Maximum concurrent broadcasts. Oldest expire first when limit is reached. |
+| `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on `PreToolUse` via `additionalContext` JSON. |
+
+See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI documentation.
+
+---
+
 ## Sync Daemon
 
 | Variable | Default | Description |

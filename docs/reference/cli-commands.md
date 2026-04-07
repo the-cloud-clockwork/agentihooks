@@ -127,6 +127,50 @@ agentihooks settings-profile --clear
 
 ---
 
+## `agentihooks broadcast`
+
+Send a message to all active Claude Code sessions simultaneously.
+
+```
+agentihooks broadcast [OPTIONS] MESSAGE
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-s`, `--severity` | `alert` | `critical`, `alert`, or `info` |
+| `-t`, `--ttl` | per severity | Time-to-live: `5m`, `30m`, `1h`, `8h`, `24h` |
+| `--persistent` | per severity | Re-inject on every hook event until TTL expires |
+| `--source` | `operator` | Source tag: `operator`, `system`, `cron`, `api` |
+| `--list` | | Show all active broadcasts |
+| `--clear [ID]` | | Clear all broadcasts, or a specific one by ID |
+
+### Severity behavior
+
+| Severity | Injection | Default TTL | Persistent |
+|----------|-----------|-------------|------------|
+| `critical` | Every turn + every tool call | 30 min | Yes |
+| `alert` | Every turn | 1 hour | Yes |
+| `info` | Once per session | 4 hours | No |
+
+### Examples
+
+```bash
+# Emergency
+agentihooks broadcast -s critical "Production incident — do NOT deploy"
+
+# Deploy freeze
+agentihooks broadcast -s alert -t 8h "Deploy freeze until 6am"
+
+# Info
+agentihooks broadcast -s info "SonarQube is down"
+
+# List / clear
+agentihooks broadcast --list
+agentihooks broadcast --clear
+```
+
+---
+
 ## `agentihooks uninstall`
 
 Remove everything agentihooks installed from the system.
