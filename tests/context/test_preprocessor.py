@@ -1,11 +1,8 @@
 """Tests for hooks.context.preprocessor."""
 
-import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Protection mask
@@ -193,10 +190,8 @@ class TestLevel3Disemvoweling:
         from hooks.context.preprocessor import preprocess
 
         text = "the code is good"
-        result_l2 = preprocess(text, level=2)
+        preprocess(text, level=2)  # ensure L2 doesn't crash on short words
         result_l3 = preprocess(text, level=3)
-        # Short words shouldn't be disemvoweled (they may be removed as filler at L2)
-        # But at L3, no additional shrinkage on already-short words
         assert "good" in result_l3 or "gd" in result_l3  # "good" is only 4 chars, below threshold
 
     def test_exclusion_words_preserved(self):
