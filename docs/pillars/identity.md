@@ -1,0 +1,336 @@
+---
+title: "Pillar 1: Identity"
+parent: The Four Pillars
+nav_order: 1
+---
+
+# Pillar 1: Identity
+{: .no_toc }
+
+**One command transforms your agent's entire identity.**
+
+> A profile is not just a config file — it is the complete persona, permissions, and toolset your agent carries into every session. Swap it in seconds. Layer them for precision.
+
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
+
+## What is a profile?
+
+A **profile** is a named bundle that defines *who your agent is* and *what it is allowed to do*:
+
+| Component | What it controls |
+|-----------|-----------------|
+| `CLAUDE.md` | The agent's system prompt — behavioral rules, response style, operator model |
+| `settings.overrides.json` | Permissions: deny lists, ask lists, permission mode |
+| `.mcp.json` | Which MCP tool servers are active |
+| `rules/`, `skills/`, `agents/`, `commands/` | Domain-specific assets available in the session |
+| `profile.yml` | Model selection, turn limits, timeout, launch flags |
+
+Profiles live under `profiles/<name>/` in the agentihooks repo or in a linked bundle. Switch one, change everything.
+
+```bash
+agentihooks init --profile coding     # feature branch agent: safe, git-guarded
+agentihooks init --profile admin      # infra agent: full permissions, no guardrails
+agentihooks init --profile colt       # operator-tuned persona with behavioral model
+```
+
+---
+
+## Profile structure
+
+```
+profiles/
+├── _base/
+│   └── settings.base.json          # Canonical hooks, permissions, MCP server list
+├── coding/
+│   ├── CLAUDE.md                   # Agent system prompt (at profile root)
+│   ├── profile.yml                 # agentihooks metadata + Claude launch config
+│   └── .claude/
+│       ├── settings.overrides.json # Merged on top of _base at install time
+│       ├── .mcp.json               # Profile MCP servers
+│       ├── rules/                  # Behavioral rules for this profile
+│       ├── skills/                 # Profile-specific skills
+│       ├── agents/                 # Profile-specific agent definitions
+│       └── commands/               # Profile-specific slash commands
+└── admin/
+    └── ...                         # Same structure
+```
+
+The `_base/settings.base.json` is the single source of truth for hook wiring. Profiles only declare what they override — the base is always preserved.
+
+---
+
+## Built-in profiles
+
+Three profiles ship with agentihooks, covering the most common permission postures:
+
+| Profile | Mode | Use case |
+|---------|------|----------|
+| `default` | `auto` | General use — autonomous but protected branches are sacred |
+| `coding` | `acceptEdits` | Feature branch development — git-guarded, edit-confirm flow |
+| `admin` | `bypassPermissions` | Infrastructure and admin tasks — full trust, no friction |
+
+These are **settings profiles** — they control permissions and tool access. Pair them with any persona profile using the [two-axis model](#the-two-axis-model).
+
+---
+
+## Profile chaining
+
+Mix and match capabilities without building a monolithic profile. Comma-separate profile names to chain them:
+
+```bash
+agentihooks init --profile coding,colt
+```
+
+Profiles are applied **left to right**. The rightmost profile has highest priority for scalar values; everything else merges additively.
+
+```mermaid
+flowchart LR
+    base["_base/\nsettings.base.json"]
+    coding["coding/\nsettings.overrides.json"]
+    colt["colt/\nsettings.overrides.json"]
+    final["~/.claude/\nsettings.json"]
+
+    base -->|"deep merge"| coding
+    coding -->|"deep merge\nhooks append"| colt
+    colt --> final
+```
+
+### What each entity does in a chain
+
+| Entity | Chain behavior |
+|--------|---------------|
+| **Settings** | Sequential deep merge — dicts combine, hook arrays append, scalars last-wins |
+| **Rules / Skills / Agents / Commands** | Additive — all profiles contribute; same filename = later profile wins |
+| **CLAUDE.md** | Concatenated into one file with `---` separators and `<!-- profile: name -->` markers |
+| **MCP servers** | Additive — all profiles' servers accumulate |
+
+### CLAUDE.md concatenation
+
+In chain mode, all personas are active simultaneously:
+
+```markdown
+<!-- profile: coding -->
+# Coding Agent
+...
+
+---
+
+<!-- profile: colt -->
+# Colt Profile
+...
+```
+
+Claude Code loads the entire combined file as its system prompt.
+
+---
+
+## The two-axis model
+
+Sometimes you want to change **permissions** without changing **who the AI is**. The two-axis model gives you independent control:
+
+```mermaid
+graph TD
+    subgraph "Axis 1 — Persona (--profile)"
+        A["CLAUDE.md\n(system prompt)"]
+        B["rules/\nskills/\nagents/\ncommands/"]
+    end
+    subgraph "Axis 2 — Settings (--settings-profile)"
+        C["settings.overrides.json\n(permissions, env vars)"]
+        D[".mcp.json\n(tool servers)"]
+    end
+
+    A --> merged["Active Session"]
+    B --> merged
+    C --> merged
+    D --> merged
+```
+
+| Axis | Controls | Changed by |
+|------|----------|-----------|
+| **Persona** | Rules, CLAUDE.md, skills, agents, commands | `--profile` |
+| **Settings** | Permissions, env vars, tool allowlists, MCP servers | `--settings-profile` |
+
+The settings overlay is applied **after** the persona's settings overrides — it always wins on conflicts.
+
+### Usage
+
+```bash
+# Full install: Colt persona + admin permissions
+agentihooks init --profile colt --settings-profile admin
+
+# Quick switch: escalate permissions, keep persona intact
+agentihooks settings-profile admin
+
+# Revert settings to persona defaults
+agentihooks settings-profile --clear
+
+# Via environment variable
+export AGENTIHOOKS_SETTINGS_PROFILE=admin
+agentihooks init --profile colt   # admin overlay applied automatically
+```
+
+**The `agentihooks settings-profile` command is the fastest way to escalate or de-escalate.** No re-install, no persona disruption — just a settings layer swap.
+
+---
+
+## Per-repo identity
+
+Each project can pin its own profile, independent of the global install. Commit a `.agentihooks.json` to the repo root:
+
+```json
+{
+  "profile": "coding",
+  "enabledMcpServers": ["gateway-core", "gateway-pm"]
+}
+```
+
+Then generate the project-local config:
+
+```bash
+agentihooks init --local
+```
+
+This writes two gitignored files that Claude Code treats as highest priority:
+
+| File | Purpose |
+|------|---------|
+| `.claude/settings.local.json` | Project-scoped permissions and env vars |
+| `.claude/CLAUDE.local.md` | Project-scoped system prompt from the resolved profile |
+
+### Querying the active profile
+
+```bash
+agentihooks --query
+```
+
+```
+coding (local)     # project has .agentihooks.json
+colt (global)      # fallback to global install
+chain: [coding, colt]  # chained profile
+```
+
+### Monorepo example
+
+Different agents, different identities, same repo:
+
+```
+my-monorepo/
+├── .agentihooks.json          → {"profile": "colt"}
+├── agents/
+│   ├── publisher/
+│   │   └── .agentihooks.json  → {"profile": "coding", "enabledMcpServers": ["gateway-publish"]}
+│   └── reviewer/
+│       └── .agentihooks.json  → {"profile": "coding", "enabledMcpServers": ["gateway-core"]}
+└── infra/
+    └── .agentihooks.json      → {"profile": "admin", "enabledMcpServers": ["gateway-infra"]}
+```
+
+---
+
+## The bundle system
+
+Profiles are shareable. A **bundle** is an external directory of custom profiles linked into agentihooks once:
+
+```
+my-bundle/
+├── .claude/                  # Assets shared by all bundle profiles
+│   ├── rules/
+│   └── .mcp.json             # Bundle-wide MCP servers
+└── profiles/
+    ├── infra-ops/            # Custom profile
+    │   ├── CLAUDE.md
+    │   ├── profile.yml
+    │   └── .claude/
+    └── reviewer/
+        └── ...
+```
+
+```bash
+# Link the bundle (once)
+agentihooks bundle link ~/dev/my-bundle
+
+# All bundle profiles are now discoverable
+agentihooks --list-profiles
+
+# Use a bundle profile like any built-in
+agentihooks init --profile infra-ops
+```
+
+Bundle profiles merge through the same 3-layer system:
+
+```
+agentihooks built-in  →  bundle global .claude/  →  profile-specific .claude/
+```
+
+Later layers win on conflicts. The bundle is a clean separation point — your team customizations live there, personal overrides live in profile-specific files.
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_PROFILE` | `default` | Profile when `--profile` is not passed. Useful in CI/Docker. |
+| `AGENTIHOOKS_SETTINGS_PROFILE` | *(none)* | Settings overlay profile applied automatically on every init. |
+
+```bash
+# In a Dockerfile or CI environment
+ENV AGENTIHOOKS_PROFILE=coding
+RUN agentihooks init   # uses coding profile automatically
+```
+
+---
+
+## Reference: profile.yml fields
+
+```yaml
+# agentihooks metadata
+name: coding
+description: "Autonomous coding agent"
+mcp_categories: aws,utilities,observability   # MCP tool categories to enable
+
+# Claude launch config (read by `agentihooks claude` / `agenti`)
+claude:
+  model: sonnet
+  max_turns: 80
+  timeout: 3600
+  permission_mode: bypassPermissions   # maps to --dangerously-skip-permissions
+```
+
+The `agentihooks claude` command (alias: `agenti`) reads this file and translates it to Claude Code CLI flags — no manual flag management.
+
+---
+
+## Creating a custom profile
+
+```bash
+# 1. Copy an existing profile as a starting point
+cp -r profiles/default profiles/myprofile
+
+# 2. Set identity metadata
+# Edit profiles/myprofile/profile.yml
+
+# 3. Write the system prompt
+# Edit profiles/myprofile/CLAUDE.md
+
+# 4. Add profile-specific assets (optional)
+# profiles/myprofile/.claude/rules/
+# profiles/myprofile/.claude/skills/
+# profiles/myprofile/.claude/settings.overrides.json
+
+# 5. Install it
+agentihooks init --profile myprofile
+```
+
+{: .note }
+Hooks are always wired from `_base/settings.base.json`. Profiles control persona, permissions, and assets — not the underlying hook infrastructure.
+
+---
+
+*Next: [Pillar 2 — Guardrails](guardrails.md) — What your agents are protected from.*
