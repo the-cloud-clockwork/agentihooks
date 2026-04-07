@@ -104,8 +104,10 @@ class TestCheckDaemons:
     def test_no_daemons(self, tmp_path):
         from scripts.status_checker import check_daemons
 
-        with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path), \
-             patch("scripts.status_checker._detect_process", return_value={"pid": None, "alive": False}):
+        with (
+            patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path),
+            patch("scripts.status_checker._detect_process", return_value={"pid": None, "alive": False}),
+        ):
             result = check_daemons()
             assert result["sync"]["alive"] is False
 

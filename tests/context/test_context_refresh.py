@@ -14,9 +14,11 @@ def _no_redis():
 @pytest.fixture()
 def tmp_home(tmp_path):
     with patch("hooks.context.context_refresh._state_file") as mock_sf:
+
         def _sf(session_id):
             safe = session_id.replace("/", "_")
             return tmp_path / f"ctx_refresh_{safe}.json"
+
         mock_sf.side_effect = _sf
         yield tmp_path
 
@@ -171,13 +173,14 @@ class TestMaybeRefresh:
     def test_no_injection_before_interval(self, tmp_home, rules_dir):
         (rules_dir / "a.md").write_text("rule")
 
-        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", True), \
-             patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 20), \
-             patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
-             patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
-             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
-             patch("hooks.common.inject_banner") as mock_banner:
-
+        with (
+            patch("hooks.config.CONTEXT_REFRESH_ENABLED", True),
+            patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 20),
+            patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)),
+            patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False),
+            patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0),
+            patch("hooks.common.inject_banner") as mock_banner,
+        ):
             from hooks.context.context_refresh import maybe_refresh
 
             for _ in range(19):
@@ -188,14 +191,15 @@ class TestMaybeRefresh:
     def test_injection_at_interval(self, tmp_home, rules_dir):
         (rules_dir / "a.md").write_text("rule A")
 
-        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", True), \
-             patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 5), \
-             patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
-             patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
-             patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000), \
-             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
-             patch("hooks.common.inject_banner") as mock_banner:
-
+        with (
+            patch("hooks.config.CONTEXT_REFRESH_ENABLED", True),
+            patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 5),
+            patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)),
+            patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False),
+            patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000),
+            patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0),
+            patch("hooks.common.inject_banner") as mock_banner,
+        ):
             from hooks.context.context_refresh import maybe_refresh
 
             for _ in range(5):
@@ -208,14 +212,15 @@ class TestMaybeRefresh:
     def test_injection_recurs(self, tmp_home, rules_dir):
         (rules_dir / "a.md").write_text("rule")
 
-        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", True), \
-             patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 5), \
-             patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
-             patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
-             patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000), \
-             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
-             patch("hooks.common.inject_banner") as mock_banner:
-
+        with (
+            patch("hooks.config.CONTEXT_REFRESH_ENABLED", True),
+            patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 5),
+            patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)),
+            patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False),
+            patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000),
+            patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0),
+            patch("hooks.common.inject_banner") as mock_banner,
+        ):
             from hooks.context.context_refresh import maybe_refresh
 
             for _ in range(10):
@@ -224,9 +229,7 @@ class TestMaybeRefresh:
             assert mock_banner.call_count == 2
 
     def test_disabled_skips(self, tmp_home):
-        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", False), \
-             patch("hooks.common.inject_banner") as mock_banner:
-
+        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", False), patch("hooks.common.inject_banner") as mock_banner:
             from hooks.context.context_refresh import maybe_refresh
 
             maybe_refresh("test-sess-4")
@@ -240,12 +243,13 @@ class TestMaybeRefresh:
     def test_empty_rules_no_injection(self, tmp_home, rules_dir):
         # rules_dir exists but has no .md files
 
-        with patch("hooks.config.CONTEXT_REFRESH_ENABLED", True), \
-             patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 1), \
-             patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
-             patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
-             patch("hooks.common.inject_banner") as mock_banner:
-
+        with (
+            patch("hooks.config.CONTEXT_REFRESH_ENABLED", True),
+            patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 1),
+            patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)),
+            patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False),
+            patch("hooks.common.inject_banner") as mock_banner,
+        ):
             from hooks.context.context_refresh import maybe_refresh
 
             maybe_refresh("test-sess-5")
