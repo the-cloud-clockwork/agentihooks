@@ -1,9 +1,11 @@
-"""Context Refresh — periodically re-injects rules into Claude's context.
+"""Context Refresh — periodically re-injects rules and CLAUDE.md into Claude's context.
 
 Combats attention decay in long sessions where rules loaded at position 0
 (CLAUDE.md, rules/*.md) lose weight as conversation grows past 50+ turns.
 
-Injects on UserPromptSubmit every CONTEXT_REFRESH_INTERVAL turns.
+Injects on UserPromptSubmit:
+  - Rules: every CONTEXT_REFRESH_INTERVAL turns (default 20)
+  - CLAUDE.md: every CONTEXT_REFRESH_CLAUDE_MD_INTERVAL turns (default 40)
 
 Turn counter persisted via Redis (primary) with file-based fallback.
 Unlike retry_breaker's in-memory fallback, file persistence is required
@@ -12,14 +14,15 @@ here because each hook invocation is a separate subprocess.
 Redis key:
     agenticore:ctx_refresh:{session_id} — Hash with fields:
         turn_count    int   UserPromptSubmit events seen
-        last_refresh  int   turn number of last injection
+        last_refresh  int   turn number of last rules injection
+        last_claude_md_refresh  int   turn number of last CLAUDE.md injection
 
 File fallback:
     ~/.agentihooks/ctx_refresh_{session_id}.json
 
 Public API:
-    maybe_refresh(session_id)       — called from on_user_prompt_submit
-    clear_session_state(session_id) — called from on_session_end
+    maybe_refresh(session_id, project_dir)  — called from on_user_prompt_submit
+    clear_session_state(session_id)         — called from on_session_end
 """
 
 import json
@@ -47,7 +50,7 @@ def _state_file(session_id: str) -> Path:
 
 
 def _default_state() -> dict:
-    return {"turn_count": 0, "last_refresh": 0}
+    return {"turn_count": 0, "last_refresh": 0, "last_claude_md_refresh": 0}
 
 
 def _get_state(session_id: str) -> dict:
@@ -57,8 +60,9 @@ def _get_state(session_id: str) -> dict:
             raw = r.hgetall(redis_key("ctx_refresh", session_id))
             if raw:
                 return {
-                    "turn_count": int(raw.get(b"turn_count", raw.get("turn_count", 0))),
-                    "last_refresh": int(raw.get(b"last_refresh", raw.get("last_refresh", 0))),
+                    "turn_count": int(raw.get("turn_count", 0)),
+                    "last_refresh": int(raw.get("last_refresh", 0)),
+                    "last_claude_md_refresh": int(raw.get("last_claude_md_refresh", 0)),
                 }
         except Exception as e:
             log("context_refresh: Redis read error", {"error": str(e)})
@@ -67,7 +71,10 @@ def _get_state(session_id: str) -> dict:
     fp = _state_file(session_id)
     try:
         if fp.exists():
-            return json.loads(fp.read_text())
+            data = json.loads(fp.read_text())
+            # Backfill new field for pre-existing state files
+            data.setdefault("last_claude_md_refresh", 0)
+            return data
     except Exception as e:
         log("context_refresh: file read error", {"error": str(e)})
 
@@ -83,6 +90,7 @@ def _set_state(session_id: str, state: dict) -> None:
             r.hset(k, mapping={
                 "turn_count": str(state["turn_count"]),
                 "last_refresh": str(state["last_refresh"]),
+                "last_claude_md_refresh": str(state.get("last_claude_md_refresh", 0)),
             })
             r.expire(k, 86400)  # 24h TTL
         except Exception as e:
@@ -99,7 +107,7 @@ def _set_state(session_id: str, state: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Rules loading
+# Content loading
 # ---------------------------------------------------------------------------
 
 
@@ -107,12 +115,18 @@ def _strip_frontmatter(content: str) -> str:
     return _FRONTMATTER_RE.sub("", content)
 
 
-def _load_rules_files(rules_dir: str, include_project: bool) -> list[tuple[str, str]]:
+def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = "") -> list[tuple[str, str]]:
     results: list[tuple[str, str]] = []
 
     dirs = [Path(rules_dir)]
     if include_project:
-        project_rules = Path(".claude/rules")
+        # Use project_dir from hook payload (cwd) or CLAUDE_PROJECT_DIR env var.
+        # Falls back to CWD only as last resort (unreliable — hook CWD is agentihooks root).
+        base = project_dir or os.environ.get("CLAUDE_PROJECT_DIR", "")
+        if base:
+            project_rules = Path(base) / ".claude" / "rules"
+        else:
+            project_rules = Path(".claude/rules")
         if project_rules.is_dir():
             dirs.append(project_rules)
 
@@ -135,22 +149,63 @@ def _load_rules_files(rules_dir: str, include_project: bool) -> list[tuple[str, 
     return results
 
 
+def _load_claude_md(project_dir: str = "") -> str | None:
+    """Load CLAUDE.md content — global first, then project-level appended."""
+    from hooks.config import CONTEXT_REFRESH_MAX_CHARS
+
+    parts: list[str] = []
+
+    # Global CLAUDE.md
+    global_md = Path.home() / ".claude" / "CLAUDE.md"
+    if global_md.is_file():
+        try:
+            content = global_md.read_text().strip()
+            if content:
+                parts.append(content)
+        except Exception:
+            pass
+
+    # Project CLAUDE.md
+    base = project_dir or os.environ.get("CLAUDE_PROJECT_DIR", "")
+    if base:
+        project_md = Path(base) / "CLAUDE.md"
+        if project_md.is_file():
+            try:
+                content = project_md.read_text().strip()
+                if content:
+                    parts.append(f"\n\n<!-- project: {Path(base).name} -->\n{content}")
+            except Exception:
+                pass
+
+    if not parts:
+        return None
+
+    combined = "\n".join(parts)
+    # Apply size cap — CLAUDE.md can be large
+    if len(combined) > CONTEXT_REFRESH_MAX_CHARS:
+        combined = combined[:CONTEXT_REFRESH_MAX_CHARS] + "\n[... truncated at size limit]"
+
+    return combined
+
+
 def _build_injection_text(rules: list[tuple[str, str]], turn: int, interval: int) -> str:
     from hooks.config import CONTEXT_REFRESH_MAX_CHARS
 
     lines = [f"Re-injecting active rules (turn {turn}, every {interval} turns).\n"]
     total = len(lines[0])
+    added = 0
 
     for name, content in rules:
         header = f"\n[{name}]\n"
         entry_len = len(header) + len(content)
         if total + entry_len > CONTEXT_REFRESH_MAX_CHARS:
-            remaining = len(rules) - len([l for l in lines if l.startswith("\n[")])
+            remaining = len(rules) - added
             if remaining > 0:
                 lines.append(f"\n[{remaining} rule(s) omitted — size limit reached]")
             break
         lines.append(header + content)
         total += entry_len
+        added += 1
 
     return "".join(lines)
 
@@ -160,11 +215,12 @@ def _build_injection_text(rules: list[tuple[str, str]], turn: int, interval: int
 # ---------------------------------------------------------------------------
 
 
-def maybe_refresh(session_id: str) -> None:
+def maybe_refresh(session_id: str, project_dir: str = "") -> None:
     if not session_id:
         return
 
     from hooks.config import (
+        CONTEXT_REFRESH_CLAUDE_MD_INTERVAL,
         CONTEXT_REFRESH_ENABLED,
         CONTEXT_REFRESH_INCLUDE_PROJECT,
         CONTEXT_REFRESH_INTERVAL,
@@ -178,20 +234,35 @@ def maybe_refresh(session_id: str) -> None:
     turn = state["turn_count"] + 1
     state["turn_count"] = turn
 
-    should_inject = (turn % CONTEXT_REFRESH_INTERVAL) == 0
-
-    if should_inject:
-        rules = _load_rules_files(CONTEXT_REFRESH_RULES_DIR, CONTEXT_REFRESH_INCLUDE_PROJECT)
+    # --- Rules re-injection ---
+    if (turn % CONTEXT_REFRESH_INTERVAL) == 0:
+        rules = _load_rules_files(CONTEXT_REFRESH_RULES_DIR, CONTEXT_REFRESH_INCLUDE_PROJECT, project_dir)
         if rules:
             from hooks.common import inject_banner
 
             text = _build_injection_text(rules, turn, CONTEXT_REFRESH_INTERVAL)
-            inject_banner(f"CONTEXT REFRESH (turn {turn})", text)
+            inject_banner(f"CONTEXT REFRESH — rules (turn {turn})", text)
             state["last_refresh"] = turn
             log("context_refresh: injected rules", {
                 "session_id": session_id,
                 "turn": turn,
                 "rules_count": len(rules),
+            })
+
+    # --- CLAUDE.md re-injection (separate cadence) ---
+    if CONTEXT_REFRESH_CLAUDE_MD_INTERVAL > 0 and (turn % CONTEXT_REFRESH_CLAUDE_MD_INTERVAL) == 0:
+        claude_md = _load_claude_md(project_dir)
+        if claude_md:
+            from hooks.common import inject_banner
+
+            inject_banner(
+                f"CONTEXT REFRESH — CLAUDE.md (turn {turn})",
+                f"Re-injecting CLAUDE.md (turn {turn}, every {CONTEXT_REFRESH_CLAUDE_MD_INTERVAL} turns).\n\n{claude_md}",
+            )
+            state["last_claude_md_refresh"] = turn
+            log("context_refresh: injected CLAUDE.md", {
+                "session_id": session_id,
+                "turn": turn,
             })
 
     _set_state(session_id, state)

@@ -194,6 +194,7 @@ CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 # =============================================================================
 CONTEXT_REFRESH_ENABLED = _env_bool("CONTEXT_REFRESH_ENABLED", "true")
 CONTEXT_REFRESH_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_INTERVAL", "20"))
+CONTEXT_REFRESH_CLAUDE_MD_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", "40"))
 CONTEXT_REFRESH_RULES_DIR: str = os.getenv(
     "CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules")
 )

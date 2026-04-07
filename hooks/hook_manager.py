@@ -456,7 +456,7 @@ def on_user_prompt_submit(payload: dict) -> None:
         try:
             from hooks.context.context_refresh import maybe_refresh
 
-            maybe_refresh(session_id)
+            maybe_refresh(session_id, project_dir=payload.get("cwd", ""))
         except Exception as e:
             log("context_refresh failed", {"error": str(e)})
 
