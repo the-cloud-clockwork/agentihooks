@@ -357,8 +357,12 @@ All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 | `COMPACT_SUGGEST_ENABLED` | `true` | Smart /compact suggestions using audit data |
 | `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Block edits that would bloat CLAUDE.md past line limit |
 | `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Max allowed lines in CLAUDE.md / CLAUDE.local.md |
-| `CONTEXT_REFRESH_ENABLED` | `true` | Re-inject rules every N turns for attention decay mitigation |
-| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject every N user messages |
+| `CONTEXT_REFRESH_ENABLED` | `true` | Re-inject rules and CLAUDE.md every N turns for attention decay mitigation |
+| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N user messages |
+| `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` | `40` | Re-inject CLAUDE.md every N user messages (0 = disabled) |
+| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also re-inject project-level `.claude/rules/` (not just global) |
+| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max chars per injection (rules or CLAUDE.md) — excess is truncated |
+| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory to re-inject |
 | `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
 | `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |

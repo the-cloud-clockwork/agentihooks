@@ -129,13 +129,31 @@ For `Write`: counts lines in the new content. For `Edit`: reads the current file
 
 ## Context Refresh
 
+Combats attention decay in long sessions by periodically re-injecting rules and CLAUDE.md into the LLM's context window. Rules and CLAUDE.md are injected on separate cadences so they don't bloat a single turn.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTEXT_REFRESH_ENABLED` | `true` | Enable/disable periodic rules re-injection on `UserPromptSubmit`. |
+| `CONTEXT_REFRESH_ENABLED` | `true` | Enable/disable periodic re-injection on `UserPromptSubmit`. |
 | `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N user messages. |
-| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Directory to load global/profile rules from. |
-| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject `.claude/rules/*.md` from the current working directory. |
-| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Maximum total characters injected per refresh (~2000 tokens). |
+| `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` | `40` | Re-inject CLAUDE.md every N user messages. Set `0` to disable CLAUDE.md refresh. |
+| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory (all profile layers merged here at install time). |
+| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject project-level `.claude/rules/*.md` from the active working directory. |
+| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max characters per injection (~2000 tokens). Excess rules are truncated alphabetically. |
+
+### How it works
+
+1. A turn counter increments on every `UserPromptSubmit` hook event (persisted via Redis or file fallback).
+2. When `turn % CONTEXT_REFRESH_INTERVAL == 0`, all `*.md` files from the global rules dir (and optionally the project rules dir) are concatenated and injected as a `system-reminder` banner.
+3. When `turn % CONTEXT_REFRESH_CLAUDE_MD_INTERVAL == 0`, `~/.claude/CLAUDE.md` (and optionally the project's `CLAUDE.md`) are injected as a separate banner.
+4. Each injection is capped at `CONTEXT_REFRESH_MAX_CHARS`. Rules that exceed the cap are omitted with a count.
+
+### Best practices for rule files
+
+- **Keep rules concise.** Each rule file should be under 800 characters. If a rule needs more, split it into focused files.
+- **Use numeric prefixes for priority.** Files are loaded alphabetically — prefix critical rules with `00-`, `01-`, etc. to ensure they survive truncation: `00-delegation.md`, `01-security.md`, `10-domains.md`.
+- **One concern per file.** Don't merge delegation, security, and domain rules into a single large file. Smaller files give the truncation logic finer granularity.
+- **Strip redundancy.** If CLAUDE.md and a rule file say the same thing, remove it from one. The refresh system injects both — duplication wastes budget.
+- **Monitor the cap.** If you see `[N rule(s) omitted]` in your logs, either raise `CONTEXT_REFRESH_MAX_CHARS` or trim your rules.
 
 ---
 
