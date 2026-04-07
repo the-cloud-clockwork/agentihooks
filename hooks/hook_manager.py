@@ -547,6 +547,17 @@ def on_pre_tool_use(payload: dict) -> None:
         else:
             log(f"Pre tool use: {tool_name}", {"tool": tool_name})
 
+    # --- Version guard: block version field edits in project manifests ---
+    if tool_name in ("Edit", "Write"):
+        try:
+            from hooks.context.version_guard import check_version_guard
+
+            check_version_guard(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("version_guard check failed", {"error": str(e)})
+
     # --- Branch guard: block git operations targeting main/master ---
     if tool_name == "Bash":
         try:
