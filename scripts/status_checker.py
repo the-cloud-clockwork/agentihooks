@@ -487,16 +487,9 @@ def check_quota() -> dict[str, Any]:
     try:
         from hooks.config import PEAK_HOURS_END, PEAK_HOURS_START, PEAK_HOURS_TZ
         from hooks.observability.peak_hours import peak_indicator
-        from hooks.quota import fmt_quota, load_quota
 
-        qd = load_quota()
         peak = peak_indicator(PEAK_HOURS_START, PEAK_HOURS_END, PEAK_HOURS_TZ)
-        if qd is None:
-            return {"summary": "(not configured)", "peak": peak, "ok": False}
-        if qd.get("stale"):
-            return {"summary": "stale", "peak": peak, "ok": False}
-        summary = fmt_quota(qd)
-        return {"summary": summary, "peak": peak, "ok": True}
+        return {"summary": "native (via statusline)", "peak": peak, "ok": True}
     except Exception as e:
         return {"summary": f"(error: {e})", "peak": "unknown", "ok": False}
 
