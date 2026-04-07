@@ -19,6 +19,7 @@ AgentiHooks is a lifecycle hook system and MCP tool server for [Claude Code](htt
 - **Multi-account quota monitoring** -- track plan-level usage across multiple Claude.ai accounts
 - **Sync daemon** -- auto-propagates new skills, agents, commands, and rules within 60s
 - **Cross-session memory** -- tool error patterns persist across sessions via NDJSON store
+- **[Broadcast system](../hooks/broadcast.md)** -- send operator messages to all active Claude Code sessions simultaneously; severities: `info` (once, 4h), `alert` (every turn, 1h), `critical` (every turn + every tool call, 30m); compose manually or use `agentihooks broadcast emit "natural language"` for AI-assisted severity selection
 
 ## Prerequisites
 

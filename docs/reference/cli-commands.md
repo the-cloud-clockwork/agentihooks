@@ -152,17 +152,41 @@ agentihooks broadcast [OPTIONS] MESSAGE
 | `alert` | Every turn | 1 hour | Yes |
 | `info` | Once per session | 4 hours | No |
 
+### `agentihooks broadcast emit`
+
+AI-assisted broadcast composition. Describe the message in natural language and Haiku selects the appropriate severity, TTL, and wording.
+
+```
+agentihooks broadcast emit NATURAL_LANGUAGE_DESCRIPTION
+```
+
+The subcommand sends the description to Claude Haiku, which returns a structured broadcast (severity, TTL, message text) and immediately posts it.
+
+```bash
+# Haiku picks severity=critical, TTL=30m
+agentihooks broadcast emit "prod API is returning 500s, stop all deploys immediately"
+
+# Haiku picks severity=alert, TTL=8h
+agentihooks broadcast emit "deploy freeze tonight until the on-call engineer clears it"
+
+# Haiku picks severity=info, TTL=4h
+agentihooks broadcast emit "sonarqube is down for maintenance"
+```
+
 ### Examples
 
 ```bash
-# Emergency
+# Emergency (manual)
 agentihooks broadcast -s critical "Production incident — do NOT deploy"
 
-# Deploy freeze
+# Deploy freeze (manual)
 agentihooks broadcast -s alert -t 8h "Deploy freeze until 6am"
 
-# Info
+# Info (manual)
 agentihooks broadcast -s info "SonarQube is down"
+
+# AI-assisted emit
+agentihooks broadcast emit "prod database is read-only until the migration completes"
 
 # List / clear
 agentihooks broadcast --list
