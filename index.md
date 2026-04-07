@@ -2,14 +2,14 @@
 layout: home
 title: Home
 nav_order: 1
-description: "AgentiHooks — Hook system and MCP tool server for Claude Code agents."
+description: "AgentiHooks — The definitive Claude Code harness. Identity, Guardrails, Context Intelligence, Fleet Command."
 permalink: /
 ---
 
 # AgentiHooks
 {: .fs-9 .fw-700 }
 
-Lifecycle hooks and 26 MCP tools for Claude Code — install once, work everywhere.
+The definitive Claude Code harness — built on four pillars that make your agents safer, smarter, and controllable at any scale.
 {: .fs-5 .text-grey-dk-100 .mb-6 }
 
 <div class="hero-actions text-center mb-8" markdown="0">
@@ -22,6 +22,97 @@ Lifecycle hooks and 26 MCP tools for Claude Code — install once, work everywhe
 [![CI](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
+
+---
+
+## The Four Pillars
+{: .fs-7 .fw-600 }
+
+AgentiHooks is organized around four core capabilities. Together they make it the definitive harness for running Claude Code at any scale — from a single session on your laptop to thousands of agent pods in Kubernetes.
+
+```mermaid
+flowchart LR
+    subgraph P1["Pillar 1 — Identity"]
+        direction TB
+        I1["Profile system\nPersonality + permissions\nper agent"]
+    end
+
+    subgraph P2["Pillar 2 — Guardrails"]
+        direction TB
+        G1["Secrets scanning\nCost limits\nTool permissions\nOutput filtering"]
+    end
+
+    subgraph P3["Pillar 3 — Context Intelligence"]
+        direction TB
+        C1["Session memory\nFile read dedup\nLazy MCP loading\nContext warnings"]
+    end
+
+    subgraph P4["Pillar 4 — Fleet Command"]
+        direction TB
+        F1["Broadcast system\nReal-time messaging\nAll sessions at once\nSeverity tiers"]
+    end
+
+    CLAUDE["Claude Code\nAgent"] --> P1
+    CLAUDE --> P2
+    CLAUDE --> P3
+    P4 --> CLAUDE
+
+    style P1 fill:#1a1a2e,color:#e0e0ff,stroke:#4a4aff
+    style P2 fill:#2e1a1a,color:#ffe0e0,stroke:#ff4a4a
+    style P3 fill:#1a2e1a,color:#e0ffe0,stroke:#4aff4a
+    style P4 fill:#1a2a2e,color:#e0f4ff,stroke:#4ac4ff
+    style CLAUDE fill:#2a2a2a,color:#ffffff,stroke:#888888
+```
+
+---
+
+### Pillar 1: Identity
+{: .fs-5 .fw-600 }
+
+**Every agent knows who it is and what it is allowed to do.**
+
+The profile system gives each agent a distinct personality, skill set, and permission boundary. Swap from `coding` to `ops` to `minimal` with one flag. Each profile carries its own CLAUDE.md, tool permissions, MCP whitelist, and rules. Agents running the same code can have completely different identities.
+
+[Read Pillar 1: Identity →]({{ site.baseurl }}/docs/pillars/identity/){: .btn }
+
+---
+
+### Pillar 2: Guardrails
+{: .fs-5 .fw-600 }
+
+**Agents that stay in bounds — automatically.**
+
+Guardrails run on every hook event. Secret patterns are scanned before any tool output reaches the model. Cost limits cut off sessions before they blow the weekly quota. Tool permissions block operations the operator never approved. Output filtering strips the 3000-line `docker logs` dump before it floods context. Guardrails are not opt-in safety theater — they are always on, zero configuration required.
+
+[Read Pillar 2: Guardrails →]({{ site.baseurl }}/docs/pillars/guardrails/){: .btn }
+
+---
+
+### Pillar 3: Context Intelligence
+{: .fs-5 .fw-600 }
+
+**Agents that use context efficiently — so sessions run deeper and cost less.**
+
+File read deduplication blocks a re-read if the file has not changed since last read. Lazy MCP loading holds all 26 tool schemas out of context until the agent actually uses one. Threshold warnings fire at 60% and 80% context fill. Session memory writes a structured handoff on `Stop` so the next session starts informed. The result: 30–50% fewer tokens, sessions that run to completion instead of compacting mid-task.
+
+[Read Pillar 3: Context Intelligence →]({{ site.baseurl }}/docs/pillars/context/){: .btn }
+
+---
+
+### Pillar 4: Fleet Command
+{: .fs-5 .fw-600 }
+
+**Talk to your entire agent fleet — in real time.**
+
+No other tool does this. One command. Every active Claude Code session. Right now.
+
+```bash
+agentihooks broadcast -s critical "Production incident — do NOT deploy."
+```
+
+The broadcast system delivers your message to every session on its next hook event — before the next turn for `alert`, before every tool call for `critical`. Three severity tiers. File-based at small scale (no server needed), Redis-backed at Kubernetes scale. AI-assisted `emit` subcommand lets Claude Haiku pick the right severity from natural language. The session registry tracks every active agent so you know exactly who is in your fleet.
+
+[Read Pillar 4: Fleet Command →]({{ site.baseurl }}/docs/pillars/fleet-command/){: .btn .btn-blue }
 
 ---
 
@@ -228,17 +319,19 @@ rm -rf ~/.agentihooks
 
 ---
 
-## What you get
+## Documentation
 
-| | |
-|---|---|
-| **[Cost management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, burn rate tracking, quota monitoring — 30–50% fewer tokens |
-| **Lifecycle hooks** | Auto-log transcripts, inject session context, save memory on stop |
-| **26 MCP tools** | AWS, email, SQS, S3, DynamoDB, PostgreSQL, observability, and more |
-| **Profiles** | Swap agent personality and permissions with one flag |
-| **`agentienv` shell function** | Clean, shell-native secret loading — auto-called on every new shell, no wrapper scripts |
-
-Full details in the [docs]({{ site.baseurl }}/docs/getting-started/).
+| Section | What it covers |
+|---------|---------------|
+| **[The Four Pillars]({{ site.baseurl }}/docs/pillars/)** | Identity, Guardrails, Context Intelligence, Fleet Command — the conceptual foundation |
+| **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
+| **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, quota monitoring |
+| **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
+| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | All 26 tools across 8 categories |
+| **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
+| **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
+| **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |
+| **[Connectors]({{ site.baseurl }}/docs/connectors/)** | Integrations with external systems |
 
 ---
 
