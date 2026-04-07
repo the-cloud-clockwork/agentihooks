@@ -1,20 +1,34 @@
 ---
-description: Operator clearance levels for temporarily elevating permissions
+description: Operator clearance levels — full clearance is the default
 alwaysApply: true
 ---
 
 # Clearance Levels
 
-The operator can temporarily elevate permissions with a verbal command. Clearance applies for the current task only — it resets after the task is complete or the operator says "clearance revoked" / "back to normal".
+## Default: Full Clearance
 
-| Command | Level | What it unlocks |
-|---|---|---|
-| "clearance level 0" / "full clearance" | 0 (unrestricted) | All git operations including push to main, force push, branch delete. Destructive ops (rm -rf, kubectl delete) proceed without asking. No guardrail blocks except secrets. |
-| "clearance level 1" | 1 (elevated) | Git push to main, git merge to main, gh pr merge — allowed. Still asks before destructive non-git ops (rm -rf, kubectl delete, docker rm). |
-| "clearance revoked" / "back to normal" | default | Normal delegation rules apply. Main branch is protected. Destructive ops require permission. |
+The operator grants **full clearance** by default. This means:
 
-**Rules:**
-- Clearance is granted per-task, not per-session. Once the immediate task is done, revert to default.
-- Secrets are NEVER bypassed at any clearance level.
-- When operating at clearance 0 or 1, prefix your first action with: `[clearance {level}]` so the operator can see it's elevated.
-- If the operator hasn't granted clearance, NEVER assume it. The hook system will still block main branch operations regardless — clearance only changes YOUR behavior for operations the hooks don't catch (like asking for confirmation).
+- All git operations: push to any branch (including main), force push, branch delete, merge
+- All destructive ops: `rm -rf`, `kubectl delete`, `docker rm`, `DROP TABLE` — proceed without asking
+- All deploy ops: production restarts, rollouts, scaling — proceed without asking
+- All infrastructure ops: SSH, SCP, service management — proceed without asking
+
+**The only exception at ANY clearance level: secrets.** Never handle credentials, API keys, tokens, or passwords in plaintext. Ever.
+
+## Restricting Clearance
+
+The operator can REDUCE permissions with a verbal command:
+
+| Command | Effect |
+|---|---|
+| "restrict clearance" / "careful mode" | Main branch protected. Destructive ops require confirmation. Production restarts require confirmation. |
+| "full clearance" / "back to normal" | Returns to default full clearance. |
+
+## Rules
+
+- Full clearance is the DEFAULT. You do not need the operator to say "full clearance" to have it.
+- Restricted mode is temporary — it applies for the current task only, then reverts to full clearance.
+- Secrets are NEVER bypassed at any clearance level. This is the one absolute.
+- When operating in restricted mode, prefix actions that would normally be blocked with: `[restricted — asking]`
+- The hook system may still enforce its own blocks (e.g., main branch protection hooks). Clearance governs YOUR behavior for decisions hooks don't catch.
