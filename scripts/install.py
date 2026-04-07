@@ -3754,31 +3754,35 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 
 
 _BROADCAST_EMIT_SYSTEM_PROMPT = """\
-You are a broadcast CLI agent. Your ONLY job is to parse a natural language \
-message and execute ONE agentihooks broadcast command.
+You are a broadcast CLI agent. You can ONLY run agentihooks broadcast commands. \
+Nothing else. Parse the user's natural language and execute ONE command.
 
-Parse the input for:
-1. Severity: "critical"/"urgent"/"emergency"/"stop" → -s critical; \
-"alert"/"warning"/"attention"/"heads up" → -s alert; otherwise → -s info (default).
-2. Duration/TTL: time expressions like "2 hours" → -t 2h, "30 minutes" → -t 30m, \
-"1 day" → -t 1d, "15 min" → -t 15m. If no duration mentioned, omit -t flag entirely.
-3. Message: the remaining human-readable content. Keep it natural — do NOT strip \
-context words. Clean up grammar if needed but preserve the operator's intent.
+ACTIONS:
+1. CREATE: parse severity, TTL, and message content.
+   Severity: "critical"/"urgent"/"emergency"/"stop" → -s critical; \
+"alert"/"warning"/"attention"/"heads up" → -s alert; default → -s info.
+   TTL: "2 hours" → -t 2h, "30 minutes" → -t 30m, "1 day" → -t 1d. Omit if not mentioned.
+   Command: agentihooks broadcast "message" [-s severity] [-t ttl]
 
-Run EXACTLY ONE Bash command in this format:
-agentihooks broadcast "extracted message" [-s severity] [-t ttl]
+2. CLEAR: if the user wants to remove/clear/delete/cancel broadcasts.
+   Clear all: agentihooks broadcast --clear
+   Clear specific: agentihooks broadcast --clear <id>
+
+3. LIST: if the user wants to see/show/check active broadcasts.
+   Command: agentihooks broadcast --list
 
 Examples:
-- "deploy freeze for the next 2 hours, this is critical"
-  → agentihooks broadcast "deploy freeze for the next 2 hours" -s critical -t 2h
+- "deploy freeze for 2 hours, critical"
+  → agentihooks broadcast "deploy freeze for 2 hours" -s critical -t 2h
 - "sonarqube is down on anton"
   → agentihooks broadcast "sonarqube is down on anton"
-- "stop all writes to postgres, 30 minutes, urgent"
-  → agentihooks broadcast "stop all writes to postgres" -s critical -t 30m
-- "heads up team, new cert rollout in 1 hour"
-  → agentihooks broadcast "new cert rollout in 1 hour" -s alert -t 1h
+- "stop all writes, 30 min, urgent"
+  → agentihooks broadcast "stop all writes" -s critical -t 30m
+- "clear all broadcasts" → agentihooks broadcast --clear
+- "what broadcasts are active" → agentihooks broadcast --list
+- "remove the sonarqube one" → agentihooks broadcast --list (to find ID, then --clear <id>)
 
-Output ONLY the command result. No explanations. No preamble.\
+Output ONLY the command result. No explanations.\
 """
 
 
@@ -3806,8 +3810,12 @@ def _broadcast_emit(natural_input: str) -> None:
         "--no-session-persistence",
         "--system-prompt",
         _BROADCAST_EMIT_SYSTEM_PROMPT,
-        "--allowedTools",
+        "--tools",
         "Bash",
+        "--allowedTools",
+        "Bash(agentihooks*)",
+        "--disallowedTools",
+        "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Agent",
     ]
 
     print(f'Interpreting: "{natural_input}"')
