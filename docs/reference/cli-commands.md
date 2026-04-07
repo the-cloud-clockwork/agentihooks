@@ -52,6 +52,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | Variable | Description |
 |----------|-------------|
 | `AGENTIHOOKS_PROFILE` | Default profile when `--profile` is not passed (default: `default`) |
+| `AGENTIHOOKS_SETTINGS_PROFILE` | Default settings-only overlay profile (default: none) |
 | `AGENTIHOOKS_MCP_FILE` | Path to an MCP JSON file to auto-merge into `~/.claude.json` during install |
 | `CLAUDE_CODE_HOME_DIR` | Home-directory root override -- `.claude` is appended automatically (default: `$HOME`) |
 | `AGENTIHOOKS_CLAUDE_HOME` | Legacy: direct path to the `.claude` directory (default: `~/.claude`) |
@@ -67,6 +68,15 @@ agentihooks init
 
 # Install with a different profile
 agentihooks init --profile admin
+
+# Install with persona + settings overlay
+agentihooks init --profile colt --settings-profile admin
+
+# Quick-switch settings layer only (keeps persona intact)
+agentihooks settings-profile admin
+
+# Revert settings to persona defaults
+agentihooks settings-profile --clear
 
 # Same, using the environment variable
 AGENTIHOOKS_PROFILE=coding agentihooks init

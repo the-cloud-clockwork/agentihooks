@@ -146,6 +146,16 @@ Switch profiles: `agentihooks init --profile <name>`. Chain profiles: `agentihoo
 
 **Profile chaining:** Comma-separated profiles are applied left to right. Settings deep-merge sequentially (hooks append), rules/skills/agents/commands accumulate additively, CLAUDE.md files are concatenated into one file with `---` separators. Query: `agentihooks --query` shows `chain: [coding, colt]`.
 
+**Settings profiles (two-axis model):** Independently control the settings layer without changing rules or CLAUDE.md:
+
+```bash
+agentihooks init --profile colt --settings-profile admin   # persona + settings overlay
+agentihooks settings-profile admin                          # quick-switch settings only
+agentihooks settings-profile --clear                        # revert to persona defaults
+```
+
+The settings profile applies only `settings.overrides.json` and `.mcp.json` — rules, CLAUDE.md, skills, agents, and commands come from the persona profile. Env var: `AGENTIHOOKS_SETTINGS_PROFILE`.
+
 ### `agentihooks claude`
 
 Reads the `claude:` section from the active profile's `profile.yml` and maps fields to CLI flags:

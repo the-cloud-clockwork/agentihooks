@@ -414,9 +414,10 @@ def _execute_actions(actions: dict, state: dict) -> dict:
         if actions["reinstall_global"]:
             global_target = targets.get("global", {})
             profile = global_target.get("profile", "default")
+            settings_profile = global_target.get("settings_profile", "")
             try:
-                _log(f"Re-installing global (profile={profile})")
-                ns = argparse.Namespace(profile=profile)
+                _log(f"Re-installing global (profile={profile}, settings_profile={settings_profile or 'none'})")
+                ns = argparse.Namespace(profile=profile, settings_profile=settings_profile)
                 install._install_global_inner(ns)
                 summary["global_reinstalled"] = True
                 _log("Global re-install complete")

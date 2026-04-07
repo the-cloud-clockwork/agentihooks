@@ -371,15 +371,18 @@ def _state_remove_mcp(mcp_path: Path) -> None:
 _SYNC_LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 
 
-def _register_target_global(profile: str) -> None:
+def _register_target_global(profile: str, settings_profile: str = "") -> None:
     """Record the global install as a sync daemon target."""
     state = _load_state()
     targets = state.setdefault("targets", {})
-    targets["global"] = {
+    entry = {
         "path": str(CLAUDE_HOME),
         "profile": profile,
         "installed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if settings_profile:
+        entry["settings_profile"] = settings_profile
+    targets["global"] = entry
     _save_state(state)
 
 
@@ -1023,6 +1026,44 @@ def _connector_new(
 # ---------------------------------------------------------------------------
 
 
+def _cmd_settings_profile(args: argparse.Namespace) -> None:
+    """Quick-switch: re-apply only the settings layer without touching rules/CLAUDE.md."""
+    state = _load_state()
+    global_target = state.get("targets", {}).get("global", {})
+    current_profile = global_target.get("profile", "")
+
+    if not current_profile:
+        print("ERROR: No profile installed. Run 'agentihooks init' first.", file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "clear", False):
+        # Remove settings overlay — re-init with persona profile only
+        print(f"Clearing settings overlay, reverting to profile '{current_profile}' defaults...")
+        global_args = argparse.Namespace(profile=current_profile, settings_profile="")
+        install_global(global_args)
+        return
+
+    sp_name = getattr(args, "sp_name", None)
+    if not sp_name:
+        # Show current state
+        current_sp = global_target.get("settings_profile", "")
+        print(f"Persona profile  : {current_profile}")
+        print(f"Settings profile : {current_sp or '(none — using persona defaults)'}")
+        print()
+        available = _available_profiles()
+        print(f"Available: {', '.join(available)}")
+        print()
+        print("Usage:")
+        print("  agentihooks settings-profile <name>    # switch settings layer")
+        print("  agentihooks settings-profile --clear   # revert to persona defaults")
+        return
+
+    # Apply the new settings profile on top of the existing persona profile
+    print(f"Switching settings layer to '{sp_name}' (keeping persona '{current_profile}')...")
+    global_args = argparse.Namespace(profile=current_profile, settings_profile=sp_name)
+    install_global(global_args)
+
+
 def cmd_init_unified(args: argparse.Namespace) -> None:
     """Unified init command — routes to global or per-repo install.
 
@@ -1072,8 +1113,13 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         else:
             profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "default")
 
+    # Resolve settings profile (optional overlay)
+    settings_profile = getattr(args, "settings_profile", None)
+    if not settings_profile:
+        settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
+
     # Build args for _install_global_inner
-    global_args = argparse.Namespace(profile=profile_name)
+    global_args = argparse.Namespace(profile=profile_name, settings_profile=settings_profile or "")
     install_global(global_args)
 
     # --- Auto-start daemons if accounts/config exist ---
@@ -1851,6 +1897,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     else:
         print(f"Profile source   : {profile_sources[0]}")
         print(f"Profile          : {profile_name}")
+    _settings_profile_display = getattr(args, "settings_profile", "") or ""
+    if _settings_profile_display:
+        sp_src = "built-in" if (PROFILES_DIR / _settings_profile_display).is_dir() else "bundle"
+        print(f"Settings profile : {_settings_profile_display} ({sp_src})")
     _canonical_python = str(_detect_venv() or sys.executable)
     print(f"Python           : {_canonical_python}")
     print()
@@ -1875,6 +1925,27 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             overrides = _resolve_profile_hook_paths(overrides, pdir)
             rendered = _deep_merge(rendered, overrides)
             print(f"Applied profile overrides: {overrides_path}")
+
+    # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
+    settings_profile_name: str = getattr(args, "settings_profile", "") or ""
+    settings_profile_dir: Path | None = None
+    if settings_profile_name:
+        settings_profile_dir = _resolve_profile_dir(settings_profile_name)
+        if settings_profile_dir is None:
+            available = _available_profiles()
+            print(f"ERROR: Settings profile '{settings_profile_name}' not found.", file=sys.stderr)
+            print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
+            sys.exit(1)
+
+        sp_overrides = settings_profile_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
+        if not sp_overrides.exists():
+            sp_overrides = settings_profile_dir / "settings.overrides.json"
+        if sp_overrides.exists():
+            sp_data = load_json(sp_overrides)
+            sp_data = _resolve_profile_hook_paths(sp_data, settings_profile_dir)
+            rendered = _deep_merge(rendered, sp_data)
+            src = "built-in" if (PROFILES_DIR / settings_profile_name).is_dir() else "bundle"
+            print(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
 
     # --- 1c. Apply linked connectors (from last profile in chain) ---
     last_profile = profile_chain[-1]
@@ -2007,6 +2078,19 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError) as exc:
                 _cprint(f"  [WARN] Could not read profile .mcp.json: {exc}")
 
+    # --- 6b. Settings-profile MCP overlay ---
+    if settings_profile_dir is not None:
+        sp_mcp = settings_profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+        if sp_mcp.exists():
+            try:
+                mcp_data = load_json(sp_mcp)
+                servers = mcp_data.get("mcpServers", {})
+                if servers:
+                    _merge_mcp_to_user_scope(servers)
+                    _cprint(f"  [OK] Settings-profile MCP servers: {', '.join(servers.keys())}")
+            except (json.JSONDecodeError, OSError) as exc:
+                _cprint(f"  [WARN] Could not read settings-profile .mcp.json: {exc}")
+
     # --- 7. Re-apply any custom MCPs tracked in state.json ---
     if STATE_JSON.exists():
         print()
@@ -2036,7 +2120,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _seed_user_env_file()
 
     # --- 12. Register as sync daemon target ---
-    _register_target_global(profile_name)
+    _register_target_global(profile_name, settings_profile=settings_profile_name)
     _snapshot_claude_json()
 
     # --- Track version in state.json ---
@@ -3810,6 +3894,10 @@ def main() -> None:
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
     init_p.add_argument("--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)")
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
+    init_p.add_argument(
+        "--settings-profile", dest="init_settings_profile", default=None,
+        help="Settings-only overlay profile (applies settings.json/MCP on top, keeps persona from --profile)"
+    )
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
 
     bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (link, unlink, list, pull)")
@@ -3897,6 +3985,13 @@ def main() -> None:
     prune_p = sub.add_parser("prune", help="Remove stale MCP entries from all config files")
     prune_p.add_argument("--verbose", "-v", action="store_true", help="Show details of each pruned entry")
 
+    sp_p = sub.add_parser(
+        "settings-profile",
+        help="Quick-switch settings layer only (keeps persona/rules/CLAUDE.md intact)",
+    )
+    sp_p.add_argument("sp_name", nargs="?", default=None, help="Settings profile name (or --clear to remove overlay)")
+    sp_p.add_argument("--clear", action="store_true", help="Remove settings overlay, revert to persona profile defaults")
+
     p_migrate = sub.add_parser("migrate", help="Fix ~/.claude.json project entries after repos move")
     p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
     p_migrate.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
@@ -3947,9 +4042,12 @@ def main() -> None:
         cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
+        args.settings_profile = getattr(args, "init_settings_profile", None) or ""
         if getattr(args, "local", False) and not args.repo:
             args.repo = "."
         cmd_init_unified(args)
+    elif args.command == "settings-profile":
+        _cmd_settings_profile(args)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
     elif args.command == "quota":

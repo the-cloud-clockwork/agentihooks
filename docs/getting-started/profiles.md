@@ -155,6 +155,56 @@ The switch takes effect on the next Claude Code session.
 
 ---
 
+## Settings profiles — independent settings layer
+
+Sometimes you want to change **what tools and permissions are available** without changing **who the AI is**. The `--settings-profile` flag provides a second axis:
+
+```bash
+# Full install: Colt persona + admin settings overlay
+agentihooks init --profile colt --settings-profile admin
+
+# Quick switch: change settings layer only, keep persona intact
+agentihooks settings-profile admin
+
+# Revert to persona defaults
+agentihooks settings-profile --clear
+```
+
+### Two-axis model
+
+| Axis | Controls | Source files |
+|------|----------|-------------|
+| **Persona** (`--profile`) | Rules, CLAUDE.md, skills, agents, commands | `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, etc. |
+| **Settings** (`--settings-profile`) | Permissions, env vars, tool allowlists, MCP | `settings.overrides.json`, `.claude/.mcp.json` |
+
+The settings profile overlay is applied **after** the persona profile's settings overrides, so it wins on conflicts. Only `settings.overrides.json` and `.mcp.json` are read from the settings profile — rules, CLAUDE.md, skills, agents, and commands are ignored.
+
+### Environment variable
+
+```bash
+export AGENTIHOOKS_SETTINGS_PROFILE=admin
+agentihooks init --profile colt  # automatically uses admin settings overlay
+```
+
+### State tracking
+
+Both axes are persisted in `~/.agentihooks/state.json`:
+
+```json
+{
+  "targets": {
+    "global": {
+      "profile": "colt",
+      "settings_profile": "admin"
+    }
+  }
+}
+```
+
+The sync daemon watches both profile directories and re-applies the correct layers when source files change.
+
+---
+
 ## Querying the active profile
 
 ```bash
