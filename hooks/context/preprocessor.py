@@ -68,25 +68,62 @@ _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
 # Negation words
-_NEGATION_WORDS = frozenset({
-    "never", "don't", "dont", "not", "no", "without",
-    "cannot", "can't", "cant", "won't", "wont",
-    "shouldn't", "shouldnt",
-})
+_NEGATION_WORDS = frozenset(
+    {
+        "never",
+        "don't",
+        "dont",
+        "not",
+        "no",
+        "without",
+        "cannot",
+        "can't",
+        "cant",
+        "won't",
+        "wont",
+        "shouldn't",
+        "shouldnt",
+    }
+)
 
 # Assertion words
-_ASSERTION_WORDS = frozenset({
-    "always", "must", "required", "mandatory",
-    "only", "exactly", "strictly",
-})
+_ASSERTION_WORDS = frozenset(
+    {
+        "always",
+        "must",
+        "required",
+        "mandatory",
+        "only",
+        "exactly",
+        "strictly",
+    }
+)
 
 # Action verbs — high-stakes operations
-_ACTION_VERBS = frozenset({
-    "push", "delete", "commit", "deploy", "block",
-    "destroy", "drop", "truncate", "kill", "terminate",
-    "rollback", "revert", "reset", "force", "override",
-    "disable", "remove", "detach", "purge", "wipe",
-})
+_ACTION_VERBS = frozenset(
+    {
+        "push",
+        "delete",
+        "commit",
+        "deploy",
+        "block",
+        "destroy",
+        "drop",
+        "truncate",
+        "kill",
+        "terminate",
+        "rollback",
+        "revert",
+        "reset",
+        "force",
+        "override",
+        "disable",
+        "remove",
+        "detach",
+        "purge",
+        "wipe",
+    }
+)
 
 # Combined word set for single-pass matching
 _PROTECTED_WORDS = _NEGATION_WORDS | _ASSERTION_WORDS | _ACTION_VERBS
@@ -105,8 +142,18 @@ _PATH_RE = re.compile(r"(?:^|\s)(\.{0,2}/[\w./-]+|~/[\w./-]+)", re.MULTILINE)
 
 # CLI subcommands (tool + first arg)
 _CLI_TOOLS = (
-    "kubectl", "helm", "terraform", "aws", "gcloud",
-    "docker", "git", "npm", "pip", "cargo", "scp", "ssh",
+    "kubectl",
+    "helm",
+    "terraform",
+    "aws",
+    "gcloud",
+    "docker",
+    "git",
+    "npm",
+    "pip",
+    "cargo",
+    "scp",
+    "ssh",
 )
 _CLI_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(t) for t in _CLI_TOOLS) + r")\s+\w+",
@@ -192,6 +239,7 @@ def _strip_mermaid_blocks(text: str, mask: list[tuple[int, int]]) -> str:
         if _overlaps_mask(m.start(), m.end(), mask):
             return m.group()
         return "[diagram removed]"
+
     return _MERMAID_RE.sub(_replace, text)
 
 
@@ -200,6 +248,7 @@ def _strip_headers(text: str, mask: list[tuple[int, int]]) -> str:
         if _overlaps_mask(m.start(), m.end(), mask):
             return m.group()
         return f"[{m.group(1).strip()}]"
+
     return _HEADER_RE.sub(_replace, text)
 
 
@@ -208,6 +257,7 @@ def _strip_horizontal_rules(text: str, mask: list[tuple[int, int]]) -> str:
         if _overlaps_mask(m.start(), m.end(), mask):
             return m.group()
         return ""
+
     return _HR_RE.sub(_replace, text)
 
 
@@ -235,11 +285,7 @@ def _strip_markdown_tables(text: str, mask: list[tuple[int, int]]) -> str:
     while i < len(lines):
         line = lines[i]
         # Detect table: line matches |...|, next line is separator |---|
-        if (
-            re.match(r"^\s*\|.+\|", line)
-            and i + 1 < len(lines)
-            and re.match(r"^\s*\|[-:\s|]+\|", lines[i + 1])
-        ):
+        if re.match(r"^\s*\|.+\|", line) and i + 1 < len(lines) and re.match(r"^\s*\|[-:\s|]+\|", lines[i + 1]):
             # Check if this table block overlaps a protected span
             table_start = sum(len(l) + 1 for l in lines[:i])
             if _overlaps_mask(table_start, table_start + len(line), mask):
@@ -272,10 +318,29 @@ def _strip_markdown_tables(text: str, mask: list[tuple[int, int]]) -> str:
 # Level 2: Filler words and abbreviations
 # ---------------------------------------------------------------------------
 
-_FILLER_WORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "in", "on", "at", "to", "of", "for", "that", "which", "with",
-})
+_FILLER_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "in",
+        "on",
+        "at",
+        "to",
+        "of",
+        "for",
+        "that",
+        "which",
+        "with",
+    }
+)
 
 # Build filler regex — word boundary, case insensitive, only when surrounded by spaces
 _FILLER_RE = re.compile(
@@ -321,6 +386,7 @@ def _remove_filler_words(text: str, mask: list[tuple[int, int]]) -> str:
         if _overlaps_mask(m.start(), m.end(), mask):
             return m.group()
         return ""
+
     result = _FILLER_RE.sub(_replace, text)
     # Clean up double spaces left by removal
     return re.sub(r"  +", " ", result)
@@ -344,6 +410,7 @@ def _apply_abbreviations(text: str, mask: list[tuple[int, int]], abbrev_dict: di
                 if m.group()[0].isupper():
                     return short_form[0].upper() + short_form[1:]
                 return short_form
+
             return _replace
 
         text = pattern.sub(_make_replacer(short), text)
@@ -359,12 +426,35 @@ def _apply_abbreviations(text: str, mask: list[tuple[int, int]], abbrev_dict: di
 
 _MIN_WORD_LENGTH = 7
 
-_DISEMVOWEL_EXCLUSIONS = frozenset({
-    "often", "even", "open", "over", "idea", "area", "issue",
-    "error", "user", "order", "offer", "later", "after",
-    "config", "token", "debug", "setup", "output", "input",
-    "under", "upper", "lower", "outer", "inner", "other",
-})
+_DISEMVOWEL_EXCLUSIONS = frozenset(
+    {
+        "often",
+        "even",
+        "open",
+        "over",
+        "idea",
+        "area",
+        "issue",
+        "error",
+        "user",
+        "order",
+        "offer",
+        "later",
+        "after",
+        "config",
+        "token",
+        "debug",
+        "setup",
+        "output",
+        "input",
+        "under",
+        "upper",
+        "lower",
+        "outer",
+        "inner",
+        "other",
+    }
+)
 
 # Match internal vowels flanked by consonants on both sides
 _INTERNAL_VOWEL_RE = re.compile(

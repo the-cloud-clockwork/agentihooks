@@ -489,10 +489,7 @@ def _get_valid_mcp_names() -> set[str]:
     """
     data = _load_json(CLAUDE_JSON)
     # Global servers (exclude claude.ai web-session entries)
-    valid = {
-        name for name in data.get("mcpServers", {}).keys()
-        if not name.startswith("claude.ai ")
-    }
+    valid = {name for name in data.get("mcpServers", {}).keys() if not name.startswith("claude.ai ")}
     # Project .mcp.json files
     for proj_path in data.get("projects", {}):
         mcp_file = Path(proj_path) / ".mcp.json"
@@ -553,6 +550,7 @@ def _get_managed_mcp_names() -> set[str]:
     try:
         _ensure_install_importable()
         import install
+
         return set(install._collect_all_managed_mcp_servers().keys())
     except Exception as exc:
         _log(f"Warning: could not collect managed MCP names: {exc}")
@@ -572,7 +570,13 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
     Returns summary dict with counts.
     """
     valid = _get_valid_mcp_names()
-    summary = {"pruned_disabled": 0, "pruned_known": 0, "pruned_settings": 0, "projects_touched": 0, "pruned_orphaned": 0}
+    summary = {
+        "pruned_disabled": 0,
+        "pruned_known": 0,
+        "pruned_settings": 0,
+        "projects_touched": 0,
+        "pruned_orphaned": 0,
+    }
 
     if not valid:
         _log("Prune: no valid MCP servers found — skipping (safety)")
@@ -587,10 +591,7 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
     if managed:
         data = _load_json(CLAUDE_JSON)
         current_servers = data.get("mcpServers", {})
-        orphaned = {
-            name for name in current_servers
-            if not name.startswith("claude.ai ") and name not in managed
-        }
+        orphaned = {name for name in current_servers if not name.startswith("claude.ai ") and name not in managed}
         if orphaned:
             for name in orphaned:
                 del current_servers[name]
@@ -687,9 +688,17 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
         _write_atomic(STATE_JSON, state)
     summary["pruned_enabled"] = pruned_enabled
 
-    total = summary["pruned_orphaned"] + summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"] + pruned_enabled
+    total = (
+        summary["pruned_orphaned"]
+        + summary["pruned_disabled"]
+        + summary["pruned_known"]
+        + summary["pruned_settings"]
+        + pruned_enabled
+    )
     if total > 0:
-        _log(f"Prune: removed {total} stale MCP entries ({summary['pruned_orphaned']} orphaned, {summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings, {pruned_enabled} enabled)")
+        _log(
+            f"Prune: removed {total} stale MCP entries ({summary['pruned_orphaned']} orphaned, {summary['pruned_disabled']} disabled, {summary['pruned_known']} known, {summary['pruned_settings']} settings, {pruned_enabled} enabled)"
+        )
 
     return summary
 
@@ -701,10 +710,7 @@ def _get_all_known_mcp_names_from_claude_json() -> set[str]:
     not local config, and should not be tracked or blacklisted.
     """
     data = _load_json(CLAUDE_JSON)
-    names = {
-        name for name in data.get("mcpServers", {}).keys()
-        if not name.startswith("claude.ai ")
-    }
+    names = {name for name in data.get("mcpServers", {}).keys() if not name.startswith("claude.ai ")}
     return names
 
 

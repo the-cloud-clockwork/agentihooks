@@ -77,12 +77,14 @@ def register(mcp):
             # Return most recent N
             results = matches[-tail:]
 
-            return json.dumps({
-                "success": True,
-                "count": len(results),
-                "total_matches": len(matches),
-                "entries": results,
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "count": len(results),
+                    "total_matches": len(matches),
+                    "entries": results,
+                }
+            )
 
         except Exception as e:
             log("MCP read_session_logs failed", {"error": str(e)})
@@ -143,13 +145,15 @@ def register(mcp):
                 filter_regex=filter_regex,
             )
 
-            return json.dumps({
-                "success": True,
-                "logs": logs,
-                "count": len(logs),
-                "runtime": runtime,
-                "target": target,
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "logs": logs,
+                    "count": len(logs),
+                    "runtime": runtime,
+                    "target": target,
+                }
+            )
 
         except ValueError as e:
             log("MCP tail_container_logs validation failed", {"error": str(e)})

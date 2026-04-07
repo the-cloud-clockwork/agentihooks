@@ -88,11 +88,14 @@ def _set_state(session_id: str, state: dict) -> None:
     if r is not None:
         try:
             k = redis_key("ctx_refresh", session_id)
-            r.hset(k, mapping={
-                "turn_count": str(state["turn_count"]),
-                "last_refresh": str(state["last_refresh"]),
-                "last_claude_md_refresh": str(state.get("last_claude_md_refresh", 0)),
-            })
+            r.hset(
+                k,
+                mapping={
+                    "turn_count": str(state["turn_count"]),
+                    "last_refresh": str(state["last_refresh"]),
+                    "last_claude_md_refresh": str(state.get("last_claude_md_refresh", 0)),
+                },
+            )
             r.expire(k, 86400)  # 24h TTL
         except Exception as e:
             log("context_refresh: Redis write error", {"error": str(e)})
@@ -123,7 +126,7 @@ def _parse_frontmatter(raw: str) -> tuple[int, str]:
         return _DEFAULT_PRIORITY, raw
 
     fm_block = m.group(1)
-    content = raw[m.end():]
+    content = raw[m.end() :]
     priority = _DEFAULT_PRIORITY
 
     for line in fm_block.splitlines():
@@ -303,11 +306,14 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
             text = _build_injection_text(rules, turn, CONTEXT_REFRESH_INTERVAL)
             inject_banner(f"CONTEXT REFRESH — rules (turn {turn})", text, skip_compression=True)
             state["last_refresh"] = turn
-            log("context_refresh: injected rules", {
-                "session_id": session_id,
-                "turn": turn,
-                "rules_count": len(rules),
-            })
+            log(
+                "context_refresh: injected rules",
+                {
+                    "session_id": session_id,
+                    "turn": turn,
+                    "rules_count": len(rules),
+                },
+            )
 
     # --- CLAUDE.md re-injection (separate cadence) ---
     if CONTEXT_REFRESH_CLAUDE_MD_INTERVAL > 0 and (turn % CONTEXT_REFRESH_CLAUDE_MD_INTERVAL) == 0:
@@ -321,10 +327,13 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
                 skip_compression=True,
             )
             state["last_claude_md_refresh"] = turn
-            log("context_refresh: injected CLAUDE.md", {
-                "session_id": session_id,
-                "turn": turn,
-            })
+            log(
+                "context_refresh: injected CLAUDE.md",
+                {
+                    "session_id": session_id,
+                    "turn": turn,
+                },
+            )
 
     _set_state(session_id, state)
 

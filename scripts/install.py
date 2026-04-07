@@ -297,12 +297,7 @@ def _deep_merge(base: dict, override: dict, _parent_key: str = "") -> dict:
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _deep_merge(merged[key], value, _parent_key=key)
-        elif (
-            _parent_key == "hooks"
-            and key in merged
-            and isinstance(merged[key], list)
-            and isinstance(value, list)
-        ):
+        elif _parent_key == "hooks" and key in merged and isinstance(merged[key], list) and isinstance(value, list):
             # Hook arrays: append profile hooks after base hooks
             merged[key] = deepcopy(merged[key]) + deepcopy(value)
         else:
@@ -2038,9 +2033,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         for pname, pdir in profile_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
-                _symlink_dir_contents(
-                    pdir / _CLAUDE_SUBDIR / subdir, dst, label=chain_label, filter_fn=filter_fn
-                )
+                _symlink_dir_contents(pdir / _CLAUDE_SUBDIR / subdir, dst, label=chain_label, filter_fn=filter_fn)
 
     # --- 5. Install CLAUDE.md (first profile = symlink, rest = rules) ---
     _cleanup_stale_claude_md_symlink()
@@ -2375,7 +2368,9 @@ def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
 
     if updated:
         save_json(_CLAUDE_JSON, data)
-        _cprint(f"  [OK] Blacklisted MCPs across {updated} project(s) in ~/.claude.json (respecting per-project enables)")
+        _cprint(
+            f"  [OK] Blacklisted MCPs across {updated} project(s) in ~/.claude.json (respecting per-project enables)"
+        )
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:
@@ -3417,10 +3412,12 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
             pid_file.unlink(missing_ok=True)
         # Kill any orphaned daemon processes
         import subprocess as _sp
+
         try:
             result = _sp.run(
                 ["pgrep", "-f", "sync_daemon.py.*--foreground"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             for line in result.stdout.strip().splitlines():
                 orphan_pid = int(line.strip())
@@ -3921,11 +3918,15 @@ def main() -> None:
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
     )
     init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
-    init_p.add_argument("--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)")
+    init_p.add_argument(
+        "--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)"
+    )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument(
-        "--settings-profile", dest="init_settings_profile", default=None,
-        help="Settings-only overlay profile (applies settings.json/MCP on top, keeps persona from --profile)"
+        "--settings-profile",
+        dest="init_settings_profile",
+        default=None,
+        help="Settings-only overlay profile (applies settings.json/MCP on top, keeps persona from --profile)",
     )
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
 
@@ -4019,7 +4020,9 @@ def main() -> None:
         help="Quick-switch settings layer only (keeps persona/rules/CLAUDE.md intact)",
     )
     sp_p.add_argument("sp_name", nargs="?", default=None, help="Settings profile name (or --clear to remove overlay)")
-    sp_p.add_argument("--clear", action="store_true", help="Remove settings overlay, revert to persona profile defaults")
+    sp_p.add_argument(
+        "--clear", action="store_true", help="Remove settings overlay, revert to persona profile defaults"
+    )
 
     p_migrate = sub.add_parser("migrate", help="Fix ~/.claude.json project entries after repos move")
     p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
@@ -4143,7 +4146,9 @@ def main() -> None:
         else:
             print(f"\nPruned {total} stale entries:")
             if summary["pruned_disabled"]:
-                print(f"  disabledMcpServers: {summary['pruned_disabled']} entries from {summary['projects_touched']} project(s)")
+                print(
+                    f"  disabledMcpServers: {summary['pruned_disabled']} entries from {summary['projects_touched']} project(s)"
+                )
             if summary["pruned_known"]:
                 print(f"  known-mcp-servers.json: {summary['pruned_known']} entries")
             if summary["pruned_settings"]:

@@ -68,4 +68,3 @@ def register(mcp):
         except Exception as e:
             log("MCP email_send failed", {"to": to, "subject": subject, "error": str(e)})
             return json.dumps({"success": False, "error": str(e)})
-

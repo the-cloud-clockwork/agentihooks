@@ -48,4 +48,3 @@ def register(mcp):
         except Exception as e:
             log("MCP storage_upload_path failed", {"path": path, "error": str(e)})
             return json.dumps({"success": False, "error": str(e)})
-

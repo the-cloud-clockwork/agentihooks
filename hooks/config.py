@@ -195,18 +195,14 @@ CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 CONTEXT_REFRESH_ENABLED = _env_bool("CONTEXT_REFRESH_ENABLED", "true")
 CONTEXT_REFRESH_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_INTERVAL", "20"))
 CONTEXT_REFRESH_CLAUDE_MD_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", "40"))
-CONTEXT_REFRESH_RULES_DIR: str = os.getenv(
-    "CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules")
-)
+CONTEXT_REFRESH_RULES_DIR: str = os.getenv("CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules"))
 CONTEXT_REFRESH_INCLUDE_PROJECT = _env_bool("CONTEXT_REFRESH_INCLUDE_PROJECT", "true")
 CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "8000"))
 
 # Context Preprocessor — compression level for refresh injections
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
 _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().strip()
-CONTEXT_REFRESH_COMPRESSION: str = (
-    _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"
-)
+CONTEXT_REFRESH_COMPRESSION: str = _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"
 CONTEXT_REFRESH_ABBREV_FILE: str = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
 
 # Scope of token compression: "refresh" = only context refresh, "all" = all injections

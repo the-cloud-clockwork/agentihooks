@@ -163,9 +163,7 @@ def _detect_process(name: str) -> dict:
     import subprocess
 
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", name], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["pgrep", "-f", name], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             pid = int(result.stdout.strip().split("\n")[0])
             return {"pid": pid, "alive": True}
