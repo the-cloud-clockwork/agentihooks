@@ -3753,6 +3753,79 @@ def cmd_quota(args: "argparse.Namespace") -> None:
 # ---------------------------------------------------------------------------
 
 
+_BROADCAST_EMIT_SYSTEM_PROMPT = """\
+You are a broadcast CLI agent. Your ONLY job is to parse a natural language \
+message and execute ONE agentihooks broadcast command.
+
+Parse the input for:
+1. Severity: "critical"/"urgent"/"emergency"/"stop" → -s critical; \
+"alert"/"warning"/"attention"/"heads up" → -s alert; otherwise → -s info (default).
+2. Duration/TTL: time expressions like "2 hours" → -t 2h, "30 minutes" → -t 30m, \
+"1 day" → -t 1d, "15 min" → -t 15m. If no duration mentioned, omit -t flag entirely.
+3. Message: the remaining human-readable content. Keep it natural — do NOT strip \
+context words. Clean up grammar if needed but preserve the operator's intent.
+
+Run EXACTLY ONE Bash command in this format:
+agentihooks broadcast "extracted message" [-s severity] [-t ttl]
+
+Examples:
+- "deploy freeze for the next 2 hours, this is critical"
+  → agentihooks broadcast "deploy freeze for the next 2 hours" -s critical -t 2h
+- "sonarqube is down on anton"
+  → agentihooks broadcast "sonarqube is down on anton"
+- "stop all writes to postgres, 30 minutes, urgent"
+  → agentihooks broadcast "stop all writes to postgres" -s critical -t 30m
+- "heads up team, new cert rollout in 1 hour"
+  → agentihooks broadcast "new cert rollout in 1 hour" -s alert -t 1h
+
+Output ONLY the command result. No explanations. No preamble.\
+"""
+
+
+def _broadcast_emit(natural_input: str) -> None:
+    """Use Claude Haiku to parse natural language into a broadcast command."""
+    import shutil
+    import subprocess as sp
+
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        print("Error: 'claude' CLI not found in PATH.", file=sys.stderr)
+        sys.exit(1)
+
+    if not natural_input.strip():
+        print('Error: emit requires a message. Usage: agentihooks broadcast emit "your message"', file=sys.stderr)
+        sys.exit(1)
+
+    cmd = [
+        claude_bin,
+        "-p",
+        "--model",
+        "haiku",
+        "--permission-mode",
+        "bypassPermissions",
+        "--no-session-persistence",
+        "--system-prompt",
+        _BROADCAST_EMIT_SYSTEM_PROMPT,
+        "--allowedTools",
+        "Bash",
+    ]
+
+    print(f'Interpreting: "{natural_input}"')
+    result = sp.run(cmd, input=natural_input, stdout=sp.PIPE, stderr=sp.STDOUT, text=True, timeout=60)
+
+    output = result.stdout.strip() if result.stdout else ""
+    if result.returncode != 0:
+        print(f"Error: claude exited with code {result.returncode}", file=sys.stderr)
+        if output:
+            print(output, file=sys.stderr)
+        sys.exit(1)
+
+    if output:
+        print(output)
+    else:
+        print("Broadcast emitted (no output from claude).")
+
+
 def _cmd_broadcast(args: argparse.Namespace) -> None:
     """Handle the broadcast CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -3782,10 +3855,19 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
             print(f"Broadcast {bcast_clear} cleared.")
         return
 
-    message = getattr(args, "message", None)
-    if not message:
+    # Join nargs="*" words into a single message
+    words = getattr(args, "message", None) or []
+    if not words:
         print("Error: message is required (or use --list / --clear)", file=sys.stderr)
         sys.exit(1)
+
+    # AI-assisted emit mode
+    if words[0] == "emit":
+        natural_input = " ".join(words[1:])
+        _broadcast_emit(natural_input)
+        return
+
+    message = " ".join(words)
 
     # Parse TTL string
     ttl_seconds = 0
@@ -4106,11 +4188,22 @@ examples:
   agentihooks broadcast --list
   agentihooks broadcast --clear
   agentihooks broadcast --clear abc123  # clear specific message
+
+ai-assisted (emit):
+  agentihooks broadcast emit "deploy freeze for the next 2 hours, critical"
+  agentihooks broadcast emit "sonarqube is down, let sessions know"
+  agentihooks broadcast emit "stop all writes to postgres for 30 min, urgent"
+  Uses Claude Haiku to parse natural language into severity, TTL, and message.
 """,
     )
-    bcast_p.add_argument("message", nargs="?", default=None, help="Message to broadcast")
     bcast_p.add_argument(
-        "-s", "--severity", default="info", choices=["info", "alert", "critical"],
+        "message", nargs="*", default=None, help="Message to broadcast (prefix with 'emit' for AI-assisted)"
+    )
+    bcast_p.add_argument(
+        "-s",
+        "--severity",
+        default="info",
+        choices=["info", "alert", "critical"],
         help="Message severity (default: info)",
     )
     bcast_p.add_argument("-t", "--ttl", default=None, help="TTL: 5m, 30m, 1h, 8h, 24h, or seconds")
@@ -4118,7 +4211,11 @@ examples:
     bcast_p.add_argument("--source", default="operator", help="Message source label")
     bcast_p.add_argument("--list", action="store_true", dest="bcast_list", help="List active broadcasts")
     bcast_p.add_argument(
-        "--clear", nargs="?", const="__ALL__", default=None, dest="bcast_clear",
+        "--clear",
+        nargs="?",
+        const="__ALL__",
+        default=None,
+        dest="bcast_clear",
         help="Clear all broadcasts, or a specific ID",
     )
 
