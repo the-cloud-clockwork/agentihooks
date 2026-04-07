@@ -1304,6 +1304,25 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
             except (json.JSONDecodeError, OSError):
                 pass
 
+    # Apply settings-profile overlay if specified in .agentihooks.json
+    sp_name = config.get("settings_profile", "")
+    if sp_name:
+        sp_dir = _resolve_profile_dir(sp_name)
+        if sp_dir is not None:
+            sp_overrides = sp_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
+            if not sp_overrides.exists():
+                sp_overrides = sp_dir / "settings.overrides.json"
+            if sp_overrides.exists():
+                try:
+                    ovr = load_json(sp_overrides)
+                    for key in ("env", "permissions"):
+                        if key in ovr and key in profile_overrides:
+                            profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
+                    profile_overrides.update({k: v for k, v in ovr.items() if k not in ("env", "permissions")})
+                    _cprint(f"  [OK] Applied settings-profile '{sp_name}' overlay (project-level)")
+                except (json.JSONDecodeError, OSError):
+                    pass
+
     # Load connector rules for this profile (use primary profile name)
     primary_profile = profile_dirs[-1][0]
     conn_env, conn_deny, conn_disabled = _load_connectors(primary_profile)
