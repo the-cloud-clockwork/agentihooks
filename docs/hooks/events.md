@@ -86,6 +86,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
    - Every `CONTEXT_REFRESH_INTERVAL` turns (default 20): re-injects all rules files (`~/.claude/rules/*.md` and optionally project `.claude/rules/*.md`) into the context
    - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`) into the context
    - Both combat attention decay in long sessions where early-loaded instructions lose influence
+   - If `CONTEXT_REFRESH_COMPRESSION` is set, content is compressed via the [Context Preprocessor](context-preprocessor.md) before injection
 
 ---
 

@@ -138,7 +138,9 @@ Combats attention decay in long sessions by periodically re-injecting rules and 
 | `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` | `40` | Re-inject CLAUDE.md every N user messages. Set `0` to disable CLAUDE.md refresh. |
 | `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory (all profile layers merged here at install time). |
 | `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject project-level `.claude/rules/*.md` from the active working directory. |
-| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max characters per injection (~2000 tokens). Excess rules are truncated alphabetically. |
+| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max characters per injection (~2000 tokens). Excess rules are truncated by priority. |
+| `CONTEXT_REFRESH_COMPRESSION` | `off` | Compression level: `off`, `light`, `standard`, `aggressive`. See [Context Preprocessor](../hooks/context-preprocessor.md). |
+| `CONTEXT_REFRESH_ABBREV_FILE` | *(empty)* | Path to user-supplied abbreviation dictionary (JSON). Merged on top of built-in. |
 
 ### How it works
 

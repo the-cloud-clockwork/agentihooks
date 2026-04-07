@@ -40,19 +40,19 @@ class TestTurnCounter:
         from hooks.context.context_refresh import _get_state
 
         state = _get_state("test-session-1")
-        assert state == {"turn_count": 0, "last_refresh": 0}
+        assert state == {"turn_count": 0, "last_refresh": 0, "last_claude_md_refresh": 0}
 
     def test_persist_across_calls(self, tmp_home):
         from hooks.context.context_refresh import _get_state, _set_state
 
-        _set_state("s1", {"turn_count": 5, "last_refresh": 0})
-        assert _get_state("s1") == {"turn_count": 5, "last_refresh": 0}
+        _set_state("s1", {"turn_count": 5, "last_refresh": 0, "last_claude_md_refresh": 0})
+        assert _get_state("s1") == {"turn_count": 5, "last_refresh": 0, "last_claude_md_refresh": 0}
 
     def test_sessions_isolated(self, tmp_home):
         from hooks.context.context_refresh import _get_state, _set_state
 
-        _set_state("s1", {"turn_count": 10, "last_refresh": 0})
-        _set_state("s2", {"turn_count": 3, "last_refresh": 0})
+        _set_state("s1", {"turn_count": 10, "last_refresh": 0, "last_claude_md_refresh": 0})
+        _set_state("s2", {"turn_count": 3, "last_refresh": 0, "last_claude_md_refresh": 0})
         assert _get_state("s1")["turn_count"] == 10
         assert _get_state("s2")["turn_count"] == 3
 
@@ -177,6 +177,7 @@ class TestMaybeRefresh:
              patch("hooks.config.CONTEXT_REFRESH_INTERVAL", 20), \
              patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
              patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
+             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
              patch("hooks.common.inject_banner") as mock_banner:
 
             from hooks.context.context_refresh import maybe_refresh
@@ -194,6 +195,7 @@ class TestMaybeRefresh:
              patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
              patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
              patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000), \
+             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
              patch("hooks.common.inject_banner") as mock_banner:
 
             from hooks.context.context_refresh import maybe_refresh
@@ -213,6 +215,7 @@ class TestMaybeRefresh:
              patch("hooks.config.CONTEXT_REFRESH_RULES_DIR", str(rules_dir)), \
              patch("hooks.config.CONTEXT_REFRESH_INCLUDE_PROJECT", False), \
              patch("hooks.config.CONTEXT_REFRESH_MAX_CHARS", 8000), \
+             patch("hooks.config.CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", 0), \
              patch("hooks.common.inject_banner") as mock_banner:
 
             from hooks.context.context_refresh import maybe_refresh
@@ -260,12 +263,12 @@ class TestClearSessionState:
     def test_clear_removes_file(self, tmp_home):
         from hooks.context.context_refresh import _set_state, clear_session_state
 
-        _set_state("s1", {"turn_count": 10, "last_refresh": 5})
+        _set_state("s1", {"turn_count": 10, "last_refresh": 5, "last_claude_md_refresh": 0})
         clear_session_state("s1")
 
         from hooks.context.context_refresh import _get_state
 
-        assert _get_state("s1") == {"turn_count": 0, "last_refresh": 0}
+        assert _get_state("s1") == {"turn_count": 0, "last_refresh": 0, "last_claude_md_refresh": 0}
 
     def test_clear_nonexistent_safe(self):
         from hooks.context.context_refresh import clear_session_state

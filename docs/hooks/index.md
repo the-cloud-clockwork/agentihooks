@@ -61,3 +61,4 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 | Page | What it covers |
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
+| [Context Preprocessor](context-preprocessor.md) | Token compression for mid-session context refresh injections |

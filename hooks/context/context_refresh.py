@@ -33,8 +33,9 @@ from pathlib import Path
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
-_FRONTMATTER_RE = re.compile(r"^---\n.*?---\n", re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"^---\n(.*?)---\n", re.DOTALL)
 _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_-]")
+_DEFAULT_PRIORITY = 5
 
 
 # ---------------------------------------------------------------------------
@@ -111,12 +112,35 @@ def _set_state(session_id: str, state: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _strip_frontmatter(content: str) -> str:
-    return _FRONTMATTER_RE.sub("", content)
+def _parse_frontmatter(raw: str) -> tuple[int, str]:
+    """Extract priority from YAML frontmatter and return (priority, content_without_frontmatter).
+
+    Supported frontmatter field: ``priority: N`` (integer, lower = higher priority).
+    Default priority is 5. Files without frontmatter get default priority.
+    """
+    m = _FRONTMATTER_RE.match(raw)
+    if not m:
+        return _DEFAULT_PRIORITY, raw
+
+    fm_block = m.group(1)
+    content = raw[m.end():]
+    priority = _DEFAULT_PRIORITY
+
+    for line in fm_block.splitlines():
+        line = line.strip()
+        if line.startswith("priority:"):
+            try:
+                priority = int(line.split(":", 1)[1].strip())
+            except (ValueError, IndexError):
+                pass
+            break
+
+    return priority, content
 
 
 def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = "") -> list[tuple[str, str]]:
-    results: list[tuple[str, str]] = []
+    # Collect as (priority, name, content)
+    entries: list[tuple[int, str, str]] = []
 
     dirs = [Path(rules_dir)]
     if include_project:
@@ -138,15 +162,22 @@ def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = 
                 if f.name == "README.md":
                     continue
                 try:
-                    content = _strip_frontmatter(f.read_text().strip())
+                    raw = f.read_text().strip()
+                    if not raw:
+                        continue
+                    priority, content = _parse_frontmatter(raw)
+                    content = content.strip()
                     if content:
-                        results.append((f.name, content))
+                        entries.append((priority, f.name, content))
                 except Exception:
                     continue
         except Exception:
             continue
 
-    return results
+    # Sort by priority (lower first), then alphabetically within same priority
+    entries.sort(key=lambda e: (e[0], e[1]))
+
+    return [(name, content) for _, name, content in entries]
 
 
 def _load_claude_md(project_dir: str = "") -> str | None:
@@ -181,6 +212,17 @@ def _load_claude_md(project_dir: str = "") -> str | None:
         return None
 
     combined = "\n".join(parts)
+
+    # Apply preprocessor compression if enabled
+    try:
+        from hooks.context.preprocessor import get_level_from_config, preprocess
+
+        level = get_level_from_config()
+        if level > 0:
+            combined = preprocess(combined, level)
+    except Exception:
+        pass
+
     # Apply size cap — CLAUDE.md can be large
     if len(combined) > CONTEXT_REFRESH_MAX_CHARS:
         combined = combined[:CONTEXT_REFRESH_MAX_CHARS] + "\n[... truncated at size limit]"
@@ -191,11 +233,29 @@ def _load_claude_md(project_dir: str = "") -> str | None:
 def _build_injection_text(rules: list[tuple[str, str]], turn: int, interval: int) -> str:
     from hooks.config import CONTEXT_REFRESH_MAX_CHARS
 
+    # Load preprocessor level once for the batch
+    compression_level = 0
+    try:
+        from hooks.context.preprocessor import get_level_from_config
+
+        compression_level = get_level_from_config()
+    except Exception:
+        pass
+
     lines = [f"Re-injecting active rules (turn {turn}, every {interval} turns).\n"]
     total = len(lines[0])
     added = 0
 
     for name, content in rules:
+        # Apply compression if enabled
+        if compression_level > 0:
+            try:
+                from hooks.context.preprocessor import preprocess
+
+                content = preprocess(content, compression_level)
+            except Exception:
+                pass
+
         header = f"\n[{name}]\n"
         entry_len = len(header) + len(content)
         if total + entry_len > CONTEXT_REFRESH_MAX_CHARS:

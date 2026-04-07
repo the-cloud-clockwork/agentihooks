@@ -201,6 +201,14 @@ CONTEXT_REFRESH_RULES_DIR: str = os.getenv(
 CONTEXT_REFRESH_INCLUDE_PROJECT = _env_bool("CONTEXT_REFRESH_INCLUDE_PROJECT", "true")
 CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "8000"))
 
+# Context Preprocessor — compression level for refresh injections
+_VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
+_raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "off").lower().strip()
+CONTEXT_REFRESH_COMPRESSION: str = (
+    _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"
+)
+CONTEXT_REFRESH_ABBREV_FILE: str = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
+
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
