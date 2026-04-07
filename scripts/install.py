@@ -4089,14 +4089,38 @@ def main() -> None:
     p_migrate.add_argument("target_path", type=str, help="New repo path or parent dir containing repos")
     p_migrate.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
 
-    bcast_p = sub.add_parser("broadcast", help="Send a message to all active Claude Code sessions")
+    bcast_p = sub.add_parser(
+        "broadcast",
+        help="Send a message to all active Claude Code sessions",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+severity levels:
+  info      delivered once per session (default, TTL 4h)
+  alert     delivered every turn, persistent (TTL 1h)
+  critical  delivered every turn + every tool call, persistent (TTL 30m)
+
+examples:
+  agentihooks broadcast "SonarQube is down"
+  agentihooks broadcast "Deploy freeze until 3am" -s alert
+  agentihooks broadcast "STOP ALL WRITES" -s critical -t 15m
+  agentihooks broadcast --list
+  agentihooks broadcast --clear
+  agentihooks broadcast --clear abc123  # clear specific message
+""",
+    )
     bcast_p.add_argument("message", nargs="?", default=None, help="Message to broadcast")
-    bcast_p.add_argument("-s", "--severity", default="alert", choices=["critical", "alert", "info"])
+    bcast_p.add_argument(
+        "-s", "--severity", default="info", choices=["info", "alert", "critical"],
+        help="Message severity (default: info)",
+    )
     bcast_p.add_argument("-t", "--ttl", default=None, help="TTL: 5m, 30m, 1h, 8h, 24h, or seconds")
-    bcast_p.add_argument("--persistent", action="store_true", default=False)
-    bcast_p.add_argument("--source", default="operator")
-    bcast_p.add_argument("--list", action="store_true", dest="bcast_list")
-    bcast_p.add_argument("--clear", nargs="?", const="__ALL__", default=None, dest="bcast_clear")
+    bcast_p.add_argument("--persistent", action="store_true", default=False, help="Force persistent delivery")
+    bcast_p.add_argument("--source", default="operator", help="Message source label")
+    bcast_p.add_argument("--list", action="store_true", dest="bcast_list", help="List active broadcasts")
+    bcast_p.add_argument(
+        "--clear", nargs="?", const="__ALL__", default=None, dest="bcast_clear",
+        help="Clear all broadcasts, or a specific ID",
+    )
 
     args = parser.parse_args(_argv)
 

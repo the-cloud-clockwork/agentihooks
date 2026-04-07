@@ -114,7 +114,7 @@ def _load_sessions() -> dict:
 
 def create_broadcast(
     message: str,
-    severity: str = "alert",
+    severity: str = "info",
     ttl_seconds: int = 0,
     source: str = "operator",
     persistent: bool | None = None,
