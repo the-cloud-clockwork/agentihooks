@@ -102,18 +102,6 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 
 ---
 
-## Quota Watcher
-
-Controls the console quota display on statusline line 3, powered by `scripts/claude_usage_watcher.py`.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLAUDE_USAGE_FILE` | -- | Path to the quota JSON file written by the watcher daemon (e.g. `~/.agentihooks/claude_usage.json`). Must be set in `~/.agentihooks/.env` to enable the statusline quota display. |
-| `CLAUDE_USAGE_STALE_SEC` | `300` | Data older than this many seconds is shown as "stale" on the statusline. |
-| `CLAUDE_USAGE_POLL_SEC` | `60` | How often (seconds) the background daemon polls claude.ai/settings/usage. |
-
----
-
 ## CLAUDE.md Sanity Check
 
 Guardrail that prevents agents from bloating `CLAUDE.md` and `CLAUDE.local.md` files past a configurable line limit. Runs on every `PreToolUse` event for `Write` and `Edit` tools. **Enabled by default.**

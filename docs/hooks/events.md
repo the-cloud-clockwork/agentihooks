@@ -220,7 +220,7 @@ Line 2 -- token counts, burn rate, lines changed, cache ratio, git branch:
 ctx: 540K/1M | burn: 23K/turn | +12-3 | cache: 67% | main
 ```
 
-Line 3 (conditional) -- threshold warning if fill % crosses `TOKEN_WARN_PCT` or `TOKEN_CRITICAL_PCT`, or quota display if enabled:
+Line 3 (conditional) -- threshold warning if fill % crosses `TOKEN_WARN_PCT` or `TOKEN_CRITICAL_PCT`, native rate limits, or peak/off-peak indicator:
 ```
 CONTEXT 61% -- consider /compact soon
 ```

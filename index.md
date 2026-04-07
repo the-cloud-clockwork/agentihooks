@@ -146,7 +146,7 @@ That's it. Hooks are active and 26 MCP tools are registered the next time you st
 | 26 MCP tool schemas loaded every turn | **Lazy loading** — schemas expand only when used | ~79K tokens/session |
 | Context hits 100%, session resets, all work lost | **Threshold warnings** — alerts at 60% and 80% | Entire session |
 | No visibility into spend | **Live statusline** — cost, burn rate, cache ratio every turn | Prevents waste |
-| Hit weekly quota mid-task | **Quota monitor** — plan usage on your statusline | Prevents limit hits |
+| Hit weekly quota mid-task | **Native rate limits** — session/weekly usage on your statusline | Prevents limit hits |
 
 **The result:** Your weekly quota lasts longer. Sessions run deeper before compaction. You see exactly where every token goes.
 
@@ -325,7 +325,7 @@ rm -rf ~/.agentihooks
 |---------|---------------|
 | **[The Four Pillars]({{ site.baseurl }}/docs/pillars/)** | Identity, Guardrails, Context Intelligence, Fleet Command — the conceptual foundation |
 | **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
-| **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, quota monitoring |
+| **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, rate limit display |
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
 | **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | All 26 tools across 8 categories |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |

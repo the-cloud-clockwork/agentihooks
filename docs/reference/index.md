@@ -14,4 +14,4 @@ Complete reference documentation for configuration and CLI commands.
 | Page | What it covers |
 |------|---------------|
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
-| [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, quota, daemon, ignore |
+| [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, daemon, ignore |

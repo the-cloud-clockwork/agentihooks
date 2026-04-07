@@ -79,8 +79,7 @@ This single command:
 9. Prunes orphaned MCP servers from `~/.claude.json`
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
 11. Restarts sync daemon (always — picks up code changes)
-12. Auto-starts quota daemon (if accounts exist)
-13. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
+12. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 
 The install is **idempotent** -- re-running is safe. Settings are only backed up on the first run.
 
@@ -136,69 +135,15 @@ All hooks and the MCP server auto-load this file at import time (plus any `~/.ag
 
 ---
 
-## 7. (Optional) Console quota display
+## 7. Rate limit display
 
-The statusline can show your Anthropic console usage on line 3. Example output:
+The statusline automatically shows your Claude Code rate limits on line 3 using native data from Claude Code:
 
 ```
-session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: $40/99 (40%) resets apr 1
+session:53% [1h35m] | weekly:35%
 ```
 
-This uses a background daemon (`scripts/claude_usage_watcher.py`) that scrapes claude.ai/settings/usage headlessly via Playwright. Auth uses your real system browser -- no Chromium login required.
-
-### Install Playwright's browser
-
-```bash
-~/.agentihooks/.venv/bin/python -m playwright install chromium
-```
-
-### Authenticate and start the daemon
-
-The `quota auth` command opens YOUR real browser (Chrome on Windows/WSL via `cmd.exe /c start`, Safari/Chrome on Mac via `open`) to claude.ai. You then copy the `sessionKey` cookie from Chrome DevTools (F12 -> Application -> Cookies -> claude.ai -> sessionKey), paste it when prompted, and the daemon starts automatically.
-
-```bash
-agentihooks quota auth
-```
-
-The cookie is saved as a Playwright storage state file at `~/.agentihooks/quota-accounts/<name>.json`. Headless Chromium is only used for background scraping -- your login happens in your real browser.
-
-### Multi-account quota
-
-You can authenticate multiple accounts and switch between them:
-
-```bash
-agentihooks quota auth work          # authenticate as "work"
-agentihooks quota auth personal      # authenticate as "personal"
-agentihooks quota list               # show all accounts
-agentihooks quota switch personal    # switch active account
-agentihooks quota restart            # restart daemon with current account
-agentihooks quota remove personal    # remove an account
-```
-
-Account credentials are stored at `~/.agentihooks/quota-accounts/<name>.json`.
-
-### Daemon management
-
-```bash
-agentihooks quota            # start background daemon (auto-detaches, PID file, logs)
-agentihooks quota status     # print last known quota JSON
-agentihooks quota logs       # tail -f daemon log (~/.agentihooks/logs/quota-watcher.log)
-agentihooks quota stop       # kill daemon
-```
-
-The daemon writes a PID file at `~/.agentihooks/quota-watcher.pid` and logs to `~/.agentihooks/logs/quota-watcher.log`.
-
-### Enable the statusline display
-
-Add to `~/.agentihooks/.env`:
-
-```bash
-CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json
-# CLAUDE_USAGE_STALE_SEC=300   # data older than this shows "stale" (default)
-# CLAUDE_USAGE_POLL_SEC=60     # daemon poll interval (default)
-```
-
-The statusline will then display quota information on line 3, color-coded by usage thresholds.
+No configuration required -- this works out of the box. Color-coded by usage: green < 60%, yellow < 80%, red above.
 
 ---
 
@@ -298,7 +243,7 @@ agentihooks uninstall
 
 Add `--yes` to skip the confirmation prompt.
 
-This removes: settings, all symlinks, CLAUDE.md, MCP server registrations, stops all daemons (quota + sync), removes the bashrc block, and uninstalls the CLI. User data in `~/.agentihooks/state.json` is preserved.
+This removes: settings, all symlinks, CLAUDE.md, MCP server registrations, stops the sync daemon, removes the bashrc block, and uninstalls the CLI. User data in `~/.agentihooks/state.json` is preserved.
 
 {: .warning }
 To fully remove all user data, delete `~/.agentihooks` manually with `rm -rf ~/.agentihooks`.

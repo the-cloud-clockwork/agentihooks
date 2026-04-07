@@ -178,89 +178,15 @@ This lets you spot runaway token consumption in real time -- a `burn: 45K/turn` 
 
 ---
 
-### 8. Console quota monitoring (opt-in)
+### 8. Native rate limit display
 
-A background daemon scrapes your Claude.ai usage page and surfaces plan-level quota on statusline Line 3:
+Claude Code provides native rate limit data (`rate_limits.five_hour` and `rate_limits.seven_day`) in every statusline payload. AgentiHooks surfaces this on statusline Line 3:
 
 ```
-quota: session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: $40/99 (40%) resets apr 1
+session:53% [1h35m] | weekly:35%
 ```
 
-You see your weekly quota percentage, per-model breakdown, extra usage spend, and reset times -- all color-coded (green < 60%, yellow < 80%, red above).
-
-**Multi-account support:** You can authenticate multiple Claude.ai accounts and switch between them:
-
-```bash
-agentihooks quota auth work          # authenticate as "work"
-agentihooks quota auth personal      # authenticate as "personal"
-agentihooks quota list               # show all accounts
-agentihooks quota switch personal    # switch active account
-```
-
-Account credentials are stored at `~/.agentihooks/quota-accounts/<name>.json`.
-
-**How it works:**
-
-1. `agentihooks quota auth` opens your real browser to `claude.ai`, prompts you to paste the `sessionKey` cookie, and saves credentials
-2. A headless Chromium daemon (`scripts/claude_usage_watcher.py`) starts in the background, loading the saved auth state once at startup
-3. Every `CLAUDE_USAGE_POLL_SEC` seconds it navigates to `claude.ai/settings/usage`, parses usage data from the page, and writes it atomically to `CLAUDE_USAGE_FILE`
-4. `hooks/statusline.py` reads that JSON file each turn and renders Line 3
-
-{: .important }
-> **Session cookie expiry:** Playwright loads the auth state once at startup. If your session cookie expires, the daemon silently stops finding data -- it does not re-authenticate. Run `agentihooks quota auth` again to refresh; it automatically kills the stale daemon and starts a fresh one with the new credentials.
-
-**Setup:**
-
-```bash
-# One-time: install headless browser (playwright is a core dependency)
-~/.agentihooks/.venv/bin/python -m playwright install chromium
-
-# Authenticate: opens your browser, paste the sessionKey cookie when prompted
-agentihooks quota auth
-
-# Enable display in ~/.agentihooks/.env
-echo 'CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json' >> ~/.agentihooks/.env
-```
-
-**CLI commands:**
-
-| Command | What it does |
-|---------|-------------|
-| `agentihooks quota` | Start the background daemon |
-| `agentihooks quota auth [name]` | Authenticate an account (kills + restarts daemon automatically) |
-| `agentihooks quota list` | Show all configured accounts |
-| `agentihooks quota switch <name>` | Switch active account |
-| `agentihooks quota restart` | Restart daemon with current account |
-| `agentihooks quota status` | Print the last known quota JSON |
-| `agentihooks quota logs` | Tail the daemon log |
-| `agentihooks quota stop` | Kill the daemon |
-| `agentihooks quota remove <name>` | Remove an account |
-| `agentihooks quota dump-html` | Dump raw usage page HTML for debugging |
-
-**Config:**
-
-| Variable | Default | What it controls |
-|----------|---------|-----------------|
-| `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables the feature) |
-| `CLAUDE_USAGE_POLL_SEC` | `60` | Daemon poll interval |
-| `CLAUDE_USAGE_STALE_SEC` | `300` | Data staleness threshold -- statusline shows "stale" if data is older than this |
-
-**Troubleshooting -- "No quota data found" in daemon log:**
-
-The daemon logs this when it successfully loads the page but finds no usage data -- typically because the page structure changed or the session cookie expired.
-
-```bash
-# 1. Check if the daemon is running and what it last scraped
-agentihooks quota status
-agentihooks quota logs
-
-# 2. Dump the raw page HTML to inspect what Playwright is actually seeing
-agentihooks quota dump-html
-cat ~/.agentihooks/usage_debug.html | grep -i 'session\|usage\|progress\|percent'
-
-# 3. If the cookie is stale, re-authenticate (auto-restarts daemon)
-agentihooks quota auth
-```
+You see your session and weekly quota percentages with reset countdowns -- all color-coded (green < 60%, yellow < 80%, red above). No configuration required -- this works out of the box with Claude Code's built-in rate limit tracking.
 
 ---
 
@@ -320,7 +246,7 @@ architectural decisions. Prefer Sonnet for implementation; reserve Opus for plan
 Detects Anthropic's peak billing hours (weekday business hours US Pacific) and shows an indicator on the statusline. When session usage is high during peak hours, adds a warning.
 
 ```
-quota: session:62% [1h] | PEAK -- sessions burn faster during business hours
+session:62% [1h] | PEAK -- sessions burn faster during business hours
 ```
 
 | Variable | Default | What it controls |
@@ -383,7 +309,7 @@ Moving workflow-specific content from CLAUDE.md (loaded every turn) to skills (l
 | **Awareness** | Context warnings (smart) | On | Prevents resets | `COMPACT_SUGGEST_ENABLED` |
 | **Awareness** | Context audit | On | Informed compaction | `CONTEXT_AUDIT_ENABLED` |
 | **Awareness** | Peak hour indicator | On | Budget preservation | `PEAK_HOURS_ENABLED` |
-| **Awareness** | Console quota display | Opt-in | Prevents limit hits | `CLAUDE_USAGE_FILE` |
+| **Awareness** | Native rate limit display | On | Prevents limit hits | *(native)* |
 | **Decode** | Thinking/effort policy | On | 10K-50K/over-think | `EFFORT_POLICY_ENABLED` |
 | **Startup** | CLAUDE.md linting | CLI | 500-5K/turn | `agentihooks lint-claude` |
 
@@ -393,19 +319,11 @@ Moving workflow-specific content from CLAUDE.md (loaded every turn) to skills (l
 
 ## Quick start
 
-Everything except quota monitoring works out of the box after installation:
+Everything works out of the box after installation:
 
 ```bash
 # Install agentihooks -- all cost features are enabled by default
 agentihooks init
-```
-
-To add quota monitoring (playwright ships with the package):
-
-```bash
-~/.agentihooks/.venv/bin/python -m playwright install chromium
-agentihooks quota auth
-echo 'CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json' >> ~/.agentihooks/.env
 ```
 
 Verify everything is working:
@@ -414,6 +332,6 @@ Verify everything is working:
 agentihooks status
 ```
 
-This shows your full system health: profile, hooks, Python, daemons, Redis, OTEL, all 6 cost guardrails with descriptions, your entire MCP fleet with real tool counts (queried via MCP protocol, cached 1h), per-project enabled/disabled state, and quota summary with peak/off-peak indicator.
+This shows your full system health: profile, hooks, Python, daemons, Redis, OTEL, all cost guardrails with descriptions, your entire MCP fleet with real tool counts (queried via MCP protocol, cached 1h), per-project enabled/disabled state, and rate limit summary with peak/off-peak indicator.
 
 Inside a Claude session, use `/agentihooks` for the same diagnostics plus live session metrics (context fill, burn rate, per-tool consumption).

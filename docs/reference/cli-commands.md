@@ -36,7 +36,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 8. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
 9. Applies MCP blacklist across all projects (`disabledMcpServers`)
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
-11. Auto-starts quota and sync daemons
+11. Restarts sync daemon
 12. Writes managed bashrc block (`agentienv` function + `agenti` alias)
 
 ### Flags
@@ -209,7 +209,7 @@ agentihooks uninstall [--yes]
 - Skills, agents, commands, and rules symlinks in `~/.claude/` -- if they target the agentihooks repo
 - `~/.claude/CLAUDE.md` -- if it points into `profiles/`
 - MCP servers in `~/.claude.json` -- from profile `.mcp.json` files and `state.json`
-- Running daemons -- both quota watcher and sync daemon are stopped
+- Running daemons -- sync daemon is stopped
 - Bashrc block -- the `agentienv` function and `agenti` alias are removed from `~/.bashrc`
 - `agentihooks` CLI -- via `uv tool uninstall agentihooks`
 
@@ -262,86 +262,6 @@ agenti
 
 # Pass extra args to claude
 agenti --verbose
-```
-
----
-
-## `agentihooks quota`
-
-Manage the background quota watcher daemon that scrapes claude.ai/settings/usage. Supports multiple accounts.
-
-```bash
-agentihooks quota [action] [account-name]
-```
-
-### Subcommands
-
-| Subcommand | Description |
-|------------|-------------|
-| *(none)* / `watch` | Start the background daemon. Auto-detaches, writes PID to `~/.agentihooks/quota-watcher.pid`, logs to `~/.agentihooks/logs/quota-watcher.log`. |
-| `auth [name]` | Opens YOUR real system browser to claude.ai. Prompts for the `sessionKey` cookie (F12 -> Application -> Cookies -> claude.ai -> sessionKey). Saves credentials to `~/.agentihooks/quota-accounts/<name>.json`, then starts the daemon. |
-| `import-cookies` | Same as `auth` but skips opening the browser -- paste the `sessionKey` value directly. |
-| `list` | Show all configured quota accounts. |
-| `switch <name>` | Switch the active quota account. |
-| `restart` | Restart the daemon with the current active account. |
-| `remove <name>` | Remove a quota account. |
-| `status` | Print the last known quota JSON from `~/.agentihooks/claude_usage.json`. |
-| `logs` | Runs `tail -f` on `~/.agentihooks/logs/quota-watcher.log`. |
-| `stop` | Kill the running daemon. |
-| `dump-html` | Dump raw usage page HTML to `~/.agentihooks/usage_debug.html` for scraper debugging. |
-
-### Multi-account support
-
-Account credentials are stored at `~/.agentihooks/quota-accounts/<name>.json`. You can authenticate multiple accounts and switch between them:
-
-```bash
-# Authenticate accounts
-agentihooks quota auth work
-agentihooks quota auth personal
-
-# List all accounts
-agentihooks quota list
-
-# Switch active account
-agentihooks quota switch personal
-
-# Restart daemon with current account
-agentihooks quota restart
-
-# Remove an account
-agentihooks quota remove personal
-```
-
-### Auth flow
-
-No Chromium/Playwright browser is used for authentication. The `auth` subcommand opens the user's real browser so they can access claude.ai with their existing session. The user copies the `sessionKey` cookie value from Chrome DevTools and pastes it at the prompt. Headless Chromium is only used by the background daemon for scraping.
-
-### Statusline output
-
-When enabled (set `CLAUDE_USAGE_FILE=~/.agentihooks/claude_usage.json` in `~/.agentihooks/.env`), the statusline displays quota information on line 3:
-
-```
-session:53% [1h] | all:35% resets fri 10:00 am | sonnet:5% resets mon 12:00 am | extra: $40/99 (40%) resets apr 1
-```
-
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--poll N` | `60` | Daemon poll interval in seconds. |
-
-### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLAUDE_USAGE_FILE` | -- | Must be set to enable. Path to the quota JSON written by the daemon. |
-| `CLAUDE_USAGE_STALE_SEC` | `300` | Data older than this shows "stale" on the statusline. |
-| `CLAUDE_USAGE_POLL_SEC` | `60` | Daemon poll interval in seconds. |
-
-### Prerequisites
-
-```bash
-~/.agentihooks/.venv/bin/python -m playwright install chromium
 ```
 
 ---
@@ -524,7 +444,7 @@ chain: [coding, colt]
 
 ## `agentihooks status`
 
-Show full system health, MCP fleet inventory with real tool counts, cost guardrails, and quota.
+Show full system health, MCP fleet inventory with real tool counts, and cost guardrails.
 
 ```bash
 agentihooks status
@@ -537,12 +457,11 @@ agentihooks status
 | **Profile** | Reads `state.json` for active profile and bundle path |
 | **Hooks** | Parses `~/.claude/settings.json`, counts hook event entries (expect 10/10) |
 | **Python** | Extracts the Python binary from hook commands and verifies it runs |
-| **Daemons** | Checks PID files for sync and quota daemons, verifies processes are alive |
+| **Daemons** | Checks PID file for sync daemon, verifies process is alive |
 | **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
 | **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
 | **Guardrails** | Lists all 6 cost guardrails with descriptions and enabled/disabled state |
 | **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, checks per-project blacklists, shows fleet total vs active in current project |
-| **Quota** | Loads quota data, shows session/weekly/spend with peak/off-peak indicator |
 
 ### MCP fleet introspection
 

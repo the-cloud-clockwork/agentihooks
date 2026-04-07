@@ -26,9 +26,6 @@ Everything user-specific lives in a single directory:
 ├── .env                # Main credentials (always loaded first)
 ├── *.env               # Companion env files (auto-sourced alphabetically after .env)
 ├── state.json          # Tracks installed state, bundle path, targets
-├── quota-accounts/     # Multi-account quota credentials
-│   ├── work.json
-│   └── personal.json
 ├── logs/               # Hook + MCP + daemon log files
 └── memory/             # Per-project agent memory files
 ```

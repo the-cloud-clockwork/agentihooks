@@ -116,7 +116,7 @@ uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 agentihooks init
 ```
 
-`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, installs the CLI globally, and auto-starts background daemons. Re-run any time — it is idempotent.
+`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, installs the CLI globally, and starts the sync daemon. Re-run any time — it is idempotent.
 
 ## Architecture
 
@@ -167,9 +167,8 @@ agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
 agentihooks mcp report                       # MCP surface area
 
-# Daemons
-agentihooks daemon start|stop|status|logs
-agentihooks quota auth|list|switch|status|stop
+# Daemon
+agentihooks daemon start|stop|status|logs    # sync daemon
 
 # Utilities
 agentihooks ignore [path]                    # create .claudeignore
