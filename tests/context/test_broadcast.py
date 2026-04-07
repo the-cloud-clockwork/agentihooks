@@ -1,10 +1,7 @@
 """Tests for hooks.context.broadcast."""
 
-import json
 import os
-import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -86,7 +83,7 @@ class TestBroadcastFileIO:
 
 class TestCreateBroadcast:
     def test_create_alert(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             msg_id = create_broadcast("Deploy freeze", severity="alert")
@@ -98,7 +95,7 @@ class TestCreateBroadcast:
         assert msgs[0]["persistent"] is True  # alert default
 
     def test_create_critical(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             create_broadcast("Incident!", severity="critical", ttl_seconds=1800)
@@ -109,7 +106,7 @@ class TestCreateBroadcast:
         assert msgs[0]["persistent"] is True
 
     def test_create_info_not_persistent(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             create_broadcast("SonarQube down", severity="info")
@@ -118,7 +115,7 @@ class TestCreateBroadcast:
         assert msgs[0]["persistent"] is False
 
     def test_create_with_custom_ttl(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             create_broadcast("Custom TTL", severity="alert", ttl_seconds=7200)
@@ -127,7 +124,7 @@ class TestCreateBroadcast:
         assert msgs[0]["ttl_seconds"] == 7200
 
     def test_max_messages_enforced(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with (
             patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
@@ -249,7 +246,7 @@ class TestCriticalFiltering:
 
 class TestSessionRegistry:
     def test_register_session(self, broadcast_dir):
-        from hooks.context.broadcast import register_session, get_active_sessions
+        from hooks.context.broadcast import get_active_sessions, register_session
 
         sessions_file = broadcast_dir / "active-sessions.json"
         with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
@@ -260,7 +257,7 @@ class TestSessionRegistry:
         assert sessions["sess-1"]["cwd"] == "/home/user/project"
 
     def test_deregister_session(self, broadcast_dir):
-        from hooks.context.broadcast import register_session, deregister_session, get_active_sessions
+        from hooks.context.broadcast import deregister_session, get_active_sessions, register_session
 
         sessions_file = broadcast_dir / "active-sessions.json"
         with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
@@ -271,7 +268,7 @@ class TestSessionRegistry:
         assert "sess-1" not in sessions
 
     def test_stale_session_cleaned(self, broadcast_dir):
-        from hooks.context.broadcast import get_active_sessions, _save_sessions
+        from hooks.context.broadcast import _save_sessions, get_active_sessions
 
         sessions_file = broadcast_dir / "active-sessions.json"
         stale = {
@@ -329,7 +326,7 @@ class TestBannerFormatting:
 
 class TestClearAndList:
     def test_clear_all(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, clear_broadcasts, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, clear_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             create_broadcast("msg1", severity="info")
@@ -340,7 +337,7 @@ class TestClearAndList:
         assert len(msgs) == 0
 
     def test_clear_specific(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, clear_broadcasts, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, clear_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             id1 = create_broadcast("msg1", severity="info")
@@ -369,7 +366,7 @@ class TestClearAndList:
 
 class TestHookIntegration:
     def test_check_broadcasts_injects_banner(self, broadcast_file, capsys):
-        from hooks.context.broadcast import create_broadcast, check_and_inject_broadcasts
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast
 
         with (
             patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
@@ -383,7 +380,7 @@ class TestHookIntegration:
         assert "BROADCAST" in captured
 
     def test_check_broadcasts_disabled(self, broadcast_file, capsys):
-        from hooks.context.broadcast import create_broadcast, check_and_inject_broadcasts
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast
 
         with (
             patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
@@ -458,7 +455,7 @@ class TestEdgeCases:
         assert result is None
 
     def test_invalid_severity_defaults_to_alert(self, broadcast_file):
-        from hooks.context.broadcast import create_broadcast, _load_broadcasts
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
 
         with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
             create_broadcast("msg", severity="nonexistent")

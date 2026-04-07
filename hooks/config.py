@@ -214,9 +214,7 @@ CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_
 # BROADCAST SYSTEM — real-time fleet messaging
 # =============================================================================
 BROADCAST_ENABLED = _env_bool("BROADCAST_ENABLED", "true")
-BROADCAST_FILE: str = os.getenv(
-    "BROADCAST_FILE", str(Path.home() / ".agentihooks" / "broadcast.json")
-)
+BROADCAST_FILE: str = os.getenv("BROADCAST_FILE", str(Path.home() / ".agentihooks" / "broadcast.json"))
 BROADCAST_MAX_MESSAGES: int = int(os.getenv("BROADCAST_MAX_MESSAGES", "50"))
 BROADCAST_CRITICAL_ON_PRETOOL = _env_bool("BROADCAST_CRITICAL_ON_PRETOOL", "true")
 
