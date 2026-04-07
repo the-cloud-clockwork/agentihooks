@@ -1296,11 +1296,16 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
         if overrides_path.exists():
             try:
                 ovr = load_json(overrides_path)
-                # Deep merge: env and permissions are dicts, rest is overwrite
+                # Deep merge: dict keys merge additively, scalars overwrite
                 for key in ("env", "permissions"):
-                    if key in ovr and key in profile_overrides:
-                        profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
-                profile_overrides.update({k: v for k, v in ovr.items() if k not in ("env", "permissions")})
+                    if key in ovr:
+                        if key in profile_overrides and isinstance(profile_overrides[key], dict):
+                            profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
+                        else:
+                            profile_overrides[key] = ovr[key]
+                for k, v in ovr.items():
+                    if k not in ("env", "permissions"):
+                        profile_overrides[k] = v
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -1315,10 +1320,16 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
             if sp_overrides.exists():
                 try:
                     ovr = load_json(sp_overrides)
+                    # Deep merge: dict keys merge additively, scalars overwrite
                     for key in ("env", "permissions"):
-                        if key in ovr and key in profile_overrides:
-                            profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
-                    profile_overrides.update({k: v for k, v in ovr.items() if k not in ("env", "permissions")})
+                        if key in ovr:
+                            if key in profile_overrides and isinstance(profile_overrides[key], dict):
+                                profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
+                            else:
+                                profile_overrides[key] = ovr[key]
+                    for k, v in ovr.items():
+                        if k not in ("env", "permissions"):
+                            profile_overrides[k] = v
                     _cprint(f"  [OK] Applied settings-profile '{sp_name}' overlay (project-level)")
                 except (json.JSONDecodeError, OSError):
                     pass
