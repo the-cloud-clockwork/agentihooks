@@ -286,30 +286,47 @@ Full architecture: [Context Preprocessor Docs](https://the-cloud-clock-work.gith
 
 ## Broadcast System — Real-Time Fleet Messaging
 
-Send messages to **all active Claude Code sessions simultaneously**. A PA system for your AI workforce.
+> **No other tool does this.** Send operator directives to every active Claude Code session simultaneously — like a PA system for your AI workforce.
+
+Sessions auto-register when they start and deregister when they end. Every hook event polls `~/.agentihooks/broadcast.json` — no sockets, no server, no infrastructure required. Works on a laptop, NFS mount, or Redis-backed Kubernetes cluster identically.
+
+### Manual broadcast
 
 ```bash
-# Emergency stop
+# Emergency stop — hits every agent on the next tool call
 agentihooks broadcast -s critical "Production incident — read-only mode, do NOT deploy"
 
-# Deploy freeze
+# Deploy freeze with custom TTL
 agentihooks broadcast -s alert -t 8h "Deploy freeze until 6am"
 
-# Informational
+# One-shot info (delivered once per session)
 agentihooks broadcast -s info "SonarQube is down, skip CI validation"
 
-# Manage
-agentihooks broadcast --list       # show active broadcasts
+# Manage active broadcasts
+agentihooks broadcast --list       # show all active messages + TTLs
 agentihooks broadcast --clear      # clear all
 ```
 
-| Severity | Where agents see it | Frequency |
-|----------|-------------------|-----------|
-| `critical` | Every user turn + every tool call | Maximum saturation |
-| `alert` | Every user turn | Persistent until TTL |
-| `info` | Once per session | One-shot delivery |
+### AI-assisted emit — describe intent in plain English
 
-Works on a single machine (file-based), shared filesystems (NFS/EFS), or at Kubernetes scale (Redis). Every agent that fires a hook event picks up the broadcast — no sockets, no pub/sub infrastructure needed.
+```bash
+# Haiku parses the severity and TTL from your natural language
+agentihooks broadcast emit "production is on fire, all agents stop deploying immediately"
+# → severity: critical, TTL: 30m, message: "production is on fire — stop deploying"
+
+agentihooks broadcast emit "remind everyone that the API rate limits reset at midnight"
+# → severity: info, TTL: 4h, message: "API rate limits reset at midnight"
+```
+
+`emit` is sandboxed: Claude Haiku can **only** run `agentihooks broadcast` commands — `Bash(agentihooks*)` is the sole permitted tool and all others are explicitly disallowed. It cannot read files, make network calls, or escape the broadcast surface.
+
+### Severity levels
+
+| Severity | Delivered | Default TTL | Use case |
+|----------|-----------|-------------|----------|
+| `critical` | Every user turn **and** every tool call | 30 min | Incidents, immediate stops |
+| `alert` | Every user turn | 1 hour | Deploy freezes, degraded dependencies |
+| `info` | Once per session | 4 hours | Reminders, FYI notices |
 
 Full architecture: [Broadcast System Docs](https://the-cloud-clock-work.github.io/agentihooks/docs/hooks/broadcast/)
 
