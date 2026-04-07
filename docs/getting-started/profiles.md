@@ -108,6 +108,18 @@ Later layers override earlier ones. This lets you start with a shared base, add 
 
 ---
 
+## Built-in profiles
+
+| Profile | Mode | Secrets | Deny | Ask | Best for |
+|---------|------|---------|------|-----|----------|
+| `default` | `auto` | `standard` | Push to main/master, force push | *(empty)* | General use — autonomous but protected branches are sacred |
+| `coding` | `acceptEdits` | `strict` | Protected branch pushes, merge, gh CLI | git push, rm -rf, docker, kubectl | Feature branch development, safe coding |
+| `admin` | `bypassPermissions` | `warn` | *(none)* | *(empty)* | Infrastructure, admin tasks, full trust |
+
+These are **settings profiles** — they control permissions and tool access. Combine them with any **persona profile** (which controls rules, CLAUDE.md, behavioral instructions) using the [two-axis model](#settings-profiles--independent-settings-layer).
+
+---
+
 ## Listing profiles
 
 ```bash

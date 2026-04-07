@@ -50,6 +50,7 @@ Create this file at your project root. It is meant to be **committed** to the re
 | Field | Type | Description |
 |-------|------|-------------|
 | `profile` | string | Profile name or comma-separated chain (e.g. `"coding,colt"`). Overrides the global profile. |
+| `settings_profile` | string | Settings-only overlay profile. Applies `settings.overrides.json` and `.mcp.json` from the named profile without changing rules, CLAUDE.md, or skills. See [Settings Profiles](profiles.md#settings-profiles--independent-settings-layer). |
 | `enabledMcpServers` | array | MCP servers to whitelist. All others are disabled by default. |
 | `disabledMcpServers` | array | Additional servers to disable (for project-scope `.mcp.json` connectors). |
 | `permissions.deny` | array | Extra tool patterns to deny (merged with profile rules). |

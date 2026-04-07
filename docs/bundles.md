@@ -98,9 +98,9 @@ Built-in profiles define escalating permission tiers:
 
 | Profile | Mode | Deny | Ask |
 |---------|------|------|-----|
-| default | `default` | -- | git push, rm -rf, docker rm, kubectl delete |
+| default | `auto` | Push to main/master, force push | *(empty)* |
 | coding | `acceptEdits` | Protected branch pushes, merge, gh CLI | git push, rm -rf, docker, kubectl |
-| admin | `auto` | -- | force push, rm -rf / |
+| admin | `bypassPermissions` | *(none)* | *(empty)* — all tools explicitly allowed |
 
 Evaluation order: **deny > ask > allow** (first match wins).
 

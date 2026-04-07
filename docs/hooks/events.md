@@ -83,10 +83,10 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 1. Scans the prompt for secrets and credentials using regex patterns
 2. If secrets are detected: injects a warning into the context (does **not** block -- warnings only at this stage)
 3. If `CONTEXT_REFRESH_ENABLED=true`: increments a per-session turn counter and:
-   - Every `CONTEXT_REFRESH_INTERVAL` turns (default 20): re-injects all rules files (`~/.claude/rules/*.md` and optionally project `.claude/rules/*.md`) into the context
-   - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`) into the context
+   - Every `CONTEXT_REFRESH_INTERVAL` turns (default 20): re-injects rules files sorted by frontmatter `priority: N` (lower = higher priority). Project rules dir resolved from the hook payload's `cwd` field (the session's active directory)
+   - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`)
    - Both combat attention decay in long sessions where early-loaded instructions lose influence
-   - If `CONTEXT_REFRESH_COMPRESSION` is set, content is compressed via the [Context Preprocessor](context-preprocessor.md) before injection
+   - Content is compressed via the [Context Preprocessor](context-preprocessor.md) (default level: `standard`; set `CONTEXT_REFRESH_COMPRESSION=off` to disable)
 
 ---
 

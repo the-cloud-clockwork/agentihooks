@@ -32,9 +32,9 @@ This property means we can compress injected content by 30-55% while preserving 
 
 ### Scope
 
-Currently: compresses content for context refresh injections only.
+By default (`CONTEXT_COMPRESSION_SCOPE=refresh`), compression applies to context refresh injections only. Set `CONTEXT_COMPRESSION_SCOPE=all` to extend compression to all `inject_context()` / `inject_banner()` calls (session start banners, secrets warnings, tool memory, circuit breaker messages, context threshold warnings) and bash output filter `additionalContext` results.
 
-Future: the preprocessor is designed as a standalone service that can process any content passing through the hook system — user messages, tool outputs, file read caches, and other injected context.
+Rules are sorted by frontmatter `priority: N` (lower = higher priority, default 5) before the size cap is applied, so high-priority rules are always compressed and injected first.
 
 ---
 

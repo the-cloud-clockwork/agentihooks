@@ -90,6 +90,43 @@ AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json agentihooks init
 
 ---
 
+## `agentihooks settings-profile`
+
+Quick-switch the settings layer without touching persona (rules, CLAUDE.md, skills, agents, commands).
+
+```
+agentihooks settings-profile [NAME] [--clear]
+```
+
+| Argument / Flag | Description |
+|----------------|-------------|
+| `NAME` | Settings profile to apply. Only its `settings.overrides.json` and `.mcp.json` are used. |
+| `--clear` | Remove the settings overlay and revert to persona profile defaults. |
+
+With no arguments, shows the current persona and settings profile.
+
+### Environment variable
+
+```bash
+export AGENTIHOOKS_SETTINGS_PROFILE=admin
+agentihooks init --profile colt   # automatically uses admin settings overlay
+```
+
+### Examples
+
+```bash
+# Show current state
+agentihooks settings-profile
+
+# Switch to admin settings (keeps colt persona)
+agentihooks settings-profile admin
+
+# Revert to persona defaults
+agentihooks settings-profile --clear
+```
+
+---
+
 ## `agentihooks uninstall`
 
 Remove everything agentihooks installed from the system.
@@ -492,7 +529,7 @@ agentihooks extract-skill "<Section Heading>" --name <skill-name> [--source <pat
 The hook and MCP server modules can be run directly with Python:
 
 ```bash
-# Run the MCP tool server (all 15 tools)
+# Run the MCP tool server
 python -m hooks.mcp
 
 # Run with specific categories
