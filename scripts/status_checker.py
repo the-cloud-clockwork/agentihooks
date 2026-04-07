@@ -76,10 +76,12 @@ def check_profile() -> dict[str, Any]:
     state = _load_state()
     global_target = state.get("targets", {}).get("global", {})
     name = global_target.get("profile", "")
+    settings_profile = global_target.get("settings_profile", "")
     bundle = state.get("bundle", {}).get("path", "")
     bundle_ok = bool(bundle and Path(bundle).expanduser().exists())
     return {
         "name": name or "(not installed)",
+        "settings_profile": settings_profile,
         "bundle": bundle or "(none)",
         "bundle_ok": bundle_ok,
         "ok": bool(name),
@@ -147,12 +149,29 @@ def _extract_hook_python() -> Optional[str]:
 
 def check_daemons() -> dict[str, Any]:
     sync = _check_pid(AGENTIHOOKS_HOME / "sync-daemon.pid")
-    quota = _check_pid(AGENTIHOOKS_HOME / "quota-watcher.pid")
+    # Fallback: detect sync daemon by process name if PID file missing (e.g. --foreground mode)
+    if not sync["alive"]:
+        sync = _detect_process("sync_daemon")
     return {
         "sync": sync,
-        "quota": quota,
-        "ok": sync["alive"] or quota["alive"],
+        "ok": sync["alive"],
     }
+
+
+def _detect_process(name: str) -> dict:
+    """Detect a running process by name pattern."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", name], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            pid = int(result.stdout.strip().split("\n")[0])
+            return {"pid": pid, "alive": True}
+    except Exception:
+        pass
+    return {"pid": None, "alive": False}
 
 
 def check_redis() -> dict[str, Any]:
@@ -191,6 +210,8 @@ def check_otel() -> dict[str, Any]:
 _GUARDRAIL_DESCRIPTIONS = {
     "bash_filter": "Truncates verbose bash output (docker, git log, test runners)",
     "file_dedup": "Blocks re-reading unchanged files already in context",
+    "context_refresh": "Re-injects rules and CLAUDE.md every N turns for attention decay",
+    "context_compression": "Token compression on injected content (standard level)",
     "context_audit": "Tracks per-tool token consumption across the session",
     "effort_policy": "Injects thinking/effort guidance, warns on expensive subagents",
     "peak_hours": "Shows peak billing indicator on statusline",
@@ -205,6 +226,8 @@ def check_guardrails() -> dict[str, Any]:
             BASH_FILTER_ENABLED,
             COMPACT_SUGGEST_ENABLED,
             CONTEXT_AUDIT_ENABLED,
+            CONTEXT_REFRESH_COMPRESSION,
+            CONTEXT_REFRESH_ENABLED,
             EFFORT_POLICY_ENABLED,
             FILE_READ_CACHE_ENABLED,
             PEAK_HOURS_ENABLED,
@@ -213,6 +236,8 @@ def check_guardrails() -> dict[str, Any]:
         flags = {
             "bash_filter": BASH_FILTER_ENABLED,
             "file_dedup": FILE_READ_CACHE_ENABLED,
+            "context_refresh": CONTEXT_REFRESH_ENABLED,
+            "context_compression": CONTEXT_REFRESH_COMPRESSION != "off",
             "context_audit": CONTEXT_AUDIT_ENABLED,
             "effort_policy": EFFORT_POLICY_ENABLED,
             "peak_hours": PEAK_HOURS_ENABLED,
@@ -566,7 +591,8 @@ def format_cli(results: dict[str, Any]) -> str:
     p = results["profile"]
     tag = "[OK]" if p["ok"] else "[!!]"
     bundle_str = f" (bundle: {p['bundle']})" if p["bundle"] != "(none)" else ""
-    lines.append(_cprint(f"{tag} Profile: {p['name']}{bundle_str}"))
+    sp_str = f" | settings: {p['settings_profile']}" if p.get("settings_profile") else ""
+    lines.append(_cprint(f"{tag} Profile: {p['name']}{sp_str}{bundle_str}"))
 
     # Hooks
     h = results["hooks"]
@@ -581,17 +607,10 @@ def format_cli(results: dict[str, Any]) -> str:
 
     # Daemons
     d = results["daemons"]
-    parts = []
     if d["sync"]["alive"]:
-        parts.append(f"sync (PID {d['sync']['pid']})")
+        lines.append(_cprint(f"[OK] Sync daemon: running (PID {d['sync']['pid']})"))
     else:
-        parts.append("sync (stopped)")
-    if d["quota"]["alive"]:
-        parts.append(f"quota (PID {d['quota']['pid']})")
-    else:
-        parts.append("quota (stopped)")
-    tag = "[OK]" if d["ok"] else "[!!]"
-    lines.append(_cprint(f"{tag} Daemons: {', '.join(parts)}"))
+        lines.append(_cprint("[!!] Sync daemon: stopped"))
 
     # Redis
     r = results["redis"]
