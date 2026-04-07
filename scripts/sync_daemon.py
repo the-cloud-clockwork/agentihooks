@@ -870,7 +870,7 @@ def _check_new_projects(known_servers_file: Path) -> None:
         _write_atomic(CLAUDE_JSON, data)
         for p in backfilled:
             _log(f"  Backfilled: {p}")
-        _log(f"New project check: blacklisted {len(to_disable)} MCPs in {len(backfilled)} new project(s)")
+        _log(f"New project check: blacklisted MCPs in {len(backfilled)} new project(s)")
 
 
 # ---------------------------------------------------------------------------

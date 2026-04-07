@@ -96,20 +96,18 @@ class TestCheckDaemons:
 
         pid = os.getpid()
         (tmp_path / "sync-daemon.pid").write_text(str(pid))
-        (tmp_path / "quota-watcher.pid").write_text(str(pid))
         with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path):
             result = check_daemons()
             assert result["sync"]["alive"] is True
-            assert result["quota"]["alive"] is True
             assert result["ok"] is True
 
     def test_no_daemons(self, tmp_path):
         from scripts.status_checker import check_daemons
 
-        with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path):
+        with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path), \
+             patch("scripts.status_checker._detect_process", return_value={"pid": None, "alive": False}):
             result = check_daemons()
             assert result["sync"]["alive"] is False
-            assert result["quota"]["alive"] is False
 
 
 class TestCheckRedis:
@@ -140,6 +138,8 @@ class TestCheckGuardrails:
             {
                 "BASH_FILTER_ENABLED": "true",
                 "FILE_READ_CACHE_ENABLED": "true",
+                "CONTEXT_REFRESH_ENABLED": "true",
+                "CONTEXT_REFRESH_COMPRESSION": "standard",
                 "CONTEXT_AUDIT_ENABLED": "true",
                 "EFFORT_POLICY_ENABLED": "true",
                 "PEAK_HOURS_ENABLED": "true",
@@ -147,8 +147,8 @@ class TestCheckGuardrails:
             },
         ):
             result = check_guardrails()
-            assert result["active"] == 6
-            assert result["total"] == 6
+            assert result["active"] == 8
+            assert result["total"] == 8
 
 
 class TestCheckMcp:

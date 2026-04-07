@@ -1913,7 +1913,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # For display and state storage, use the full chain string
     profile_name = ",".join(profile_chain)
-    primary_profile = profile_chain[0]
 
     profile_sources = []
     for pname, _ in profile_dirs:
@@ -4132,10 +4131,9 @@ def main() -> None:
         print(format_cli(run_all_checks()))
     elif args.command == "prune":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-        from scripts.sync_daemon import _prune_stale_mcp_servers, _get_valid_mcp_names
+        from scripts.sync_daemon import _get_valid_mcp_names, _prune_stale_mcp_servers
 
         known_servers_file = AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json"
-        verbose = getattr(args, "verbose", False)
         valid = _get_valid_mcp_names()
         print(f"Valid MCP servers ({len(valid)}): {', '.join(sorted(valid))}")
         summary = _prune_stale_mcp_servers(known_servers_file, verbose=True)

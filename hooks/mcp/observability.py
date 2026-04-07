@@ -1,7 +1,6 @@
 """Observability MCP tools — session log reading and container log tailing."""
 
 import json
-import re
 from pathlib import Path
 from typing import Optional
 
