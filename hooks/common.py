@@ -197,7 +197,7 @@ def output_json(data: dict) -> None:
 # to log files which Claude does NOT see.
 
 
-def inject_context(content: str, also_log: bool = True) -> None:
+def inject_context(content: str, also_log: bool = True, skip_compression: bool = False) -> None:
     """Inject content into Claude's context window via STDOUT.
 
     This is the ONLY way to make content visible to Claude during a session.
@@ -206,7 +206,22 @@ def inject_context(content: str, also_log: bool = True) -> None:
     Args:
         content: The content to inject (will be printed to STDOUT)
         also_log: If True, also write to log file for debugging
+        skip_compression: If True, bypass the preprocessor (used when caller already compressed)
     """
+    # Apply token compression if scope=all and not already compressed
+    if not skip_compression:
+        try:
+            from hooks.config import CONTEXT_COMPRESSION_SCOPE
+
+            if CONTEXT_COMPRESSION_SCOPE == "all":
+                from hooks.context.preprocessor import get_level_from_config, preprocess
+
+                level = get_level_from_config()
+                if level > 0:
+                    content = preprocess(content, level)
+        except Exception:
+            pass
+
     # Print to STDOUT - this gets injected into Claude's context
     print("=== CONTEXT INJECTION ===")
     print(content)
@@ -243,7 +258,7 @@ def inject_file(file_path: str, also_log: bool = True) -> bool:
         return False
 
 
-def inject_banner(title: str, content: str, also_log: bool = True) -> None:
+def inject_banner(title: str, content: str, also_log: bool = True, skip_compression: bool = False) -> None:
     """Inject a formatted banner into Claude's context.
 
     Creates a visible box around important information that Claude will see.
@@ -252,6 +267,7 @@ def inject_banner(title: str, content: str, also_log: bool = True) -> None:
         title: Banner title (displayed at top)
         content: Content to display in the banner body
         also_log: If True, also write to log file for debugging
+        skip_compression: If True, bypass the preprocessor (used when caller already compressed)
     """
     width = 78
     border = "═" * width
@@ -278,7 +294,7 @@ def inject_banner(title: str, content: str, also_log: bool = True) -> None:
 ╚{border}╝
     """
 
-    inject_context(banner, also_log=also_log)
+    inject_context(banner, also_log=also_log, skip_compression=skip_compression)
 
 
 # =============================================================================

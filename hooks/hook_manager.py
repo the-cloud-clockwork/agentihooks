@@ -679,6 +679,18 @@ def on_post_tool_use(payload: dict) -> None:
                             "tool_name": tool_name,
                         },
                     )
+                    # Apply token compression if scope=all
+                    try:
+                        from hooks.config import CONTEXT_COMPRESSION_SCOPE
+
+                        if CONTEXT_COMPRESSION_SCOPE == "all":
+                            from hooks.context.preprocessor import get_level_from_config, preprocess
+
+                            level = get_level_from_config()
+                            if level > 0:
+                                filtered = preprocess(filtered, level)
+                    except Exception:
+                        pass
                     print(_json.dumps({"additionalContext": filtered}))
         except Exception as e:
             log("bash_output_filter failed", {"error": str(e)})

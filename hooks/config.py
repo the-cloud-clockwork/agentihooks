@@ -209,6 +209,11 @@ CONTEXT_REFRESH_COMPRESSION: str = (
 )
 CONTEXT_REFRESH_ABBREV_FILE: str = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
 
+# Scope of token compression: "refresh" = only context refresh, "all" = all injections
+_VALID_COMPRESSION_SCOPES = frozenset({"refresh", "all"})
+_raw_scope = os.getenv("CONTEXT_COMPRESSION_SCOPE", "refresh").lower().strip()
+CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_SCOPES else "refresh"
+
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.

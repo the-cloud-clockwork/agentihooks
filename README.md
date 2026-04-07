@@ -363,7 +363,8 @@ All configuration goes in `.env` files in `~/.agentihooks/`. Key variables:
 | `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also re-inject project-level `.claude/rules/` (not just global) |
 | `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max chars per injection (rules or CLAUDE.md) — excess is truncated |
 | `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory to re-inject |
-| `CONTEXT_REFRESH_COMPRESSION` | `off` | Token compression: off/light/standard/aggressive |
+| `CONTEXT_REFRESH_COMPRESSION` | `standard` | Token compression: off/light/standard/aggressive |
+| `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Compression scope: refresh (default) or all (every injection) |
 | `REDIS_URL` | -- | Redis connection string (graceful degradation when unavailable) |
 | `CLAUDE_USAGE_FILE` | -- | Path to quota JSON (enables statusline quota display) |
 | `CLAUDE_USAGE_POLL_SEC` | `60` | Quota watcher poll interval |

@@ -217,14 +217,25 @@ CONTEXT_REFRESH_ABBREV_FILE=/home/user/.agentihooks/custom-abbrevs.json
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTEXT_REFRESH_COMPRESSION` | `off` | Compression level: `off`, `light`, `standard`, `aggressive` |
+| `CONTEXT_REFRESH_COMPRESSION` | `standard` | Compression level: `off`, `light`, `standard`, `aggressive` |
+| `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Where compression applies: `refresh` (context refresh only) or `all` (all injections + tool output) |
 | `CONTEXT_REFRESH_ABBREV_FILE` | *(empty)* | Path to user-supplied abbreviation dictionary (JSON). Merged on top of built-in. |
 
-Add to `~/.agentihooks/.env`:
+### Scope
+
+By default, compression only applies to context refresh injections. Set `CONTEXT_COMPRESSION_SCOPE=all` to compress **everything** that flows through the hook system:
+
+- All `inject_context()` / `inject_banner()` calls (session start banners, secrets warnings, tool memory, circuit breaker messages, context threshold warnings)
+- Bash output filter `additionalContext` results (kubectl describe, docker logs, git diffs)
+- Context refresh rules and CLAUDE.md (already compressed per-rule for priority truncation)
 
 ```bash
+# In ~/.agentihooks/.env
 CONTEXT_REFRESH_COMPRESSION=standard
+CONTEXT_COMPRESSION_SCOPE=all
 ```
+
+**Not compressed** (by design): user prompts, stderr block messages, log file output.
 
 ---
 

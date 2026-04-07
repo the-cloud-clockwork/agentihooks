@@ -376,3 +376,53 @@ class TestConfigIntegration:
 
         with patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", env_val):
             assert get_level_from_config() == expected
+
+
+# ---------------------------------------------------------------------------
+# Global compression scope (inject_context integration)
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalCompressionScope:
+    def test_inject_context_compresses_when_scope_all(self, capsys):
+        with patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"), \
+             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"):
+            from hooks.common import inject_context
+
+            inject_context("The system is configured to use the kubernetes database", also_log=False)
+
+        captured = capsys.readouterr().out
+        # "kubernetes" should be abbreviated to "k8s", "database" to "db"
+        assert "k8s" in captured
+        assert "db" in captured
+
+    def test_inject_context_no_compression_when_scope_refresh(self, capsys):
+        with patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "refresh"), \
+             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"):
+            from hooks.common import inject_context
+
+            inject_context("The system is configured to use the kubernetes database", also_log=False)
+
+        captured = capsys.readouterr().out
+        assert "kubernetes" in captured
+        assert "database" in captured
+
+    def test_inject_context_skip_compression_flag(self, capsys):
+        with patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"), \
+             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"):
+            from hooks.common import inject_context
+
+            inject_context("The kubernetes database", also_log=False, skip_compression=True)
+
+        captured = capsys.readouterr().out
+        assert "kubernetes" in captured  # not compressed because skip=True
+
+    def test_inject_banner_passes_skip_compression(self, capsys):
+        with patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"), \
+             patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"):
+            from hooks.common import inject_banner
+
+            inject_banner("TEST", "kubernetes database", also_log=False, skip_compression=True)
+
+        captured = capsys.readouterr().out
+        assert "kubernetes" in captured  # not compressed

@@ -301,7 +301,7 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
             from hooks.common import inject_banner
 
             text = _build_injection_text(rules, turn, CONTEXT_REFRESH_INTERVAL)
-            inject_banner(f"CONTEXT REFRESH — rules (turn {turn})", text)
+            inject_banner(f"CONTEXT REFRESH — rules (turn {turn})", text, skip_compression=True)
             state["last_refresh"] = turn
             log("context_refresh: injected rules", {
                 "session_id": session_id,
@@ -318,6 +318,7 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
             inject_banner(
                 f"CONTEXT REFRESH — CLAUDE.md (turn {turn})",
                 f"Re-injecting CLAUDE.md (turn {turn}, every {CONTEXT_REFRESH_CLAUDE_MD_INTERVAL} turns).\n\n{claude_md}",
+                skip_compression=True,
             )
             state["last_claude_md_refresh"] = turn
             log("context_refresh: injected CLAUDE.md", {
