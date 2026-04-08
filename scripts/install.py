@@ -1096,22 +1096,30 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if not bundle:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
 
-    # Resolve profile
+    # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
     profile_name = args.profile
     if not profile_name:
-        interactive = sys.stdin.isatty()
-        if interactive:
+        profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
+    _prev_state = _load_state()
+    _prev_global = _prev_state.get("targets", {}).get("global", {})
+    if not profile_name:
+        stored_profile = _prev_global.get("profile", "")
+        if stored_profile:
+            profile_name = stored_profile
+            print(f"Using profile from previous install: {profile_name}")
+        elif sys.stdin.isatty():
             available = _available_profiles()
             print(f"Available profiles: {', '.join(available)}")
-            default_profile = os.environ.get("AGENTIHOOKS_PROFILE", "default")
-            profile_name = input(f"Profile [{default_profile}]: ").strip() or default_profile
+            profile_name = input("Profile [default]: ").strip() or "default"
         else:
-            profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "default")
+            profile_name = "default"
 
-    # Resolve settings profile (optional overlay)
+    # Resolve settings profile (optional overlay) — same precedence as profile
     settings_profile = getattr(args, "settings_profile", None)
     if not settings_profile:
         settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
+    if not settings_profile:
+        settings_profile = _prev_global.get("settings_profile", "")
 
     # Build args for _install_global_inner
     global_args = argparse.Namespace(profile=profile_name, settings_profile=settings_profile or "")

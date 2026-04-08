@@ -1015,6 +1015,13 @@ def _run_daemon(poll_sec: int) -> None:
             except Exception as prune_err:
                 _log(f"MCP prune error: {prune_err}")
 
+            # Clean up stale broadcast sessions (dead PIDs)
+            try:
+                from hooks.context.broadcast import get_active_sessions
+                get_active_sessions(cleanup=True)
+            except Exception:
+                pass  # broadcast module may not be importable in all envs
+
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
             import traceback
