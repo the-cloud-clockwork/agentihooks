@@ -1747,22 +1747,25 @@ def query_active_profile() -> None:
     local_config = cwd / ".agentihooks.json"
     source = "global"
     profile_name = None
+    settings_profile = ""
 
     if local_config.exists():
         try:
             cfg = load_json(local_config)
             profile_name = cfg.get("profile")
+            settings_profile = cfg.get("settings_profile", "")
             if profile_name:
                 source = "local"
         except (json.JSONDecodeError, OSError):
             pass
 
     # Fall back to global state
+    state = _load_state()
+    global_target = state.get("targets", {}).get("global", {})
     if not profile_name:
-        state = _load_state()
-        targets = state.get("targets", {})
-        global_target = targets.get("global", {})
         profile_name = global_target.get("profile")
+    if not settings_profile:
+        settings_profile = global_target.get("settings_profile", "")
 
     if not profile_name:
         print("not installed")
@@ -1773,6 +1776,8 @@ def query_active_profile() -> None:
         print(f"chain: [{', '.join(chain)}] ({source})")
     else:
         print(f"{profile_name} ({source})")
+    if settings_profile:
+        print(f"settings: {settings_profile}")
 
 
 def list_profiles() -> None:
