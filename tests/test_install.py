@@ -533,3 +533,164 @@ class TestInteractiveUninstall:
         ):
             install._cmd_mcp_interactive_uninstall()
         assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# Init idempotency — profile recall from state.json
+# ---------------------------------------------------------------------------
+
+
+class TestInitProfileRecall:
+    """Verify that init reuses stored profile/settings_profile from state.json."""
+
+    def _make_state(self, profile, settings_profile=""):
+        entry = {"path": "/home/test/.claude", "profile": profile, "installed_at": "2026-01-01T00:00:00Z"}
+        if settings_profile:
+            entry["settings_profile"] = settings_profile
+        return {"targets": {"global": entry}}
+
+    def test_recalls_profile_from_state(self):
+        """When no CLI flag or env var, init uses profile from state.json."""
+        import argparse
+
+        state = self._make_state("colt")
+        args = argparse.Namespace(
+            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            # Remove AGENTIHOOKS_PROFILE if set
+            import os
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(args)
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "colt"
+
+    def test_recalls_settings_profile_from_state(self):
+        """When no CLI flag or env var, init uses settings_profile from state.json."""
+        import argparse
+
+        state = self._make_state("colt", settings_profile="admin")
+        args = argparse.Namespace(
+            profile="colt", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            import os
+            os.environ.pop("AGENTIHOOKS_SETTINGS_PROFILE", None)
+            install.cmd_init_unified(args)
+            called_args = mock_install.call_args[0][0]
+            assert called_args.settings_profile == "admin"
+
+    def test_cli_flag_overrides_state(self):
+        """CLI --profile overrides state.json stored profile."""
+        import argparse
+
+        state = self._make_state("default")
+        args = argparse.Namespace(
+            profile="colt", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            install.cmd_init_unified(args)
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "colt"
+
+    def test_env_var_overrides_state(self):
+        """AGENTIHOOKS_PROFILE env var overrides state.json."""
+        import argparse
+
+        state = self._make_state("default")
+        args = argparse.Namespace(
+            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {"AGENTIHOOKS_PROFILE": "admin"}, clear=False),
+        ):
+            install.cmd_init_unified(args)
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "admin"
+
+    def test_prompts_when_no_state(self):
+        """When state.json has no profile, falls back to interactive prompt."""
+        import argparse
+
+        args = argparse.Namespace(
+            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", return_value={}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "_available_profiles", return_value=["default", "colt"]),
+            patch.object(install, "install_global") as mock_install,
+            patch("builtins.input", return_value="colt"),
+            patch("sys.stdin") as mock_stdin,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            import os
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            mock_stdin.isatty.return_value = True
+            install.cmd_init_unified(args)
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "colt"
+
+
+# ---------------------------------------------------------------------------
+# query_active_profile — settings_profile reporting
+# ---------------------------------------------------------------------------
+
+
+class TestQueryActiveProfile:
+    def test_shows_settings_profile(self, capsys):
+        state = {
+            "targets": {
+                "global": {
+                    "path": "/home/test/.claude",
+                    "profile": "colt",
+                    "settings_profile": "admin",
+                    "installed_at": "2026-01-01T00:00:00Z",
+                },
+            },
+        }
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch("pathlib.Path.exists", return_value=False),  # no local .agentihooks.json
+        ):
+            install.query_active_profile()
+        out = capsys.readouterr().out
+        assert "colt" in out
+        assert "settings: admin" in out
+
+    def test_no_settings_profile_no_line(self, capsys):
+        state = {
+            "targets": {
+                "global": {
+                    "path": "/home/test/.claude",
+                    "profile": "colt",
+                    "installed_at": "2026-01-01T00:00:00Z",
+                },
+            },
+        }
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch("pathlib.Path.exists", return_value=False),
+        ):
+            install.query_active_profile()
+        out = capsys.readouterr().out
+        assert "colt" in out
+        assert "settings:" not in out
