@@ -38,6 +38,24 @@ def is_peak_now(start_hour: int = 9, end_hour: int = 17, tz_name: str = "US/Paci
     return start_hour <= now.hour < end_hour
 
 
+def to_local_hour(hour: int, tz_name: str = "US/Pacific") -> tuple[int, str]:
+    """Convert an hour in `tz_name` to the local machine timezone.
+
+    Returns (local_hour, local_tz_abbrev). Falls back to (hour, "PT") on error.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        src_tz = ZoneInfo(tz_name)
+        # Use today's date in the source tz at the given hour, then convert
+        now_src = datetime.now(src_tz).replace(hour=hour, minute=0, second=0, microsecond=0)
+        local = now_src.astimezone()  # system local tz
+        abbrev = local.tzname() or "local"
+        return local.hour, abbrev
+    except Exception:
+        return hour, "PT"
+
+
 def peak_indicator(start_hour: int = 9, end_hour: int = 17, tz_name: str = "US/Pacific") -> str:
     """Return compact peak status string for statusline."""
     if is_peak_now(start_hour, end_hour, tz_name):
