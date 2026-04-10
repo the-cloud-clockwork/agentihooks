@@ -3873,6 +3873,184 @@ def _broadcast_emit(natural_input: str) -> None:
         print("Broadcast emitted (no output from claude).")
 
 
+def _parse_ttl_string(ttl_raw: str | None) -> int:
+    """Parse a TTL string like '5m', '1h', '30' into seconds. Returns 0 if None."""
+    if not ttl_raw:
+        return 0
+    _ttl_map = {"m": 60, "h": 3600, "d": 86400}
+    if ttl_raw[-1] in _ttl_map and ttl_raw[:-1].isdigit():
+        return int(ttl_raw[:-1]) * _ttl_map[ttl_raw[-1]]
+    if ttl_raw.isdigit():
+        return int(ttl_raw)
+    print(f"Error: invalid TTL '{ttl_raw}'. Use: 5m, 30m, 1h, 8h, 24h, or seconds.", file=sys.stderr)
+    sys.exit(1)
+
+
+def _cmd_overlay(args: argparse.Namespace) -> None:
+    """Handle the overlay CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from scripts.overlay import get_active_overlays, overlay_add, overlay_clear, overlay_list, overlay_refresh, overlay_remove
+
+    action = args.action
+    name = args.name
+
+    if action == "list":
+        allowed = overlay_list()
+        active = get_active_overlays()
+        active_names = {o.get("name") for o in active}
+        if not allowed:
+            print("No overlays available (base profile has no allowedOverlays).")
+            return
+        for o in allowed:
+            status = f"{_GREEN}ACTIVE{_RESET}" if o["name"] in active_names else "available" if o["available"] else f"{_RED}not found{_RESET}"
+            desc = f" — {o['description']}" if o.get("description") else ""
+            print(f"  {o['name']}: {status}{desc}")
+
+    elif action == "add":
+        if not name:
+            print("Error: overlay name required.", file=sys.stderr)
+            sys.exit(1)
+        result = overlay_add(name, added_by="cli")
+        if result.get("success"):
+            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' activated. Takes effect next turn.")
+        else:
+            print(f"Error: {result.get('error')}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "remove":
+        if not name:
+            print("Error: overlay name required.", file=sys.stderr)
+            sys.exit(1)
+        result = overlay_remove(name)
+        if result.get("success"):
+            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' removed.")
+        else:
+            print(f"Error: {result.get('error')}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "refresh":
+        if not name:
+            print("Error: overlay name required.", file=sys.stderr)
+            sys.exit(1)
+        result = overlay_refresh(name)
+        if result.get("success"):
+            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' refreshed from disk.")
+        else:
+            print(f"Error: {result.get('error')}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "clear":
+        result = overlay_clear()
+        print(f"{_GREEN}[OK]{_RESET} Cleared {result.get('removed_count', 0)} overlay(s).")
+
+
+def _cmd_channel(args: argparse.Namespace) -> None:
+    """Handle the channel CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    action = args.action
+
+    if action == "list":
+        from hooks.context.broadcast import list_broadcasts
+
+        msgs = list_broadcasts()
+        channels: dict[str, int] = {}
+        global_count = 0
+        for m in msgs:
+            ch = m.get("channel")
+            if ch:
+                channels[ch] = channels.get(ch, 0) + 1
+            else:
+                global_count += 1
+        if not channels and global_count == 0:
+            print("No active messages.")
+            return
+        if global_count:
+            print(f"  global: {global_count} message(s)")
+        for ch, count in sorted(channels.items()):
+            print(f"  {ch}: {count} message(s)")
+
+    elif action == "publish":
+        if not args.channel_name:
+            print("Error: channel name required.", file=sys.stderr)
+            sys.exit(1)
+        msg_text = " ".join(args.chan_message) if args.chan_message else ""
+        if not msg_text:
+            print("Error: message required.", file=sys.stderr)
+            sys.exit(1)
+        from hooks.context.broadcast import create_broadcast
+
+        ttl = _parse_ttl_string(getattr(args, "ttl", None))
+        msg_id = create_broadcast(
+            message=msg_text,
+            severity=args.severity,
+            ttl_seconds=ttl,
+            source="cli-channel",
+            channel=args.channel_name,
+        )
+        if msg_id:
+            print(f"{_GREEN}[OK]{_RESET} Published to '{args.channel_name}' (id: {msg_id})")
+        else:
+            print("Error: empty message.", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "subscribe":
+        if not args.channel_name:
+            print("Error: channel name required.", file=sys.stderr)
+            sys.exit(1)
+        config_path = Path.cwd() / ".agentihooks.json"
+        cfg = {}
+        if config_path.exists():
+            cfg = json.loads(config_path.read_text())
+        channels = cfg.get("channels", [])
+        if args.channel_name not in channels:
+            channels.append(args.channel_name)
+            cfg["channels"] = channels
+            config_path.write_text(json.dumps(cfg, indent=2))
+            print(f"{_GREEN}[OK]{_RESET} Subscribed to '{args.channel_name}' in {config_path}")
+        else:
+            print(f"Already subscribed to '{args.channel_name}'.")
+
+    elif action == "unsubscribe":
+        if not args.channel_name:
+            print("Error: channel name required.", file=sys.stderr)
+            sys.exit(1)
+        config_path = Path.cwd() / ".agentihooks.json"
+        if not config_path.exists():
+            print("No .agentihooks.json in current directory.", file=sys.stderr)
+            sys.exit(1)
+        cfg = json.loads(config_path.read_text())
+        channels = cfg.get("channels", [])
+        if args.channel_name in channels:
+            channels.remove(args.channel_name)
+            cfg["channels"] = channels
+            config_path.write_text(json.dumps(cfg, indent=2))
+            print(f"{_GREEN}[OK]{_RESET} Unsubscribed from '{args.channel_name}'")
+        else:
+            print(f"Not subscribed to '{args.channel_name}'.")
+
+
+def _cmd_brain(args: argparse.Namespace) -> None:
+    """Handle the brain CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context.brain_adapter import force_refresh, get_status
+
+    if args.action == "status":
+        status = get_status()
+        print(f"  enabled:    {status.get('enabled')}")
+        print(f"  source:     {status.get('source_type')} → {status.get('source_path')}")
+        print(f"  channel:    {status.get('channel')}")
+        print(f"  entries:    {status.get('entry_count')}")
+        print(f"  hash:       {status.get('content_hash') or '(none)'}")
+        print(f"  refresh:    every {status.get('refresh_interval')} turns")
+
+    elif args.action == "refresh":
+        published = force_refresh()
+        if published:
+            print(f"{_GREEN}[OK]{_RESET} Brain content refreshed and published.")
+        else:
+            print("No changes (content unchanged or source empty).")
+
+
 def _cmd_broadcast(args: argparse.Namespace) -> None:
     """Handle the broadcast CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -4266,6 +4444,34 @@ ai-assisted (emit):
         help="Clear all broadcasts, or a specific ID",
     )
 
+    # --- Overlay subcommand ---
+    overlay_p = sub.add_parser("overlay", help="Manage runtime profile overlays (mid-session profile shifting)")
+    overlay_p.add_argument("action", choices=["list", "add", "remove", "clear", "refresh"], help="Overlay action")
+    overlay_p.add_argument("name", nargs="?", default=None, help="Profile name (for add/remove/refresh)")
+
+    # --- Channel subcommand ---
+    chan_p = sub.add_parser(
+        "channel",
+        help="Manage broadcast channels (targeted messaging)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  agentihooks channel list
+  agentihooks channel publish brain "Hot arcs updated" -s info -t 1h
+  agentihooks channel subscribe brain
+  agentihooks channel unsubscribe brain
+""",
+    )
+    chan_p.add_argument("action", choices=["list", "publish", "subscribe", "unsubscribe"], help="Channel action")
+    chan_p.add_argument("channel_name", nargs="?", default=None, help="Channel name")
+    chan_p.add_argument("chan_message", nargs="*", default=None, help="Message (for publish)")
+    chan_p.add_argument("-s", "--severity", default="info", choices=["info", "alert", "critical"])
+    chan_p.add_argument("-t", "--ttl", default=None, help="TTL: 5m, 30m, 1h, 8h, 24h, or seconds")
+
+    # --- Brain subcommand ---
+    brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
+    brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -4395,6 +4601,12 @@ ai-assisted (emit):
         cmd_migrate(args)
     elif args.command == "broadcast":
         _cmd_broadcast(args)
+    elif args.command == "overlay":
+        _cmd_overlay(args)
+    elif args.command == "channel":
+        _cmd_channel(args)
+    elif args.command == "brain":
+        _cmd_brain(args)
 
 
 if __name__ == "__main__":

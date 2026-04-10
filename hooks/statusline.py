@@ -311,6 +311,31 @@ def main() -> None:
         except Exception:
             pass
 
+        # Active overlays indicator
+        try:
+            from scripts.overlay import get_active_overlays
+
+            overlays = get_active_overlays()
+            if overlays:
+                names = ",".join(o.get("name", "?") for o in overlays)
+                parts_3.append(f"{_CYAN}OVL:{names}{_RESET}")
+        except Exception:
+            pass
+
+        # Channel subscriptions indicator
+        try:
+            cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+            _cfg_path = Path(cwd) / ".agentihooks.json"
+            if _cfg_path.exists():
+                import json as _json_sl
+
+                _cfg = _json_sl.loads(_cfg_path.read_text())
+                _channels = _cfg.get("channels", [])
+                if _channels:
+                    parts_3.append(f"{_DIM}ch:{','.join(_channels)}{_RESET}")
+        except Exception:
+            pass
+
         if parts_3:
             print(f"  {_DIM}|{_RESET}  ".join(parts_3))
 
