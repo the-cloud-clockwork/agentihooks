@@ -308,7 +308,7 @@ def main() -> None:
             _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
 
             print(
-                f"  {_DIM}ah:{_RESET} {_prof_display}"
+                f"  {_DIM}agentihooks:{_RESET} {_prof_display}"
                 f"  {_DIM}sp:{_RESET}{_sp_display}"
                 f"  {_DIM}ovl:{_RESET}{_ovl_display}"
                 f"  {_DIM}ch:{_RESET}{_ch_display}"
