@@ -17,6 +17,7 @@ Native fields used from Claude Code's statusline JSON:
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -245,35 +246,73 @@ def main() -> None:
         if line2_parts:
             print(" | ".join(line2_parts))
 
-        # ── LINE 2b: AgentiHooks — profile, settings-profile, overlay ─
+        # ── LINE 2b: AgentiHooks — always shown ──────────────────────
+        # Format: ah: profile | sp:none | ovl:none | ch:none
         try:
-            ah_parts = []
+            import json as _json_ah
 
-            # Active profile from state.json
             from hooks.config import AGENTIHOOKS_HOME
 
+            # --- Global: profile + settings-profile from state.json ---
+            _g_profile = "none"
+            _g_sp = "none"
             _state_path = Path(AGENTIHOOKS_HOME) / "state.json"
             if _state_path.exists():
-                import json as _json_ah
-
                 _ah_state = _json_ah.loads(_state_path.read_text())
-                _profile = _ah_state.get("targets", {}).get("global", {}).get("profile", "")
-                _sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "")
-                if _profile:
-                    ah_parts.append(f"{_MAGENTA}{_profile}{_RESET}")
-                if _sp:
-                    ah_parts.append(f"{_DIM}sp:{_RESET}{_sp}")
+                _g_profile = _ah_state.get("targets", {}).get("global", {}).get("profile", "") or "none"
+                _g_sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "") or "none"
 
-            # Active overlays
-            from scripts.overlay import get_active_overlays
+            # --- Local: per-repo override from .agentihooks.json ---
+            _l_profile = ""
+            _l_channels: list[str] = []
+            cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+            _cfg_path = Path(cwd) / ".agentihooks.json"
+            if _cfg_path.exists():
+                _cfg = _json_ah.loads(_cfg_path.read_text())
+                _l_profile = _cfg.get("profile", "")
+                _l_channels = _cfg.get("channels", []) or []
 
-            _overlays = get_active_overlays()
-            if _overlays:
-                _ovl_names = ",".join(o.get("name", "?") for o in _overlays)
-                ah_parts.append(f"{_CYAN}+{_ovl_names}{_RESET}")
+            # --- Overlay ---
+            _ovl_str = "none"
+            try:
+                # scripts/ is a sibling of hooks/ — ensure repo root is on path
+                _repo_root = str(Path(__file__).resolve().parent.parent)
+                if _repo_root not in sys.path:
+                    sys.path.insert(0, _repo_root)
+                from scripts.overlay import get_active_overlays
 
-            if ah_parts:
-                print(f"  {_DIM}ah:{_RESET} " + " | ".join(ah_parts))
+                _overlays = get_active_overlays()
+                if _overlays:
+                    _ovl_str = ",".join(o.get("name", "?") for o in _overlays)
+            except Exception:
+                pass
+
+            # --- Build the display ---
+            # Profile: show local override if different from global
+            if _l_profile and _l_profile != _g_profile:
+                _prof_display = f"{_MAGENTA}{_l_profile}{_RESET} {_DIM}({_g_profile}){_RESET}"
+            else:
+                _prof_display = f"{_MAGENTA}{_g_profile}{_RESET}"
+
+            # Settings-profile
+            _sp_color = _DIM if _g_sp == "none" else ""
+            _sp_display = f"{_sp_color}{_g_sp}{_RESET}"
+
+            # Overlay
+            _ovl_color = _CYAN if _ovl_str != "none" else _DIM
+            _ovl_display = f"{_ovl_color}{_ovl_str}{_RESET}"
+
+            # Channels
+            _ch_str = ",".join(_l_channels) if _l_channels else "none"
+            _ch_color = "" if _l_channels else _DIM
+            _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
+
+            print(
+                f"  {_DIM}ah:{_RESET} {_prof_display}"
+                f"  {_DIM}sp:{_RESET}{_sp_display}"
+                f"  {_DIM}ovl:{_RESET}{_ovl_display}"
+                f"  {_DIM}ch:{_RESET}{_ch_display}"
+            )
         except Exception:
             pass
 
@@ -340,20 +379,6 @@ def main() -> None:
                         )
                 else:
                     parts_3.append(f"{_GREEN}OFF-PEAK — full session rate{_RESET}")
-        except Exception:
-            pass
-
-        # Channel subscriptions indicator
-        try:
-            cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-            _cfg_path = Path(cwd) / ".agentihooks.json"
-            if _cfg_path.exists():
-                import json as _json_sl
-
-                _cfg = _json_sl.loads(_cfg_path.read_text())
-                _channels = _cfg.get("channels", [])
-                if _channels:
-                    parts_3.append(f"{_DIM}ch:{','.join(_channels)}{_RESET}")
         except Exception:
             pass
 
