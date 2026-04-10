@@ -294,9 +294,10 @@ def main() -> None:
             else:
                 _prof_display = f"{_MAGENTA}{_g_profile}{_RESET}"
 
-            # Settings-profile
+            # Settings-profile — show profile name as default when no explicit override
+            _sp_value = _g_sp if _g_sp != "none" else _g_profile
             _sp_color = _DIM if _g_sp == "none" else ""
-            _sp_display = f"{_sp_color}{_g_sp}{_RESET}"
+            _sp_display = f"{_sp_color}{_sp_value}{_RESET}"
 
             # Overlay
             _ovl_color = _CYAN if _ovl_str != "none" else _DIM

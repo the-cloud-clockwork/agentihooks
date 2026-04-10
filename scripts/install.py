@@ -345,6 +345,39 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
         _save_state(state)
         print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in state.json{_RESET}")
 
+    # Also migrate ~/.claude.json project entries that reference the old profile
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.exists():
+        try:
+            cj = json.loads(claude_json.read_text())
+            cj_changed = False
+            for _path, proj_cfg in cj.get("projects", {}).items():
+                if isinstance(proj_cfg, dict) and proj_cfg.get("profile") == old_name:
+                    proj_cfg["profile"] = new_name
+                    cj_changed = True
+            if cj_changed:
+                claude_json.write_text(json.dumps(cj, indent=2))
+                print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in ~/.claude.json{_RESET}")
+        except Exception:
+            pass
+
+    # Also migrate .agentihooks.json files in known project directories
+    try:
+        cj2 = json.loads(claude_json.read_text()) if claude_json.exists() else {}
+        for proj_path in cj2.get("projects", {}):
+            ah_json = Path(proj_path) / ".agentihooks.json"
+            if ah_json.exists():
+                try:
+                    cfg = json.loads(ah_json.read_text())
+                    if cfg.get("profile") == old_name:
+                        cfg["profile"] = new_name
+                        ah_json.write_text(json.dumps(cfg, indent=2))
+                        print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in {ah_json}{_RESET}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 
 def _state_add_mcp(mcp_path: Path) -> None:
     """Record *mcp_path* in state.json so --sync can restore it."""
