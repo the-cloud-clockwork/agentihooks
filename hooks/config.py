@@ -169,6 +169,10 @@ BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / 
 BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
 BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
 
+# Amygdala — emergency signal propagation
+AMYGDALA_ENABLED = _env_bool("AMYGDALA_ENABLED", "false")
+AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))

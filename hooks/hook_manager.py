@@ -521,6 +521,17 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("brain_adapter refresh failed", {"error": str(e)})
 
+    # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
+    try:
+        from hooks.config import AMYGDALA_ENABLED
+
+        if AMYGDALA_ENABLED:
+            from hooks.context.amygdala_hook import check_amygdala
+
+            check_amygdala(session_id)
+    except Exception as e:
+        log("amygdala_hook failed", {"error": str(e)})
+
     # --- Context refresh: re-inject rules every N turns ---
     from hooks.config import CONTEXT_REFRESH_ENABLED
 
