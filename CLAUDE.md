@@ -25,8 +25,8 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 |--------|-----------|-------------|
 | **Identity** | `scripts/install.py`, `profiles/`, `settings.base.json` | Profile system, chaining, two-axis model, bundle merge |
 | **Guardrails** | `hooks/secrets.py`, `hooks/context/retry_breaker.py`, `hooks/context/branch_guard.py`, `hooks/context/version_guard.py`, `hooks/context/claude_md_sanity.py` | Safety mechanisms that block or warn |
-| **Context Intelligence** | `hooks/context/context_refresh.py`, `hooks/context/preprocessor.py`, `hooks/tool_memory.py`, `hooks/observability/context_audit.py` | Attention decay mitigation, token compression, tool memory |
-| **Fleet Command** | `hooks/context/broadcast.py`, broadcast sections in `hook_manager.py`, CLI in `install.py` | Real-time messaging to all active sessions |
+| **Context Intelligence** | `hooks/context/context_refresh.py`, `hooks/context/preprocessor.py`, `hooks/context/brain_adapter.py`, `hooks/tool_memory.py` | Attention decay mitigation, token compression, brain injection, tool memory |
+| **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py` | Real-time messaging with channel-based targeting, brain adapter |
 
 ## Architecture
 
@@ -43,9 +43,9 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 
 | Event | Handler | Key behavior |
 |---|---|---|
-| `SessionStart` | `on_session_start` | Register broadcast session, inject context, MCP warning |
+| `SessionStart` | `on_session_start` | Register broadcast session, inject context, brain injection, MCP warning |
 | `SessionEnd` | `on_session_end` | Deregister session, clear caches, log summary |
-| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, context refresh, broadcast delivery |
+| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, overlay injection, brain refresh, context refresh, channel-filtered broadcast delivery |
 | `PreToolUse` | `on_pre_tool_use` | Secrets scan, guardrails pipeline, critical broadcast via additionalContext |
 | `PostToolUse` | `on_post_tool_use` | Bash filter, file dedup, tool error recording |
 | `Stop` / `SubagentStop` | `on_stop` | Memory auto-save, cost logging |
@@ -64,9 +64,19 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 
 3-layer merge: agentihooks built-in → bundle global → profile-specific. Profiles chained with commas. Two-axis model: persona (rules/CLAUDE.md) independent from settings (permissions/MCP).
 
-### Broadcast system
+### Runtime overlays
+
+`scripts/overlay.py` + `hooks/context/overlay_injector.py` + `hooks/mcp/profiles.py`. Agents can chain profiles mid-session via MCP tools (`overlay_add`, `overlay_remove`). State in `~/.agentihooks/active_overlays.json`. Content injected via `UserPromptSubmit` hook. Base profile's `allowedOverlays` field in `profile.yml` controls the whitelist.
+
+### Broadcast system + channels
 
 File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/deregister via hooks. Three severity tiers (info/alert/critical). AI-assisted `emit` spawns sandboxed Haiku (Bash(agentihooks*) only).
+
+**Channels:** Messages can have an optional `channel` field. Sessions subscribe to channels in `.agentihooks.json` via `"channels": ["brain", "ops-alerts"]`. Delivery is filtered at read-time — global messages (no channel) reach everyone, channel messages reach only subscribers. Wildcard `"*"` subscribes to all.
+
+### Brain adapter
+
+`hooks/context/brain_adapter.py` bridges an external knowledge source (file/vault/API) to the broadcast channel system. Pluggable `BrainSource` interface; ships with `FileBrainSource` reading `~/.agentihooks/brain/*.md` (YAML frontmatter + markdown body). Counter-gated refresh every N turns. Publishes to the `brain` broadcast channel. Config: `BRAIN_ENABLED`, `BRAIN_SOURCE_PATH`, `BRAIN_CHANNEL`, `BRAIN_REFRESH_INTERVAL`.
 
 ### Testing patterns
 

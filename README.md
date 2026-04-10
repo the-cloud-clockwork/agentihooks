@@ -64,6 +64,7 @@ LLMs lose focus on early instructions as conversations grow. AgentiHooks defeats
 - **Priority frontmatter** — critical rules load first within the 8000-char budget
 - **Token compression** — 4 levels (off/light/standard/aggressive) with safety-preserving protection mask
 - **Tool memory** — past errors injected so agents don't repeat mistakes
+- **Brain adapter** — pluggable source that pumps knowledge (hot arcs, operational memory) into agents via broadcast channels
 - **Context audit** — tracks what's being injected and how much budget is used
 
 ```bash
@@ -76,7 +77,7 @@ CONTEXT_COMPRESSION_SCOPE=all           # compress all injections
 
 ### Pillar 4: Fleet Command — *Talk to your entire fleet*
 
-> **No other tool does this.** Send messages to every active Claude Code session simultaneously — like a PA system for your AI workforce.
+> **No other tool does this.** Send messages to every active Claude Code session simultaneously — like a PA system for your AI workforce. Now with **channels** for targeted delivery — subscribe agents to topics, and only the right sessions hear the right messages.
 
 ```bash
 # Manual — full control
@@ -168,6 +169,16 @@ agentihooks overlay add patch-mode           # activate overlay
 agentihooks overlay remove patch-mode        # deactivate overlay
 agentihooks overlay clear                    # remove all overlays
 
+# Broadcast channels (targeted messaging)
+agentihooks channel publish brain "msg"      # publish to a channel
+agentihooks channel list                     # active channels + message counts
+agentihooks channel subscribe brain          # subscribe CWD project
+agentihooks channel unsubscribe brain        # unsubscribe CWD project
+
+# Brain adapter (knowledge injection)
+agentihooks brain status                     # source type, entries, refresh state
+agentihooks brain refresh                    # force re-read + republish
+
 # Diagnostics
 agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
@@ -251,10 +262,10 @@ agentihooks settings-profile --clear         # revert
 
 | Event | Key behavior |
 |-------|-------------|
-| `SessionStart` | Register session, inject context, deliver broadcasts, MCP warnings |
+| `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, overlay injection, context refresh, broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, overlay injection, brain refresh, context refresh, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -278,6 +289,10 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
 | `IMAGE_PERSISTENCE_REMINDER_ENABLED` | `true` | Remind to rebuild images after live patches |
+| `BRAIN_ENABLED` | `false` | Brain adapter master switch |
+| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory to read brain content from |
+| `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content |
+| `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
 
 Complete table: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
