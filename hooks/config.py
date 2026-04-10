@@ -146,6 +146,13 @@ RETRY_BREAKER_MAX = int(os.getenv("RETRY_BREAKER_MAX", "5"))
 RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "10"))
 RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 
+# =============================================================================
+# IMAGE PERSISTENCE REMINDER
+# =============================================================================
+# Re-injects the live-patch → image-rebuild rule every N tool calls per session.
+IMAGE_PERSISTENCE_REMINDER_ENABLED = _env_bool("IMAGE_PERSISTENCE_REMINDER_ENABLED", "true")
+IMAGE_PERSISTENCE_REMINDER_INTERVAL = int(os.getenv("IMAGE_PERSISTENCE_REMINDER_INTERVAL", "10"))
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))

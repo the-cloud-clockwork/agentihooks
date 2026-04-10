@@ -27,7 +27,7 @@ graph LR
 One command transforms your agent's entire personality, permissions, and toolset.
 
 ```bash
-agentihooks init --profile coding,colt     # chain profiles
+agentihooks init --profile coding,anton     # chain profiles
 agentihooks settings-profile admin          # swap permissions without touching persona
 agentihooks init --local --profile infra    # per-repo identity
 ```
@@ -143,7 +143,7 @@ Claude Code
 ```bash
 # Install / configure
 agentihooks init                             # global install with default profile
-agentihooks init --profile coding,colt       # chain profiles
+agentihooks init --profile coding,anton       # chain profiles
 agentihooks init --local --profile infra     # per-repo config
 agentihooks settings-profile admin           # quick-switch settings layer
 
@@ -211,12 +211,12 @@ Built-in profiles: `default` (auto), `coding` (acceptEdits), `admin` (bypassPerm
 
 **3-layer merge:** agentihooks built-in -> bundle global `.claude/` -> profile-specific `.claude/`. Applies to skills, agents, commands, rules, and MCP servers.
 
-**Profile chaining:** `agentihooks init --profile coding,colt` applies each profile sequentially — hooks append, CLAUDE.md concatenates, rules/skills accumulate additively.
+**Profile chaining:** `agentihooks init --profile coding,anton` applies each profile sequentially — hooks append, CLAUDE.md concatenates, rules/skills accumulate additively.
 
 **Settings profiles (two-axis model):** Control settings independently from persona:
 
 ```bash
-agentihooks init --profile colt --settings-profile admin
+agentihooks init --profile anton --settings-profile admin
 agentihooks settings-profile admin           # quick-switch
 agentihooks settings-profile --clear         # revert
 ```

@@ -553,7 +553,7 @@ class TestInitProfileRecall:
         """When no CLI flag or env var, init uses profile from state.json."""
         import argparse
 
-        state = self._make_state("colt")
+        state = self._make_state("anton")
         args = argparse.Namespace(
             profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
         )
@@ -568,15 +568,15 @@ class TestInitProfileRecall:
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
             install.cmd_init_unified(args)
             called_args = mock_install.call_args[0][0]
-            assert called_args.profile == "colt"
+            assert called_args.profile == "anton"
 
     def test_recalls_settings_profile_from_state(self):
         """When no CLI flag or env var, init uses settings_profile from state.json."""
         import argparse
 
-        state = self._make_state("colt", settings_profile="admin")
+        state = self._make_state("anton", settings_profile="admin")
         args = argparse.Namespace(
-            profile="colt", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile="anton", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -596,7 +596,7 @@ class TestInitProfileRecall:
 
         state = self._make_state("default")
         args = argparse.Namespace(
-            profile="colt", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile="anton", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -606,7 +606,7 @@ class TestInitProfileRecall:
         ):
             install.cmd_init_unified(args)
             called_args = mock_install.call_args[0][0]
-            assert called_args.profile == "colt"
+            assert called_args.profile == "anton"
 
     def test_env_var_overrides_state(self):
         """AGENTIHOOKS_PROFILE env var overrides state.json."""
@@ -636,9 +636,9 @@ class TestInitProfileRecall:
         with (
             patch.object(install, "_load_state", return_value={}),
             patch.object(install, "_get_bundle_path", return_value=None),
-            patch.object(install, "_available_profiles", return_value=["default", "colt"]),
+            patch.object(install, "_available_profiles", return_value=["default", "anton"]),
             patch.object(install, "install_global") as mock_install,
-            patch("builtins.input", return_value="colt"),
+            patch("builtins.input", return_value="anton"),
             patch("sys.stdin") as mock_stdin,
             patch.dict("os.environ", {}, clear=False),
         ):
@@ -647,7 +647,7 @@ class TestInitProfileRecall:
             mock_stdin.isatty.return_value = True
             install.cmd_init_unified(args)
             called_args = mock_install.call_args[0][0]
-            assert called_args.profile == "colt"
+            assert called_args.profile == "anton"
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +661,7 @@ class TestQueryActiveProfile:
             "targets": {
                 "global": {
                     "path": "/home/test/.claude",
-                    "profile": "colt",
+                    "profile": "anton",
                     "settings_profile": "admin",
                     "installed_at": "2026-01-01T00:00:00Z",
                 },
@@ -673,7 +673,7 @@ class TestQueryActiveProfile:
         ):
             install.query_active_profile()
         out = capsys.readouterr().out
-        assert "colt" in out
+        assert "anton" in out
         assert "settings: admin" in out
 
     def test_no_settings_profile_no_line(self, capsys):
@@ -681,7 +681,7 @@ class TestQueryActiveProfile:
             "targets": {
                 "global": {
                     "path": "/home/test/.claude",
-                    "profile": "colt",
+                    "profile": "anton",
                     "installed_at": "2026-01-01T00:00:00Z",
                 },
             },
@@ -692,5 +692,5 @@ class TestQueryActiveProfile:
         ):
             install.query_active_profile()
         out = capsys.readouterr().out
-        assert "colt" in out
+        assert "anton" in out
         assert "settings:" not in out

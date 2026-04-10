@@ -404,9 +404,9 @@ class TestActiveProfileDetection:
     """Test query_active_profile reads from state.json."""
 
     def test_reads_from_state(self, install_env, capsys):
-        with patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "colt"}}}):
+        with patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "anton"}}}):
             install.query_active_profile()
-        assert capsys.readouterr().out.strip() == "colt"
+        assert capsys.readouterr().out.strip() == "anton"
 
     def test_not_installed(self, install_env, capsys):
         with patch.object(install, "_load_state", return_value={}):

@@ -49,7 +49,7 @@ Create this file at your project root. It is meant to be **committed** to the re
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `profile` | string | Profile name or comma-separated chain (e.g. `"coding,colt"`). Overrides the global profile. |
+| `profile` | string | Profile name or comma-separated chain (e.g. `"coding,anton"`). Overrides the global profile. |
 | `settings_profile` | string | Settings-only overlay profile. Applies `settings.overrides.json` and `.mcp.json` from the named profile without changing rules, CLAUDE.md, or skills. See [Settings Profiles](profiles.md#settings-profiles--independent-settings-layer). |
 | `enabledMcpServers` | array | MCP servers to whitelist. All others are disabled by default. |
 | `disabledMcpServers` | array | Additional servers to disable (for project-scope `.mcp.json` connectors). |
@@ -106,13 +106,13 @@ Comma-separated profiles are supported:
 
 ```json
 {
-  "profile": "coding,colt"
+  "profile": "coding,anton"
 }
 ```
 
 This produces:
 - `CLAUDE.local.md` concatenated from both profiles (with `<!-- profile: name -->` markers and `---` separators)
-- Settings overrides merged sequentially (coding first, colt on top)
+- Settings overrides merged sequentially (coding first, anton on top)
 - MCP whitelists unioned across both profiles
 
 ### Querying the active profile
@@ -128,7 +128,7 @@ coding (local)
 
 When run from a directory without one:
 ```
-colt (global)
+anton (global)
 ```
 
 ### One-shot profile override
@@ -150,7 +150,7 @@ This file is generated from the resolved profile's `CLAUDE.md` and written to `.
 | Scenario | Behavior |
 |---|---|
 | Single profile (`"coding"`) | Content is copied directly from the profile's `CLAUDE.md` |
-| Profile chain (`"coding,colt"`) | All profiles' `CLAUDE.md` files concatenated with markers |
+| Profile chain (`"coding,anton"`) | All profiles' `CLAUDE.md` files concatenated with markers |
 | No `CLAUDE.md` in profile | File is not generated |
 
 Chain mode output:
@@ -162,8 +162,8 @@ Chain mode output:
 
 ---
 
-<!-- profile: colt -->
-# Colt Profile
+<!-- profile: anton -->
+# Anton Profile
 ...
 ```
 
@@ -238,7 +238,7 @@ The daemon is always restarted on `agentihooks init` to ensure it runs the lates
 
 ```
 my-monorepo/
-├── .agentihooks.json           → {"profile": "colt"}
+├── .agentihooks.json           → {"profile": "anton"}
 ├── agents/
 │   ├── publisher/
 │   │   └── .agentihooks.json   → {"profile": "coding", "enabledMcpServers": ["gateway-publish"]}

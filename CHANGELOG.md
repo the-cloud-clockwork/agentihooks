@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`CLAUDE.local.md` generation** — `agentihooks init --local` generates `.claude/CLAUDE.local.md` from the resolved profile's `CLAUDE.md`. Auto-gitignored.
 - **Hierarchy-aware MCP blacklist** — parent projects exclude MCP servers that child projects whitelist via `.agentihooks.json`.
 - **Orphaned MCP server pruning** — sync daemon removes stale servers from `~/.claude.json` not defined in any source file.
-- **`--query` CWD awareness** — reads `.agentihooks.json` from current directory first, shows `coding (local)` vs `colt (global)`.
+- **`--query` CWD awareness** — reads `.agentihooks.json` from current directory first, shows `coding (local)` vs `anton (global)`.
 - **Daemon restart on init** — always kills and restarts sync daemon to pick up code changes.
 - **Per-project docs page** — new `docs/getting-started/per-project.md`.
 - **Sync daemon (`agentihooks daemon`)** — background daemon that watches all source files feeding the install pipeline (profiles, `settings.base.json`, connectors, bundles, MCP files, `.env`) and auto-propagates changes to all registered downstream consumers. Uses SHA-256 hashing with category-based change detection. Targets are registered automatically by `agentihooks init` and `agentihooks init --repo`. Configurable poll interval (default 60s, env: `AGENTIHOOKS_SYNC_POLL_SEC`). Advisory file lock prevents concurrent writes. State: PID at `~/.agentihooks/sync-daemon.pid`, hashes at `~/.agentihooks/sync-hashes.json`, log at `~/.agentihooks/logs/sync-daemon.log`.

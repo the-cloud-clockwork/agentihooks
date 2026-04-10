@@ -172,8 +172,8 @@ The switch takes effect on the next Claude Code session.
 Sometimes you want to change **what tools and permissions are available** without changing **who the AI is**. The `--settings-profile` flag provides a second axis:
 
 ```bash
-# Full install: Colt persona + admin settings overlay
-agentihooks init --profile colt --settings-profile admin
+# Full install: Anton persona + admin settings overlay
+agentihooks init --profile anton --settings-profile admin
 
 # Quick switch: change settings layer only, keep persona intact
 agentihooks settings-profile admin
@@ -195,7 +195,7 @@ The settings profile overlay is applied **after** the persona profile's settings
 
 ```bash
 export AGENTIHOOKS_SETTINGS_PROFILE=admin
-agentihooks init --profile colt  # automatically uses admin settings overlay
+agentihooks init --profile anton  # automatically uses admin settings overlay
 ```
 
 ### State tracking
@@ -206,7 +206,7 @@ Both axes are persisted in `~/.agentihooks/state.json`:
 {
   "targets": {
     "global": {
-      "profile": "colt",
+      "profile": "anton",
       "settings_profile": "admin"
     }
   }
@@ -232,7 +232,7 @@ coding (local)
 Otherwise it falls back to the global profile:
 
 ```
-colt (global)
+anton (global)
 ```
 
 See [Per-Project Configuration](per-project.md) for details on local profile overrides.
@@ -280,21 +280,21 @@ Profiles affect the **agent's persona, tool access, and asset selection** but no
 You can combine multiple profiles by separating them with commas:
 
 ```bash
-agentihooks init --profile coding,colt
+agentihooks init --profile coding,anton
 ```
 
 Profiles are applied **left to right** — the last profile has highest priority for simple values, and all profiles contribute additively for hooks, rules, skills, agents, commands, and MCP servers.
 
 ### How chaining works
 
-Given `--profile coding,colt`:
+Given `--profile coding,anton`:
 
 ```
 settings.base.json                    ← base hooks + defaults
         ↓
 coding/settings.overrides.json        ← merged on top (dicts merge, hooks append)
         ↓
-colt/settings.overrides.json          ← merged on top (dicts merge, hooks append)
+anton/settings.overrides.json          ← merged on top (dicts merge, hooks append)
         ↓
 ~/.claude/settings.json               ← final result
 ```
@@ -320,8 +320,8 @@ In chain mode, all profiles' `CLAUDE.md` files are concatenated into a single re
 
 ---
 
-<!-- profile: colt -->
-# Colt Profile
+<!-- profile: anton -->
+# Anton Profile
 ...
 ```
 
@@ -338,22 +338,22 @@ agentihooks --query
 
 Single profile output:
 ```
-colt
+anton
 ```
 
 Chain output:
 ```
-chain: [coding, colt]
+chain: [coding, anton]
 ```
 
 ### Example: combining a coding base with operator customizations
 
 ```bash
-agentihooks init --profile coding,colt
+agentihooks init --profile coding,anton
 ```
 
 This gives you:
 - **coding's** git safety rules, retry breaker, security rules
-- **colt's** operator behavioral model, delegation map, response template
+- **anton's** operator behavioral model, delegation map, response template
 - Both profiles' settings merged (hooks appended, env vars combined)
 - Both profiles' rules, skills, agents, commands all present

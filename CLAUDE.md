@@ -14,7 +14,7 @@ uv run python -m pytest tests/test_hook_manager.py                     # single 
 uv run python -m pytest tests/test_config.py::TestSecretsMode -v       # single test
 uv run ruff check .                                                    # lint
 uv run ruff format .                                                   # format
-agentihooks init --profile colt                                        # global install
+agentihooks init --profile anton                                       # global install
 ```
 
 ## The Four Pillars

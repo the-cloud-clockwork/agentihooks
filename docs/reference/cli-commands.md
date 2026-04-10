@@ -44,7 +44,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
-| `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,colt` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
+| `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--repo <path>` | Target repo directory for per-repo configuration |
 
 ### Environment variables
@@ -70,7 +70,7 @@ agentihooks init
 agentihooks init --profile admin
 
 # Install with persona + settings overlay
-agentihooks init --profile colt --settings-profile admin
+agentihooks init --profile anton --settings-profile admin
 
 # Quick-switch settings layer only (keeps persona intact)
 agentihooks settings-profile admin
@@ -109,7 +109,7 @@ With no arguments, shows the current persona and settings profile.
 
 ```bash
 export AGENTIHOOKS_SETTINGS_PROFILE=admin
-agentihooks init --profile colt   # automatically uses admin settings overlay
+agentihooks init --profile anton   # automatically uses admin settings overlay
 ```
 
 ### Examples
@@ -118,7 +118,7 @@ agentihooks init --profile colt   # automatically uses admin settings overlay
 # Show current state
 agentihooks settings-profile
 
-# Switch to admin settings (keeps colt persona)
+# Switch to admin settings (keeps anton persona)
 agentihooks settings-profile admin
 
 # Revert to persona defaults
@@ -432,12 +432,12 @@ agentihooks --query
 
 Single profile output:
 ```
-colt
+anton
 ```
 
 Chain output:
 ```
-chain: [coding, colt]
+chain: [coding, anton]
 ```
 
 ---

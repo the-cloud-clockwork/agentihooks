@@ -324,6 +324,28 @@ def _save_state(state: dict) -> None:
     save_json(STATE_JSON, state)
 
 
+def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
+    """One-shot migration: rewrite all profile references from old_name to new_name in state.json."""
+    changed = False
+    targets = state.get("targets", {})
+
+    # Global target
+    g = targets.get("global", {})
+    if g.get("profile") == old_name:
+        g["profile"] = new_name
+        changed = True
+
+    # Per-project targets
+    for _proj_key, proj in targets.get("projects", {}).items():
+        if proj.get("profile") == old_name:
+            proj["profile"] = new_name
+            changed = True
+
+    if changed:
+        _save_state(state)
+        print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in state.json{_RESET}")
+
+
 def _state_add_mcp(mcp_path: Path) -> None:
     """Record *mcp_path* in state.json so --sync can restore it."""
     state = _load_state()
@@ -1101,6 +1123,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if not profile_name:
         profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
     _prev_state = _load_state()
+    _migrate_profile_rename(_prev_state, "colt", "anton")
     _prev_global = _prev_state.get("targets", {}).get("global", {})
     if not profile_name:
         stored_profile = _prev_global.get("profile", "")

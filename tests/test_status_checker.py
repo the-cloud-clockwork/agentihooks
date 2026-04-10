@@ -12,11 +12,11 @@ class TestCheckProfile:
     def test_with_state(self, tmp_path):
         from scripts.status_checker import check_profile
 
-        state = {"targets": {"global": {"profile": "colt"}}, "bundle": {"path": str(tmp_path)}}
+        state = {"targets": {"global": {"profile": "anton"}}, "bundle": {"path": str(tmp_path)}}
         with patch("scripts.status_checker.STATE_JSON", tmp_path / "state.json"):
             (tmp_path / "state.json").write_text(json.dumps(state))
             result = check_profile()
-            assert result["name"] == "colt"
+            assert result["name"] == "anton"
             assert result["ok"] is True
 
     def test_missing_state(self, tmp_path):

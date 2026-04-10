@@ -36,7 +36,7 @@ Profiles live under `profiles/<name>/` in the agentihooks repo or in a linked bu
 ```bash
 agentihooks init --profile coding     # feature branch agent: safe, git-guarded
 agentihooks init --profile admin      # infra agent: full permissions, no guardrails
-agentihooks init --profile colt       # operator-tuned persona with behavioral model
+agentihooks init --profile anton       # operator-tuned persona with behavioral model
 ```
 
 ---
@@ -84,7 +84,7 @@ These are **settings profiles** — they control permissions and tool access. Pa
 Mix and match capabilities without building a monolithic profile. Comma-separate profile names to chain them:
 
 ```bash
-agentihooks init --profile coding,colt
+agentihooks init --profile coding,anton
 ```
 
 Profiles are applied **left to right**. The rightmost profile has highest priority for scalar values; everything else merges additively.
@@ -93,12 +93,12 @@ Profiles are applied **left to right**. The rightmost profile has highest priori
 flowchart LR
     base["_base/\nsettings.base.json"]
     coding["coding/\nsettings.overrides.json"]
-    colt["colt/\nsettings.overrides.json"]
+    anton["anton/\nsettings.overrides.json"]
     final["~/.claude/\nsettings.json"]
 
     base -->|"deep merge"| coding
-    coding -->|"deep merge\nhooks append"| colt
-    colt --> final
+    coding -->|"deep merge\nhooks append"| anton
+    anton --> final
 ```
 
 ### What each entity does in a chain
@@ -121,8 +121,8 @@ In chain mode, all personas are active simultaneously:
 
 ---
 
-<!-- profile: colt -->
-# Colt Profile
+<!-- profile: anton -->
+# Anton Profile
 ...
 ```
 
@@ -161,8 +161,8 @@ The settings overlay is applied **after** the persona's settings overrides — i
 ### Usage
 
 ```bash
-# Full install: Colt persona + admin permissions
-agentihooks init --profile colt --settings-profile admin
+# Full install: Anton persona + admin permissions
+agentihooks init --profile anton --settings-profile admin
 
 # Quick switch: escalate permissions, keep persona intact
 agentihooks settings-profile admin
@@ -172,7 +172,7 @@ agentihooks settings-profile --clear
 
 # Via environment variable
 export AGENTIHOOKS_SETTINGS_PROFILE=admin
-agentihooks init --profile colt   # admin overlay applied automatically
+agentihooks init --profile anton   # admin overlay applied automatically
 ```
 
 **The `agentihooks settings-profile` command is the fastest way to escalate or de-escalate.** No re-install, no persona disruption — just a settings layer swap.
@@ -211,8 +211,8 @@ agentihooks --query
 
 ```
 coding (local)     # project has .agentihooks.json
-colt (global)      # fallback to global install
-chain: [coding, colt]  # chained profile
+anton (global)      # fallback to global install
+chain: [coding, anton]  # chained profile
 ```
 
 ### Monorepo example
@@ -221,7 +221,7 @@ Different agents, different identities, same repo:
 
 ```
 my-monorepo/
-├── .agentihooks.json          → {"profile": "colt"}
+├── .agentihooks.json          → {"profile": "anton"}
 ├── agents/
 │   ├── publisher/
 │   │   └── .agentihooks.json  → {"profile": "coding", "enabledMcpServers": ["gateway-publish"]}
