@@ -245,6 +245,38 @@ def main() -> None:
         if line2_parts:
             print(" | ".join(line2_parts))
 
+        # ── LINE 2b: AgentiHooks — profile, settings-profile, overlay ─
+        try:
+            ah_parts = []
+
+            # Active profile from state.json
+            from hooks.config import AGENTIHOOKS_HOME
+
+            _state_path = Path(AGENTIHOOKS_HOME) / "state.json"
+            if _state_path.exists():
+                import json as _json_ah
+
+                _ah_state = _json_ah.loads(_state_path.read_text())
+                _profile = _ah_state.get("targets", {}).get("global", {}).get("profile", "")
+                _sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "")
+                if _profile:
+                    ah_parts.append(f"{_MAGENTA}{_profile}{_RESET}")
+                if _sp:
+                    ah_parts.append(f"{_DIM}sp:{_RESET}{_sp}")
+
+            # Active overlays
+            from scripts.overlay import get_active_overlays
+
+            _overlays = get_active_overlays()
+            if _overlays:
+                _ovl_names = ",".join(o.get("name", "?") for o in _overlays)
+                ah_parts.append(f"{_CYAN}+{_ovl_names}{_RESET}")
+
+            if ah_parts:
+                print(f"  {_DIM}ah:{_RESET} " + " | ".join(ah_parts))
+        except Exception:
+            pass
+
         # ── LINE 3: Rate limits (native) + context warning ────────────
         parts_3 = []
 
@@ -308,17 +340,6 @@ def main() -> None:
                         )
                 else:
                     parts_3.append(f"{_GREEN}OFF-PEAK — full session rate{_RESET}")
-        except Exception:
-            pass
-
-        # Active overlays indicator
-        try:
-            from scripts.overlay import get_active_overlays
-
-            overlays = get_active_overlays()
-            if overlays:
-                names = ",".join(o.get("name", "?") for o in overlays)
-                parts_3.append(f"{_CYAN}OVL:{names}{_RESET}")
         except Exception:
             pass
 
