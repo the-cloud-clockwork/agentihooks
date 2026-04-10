@@ -333,4 +333,42 @@ Hooks are always wired from `_base/settings.base.json`. Profiles control persona
 
 ---
 
+---
+
+## Runtime overlays — mid-session profile shifting
+
+Profiles are static — installed once, read at session start. But what if your agent needs to shift behavior mid-session without restarting?
+
+**Runtime overlays** solve this. An agent can layer a profile on top of its base identity, live, and peel it off when done — all without losing conversation context.
+
+```
+# Agent running on anton (general-purpose, full autonomy)
+# A service breaks. Enter surgical mode:
+
+agent → overlay_add("patch-mode")
+# → Next turn: patch-mode rules injected into context
+# → Agent investigates, applies fix, validates
+
+operator → "good, integrate it"
+
+agent → overlay_remove("patch-mode")
+# → Back to anton. Auto-commits. Kicks off image rebuild.
+```
+
+Overlays are controlled by the base profile's `allowedOverlays` whitelist in `profile.yml`:
+
+```yaml
+allowedOverlays:
+  - patch-mode
+  - router
+```
+
+Agents can shift between approved modes but cannot escalate to unapproved profiles. The whitelist is the blast radius control.
+
+Available as MCP tools (`overlay_add`, `overlay_remove`, `overlay_refresh`, `profile_list`, `profile_current`) inside any session via the `hooks-utils` server.
+
+[Full docs: Runtime Overlays](overlays.md)
+
+---
+
 *Next: [Pillar 2 — Guardrails](guardrails.md) — What your agents are protected from.*

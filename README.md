@@ -6,7 +6,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clock-work.github.io/agentihooks/)
 
-The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with profiles, guardrails, context intelligence, and real-time broadcast messaging across every active session.
+The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with smart profiles that shift mid-session, guardrails, context intelligence, and real-time broadcast messaging across every active session.
 
 > **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
 
@@ -162,6 +162,12 @@ agenti                                       # alias (after source ~/.bashrc)
 agentihooks bundle link ~/dev/my-tools       # link a bundle
 agentihooks bundle pull                      # update linked bundle
 
+# Runtime overlays (mid-session profile shifting)
+agentihooks overlay list                     # available overlays for current base
+agentihooks overlay add patch-mode           # activate overlay
+agentihooks overlay remove patch-mode        # deactivate overlay
+agentihooks overlay clear                    # remove all overlays
+
 # Diagnostics
 agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
@@ -213,6 +219,24 @@ Built-in profiles: `default` (auto), `coding` (acceptEdits), `admin` (bypassPerm
 
 **Profile chaining:** `agentihooks init --profile coding,anton` applies each profile sequentially — hooks append, CLAUDE.md concatenates, rules/skills accumulate additively.
 
+**Runtime overlays — profiles that shift mid-session:**
+
+Your agent is running on `anton`. A service breaks. Instead of restarting:
+
+```
+agent calls → overlay_add("patch-mode")
+```
+
+Next turn, the agent has `patch-mode` rules layered on top — surgical mode, investigation-first, operator-gated commits. It fixes the service, operator validates, then:
+
+```
+agent calls → overlay_remove("patch-mode")
+```
+
+Back to `anton`. Full autonomy. Image rebuild in parallel. Zero session restart, zero context loss. The base profile's `allowedOverlays` field controls which overlays agents can activate — no escalation to profiles they weren't designed for.
+
+This is a **smart profile system** — agents don't just have identities, they shift between complementary modes like a musician moving between tension and release. [Full docs: Runtime Overlays](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/overlays/)
+
 **Settings profiles (two-axis model):** Control settings independently from persona:
 
 ```bash
@@ -230,7 +254,7 @@ agentihooks settings-profile --clear         # revert
 | `SessionStart` | Register session, inject context, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, context refresh, broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, overlay injection, context refresh, broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -252,6 +276,8 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
+| `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
+| `IMAGE_PERSISTENCE_REMINDER_ENABLED` | `true` | Remind to rebuild images after live patches |
 
 Complete table: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
 
