@@ -127,6 +127,14 @@ def register(mcp):
                 "read_session_logs",
                 "tail_container_logs",
             ],
+            "channels": [
+                "channel_publish",
+                "channel_list",
+                "channel_subscribe",
+                "channel_unsubscribe",
+                "brain_refresh",
+                "brain_status",
+            ],
             "profiles": [
                 "profile_list",
                 "profile_current",

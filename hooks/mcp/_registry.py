@@ -8,6 +8,7 @@ CATEGORY_MODULES = {
     "database": "hooks.mcp.database",
     "compute": "hooks.mcp.compute",
     "observability": "hooks.mcp.observability",
+    "channels": "hooks.mcp.channels",
     "profiles": "hooks.mcp.profiles",
     "utilities": "hooks.mcp.utilities",
 }
