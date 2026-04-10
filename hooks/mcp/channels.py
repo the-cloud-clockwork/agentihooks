@@ -1,0 +1,161 @@
+"""Channel + brain MCP tools — publish, subscribe, and manage broadcast channels."""
+
+import json
+
+from hooks.common import log
+
+
+def register(mcp):
+    @mcp.tool()
+    def channel_publish(channel: str, message: str, severity: str = "info", ttl_seconds: int = 3600) -> str:
+        """Publish a message to a named broadcast channel.
+
+        Only sessions subscribed to this channel (via .agentihooks.json) will receive it.
+
+        Args:
+            channel: Channel name (e.g. "brain", "ops-alerts", "deploy-status")
+            message: Message content to broadcast
+            severity: "info", "alert", or "critical" (default: info)
+            ttl_seconds: Time-to-live in seconds (default: 3600)
+
+        Returns:
+            JSON with success status and message_id.
+        """
+        try:
+            from hooks.context.broadcast import create_broadcast
+
+            msg_id = create_broadcast(
+                message=message,
+                severity=severity,
+                ttl_seconds=ttl_seconds,
+                source="mcp-channel",
+                channel=channel,
+            )
+            if msg_id:
+                return json.dumps({"success": True, "message_id": msg_id, "channel": channel})
+            return json.dumps({"success": False, "error": "Empty message"})
+        except Exception as e:
+            log("MCP channel_publish failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def channel_list() -> str:
+        """List all channels with active (non-expired) messages.
+
+        Returns:
+            JSON with channels list, message counts per channel, and global message count.
+        """
+        try:
+            from hooks.context.broadcast import list_broadcasts
+
+            msgs = list_broadcasts()
+            channels: dict[str, int] = {}
+            global_count = 0
+            for m in msgs:
+                ch = m.get("channel")
+                if ch:
+                    channels[ch] = channels.get(ch, 0) + 1
+                else:
+                    global_count += 1
+
+            return json.dumps({
+                "success": True,
+                "channels": channels,
+                "global_messages": global_count,
+                "total_messages": len(msgs),
+            })
+        except Exception as e:
+            log("MCP channel_list failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def channel_subscribe(channel: str) -> str:
+        """Add a channel subscription to the current project's .agentihooks.json.
+
+        Args:
+            channel: Channel name to subscribe to
+
+        Returns:
+            JSON with success status and updated channels list.
+        """
+        try:
+            from pathlib import Path
+
+            config_path = Path.cwd() / ".agentihooks.json"
+            cfg = {}
+            if config_path.exists():
+                cfg = json.loads(config_path.read_text())
+
+            channels = cfg.get("channels", [])
+            if not isinstance(channels, list):
+                channels = []
+            if channel not in channels:
+                channels.append(channel)
+                cfg["channels"] = channels
+                config_path.write_text(json.dumps(cfg, indent=2))
+
+            return json.dumps({"success": True, "channels": channels})
+        except Exception as e:
+            log("MCP channel_subscribe failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def channel_unsubscribe(channel: str) -> str:
+        """Remove a channel subscription from the current project's .agentihooks.json.
+
+        Args:
+            channel: Channel name to unsubscribe from
+
+        Returns:
+            JSON with success status and updated channels list.
+        """
+        try:
+            from pathlib import Path
+
+            config_path = Path.cwd() / ".agentihooks.json"
+            if not config_path.exists():
+                return json.dumps({"success": False, "error": "No .agentihooks.json in CWD"})
+
+            cfg = json.loads(config_path.read_text())
+            channels = cfg.get("channels", [])
+            if channel in channels:
+                channels.remove(channel)
+                cfg["channels"] = channels
+                config_path.write_text(json.dumps(cfg, indent=2))
+
+            return json.dumps({"success": True, "channels": channels})
+        except Exception as e:
+            log("MCP channel_unsubscribe failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def brain_refresh() -> str:
+        """Force the brain adapter to re-read its source and republish to the brain channel.
+
+        Returns:
+            JSON with success status and whether new content was published.
+        """
+        try:
+            from hooks.context.brain_adapter import force_refresh
+
+            published = force_refresh()
+            return json.dumps({"success": True, "published": published})
+        except Exception as e:
+            log("MCP brain_refresh failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def brain_status() -> str:
+        """Return current brain adapter state: source type, path, entry count, channel.
+
+        Returns:
+            JSON with brain adapter status details.
+        """
+        try:
+            from hooks.context.brain_adapter import get_status
+
+            status = get_status()
+            return json.dumps({"success": True, **status})
+        except Exception as e:
+            log("MCP brain_status failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})

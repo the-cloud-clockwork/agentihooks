@@ -343,12 +343,16 @@ def on_session_start(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
 
-    # Brain hot-arcs injection (frontal-lobe/conscious/_hot-arcs.md)
+    # Brain adapter — initial brain content injection at session start
     try:
-        from hooks.context.hot_arcs import inject_hot_arcs
-        inject_hot_arcs()
+        from hooks.config import BRAIN_ENABLED
+
+        if BRAIN_ENABLED:
+            from hooks.context.brain_adapter import inject_on_session_start
+
+            inject_on_session_start()
     except Exception as e:
-        log("hot_arcs injection failed", {"error": str(e)})
+        log("brain_adapter session_start failed", {"error": str(e)})
 
     # MCP surface area warning
     try:
@@ -428,6 +432,14 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    # Clear brain adapter counter for this session
+    try:
+        from hooks.context.brain_adapter import clear_session_state as _clear_brain
+
+        _clear_brain(session_id)
+    except Exception:
+        pass
+
     # Clear context refresh turn counter for this session
     from hooks.config import CONTEXT_REFRESH_ENABLED
 
@@ -497,6 +509,17 @@ def on_user_prompt_submit(payload: dict) -> None:
             inject_overlays()
     except Exception as e:
         log("overlay_injector failed", {"error": str(e)})
+
+    # --- Brain adapter: counter-gated refresh of brain content ---
+    try:
+        from hooks.config import BRAIN_ENABLED
+
+        if BRAIN_ENABLED:
+            from hooks.context.brain_adapter import maybe_refresh as brain_maybe_refresh
+
+            brain_maybe_refresh(session_id)
+    except Exception as e:
+        log("brain_adapter refresh failed", {"error": str(e)})
 
     # --- Context refresh: re-inject rules every N turns ---
     from hooks.config import CONTEXT_REFRESH_ENABLED

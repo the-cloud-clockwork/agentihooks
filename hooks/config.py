@@ -159,6 +159,16 @@ IMAGE_PERSISTENCE_REMINDER_INTERVAL = int(os.getenv("IMAGE_PERSISTENCE_REMINDER_
 # Injects active overlay profile content on every UserPromptSubmit turn.
 OVERLAY_INJECTION_ENABLED = _env_bool("OVERLAY_INJECTION_ENABLED", "true")
 
+# =============================================================================
+# BRAIN ADAPTER
+# =============================================================================
+# Pluggable brain content injection into broadcast channels.
+BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", "false")
+BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
+BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / "brain"))
+BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
+BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))

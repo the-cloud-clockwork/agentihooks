@@ -108,6 +108,42 @@ def _load_sessions() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Channel subscription resolution
+# ---------------------------------------------------------------------------
+
+
+def _get_session_channels(session_id: str) -> list[str]:
+    """Resolve channel subscriptions for a session from its .agentihooks.json."""
+    sessions = _load_sessions()
+    session_info = sessions.get(session_id, {})
+    cwd = session_info.get("cwd", "")
+    if not cwd:
+        return []
+    try:
+        config_path = Path(cwd) / ".agentihooks.json"
+        if config_path.exists():
+            cfg = json.loads(config_path.read_text())
+            channels = cfg.get("channels", [])
+            return channels if isinstance(channels, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
+    """Check if a message should be delivered to a session based on channels."""
+    msg_channel = msg.get("channel")
+    # Global messages (no channel) → always deliver
+    if not msg_channel:
+        return True
+    # Wildcard subscription → deliver everything
+    if "*" in session_channels:
+        return True
+    # Channel match
+    return msg_channel in session_channels
+
+
+# ---------------------------------------------------------------------------
 # Message lifecycle
 # ---------------------------------------------------------------------------
 
@@ -118,6 +154,7 @@ def create_broadcast(
     ttl_seconds: int = 0,
     source: str = "operator",
     persistent: bool | None = None,
+    channel: str | None = None,
 ) -> str | None:
     if not message or not message.strip():
         return None
@@ -146,6 +183,8 @@ def create_broadcast(
         "expires_at": expires_at,
         "delivered_to": [],
     }
+    if channel:
+        entry["channel"] = channel
 
     msgs = _load_broadcasts()
     msgs.append(entry)
@@ -162,13 +201,27 @@ def list_broadcasts() -> list[dict]:
     return _load_broadcasts()
 
 
-def clear_broadcasts(message_id: str | None = None) -> None:
-    if message_id is None:
+def clear_broadcasts(message_id: str | None = None, channel: str | None = None) -> int:
+    """Clear broadcasts. Returns count removed.
+
+    If message_id: clear that specific message.
+    If channel: clear all messages on that channel.
+    If neither: clear everything.
+    """
+    msgs = _load_broadcasts()
+    if message_id is None and channel is None:
+        count = len(msgs)
         _save_broadcasts([])
-    else:
-        msgs = _load_broadcasts()
-        msgs = [m for m in msgs if m.get("id") != message_id]
-        _save_broadcasts(msgs)
+        return count
+    if channel:
+        remaining = [m for m in msgs if m.get("channel") != channel]
+        count = len(msgs) - len(remaining)
+        _save_broadcasts(remaining)
+        return count
+    remaining = [m for m in msgs if m.get("id") != message_id]
+    count = len(msgs) - len(remaining)
+    _save_broadcasts(remaining)
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +231,12 @@ def clear_broadcasts(message_id: str | None = None) -> None:
 
 def get_pending_broadcasts(session_id: str) -> list[dict]:
     msgs = _load_broadcasts(cleanup=True)
+    channels = _get_session_channels(session_id)
     pending = []
     for m in msgs:
         if _is_expired(m):
+            continue
+        if not _message_matches_channel(m, channels):
             continue
         if m.get("persistent"):
             pending.append(m)
@@ -191,7 +247,14 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
 
 def get_critical_broadcasts(session_id: str) -> list[dict]:
     msgs = _load_broadcasts(cleanup=True)
-    return [m for m in msgs if m.get("severity") == "critical" and m.get("persistent") and not _is_expired(m)]
+    channels = _get_session_channels(session_id)
+    return [
+        m for m in msgs
+        if m.get("severity") == "critical"
+        and m.get("persistent")
+        and not _is_expired(m)
+        and _message_matches_channel(m, channels)
+    ]
 
 
 def mark_delivered(session_id: str, message_id: str) -> None:
