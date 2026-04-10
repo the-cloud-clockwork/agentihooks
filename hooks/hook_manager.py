@@ -343,6 +343,13 @@ def on_session_start(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
 
+    # Brain hot-arcs injection (frontal-lobe/conscious/_hot-arcs.md)
+    try:
+        from hooks.context.hot_arcs import inject_hot_arcs
+        inject_hot_arcs()
+    except Exception as e:
+        log("hot_arcs injection failed", {"error": str(e)})
+
     # MCP surface area warning
     try:
         import importlib.util
