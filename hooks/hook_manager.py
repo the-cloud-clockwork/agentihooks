@@ -480,6 +480,17 @@ def on_user_prompt_submit(payload: dict) -> None:
     else:
         log("Secrets scanning skipped (mode=off)")
 
+    # --- Overlay injection: inject active overlay profiles every turn ---
+    try:
+        from hooks.config import OVERLAY_INJECTION_ENABLED
+
+        if OVERLAY_INJECTION_ENABLED:
+            from hooks.context.overlay_injector import inject_overlays
+
+            inject_overlays()
+    except Exception as e:
+        log("overlay_injector failed", {"error": str(e)})
+
     # --- Context refresh: re-inject rules every N turns ---
     from hooks.config import CONTEXT_REFRESH_ENABLED
 

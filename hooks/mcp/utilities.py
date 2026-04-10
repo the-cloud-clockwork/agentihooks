@@ -127,6 +127,13 @@ def register(mcp):
                 "read_session_logs",
                 "tail_container_logs",
             ],
+            "profiles": [
+                "profile_list",
+                "profile_current",
+                "overlay_add",
+                "overlay_remove",
+                "overlay_refresh",
+            ],
             "utilities": [
                 "write_markdown",
                 "get_env",

@@ -153,6 +153,12 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 IMAGE_PERSISTENCE_REMINDER_ENABLED = _env_bool("IMAGE_PERSISTENCE_REMINDER_ENABLED", "true")
 IMAGE_PERSISTENCE_REMINDER_INTERVAL = int(os.getenv("IMAGE_PERSISTENCE_REMINDER_INTERVAL", "10"))
 
+# =============================================================================
+# OVERLAY INJECTION
+# =============================================================================
+# Injects active overlay profile content on every UserPromptSubmit turn.
+OVERLAY_INJECTION_ENABLED = _env_bool("OVERLAY_INJECTION_ENABLED", "true")
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
