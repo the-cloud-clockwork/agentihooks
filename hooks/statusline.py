@@ -309,9 +309,9 @@ def main() -> None:
 
             print(
                 f"  {_DIM}agentihooks:{_RESET} {_prof_display}"
-                f"  {_DIM}sp:{_RESET}{_sp_display}"
-                f"  {_DIM}ovl:{_RESET}{_ovl_display}"
-                f"  {_DIM}ch:{_RESET}{_ch_display}"
+                f"  {_DIM}settings:{_RESET}{_sp_display}"
+                f"  {_DIM}overlay:{_RESET}{_ovl_display}"
+                f"  {_DIM}channels:{_RESET}{_ch_display}"
             )
         except Exception:
             pass
