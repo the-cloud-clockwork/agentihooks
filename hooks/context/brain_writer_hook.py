@@ -99,6 +99,8 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
             "content": marker["content"],
             "attrs": marker["attrs"],
             "session_id": session_id,
+            "agent_name": os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown")),
+            "project": os.getenv("CLAUDE_PROJECT_DIR", ""),
             "ts": now.isoformat(),
         }
         (outbox / filename).write_text(json.dumps(payload, indent=2))
