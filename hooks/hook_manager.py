@@ -951,6 +951,20 @@ def on_stop(payload: dict) -> None:
         },
     )
 
+    # Brain writer — FIRST priority, scan transcript for agent-emitted markers
+    # Must run early: Stop hooks in -p mode have limited execution time
+    try:
+        from hooks.config import BRAIN_WRITER_ENABLED
+
+        if BRAIN_WRITER_ENABLED and (transcript_path or payload.get("last_assistant_message")):
+            from hooks.context.brain_writer_hook import write_markers
+
+            last_msg = payload.get("last_assistant_message", "")
+            stats = write_markers(session_id, transcript_path, last_message=last_msg)
+            log("brain_writer: result", stats)
+    except Exception as e:
+        log("brain_writer_hook failed", {"error": str(e)})
+
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:
@@ -1006,19 +1020,6 @@ def on_stop(payload: dict) -> None:
                         log("Context audit report", {"fill_pct": fill_pct, "report": report})
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
-
-    # Brain writer — scan transcript for agent-emitted markers, route to vault/redis
-    try:
-        from hooks.config import BRAIN_WRITER_ENABLED
-
-        if BRAIN_WRITER_ENABLED and transcript_path:
-            from hooks.context.brain_writer_hook import write_markers
-
-            stats = write_markers(session_id, transcript_path)
-            if stats.get("markers", 0) > 0:
-                log("brain_writer: processed", stats)
-    except Exception as e:
-        log("brain_writer_hook failed", {"error": str(e)})
 
 
 def on_subagent_stop(payload: dict) -> None:

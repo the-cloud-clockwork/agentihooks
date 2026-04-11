@@ -165,8 +165,14 @@ def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
 
 # ── Main entry point ─────────────────────────────────────────────────
 
-def write_markers(session_id: str, transcript_path: str) -> dict:
-    """Scan transcript for brain markers, write to outbox, publish to Redis."""
+def write_markers(session_id: str, transcript_path: str, last_message: str = "") -> dict:
+    """Scan transcript for brain markers, write to outbox, publish to Redis.
+
+    Args:
+        last_message: The last assistant message from the Stop payload.
+            Used as fallback when the JSONL transcript hasn't been flushed yet
+            (race condition in -p mode).
+    """
     from hooks.config import (
         BRAIN_WRITER_ENABLED,
         BRAIN_WRITER_MAX_MARKERS,
@@ -179,6 +185,10 @@ def write_markers(session_id: str, transcript_path: str) -> dict:
         return {"markers": 0, "reason": "disabled"}
 
     markers = _parse_transcript_for_markers(transcript_path, BRAIN_WRITER_MAX_MARKERS)
+
+    # Fallback: if transcript had no markers but last_message does, parse that
+    if not markers and last_message:
+        markers = _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]
     if not markers:
         return {"markers": 0}
 
