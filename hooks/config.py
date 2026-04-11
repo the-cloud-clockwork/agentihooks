@@ -163,7 +163,10 @@ OVERLAY_INJECTION_ENABLED = _env_bool("OVERLAY_INJECTION_ENABLED", "true")
 # BRAIN ADAPTER
 # =============================================================================
 # Pluggable brain content injection into broadcast channels.
-BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", "false")
+# Auto-detect brain: enabled if brain-feed dir has .md files, unless explicitly disabled
+_brain_feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
+_brain_default = "true" if (_brain_feed_dir.is_dir() and any(_brain_feed_dir.glob("*.md"))) else "false"
+BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", _brain_default)
 BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
 BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / "brain-feed"))
 BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
