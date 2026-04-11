@@ -2147,8 +2147,15 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
     _install_user_mcp(last_profile)
-    # Layer 2: bundle .claude/.mcp.json (all profiles), fallback to root .mcp.json
-    if bundle_dir:
+
+    # Check if any profile in the chain has its own .mcp.json — if so, it overrides the bundle global
+    profile_has_own_mcp = any(
+        (pdir / _CLAUDE_SUBDIR / _MCP_JSON_NAME).exists()
+        for _, pdir in profile_dirs
+    )
+
+    # Layer 2: bundle .claude/.mcp.json — SKIP if profile defines its own MCP servers
+    if bundle_dir and not profile_has_own_mcp:
         bundle_mcp = bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
         if not bundle_mcp.exists():
             bundle_mcp = bundle_dir / _MCP_JSON_NAME
@@ -2161,6 +2168,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                     _cprint(f"  [OK] Bundle MCP servers: {', '.join(servers.keys())}")
             except (json.JSONDecodeError, OSError) as exc:
                 _cprint(f"  [WARN] Could not read bundle .mcp.json: {exc}")
+    elif profile_has_own_mcp:
+        _cprint(f"  [OK] Profile has own .mcp.json — skipping bundle global MCP servers")
+
     # Layer 3+: each profile's .mcp.json (chained)
     for pname, pdir in profile_dirs:
         profile_mcp = pdir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
