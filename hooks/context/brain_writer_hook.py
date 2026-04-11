@@ -145,7 +145,7 @@ def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
             f"scope {scope} "
             f"ts {int(datetime.now(timezone.utc).timestamp())}"
         )
-        cmd = f"redis-cli -h {host} -p {port} -a {password} -n {db} XADD anton:events:brain '*' {fields}"
+        cmd = f"docker exec dataplane_redis redis-cli -a {password} -n {db} XADD anton:events:brain '*' {fields}"
 
         try:
             result = subprocess.run(

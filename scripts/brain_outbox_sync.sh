@@ -19,21 +19,33 @@ SSH_CMD="ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=5 $VAULT_SSH"
 # Ensure today's cluster dir exists
 $SSH_CMD "mkdir -p '$CLUSTER_DIR' && chmod 777 '$CLUSTER_DIR'" 2>/dev/null || true
 
+# Ensure logs dir exists
+mkdir -p "$HOME/.agentihooks/logs"
+
 PROCESSED=0
 for f in "$OUTBOX"/*.json; do
     [[ -f "$f" ]] || continue
 
-    TYPE=$(python3 -c "import json; print(json.load(open('$f'))['type'])")
-    CONTENT=$(python3 -c "import json; c=json.load(open('$f'))['content']; print(c[:500])")
-    SID=$(python3 -c "import json; print(json.load(open('$f'))['session_id'][:8])")
-    TS=$(python3 -c "import json; print(json.load(open('$f'))['ts'][:19])")
+    # Extract fields safely via python
+    read -r TYPE SID <<< "$(python3 -c "
+import json, sys
+d = json.load(open('$f'))
+print(d['type'], d['session_id'][:8])
+")"
+    CONTENT=$(python3 -c "
+import json, sys
+d = json.load(open('$f'))
+# Escape for safe shell embedding
+c = d['content'][:500].replace('\\\\', '\\\\\\\\').replace(\"'\", \"'\\\\''\")
+print(c)
+")
 
     ARC_FILE="$CLUSTER_DIR/${TODAY}-${SID}-writer.md"
 
-    # Create arc stub if needed, then append marker
-    $SSH_CMD "
-        if [[ ! -f '$ARC_FILE' ]]; then
-            cat > '$ARC_FILE' << 'FRONTMATTER'
+    # Build the marker block locally, base64 encode, decode on remote
+    MARKER_BLOCK=$(printf '\n<!-- @%s -->\n%s\n<!-- @/%s -->\n' "$TYPE" "$CONTENT" "$TYPE" | base64 -w0)
+
+    STUB_CONTENT=$(cat <<STUBEOF
 ---
 cluster_id: ${TODAY}-${SID}-writer
 title: Session markers — ${SID}
@@ -46,21 +58,23 @@ created: ${TODAY}
 ---
 
 # Session Markers
-FRONTMATTER
+STUBEOF
+)
+    STUB_B64=$(echo "$STUB_CONTENT" | base64 -w0)
+
+    $SSH_CMD "
+        if [[ ! -f '$ARC_FILE' ]]; then
+            echo '$STUB_B64' | base64 -d > '$ARC_FILE'
             chmod 666 '$ARC_FILE'
         fi
-        printf '\n<!-- @${TYPE} -->\n${CONTENT}\n<!-- @/${TYPE} -->\n' >> '$ARC_FILE'
-    " 2>/dev/null
+        echo '$MARKER_BLOCK' | base64 -d >> '$ARC_FILE'
+    " 2>/dev/null || { echo "WARN: failed to write $f" >&2; continue; }
 
     rm "$f"
     PROCESSED=$((PROCESSED + 1))
 done
 
 if [[ "$PROCESSED" -gt 0 ]]; then
-    # Quick-refresh brain-feed (scan arcs + write feeds only, no heat recompute)
-    $SSH_CMD "python3 '$VAULT_PATH/brain-tools/brain_keeper.py' \
-        --vault '$VAULT_PATH' --brain-feed '$VAULT_PATH/brain-feed' --quick-refresh" 2>/dev/null || true
-
     # Sync brain-feed back to local
     rsync -az -e "ssh -i $SSH_KEY" "$VAULT_SSH:$VAULT_PATH/brain-feed/" "$HOME/.agentihooks/brain-feed/" 2>/dev/null || true
 
