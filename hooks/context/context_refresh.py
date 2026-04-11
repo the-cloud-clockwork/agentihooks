@@ -147,8 +147,6 @@ def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = 
 
     dirs = [Path(rules_dir)]
     if include_project:
-        # Use project_dir from hook payload (cwd) or CLAUDE_PROJECT_DIR env var.
-        # Falls back to CWD only as last resort (unreliable — hook CWD is agentihooks root).
         base = project_dir or os.environ.get("CLAUDE_PROJECT_DIR", "")
         if base:
             project_rules = Path(base) / ".claude" / "rules"
@@ -156,6 +154,16 @@ def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = 
             project_rules = Path(".claude/rules")
         if project_rules.is_dir():
             dirs.append(project_rules)
+
+    # Include rules from active overlays (mid-session profile activation)
+    try:
+        from scripts.overlay import get_active_overlays
+        for overlay in get_active_overlays():
+            rules_dir_path = overlay.get("rules_dir")
+            if rules_dir_path and Path(rules_dir_path).is_dir():
+                dirs.append(Path(rules_dir_path))
+    except Exception:
+        pass
 
     for d in dirs:
         try:
@@ -336,6 +344,34 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
             )
 
     _set_state(session_id, state)
+
+
+def force_rules_refresh(session_id: str, project_dir: str = "") -> None:
+    """Force immediate re-injection of all rules (including overlay rules).
+
+    Called when an overlay is activated/deactivated to ensure the session
+    gets the new rules immediately instead of waiting for the next interval.
+    """
+    from hooks.config import (
+        CONTEXT_REFRESH_RULES_DIR,
+        CONTEXT_REFRESH_INCLUDE_PROJECT,
+        CONTEXT_REFRESH_INTERVAL,
+    )
+    from hooks.common import inject_context
+
+    rules = _load_rules_files(CONTEXT_REFRESH_RULES_DIR, CONTEXT_REFRESH_INCLUDE_PROJECT, project_dir)
+    if not rules:
+        return
+
+    state = _get_state(session_id)
+    turn = state.get("turn_count", 0)
+    text = _build_injection_text(rules, turn, CONTEXT_REFRESH_INTERVAL)
+    inject_context(text)
+
+    # Reset counter so next normal refresh doesn't double-inject
+    state["last_rules_turn"] = turn
+    _set_state(session_id, state)
+    log("context_refresh: forced rules refresh", {"rules_count": len(rules)})
 
 
 def clear_session_state(session_id: str) -> None:

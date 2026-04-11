@@ -185,11 +185,13 @@ def overlay_add(name: str, base_profile_dir: Path | None = None, added_by: str =
             return {"success": False, "error": f"Overlay '{name}' already active"}
 
     content = _render_profile_content(overlay_dir)
+    rules_dir = overlay_dir / ".claude" / "rules"
     entry = {
         "name": name,
         "added_at": datetime.now(timezone.utc).isoformat(),
         "added_by": added_by,
         "rules_content": content,
+        "rules_dir": str(rules_dir) if rules_dir.is_dir() else "",
     }
 
     if not data.get("base_profile"):
@@ -198,6 +200,35 @@ def overlay_add(name: str, base_profile_dir: Path | None = None, added_by: str =
     _save_overlays(data)
 
     log("overlay_add", {"name": name, "added_by": added_by})
+
+    # Force immediate rules re-injection for current session
+    try:
+        from hooks.context.context_refresh import force_rules_refresh
+        from hooks.context.broadcast import _load_sessions
+        sessions = _load_sessions()  # dict keyed by session_id
+        if sessions:
+            latest_sid = max(sessions, key=lambda sid: sessions[sid].get("registered_at", ""))
+            force_rules_refresh(latest_sid, sessions[latest_sid].get("cwd", ""))
+    except Exception:
+        pass
+
+    # Broadcast activation to fleet
+    try:
+        from hooks.config import PROFILE_BROADCAST_ENABLED
+        if PROFILE_BROADCAST_ENABLED:
+            import os
+            from hooks.context.broadcast import create_broadcast
+            agent = os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown"))
+            create_broadcast(
+                message=f"Profile **{name}** activated on {agent}",
+                severity="info",
+                ttl_seconds=300,
+                source="overlay-system",
+                channel="brain",
+            )
+    except Exception:
+        pass
+
     return {"success": True, "overlay": entry}
 
 
@@ -213,6 +244,24 @@ def overlay_remove(name: str) -> dict:
     data["overlays"] = new_overlays
     _save_overlays(data)
     log("overlay_remove", {"name": name})
+
+    # Broadcast deactivation to fleet
+    try:
+        from hooks.config import PROFILE_BROADCAST_ENABLED
+        if PROFILE_BROADCAST_ENABLED:
+            import os
+            from hooks.context.broadcast import create_broadcast
+            agent = os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown"))
+            create_broadcast(
+                message=f"Profile **{name}** deactivated on {agent}",
+                severity="info",
+                ttl_seconds=300,
+                source="overlay-system",
+                channel="brain",
+            )
+    except Exception:
+        pass
+
     return {"success": True, "removed": name}
 
 

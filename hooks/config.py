@@ -253,6 +253,9 @@ _raw_scope = os.getenv("CONTEXT_COMPRESSION_SCOPE", "refresh").lower().strip()
 CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_SCOPES else "refresh"
 
 # =============================================================================
+# PROFILE / OVERLAY BROADCAST — notify fleet on profile activation/deactivation
+PROFILE_BROADCAST_ENABLED = _env_bool("PROFILE_BROADCAST_ENABLED", "true")
+
 # BROADCAST SYSTEM — real-time fleet messaging
 # =============================================================================
 BROADCAST_ENABLED = _env_bool("BROADCAST_ENABLED", "true")
