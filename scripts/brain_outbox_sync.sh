@@ -62,12 +62,18 @@ STUBEOF
 )
     STUB_B64=$(echo "$STUB_CONTENT" | base64 -w0)
 
+    # Dedup: compute short hash of content, skip if already in arc
+    CONTENT_HASH=$(echo "$CONTENT" | md5sum | cut -c1-8)
+
     $SSH_CMD "
         if [[ ! -f '$ARC_FILE' ]]; then
             echo '$STUB_B64' | base64 -d > '$ARC_FILE'
             chmod 666 '$ARC_FILE'
         fi
-        echo '$MARKER_BLOCK' | base64 -d >> '$ARC_FILE'
+        if ! grep -qF '$CONTENT_HASH' '$ARC_FILE' 2>/dev/null; then
+            echo '$MARKER_BLOCK' | base64 -d >> '$ARC_FILE'
+            echo '<!-- hash:$CONTENT_HASH -->' >> '$ARC_FILE'
+        fi
     " 2>/dev/null || { echo "WARN: failed to write $f" >&2; continue; }
 
     rm "$f"
