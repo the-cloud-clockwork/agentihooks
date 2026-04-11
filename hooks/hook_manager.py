@@ -332,6 +332,18 @@ def on_session_start(payload: dict) -> None:
         log("thinking_policy injection failed", {"error": str(e)})
 
     # --- Broadcast: register session + deliver pending ---
+    # Brain adapter FIRST — publishes brain content to broadcast.json
+    try:
+        from hooks.config import BRAIN_ENABLED
+
+        if BRAIN_ENABLED:
+            from hooks.context.brain_adapter import inject_on_session_start
+
+            inject_on_session_start()
+    except Exception as e:
+        log("brain_adapter session_start failed", {"error": str(e)})
+
+    # Broadcast SECOND — reads broadcast.json (now includes brain content) and injects
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
@@ -342,17 +354,6 @@ def on_session_start(payload: dict) -> None:
             check_and_inject_broadcasts(session_id)
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
-
-    # Brain adapter — initial brain content injection at session start
-    try:
-        from hooks.config import BRAIN_ENABLED
-
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import inject_on_session_start
-
-            inject_on_session_start()
-    except Exception as e:
-        log("brain_adapter session_start failed", {"error": str(e)})
 
     # Auto-overlay activation — profiles requested via AGENTIHOOKS_AUTO_OVERLAY env var
     try:
