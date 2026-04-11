@@ -3587,8 +3587,13 @@ def _quota_start_daemon(python: str, watcher: Path, poll: int = 60) -> None:
 def cmd_claude(extra_args: list[str]) -> None:
     """Launch claude with flags from the active profile's claude: section."""
     state = _load_state()
-    profile_name = state.get("targets", {}).get("global", {}).get("profile", "default")
-    profile_dir = _resolve_profile_dir(profile_name)
+    global_target = state.get("targets", {}).get("global", {})
+    profile_name = global_target.get("profile", "default")
+    # For chained profiles (e.g. "anton,brain"), prefer settings_profile for claude: flags,
+    # then fall back to the first profile in the chain.
+    settings_profile = global_target.get("settings_profile", "")
+    primary_name = settings_profile or profile_name.split(",")[0].strip()
+    profile_dir = _resolve_profile_dir(primary_name)
 
     claude_flags: dict = {}
     if profile_dir:
