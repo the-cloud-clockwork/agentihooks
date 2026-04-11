@@ -481,11 +481,17 @@ def _sync_lock(*, blocking: bool = True):
 
 
 def _get_bundle_path() -> Path | None:
-    """Return the linked bundle path from state.json, or None."""
+    """Return the linked bundle path from state.json, or AGENTIHOOKS_BUNDLE_PATH env var."""
     state = _load_state()
     bundle = state.get("bundle")
     if bundle:
         p = Path(bundle["path"])
+        if p.is_dir():
+            return p
+    # Fallback: auto-discover from env var (headless/container mode)
+    env_path = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
+    if env_path:
+        p = Path(env_path).expanduser().resolve()
         if p.is_dir():
             return p
     return None
