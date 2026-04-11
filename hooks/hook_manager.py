@@ -990,6 +990,19 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
 
+    # Brain writer — scan transcript for agent-emitted markers, route to vault/redis
+    try:
+        from hooks.config import BRAIN_WRITER_ENABLED
+
+        if BRAIN_WRITER_ENABLED and transcript_path:
+            from hooks.context.brain_writer_hook import write_markers
+
+            stats = write_markers(session_id, transcript_path)
+            if stats.get("markers", 0) > 0:
+                log("brain_writer: processed", stats)
+    except Exception as e:
+        log("brain_writer_hook failed", {"error": str(e)})
+
 
 def on_subagent_stop(payload: dict) -> None:
     """Handle SubagentStop event."""

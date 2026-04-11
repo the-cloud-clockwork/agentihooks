@@ -173,6 +173,21 @@ BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
 AMYGDALA_ENABLED = _env_bool("AMYGDALA_ENABLED", "false")
 AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
 
+# Brain Writer — write-back path from agent markers to vault + event bus
+BRAIN_WRITER_ENABLED = _env_bool("BRAIN_WRITER_ENABLED", "false")
+BRAIN_WRITER_OUTBOX = os.getenv(
+    "BRAIN_WRITER_OUTBOX", str(Path(AGENTIHOOKS_HOME) / "brain-outbox")
+)
+BRAIN_WRITER_VAULT_SSH = os.getenv("BRAIN_WRITER_VAULT_SSH", "")
+BRAIN_WRITER_VAULT_PATH = os.getenv(
+    "BRAIN_WRITER_VAULT_PATH", "/mnt/user/appdata/obsidian/vault"
+)
+BRAIN_WRITER_SSH_KEY = os.getenv(
+    "BRAIN_WRITER_SSH_KEY", str(Path.home() / ".ssh" / "anton_id_ed25519")
+)
+BRAIN_WRITER_REDIS_URL = os.getenv("BRAIN_WRITER_REDIS_URL", "")
+BRAIN_WRITER_MAX_MARKERS = int(os.getenv("BRAIN_WRITER_MAX_MARKERS", "5"))
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
