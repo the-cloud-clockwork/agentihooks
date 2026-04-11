@@ -3,5 +3,9 @@
   "enabledMcpServers": [
     "hooks-utils",
     "gateway-core"
+  ],
+  "channels": [
+    "brain",
+    "amygdala"
   ]
 }
