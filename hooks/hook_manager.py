@@ -354,6 +354,22 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 
+    # Auto-overlay activation — profiles requested via AGENTIHOOKS_AUTO_OVERLAY env var
+    try:
+        auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
+        if auto_overlays:
+            from scripts.overlay import overlay_add
+            for name in auto_overlays.split(","):
+                name = name.strip()
+                if name:
+                    result = overlay_add(name, added_by="auto-session-start")
+                    if result.get("success"):
+                        log("auto_overlay: activated", {"name": name})
+                    else:
+                        log("auto_overlay: skip", {"name": name, "reason": result.get("error", "")})
+    except Exception as e:
+        log("auto_overlay session_start failed", {"error": str(e)})
+
     # MCP surface area warning
     try:
         import importlib.util
@@ -1008,6 +1024,19 @@ def on_subagent_stop(payload: dict) -> None:
     """Handle SubagentStop event."""
     session_id = payload.get("session_id", "")
     log("Subagent stopped", {"session_id": session_id})
+
+    # Auto-overlay cleanup — remove overlays activated at session start
+    try:
+        auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
+        if auto_overlays:
+            from scripts.overlay import overlay_remove
+            for name in auto_overlays.split(","):
+                name = name.strip()
+                if name:
+                    overlay_remove(name)
+                    log("auto_overlay: deactivated", {"name": name})
+    except Exception as e:
+        log("auto_overlay subagent_stop failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log (for debugging)
     transcript_path = payload.get("transcript_path", "")

@@ -255,6 +255,9 @@ CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_
 # =============================================================================
 # PROFILE / OVERLAY BROADCAST — notify fleet on profile activation/deactivation
 PROFILE_BROADCAST_ENABLED = _env_bool("PROFILE_BROADCAST_ENABLED", "true")
+# Auto-overlay: comma-separated overlays to activate at session start
+# Can also be set per-agent via AGENTIHOOKS_AUTO_OVERLAY env var
+AGENTIHOOKS_AUTO_OVERLAY = os.getenv("AGENTIHOOKS_AUTO_OVERLAY", "")
 
 # BROADCAST SYSTEM — real-time fleet messaging
 # =============================================================================
