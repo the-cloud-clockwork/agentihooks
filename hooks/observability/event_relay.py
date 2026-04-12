@@ -323,10 +323,14 @@ def main() -> None:
         all_events: list[dict] = []
         if hook_name == "PostToolUse":
             all_events.extend(events_from_post_tool_use(event))
-        events_from_file, new_pos = read_new_transcript_events(session_id, transcript_path)
-        if events_from_file:
-            all_events.extend(events_from_file)
-            _save_position(session_id, new_pos)
+            _, new_pos = read_new_transcript_events(session_id, transcript_path)
+            if new_pos:
+                _save_position(session_id, new_pos)
+        else:
+            events_from_file, new_pos = read_new_transcript_events(session_id, transcript_path)
+            if events_from_file:
+                all_events.extend(events_from_file)
+                _save_position(session_id, new_pos)
         if hook_name == "Stop" and not any(e["event_type"] == "assistant_text" for e in all_events):
             all_events.extend(events_from_stop_payload(event))
         if all_events:
