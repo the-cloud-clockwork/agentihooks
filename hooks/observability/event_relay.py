@@ -251,6 +251,56 @@ def publish_done(correlation_id: str, session_id: str) -> None:
         pass
 
 
+def events_from_post_tool_use(payload: dict) -> list[dict]:
+    """Build tool_use + tool_result events directly from a PostToolUse hook payload.
+
+    The hook payload has tool_name, tool_input, tool_output, is_error directly,
+    so we don't depend on the transcript JSONL being flushed yet (a known race
+    condition with `claude -p` Stop hooks).
+    """
+    out = []
+    tool_name = payload.get("tool_name", "")
+    if not tool_name or tool_name.startswith("system/"):
+        return out
+    tool_input = payload.get("tool_input", {}) or {}
+    tool_output = payload.get("tool_output", "")
+    is_error = bool(payload.get("is_error", False))
+    out.append({
+        "event_type": "tool_use",
+        "content": json.dumps({
+            "id": payload.get("tool_use_id", ""),
+            "name": tool_name,
+            "input": tool_input,
+        }),
+    })
+    if tool_output != "" or is_error:
+        if isinstance(tool_output, (dict, list)):
+            output_text = json.dumps(tool_output)
+        else:
+            output_text = str(tool_output)
+        out.append({
+            "event_type": "tool_result",
+            "content": json.dumps({
+                "tool_use_id": payload.get("tool_use_id", ""),
+                "is_error": is_error,
+                "output": output_text,
+            }),
+        })
+    return out
+
+
+def events_from_stop_payload(payload: dict) -> list[dict]:
+    """Extract assistant_text from a Stop hook payload's last_assistant_message field.
+
+    Used as fallback when the JSONL transcript hasn't been flushed yet.
+    """
+    out = []
+    last_msg = payload.get("last_assistant_message", "") or ""
+    if isinstance(last_msg, str) and last_msg.strip():
+        out.append({"event_type": "assistant_text", "content": last_msg})
+    return out
+
+
 def main() -> None:
     correlation_id = os.environ.get("AGENTICORE_CORRELATION_ID", "")
     if not correlation_id:
@@ -270,10 +320,17 @@ def main() -> None:
     transcript_path = event.get("transcript_path", "")
 
     try:
-        events, new_pos = read_new_transcript_events(session_id, transcript_path)
-        if events:
-            publish_events(correlation_id, session_id, events)
+        all_events: list[dict] = []
+        if hook_name == "PostToolUse":
+            all_events.extend(events_from_post_tool_use(event))
+        events_from_file, new_pos = read_new_transcript_events(session_id, transcript_path)
+        if events_from_file:
+            all_events.extend(events_from_file)
             _save_position(session_id, new_pos)
+        if hook_name == "Stop" and not any(e["event_type"] == "assistant_text" for e in all_events):
+            all_events.extend(events_from_stop_payload(event))
+        if all_events:
+            publish_events(correlation_id, session_id, all_events)
         if hook_name == "Stop":
             publish_done(correlation_id, session_id)
     except Exception:

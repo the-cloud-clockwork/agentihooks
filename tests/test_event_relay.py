@@ -273,3 +273,83 @@ class TestPublish:
         monkeypatch.setattr(mod, "_get_redis", lambda: None)
         n = mod.publish_events("c", "s", [{"event_type": "thinking", "content": "x"}])
         assert n == 0
+
+
+class TestEventsFromPostToolUse:
+    def test_basic_tool_use_and_result(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "tool_output": "file1\nfile2",
+            "is_error": False,
+            "tool_use_id": "tu_42",
+        }
+        events = events_from_post_tool_use(payload)
+        assert len(events) == 2
+        assert events[0]["event_type"] == "tool_use"
+        tu = json.loads(events[0]["content"])
+        assert tu["name"] == "Bash"
+        assert tu["input"] == {"command": "ls"}
+        assert tu["id"] == "tu_42"
+        assert events[1]["event_type"] == "tool_result"
+        tr = json.loads(events[1]["content"])
+        assert tr["output"] == "file1\nfile2"
+        assert tr["is_error"] is False
+
+    def test_skips_system_tools(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {"tool_name": "system/internal", "tool_input": {}, "tool_output": "x"}
+        assert events_from_post_tool_use(payload) == []
+
+    def test_missing_tool_name_skipped(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        assert events_from_post_tool_use({}) == []
+
+    def test_dict_tool_output_serialized(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/etc/hosts"},
+            "tool_output": {"lines": 10, "size": 256},
+        }
+        events = events_from_post_tool_use(payload)
+        tr = json.loads(events[1]["content"])
+        assert json.loads(tr["output"]) == {"lines": 10, "size": 256}
+
+    def test_is_error_propagated(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "false"},
+            "tool_output": "error: command failed",
+            "is_error": True,
+        }
+        events = events_from_post_tool_use(payload)
+        tr = json.loads(events[1]["content"])
+        assert tr["is_error"] is True
+
+    def test_no_output_no_result_event(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_output": ""}
+        events = events_from_post_tool_use(payload)
+        assert len(events) == 1
+        assert events[0]["event_type"] == "tool_use"
+
+
+class TestEventsFromStopPayload:
+    def test_extracts_last_assistant_message(self):
+        from hooks.observability.event_relay import events_from_stop_payload
+        payload = {"last_assistant_message": "Hello, world!"}
+        events = events_from_stop_payload(payload)
+        assert events == [{"event_type": "assistant_text", "content": "Hello, world!"}]
+
+    def test_empty_message_skipped(self):
+        from hooks.observability.event_relay import events_from_stop_payload
+        assert events_from_stop_payload({"last_assistant_message": ""}) == []
+        assert events_from_stop_payload({}) == []
+        assert events_from_stop_payload({"last_assistant_message": "   "}) == []
+
+    def test_non_string_skipped(self):
+        from hooks.observability.event_relay import events_from_stop_payload
+        assert events_from_stop_payload({"last_assistant_message": ["x", "y"]}) == []
