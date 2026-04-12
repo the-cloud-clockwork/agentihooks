@@ -19,7 +19,7 @@ class TestMCPRegistry:
         """Standard categories are registered."""
         from hooks.mcp._registry import CATEGORY_MODULES
 
-        expected = ["aws", "email", "messaging", "storage"]
+        expected = ["aws", "email", "storage"]
         for cat in expected:
             assert cat in CATEGORY_MODULES, f"Missing category: {cat}"
 

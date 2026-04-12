@@ -109,10 +109,6 @@ def register(mcp):
             "email": [
                 "email_send",
             ],
-            "messaging": [
-                "sqs_send_message",
-                "webhook_send",
-            ],
             "storage": [
                 "storage_upload_path",
             ],

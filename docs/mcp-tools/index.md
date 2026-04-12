@@ -7,7 +7,7 @@ permalink: /docs/mcp-tools/
 
 # MCP Tools
 
-The AgentiHooks MCP server exposes tools across **8 categories**. The server is started by `python -m hooks.mcp` and registered automatically during `agentihooks init`.
+The AgentiHooks MCP server exposes tools across **7 categories**. The server is started by `python -m hooks.mcp` and registered automatically during `agentihooks init`.
 
 ## Categories
 
@@ -15,7 +15,6 @@ The AgentiHooks MCP server exposes tools across **8 categories**. The server is 
 |----------|-------------|
 | [AWS](aws.md) | Profile listing, account ID lookup, account discovery |
 | [Email](email.md) | SMTP send with plain text / HTML / markdown options |
-| [Messaging](messaging.md) | SQS message send, webhook HTTP calls |
 | [Storage](storage.md) | S3 upload |
 | [Database](database.md) | DynamoDB put, PostgreSQL execute |
 | [Compute](compute.md) | AWS Lambda invocation (sync + async) |
@@ -35,7 +34,7 @@ MCP_CATEGORIES=aws,utilities python -m hooks.mcp
 Valid values (comma-separated):
 
 ```
-aws, email, messaging, storage, database,
+aws, email, storage, database,
 compute, observability, utilities
 ```
 

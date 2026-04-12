@@ -3,9 +3,7 @@
 This package contains clients for external services:
 - aws: AWS config parsing
 - mailer: SMTP email client
-- sqs: AWS SQS messaging with state enrichment
 - storage: AWS S3 storage uploads
-- webhook: HTTP webhook client
 - lambda_invoke: AWS Lambda invocation
 - dynamodb: AWS DynamoDB storage
 - postgres: PostgreSQL database storage
@@ -75,26 +73,11 @@ from hooks.integrations.postgres import (
 from hooks.integrations.postgres import (
     insert as postgres_insert,
 )
-from hooks.integrations.sqs import (
-    SQSClient,
-    SQSIntegration,
-    SQSResult,
-    load_state,
-    send_message,
-)
 from hooks.integrations.storage import (
     S3StorageClient,
     StorageIntegration,
     UploadResult,
     upload_path,
-)
-from hooks.integrations.webhook import (
-    HTTPClient,
-    HTTPIntegration,
-    HTTPResult,
-)
-from hooks.integrations.webhook import (
-    send as http_send,
 )
 
 # =============================================================================
@@ -154,22 +137,11 @@ __all__ = [
     "markdown_to_html",
     "wrap_html_body",
     "parse_recipients",
-    # SQS
-    "SQSClient",
-    "SQSResult",
-    "SQSIntegration",
-    "send_message",
-    "load_state",
     # S3 Storage
     "S3StorageClient",
     "StorageIntegration",
     "UploadResult",
     "upload_path",
-    # HTTP Webhook
-    "HTTPClient",
-    "HTTPResult",
-    "HTTPIntegration",
-    "http_send",
     # Lambda
     "LambdaClient",
     "LambdaResult",

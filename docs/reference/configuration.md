@@ -34,7 +34,7 @@ These variables control how `agentihooks init` installs and configures Claude Co
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTIHOOKS_HOME` | `~/.agentihooks` | Root directory for all runtime data: logs, memory, state. Set to a shared mount for Kubernetes deployments. |
-| `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `aws,email,messaging,storage,database,compute,observability,utilities`. |
+| `MCP_CATEGORIES` | `all` | Comma-separated list of MCP tool categories to load. Valid values: `aws,email,storage,database,compute,observability,utilities`. |
 | `ALLOWED_TOOLS` | -- | Legacy: comma-separated list of specific tool names. Takes precedence over category filtering after categories are loaded. |
 | `ENABLE_TOOL_SEARCH` | `true` | Set in the `env` block of `settings.json`. Makes all MCP tools lazy-loaded on demand -- shown as "(loaded on-demand)" in `/context`. Eliminates approximately 79K token upfront cost from MCP tool schemas. |
 
@@ -204,27 +204,6 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ---
 
-## Messaging
-
-### SQS
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SQS_QUEUE_URL` | -- | Full SQS queue URL. |
-| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual send. |
-
-### Webhook
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WEBHOOK_URL` | -- | Default webhook endpoint URL. |
-| `WEBHOOK_AUTH_HEADER` | `X-Auth-Token` | Authentication header name. |
-| `WEBHOOK_AUTH_TOKEN` | -- | Authentication token value. |
-| `WEBHOOK_TIMEOUT` | `30` | Request timeout in seconds. |
-| `IS_EVALUATION` | `false` | Evaluation mode -- skips actual send. |
-
----
-
 ## Storage (S3)
 
 | Variable | Default | Description |
@@ -280,8 +259,8 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ## Evaluation mode
 
-`IS_EVALUATION=true` is a shared flag recognized by messaging, storage, database, and compute integrations. When set, tools skip their actual external calls and return a simulated success response. Useful for testing agent logic without side effects.
+`IS_EVALUATION=true` is a shared flag recognized by storage, database, and compute integrations. When set, tools skip their actual external calls and return a simulated success response. Useful for testing agent logic without side effects.
 
 | Variable | Integrations affected |
 |----------|-----------------------|
-| `IS_EVALUATION` | SQS, Webhook, S3, DynamoDB, PostgreSQL, Lambda |
+| `IS_EVALUATION` | S3, DynamoDB, PostgreSQL, Lambda |
