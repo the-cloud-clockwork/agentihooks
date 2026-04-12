@@ -160,18 +160,35 @@ def extract_events_from_user(entry: dict) -> list[dict]:
     return out
 
 
-def extract_events_from_entry(entry: dict) -> list[dict]:
-    """Dispatch to assistant/user extractors. Returns [] for other entry types."""
+def extract_events_from_entry(entry: dict, drop_tool_events: bool = False) -> list[dict]:
+    """Dispatch to assistant/user extractors. Returns [] for other entry types.
+
+    drop_tool_events: when True, skip tool_use and tool_result blocks. Used by
+    the Stop reader because PostToolUse already published those — keeping them
+    here would double-emit if the JSONL flush race causes the transcript cursor
+    to lag behind the actual tool_use writes.
+    """
     t = entry.get("type")
     if t == "assistant":
-        return extract_events_from_assistant(entry)
+        events = extract_events_from_assistant(entry)
+        if drop_tool_events:
+            events = [e for e in events if e["event_type"] != "tool_use"]
+        return events
     if t == "user":
+        if drop_tool_events:
+            return []
         return extract_events_from_user(entry)
     return []
 
 
-def read_new_transcript_events(session_id: str, transcript_path: str) -> tuple[list[dict], int]:
-    """Returns (events, new_position). Reads transcript JSONL from byte offset."""
+def read_new_transcript_events(
+    session_id: str, transcript_path: str, drop_tool_events: bool = False,
+) -> tuple[list[dict], int]:
+    """Returns (events, new_position). Reads transcript JSONL from byte offset.
+
+    drop_tool_events: pass True from the Stop hook so tool_use/tool_result
+    blocks are not re-emitted (PostToolUse already published them).
+    """
     if not transcript_path or not os.path.exists(transcript_path):
         return [], 0
     pos = _load_position(session_id)
@@ -189,7 +206,7 @@ def read_new_transcript_events(session_id: str, transcript_path: str) -> tuple[l
                 entry = json.loads(line)
             except Exception:
                 continue
-            events.extend(extract_events_from_entry(entry))
+            events.extend(extract_events_from_entry(entry, drop_tool_events=drop_tool_events))
         return events, new_pos
     except Exception:
         return [], pos
@@ -254,8 +271,12 @@ def publish_done(correlation_id: str, session_id: str) -> None:
 def events_from_post_tool_use(payload: dict) -> list[dict]:
     """Build tool_use + tool_result events directly from a PostToolUse hook payload.
 
-    The hook payload has tool_name, tool_input, tool_output, is_error directly,
-    so we don't depend on the transcript JSONL being flushed yet (a known race
+    Field names per Claude Code's actual hook protocol:
+      - tool_name, tool_input, tool_use_id (top-level)
+      - tool_response (dict or string with the tool's output) — NOT tool_output
+      - is_error may be None (older versions) or in tool_response
+
+    We don't depend on the transcript JSONL being flushed yet (a known race
     condition with `claude -p` Stop hooks).
     """
     out = []
@@ -263,29 +284,50 @@ def events_from_post_tool_use(payload: dict) -> list[dict]:
     if not tool_name or tool_name.startswith("system/"):
         return out
     tool_input = payload.get("tool_input", {}) or {}
-    tool_output = payload.get("tool_output", "")
-    is_error = bool(payload.get("is_error", False))
+    tool_use_id = payload.get("tool_use_id", "")
     out.append({
         "event_type": "tool_use",
         "content": json.dumps({
-            "id": payload.get("tool_use_id", ""),
+            "id": tool_use_id,
             "name": tool_name,
             "input": tool_input,
         }),
     })
-    if tool_output != "" or is_error:
-        if isinstance(tool_output, (dict, list)):
-            output_text = json.dumps(tool_output)
+
+    tool_response = payload.get("tool_response")
+    if tool_response is None:
+        tool_response = payload.get("tool_output")
+    is_error_top = payload.get("is_error")
+
+    if tool_response is None and not is_error_top:
+        return out
+
+    if isinstance(tool_response, dict):
+        is_error = bool(tool_response.get("is_error", is_error_top or False))
+        for key in ("stdout", "output", "result", "content"):
+            if key in tool_response and tool_response[key] is not None:
+                output_text = str(tool_response[key])
+                break
         else:
-            output_text = str(tool_output)
-        out.append({
-            "event_type": "tool_result",
-            "content": json.dumps({
-                "tool_use_id": payload.get("tool_use_id", ""),
-                "is_error": is_error,
-                "output": output_text,
-            }),
-        })
+            output_text = json.dumps(tool_response)
+    elif isinstance(tool_response, list):
+        output_text = json.dumps(tool_response)
+        is_error = bool(is_error_top)
+    else:
+        output_text = "" if tool_response is None else str(tool_response)
+        is_error = bool(is_error_top)
+
+    if not output_text and not is_error:
+        return out
+
+    out.append({
+        "event_type": "tool_result",
+        "content": json.dumps({
+            "tool_use_id": tool_use_id,
+            "is_error": is_error,
+            "output": output_text,
+        }),
+    })
     return out
 
 
@@ -327,7 +369,10 @@ def main() -> None:
             if new_pos:
                 _save_position(session_id, new_pos)
         else:
-            events_from_file, new_pos = read_new_transcript_events(session_id, transcript_path)
+            drop_tools = hook_name == "Stop"
+            events_from_file, new_pos = read_new_transcript_events(
+                session_id, transcript_path, drop_tool_events=drop_tools,
+            )
             if events_from_file:
                 all_events.extend(events_from_file)
                 _save_position(session_id, new_pos)

@@ -276,7 +276,31 @@ class TestPublish:
 
 
 class TestEventsFromPostToolUse:
-    def test_basic_tool_use_and_result(self):
+    def test_real_claude_code_payload_shape(self):
+        """Mirror Claude Code's actual PostToolUse hook event."""
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "session_id": "abc",
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hi", "description": "Echo"},
+            "tool_use_id": "toolu_xyz",
+            "tool_response": {"stdout": "hi\n", "stderr": "", "is_error": False},
+        }
+        events = events_from_post_tool_use(payload)
+        assert len(events) == 2
+        assert events[0]["event_type"] == "tool_use"
+        tu = json.loads(events[0]["content"])
+        assert tu["name"] == "Bash"
+        assert tu["input"] == {"command": "echo hi", "description": "Echo"}
+        assert tu["id"] == "toolu_xyz"
+        assert events[1]["event_type"] == "tool_result"
+        tr = json.loads(events[1]["content"])
+        assert tr["output"] == "hi\n"
+        assert tr["is_error"] is False
+        assert tr["tool_use_id"] == "toolu_xyz"
+
+    def test_legacy_tool_output_field_still_works(self):
         from hooks.observability.event_relay import events_from_post_tool_use
         payload = {
             "tool_name": "Bash",
@@ -287,54 +311,74 @@ class TestEventsFromPostToolUse:
         }
         events = events_from_post_tool_use(payload)
         assert len(events) == 2
-        assert events[0]["event_type"] == "tool_use"
-        tu = json.loads(events[0]["content"])
-        assert tu["name"] == "Bash"
-        assert tu["input"] == {"command": "ls"}
-        assert tu["id"] == "tu_42"
-        assert events[1]["event_type"] == "tool_result"
         tr = json.loads(events[1]["content"])
         assert tr["output"] == "file1\nfile2"
-        assert tr["is_error"] is False
 
     def test_skips_system_tools(self):
         from hooks.observability.event_relay import events_from_post_tool_use
-        payload = {"tool_name": "system/internal", "tool_input": {}, "tool_output": "x"}
+        payload = {"tool_name": "system/internal", "tool_input": {}, "tool_response": "x"}
         assert events_from_post_tool_use(payload) == []
 
     def test_missing_tool_name_skipped(self):
         from hooks.observability.event_relay import events_from_post_tool_use
         assert events_from_post_tool_use({}) == []
 
-    def test_dict_tool_output_serialized(self):
+    def test_dict_response_falls_through_to_json(self):
         from hooks.observability.event_relay import events_from_post_tool_use
         payload = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/etc/hosts"},
-            "tool_output": {"lines": 10, "size": 256},
+            "tool_name": "MyTool",
+            "tool_input": {},
+            "tool_response": {"foo": "bar"},
         }
         events = events_from_post_tool_use(payload)
+        assert len(events) == 2
         tr = json.loads(events[1]["content"])
-        assert json.loads(tr["output"]) == {"lines": 10, "size": 256}
+        assert json.loads(tr["output"]) == {"foo": "bar"}
 
-    def test_is_error_propagated(self):
+    def test_is_error_in_response(self):
         from hooks.observability.event_relay import events_from_post_tool_use
         payload = {
             "tool_name": "Bash",
             "tool_input": {"command": "false"},
-            "tool_output": "error: command failed",
+            "tool_response": {"stdout": "", "stderr": "boom", "is_error": True},
+        }
+        events = events_from_post_tool_use(payload)
+        tr = json.loads(events[1]["content"])
+        assert tr["is_error"] is True
+
+    def test_is_error_top_level_only(self):
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "x"},
+            "tool_response": "boom",
             "is_error": True,
         }
         events = events_from_post_tool_use(payload)
         tr = json.loads(events[1]["content"])
         assert tr["is_error"] is True
 
-    def test_no_output_no_result_event(self):
+    def test_no_response_no_result(self):
         from hooks.observability.event_relay import events_from_post_tool_use
-        payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_output": ""}
+        payload = {"tool_name": "Bash", "tool_input": {}, "tool_use_id": "x"}
         events = events_from_post_tool_use(payload)
         assert len(events) == 1
         assert events[0]["event_type"] == "tool_use"
+
+    def test_is_error_none_treated_as_false(self):
+        """Real-world Claude Code: is_error may be None (not set)."""
+        from hooks.observability.event_relay import events_from_post_tool_use
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "tool_use_id": "x",
+            "tool_response": {"stdout": "data\n"},
+            "is_error": None,
+        }
+        events = events_from_post_tool_use(payload)
+        tr = json.loads(events[1]["content"])
+        assert tr["is_error"] is False
+        assert tr["output"] == "data\n"
 
 
 class TestEventsFromStopPayload:
