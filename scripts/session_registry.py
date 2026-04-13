@@ -11,6 +11,7 @@ out to Windows Terminal (wt.exe) for `agentihooks sessions reopen`.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from hooks.context.broadcast import (
     _load_sessions,
+    _save_sessions,
     derive_session_title,
     heartbeat_sessions,
 )
@@ -238,3 +240,113 @@ def cmd_reopen(args) -> int:
     count = args.count if getattr(args, "count", None) else None
     launched = reopen_sessions(count=count)
     return 0 if launched >= 0 else 1
+
+
+
+def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
+    """Scan ~/.claude/projects/*/*.jsonl for transcripts modified in the last
+    `max_age_hours`. Register any session UUID not already in the registry
+    with status="dead" (unknown liveness without a tracked PID). The cwd is
+    decoded from the encoded directory name (-home-x-y -> /home/x/y).
+
+    Returns a summary dict: {added, skipped_existing, scanned, errors}.
+    """
+    import time as _time
+
+    summary = {"added": 0, "skipped_existing": 0, "scanned": 0, "errors": 0}
+    projects_dir = Path.home() / ".claude" / "projects"
+    if not projects_dir.is_dir():
+        return summary
+
+    cutoff = _time.time() - (max_age_hours * 3600)
+    sessions = _load_sessions()
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    changed = False
+
+    for proj_dir in projects_dir.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        name = proj_dir.name
+        if not name.startswith("-"):
+            continue
+        # Fallback cwd from dir name — lossy for real paths containing '-'.
+        fallback_cwd = "/" + name[1:].replace("-", "/")
+
+        for jsonl in proj_dir.glob("*.jsonl"):
+            try:
+                mtime = jsonl.stat().st_mtime
+                if mtime < cutoff:
+                    continue
+            except OSError:
+                summary["errors"] += 1
+                continue
+            summary["scanned"] += 1
+            sid = jsonl.stem  # the session UUID
+            # Skip if already present AND alive — preserve live heartbeat data.
+            existing = sessions.get(sid)
+            if existing and existing.get("status") == "alive":
+                summary["skipped_existing"] += 1
+                continue
+            # Authoritative cwd from the JSONL itself (line 2 user event has cwd).
+            cwd = _extract_cwd_from_jsonl(jsonl) or fallback_cwd
+            mtime_iso = (
+                datetime.fromtimestamp(mtime, tz=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            entry = {
+                "started_at": mtime_iso,
+                "last_seen": mtime_iso,
+                "status": "dead",
+                "pid": 0,
+                "cwd": cwd,
+                "model": "",
+                "backfilled": True,
+            }
+            # Preserve existing fields we want to keep (started_at, pid, model).
+            if existing:
+                entry["started_at"] = existing.get("started_at", mtime_iso)
+                entry["pid"] = existing.get("pid", 0)
+                entry["model"] = existing.get("model", "")
+                # Don't downgrade a closed entry to dead.
+                if existing.get("status") == "closed":
+                    entry["status"] = "closed"
+                summary["skipped_existing"] += 1
+                summary["added"] -= 1  # net-zero for this sid
+            sessions[sid] = entry
+            summary["added"] += 1
+            changed = True
+
+    if changed:
+        _save_sessions(sessions)
+    return summary
+
+
+def _extract_cwd_from_jsonl(path: Path) -> str:
+    """Read the first few lines of a Claude Code transcript and return the
+    cwd field if present (line 2 is typically a user event with cwd)."""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > 10:
+                    break
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict) and obj.get("cwd"):
+                    return obj["cwd"]
+    except OSError:
+        return ""
+    return ""
+
+
+def cmd_backfill(args) -> int:
+    hours = getattr(args, "hours", 24)
+    summary = backfill_from_transcripts(max_age_hours=hours)
+    print(
+        f"{_GREEN}Backfilled{_RESET} added={summary['added']} "
+        f"skipped={summary['skipped_existing']} scanned={summary['scanned']} "
+        f"errors={summary['errors']}"
+    )
+    return 0

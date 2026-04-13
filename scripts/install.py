@@ -4547,6 +4547,11 @@ examples:
     sess_reopen_p.add_argument(
         "count", nargs="?", type=int, default=None, help="How many to reopen (default: all)"
     )
+    sess_backfill_p = sess_sub.add_parser(
+        "backfill",
+        help="Seed the registry from ~/.claude/projects/*.jsonl (for pre-existing sessions)",
+    )
+    sess_backfill_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
 
     args = parser.parse_args(_argv)
 
@@ -4691,10 +4696,14 @@ def _cmd_sessions(args) -> None:
     from scripts.session_registry import cmd_list, cmd_reopen
 
     action = getattr(args, "sessions_action", None) or "list"
+    from scripts.session_registry import cmd_backfill
+
     if action in ("list", "ls"):
         cmd_list(args)
     elif action in ("reopen", "open"):
         cmd_reopen(args)
+    elif action == "backfill":
+        cmd_backfill(args)
     else:
         print(f"Unknown sessions action: {action}", file=sys.stderr)
         sys.exit(1)
