@@ -374,7 +374,21 @@ def mark_session_closed(session_id: str) -> None:
 
 
 def heartbeat_sessions() -> dict:
-    """Daemon tick: update last_seen for live PIDs, flip dead ones, prune 24h-old."""
+    """Daemon tick: update last_seen for live PIDs, flip dead ones, prune 24h-old.
+
+    Also calls reconcile_live_sessions (lazy import) to pick up any claude
+    processes that started before this registry was deployed and thus never
+    fired a SessionStart hook.
+    """
+    # Lazy import to avoid a circular dependency (session_registry imports
+    # helpers from this module).
+    try:
+        from scripts.session_registry import reconcile_live_sessions
+
+        reconcile_live_sessions()
+    except Exception:
+        pass
+
     sessions = _load_sessions()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")

@@ -75,6 +75,10 @@ def list_sessions(max_age_hours: int = 24, refresh: bool = True) -> list[dict]:
     """
     if refresh:
         try:
+            reconcile_live_sessions()
+        except Exception:
+            pass
+        try:
             heartbeat_sessions()
         except Exception:
             pass
@@ -319,7 +323,106 @@ def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
 
     if changed:
         _save_sessions(sessions)
+    # After seeding from transcripts, run reconcile to flip live ones to alive.
+    reconcile_live_sessions()
     return summary
+
+
+def reconcile_live_sessions() -> dict:
+    """Walk running `claude` processes and mark registry entries alive.
+
+    Heuristic:
+      1. For each live claude PID, read /proc/<pid>/cwd.
+      2. Find all .jsonl transcripts in ~/.claude/projects/<encoded>/ whose
+         mtime is within the last 30 minutes (actively being written).
+      3. Claim the most-recently-modified unclaimed JSONL per PID.
+      4. Flip the matching registry entry to status=alive with the real PID.
+
+    Returns a summary dict.
+    """
+    import glob as _glob
+    import re as _re
+    import time as _time
+
+    summary = {"live_claude_pids": 0, "matched": 0, "unmatched_pids": 0}
+    try:
+        claude_pids = [
+            int(pid_file.name)
+            for pid_file in Path("/proc").iterdir()
+            if pid_file.name.isdigit()
+            and (pid_file / "comm").exists()
+            and (pid_file / "comm").read_text().strip() == "claude"
+        ]
+    except OSError:
+        return summary
+
+    summary["live_claude_pids"] = len(claude_pids)
+    if not claude_pids:
+        return summary
+
+    sessions = _load_sessions()
+
+    # Group PIDs by their cwd.
+    pids_by_cwd: dict[str, list[int]] = {}
+    for pid in claude_pids:
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except OSError:
+            continue
+        pids_by_cwd.setdefault(cwd, []).append(pid)
+
+    changed = False
+    for cwd, pids in pids_by_cwd.items():
+        projects_dir = Path.home() / ".claude" / "projects" / cwd.replace("/", "-")
+        if not projects_dir.is_dir():
+            summary["unmatched_pids"] += len(pids)
+            continue
+
+        # All JSONLs in this project, newest-mtime first. No write-recency
+        # filter: an idle session still has a live PID.
+        jsonls = sorted(
+            ((f.stat().st_mtime, f) for f in projects_dir.glob("*.jsonl")),
+            reverse=True,
+        )
+
+        # Match newest PID (highest pid = most-recently-started) to newest JSONL.
+        pids_sorted = sorted(pids, reverse=True)
+        for pid, (_mtime, jsonl) in zip(pids_sorted, jsonls):
+            sid = jsonl.stem
+            entry = sessions.get(sid)
+            now_iso = (
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            )
+            if entry is None:
+                entry = {
+                    "started_at": now_iso,
+                    "cwd": cwd,
+                    "model": "",
+                    "backfilled": True,
+                }
+            entry["status"] = "alive"
+            entry["pid"] = pid
+            entry["last_seen"] = now_iso
+            entry["cwd"] = cwd
+            sessions[sid] = entry
+            summary["matched"] += 1
+            changed = True
+
+        if len(pids_sorted) > len(jsonls):
+            summary["unmatched_pids"] += len(pids_sorted) - len(jsonls)
+
+    if changed:
+        _save_sessions(sessions)
+    return summary
+
+
+def cmd_reconcile(args) -> int:
+    summary = reconcile_live_sessions()
+    print(
+        f"{_GREEN}Reconciled{_RESET} claude_pids={summary['live_claude_pids']} "
+        f"matched={summary['matched']} unmatched_pids={summary['unmatched_pids']}"
+    )
+    return 0
 
 
 def _extract_cwd_from_jsonl(path: Path) -> str:

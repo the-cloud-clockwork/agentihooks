@@ -4552,6 +4552,10 @@ examples:
         help="Seed the registry from ~/.claude/projects/*.jsonl (for pre-existing sessions)",
     )
     sess_backfill_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
+    sess_sub.add_parser(
+        "reconcile",
+        help="Walk running claude processes and flip matched registry entries to alive",
+    )
 
     args = parser.parse_args(_argv)
 
@@ -4696,7 +4700,7 @@ def _cmd_sessions(args) -> None:
     from scripts.session_registry import cmd_list, cmd_reopen
 
     action = getattr(args, "sessions_action", None) or "list"
-    from scripts.session_registry import cmd_backfill
+    from scripts.session_registry import cmd_backfill, cmd_reconcile
 
     if action in ("list", "ls"):
         cmd_list(args)
@@ -4704,6 +4708,8 @@ def _cmd_sessions(args) -> None:
         cmd_reopen(args)
     elif action == "backfill":
         cmd_backfill(args)
+    elif action == "reconcile":
+        cmd_reconcile(args)
     else:
         print(f"Unknown sessions action: {action}", file=sys.stderr)
         sys.exit(1)
