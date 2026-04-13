@@ -269,6 +269,20 @@ BROADCAST_FILE: str = os.getenv("BROADCAST_FILE", str(Path.home() / ".agentihook
 BROADCAST_MAX_MESSAGES: int = int(os.getenv("BROADCAST_MAX_MESSAGES", "50"))
 BROADCAST_CRITICAL_ON_PRETOOL = _env_bool("BROADCAST_CRITICAL_ON_PRETOOL", "true")
 
+# Cadence controls — skip re-injecting identical or too-frequent broadcasts per session.
+BROADCAST_DEDUP_BY_HASH = _env_bool("BROADCAST_DEDUP_BY_HASH", "true")
+BROADCAST_MIN_INTERVAL_SEC: int = int(os.getenv("BROADCAST_MIN_INTERVAL_SEC", "300"))
+BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "2"))
+BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
+BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
+    "BROADCAST_DELIVERY_STATE_FILE",
+    str(Path.home() / ".agentihooks" / "broadcast_delivery_state.json"),
+)
+
+# Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
+BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "5"))
+BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "2048"))
+
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.

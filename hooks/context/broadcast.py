@@ -4,18 +4,80 @@ File-based pub/sub: operator writes messages, all active sessions receive them.
 Severity levels: critical (every turn + every tool call), alert (every turn), info (once).
 """
 
+import hashlib
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hooks.config import (
     BROADCAST_CRITICAL_ON_PRETOOL,
+    BROADCAST_DEDUP_BY_HASH,
+    BROADCAST_DELIVERY_STATE_FILE,
     BROADCAST_ENABLED,
     BROADCAST_FILE,
     BROADCAST_MAX_MESSAGES,
+    BROADCAST_MAX_PER_PROMPT,
+    BROADCAST_MIN_INTERVAL_SEC,
+    BROADCAST_PERSISTENT_THROTTLE,
 )
+
+_SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
+
+
+def _delivery_state_path() -> Path:
+    return Path(BROADCAST_DELIVERY_STATE_FILE).expanduser()
+
+
+def _load_delivery_state() -> dict:
+    p = _delivery_state_path()
+    if not p.exists() or p.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_delivery_state(state: dict) -> None:
+    p = _delivery_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(state))
+    os.replace(str(tmp), str(p))
+
+
+def _msg_hash(msg: dict) -> str:
+    raw = (msg.get("id", "") + "|" + msg.get("message", "")).encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
+    key = msg.get("channel") or ("_msg_" + msg.get("id", ""))
+    prev = sess_state.get(key)
+    persistent = bool(msg.get("persistent"))
+    if not prev:
+        return ""
+    if BROADCAST_DEDUP_BY_HASH and prev.get("hash") == _msg_hash(msg):
+        if persistent and not BROADCAST_PERSISTENT_THROTTLE:
+            return ""
+        if now_ts - prev.get("ts", 0) < BROADCAST_MIN_INTERVAL_SEC:
+            return "dedup"
+    if persistent and BROADCAST_PERSISTENT_THROTTLE:
+        if now_ts - prev.get("ts", 0) < BROADCAST_MIN_INTERVAL_SEC:
+            return "throttle"
+    return ""
+
+
+def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
+    state = _load_delivery_state()
+    sess = state.setdefault(sid, {})
+    key = msg.get("channel") or ("_msg_" + msg.get("id", ""))
+    sess[key] = {"hash": _msg_hash(msg), "ts": now_ts}
+    _save_delivery_state(state)
 
 # Default TTL per severity (seconds). 0 = use default.
 _DEFAULT_TTL = {"critical": 1800, "alert": 3600, "info": 14400}
@@ -506,21 +568,39 @@ def check_and_inject_broadcasts(session_id: str) -> None:
         from hooks.telemetry import emit_span
 
         pending = get_pending_broadcasts(session_id)
+        now_ts = time.time()
+        state = _load_delivery_state()
+        sess_state = state.get(session_id, {})
+
+        pending.sort(key=lambda m: _SEVERITY_RANK.get(m.get("severity", "info"), 9))
+
+        injected = 0
         for msg in pending:
+            skip_reason = _should_skip(msg, sess_state, now_ts)
+            if not skip_reason and injected >= BROADCAST_MAX_PER_PROMPT:
+                skip_reason = "cap"
+
+            span_attrs = {
+                "session_id": session_id,
+                "message_id": msg.get("id", ""),
+                "channel": msg.get("channel") or "_global",
+                "severity": msg.get("severity", "info"),
+                "source": msg.get("source", ""),
+                "bytes": len(msg.get("message", "")),
+                "persistent": bool(msg.get("persistent")),
+                "skipped": bool(skip_reason),
+                "skip_reason": skip_reason or "",
+            }
+
+            if skip_reason:
+                emit_span("brain.delivery", span_attrs)
+                continue
+
             banner = format_broadcast_banner(msg)
             inject_banner("BROADCAST", banner)
-            emit_span(
-                "brain.delivery",
-                {
-                    "session_id": session_id,
-                    "message_id": msg.get("id", ""),
-                    "channel": msg.get("channel") or "_global",
-                    "severity": msg.get("severity", "info"),
-                    "source": msg.get("source", ""),
-                    "bytes": len(msg.get("message", "")),
-                    "persistent": bool(msg.get("persistent")),
-                },
-            )
+            emit_span("brain.delivery", span_attrs)
+            _record_delivery(session_id, msg, now_ts)
+            injected += 1
             if not msg.get("persistent"):
                 mark_delivered(session_id, msg["id"])
     except Exception:

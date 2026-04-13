@@ -148,16 +148,66 @@ def _get_source() -> BrainSource | None:
 # ---------------------------------------------------------------------------
 
 
+def _trim_hot_arcs_table(content: str, top_n: int) -> str:
+    """If content contains a markdown table with header 'Arc | Heat | ...', keep top_n rows."""
+    lines = content.splitlines()
+    header_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("| Arc") and "Heat" in stripped:
+            header_idx = i
+            break
+    if header_idx is None or header_idx + 2 >= len(lines):
+        return content
+    sep_idx = header_idx + 1
+    data_start = header_idx + 2
+    data_end = data_start
+    while data_end < len(lines) and lines[data_end].strip().startswith("|"):
+        data_end += 1
+    kept = lines[data_start:data_start + top_n]
+    dropped = (data_end - data_start) - len(kept)
+    tail = lines[data_end:]
+    result = lines[:sep_idx + 1] + kept
+    if dropped > 0:
+        result.append(f"| ... | ... | ... | ... | *({dropped} more arcs trimmed)* |")
+    result.extend(tail)
+    return "\n".join(result)
+
+
+def _shrink_entry(entry: BrainEntry, top_n: int, max_bytes: int) -> BrainEntry:
+    content = entry.content
+    if top_n > 0:
+        content = _trim_hot_arcs_table(content, top_n)
+    if max_bytes > 0 and len(content) > max_bytes:
+        content = content[:max_bytes] + f"\n…[+{len(entry.content) - max_bytes} bytes trimmed]"
+    if content == entry.content:
+        return entry
+    return BrainEntry(
+        id=entry.id,
+        title=entry.title,
+        content=content,
+        priority=entry.priority,
+        ttl=entry.ttl,
+        severity=entry.severity,
+        metadata=entry.metadata,
+    )
+
+
 def _publish_entries(entries: list[BrainEntry]) -> int:
     """Publish brain entries to the broadcast channel. Returns count published."""
     try:
-        from hooks.config import BRAIN_CHANNEL
+        from hooks.config import (
+            BRAIN_CHANNEL,
+            BRAIN_HOT_ARCS_TOP_N,
+            BRAIN_PAYLOAD_MAX_BYTES,
+        )
     except ImportError:
         return 0
 
     from hooks.context.broadcast import clear_broadcasts, create_broadcast
     from hooks.telemetry import span_ctx
 
+    entries = [_shrink_entry(e, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES) for e in entries]
     total_bytes = sum(len(e.content) for e in entries)
     with span_ctx(
         "brain.inject",
