@@ -4543,10 +4543,10 @@ examples:
     sess_list_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
     sess_list_p.add_argument("--limit", type=int, default=10, help="How many to show (default: 10, 0 = all)")
     sess_reopen_p = sess_sub.add_parser(
-        "reopen", aliases=["open"], help="Reopen dead/closed sessions in new Windows Terminal tabs"
+        "reopen", aliases=["open"], help="Reopen N dead/closed sessions in new Windows Terminal tabs (N required)"
     )
     sess_reopen_p.add_argument(
-        "count", nargs="?", type=int, default=None, help="How many to reopen (default: all)"
+        "count", type=int, help="How many to reopen (REQUIRED — no default to avoid accidental 10-tab spawns)"
     )
     sess_backfill_p = sess_sub.add_parser(
         "backfill",

@@ -139,7 +139,7 @@ def cmd_list(args) -> int:
     print()
     print(
         f"{_DIM}Showing {len(rows)} most recent. "
-        f"Reopen: agentihooks sessions reopen [N]  (default 10){_RESET}"
+        f"Reopen: agentihooks sessions reopen <N>  (N required){_RESET}"
     )
     return 0
 
@@ -201,8 +201,6 @@ def reopen_sessions(count: int | None = None, include_alive: bool = False) -> in
     rows = list_sessions()
     if not include_alive:
         rows = [r for r in rows if r["status"] in ("dead", "closed")]
-    if count is None:
-        count = 10
     rows = rows[:count]
 
     if not rows:
@@ -244,7 +242,14 @@ def reopen_sessions(count: int | None = None, include_alive: bool = False) -> in
 
 
 def cmd_reopen(args) -> int:
-    count = args.count if getattr(args, "count", None) else None
+    count = getattr(args, "count", None)
+    if count is None or count <= 0:
+        print(
+            f"{_RED}error:{_RESET} sessions reopen requires an explicit count "
+            f"(e.g. `sessions reopen 3`). Refusing to reopen 10 tabs by default.",
+            file=sys.stderr,
+        )
+        return 2
     launched = reopen_sessions(count=count)
     return 0 if launched >= 0 else 1
 
