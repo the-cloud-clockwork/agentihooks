@@ -1022,10 +1022,70 @@ def on_stop(payload: dict) -> None:
         log("context_audit report failed", {"error": str(e)})
 
 
+def on_subagent_start(payload: dict) -> None:
+    """Handle SubagentStart event — wire the brain through to subagents.
+
+    Mirrors on_session_start brain logic so dispatched subagents get:
+      - brain context injected via brain_adapter
+      - broadcasts delivered via broadcast.check_and_inject_broadcasts
+      - brain.inject + brain.delivery spans visible in ClickHouse/Langfuse
+
+    This is the fix for the "subagents have no brain" gap (BRAIN-MVP item #21).
+    """
+    agent_id = payload.get("agent_id") or payload.get("session_id", "")
+    agent_type = payload.get("agent_type", "unknown")
+    log("Subagent started", {"agent_id": agent_id, "agent_type": agent_type})
+
+    # Brain adapter — publish brain content to the shared broadcast channel
+    try:
+        from hooks.config import BRAIN_ENABLED
+
+        if BRAIN_ENABLED:
+            from hooks.context.brain_adapter import inject_on_session_start
+
+            inject_on_session_start()
+    except Exception as e:
+        log("brain_adapter subagent_start failed", {"error": str(e)})
+
+    # Broadcast — register subagent session and deliver pending broadcasts
+    try:
+        from hooks.config import BROADCAST_ENABLED
+
+        if BROADCAST_ENABLED and agent_id:
+            from hooks.context.broadcast import check_and_inject_broadcasts, register_session
+
+            register_session(
+                agent_id,
+                pid=os.getppid(),
+                cwd=payload.get("cwd", ""),
+                model=payload.get("model", ""),
+            )
+            check_and_inject_broadcasts(agent_id)
+    except Exception as e:
+        log("broadcast subagent_start failed", {"error": str(e)})
+
+
 def on_subagent_stop(payload: dict) -> None:
-    """Handle SubagentStop event."""
-    session_id = payload.get("session_id", "")
-    log("Subagent stopped", {"session_id": session_id})
+    """Handle SubagentStop event — capture brain markers from subagent output."""
+    agent_id = payload.get("agent_id") or payload.get("session_id", "")
+    transcript_path = (
+        payload.get("agent_transcript_path") or payload.get("transcript_path", "")
+    )
+    last_msg = payload.get("last_assistant_message", "")
+    log("Subagent stopped", {"agent_id": agent_id})
+
+    # Brain writer — scan subagent transcript for emitted markers
+    # Same pattern as on_stop but routed through subagent identifiers
+    try:
+        from hooks.config import BRAIN_WRITER_ENABLED
+
+        if BRAIN_WRITER_ENABLED and (transcript_path or last_msg):
+            from hooks.context.brain_writer_hook import write_markers
+
+            stats = write_markers(agent_id, transcript_path, last_message=last_msg)
+            log("brain_writer subagent: result", stats)
+    except Exception as e:
+        log("brain_writer subagent_stop failed", {"error": str(e)})
 
     # Auto-overlay cleanup — remove overlays activated at session start
     try:
@@ -1041,11 +1101,10 @@ def on_subagent_stop(payload: dict) -> None:
         log("auto_overlay subagent_stop failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log (for debugging)
-    transcript_path = payload.get("transcript_path", "")
-    if session_id and transcript_path:
+    if agent_id and transcript_path:
         from hooks.observability.transcript import log_new_entries
 
-        log_new_entries(session_id, transcript_path)
+        log_new_entries(agent_id, transcript_path)
 
 
 def on_status_line(payload: dict) -> None:
@@ -1118,6 +1177,7 @@ EVENT_HANDLERS = {
     "PreToolUse": on_pre_tool_use,
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
+    "SubagentStart": on_subagent_start,
     "SubagentStop": on_subagent_stop,
     "Notification": on_notification,
     "PreCompact": on_pre_compact,

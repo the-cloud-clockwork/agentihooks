@@ -71,6 +71,16 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [

@@ -42,7 +42,7 @@ def _try_init_sdk():
             from opentelemetry import trace
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
             from hooks.config import OTEL_HOOKS_SERVICE_NAME
 
@@ -68,7 +68,11 @@ def _try_init_sdk():
 
             resource = Resource.create({"service.name": OTEL_HOOKS_SERVICE_NAME})
             provider = TracerProvider(resource=resource)
-            provider.add_span_processor(BatchSpanProcessor(exporter))
+            # SimpleSpanProcessor — blocking export per span. Required for
+            # short-lived hook subprocesses that exit before BatchSpanProcessor
+            # would flush. Trade-off: higher per-span latency, but spans never
+            # get dropped on subprocess exit.
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
             trace.set_tracer_provider(provider)
             _SDK_TRACER = trace.get_tracer("agentihooks.brain")
         except Exception:
