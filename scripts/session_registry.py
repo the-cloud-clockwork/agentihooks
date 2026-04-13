@@ -158,22 +158,34 @@ def _detect_terminal() -> str:
 
 
 def _build_wt_cmd(entry: dict) -> list[str]:
-    """Build a `wt.exe new-tab` argv for WSL2.
+    """Build a `wt.exe new-tab` argv that launches PowerShell, which then
+    runs `wsl.exe -d <distro> bash -c 'cd CWD && agenti --resume ID'`.
 
-    Uses $WSL_DISTRO_NAME if set, otherwise lets wsl.exe pick the default.
+    Why PowerShell as the outer shell:
+      - wt.exe splits its command line on `;` (tab/pane separator), so a
+        bash trailing `; exec bash` is parsed by wt as a separate command
+        and fails with "system cannot find file 'exec bash'".
+      - PowerShell -NoExit keeps the tab alive after the inner command
+        exits, so the operator can inspect output or restart the session.
+      - PowerShell is the default Windows Terminal profile on most setups,
+        so this works whether or not a WSL profile is installed.
     """
     sid = entry["session_id"]
     cwd = entry["cwd"]
     short = sid[:8]
     distro = os.environ.get("WSL_DISTRO_NAME", "")
 
-    # Inner bash command: cd into cwd, resume the session, keep shell open on exit.
-    inner = f"cd {_shell_quote(cwd)} && agenti --resume {sid}; exec bash"
+    # Inner bash command — no `; exec bash`, PowerShell -NoExit handles persistence.
+    inner_bash = f"cd {_shell_quote(cwd)} && agenti --resume {sid}"
 
-    wsl_args = ["wsl.exe"]
+    # Build the wsl.exe call as one string that PowerShell will invoke.
+    wsl_call = "wsl.exe"
     if distro:
-        wsl_args += ["-d", distro]
-    wsl_args += ["--", "bash", "-c", inner]
+        wsl_call += f" -d {distro}"
+    wsl_call += f" -- bash -lc {_powershell_quote(inner_bash)}"
+
+    # PowerShell command: run the wsl call, stay open after it exits.
+    ps_cmd = f"& {{ {wsl_call} }}"
 
     return [
         "wt.exe",
@@ -182,26 +194,58 @@ def _build_wt_cmd(entry: dict) -> list[str]:
         "new-tab",
         "--title",
         f"ag:{short}",
-    ] + wsl_args
+        "powershell.exe",
+        "-NoExit",
+        "-NoProfile",
+        "-Command",
+        ps_cmd,
+    ]
+
+
+def _powershell_quote(s: str) -> str:
+    """Quote a string for safe embedding inside a PowerShell single-quoted literal."""
+    return "'" + s.replace("'", "''") + "'"
 
 
 def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
-def reopen_sessions(count: int | None = None, include_alive: bool = False) -> int:
-    """Reopen dead/closed sessions in new Windows Terminal tabs.
+def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
+    """Reopen specific sessions (by 1-based IDX from the same list that
+    `sessions list` would show) in new Windows Terminal tabs.
 
     Args:
-        count: max number of sessions to reopen (most-recent first). None = all.
+        indices: 1-based row numbers from `sessions list`. Out-of-range
+            entries are skipped with a warning. Alive rows are skipped
+            unless include_alive is set.
         include_alive: also reopen alive entries (normally skipped).
 
     Returns number of sessions successfully launched.
     """
-    rows = list_sessions()
-    if not include_alive:
-        rows = [r for r in rows if r["status"] in ("dead", "closed")]
-    rows = rows[:count]
+    all_rows = list_sessions()  # same sort order as `sessions list`
+    rows: list[dict] = []
+    seen: set[int] = set()
+    for idx in indices:
+        if idx < 1 or idx > len(all_rows):
+            print(
+                f"{_YELLOW}warn:{_RESET} idx {idx} out of range "
+                f"(1..{len(all_rows)})",
+                file=sys.stderr,
+            )
+            continue
+        if idx in seen:
+            continue
+        seen.add(idx)
+        row = all_rows[idx - 1]
+        if not include_alive and row["status"] == "alive":
+            print(
+                f"{_YELLOW}skip:{_RESET} idx {idx} ({row['session_id'][:8]}) "
+                f"is alive — already running",
+                file=sys.stderr,
+            )
+            continue
+        rows.append(row)
 
     if not rows:
         print(f"{_DIM}No dead/closed sessions to reopen.{_RESET}")
@@ -242,15 +286,31 @@ def reopen_sessions(count: int | None = None, include_alive: bool = False) -> in
 
 
 def cmd_reopen(args) -> int:
-    count = getattr(args, "count", None)
-    if count is None or count <= 0:
+    raw_indices = getattr(args, "indices", None) or []
+    # Allow `reopen 6,7,8` and `reopen 6 7 8` interchangeably.
+    flat: list[int] = []
+    for tok in raw_indices:
+        for part in str(tok).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                flat.append(int(part))
+            except ValueError:
+                print(
+                    f"{_RED}error:{_RESET} '{part}' is not an integer IDX",
+                    file=sys.stderr,
+                )
+                return 2
+    if not flat:
         print(
-            f"{_RED}error:{_RESET} sessions reopen requires an explicit count "
-            f"(e.g. `sessions reopen 3`). Refusing to reopen 10 tabs by default.",
+            f"{_RED}error:{_RESET} sessions reopen requires at least one IDX "
+            f"(e.g. `sessions reopen 6` or `sessions reopen 6,7,8`). "
+            f"Run `sessions list` first to see IDX numbers.",
             file=sys.stderr,
         )
         return 2
-    launched = reopen_sessions(count=count)
+    launched = reopen_sessions(indices=flat)
     return 0 if launched >= 0 else 1
 
 
