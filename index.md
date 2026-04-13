@@ -345,6 +345,6 @@ rm -rf ~/.agentihooks
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/The-Cloud-Clock-Work">The Cloud Clock Work</a> &middot;
+  Built by <a href="https://github.com/The-Cloud-Clock-Work">The Cloud Clockwork</a> &middot;
   <a href="https://github.com/The-Cloud-Clock-Work/agentihooks/blob/main/LICENSE">MIT License</a>
 </p>
