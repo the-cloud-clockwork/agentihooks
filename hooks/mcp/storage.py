@@ -24,7 +24,7 @@ def register(mcp):
             match_uuid: If True, extract UUID from filename and use as prefix (default: False)
 
         Returns:
-            JSON with success status, s3_url, uploaded file count
+            JSON with success status, storage_url, uploaded file count
         """
         try:
             from hooks.integrations.storage import upload_path
@@ -39,7 +39,7 @@ def register(mcp):
             return json.dumps(
                 {
                     "success": result.success,
-                    "s3_url": result.s3_url,
+                    "storage_url": result.storage_url,
                     "files_uploaded": result.files_uploaded,
                     "error": result.error,
                 }
