@@ -415,18 +415,14 @@ def reconcile_live_sessions() -> dict:
 
     summary = {"live_claude_pids": 0, "matched": 0, "unmatched_pids": 0}
 
-    def _parent_comm(pid: int) -> tuple[int, str]:
-        """Return (ppid, parent_comm) for a pid by reading /proc/pid/stat."""
+    def _pid_state(pid: int) -> str:
+        """Return the state char from /proc/<pid>/stat (R/S/D/T/t/Z/I/...)."""
         try:
             stat = (Path("/proc") / str(pid) / "stat").read_text()
-            # stat format: pid (comm) state ppid ...
-            # comm can contain spaces/parens — split on last ")"
-            right = stat.rsplit(")", 1)[1].split()
-            ppid = int(right[1])
-            pcomm = (Path("/proc") / str(ppid) / "comm").read_text().strip()
-            return ppid, pcomm
-        except (OSError, IndexError, ValueError):
-            return 0, ""
+            # format: pid (comm) state ppid ... — comm may contain ")" so split on last one
+            return stat.rsplit(")", 1)[1].split()[0]
+        except (OSError, IndexError):
+            return ""
 
     try:
         raw_pids = [
@@ -439,19 +435,15 @@ def reconcile_live_sessions() -> dict:
     except OSError:
         return summary
 
-    # Filter ghosts:
-    #   1. Must have an interactive bash parent (not init/Relay/systemd).
-    #   2. Dedupe by ppid — if two claude children share a parent, the
-    #      newer PID (higher number, later start) is the real session; the
-    #      older is a stale ghost left over from a crashed instance.
-    by_ppid: dict[int, int] = {}
-    for pid in raw_pids:
-        ppid, pcomm = _parent_comm(pid)
-        if pcomm != "bash":
-            continue
-        if ppid not in by_ppid or pid > by_ppid[ppid]:
-            by_ppid[ppid] = pid
-    claude_pids = sorted(by_ppid.values())
+    # Include any claude process that is NOT a zombie. State T (stopped via
+    # Ctrl+Z or job-control), state D (uninterruptible sleep), and the
+    # typical S/R are all live processes with valid /proc state; only Z
+    # (zombie) means the process no longer has a live image. We do NOT
+    # filter by parent comm or dedupe by ppid — WSL2 can re-parent live
+    # claude processes to init/Relay when VSCode detaches a terminal,
+    # and multiple claude children can legitimately share a single
+    # interactive bash parent.
+    claude_pids = [pid for pid in raw_pids if _pid_state(pid) != "Z"]
 
     summary["live_claude_pids"] = len(claude_pids)
     if not claude_pids:
