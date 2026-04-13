@@ -67,11 +67,11 @@ def _status_color(status: str) -> str:
     }.get(status, _DIM)
 
 
-def list_sessions(max_age_hours: int = 24, refresh: bool = True) -> list[dict]:
+def list_sessions(max_age_hours: int = 24, refresh: bool = True, limit: int | None = None) -> list[dict]:
     """Return a list of session entries sorted by last_seen descending.
 
-    If refresh=True, runs heartbeat_sessions() first so the list reflects
-    current PID liveness even if the daemon hasn't ticked recently.
+    If refresh=True, runs reconcile + heartbeat first so status reflects
+    current PID liveness. limit caps the returned rows (most-recent first).
     """
     if refresh:
         try:
@@ -110,34 +110,36 @@ def list_sessions(max_age_hours: int = 24, refresh: bool = True) -> list[dict]:
             }
         )
     rows.sort(key=lambda r: r["age_seconds"])
+    if limit is not None and limit > 0:
+        rows = rows[:limit]
     return rows
 
 
 def cmd_list(args) -> int:
-    rows = list_sessions(max_age_hours=getattr(args, "hours", 24))
+    limit = getattr(args, "limit", 10)
+    rows = list_sessions(max_age_hours=getattr(args, "hours", 24), limit=limit)
     if not rows:
         print(f"{_DIM}No sessions in the last 24h.{_RESET}")
         return 0
 
     print(
-        f"{_BOLD}{'IDX':<4}{'ID':<12}{'STATUS':<9}{'AGE':<6}"
-        f"{'CWD':<42}TITLE{_RESET}"
+        f"{_BOLD}{'IDX':<4}{'STATUS':<8}{'AGE':<6}"
+        f"{'CWD':<46}ID{_RESET}"
     )
     for i, r in enumerate(rows, 1):
-        sid_short = r["session_id"][:8] + ".."
+        sid = r["session_id"]
         status = r["status"]
         color = _status_color(status)
         age = _humanize_age(r["age_seconds"])
-        cwd = _shorten_cwd(r["cwd"], 40)
-        title = r["title"][:50]
+        cwd = _shorten_cwd(r["cwd"], 44)
         print(
-            f"{i:<4}{sid_short:<12}{color}{status:<9}{_RESET}"
-            f"{age:<6}{cwd:<42}{_DIM}{title}{_RESET}"
+            f"{i:<4}{color}{status:<8}{_RESET}"
+            f"{age:<6}{cwd:<46}{_DIM}{sid}{_RESET}"
         )
     print()
     print(
-        f"{_DIM}Reopen with: "
-        f"agentihooks sessions reopen [N]  (N = how many, default all dead/closed){_RESET}"
+        f"{_DIM}Showing {len(rows)} most recent. "
+        f"Reopen: agentihooks sessions reopen [N]  (default 10){_RESET}"
     )
     return 0
 
@@ -199,8 +201,9 @@ def reopen_sessions(count: int | None = None, include_alive: bool = False) -> in
     rows = list_sessions()
     if not include_alive:
         rows = [r for r in rows if r["status"] in ("dead", "closed")]
-    if count is not None:
-        rows = rows[:count]
+    if count is None:
+        count = 10
+    rows = rows[:count]
 
     if not rows:
         print(f"{_DIM}No dead/closed sessions to reopen.{_RESET}")
@@ -345,8 +348,22 @@ def reconcile_live_sessions() -> dict:
     import time as _time
 
     summary = {"live_claude_pids": 0, "matched": 0, "unmatched_pids": 0}
+
+    def _parent_comm(pid: int) -> tuple[int, str]:
+        """Return (ppid, parent_comm) for a pid by reading /proc/pid/stat."""
+        try:
+            stat = (Path("/proc") / str(pid) / "stat").read_text()
+            # stat format: pid (comm) state ppid ...
+            # comm can contain spaces/parens — split on last ")"
+            right = stat.rsplit(")", 1)[1].split()
+            ppid = int(right[1])
+            pcomm = (Path("/proc") / str(ppid) / "comm").read_text().strip()
+            return ppid, pcomm
+        except (OSError, IndexError, ValueError):
+            return 0, ""
+
     try:
-        claude_pids = [
+        raw_pids = [
             int(pid_file.name)
             for pid_file in Path("/proc").iterdir()
             if pid_file.name.isdigit()
@@ -355,6 +372,20 @@ def reconcile_live_sessions() -> dict:
         ]
     except OSError:
         return summary
+
+    # Filter ghosts:
+    #   1. Must have an interactive bash parent (not init/Relay/systemd).
+    #   2. Dedupe by ppid — if two claude children share a parent, the
+    #      newer PID (higher number, later start) is the real session; the
+    #      older is a stale ghost left over from a crashed instance.
+    by_ppid: dict[int, int] = {}
+    for pid in raw_pids:
+        ppid, pcomm = _parent_comm(pid)
+        if pcomm != "bash":
+            continue
+        if ppid not in by_ppid or pid > by_ppid[ppid]:
+            by_ppid[ppid] = pid
+    claude_pids = sorted(by_ppid.values())
 
     summary["live_claude_pids"] = len(claude_pids)
     if not claude_pids:

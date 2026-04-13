@@ -4539,8 +4539,9 @@ examples:
         help="List and reopen recent Claude Code sessions (24h crash-recovery registry)",
     )
     sess_sub = sess_p.add_subparsers(dest="sessions_action")
-    sess_list_p = sess_sub.add_parser("list", aliases=["ls"], help="List sessions from the last 24h")
+    sess_list_p = sess_sub.add_parser("list", aliases=["ls"], help="List the most recent sessions (default: last 10 in 24h window)")
     sess_list_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
+    sess_list_p.add_argument("--limit", type=int, default=10, help="How many to show (default: 10, 0 = all)")
     sess_reopen_p = sess_sub.add_parser(
         "reopen", aliases=["open"], help="Reopen dead/closed sessions in new Windows Terminal tabs"
     )
