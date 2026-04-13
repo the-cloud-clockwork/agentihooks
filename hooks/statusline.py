@@ -263,14 +263,20 @@ def main() -> None:
                 _g_sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "") or "none"
 
             # --- Local: per-repo override from .agentihooks.json ---
+            # Base floor: every session is implicitly subscribed to brain + amygdala.
+            # Per-repo channels ADD to this — they can never drop the base floor.
+            _BASE_CHANNELS = ["brain", "amygdala"]
             _l_profile = ""
-            _l_channels: list[str] = []
+            _l_channels: list[str] = list(_BASE_CHANNELS)
             cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
             _cfg_path = Path(cwd) / ".agentihooks.json"
             if _cfg_path.exists():
                 _cfg = _json_ah.loads(_cfg_path.read_text())
                 _l_profile = _cfg.get("profile", "")
-                _l_channels = _cfg.get("channels", []) or []
+                _repo_ch = _cfg.get("channels", []) or []
+                for _c in _repo_ch:
+                    if _c not in _l_channels:
+                        _l_channels.append(_c)
 
             # --- Overlay ---
             _ovl_str = "none"
@@ -303,9 +309,10 @@ def main() -> None:
             _ovl_color = _CYAN if _ovl_str != "none" else _DIM
             _ovl_display = f"{_ovl_color}{_ovl_str}{_RESET}"
 
-            # Channels
-            _ch_str = ",".join(_l_channels) if _l_channels else "none"
-            _ch_color = "" if _l_channels else _DIM
+            # Channels — floor is always brain,amygdala; extras shown in normal color.
+            _ch_str = ",".join(_l_channels)
+            _is_base_only = set(_l_channels) == set(_BASE_CHANNELS)
+            _ch_color = _DIM if _is_base_only else ""
             _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
 
             print(

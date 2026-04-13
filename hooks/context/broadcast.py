@@ -22,6 +22,11 @@ _DEFAULT_TTL = {"critical": 1800, "alert": 3600, "info": 14400}
 _DEFAULT_PERSISTENT = {"critical": True, "alert": True, "info": False}
 _VALID_SEVERITIES = frozenset({"critical", "alert", "info"})
 
+# Channels every session is subscribed to unconditionally.
+# The operator's rule: brain + amygdala are fleet-wide, no repo can drop them.
+# Per-repo .agentihooks.json channels are ADDED on top of this floor.
+BASE_CHANNELS = ("brain", "amygdala")
+
 
 # ---------------------------------------------------------------------------
 # File paths
@@ -113,21 +118,35 @@ def _load_sessions() -> dict:
 
 
 def _get_session_channels(session_id: str) -> list[str]:
-    """Resolve channel subscriptions for a session from its .agentihooks.json."""
+    """Resolve channel subscriptions for a session.
+
+    Every session is implicitly subscribed to BASE_CHANNELS (brain, amygdala).
+    Per-repo .agentihooks.json channels are added on top. A repo with no config
+    file — or with no `channels` key — still receives the base floor.
+    """
+    base = list(BASE_CHANNELS)
     sessions = _load_sessions()
     session_info = sessions.get(session_id, {})
     cwd = session_info.get("cwd", "")
-    if not cwd:
-        return []
-    try:
-        config_path = Path(cwd) / ".agentihooks.json"
-        if config_path.exists():
-            cfg = json.loads(config_path.read_text())
-            channels = cfg.get("channels", [])
-            return channels if isinstance(channels, list) else []
-    except Exception:
-        pass
-    return []
+    repo_channels: list[str] = []
+    if cwd:
+        try:
+            config_path = Path(cwd) / ".agentihooks.json"
+            if config_path.exists():
+                cfg = json.loads(config_path.read_text())
+                ch = cfg.get("channels", [])
+                if isinstance(ch, list):
+                    repo_channels = ch
+        except Exception:
+            pass
+    # Merge base + repo, deduped, preserve order (base first).
+    seen: set[str] = set()
+    merged: list[str] = []
+    for c in list(base) + list(repo_channels):
+        if c not in seen:
+            seen.add(c)
+            merged.append(c)
+    return merged
 
 
 def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:

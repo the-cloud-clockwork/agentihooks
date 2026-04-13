@@ -1,5 +1,5 @@
 {
-  "profile": "default",
+  "profile": "anton",
   "enabledMcpServers": [
     "hooks-utils",
     "gateway-core"
