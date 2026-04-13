@@ -24,8 +24,11 @@ from hooks.context.broadcast import (
     _load_sessions,
     _save_sessions,
     derive_session_title,
+    encode_cwd,
     heartbeat_sessions,
 )
+
+SESSION_BUSY_WINDOW = 60  # seconds; JSONL writes newer than this = still live
 
 _CYAN = "\033[36m"
 _GREEN = "\033[32m"
@@ -212,6 +215,27 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _jsonl_recently_written(row: dict) -> bool:
+    """Return True if the session's transcript JSONL was modified within
+    SESSION_BUSY_WINDOW seconds — signal that another claude process is
+    still actively writing to it, and reopening would fork a duplicate.
+    """
+    import time as _time
+
+    sid = row.get("session_id", "")
+    cwd = row.get("cwd", "")
+    if not sid or not cwd:
+        return False
+    transcript = (
+        Path.home() / ".claude" / "projects" / encode_cwd(cwd) / f"{sid}.jsonl"
+    )
+    try:
+        mtime = transcript.stat().st_mtime
+    except OSError:
+        return False
+    return (_time.time() - mtime) < SESSION_BUSY_WINDOW
+
+
 def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
     """Reopen specific sessions (by 1-based IDX from the same list that
     `sessions list` would show) in new Windows Terminal tabs.
@@ -243,6 +267,14 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
             print(
                 f"{_YELLOW}skip:{_RESET} idx {idx} ({row['session_id'][:8]}) "
                 f"is alive — already running",
+                file=sys.stderr,
+            )
+            continue
+        if not include_alive and _jsonl_recently_written(row):
+            print(
+                f"{_YELLOW}skip:{_RESET} idx {idx} ({row['session_id'][:8]}) "
+                f"JSONL was written <{SESSION_BUSY_WINDOW}s ago — another "
+                f"claude is likely still writing it. Use --force to override.",
                 file=sys.stderr,
             )
             continue
@@ -462,7 +494,7 @@ def reconcile_live_sessions() -> dict:
 
     changed = False
     for cwd, pids in pids_by_cwd.items():
-        projects_dir = Path.home() / ".claude" / "projects" / cwd.replace("/", "-")
+        projects_dir = Path.home() / ".claude" / "projects" / encode_cwd(cwd)
         if not projects_dir.is_dir():
             summary["unmatched_pids"] += len(pids)
             continue

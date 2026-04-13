@@ -305,8 +305,12 @@ def _parse_iso(ts: str) -> datetime:
 
 
 def encode_cwd(cwd: str) -> str:
-    """Claude Code encodes cwd for ~/.claude/projects/ by replacing / with -."""
-    return cwd.replace("/", "-")
+    """Claude Code encodes cwd for ~/.claude/projects/ by replacing BOTH
+    forward slashes and dots with '-'. Example:
+        /home/iamroot/dev/antoncore/.claude/worktrees/foo
+      → -home-iamroot-dev-antoncore--claude-worktrees-foo
+    """
+    return cwd.replace("/", "-").replace(".", "-")
 
 
 def derive_session_title(session_id: str, cwd: str, max_len: int = 60) -> str:

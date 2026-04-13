@@ -4552,6 +4552,11 @@ examples:
         nargs="+",
         help="IDX numbers from `sessions list` — space or comma-separated (e.g. `6 7` or `6,7,8`)",
     )
+    sess_reopen_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Override busy-JSONL and alive-status guards (DANGEROUS — can fork duplicate sessions)",
+    )
     sess_backfill_p = sess_sub.add_parser(
         "backfill",
         help="Seed the registry from ~/.claude/projects/*.jsonl (for pre-existing sessions)",
