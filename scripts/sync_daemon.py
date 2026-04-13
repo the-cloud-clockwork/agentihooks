@@ -28,6 +28,12 @@ from pathlib import Path
 
 AGENTIHOOKS_ROOT = Path(__file__).resolve().parent.parent
 AGENTIHOOKS_STATE_DIR = Path.home() / ".agentihooks"
+
+# Ensure the agentihooks package root is importable when this script is
+# launched directly via `python sync_daemon.py` from any cwd. Without this,
+# `from hooks.context.broadcast import ...` fails with ModuleNotFoundError.
+if str(AGENTIHOOKS_ROOT) not in sys.path:
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
 STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 HASH_FILE = AGENTIHOOKS_STATE_DIR / "sync-hashes.json"
 PID_FILE = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
