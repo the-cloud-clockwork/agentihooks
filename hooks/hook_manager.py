@@ -1034,7 +1034,13 @@ def on_subagent_start(payload: dict) -> None:
     """
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
-    log("Subagent started", {"agent_id": agent_id, "agent_type": agent_type})
+    log("Subagent started", {
+        "agent_id": agent_id,
+        "agent_type": agent_type,
+        "otel_endpoint": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "<unset>"),
+        "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "<unset>"),
+        "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", "<unset>"),
+    })
 
     # Brain adapter — publish brain content to the shared broadcast channel
     try:
