@@ -1006,6 +1006,17 @@ def _run_daemon(poll_sec: int) -> None:
             except Exception as proj_err:
                 _log(f"New project check error: {proj_err}")
             try:
+                from hooks.context.broadcast import heartbeat_sessions
+                hb = heartbeat_sessions()
+                if hb.get("flipped_dead") or hb.get("pruned"):
+                    _log(
+                        f"Sessions heartbeat: alive={hb['alive']} "
+                        f"dead={hb['flipped_dead']} pruned={hb['pruned']} "
+                        f"total={hb['total']}"
+                    )
+            except Exception as sess_err:
+                _log(f"Session heartbeat error: {sess_err}")
+            try:
                 _update_claude_json_snapshot()
             except Exception as snap_err:
                 _log(f"Snapshot update error: {snap_err}")

@@ -484,9 +484,9 @@ def on_session_end(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
-            from hooks.context.broadcast import deregister_session
+            from hooks.context.broadcast import mark_session_closed
 
-            deregister_session(session_id)
+            mark_session_closed(session_id)
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
 

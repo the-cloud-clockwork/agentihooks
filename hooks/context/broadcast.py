@@ -293,10 +293,60 @@ def mark_delivered(session_id: str, message_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def encode_cwd(cwd: str) -> str:
+    """Claude Code encodes cwd for ~/.claude/projects/ by replacing / with -."""
+    return cwd.replace("/", "-")
+
+
+def derive_session_title(session_id: str, cwd: str, max_len: int = 60) -> str:
+    """Read the first user message from the JSONL transcript as a title.
+
+    Fallback to the cwd basename if transcript unreadable.
+    """
+    try:
+        transcript = Path.home() / ".claude" / "projects" / encode_cwd(cwd) / f"{session_id}.jsonl"
+        if transcript.exists():
+            with transcript.open("r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if obj.get("type") != "user":
+                        continue
+                    msg = obj.get("message", {})
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
+                        content = " ".join(p for p in parts if p)
+                    if not isinstance(content, str):
+                        continue
+                    content = content.strip().replace("\n", " ")
+                    if content:
+                        return content[:max_len]
+    except OSError:
+        pass
+    return Path(cwd).name or cwd or "(unknown)"
+
+
 def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
     sessions = _load_sessions()
+    now = _now_iso()
     sessions[session_id] = {
-        "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "started_at": now,
+        "last_seen": now,
+        "status": "alive",
         "pid": pid,
         "cwd": cwd,
         "model": model,
@@ -305,9 +355,73 @@ def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
 
 
 def deregister_session(session_id: str) -> None:
+    """Hard-delete a session entry. Prefer mark_session_closed for crash-recovery."""
     sessions = _load_sessions()
     sessions.pop(session_id, None)
     _save_sessions(sessions)
+
+
+def mark_session_closed(session_id: str) -> None:
+    """Flip a session to status=closed on clean SessionEnd. Keeps the entry
+    for the 24h retention window so `sessions reopen` can still recover it."""
+    sessions = _load_sessions()
+    entry = sessions.get(session_id)
+    if entry is None:
+        return
+    entry["status"] = "closed"
+    entry["last_seen"] = _now_iso()
+    _save_sessions(sessions)
+
+
+def heartbeat_sessions() -> dict:
+    """Daemon tick: update last_seen for live PIDs, flip dead ones, prune 24h-old."""
+    sessions = _load_sessions()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "total": 0}
+    prune: list[str] = []
+    changed = False
+
+    for sid, info in list(sessions.items()):
+        status = info.get("status", "alive")
+        pid = info.get("pid", 0)
+
+        ts_str = info.get("last_seen") or info.get("started_at")
+        if ts_str:
+            try:
+                ts = _parse_iso(ts_str)
+                if (now_dt - ts).total_seconds() > SESSION_MAX_AGE_SECONDS:
+                    prune.append(sid)
+                    continue
+            except ValueError:
+                pass
+
+        if status == "alive":
+            alive = False
+            try:
+                if pid:
+                    os.kill(int(pid), 0)
+                    alive = True
+            except (OSError, ValueError):
+                alive = False
+            if alive:
+                info["last_seen"] = now_iso
+                summary["alive"] += 1
+                changed = True
+            else:
+                info["status"] = "dead"
+                summary["flipped_dead"] += 1
+                changed = True
+
+    for sid in prune:
+        del sessions[sid]
+        summary["pruned"] += 1
+        changed = True
+
+    summary["total"] = len(sessions)
+    if changed:
+        _save_sessions(sessions)
+    return summary
 
 
 def get_active_sessions(cleanup: bool = False) -> dict:

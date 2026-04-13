@@ -2169,7 +2169,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             except (json.JSONDecodeError, OSError) as exc:
                 _cprint(f"  [WARN] Could not read bundle .mcp.json: {exc}")
     elif profile_has_own_mcp:
-        _cprint(f"  [OK] Profile has own .mcp.json — skipping bundle global MCP servers")
+        _cprint("  [OK] Profile has own .mcp.json — skipping bundle global MCP servers")
 
     # Layer 3+: each profile's .mcp.json (chained)
     for pname, pdir in profile_dirs:
@@ -3943,7 +3943,14 @@ def _parse_ttl_string(ttl_raw: str | None) -> int:
 def _cmd_overlay(args: argparse.Namespace) -> None:
     """Handle the overlay CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-    from scripts.overlay import get_active_overlays, overlay_add, overlay_clear, overlay_list, overlay_refresh, overlay_remove
+    from scripts.overlay import (
+        get_active_overlays,
+        overlay_add,
+        overlay_clear,
+        overlay_list,
+        overlay_refresh,
+        overlay_remove,
+    )
 
     action = args.action
     name = args.name
@@ -4526,6 +4533,21 @@ examples:
     brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
     brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
 
+    # --- Sessions subcommand ---
+    sess_p = sub.add_parser(
+        "sessions",
+        help="List and reopen recent Claude Code sessions (24h crash-recovery registry)",
+    )
+    sess_sub = sess_p.add_subparsers(dest="sessions_action")
+    sess_list_p = sess_sub.add_parser("list", aliases=["ls"], help="List sessions from the last 24h")
+    sess_list_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
+    sess_reopen_p = sess_sub.add_parser(
+        "reopen", aliases=["open"], help="Reopen dead/closed sessions in new Windows Terminal tabs"
+    )
+    sess_reopen_p.add_argument(
+        "count", nargs="?", type=int, default=None, help="How many to reopen (default: all)"
+    )
+
     args = parser.parse_args(_argv)
 
     if args.list_profiles:
@@ -4661,6 +4683,21 @@ examples:
         _cmd_channel(args)
     elif args.command == "brain":
         _cmd_brain(args)
+    elif args.command == "sessions":
+        _cmd_sessions(args)
+
+
+def _cmd_sessions(args) -> None:
+    from scripts.session_registry import cmd_list, cmd_reopen
+
+    action = getattr(args, "sessions_action", None) or "list"
+    if action in ("list", "ls"):
+        cmd_list(args)
+    elif action in ("reopen", "open"):
+        cmd_reopen(args)
+    else:
+        print(f"Unknown sessions action: {action}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
