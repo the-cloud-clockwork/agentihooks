@@ -175,8 +175,9 @@ def _build_wt_cmd(entry: dict) -> list[str]:
     short = sid[:8]
     distro = os.environ.get("WSL_DISTRO_NAME", "")
 
-    # Inner bash command — no `; exec bash`, PowerShell -NoExit handles persistence.
-    inner_bash = f"cd {_shell_quote(cwd)} && agenti --resume {sid}"
+    # Inner bash command — call `agentihooks claude` directly (not the
+    # bashrc `agenti` alias, which is unavailable in non-interactive shells).
+    inner_bash = f"cd {_shell_quote(cwd)} && agentihooks claude --resume {sid}"
 
     # Build the wsl.exe call as one string that PowerShell will invoke.
     wsl_call = "wsl.exe"
