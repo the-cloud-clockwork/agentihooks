@@ -99,8 +99,11 @@ def __getattr__(name: str):
 # =============================================================================
 
 
+_BRAIN_LOG_PREFIXES = ("brain_", "broadcast_", "outbox_", "amygdala_")
+
+
 def log(message: str, payload: dict | None = None) -> None:
-    """Write log entry to file (JSON format)."""
+    """Write log entry to file (JSON format), optionally fan out to OTLP logs."""
     if not LOG_ENABLED:
         return
 
@@ -119,6 +122,16 @@ def log(message: str, payload: dict | None = None) -> None:
             f.write(json.dumps(entry) + "\n")
     except Exception:  # NOSONAR — hooks must never crash the parent process
         pass  # Silent failure - never break Claude
+
+    # OTLP log fan-out for brain-tagged events (deterministic audit trail).
+    # Gated by OTEL_HOOK_LOG_FANOUT (inherits OTEL_HOOKS_ENABLED by default).
+    try:
+        if any(message.startswith(p) for p in _BRAIN_LOG_PREFIXES):
+            from hooks.telemetry import emit_log
+
+            emit_log(message, payload or {})
+    except Exception:
+        pass
 
 
 def log_command(script_name: str, output: str) -> None:

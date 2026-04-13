@@ -184,20 +184,39 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
     if not BRAIN_WRITER_ENABLED:
         return {"markers": 0, "reason": "disabled"}
 
-    markers = _parse_transcript_for_markers(transcript_path, BRAIN_WRITER_MAX_MARKERS)
+    from hooks.telemetry import span_ctx
 
-    # Fallback: if transcript had no markers but last_message does, parse that
-    if not markers and last_message:
-        markers = _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]
-    if not markers:
-        return {"markers": 0}
+    with span_ctx(
+        "brain.marker_write",
+        {
+            "session_id": session_id,
+            "transcript_path": transcript_path or "<fallback>",
+            "source": "transcript" if transcript_path else "last_message",
+        },
+    ) as span:
+        markers = _parse_transcript_for_markers(transcript_path, BRAIN_WRITER_MAX_MARKERS)
 
-    outbox_count = _write_to_outbox(markers, session_id, BRAIN_WRITER_OUTBOX)
-    redis_count = _publish_to_redis(markers, BRAIN_WRITER_REDIS_URL, BRAIN_WRITER_SSH_KEY)
+        # Fallback: if transcript had no markers but last_message does, parse that
+        if not markers and last_message:
+            markers = _find_markers(last_message)[:BRAIN_WRITER_MAX_MARKERS]
+        if not markers:
+            span.set_attrs({"markers_found": 0})
+            return {"markers": 0}
 
-    return {
-        "markers": len(markers),
-        "outbox": outbox_count,
-        "redis": redis_count,
-        "types": [m["type"] for m in markers],
-    }
+        outbox_count = _write_to_outbox(markers, session_id, BRAIN_WRITER_OUTBOX)
+        redis_count = _publish_to_redis(markers, BRAIN_WRITER_REDIS_URL, BRAIN_WRITER_SSH_KEY)
+
+        span.set_attrs(
+            {
+                "markers_found": len(markers),
+                "outbox_count": outbox_count,
+                "redis_count": redis_count,
+                "marker_types": ",".join(m["type"] for m in markers),
+            }
+        )
+        return {
+            "markers": len(markers),
+            "outbox": outbox_count,
+            "redis": redis_count,
+            "types": [m["type"] for m in markers],
+        }

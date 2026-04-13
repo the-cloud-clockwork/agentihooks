@@ -156,24 +156,35 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
         return 0
 
     from hooks.context.broadcast import clear_broadcasts, create_broadcast
+    from hooks.telemetry import span_ctx
 
-    # Clear existing brain messages on this channel
-    clear_broadcasts(channel=BRAIN_CHANNEL)
+    total_bytes = sum(len(e.content) for e in entries)
+    with span_ctx(
+        "brain.inject",
+        {
+            "channel": BRAIN_CHANNEL,
+            "entry_count": len(entries),
+            "total_bytes": total_bytes,
+        },
+    ) as span:
+        # Clear existing brain messages on this channel
+        clear_broadcasts(channel=BRAIN_CHANNEL)
 
-    count = 0
-    for entry in entries:
-        msg_id = create_broadcast(
-            message=f"[{entry.title}]\n{entry.content}",
-            severity=entry.severity,
-            ttl_seconds=entry.ttl,
-            source="brain-adapter",
-            persistent=True,  # Brain content should be persistent (every turn)
-            channel=BRAIN_CHANNEL,
-        )
-        if msg_id:
-            count += 1
+        count = 0
+        for entry in entries:
+            msg_id = create_broadcast(
+                message=f"[{entry.title}]\n{entry.content}",
+                severity=entry.severity,
+                ttl_seconds=entry.ttl,
+                source="brain-adapter",
+                persistent=True,  # Brain content should be persistent (every turn)
+                channel=BRAIN_CHANNEL,
+            )
+            if msg_id:
+                count += 1
 
-    return count
+        span.set_attrs({"published_count": count})
+        return count
 
 
 def _compute_hash(entries: list[BrainEntry]) -> str:

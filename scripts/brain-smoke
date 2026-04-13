@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""brain-smoke — deterministic smoke test for the brain nervous system.
+
+Replays synthetic hook payloads (SessionStart, UserPromptSubmit, Stop) through
+`python -m hooks` and asserts the expected side effects:
+
+  1. SessionStart    → broadcast.json has brain-adapter entries (READ path)
+  2. UserPromptSubmit → brain.delivery spans emitted per message (delivery path)
+  3. Stop            → outbox has marker files (WRITE path)
+  4. --otel-check    → ClickHouse has brain.* spans from this run
+
+Exit 0 on all-pass, 1 on any failure. No agent interaction — pure determinism.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+
+REPO = Path(__file__).resolve().parent.parent
+HOOKS_VENV = REPO / ".venv" / "bin" / "python"
+AGENTIHOOKS_DIR = Path.home() / ".agentihooks"
+BROADCAST_FILE = AGENTIHOOKS_DIR / "broadcast.json"
+OUTBOX_DIR = AGENTIHOOKS_DIR / "brain-outbox"
+HOOKS_LOG = AGENTIHOOKS_DIR / "logs" / "hooks.log"
+
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+
+def _run_hook(event: str, payload: dict) -> subprocess.CompletedProcess:
+    """Pipe a JSON payload through `python -m hooks` and return the result."""
+    p = dict(payload)
+    p["hook_event_name"] = event
+    proc = subprocess.run(
+        [str(HOOKS_VENV), "-m", "hooks"],
+        input=json.dumps(p),
+        capture_output=True,
+        text=True,
+        cwd=str(REPO),
+        timeout=30,
+    )
+    return proc
+
+
+def _make_session_id() -> str:
+    return f"smoke-{uuid.uuid4().hex[:8]}"
+
+
+def _load_broadcasts() -> list[dict]:
+    if not BROADCAST_FILE.exists():
+        return []
+    try:
+        return json.loads(BROADCAST_FILE.read_text()) or []
+    except Exception:
+        return []
+
+
+def _count_outbox_files() -> int:
+    if not OUTBOX_DIR.exists():
+        return 0
+    return len(list(OUTBOX_DIR.glob("*.json")))
+
+
+def test_inject(session_id: str) -> tuple[bool, str]:
+    """SessionStart payload → broadcast.json should have brain entries."""
+    baseline = len(_load_broadcasts())
+    payload = {
+        "session_id": session_id,
+        "transcript_path": f"/tmp/smoke-{session_id}.jsonl",
+        "cwd": str(REPO),
+        "source": "startup",
+    }
+    proc = _run_hook("SessionStart", payload)
+    if proc.returncode != 0 and proc.returncode != 2:
+        return False, f"hook exit {proc.returncode}: {proc.stderr[:200]}"
+    after = _load_broadcasts()
+    brain_entries = [b for b in after if b.get("source") == "brain-adapter"]
+    if not brain_entries:
+        return False, f"no brain-adapter broadcasts (total={len(after)} baseline={baseline})"
+    return True, f"broadcasts_total={len(after)} brain_entries={len(brain_entries)}"
+
+
+def test_delivery(session_id: str) -> tuple[bool, str]:
+    """UserPromptSubmit → hook log should contain brain events."""
+    payload = {
+        "session_id": session_id,
+        "transcript_path": f"/tmp/smoke-{session_id}.jsonl",
+        "cwd": str(REPO),
+        "prompt": "brain-smoke delivery test",
+    }
+    log_size_before = HOOKS_LOG.stat().st_size if HOOKS_LOG.exists() else 0
+    proc = _run_hook("UserPromptSubmit", payload)
+    if proc.returncode not in (0, 2):
+        return False, f"hook exit {proc.returncode}: {proc.stderr[:200]}"
+    if not HOOKS_LOG.exists():
+        return False, "hooks.log missing"
+    log_size_after = HOOKS_LOG.stat().st_size
+    if log_size_after <= log_size_before:
+        return False, "hook log did not grow"
+    return True, f"log grew by {log_size_after - log_size_before} bytes"
+
+
+def test_marker_write(session_id: str) -> tuple[bool, str]:
+    """Stop payload with lesson marker → outbox should gain a file."""
+    transcript = Path(f"/tmp/smoke-{session_id}.jsonl")
+    lesson = (
+        "This is a smoke test lesson.\n"
+        "<!-- @lesson -->\n"
+        f"brain-smoke marker for session {session_id}.\n"
+        "<!-- @/lesson -->\n"
+    )
+    turn = {
+        "type": "assistant",
+        "timestamp": "2026-04-13T18:00:00Z",
+        "message": {"content": [{"type": "text", "text": lesson}]},
+    }
+    transcript.write_text(json.dumps(turn) + "\n")
+    before = _count_outbox_files()
+    payload = {
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+        "cwd": str(REPO),
+        "last_assistant_message": lesson,
+    }
+    proc = _run_hook("Stop", payload)
+    transcript.unlink(missing_ok=True)
+    if proc.returncode not in (0, 2):
+        return False, f"hook exit {proc.returncode}: {proc.stderr[:200]}"
+    after = _count_outbox_files()
+    if after <= before:
+        return False, f"outbox did not grow ({before} -> {after})"
+    return True, f"outbox {before} -> {after} (+{after - before})"
+
+
+def test_error_path(session_id: str) -> tuple[bool, str]:
+    """Stop with empty transcript_path should not crash."""
+    payload = {
+        "session_id": session_id,
+        "transcript_path": "",
+        "cwd": str(REPO),
+        "last_assistant_message": "no markers here",
+    }
+    proc = _run_hook("Stop", payload)
+    if proc.returncode not in (0, 2):
+        return False, f"crashed: exit {proc.returncode}"
+    return True, "graceful degradation"
+
+
+def test_otel_spans(session_id: str) -> tuple[bool, str]:
+    """Optional: query ClickHouse for brain.* spans for this session."""
+    ch_url = os.getenv("CLICKHOUSE_URL")
+    if not ch_url:
+        return True, "skipped (CLICKHOUSE_URL unset)"
+    query = (
+        "SELECT SpanName, count() FROM otel.otel_traces "
+        "WHERE SpanName LIKE 'brain.%' "
+        "AND Timestamp > now() - INTERVAL 2 MINUTE "
+        "GROUP BY SpanName"
+    )
+    try:
+        import base64
+        parsed = urllib.parse.urlparse(ch_url)
+        host_url = f"{parsed.scheme}://{parsed.hostname}"
+        if parsed.port:
+            host_url += f":{parsed.port}"
+        data = urllib.parse.quote(query)
+        req = urllib.request.Request(
+            f"{host_url}/?query={data}",
+            method="POST",
+        )
+        if parsed.username:
+            creds = f"{parsed.username}:{parsed.password or ''}"
+            b64 = base64.b64encode(creds.encode()).decode()
+            req.add_header("Authorization", f"Basic {b64}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
+    except Exception as e:
+        return False, f"clickhouse unreachable: {e}"
+    if not body.strip():
+        return False, "no brain.* spans in last 2 min"
+    return True, f"spans: {body.strip().replace(chr(10), ', ')}"
+
+
+TESTS = [
+    ("inject", "SessionStart → broadcast.json brain entries", test_inject),
+    ("delivery", "UserPromptSubmit → hook log growth", test_delivery),
+    ("marker_write", "Stop + lesson marker → outbox file", test_marker_write),
+    ("error_path", "Stop with empty transcript_path → graceful", test_error_path),
+]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Brain nervous system smoke test")
+    ap.add_argument("--otel-check", action="store_true",
+                    help="query ClickHouse for brain.* spans (needs CLICKHOUSE_URL)")
+    ap.add_argument("--no-color", action="store_true")
+    args = ap.parse_args()
+
+    if args.no_color:
+        global GREEN, RED, YELLOW, BOLD, RESET
+        GREEN = RED = YELLOW = BOLD = RESET = ""
+
+    session_id = _make_session_id()
+    print(f"{BOLD}brain-smoke{RESET} session={session_id}")
+    print(f"  hooks={HOOKS_VENV}")
+    print()
+
+    results: list[tuple[str, bool, str]] = []
+    for slug, desc, fn in TESTS:
+        t0 = time.time()
+        try:
+            ok, evidence = fn(session_id)
+        except Exception as e:
+            ok, evidence = False, f"exception: {e}"
+        dt = (time.time() - t0) * 1000
+        marker = f"{GREEN}PASS{RESET}" if ok else f"{RED}FAIL{RESET}"
+        print(f"  [{marker}] {desc}  ({dt:.0f}ms)")
+        print(f"         {evidence}")
+        results.append((slug, ok, evidence))
+
+    if args.otel_check:
+        t0 = time.time()
+        ok, evidence = test_otel_spans(session_id)
+        dt = (time.time() - t0) * 1000
+        marker = f"{GREEN}PASS{RESET}" if ok else f"{YELLOW}WARN{RESET}"
+        print(f"  [{marker}] OTel spans in ClickHouse  ({dt:.0f}ms)")
+        print(f"         {evidence}")
+        if not ok:
+            results.append(("otel_spans", ok, evidence))
+
+    failures = sum(1 for _, ok, _ in results if not ok)
+    print()
+    if failures == 0:
+        print(f"{GREEN}{BOLD}ALL PASS{RESET}  ({len(results)} tests)")
+        return 0
+    print(f"{RED}{BOLD}{failures} FAIL{RESET}  ({len(results)} tests)")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

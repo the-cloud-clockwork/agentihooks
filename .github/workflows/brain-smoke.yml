@@ -1,0 +1,73 @@
+name: brain-smoke
+
+on:
+  pull_request:
+    paths:
+      - 'hooks/telemetry.py'
+      - 'hooks/common.py'
+      - 'hooks/context/brain_adapter.py'
+      - 'hooks/context/brain_writer_hook.py'
+      - 'hooks/context/broadcast.py'
+      - 'scripts/brain-smoke'
+      - 'pyproject.toml'
+      - '.github/workflows/brain-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: brain-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      otel-collector:
+        image: otel/opentelemetry-collector-contrib:0.96.0
+        ports:
+          - 4318:4318
+          - 4317:4317
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Create venv and install
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python -e ".[all]"
+
+      - name: Seed brain-feed fixtures
+        run: |
+          mkdir -p $HOME/.agentihooks/brain-feed
+          cat > $HOME/.agentihooks/brain-feed/hot-arcs.md <<'EOF'
+          ---
+          id: ci-test-hot-arcs
+          title: Active Hot Arcs
+          priority: 5
+          ttl: 3600
+          severity: info
+          ---
+          ## Hot Arcs — CI smoke
+          | Arc | Heat | Region | Title |
+          |---|---|---|---|
+          | [[test-arc]] | 5 | bridge | CI smoke test arc |
+          EOF
+
+      - name: Run brain-smoke
+        env:
+          OTEL_HOOKS_ENABLED: 'true'
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318'
+          OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+          BRAIN_WRITER_ENABLED: 'true'
+          BRAIN_ENABLED: 'true'
+          LOG_HOOKS: 'true'
+        run: |
+          ./scripts/brain-smoke --no-color

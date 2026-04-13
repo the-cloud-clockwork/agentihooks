@@ -503,11 +503,24 @@ def check_and_inject_broadcasts(session_id: str) -> None:
 
     try:
         from hooks.common import inject_banner
+        from hooks.telemetry import emit_span
 
         pending = get_pending_broadcasts(session_id)
         for msg in pending:
             banner = format_broadcast_banner(msg)
             inject_banner("BROADCAST", banner)
+            emit_span(
+                "brain.delivery",
+                {
+                    "session_id": session_id,
+                    "message_id": msg.get("id", ""),
+                    "channel": msg.get("channel") or "_global",
+                    "severity": msg.get("severity", "info"),
+                    "source": msg.get("source", ""),
+                    "bytes": len(msg.get("message", "")),
+                    "persistent": bool(msg.get("persistent")),
+                },
+            )
             if not msg.get("persistent"):
                 mark_delivered(session_id, msg["id"])
     except Exception:
