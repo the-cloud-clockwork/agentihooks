@@ -1360,7 +1360,13 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
             overrides_path = pdir / "settings.overrides.json"
         if overrides_path.exists():
             try:
-                ovr = load_json(overrides_path)
+                # Substitute {PROFILE_DIR} placeholder with the absolute profile path
+                # BEFORE JSON parsing, so hook commands like
+                #   "bash {PROFILE_DIR}/hooks/x.sh"
+                # become absolute paths that work regardless of Claude's cwd.
+                raw = overrides_path.read_text()
+                raw = raw.replace("{PROFILE_DIR}", str(pdir.resolve()))
+                ovr = json.loads(raw)
                 # Deep merge: dict keys merge additively, scalars overwrite
                 for key in ("env", "permissions"):
                     if key in ovr:
@@ -1384,7 +1390,9 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
                 sp_overrides = sp_dir / "settings.overrides.json"
             if sp_overrides.exists():
                 try:
-                    ovr = load_json(sp_overrides)
+                    raw = sp_overrides.read_text()
+                    raw = raw.replace("{PROFILE_DIR}", str(sp_dir.resolve()))
+                    ovr = json.loads(raw)
                     # Deep merge: dict keys merge additively, scalars overwrite
                     for key in ("env", "permissions"):
                         if key in ovr:
