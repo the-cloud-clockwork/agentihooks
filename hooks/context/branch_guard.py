@@ -29,11 +29,6 @@ _BLOCKED_PATTERNS = [
         re.compile(r"git\s+rebase\s+.*\b(main|master)\b"),
         "Rebasing onto main/master is blocked. Create a PR instead.",
     ),
-    # Checkout/switch to main/master (switching to the protected branch)
-    (
-        re.compile(r"git\s+(checkout|switch)\s+(-\S+\s+)?(main|master)\b"),
-        "Checking out main/master directly is blocked. Work on a feature branch.",
-    ),
     # Delete main/master branch
     (
         re.compile(r"git\s+branch\s+(-[dD]|--delete)\b.*\b(main|master)\b"),
@@ -47,11 +42,6 @@ _BLOCKED_PATTERNS = [
     (
         re.compile(r"git\s+push\s+.*--force-with-lease"),
         "Force push (with lease) is blocked — this can destroy remote history.",
-    ),
-    # gh pr merge (merging PRs — operator merges manually)
-    (
-        re.compile(r"gh\s+pr\s+merge\b"),
-        "gh pr merge is blocked — the operator merges PRs to main manually.",
     ),
     # Git tag (tagging is a release operation — must be done by a human or CI)
     (

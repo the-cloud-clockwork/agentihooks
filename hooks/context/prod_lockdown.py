@@ -28,16 +28,6 @@ BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
 
 _BLOCKED: list[tuple[re.Pattern, str, str]] = [
     (
-        re.compile(r"git\s+push[^|&;\n]*\borigin\b[^|&;\n]*\bmain\b", re.I),
-        "git push to main",
-        "use gh pr create --base main instead",
-    ),
-    (
-        re.compile(r"\bgh\s+pr\s+merge\b", re.I),
-        "gh pr merge",
-        "operator merges PRs to main manually",
-    ),
-    (
         re.compile(r"\bkubectl\b[^|&;\n]*\s-n\s+anton-prod\b", re.I),
         "kubectl in anton-prod namespace",
         "production namespace is locked",
