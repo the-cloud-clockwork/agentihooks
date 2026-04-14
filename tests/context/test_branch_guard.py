@@ -36,10 +36,10 @@ class TestBranchGuard:
         self._assert_blocked("git push origin HEAD:master")
 
     def test_checkout_main(self):
-        self._assert_blocked("git checkout main")
+        self._assert_allowed("git checkout main")
 
     def test_switch_master(self):
-        self._assert_blocked("git switch master")
+        self._assert_allowed("git switch master")
 
     def test_merge_main(self):
         self._assert_blocked("git merge main")
@@ -63,7 +63,7 @@ class TestBranchGuard:
         self._assert_blocked("git branch -D main")
 
     def test_gh_pr_merge(self):
-        self._assert_blocked("gh pr merge 123")
+        self._assert_allowed("gh pr merge 123")
 
     # --- Allowed commands ---
 

@@ -479,6 +479,14 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
+    # Clear prod lockdown bypass flag for this session
+    try:
+        from hooks.context.prod_lockdown import clear_bypass
+
+        clear_bypass(session_id)
+    except Exception:
+        pass
+
     # --- Broadcast: deregister session ---
     from hooks.config import BROADCAST_ENABLED
 
@@ -559,6 +567,17 @@ def on_user_prompt_submit(payload: dict) -> None:
             maybe_refresh(session_id, project_dir=payload.get("cwd", ""))
         except Exception as e:
             log("context_refresh failed", {"error": str(e)})
+
+    # --- Prod lockdown bypass: detect operator override phrase ---
+    try:
+        from hooks.context.prod_lockdown import contains_bypass_phrase, set_bypass
+
+        prompt = payload.get("prompt", "")
+        if prompt and contains_bypass_phrase(prompt):
+            set_bypass(session_id)
+            log("prod_lockdown: bypass active this turn", {"session_id": session_id})
+    except Exception as e:
+        log("prod_lockdown bypass detection failed", {"error": str(e)})
 
     # --- Broadcast: inject pending messages ---
     from hooks.config import BROADCAST_ENABLED
@@ -672,13 +691,25 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Branch guard: block git operations targeting main/master ---
     if tool_name == "Bash":
         try:
-            from hooks.context.branch_guard import check_branch_guard
+            from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
 
             check_branch_guard(payload)
+            check_commit_on_main(payload)
         except BlockAction:
             raise
         except Exception as e:
             log("branch_guard check failed", {"error": str(e)})
+
+    # --- Prod lockdown: block production operations unless bypass active ---
+    if tool_name == "Bash":
+        try:
+            from hooks.context.prod_lockdown import check_prod_lockdown
+
+            check_prod_lockdown(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("prod_lockdown check failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -980,6 +1011,14 @@ def on_stop(payload: dict) -> None:
 
     # Check for errors and notify
     notify_on_error(transcript_path)
+
+    # Clear prod lockdown bypass for this turn
+    try:
+        from hooks.context.prod_lockdown import clear_bypass
+
+        clear_bypass(session_id)
+    except Exception as e:
+        log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
     # Scan transcript for MCP errors missed by PostToolUse
     from hooks.tool_memory import scan_transcript
