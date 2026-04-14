@@ -1,14 +1,17 @@
 """Branch Guard — blocks destructive git operations on main/master.
 
-Prevents pushes, merges, checkouts, rebases, branch deletions targeting
-main/master, force pushes, git tagging, and gh pr merge.
+Prevents pushes, merges, rebases, branch deletions targeting main/master,
+force pushes, git tagging, and commits while HEAD is on main/master.
 Read-only operations (pull, diff, log, status) are allowed.
 
 Public API:
-    check_branch_guard(payload)  — called from on_pre_tool_use for Bash
+    check_branch_guard(payload)      — called from on_pre_tool_use for Bash
+    check_commit_on_main(payload)    — called from on_pre_tool_use for Bash
 """
 
+import os
 import re
+import subprocess
 
 from hooks.common import log
 from hooks.hook_manager import BlockAction
@@ -87,3 +90,68 @@ def check_branch_guard(payload: dict) -> None:
                 },
             )
             raise BlockAction(f"BLOCKED: {message}")
+
+
+_COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")
+_CD_PREFIX_PATTERN = re.compile(r"^\s*cd\s+(\S+)\s*(?:&&|;)")
+
+
+def _resolve_cwd(command: str, payload_cwd: str) -> str:
+    """Return the effective cwd — honors `cd <path> && ...` prefix in command."""
+    m = _CD_PREFIX_PATTERN.match(command)
+    if m:
+        path = m.group(1).strip('"').strip("'")
+        if os.path.isdir(path):
+            return path
+    if payload_cwd and os.path.isdir(payload_cwd):
+        return payload_cwd
+    return os.getcwd()
+
+
+def _current_branch(cwd: str) -> str:
+    """Return the current git branch name, or empty string on failure."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def check_commit_on_main(payload: dict) -> None:
+    """Block `git commit` when HEAD is on main/master.
+
+    AI should always work on a feature branch. Committing on main (even
+    locally) pollutes main history and encourages the wrong workflow.
+    Should only be called when tool_name == 'Bash'.
+    """
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", "")
+    if not command or not _COMMIT_PATTERN.search(command):
+        return
+
+    payload_cwd = payload.get("cwd") or payload.get("tool_input", {}).get("cwd") or ""
+    cwd = _resolve_cwd(command, payload_cwd)
+    branch = _current_branch(cwd)
+    if branch in ("main", "master"):
+        log(
+            "branch_guard: commit on main blocked",
+            {
+                "branch": branch,
+                "command": command[:200],
+                "cwd": cwd,
+                "session_id": payload.get("session_id", ""),
+            },
+        )
+        raise BlockAction(
+            f"BLOCKED: git commit on '{branch}' branch is not allowed.\n"
+            f"Create a feature branch first:\n"
+            f"  git checkout -b feat/<short-description>\n"
+            f"Then commit and open a PR to main when ready."
+        )

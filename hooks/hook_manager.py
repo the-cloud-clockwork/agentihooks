@@ -691,9 +691,10 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Branch guard: block git operations targeting main/master ---
     if tool_name == "Bash":
         try:
-            from hooks.context.branch_guard import check_branch_guard
+            from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
 
             check_branch_guard(payload)
+            check_commit_on_main(payload)
         except BlockAction:
             raise
         except Exception as e:
