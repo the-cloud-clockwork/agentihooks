@@ -84,26 +84,29 @@ _BRANCH_CREATE_PATTERNS = [
 _BLOCKED_PATTERNS = [
     # Push to main/master (direct push bypasses PR workflow)
     (
-        re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(main|master)\b"),
+        re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![/\w-])(main|master)(?![/\w-])"),
         "Pushing directly to main/master is blocked. Use gh pr create --base main instead.",
     ),
     # Merge into main/master (direct merge bypasses PR workflow)
     (
-        re.compile(r"git\s+merge\s+.*\b(main|master)\b"),
+        re.compile(r"git\s+merge\s+.*(?<![/\w-])(main|master)(?![/\w-])"),
         "Direct merge into main/master is blocked. Create a PR instead.",
     ),
     # Rebase onto main/master
     (
-        re.compile(r"git\s+rebase\s+.*\b(main|master)\b"),
+        re.compile(r"git\s+rebase\s+.*(?<![/\w-])(main|master)(?![/\w-])"),
         "Rebasing onto main/master is blocked. Create a PR instead.",
     ),
     # Delete main/master branch
     (
-        re.compile(r"git\s+branch\s+(-[dD]|--delete)\b.*\b(main|master)\b"),
+        re.compile(r"git\s+branch\s+(-[dD]|--delete)\b.*(?<![/\w-])(main|master)(?![/\w-])"),
         "Deleting main/master is blocked.",
     ),
     # Reset main/master (destructive — rewrites history)
-    (re.compile(r"git\s+reset\s+.*\b(main|master)\b"), "Resetting main/master is blocked — this rewrites history."),
+    (
+        re.compile(r"git\s+reset\s+.*(?<![/\w-])(main|master)(?![/\w-])"),
+        "Resetting main/master is blocked — this rewrites history.",
+    ),
     # Force push (any branch — can destroy remote history)
     (re.compile(r"git\s+push\s+--force"), "Force push is blocked — this can destroy remote history."),
     (re.compile(r"git\s+push\s+-f\b"), "Force push is blocked — this can destroy remote history."),
