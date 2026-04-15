@@ -331,6 +331,17 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("thinking_policy injection failed", {"error": str(e)})
 
+    # --- Auto dev-switch: if on main/master, switch to dev (create if missing) ---
+    try:
+        from hooks.config import AUTO_DEV_SWITCH_ENABLED
+
+        if AUTO_DEV_SWITCH_ENABLED:
+            from hooks.context.auto_dev_switch import inject_on_session_start as _auto_dev
+
+            _auto_dev(payload.get("cwd", ""))
+    except Exception as e:
+        log("auto_dev_switch session_start failed", {"error": str(e)})
+
     # --- CI Manifesto: inject doctrine at session start ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED

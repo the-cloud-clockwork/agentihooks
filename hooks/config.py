@@ -293,6 +293,9 @@ CI_MANIFESTO_PATH: str = os.getenv(
 )
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
+# Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
+AUTO_DEV_SWITCH_ENABLED = _env_bool("AUTO_DEV_SWITCH_ENABLED", "true")
+
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
