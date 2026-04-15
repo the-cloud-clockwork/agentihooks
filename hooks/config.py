@@ -284,6 +284,16 @@ BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "5"))
 BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "1536"))
 
 # =============================================================================
+# CI MANIFESTO — doctrine-as-context injection
+# =============================================================================
+CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
+CI_MANIFESTO_PATH: str = os.getenv(
+    "CI_MANIFESTO_PATH",
+    str(Path.home() / "dev" / "tccw-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"),
+)
+CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
+
+# =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)
 # Layer 1 (Claude Code native) reads standard OTEL_* env vars directly.
 # These control agentihooks-specific OTEL emission.
