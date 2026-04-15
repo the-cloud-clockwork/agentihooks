@@ -331,6 +331,17 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("thinking_policy injection failed", {"error": str(e)})
 
+    # --- CI Manifesto: inject doctrine at session start ---
+    try:
+        from hooks.config import CI_MANIFESTO_ENABLED
+
+        if CI_MANIFESTO_ENABLED:
+            from hooks.context.ci_manifesto import inject_on_session_start as inject_ci_manifesto
+
+            inject_ci_manifesto()
+    except Exception as e:
+        log("ci_manifesto session_start failed", {"error": str(e)})
+
     # --- Broadcast: register session + deliver pending ---
     # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
@@ -481,9 +492,10 @@ def on_session_end(payload: dict) -> None:
 
     # Clear prod lockdown bypass flag for this session
     try:
-        from hooks.context.prod_lockdown import clear_bypass
+        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
+        clear_release_signal(session_id)
     except Exception:
         pass
 
@@ -546,6 +558,17 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("brain_adapter refresh failed", {"error": str(e)})
 
+    # --- CI Manifesto: counter-gated re-injection of doctrine ---
+    try:
+        from hooks.config import CI_MANIFESTO_ENABLED
+
+        if CI_MANIFESTO_ENABLED:
+            from hooks.context.ci_manifesto import maybe_refresh as ci_manifesto_refresh
+
+            ci_manifesto_refresh(session_id)
+    except Exception as e:
+        log("ci_manifesto refresh failed", {"error": str(e)})
+
     # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
     try:
         from hooks.config import AMYGDALA_ENABLED
@@ -578,6 +601,23 @@ def on_user_prompt_submit(payload: dict) -> None:
             log("prod_lockdown: bypass active this turn", {"session_id": session_id})
     except Exception as e:
         log("prod_lockdown bypass detection failed", {"error": str(e)})
+
+    # --- Release-gate signal: detect manifesto §9 release-gate or hotfix phrases ---
+    try:
+        from hooks.context.ci_manifesto import contains_hotfix_signal, contains_release_signal
+        from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
+        from hooks.context.prod_lockdown import set_release_signal
+
+        prompt = payload.get("prompt", "")
+        if prompt:
+            if contains_release_signal(prompt):
+                set_release_signal(session_id)
+                log("ci_manifesto: release-gate signal active this turn", {"session_id": session_id})
+            if contains_hotfix_signal(prompt):
+                _set_full_bypass(session_id)
+                log("ci_manifesto: hotfix signal active this turn", {"session_id": session_id})
+    except Exception as e:
+        log("ci_manifesto signal detection failed", {"error": str(e)})
 
     # --- Broadcast: inject pending messages ---
     from hooks.config import BROADCAST_ENABLED
@@ -1012,11 +1052,12 @@ def on_stop(payload: dict) -> None:
     # Check for errors and notify
     notify_on_error(transcript_path)
 
-    # Clear prod lockdown bypass for this turn
+    # Clear prod lockdown bypass + release signal for this turn
     try:
-        from hooks.context.prod_lockdown import clear_bypass
+        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
+        clear_release_signal(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
@@ -1080,6 +1121,17 @@ def on_subagent_start(payload: dict) -> None:
         "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "<unset>"),
         "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", "<unset>"),
     })
+
+    # CI Manifesto — inject doctrine into subagents too
+    try:
+        from hooks.config import CI_MANIFESTO_ENABLED
+
+        if CI_MANIFESTO_ENABLED:
+            from hooks.context.ci_manifesto import inject_on_session_start as inject_ci_manifesto
+
+            inject_ci_manifesto()
+    except Exception as e:
+        log("ci_manifesto subagent_start failed", {"error": str(e)})
 
     # Brain adapter — publish brain content to the shared broadcast channel
     try:
