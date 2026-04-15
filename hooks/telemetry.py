@@ -174,8 +174,12 @@ def span_ctx(name: str, attrs: dict[str, Any]) -> Iterator[_Span]:
 def _http_fallback(name: str, attrs: dict[str, Any], duration_ms: float | None) -> None:
     """Minimal OTLP HTTP JSON trace export. No SDK required."""
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-    if not endpoint or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "") == "grpc":
+    if not endpoint:
         return
+    # If configured endpoint is gRPC port (4317), swap to the sibling HTTP port
+    # (4318) for the fallback. Prevents silent drops when gRPC SDK isn't available.
+    if ":4317" in endpoint:
+        endpoint = endpoint.replace(":4317", ":4318")
     url = endpoint.rstrip("/") + "/v1/traces"
     try:
         from hooks.config import OTEL_HOOKS_SERVICE_NAME as svc
