@@ -501,12 +501,14 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear prod lockdown bypass flag for this session
+    # Clear prod lockdown bypass flag + branch signal for this session
     try:
+        from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
+        clear_branch_signal(session_id)
     except Exception:
         pass
 
@@ -613,9 +615,14 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("prod_lockdown bypass detection failed", {"error": str(e)})
 
-    # --- Release-gate signal: detect manifesto §9 release-gate or hotfix phrases ---
+    # --- Release-gate / hotfix / branch signals (CI Manifesto §9, §14) ---
     try:
-        from hooks.context.ci_manifesto import contains_hotfix_signal, contains_release_signal
+        from hooks.context.branch_guard import set_branch_signal
+        from hooks.context.ci_manifesto import (
+            contains_branch_signal,
+            contains_hotfix_signal,
+            contains_release_signal,
+        )
         from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
         from hooks.context.prod_lockdown import set_release_signal
 
@@ -627,6 +634,9 @@ def on_user_prompt_submit(payload: dict) -> None:
             if contains_hotfix_signal(prompt):
                 _set_full_bypass(session_id)
                 log("ci_manifesto: hotfix signal active this turn", {"session_id": session_id})
+            if contains_branch_signal(prompt):
+                set_branch_signal(session_id)
+                log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
@@ -1063,12 +1073,14 @@ def on_stop(payload: dict) -> None:
     # Check for errors and notify
     notify_on_error(transcript_path)
 
-    # Clear prod lockdown bypass + release signal for this turn
+    # Clear prod lockdown bypass + release signal + branch signal for this turn
     try:
+        from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
+        clear_branch_signal(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
