@@ -890,6 +890,48 @@ def on_post_tool_use(payload: dict) -> None:
     tool_name = payload.get("tool_name", "unknown")
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
 
+    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14) ---
+    if tool_name == "AskUserQuestion":
+        try:
+            from hooks.context.branch_guard import set_branch_signal
+            from hooks.context.ci_manifesto import (
+                contains_branch_signal,
+                contains_hotfix_signal,
+                contains_release_signal,
+            )
+            from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
+            from hooks.context.prod_lockdown import set_release_signal
+
+            session_id = payload.get("session_id", "")
+            resp = payload.get("tool_response") or payload.get("tool_output") or {}
+            # Collect answer text — answers dict values, labels, notes
+            texts: list[str] = []
+            if isinstance(resp, dict):
+                answers = resp.get("answers") or {}
+                if isinstance(answers, dict):
+                    texts.extend(str(v) for v in answers.values())
+                ann = resp.get("annotations") or {}
+                if isinstance(ann, dict):
+                    for a in ann.values():
+                        if isinstance(a, dict):
+                            if a.get("notes"):
+                                texts.append(str(a["notes"]))
+                            if a.get("preview"):
+                                texts.append(str(a["preview"]))
+            combined = " ".join(texts).lower()
+            if combined and session_id:
+                if contains_release_signal(combined):
+                    set_release_signal(session_id)
+                    log("ci_manifesto: release-gate signal via AskUserQuestion answer", {"session_id": session_id})
+                if contains_hotfix_signal(combined):
+                    _set_full_bypass(session_id)
+                    log("ci_manifesto: hotfix signal via AskUserQuestion answer", {"session_id": session_id})
+                if contains_branch_signal(combined):
+                    set_branch_signal(session_id)
+                    log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
+        except Exception as e:
+            log("ci_manifesto AskUserQuestion signal detection failed", {"error": str(e)})
+
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
