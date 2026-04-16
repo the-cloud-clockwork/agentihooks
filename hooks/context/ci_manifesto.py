@@ -107,15 +107,15 @@ _SECTION_RE = re.compile(
     r"\*\*(Release-gate signals|Hotfix signals)\*\*.*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
-# Branch signals live under §14, PR signals under §15 — both share the
+# Branch Discipline and PR Discipline sections — both share the
 # "Unlock (per-turn operator signal)" fenced-block convention. We match
-# both by scanning all such blocks in order under their section headers.
+# by section title (section numbering changes when new sections land).
 _BRANCH_SECTION_RE = re.compile(
-    r"##\s*14\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
+    r"##\s*\d+\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
 _PR_SECTION_RE = re.compile(
-    r"##\s*15\.\s*PR\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
+    r"##\s*\d+\.\s*PR\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
 
