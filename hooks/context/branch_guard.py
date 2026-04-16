@@ -20,6 +20,8 @@ from hooks.hook_manager import BlockAction
 
 # Per-turn branch-creation signal (CI Manifesto §14)
 _BRANCH_SIGNAL_TYPE = "branch_create_signal"
+# Per-turn PR-creation signal (CI Manifesto §15)
+_PR_SIGNAL_TYPE = "pr_create_signal"
 _BRANCH_SIGNAL_TTL = 300
 
 
@@ -29,6 +31,14 @@ def _branch_signal_key(session_id: str) -> str:
 
 def _branch_signal_flag(session_id: str) -> Path:
     return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.branch"
+
+
+def _pr_signal_key(session_id: str) -> str:
+    return redis_key(_PR_SIGNAL_TYPE, session_id)
+
+
+def _pr_signal_flag(session_id: str) -> Path:
+    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.pr"
 
 
 def set_branch_signal(session_id: str) -> None:
@@ -69,6 +79,51 @@ def _has_branch_signal(session_id: str) -> bool:
         except Exception:
             pass
     return _branch_signal_flag(session_id).exists()
+
+
+def set_pr_signal(session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.setex(_pr_signal_key(session_id), _BRANCH_SIGNAL_TTL, "1")
+        except Exception as e:
+            log("branch_guard.set_pr_signal redis failed", {"error": str(e)})
+    try:
+        f = _pr_signal_flag(session_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("1")
+    except Exception as e:
+        log("branch_guard.set_pr_signal file failed", {"error": str(e)})
+
+
+def clear_pr_signal(session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.delete(_pr_signal_key(session_id))
+        except Exception:
+            pass
+    try:
+        _pr_signal_flag(session_id).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _has_pr_signal(session_id: str) -> bool:
+    if not session_id:
+        return False
+    r = get_redis()
+    if r:
+        try:
+            return bool(r.exists(_pr_signal_key(session_id)))
+        except Exception:
+            pass
+    return _pr_signal_flag(session_id).exists()
+
+
+# PR creation pattern (CI Manifesto §15). Blocks `gh pr create` in any form.
+# Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
+_PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
 
 
 # Branch-creation patterns (blocked without branch signal).
@@ -172,6 +227,20 @@ def check_branch_guard(payload: dict) -> None:
                 "Work on 'dev' (default) or an operator-assigned branch/worktree.\n"
                 "To unlock for this turn, operator must include a branch signal "
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
+            )
+
+    # PR creation — default-deny unless operator signaled this turn (§15)
+    if _PR_CREATE_PATTERN.search(check_text):
+        if not _has_pr_signal(session_id):
+            log(
+                "branch_guard: PR creation blocked",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: agent PR creation is disabled (CI Manifesto §15).\n"
+                "Agents commit and push — the operator decides when to open a PR.\n"
+                "To unlock for this turn, operator must include a PR signal "
+                "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
             )
 
 

@@ -501,14 +501,15 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear prod lockdown bypass flag + branch signal for this session
+    # Clear prod lockdown bypass flag + branch/PR signals for this session
     try:
-        from hooks.context.branch_guard import clear_branch_signal
+        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
         clear_branch_signal(session_id)
+        clear_pr_signal(session_id)
     except Exception:
         pass
 
@@ -615,12 +616,13 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("prod_lockdown bypass detection failed", {"error": str(e)})
 
-    # --- Release-gate / hotfix / branch signals (CI Manifesto §9, §14) ---
+    # --- Release-gate / hotfix / branch / PR signals (CI Manifesto §9, §14, §15) ---
     try:
-        from hooks.context.branch_guard import set_branch_signal
+        from hooks.context.branch_guard import set_branch_signal, set_pr_signal
         from hooks.context.ci_manifesto import (
             contains_branch_signal,
             contains_hotfix_signal,
+            contains_pr_signal,
             contains_release_signal,
         )
         from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
@@ -637,6 +639,9 @@ def on_user_prompt_submit(payload: dict) -> None:
             if contains_branch_signal(prompt):
                 set_branch_signal(session_id)
                 log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
+            if contains_pr_signal(prompt):
+                set_pr_signal(session_id)
+                log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
@@ -890,13 +895,14 @@ def on_post_tool_use(payload: dict) -> None:
     tool_name = payload.get("tool_name", "unknown")
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
 
-    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14) ---
+    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
         try:
-            from hooks.context.branch_guard import set_branch_signal
+            from hooks.context.branch_guard import set_branch_signal, set_pr_signal
             from hooks.context.ci_manifesto import (
                 contains_branch_signal,
                 contains_hotfix_signal,
+                contains_pr_signal,
                 contains_release_signal,
             )
             from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
@@ -904,7 +910,6 @@ def on_post_tool_use(payload: dict) -> None:
 
             session_id = payload.get("session_id", "")
             resp = payload.get("tool_response") or payload.get("tool_output") or {}
-            # Collect answer text — answers dict values, labels, notes
             texts: list[str] = []
             if isinstance(resp, dict):
                 answers = resp.get("answers") or {}
@@ -929,6 +934,9 @@ def on_post_tool_use(payload: dict) -> None:
                 if contains_branch_signal(combined):
                     set_branch_signal(session_id)
                     log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
+                if contains_pr_signal(combined):
+                    set_pr_signal(session_id)
+                    log("ci_manifesto: PR signal via AskUserQuestion answer", {"session_id": session_id})
         except Exception as e:
             log("ci_manifesto AskUserQuestion signal detection failed", {"error": str(e)})
 
@@ -1115,14 +1123,15 @@ def on_stop(payload: dict) -> None:
     # Check for errors and notify
     notify_on_error(transcript_path)
 
-    # Clear prod lockdown bypass + release signal + branch signal for this turn
+    # Clear prod lockdown bypass + release + branch + PR signals for this turn
     try:
-        from hooks.context.branch_guard import clear_branch_signal
+        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
         clear_branch_signal(session_id)
+        clear_pr_signal(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
