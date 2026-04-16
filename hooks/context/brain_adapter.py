@@ -45,6 +45,26 @@ from hooks.common import log
 # In-memory state
 _memory_counter: dict[str, int] = {}
 _content_hash: str = ""
+_HASH_CACHE_FILE = Path.home() / ".agentihooks" / "brain_adapter_hash.json"
+
+
+def _load_persisted_hash() -> str:
+    """Read last-published content hash from disk. Empty on miss."""
+    try:
+        if _HASH_CACHE_FILE.exists():
+            return json.loads(_HASH_CACHE_FILE.read_text()).get("hash", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _save_persisted_hash(hash_val: str) -> None:
+    """Persist last-published content hash so next hook process can dedup."""
+    try:
+        _HASH_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HASH_CACHE_FILE.write_text(json.dumps({"hash": hash_val}))
+    except Exception:
+        pass
 
 
 @dataclass
@@ -314,6 +334,14 @@ def force_refresh() -> bool:
     """Force re-read source and republish if changed. Returns True if published."""
     global _content_hash
 
+    # Hook runs in fresh Python process every prompt — module-level
+    # _content_hash starts empty. Hydrate it from persisted file so we can
+    # dedup across process boundaries. Without this, every prompt re-publishes
+    # identical content with a fresh expires_at timestamp, which defeats
+    # prompt caching (every broadcast block differs by one UUID + one Z-time).
+    if not _content_hash:
+        _content_hash = _load_persisted_hash()
+
     source = _get_source()
     if source is None:
         return False
@@ -343,6 +371,7 @@ def force_refresh() -> bool:
 
     count = _publish_entries(entries)
     _content_hash = new_hash
+    _save_persisted_hash(new_hash)
     log("brain_adapter: published", {"count": count, "hash": new_hash})
     return True
 

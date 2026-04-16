@@ -51,7 +51,16 @@ def _save_delivery_state(state: dict) -> None:
 
 
 def _msg_hash(msg: dict) -> str:
-    raw = (msg.get("id", "") + "|" + msg.get("message", "")).encode()
+    # Content-only hash. Intentionally omits `id` (random UUID regenerated on
+    # every clear+create cycle) and `expires_at` (changes every creation).
+    # Channel + severity + message uniquely identify semantic content. Two
+    # broadcasts with identical content on the same channel are the same
+    # broadcast for dedup purposes, even if they carry different UUIDs.
+    raw = "|".join([
+        str(msg.get("channel", "")),
+        str(msg.get("severity", "")),
+        msg.get("message", ""),
+    ]).encode()
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -531,16 +540,18 @@ def format_broadcast_banner(msg: dict) -> str:
     severity = msg.get("severity", "alert").upper()
     source = msg.get("source", "unknown")
     message = msg.get("message", "")
-    expires = msg.get("expires_at", "")
 
+    # Expires timestamp intentionally omitted. The value changes every time
+    # the broadcast is re-created (fresh UTC), which breaks Anthropic prompt
+    # caching on long conversations. Consumers who need the TTL can read
+    # `expires_at` directly from the broadcast file — no reason to render it
+    # into the injected banner text.
     lines = [
         f"=== BROADCAST [{severity}] ===",
         f"From: {source}",
         message,
+        "=" * 30,
     ]
-    if expires:
-        lines.append(f"Expires: {expires}")
-    lines.append("=" * 30)
     return "\n".join(lines)
 
 
