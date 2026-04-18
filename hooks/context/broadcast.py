@@ -328,6 +328,8 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
             continue
         if not _message_matches_channel(m, channels):
             continue
+        if session_id in m.get("acknowledged_by", []):
+            continue
         if m.get("persistent"):
             pending.append(m)
         elif session_id not in m.get("delivered_to", []):
@@ -344,6 +346,27 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
         and m.get("persistent")
         and not _is_expired(m)
         and _message_matches_channel(m, channels)
+        and session_id not in m.get("acknowledged_by", [])
+    ]
+
+
+def get_pretool_broadcasts(session_id: str) -> list[dict]:
+    """Return persistent broadcasts at or above the configured severity threshold.
+
+    Used by PreToolUse to inject alerts mid-tool-chain. Respects acknowledgment.
+    """
+    from hooks.config import BROADCAST_PRETOOL_MIN_SEVERITY
+
+    min_rank = _SEVERITY_RANK.get(BROADCAST_PRETOOL_MIN_SEVERITY, 2)
+    msgs = _load_broadcasts(cleanup=True)
+    channels = _get_session_channels(session_id)
+    return [
+        m for m in msgs
+        if _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank
+        and m.get("persistent")
+        and not _is_expired(m)
+        and _message_matches_channel(m, channels)
+        and session_id not in m.get("acknowledged_by", [])
     ]
 
 
@@ -357,6 +380,24 @@ def mark_delivered(session_id: str, message_id: str) -> None:
                 m["delivered_to"] = delivered
             break
     _save_broadcasts(msgs)
+
+
+def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
+    """Mark a persistent broadcast as acknowledged for this session.
+
+    Acknowledged messages stop re-injecting for this session but remain
+    active for other sessions that haven't acknowledged.
+    """
+    msgs = _load_broadcasts()
+    for m in msgs:
+        if m.get("id") == message_id:
+            acked = m.get("acknowledged_by", [])
+            if session_id not in acked:
+                acked.append(session_id)
+                m["acknowledged_by"] = acked
+            _save_broadcasts(msgs)
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -540,28 +581,26 @@ def format_broadcast_banner(msg: dict) -> str:
     severity = msg.get("severity", "alert").upper()
     source = msg.get("source", "unknown")
     message = msg.get("message", "")
+    msg_id = msg.get("id", "")
 
-    # Expires timestamp intentionally omitted. The value changes every time
-    # the broadcast is re-created (fresh UTC), which breaks Anthropic prompt
-    # caching on long conversations. Consumers who need the TTL can read
-    # `expires_at` directly from the broadcast file — no reason to render it
-    # into the injected banner text.
     lines = [
         f"=== BROADCAST [{severity}] ===",
         f"From: {source}",
-        message,
-        "=" * 30,
     ]
+    if msg_id:
+        lines.append(f"ID: {msg_id}")
+    lines.extend([message, "=" * 30])
     return "\n".join(lines)
 
 
 def format_critical_context(msgs: list[dict]) -> str:
     if not msgs:
         return ""
-    lines = ["CRITICAL BROADCAST ALERTS:"]
+    lines = ["BROADCAST ALERTS (PreToolUse):"]
     for m in msgs:
-        expires = m.get("expires_at", "")
-        lines.append(f"  - [{m.get('severity', 'critical').upper()}] {m['message']} (expires: {expires})")
+        msg_id = m.get("id", "")
+        sev = m.get("severity", "critical").upper()
+        lines.append(f"  - [{sev}] (id:{msg_id}) {m['message']}")
     return "\n".join(lines)
 
 
@@ -623,9 +662,9 @@ def get_pretool_context(session_id: str) -> str | None:
         return None
 
     try:
-        critical = get_critical_broadcasts(session_id)
-        if not critical:
+        msgs = get_pretool_broadcasts(session_id)
+        if not msgs:
             return None
-        return format_critical_context(critical)
+        return format_critical_context(msgs)
     except Exception:
         return None

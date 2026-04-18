@@ -129,6 +129,61 @@ def register(mcp):
             return json.dumps({"success": False, "error": str(e)})
 
     @mcp.tool()
+    def channel_acknowledge(message_id: str) -> str:
+        """Acknowledge a broadcast message — stops it from re-injecting for this session.
+
+        Use when you've processed a persistent broadcast and don't need to see it again.
+        The message remains active for other sessions that haven't acknowledged it.
+        The message ID is shown in broadcast banners as 'ID: <id>'.
+
+        Args:
+            message_id: The broadcast message ID to acknowledge
+
+        Returns:
+            JSON with success status.
+        """
+        try:
+            import os
+
+            from hooks.context.broadcast import acknowledge_broadcast
+
+            session_id = os.getenv("CLAUDE_SESSION_ID", "unknown")
+            found = acknowledge_broadcast(session_id, message_id)
+            if found:
+                return json.dumps({"success": True, "message_id": message_id, "acknowledged": True})
+            return json.dumps({"success": False, "error": f"Message {message_id} not found"})
+        except Exception as e:
+            log("MCP channel_acknowledge failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
+    def channel_clear(channel: str = "", message_id: str = "") -> str:
+        """Clear broadcast messages.
+
+        If message_id is provided: clear that specific message.
+        If channel is provided: clear all messages on that channel.
+        If neither: clear all broadcasts.
+
+        Args:
+            channel: Channel name to clear (optional)
+            message_id: Specific message ID to clear (optional)
+
+        Returns:
+            JSON with success status and count of messages removed.
+        """
+        try:
+            from hooks.context.broadcast import clear_broadcasts
+
+            count = clear_broadcasts(
+                message_id=message_id or None,
+                channel=channel or None,
+            )
+            return json.dumps({"success": True, "cleared": count})
+        except Exception as e:
+            log("MCP channel_clear failed", {"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
+
+    @mcp.tool()
     def brain_refresh() -> str:
         """Force the brain adapter to re-read its source and republish to the brain channel.
 
