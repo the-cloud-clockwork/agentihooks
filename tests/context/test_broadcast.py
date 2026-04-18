@@ -406,15 +406,33 @@ class TestHookIntegration:
         assert context is not None
         assert "Critical incident" in context
 
-    def test_get_pretool_context_ignores_non_critical(self, broadcast_file):
+    def test_get_pretool_context_includes_alert(self, broadcast_file):
+        """Alert severity is included in pretool context (default threshold)."""
         from hooks.context.broadcast import create_broadcast, get_pretool_context
 
         with (
             patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
             patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
             patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", True),
+            patch("hooks.config.BROADCAST_PRETOOL_MIN_SEVERITY", "alert"),
         ):
             create_broadcast("Just an alert", severity="alert")
+            context = get_pretool_context("sess-test")
+
+        assert context is not None
+        assert "ALERT" in context
+
+    def test_get_pretool_context_ignores_info(self, broadcast_file):
+        """Info severity is excluded from pretool context."""
+        from hooks.context.broadcast import create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", True),
+            patch("hooks.config.BROADCAST_PRETOOL_MIN_SEVERITY", "alert"),
+        ):
+            create_broadcast("Just info", severity="info")
             context = get_pretool_context("sess-test")
 
         assert context is None
