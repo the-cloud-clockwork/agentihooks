@@ -229,13 +229,10 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
 
     log("voice_output: passed guards", {"session_id": session_id, "chars": len(text), "url": VOICE_SERVICE_URL})
 
-    if len(text) < 300:
-        spoken = text
-    else:
-        spoken = _summarize_with_haiku(text)
-        if not spoken:
-            log("voice_output: haiku returned nothing, speaking truncated", {"session_id": session_id})
-            spoken = text[:300]
+    spoken = _summarize_with_haiku(text)
+    if not spoken:
+        log("voice_output: haiku returned nothing, speaking truncated", {"session_id": session_id})
+        spoken = text[:300]
 
     _speak_and_play(spoken, VOICE_SERVICE_URL)
     log("voice_output: spoke", {"session_id": session_id, "chars": len(spoken)})
