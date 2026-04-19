@@ -106,17 +106,18 @@ def is_voice_enabled(session_id: str) -> bool:
 
 
 def _summarize_with_haiku(text: str) -> str | None:
+    clamped = text[:1500] if len(text) > 1500 else text
+    prompt = f"{_SUMMARIZER_SYSTEM}\n\n---\n\n{clamped}"
     try:
-        clamped = text[:1500] if len(text) > 1500 else text
         result = subprocess.run(
-            ["claude", "-p", "--bare", "--model", "claude-haiku-4-5", "--system-prompt", _SUMMARIZER_SYSTEM],
-            input=clamped,
+            ["claude", prompt, "-p", "--model", "claude-haiku-4-5"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=15,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
+        log("voice_output: haiku returned empty", {"returncode": result.returncode, "stderr": (result.stderr or "")[:200]})
         return None
     except FileNotFoundError:
         log("voice_output: claude CLI not found on PATH", {})
