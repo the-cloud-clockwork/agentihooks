@@ -513,6 +513,14 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    # Clear voice output flag for this session
+    try:
+        from hooks.context.voice_output import clear_voice_enabled
+
+        clear_voice_enabled(session_id)
+    except Exception:
+        pass
+
     # --- Broadcast: deregister session ---
     from hooks.config import BROADCAST_ENABLED
 
@@ -644,6 +652,29 @@ def on_user_prompt_submit(payload: dict) -> None:
                 log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
+
+    # --- Voice output: detect enable/disable voice signals ---
+    try:
+        from hooks.config import VOICE_ENABLED
+
+        if VOICE_ENABLED:
+            from hooks.context.voice_output import (
+                contains_disable_signal,
+                contains_enable_signal,
+                clear_voice_enabled,
+                set_voice_enabled,
+            )
+
+            prompt = payload.get("prompt", "")
+            if prompt:
+                if contains_enable_signal(prompt):
+                    set_voice_enabled(session_id)
+                    log("voice_output: voice enabled for session", {"session_id": session_id})
+                elif contains_disable_signal(prompt):
+                    clear_voice_enabled(session_id)
+                    log("voice_output: voice disabled for session", {"session_id": session_id})
+    except Exception as e:
+        log("voice_output signal detection failed", {"error": str(e)})
 
     # --- Broadcast: inject pending messages ---
     from hooks.config import BROADCAST_ENABLED
@@ -1174,6 +1205,17 @@ def on_stop(payload: dict) -> None:
                         log("Context audit report", {"fill_pct": fill_pct, "report": report})
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
+
+    # Voice output — summarize + speak last assistant message
+    try:
+        from hooks.config import VOICE_ENABLED
+
+        if VOICE_ENABLED:
+            from hooks.context.voice_output import maybe_speak
+
+            maybe_speak(session_id, payload.get("last_assistant_message", ""))
+    except Exception as e:
+        log("voice_output stop hook failed", {"error": str(e)})
 
 
 def on_subagent_start(payload: dict) -> None:
