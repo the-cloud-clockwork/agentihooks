@@ -32,13 +32,7 @@ def _write_quota_flag() -> None:
 def _is_quota_exhausted() -> bool:
     return _QUOTA_FLAG.exists()
 
-_SUMMARIZER_SYSTEM = (
-    "You are a voice briefing system. Your ONLY job: compress the input into "
-    "ONE spoken sentence, maximum 30 words. No markdown. No bullet points. "
-    "No code. No lists. Just one clean sentence a human can hear in under "
-    "10 seconds. If the input is a short answer, rephrase it naturally for "
-    "speech. Never exceed 30 words."
-)
+_SUMMARIZER_PREFIX = "Compress into one spoken sentence under 25 words, no formatting: "
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +101,13 @@ def is_voice_enabled(session_id: str) -> bool:
 
 def _summarize_with_haiku(text: str) -> str | None:
     clamped = text[:1500] if len(text) > 1500 else text
-    prompt = f"{_SUMMARIZER_SYSTEM}\n\n---\n\n{clamped}"
+    prompt = f"{_SUMMARIZER_PREFIX}{clamped}"
     try:
         result = subprocess.run(
             ["claude", prompt, "-p", "--model", "claude-haiku-4-5"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
