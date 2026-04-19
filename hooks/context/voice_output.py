@@ -1,16 +1,18 @@
 """Voice output — spoken summaries of Claude responses via Anton Voice Service.
 
 Toggle: operator says "enable voice" / "disable voice" in chat.
-Pipeline: Stop hook → Haiku summarizes → POST /speak → ffplay plays OGG.
+Pipeline: Stop hook → fork → Haiku summarizes → POST /speak → ffplay plays OGG.
 Session-scoped: persists until session end or explicit disable.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
@@ -18,23 +20,44 @@ from hooks.common import log
 
 VOICE_TYPE = "voice_enabled"
 _FLAG_DIR = Path.home() / ".agentihooks" / "voice_flags"
+_QUOTA_FLAG = _FLAG_DIR / "quota_exhausted"
+_LAST_SPOKE_FLAG = _FLAG_DIR / "last_spoke_ts"
+_COOLDOWN_SECONDS = 10
 
 _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECASE)
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
-_QUOTA_FLAG = Path.home() / ".agentihooks" / "voice_flags" / "quota_exhausted"
+
+_DEFAULT_SUMMARIZER_PREFIX = "Compress into one spoken sentence under 25 words, no formatting: "
+
+
+def _get_summarizer_prefix() -> str:
+    return os.getenv("VOICE_SUMMARIZER_PREFIX", _DEFAULT_SUMMARIZER_PREFIX)
+
+
+# ---------------------------------------------------------------------------
+# Quota management (global, auto-expires after 1 hour)
+# ---------------------------------------------------------------------------
 
 
 def _write_quota_flag() -> None:
-    _QUOTA_FLAG.parent.mkdir(parents=True, exist_ok=True)
-    _QUOTA_FLAG.write_text("1")
+    _FLAG_DIR.mkdir(parents=True, exist_ok=True)
+    _QUOTA_FLAG.write_text(str(int(time.time())))
 
 
 def _is_quota_exhausted() -> bool:
-    return _QUOTA_FLAG.exists()
+    if not _QUOTA_FLAG.exists():
+        return False
+    try:
+        ts = int(_QUOTA_FLAG.read_text().strip())
+        if time.time() - ts > 3600:
+            _QUOTA_FLAG.unlink(missing_ok=True)
+            return False
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def check_quota_banner(session_id: str) -> str | None:
-    """Return a banner string if quota is exhausted and voice is enabled, else None."""
     if _is_quota_exhausted() and is_voice_enabled(session_id):
         return (
             "Voice output UNAVAILABLE — voice service quota exhausted. "
@@ -43,7 +66,28 @@ def check_quota_banner(session_id: str) -> str | None:
         )
     return None
 
-_SUMMARIZER_PREFIX = "Compress into one spoken sentence under 25 words, no formatting: "
+
+# ---------------------------------------------------------------------------
+# Rate limiting (max 1 speak per COOLDOWN_SECONDS)
+# ---------------------------------------------------------------------------
+
+
+def _check_cooldown() -> bool:
+    try:
+        if not _LAST_SPOKE_FLAG.exists():
+            return True
+        ts = float(_LAST_SPOKE_FLAG.read_text().strip())
+        return (time.time() - ts) >= _COOLDOWN_SECONDS
+    except (ValueError, OSError):
+        return True
+
+
+def _record_spoke() -> None:
+    try:
+        _FLAG_DIR.mkdir(parents=True, exist_ok=True)
+        _LAST_SPOKE_FLAG.write_text(str(time.time()))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +149,34 @@ def is_voice_enabled(session_id: str) -> bool:
         return False
 
 
+def cleanup_stale_flags(max_age_seconds: int = 86400) -> int:
+    """Remove voice flags older than max_age_seconds. Returns count removed."""
+    removed = 0
+    try:
+        if not _FLAG_DIR.exists():
+            return 0
+        now = time.time()
+        for f in _FLAG_DIR.glob("*.voice"):
+            try:
+                if now - f.stat().st_mtime > max_age_seconds:
+                    f.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return removed
+
+
 # ---------------------------------------------------------------------------
-# Haiku summarizer
+# Haiku summarizer (CLI, no --bare — uses existing OAuth auth)
 # ---------------------------------------------------------------------------
 
 
 def _summarize_with_haiku(text: str) -> str | None:
     clamped = text[:1500] if len(text) > 1500 else text
-    prompt = f"{_SUMMARIZER_PREFIX}{clamped}"
+    prefix = _get_summarizer_prefix()
+    prompt = f"{prefix}{clamped}"
     try:
         result = subprocess.run(
             ["claude", prompt, "-p", "--model", "haiku"],
@@ -140,27 +204,50 @@ def _summarize_with_haiku(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_wsl2_cache: bool | None = None
+
+
 def _is_wsl2() -> bool:
-    try:
-        return "microsoft" in Path("/proc/version").read_text().lower()
-    except Exception:
-        return False
+    global _wsl2_cache
+    if _wsl2_cache is None:
+        try:
+            _wsl2_cache = "microsoft" in Path("/proc/version").read_text().lower()
+        except Exception:
+            _wsl2_cache = False
+    return _wsl2_cache
 
 
-def _find_ffplay() -> list[str]:
-    """Find ffplay binary — WSL2 uses Windows ffplay.exe, native Linux uses ffplay."""
+def _is_macos() -> bool:
+    import platform
+    return platform.system() == "Darwin"
+
+
+def _find_player() -> list[str]:
+    """Find audio player — WSL2 uses Windows ffplay.exe, macOS uses afplay, Linux uses ffplay."""
     if _is_wsl2():
+        try:
+            result = subprocess.run(
+                ["bash", "-c", "command -v ffplay.exe 2>/dev/null || /mnt/c/Windows/System32/where.exe ffplay 2>/dev/null | head -1"],
+                capture_output=True, text=True, timeout=5,
+            )
+            path = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+            if path:
+                wsl_path = path if path.startswith("/") else f"/mnt/{path[0].lower()}{path[2:].replace(chr(92), '/')}"
+                return [wsl_path]
+        except Exception:
+            pass
         for candidate in [
             "/mnt/c/Tools/ffmpeg-7.0/bin/ffplay.exe",
             "/mnt/c/ProgramData/chocolatey/bin/ffplay.exe",
         ]:
             if Path(candidate).exists():
                 return [candidate]
+    if _is_macos():
+        return ["afplay"]
     return ["ffplay"]
 
 
 def _audio_path_for_player(path: str) -> str:
-    """Convert path for the player — WSL2 needs Windows-style path for ffplay.exe."""
     if _is_wsl2():
         try:
             result = subprocess.run(
@@ -173,7 +260,39 @@ def _audio_path_for_player(path: str) -> str:
     return path
 
 
-def _speak_and_play(text: str, voice_service_url: str) -> None:
+def _convert_for_macos(ogg_path: str) -> str | None:
+    """Convert OGG to WAV for macOS afplay."""
+    wav_path = ogg_path.replace(".ogg", ".wav")
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", ogg_path, wav_path],
+            capture_output=True, timeout=15,
+        )
+        if result.returncode == 0 and Path(wav_path).exists():
+            return wav_path
+    except Exception:
+        pass
+    return None
+
+
+def _kill_existing_playback() -> None:
+    """Kill any running ffplay/afplay to prevent overlapping audio."""
+    try:
+        if _is_wsl2():
+            subprocess.run(
+                ["taskkill.exe", "/IM", "ffplay.exe", "/F"],
+                capture_output=True, timeout=5,
+            )
+        elif _is_macos():
+            subprocess.run(["pkill", "-x", "afplay"], capture_output=True, timeout=5)
+        else:
+            subprocess.run(["pkill", "-x", "ffplay"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _speak_and_play(text: str, voice_service_url: str) -> bool:
+    """Returns True if audio was played successfully."""
     try:
         from hooks.config import VOICE_API_KEY
 
@@ -211,25 +330,42 @@ def _speak_and_play(text: str, voice_service_url: str) -> None:
                 _write_quota_flag()
             else:
                 log("voice_output: speak request failed", {"http": http_code, "body": err_body[:200]})
-            return
+            return False
 
         if not Path(tmp_path).exists() or Path(tmp_path).stat().st_size < 100:
             log("voice_output: empty or missing audio file", {})
-            return
+            return False
 
-        ffplay_cmd = _find_ffplay()
-        play_path = _audio_path_for_player(tmp_path)
+        _kill_existing_playback()
+
+        player_cmd = _find_player()
+        play_path = tmp_path
+
+        if _is_macos() and player_cmd == ["afplay"]:
+            wav = _convert_for_macos(tmp_path)
+            if wav:
+                play_path = wav
+            else:
+                log("voice_output: macOS OGG→WAV conversion failed", {})
+                return False
+        else:
+            play_path = _audio_path_for_player(tmp_path)
+
         subprocess.Popen(
-            [*ffplay_cmd, "-nodisp", "-autoexit", play_path],
+            [*player_cmd, "-nodisp", "-autoexit", play_path] if "afplay" not in player_cmd[0] else [*player_cmd, play_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        return True
     except FileNotFoundError as e:
-        log("voice_output: ffplay or curl not found", {"error": str(e)})
+        log("voice_output: player or curl not found", {"error": str(e)})
+        return False
     except subprocess.TimeoutExpired:
         log("voice_output: speak request timed out", {})
+        return False
     except Exception as e:
         log("voice_output: speak_and_play failed", {"error": str(e)})
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -241,33 +377,26 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
     from hooks.config import VOICE_ENABLED, VOICE_SERVICE_URL
 
     if not VOICE_ENABLED:
-        log("voice_output: guard: VOICE_ENABLED is false", {})
         return
     if not is_voice_enabled(session_id):
-        log("voice_output: guard: voice not enabled for session", {"session_id": session_id})
         return
     if not last_assistant_message or not last_assistant_message.strip():
-        log("voice_output: guard: empty message", {"session_id": session_id})
         return
     if not VOICE_SERVICE_URL:
-        log("voice_output: guard: no VOICE_SERVICE_URL", {})
         return
     if _is_quota_exhausted():
-        log("voice_output: guard: quota exhausted — re-enable voice to retry", {"session_id": session_id})
+        return
+    if not _check_cooldown():
+        log("voice_output: cooldown active, skipping", {"session_id": session_id})
         return
 
     text = last_assistant_message.strip()
 
     if text.startswith("```"):
-        log("voice_output: guard: code block", {"session_id": session_id})
         return
     if len(text) > 5000:
-        log("voice_output: guard: too long", {"session_id": session_id, "len": len(text)})
         return
 
-    log("voice_output: passed guards", {"session_id": session_id, "chars": len(text), "url": VOICE_SERVICE_URL})
-
-    import os
     pid = os.fork()
     if pid != 0:
         return
@@ -278,8 +407,10 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
             log("voice_output: haiku returned nothing, speaking truncated", {"session_id": session_id})
             spoken = text[:300]
 
-        _speak_and_play(spoken, VOICE_SERVICE_URL)
-        log("voice_output: spoke", {"session_id": session_id, "chars": len(spoken)})
+        success = _speak_and_play(spoken, VOICE_SERVICE_URL)
+        if success:
+            _record_spoke()
+            log("voice_output: spoke", {"session_id": session_id, "chars": len(spoken)})
     except Exception as e:
         log("voice_output: background process failed", {"error": str(e)})
     finally:

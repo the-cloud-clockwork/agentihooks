@@ -377,6 +377,15 @@ def on_session_start(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
 
+    # Voice output — cleanup stale flags from dead sessions
+    try:
+        from hooks.context.voice_output import cleanup_stale_flags
+        cleaned = cleanup_stale_flags()
+        if cleaned:
+            log("voice_output: cleaned stale flags", {"count": cleaned})
+    except Exception:
+        pass
+
     # Auto-overlay activation — profiles requested via AGENTIHOOKS_AUTO_OVERLAY env var
     try:
         auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
