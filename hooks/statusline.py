@@ -315,11 +315,19 @@ def main() -> None:
             _ch_color = _DIM if _is_base_only else ""
             _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
 
+            _voice_str = ""
+            _voice_sid = session_id
+            if _voice_sid:
+                _vf = Path.home() / ".agentihooks" / "voice_flags" / f"{_voice_sid}.voice"
+                if _vf.exists():
+                    _voice_str = f"  {_CYAN}voice:ON{_RESET}"
+
             print(
                 f"  {_DIM}agentihooks:{_RESET} {_prof_display}"
                 f"  {_DIM}settings:{_RESET}{_sp_display}"
                 f"  {_DIM}overlay:{_RESET}{_ovl_display}"
                 f"  {_DIM}channels:{_RESET}{_ch_display}"
+                f"{_voice_str}"
             )
         except Exception:
             pass

@@ -377,6 +377,15 @@ def on_session_start(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
 
+    # Voice output — cleanup stale flags from dead sessions
+    try:
+        from hooks.context.voice_output import cleanup_stale_flags
+        cleaned = cleanup_stale_flags()
+        if cleaned:
+            log("voice_output: cleaned stale flags", {"count": cleaned})
+    except Exception:
+        pass
+
     # Auto-overlay activation — profiles requested via AGENTIHOOKS_AUTO_OVERLAY env var
     try:
         auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
@@ -513,6 +522,14 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    # Clear voice output flag for this session
+    try:
+        from hooks.context.voice_output import clear_voice_enabled
+
+        clear_voice_enabled(session_id)
+    except Exception:
+        pass
+
     # --- Broadcast: deregister session ---
     from hooks.config import BROADCAST_ENABLED
 
@@ -644,6 +661,39 @@ def on_user_prompt_submit(payload: dict) -> None:
                 log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
+
+    # --- Voice output: detect enable/disable voice signals ---
+    try:
+        from hooks.config import VOICE_ENABLED
+
+        if VOICE_ENABLED:
+            from hooks.context.voice_output import (
+                contains_disable_signal,
+                contains_enable_signal,
+                clear_voice_enabled,
+                set_voice_enabled,
+            )
+
+            prompt = payload.get("prompt", "")
+            if prompt:
+                if contains_enable_signal(prompt):
+                    set_voice_enabled(session_id)
+                    log("voice_output: voice enabled for session", {"session_id": session_id})
+                    from hooks.common import inject_banner
+                    inject_banner("VOICE", "Voice output ENABLED. All responses will be spoken aloud. Say 'disable voice' to stop. This is a system toggle — no action needed from you.")
+                elif contains_disable_signal(prompt):
+                    clear_voice_enabled(session_id)
+                    log("voice_output: voice disabled for session", {"session_id": session_id})
+                    from hooks.common import inject_banner
+                    inject_banner("VOICE", "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.")
+            # Check quota banner (even if no enable/disable signal this turn)
+            from hooks.context.voice_output import check_quota_banner
+            quota_msg = check_quota_banner(session_id)
+            if quota_msg:
+                from hooks.common import inject_banner
+                inject_banner("VOICE", quota_msg)
+    except Exception as e:
+        log("voice_output signal detection failed", {"error": str(e)})
 
     # --- Broadcast: inject pending messages ---
     from hooks.config import BROADCAST_ENABLED
@@ -1174,6 +1224,17 @@ def on_stop(payload: dict) -> None:
                         log("Context audit report", {"fill_pct": fill_pct, "report": report})
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
+
+    # Voice output — summarize + speak last assistant message
+    try:
+        from hooks.config import VOICE_ENABLED
+
+        if VOICE_ENABLED:
+            from hooks.context.voice_output import maybe_speak
+
+            maybe_speak(session_id, payload.get("last_assistant_message", ""))
+    except Exception as e:
+        log("voice_output stop hook failed", {"error": str(e)})
 
 
 def on_subagent_start(payload: dict) -> None:
