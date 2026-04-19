@@ -23,9 +23,11 @@ _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECAS
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
 
 _SUMMARIZER_SYSTEM = (
-    "You are a tactical AI briefing system. Summarize the assistant response "
-    "in 1-2 spoken sentences, calm and precise tone — no markdown, "
-    "no bullet points, no code. Speak as if reporting to an operator."
+    "You are a voice briefing system. Your ONLY job: compress the input into "
+    "ONE spoken sentence, maximum 30 words. No markdown. No bullet points. "
+    "No code. No lists. Just one clean sentence a human can hear in under "
+    "10 seconds. If the input is a short answer, rephrase it naturally for "
+    "speech. Never exceed 30 words."
 )
 
 
@@ -91,9 +93,10 @@ def is_voice_enabled(session_id: str) -> bool:
 
 def _summarize_with_haiku(text: str) -> str | None:
     try:
+        clamped = text[:1500] if len(text) > 1500 else text
         result = subprocess.run(
             ["claude", "-p", "--bare", "--model", "claude-haiku-4-5", "--system-prompt", _SUMMARIZER_SYSTEM],
-            input=text,
+            input=clamped,
             capture_output=True,
             text=True,
             timeout=30,
