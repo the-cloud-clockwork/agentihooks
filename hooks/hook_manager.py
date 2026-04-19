@@ -670,9 +670,13 @@ def on_user_prompt_submit(payload: dict) -> None:
                 if contains_enable_signal(prompt):
                     set_voice_enabled(session_id)
                     log("voice_output: voice enabled for session", {"session_id": session_id})
+                    from hooks.common import inject_banner
+                    inject_banner("VOICE", "Voice output ENABLED. All responses will be spoken aloud. Say 'disable voice' to stop. This is a system toggle — no action needed from you.")
                 elif contains_disable_signal(prompt):
                     clear_voice_enabled(session_id)
                     log("voice_output: voice disabled for session", {"session_id": session_id})
+                    from hooks.common import inject_banner
+                    inject_banner("VOICE", "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.")
     except Exception as e:
         log("voice_output signal detection failed", {"error": str(e)})
 
