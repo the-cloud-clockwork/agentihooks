@@ -79,8 +79,14 @@ class TestBranchGuard:
     def test_checkout_dev(self):
         self._assert_allowed("git checkout dev")
 
-    def test_checkout_feature(self):
-        self._assert_allowed("git checkout -b feature/new-thing")
+    def test_checkout_feature_blocked_without_signal(self):
+        self._assert_blocked("git checkout -b feature/new-thing")
+
+    def test_checkout_feature_allowed_with_signal(self):
+        from unittest.mock import patch
+
+        with patch("hooks.context.branch_guard._has_branch_signal", return_value=True):
+            self._assert_allowed("git checkout -b feature/new-thing")
 
     def test_merge_dev(self):
         self._assert_allowed("git merge dev")

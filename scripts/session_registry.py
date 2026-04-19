@@ -365,7 +365,6 @@ def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
 
     cutoff = _time.time() - (max_age_hours * 3600)
     sessions = _load_sessions()
-    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     changed = False
 
     for proj_dir in projects_dir.iterdir():
@@ -441,9 +440,6 @@ def reconcile_live_sessions() -> dict:
 
     Returns a summary dict.
     """
-    import glob as _glob
-    import re as _re
-    import time as _time
 
     summary = {"live_claude_pids": 0, "matched": 0, "unmatched_pids": 0}
 

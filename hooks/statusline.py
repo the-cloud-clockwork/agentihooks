@@ -316,7 +316,7 @@ def main() -> None:
             _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
 
             _voice_str = ""
-            _voice_sid = session_id
+            _voice_sid = payload.get("session_id", "")
             if _voice_sid:
                 _vf = Path.home() / ".agentihooks" / "voice_flags" / f"{_voice_sid}.voice"
                 if _vf.exists():

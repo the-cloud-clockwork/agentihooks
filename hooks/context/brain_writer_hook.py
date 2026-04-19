@@ -123,7 +123,6 @@ def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
     # Parse Redis URL
     parsed = urlparse(redis_url)
     host = parsed.hostname or "10.10.30.130"
-    port = parsed.port or 6379
     password = parsed.password or ""
     db = parsed.path.lstrip("/") or "11"
 
