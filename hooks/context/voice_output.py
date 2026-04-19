@@ -104,7 +104,7 @@ def _summarize_with_haiku(text: str) -> str | None:
     prompt = f"{_SUMMARIZER_PREFIX}{clamped}"
     try:
         result = subprocess.run(
-            ["claude", prompt, "-p", "--model", "claude-haiku-4-5"],
+            ["claude", prompt, "-p", "--model", "haiku"],
             capture_output=True,
             text=True,
             timeout=30,
