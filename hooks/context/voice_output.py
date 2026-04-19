@@ -32,6 +32,17 @@ def _write_quota_flag() -> None:
 def _is_quota_exhausted() -> bool:
     return _QUOTA_FLAG.exists()
 
+
+def check_quota_banner(session_id: str) -> str | None:
+    """Return a banner string if quota is exhausted and voice is enabled, else None."""
+    if _is_quota_exhausted() and is_voice_enabled(session_id):
+        return (
+            "Voice output UNAVAILABLE — voice service quota exhausted. "
+            "Responses will not be spoken until credits are topped up. "
+            "Say 'enable voice' after replenishing to retry."
+        )
+    return None
+
 _SUMMARIZER_PREFIX = "Compress into one spoken sentence under 25 words, no formatting: "
 
 

@@ -677,6 +677,12 @@ def on_user_prompt_submit(payload: dict) -> None:
                     log("voice_output: voice disabled for session", {"session_id": session_id})
                     from hooks.common import inject_banner
                     inject_banner("VOICE", "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.")
+            # Check quota banner (even if no enable/disable signal this turn)
+            from hooks.context.voice_output import check_quota_banner
+            quota_msg = check_quota_banner(session_id)
+            if quota_msg:
+                from hooks.common import inject_banner
+                inject_banner("VOICE", quota_msg)
     except Exception as e:
         log("voice_output signal detection failed", {"error": str(e)})
 
