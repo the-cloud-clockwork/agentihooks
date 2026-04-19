@@ -27,7 +27,11 @@ _COOLDOWN_SECONDS = 10
 _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECASE)
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
 
-_DEFAULT_SUMMARIZER_PREFIX = "Compress into one spoken sentence under 25 words, no formatting: "
+_DEFAULT_SUMMARIZER_PREFIX = (
+    "Distill this into exactly ONE short sentence for a voice briefing. "
+    "Max 20 words. No lists. No bullet points. No filenames. No commit hashes. "
+    "Just the key takeaway a human needs to hear in 5 seconds: "
+)
 
 
 def _get_summarizer_prefix() -> str:
@@ -185,7 +189,16 @@ def _summarize_with_haiku(text: str) -> str | None:
             timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            out = result.stdout.strip()
+            if len(out) > 150:
+                for end in [". ", "! ", "? "]:
+                    idx = out[:150].rfind(end)
+                    if idx > 0:
+                        out = out[:idx + 1]
+                        break
+                else:
+                    out = out[:150]
+            return out
         log("voice_output: haiku returned empty", {"returncode": result.returncode, "stderr": (result.stderr or "")[:200]})
         return None
     except FileNotFoundError:
