@@ -152,19 +152,25 @@ def _audio_path_for_player(path: str) -> str:
 
 def _speak_and_play(text: str, voice_service_url: str) -> None:
     try:
+        from hooks.config import VOICE_API_KEY
+
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             tmp_path = tmp.name
 
         payload = json.dumps({"text": text, "store": False})
+        curl_cmd = [
+            "curl", "-sf",
+            "-X", "POST",
+            f"{voice_service_url}/speak",
+            "-H", "Content-Type: application/json",
+            "-d", payload,
+            "-o", tmp_path,
+        ]
+        if VOICE_API_KEY:
+            curl_cmd.extend(["-H", f"Authorization: Bearer {VOICE_API_KEY}"])
+
         result = subprocess.run(
-            [
-                "curl", "-sf",
-                "-X", "POST",
-                f"{voice_service_url}/speak",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
-                "-o", tmp_path,
-            ],
+            curl_cmd,
             capture_output=True,
             timeout=30,
         )
@@ -200,27 +206,36 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
     from hooks.config import VOICE_ENABLED, VOICE_SERVICE_URL
 
     if not VOICE_ENABLED:
+        log("voice_output: guard: VOICE_ENABLED is false", {})
         return
     if not is_voice_enabled(session_id):
+        log("voice_output: guard: voice not enabled for session", {"session_id": session_id})
         return
     if not last_assistant_message or not last_assistant_message.strip():
+        log("voice_output: guard: empty message", {"session_id": session_id})
         return
     if not VOICE_SERVICE_URL:
+        log("voice_output: guard: no VOICE_SERVICE_URL", {})
         return
 
     text = last_assistant_message.strip()
 
     if text.startswith("```"):
+        log("voice_output: guard: code block", {"session_id": session_id})
         return
     if len(text) > 5000:
+        log("voice_output: guard: too long", {"session_id": session_id, "len": len(text)})
         return
 
-    if len(text) < 200:
+    log("voice_output: passed guards", {"session_id": session_id, "chars": len(text), "url": VOICE_SERVICE_URL})
+
+    if len(text) < 300:
         spoken = text
     else:
         spoken = _summarize_with_haiku(text)
         if not spoken:
-            return
+            log("voice_output: haiku returned nothing, speaking truncated", {"session_id": session_id})
+            spoken = text[:300]
 
     _speak_and_play(spoken, VOICE_SERVICE_URL)
     log("voice_output: spoke", {"session_id": session_id, "chars": len(spoken)})
