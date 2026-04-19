@@ -182,12 +182,13 @@ def _speak_and_play(text: str, voice_service_url: str) -> None:
 
         payload = json.dumps({"text": text, "store": False})
         curl_cmd = [
-            "curl", "-sf",
+            "curl", "-s",
             "-X", "POST",
             f"{voice_service_url}/speak",
             "-H", "Content-Type: application/json",
             "-d", payload,
             "-o", tmp_path,
+            "-w", "%{http_code}",
         ]
         if VOICE_API_KEY:
             curl_cmd.extend(["-H", f"Authorization: Bearer {VOICE_API_KEY}"])
@@ -195,19 +196,21 @@ def _speak_and_play(text: str, voice_service_url: str) -> None:
         result = subprocess.run(
             curl_cmd,
             capture_output=True,
+            text=True,
             timeout=30,
         )
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace") if result.stderr else ""
+        http_code = result.stdout.strip() if result.stdout else ""
+
+        if http_code != "200":
             try:
                 err_body = Path(tmp_path).read_text(errors="replace")[:500]
             except Exception:
                 err_body = ""
-            if "quota" in err_body.lower() or "429" in err_body or "insufficient" in err_body.lower():
-                log("voice_output: QUOTA EXHAUSTED — auto-disabling voice", {"returncode": result.returncode, "body": err_body[:200]})
+            if http_code == "429" or "quota" in err_body.lower() or "insufficient" in err_body.lower():
+                log("voice_output: QUOTA EXHAUSTED — auto-disabling voice", {"http": http_code, "body": err_body[:200]})
                 _write_quota_flag()
             else:
-                log("voice_output: speak request failed", {"returncode": result.returncode, "stderr": stderr[:200]})
+                log("voice_output: speak request failed", {"http": http_code, "body": err_body[:200]})
             return
 
         if not Path(tmp_path).exists() or Path(tmp_path).stat().st_size < 100:
