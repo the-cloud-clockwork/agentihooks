@@ -21,6 +21,16 @@ _FLAG_DIR = Path.home() / ".agentihooks" / "voice_flags"
 
 _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECASE)
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
+_QUOTA_FLAG = Path.home() / ".agentihooks" / "voice_flags" / "quota_exhausted"
+
+
+def _write_quota_flag() -> None:
+    _QUOTA_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    _QUOTA_FLAG.write_text("1")
+
+
+def _is_quota_exhausted() -> bool:
+    return _QUOTA_FLAG.exists()
 
 _SUMMARIZER_SYSTEM = (
     "You are a voice briefing system. Your ONLY job: compress the input into "
@@ -58,6 +68,10 @@ def set_voice_enabled(session_id: str) -> None:
             pass
     _FLAG_DIR.mkdir(parents=True, exist_ok=True)
     (_FLAG_DIR / f"{session_id}.voice").write_text("1")
+    try:
+        _QUOTA_FLAG.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def clear_voice_enabled(session_id: str) -> None:
@@ -178,7 +192,16 @@ def _speak_and_play(text: str, voice_service_url: str) -> None:
             timeout=30,
         )
         if result.returncode != 0:
-            log("voice_output: speak request failed", {"returncode": result.returncode})
+            stderr = result.stderr.decode(errors="replace") if result.stderr else ""
+            try:
+                err_body = Path(tmp_path).read_text(errors="replace")[:500]
+            except Exception:
+                err_body = ""
+            if "quota" in err_body.lower() or "429" in err_body or "insufficient" in err_body.lower():
+                log("voice_output: QUOTA EXHAUSTED — auto-disabling voice", {"returncode": result.returncode, "body": err_body[:200]})
+                _write_quota_flag()
+            else:
+                log("voice_output: speak request failed", {"returncode": result.returncode, "stderr": stderr[:200]})
             return
 
         if not Path(tmp_path).exists() or Path(tmp_path).stat().st_size < 100:
@@ -219,6 +242,9 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
         return
     if not VOICE_SERVICE_URL:
         log("voice_output: guard: no VOICE_SERVICE_URL", {})
+        return
+    if _is_quota_exhausted():
+        log("voice_output: guard: quota exhausted — re-enable voice to retry", {"session_id": session_id})
         return
 
     text = last_assistant_message.strip()
