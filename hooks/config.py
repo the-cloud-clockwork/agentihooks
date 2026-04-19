@@ -289,6 +289,7 @@ BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "1536"))
 # =============================================================================
 VOICE_ENABLED: bool = _env_bool("VOICE_ENABLED", "false")
 VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "")
+VOICE_API_KEY: str = os.getenv("VOICE_API_KEY", "")
 
 # =============================================================================
 # CI MANIFESTO — doctrine-as-context injection
