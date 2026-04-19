@@ -117,6 +117,39 @@ def _summarize_with_haiku(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _is_wsl2() -> bool:
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except Exception:
+        return False
+
+
+def _find_ffplay() -> list[str]:
+    """Find ffplay binary — WSL2 uses Windows ffplay.exe, native Linux uses ffplay."""
+    if _is_wsl2():
+        for candidate in [
+            "/mnt/c/Tools/ffmpeg-7.0/bin/ffplay.exe",
+            "/mnt/c/ProgramData/chocolatey/bin/ffplay.exe",
+        ]:
+            if Path(candidate).exists():
+                return [candidate]
+    return ["ffplay"]
+
+
+def _audio_path_for_player(path: str) -> str:
+    """Convert path for the player — WSL2 needs Windows-style path for ffplay.exe."""
+    if _is_wsl2():
+        try:
+            result = subprocess.run(
+                ["wslpath", "-w", path], capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+    return path
+
+
 def _speak_and_play(text: str, voice_service_url: str) -> None:
     try:
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
@@ -143,8 +176,10 @@ def _speak_and_play(text: str, voice_service_url: str) -> None:
             log("voice_output: empty or missing audio file", {})
             return
 
+        ffplay_cmd = _find_ffplay()
+        play_path = _audio_path_for_player(tmp_path)
         subprocess.Popen(
-            ["ffplay", "-nodisp", "-autoexit", tmp_path],
+            [*ffplay_cmd, "-nodisp", "-autoexit", play_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
