@@ -179,6 +179,12 @@ def cleanup_stale_flags(max_age_seconds: int = 86400) -> int:
 
 def _summarize_with_haiku(text: str) -> str | None:
     clamped = text[:1500] if len(text) > 1500 else text
+    # Strip noise that shouldn't be spoken
+    clamped = re.sub(r"\b[0-9a-f]{7,40}\b", "", clamped)  # git hashes
+    clamped = re.sub(r"```[\s\S]*?```", "", clamped)  # code blocks
+    clamped = re.sub(r"`[^`]+`", "", clamped)  # inline code
+    clamped = re.sub(r"https?://\S+", "", clamped)  # URLs
+    clamped = re.sub(r"\s+", " ", clamped).strip()  # collapse whitespace
     prefix = _get_summarizer_prefix()
     prompt = f"{prefix}{clamped}"
     try:
