@@ -92,7 +92,7 @@ def is_voice_enabled(session_id: str) -> bool:
 def _summarize_with_haiku(text: str) -> str | None:
     try:
         result = subprocess.run(
-            ["claude", "-p", "--model", "claude-haiku-4-5", "--system-prompt", _SUMMARIZER_SYSTEM],
+            ["claude", "-p", "--bare", "--model", "claude-haiku-4-5", "--system-prompt", _SUMMARIZER_SYSTEM],
             input=text,
             capture_output=True,
             text=True,
@@ -215,7 +215,7 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
     if len(text) > 5000:
         return
 
-    if len(text) < 100:
+    if len(text) < 200:
         spoken = text
     else:
         spoken = _summarize_with_haiku(text)
