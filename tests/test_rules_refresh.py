@@ -192,7 +192,5 @@ class TestPayloadCollection:
     def test_missing_claude_local_md_is_tolerated(self, tmp_path):
         claude_md = tmp_path / "CLAUDE.md"
         claude_md.write_text("# Only global")
-        payload = rules_refresh.collect_profile_rules(
-            tmp_path / "nope", claude_md, tmp_path / "no-local.md"
-        )
+        payload = rules_refresh.collect_profile_rules(tmp_path / "nope", claude_md, tmp_path / "no-local.md")
         assert "# Only global" in payload
