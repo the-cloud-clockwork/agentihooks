@@ -525,6 +525,23 @@ def reconcile_live_sessions() -> dict:
         pids_sorted = sorted(pids, reverse=True)
         matched_by_cmdline: set[int] = set()
 
+        def _supersede_pid_except(pid_val: int, keep_sid: str) -> None:
+            """Mark any other alive entry with the same PID as superseded.
+
+            A single Claude Code PID only hosts one active session at a time.
+            When reconcile decides PID P owns session S, any other alive
+            entry claiming PID P is stale and must be demoted.
+            """
+            nonlocal changed
+            for other_sid, other_info in sessions.items():
+                if other_sid == keep_sid:
+                    continue
+                if other_info.get("pid") == pid_val and other_info.get("status") == "alive":
+                    other_info["status"] = "superseded"
+                    other_info["superseded_at"] = now_iso
+                    other_info["superseded_by"] = keep_sid
+                    changed = True
+
         for pid in pids_sorted:
             sid = _pid_resume_sid(pid)
             if not sid:
@@ -547,6 +564,7 @@ def reconcile_live_sessions() -> dict:
             entry["last_seen"] = now_iso
             entry["cwd"] = cwd
             sessions[sid] = entry
+            _supersede_pid_except(pid, sid)
             summary["matched"] += 1
             changed = True
 
@@ -576,7 +594,35 @@ def reconcile_live_sessions() -> dict:
             entry["last_seen"] = now_iso
             entry["cwd"] = cwd
             sessions[sid] = entry
+            _supersede_pid_except(pid, sid)
             summary["matched"] += 1
+            changed = True
+
+    # Final pass: collapse any duplicate alive entries per PID. If a PID
+    # claims multiple alive entries (legacy state from older reconciles
+    # that never superseded), keep only the most recent `started_at`
+    # and demote the rest.
+    from collections import defaultdict
+
+    now_iso_final = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    pid_to_alive: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    for sid, info in sessions.items():
+        if info.get("status") != "alive":
+            continue
+        pid = info.get("pid", 0)
+        if not pid:
+            continue
+        pid_to_alive[pid].append((info.get("started_at", ""), sid))
+
+    for pid, entries in pid_to_alive.items():
+        if len(entries) <= 1:
+            continue
+        entries.sort(reverse=True)  # newest started_at first
+        keep_sid = entries[0][1]
+        for _started, sid in entries[1:]:
+            sessions[sid]["status"] = "superseded"
+            sessions[sid]["superseded_at"] = now_iso_final
+            sessions[sid]["superseded_by"] = keep_sid
             changed = True
 
     if changed:
