@@ -143,9 +143,7 @@ def cmd_list(args) -> int:
         age = _humanize_age(r["age_seconds"])
         name = _truncate(r.get("title", "") or "(unnamed)", 28)
         cwd = _shorten_cwd(r["cwd"], 34)
-        print(
-            f"{i:<4}{color}{status:<11}{_RESET}{age:<6}{_CYAN}{name:<30}{_RESET}{cwd:<36}{_DIM}{sid}{_RESET}"
-        )
+        print(f"{i:<4}{color}{status:<11}{_RESET}{age:<6}{_CYAN}{name:<30}{_RESET}{cwd:<36}{_DIM}{sid}{_RESET}")
     print()
     print(f"{_DIM}Showing {len(rows)} most recent. Reopen: agentihooks sessions reopen <N>  (N required){_RESET}")
     return 0
