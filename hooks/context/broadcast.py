@@ -464,6 +464,18 @@ def derive_session_title(session_id: str, cwd: str, max_len: int = 60) -> str:
 def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
     sessions = _load_sessions()
     now = _now_iso()
+    # A single Claude Code PID only hosts ONE active session at a time.
+    # When a new session_id registers from the same pid, supersede any
+    # previously-alive entries for that pid (they're from an earlier
+    # session lifecycle — /resume or /clear).
+    if pid:
+        for existing_sid, existing_info in sessions.items():
+            if existing_sid == session_id:
+                continue
+            if existing_info.get("pid") == pid and existing_info.get("status") == "alive":
+                existing_info["status"] = "superseded"
+                existing_info["superseded_at"] = now
+                existing_info["superseded_by"] = session_id
     sessions[session_id] = {
         "started_at": now,
         "last_seen": now,

@@ -267,6 +267,37 @@ class TestSessionRegistry:
 
         assert "sess-1" not in sessions
 
+    def test_new_session_supersedes_old_for_same_pid(self, broadcast_dir):
+        """Second register from the same pid marks the first as superseded.
+
+        Fixes the 'alive session flood' bug where a single Claude Code process
+        cycling through sessions (/resume, /clear) left stale 'alive' entries.
+        """
+        from hooks.context.broadcast import _load_sessions, register_session
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-old", pid=12345, cwd="/tmp", model="opus")
+            register_session("sess-new", pid=12345, cwd="/tmp", model="opus")
+            sessions = _load_sessions()
+
+        assert sessions["sess-old"]["status"] == "superseded"
+        assert sessions["sess-old"]["superseded_by"] == "sess-new"
+        assert sessions["sess-new"]["status"] == "alive"
+
+    def test_register_does_not_touch_other_pids(self, broadcast_dir):
+        """Registering a new session from pid A must not affect sessions from pid B."""
+        from hooks.context.broadcast import _load_sessions, register_session
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=11111, cwd="/tmp", model="opus")
+            register_session("sess-b", pid=22222, cwd="/tmp", model="opus")
+            sessions = _load_sessions()
+
+        assert sessions["sess-a"]["status"] == "alive"
+        assert sessions["sess-b"]["status"] == "alive"
+
     def test_stale_session_cleaned(self, broadcast_dir):
         from hooks.context.broadcast import _save_sessions, get_active_sessions
 
