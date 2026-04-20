@@ -91,7 +91,14 @@ def list_sessions(max_age_hours: int = 24, refresh: bool = True, limit: int | No
     cutoff = max_age_hours * 3600
     rows: list[dict] = []
     for sid, info in sessions.items():
-        ts_str = info.get("last_seen") or info.get("started_at", "")
+        status = info.get("status", "alive")
+        # Age semantics:
+        #   alive    → time since session started (session lifetime, differentiates live sessions)
+        #   otherwise → time since last activity (how long ago it went inactive)
+        if status == "alive":
+            ts_str = info.get("started_at") or info.get("last_seen", "")
+        else:
+            ts_str = info.get("last_seen") or info.get("started_at", "")
         try:
             ts = _parse_iso(ts_str)
         except ValueError:
@@ -102,17 +109,20 @@ def list_sessions(max_age_hours: int = 24, refresh: bool = True, limit: int | No
         rows.append(
             {
                 "session_id": sid,
-                "status": info.get("status", "alive"),
+                "status": status,
                 "cwd": info.get("cwd", ""),
                 "pid": info.get("pid", 0),
                 "model": info.get("model", ""),
                 "started_at": info.get("started_at", ""),
-                "last_seen": ts_str,
+                "last_seen": info.get("last_seen", ""),
                 "age_seconds": age,
                 "title": derive_session_title(sid, info.get("cwd", "")),
             }
         )
-    rows.sort(key=lambda r: r["age_seconds"])
+    # Sort: alive first (by age ascending = longest-running on top), then
+    # everything else by age ascending (most-recently-active on top).
+    _status_rank = {"alive": 0, "closed": 1, "dead": 2, "superseded": 3}
+    rows.sort(key=lambda r: (_status_rank.get(r["status"], 9), r["age_seconds"]))
     if limit is not None and limit > 0:
         rows = rows[:limit]
     return rows
@@ -125,17 +135,26 @@ def cmd_list(args) -> int:
         print(f"{_DIM}No sessions in the last 24h.{_RESET}")
         return 0
 
-    print(f"{_BOLD}{'IDX':<4}{'STATUS':<8}{'AGE':<6}{'CWD':<46}ID{_RESET}")
+    print(f"{_BOLD}{'IDX':<4}{'STATUS':<11}{'AGE':<6}{'NAME':<30}{'CWD':<36}ID{_RESET}")
     for i, r in enumerate(rows, 1):
         sid = r["session_id"]
         status = r["status"]
         color = _status_color(status)
         age = _humanize_age(r["age_seconds"])
-        cwd = _shorten_cwd(r["cwd"], 44)
-        print(f"{i:<4}{color}{status:<8}{_RESET}{age:<6}{cwd:<46}{_DIM}{sid}{_RESET}")
+        name = _truncate(r.get("title", "") or "(unnamed)", 28)
+        cwd = _shorten_cwd(r["cwd"], 34)
+        print(
+            f"{i:<4}{color}{status:<11}{_RESET}{age:<6}{_CYAN}{name:<30}{_RESET}{cwd:<36}{_DIM}{sid}{_RESET}"
+        )
     print()
     print(f"{_DIM}Showing {len(rows)} most recent. Reopen: agentihooks sessions reopen <N>  (N required){_RESET}")
     return 0
+
+
+def _truncate(s: str, width: int) -> str:
+    if len(s) <= width:
+        return s
+    return s[: width - 1] + "…"
 
 
 def _detect_terminal() -> str:

@@ -431,31 +431,51 @@ def encode_cwd(cwd: str) -> str:
 
 
 def derive_session_title(session_id: str, cwd: str, max_len: int = 60) -> str:
-    """Read the first user message from the JSONL transcript as a title.
+    """Return the session's display name.
 
-    Fallback to the cwd basename if transcript unreadable.
+    Priority:
+      1. Most recent `custom-title` event (set by Claude Code /rename or --name flag)
+      2. Most recent `agent-name` event
+      3. First user message text
+      4. cwd basename (fallback when transcript unreadable)
     """
     try:
         transcript = Path.home() / ".claude" / "projects" / encode_cwd(cwd) / f"{session_id}.jsonl"
         if transcript.exists():
+            custom_title: str | None = None
+            agent_name: str | None = None
+            first_user_msg: str | None = None
             with transcript.open("r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     try:
                         obj = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if obj.get("type") != "user":
-                        continue
-                    msg = obj.get("message", {})
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        parts = [c.get("text", "") for c in content if isinstance(c, dict)]
-                        content = " ".join(p for p in parts if p)
-                    if not isinstance(content, str):
-                        continue
-                    content = content.strip().replace("\n", " ")
-                    if content:
-                        return content[:max_len]
+                    event_type = obj.get("type")
+                    if event_type == "custom-title":
+                        t = obj.get("customTitle", "")
+                        if t:
+                            custom_title = t
+                    elif event_type == "agent-name":
+                        n = obj.get("agentName", "")
+                        if n:
+                            agent_name = n
+                    elif event_type == "user" and first_user_msg is None:
+                        msg = obj.get("message", {})
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            parts = [c.get("text", "") for c in content if isinstance(c, dict)]
+                            content = " ".join(p for p in parts if p)
+                        if isinstance(content, str):
+                            content = content.strip().replace("\n", " ")
+                            if content:
+                                first_user_msg = content
+            if custom_title:
+                return custom_title[:max_len]
+            if agent_name:
+                return agent_name[:max_len]
+            if first_user_msg:
+                return first_user_msg[:max_len]
     except OSError:
         pass
     return Path(cwd).name or cwd or "(unknown)"
@@ -476,8 +496,13 @@ def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
                 existing_info["status"] = "superseded"
                 existing_info["superseded_at"] = now
                 existing_info["superseded_by"] = session_id
+    # Preserve started_at across re-registrations (SessionStart can fire
+    # multiple times per session — resume, reconnect — and we want the
+    # age to reflect the true session start, not the last event).
+    existing = sessions.get(session_id)
+    started_at = existing.get("started_at", now) if existing else now
     sessions[session_id] = {
-        "started_at": now,
+        "started_at": started_at,
         "last_seen": now,
         "status": "alive",
         "pid": pid,
