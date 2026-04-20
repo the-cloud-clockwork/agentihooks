@@ -100,12 +100,8 @@ class TestBrainAdapter:
 
         brain_dir = tmp_path / "brain"
         brain_dir.mkdir()
-        (brain_dir / "hot-arcs.md").write_text(
-            "---\nid: hot\ntitle: Hot Arcs\npriority: 10\n---\nArc content here."
-        )
-        (brain_dir / "notes.md").write_text(
-            "---\nid: notes\ntitle: Notes\npriority: 5\n---\nSome notes."
-        )
+        (brain_dir / "hot-arcs.md").write_text("---\nid: hot\ntitle: Hot Arcs\npriority: 10\n---\nArc content here.")
+        (brain_dir / "notes.md").write_text("---\nid: notes\ntitle: Notes\npriority: 5\n---\nSome notes.")
 
         source = FileBrainSource(brain_dir)
         entries = source.fetch()
@@ -168,13 +164,16 @@ class TestBrainAdapter:
             patch("hooks.context.brain_adapter.BRAIN_REFRESH_INTERVAL", 30, create=True),
         ):
             # Patch the config imports inside get_status
-            with patch.dict("hooks.config.__dict__", {
-                "BRAIN_ENABLED": True,
-                "BRAIN_SOURCE_TYPE": "file",
-                "BRAIN_SOURCE_PATH": "/tmp/brain",
-                "BRAIN_CHANNEL": "brain",
-                "BRAIN_REFRESH_INTERVAL": 30,
-            }):
+            with patch.dict(
+                "hooks.config.__dict__",
+                {
+                    "BRAIN_ENABLED": True,
+                    "BRAIN_SOURCE_TYPE": "file",
+                    "BRAIN_SOURCE_PATH": "/tmp/brain",
+                    "BRAIN_CHANNEL": "brain",
+                    "BRAIN_REFRESH_INTERVAL": 30,
+                },
+            ):
                 from hooks.context.brain_adapter import get_status
 
                 status = get_status()

@@ -107,15 +107,17 @@ class FileBrainSource(BrainSource):
                 fm, body = _parse_frontmatter(text)
                 if not body.strip():
                     continue
-                entries.append(BrainEntry(
-                    id=fm.get("id", md_file.stem),
-                    title=fm.get("title", md_file.stem),
-                    content=body.strip(),
-                    priority=int(fm.get("priority", 5)),
-                    ttl=int(fm.get("ttl", 3600)),
-                    severity=fm.get("severity", "info"),
-                    metadata=fm,
-                ))
+                entries.append(
+                    BrainEntry(
+                        id=fm.get("id", md_file.stem),
+                        title=fm.get("title", md_file.stem),
+                        content=body.strip(),
+                        priority=int(fm.get("priority", 5)),
+                        ttl=int(fm.get("ttl", 3600)),
+                        severity=fm.get("severity", "info"),
+                        metadata=fm,
+                    )
+                )
             except Exception as e:
                 log("brain_adapter: failed to read file", {"file": str(md_file), "error": str(e)})
 
@@ -184,10 +186,10 @@ def _trim_hot_arcs_table(content: str, top_n: int) -> str:
     data_end = data_start
     while data_end < len(lines) and lines[data_end].strip().startswith("|"):
         data_end += 1
-    kept = lines[data_start:data_start + top_n]
+    kept = lines[data_start : data_start + top_n]
     dropped = (data_end - data_start) - len(kept)
     tail = lines[data_end:]
-    result = lines[:sep_idx + 1] + kept
+    result = lines[: sep_idx + 1] + kept
     if dropped > 0:
         result.append(f"| ... | ... | ... | ... | *({dropped} more arcs trimmed)* |")
     result.extend(tail)

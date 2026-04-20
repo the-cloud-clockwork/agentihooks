@@ -29,11 +29,13 @@ def register(mcp):
             base_dir = _resolve_base_profile_dir()
             allowed = overlay_list(base_dir)
 
-            return json.dumps({
-                "success": True,
-                "current_profile": current_profile,
-                "allowed_overlays": allowed,
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "current_profile": current_profile,
+                    "allowed_overlays": allowed,
+                }
+            )
         except Exception as e:
             log("MCP profile_list failed", {"error": str(e)})
             return json.dumps({"success": False, "error": str(e)})
@@ -62,15 +64,17 @@ def register(mcp):
             overlay_names = [o.get("name", "") for o in overlays]
             chain = [current_profile] + overlay_names if current_profile else overlay_names
 
-            return json.dumps({
-                "success": True,
-                "base_profile": current_profile,
-                "active_overlays": [
-                    {"name": o.get("name"), "added_at": o.get("added_at"), "added_by": o.get("added_by")}
-                    for o in overlays
-                ],
-                "effective_chain": chain,
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "base_profile": current_profile,
+                    "active_overlays": [
+                        {"name": o.get("name"), "added_at": o.get("added_at"), "added_by": o.get("added_by")}
+                        for o in overlays
+                    ],
+                    "effective_chain": chain,
+                }
+            )
         except Exception as e:
             log("MCP profile_current failed", {"error": str(e)})
             return json.dumps({"success": False, "error": str(e)})

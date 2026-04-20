@@ -56,11 +56,13 @@ def _msg_hash(msg: dict) -> str:
     # Channel + severity + message uniquely identify semantic content. Two
     # broadcasts with identical content on the same channel are the same
     # broadcast for dedup purposes, even if they carry different UUIDs.
-    raw = "|".join([
-        str(msg.get("channel", "")),
-        str(msg.get("severity", "")),
-        msg.get("message", ""),
-    ]).encode()
+    raw = "|".join(
+        [
+            str(msg.get("channel", "")),
+            str(msg.get("severity", "")),
+            msg.get("message", ""),
+        ]
+    ).encode()
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -87,6 +89,7 @@ def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
     key = msg.get("channel") or ("_msg_" + msg.get("id", ""))
     sess[key] = {"hash": _msg_hash(msg), "ts": now_ts}
     _save_delivery_state(state)
+
 
 # Default TTL per severity (seconds). 0 = use default.
 _DEFAULT_TTL = {"critical": 1800, "alert": 3600, "info": 14400}
@@ -341,7 +344,8 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
     return [
-        m for m in msgs
+        m
+        for m in msgs
         if m.get("severity") == "critical"
         and m.get("persistent")
         and not _is_expired(m)
@@ -361,7 +365,8 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
     return [
-        m for m in msgs
+        m
+        for m in msgs
         if _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank
         and m.get("persistent")
         and not _is_expired(m)

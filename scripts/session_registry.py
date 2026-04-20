@@ -56,10 +56,10 @@ def _humanize_age(seconds: int) -> str:
 def _shorten_cwd(cwd: str, width: int = 40) -> str:
     home = str(Path.home())
     if cwd.startswith(home):
-        cwd = "~" + cwd[len(home):]
+        cwd = "~" + cwd[len(home) :]
     if len(cwd) <= width:
         return cwd
-    return "…" + cwd[-(width - 1):]
+    return "…" + cwd[-(width - 1) :]
 
 
 def _status_color(status: str) -> str:
@@ -125,25 +125,16 @@ def cmd_list(args) -> int:
         print(f"{_DIM}No sessions in the last 24h.{_RESET}")
         return 0
 
-    print(
-        f"{_BOLD}{'IDX':<4}{'STATUS':<8}{'AGE':<6}"
-        f"{'CWD':<46}ID{_RESET}"
-    )
+    print(f"{_BOLD}{'IDX':<4}{'STATUS':<8}{'AGE':<6}{'CWD':<46}ID{_RESET}")
     for i, r in enumerate(rows, 1):
         sid = r["session_id"]
         status = r["status"]
         color = _status_color(status)
         age = _humanize_age(r["age_seconds"])
         cwd = _shorten_cwd(r["cwd"], 44)
-        print(
-            f"{i:<4}{color}{status:<8}{_RESET}"
-            f"{age:<6}{cwd:<46}{_DIM}{sid}{_RESET}"
-        )
+        print(f"{i:<4}{color}{status:<8}{_RESET}{age:<6}{cwd:<46}{_DIM}{sid}{_RESET}")
     print()
-    print(
-        f"{_DIM}Showing {len(rows)} most recent. "
-        f"Reopen: agentihooks sessions reopen <N>  (N required){_RESET}"
-    )
+    print(f"{_DIM}Showing {len(rows)} most recent. Reopen: agentihooks sessions reopen <N>  (N required){_RESET}")
     return 0
 
 
@@ -226,9 +217,7 @@ def _jsonl_recently_written(row: dict) -> bool:
     cwd = row.get("cwd", "")
     if not sid or not cwd:
         return False
-    transcript = (
-        Path.home() / ".claude" / "projects" / encode_cwd(cwd) / f"{sid}.jsonl"
-    )
+    transcript = Path.home() / ".claude" / "projects" / encode_cwd(cwd) / f"{sid}.jsonl"
     try:
         mtime = transcript.stat().st_mtime
     except OSError:
@@ -254,8 +243,7 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
     for idx in indices:
         if idx < 1 or idx > len(all_rows):
             print(
-                f"{_YELLOW}warn:{_RESET} idx {idx} out of range "
-                f"(1..{len(all_rows)})",
+                f"{_YELLOW}warn:{_RESET} idx {idx} out of range (1..{len(all_rows)})",
                 file=sys.stderr,
             )
             continue
@@ -265,8 +253,7 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
         row = all_rows[idx - 1]
         if not include_alive and row["status"] == "alive":
             print(
-                f"{_YELLOW}skip:{_RESET} idx {idx} ({row['session_id'][:8]}) "
-                f"is alive — already running",
+                f"{_YELLOW}skip:{_RESET} idx {idx} ({row['session_id'][:8]}) is alive — already running",
                 file=sys.stderr,
             )
             continue
@@ -306,15 +293,10 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
             except OSError as e:
                 print(f"{_RED}✗{_RESET} {sid_short}: {e}", file=sys.stderr)
         else:
-            print(
-                f"{_YELLOW}manual:{_RESET} cd {_shell_quote(r['cwd'])} && "
-                f"agenti --resume {r['session_id']}"
-            )
+            print(f"{_YELLOW}manual:{_RESET} cd {_shell_quote(r['cwd'])} && agenti --resume {r['session_id']}")
 
     if terminal != "wt":
-        print(
-            f"\n{_DIM}wt.exe not found. Above commands listed for manual execution.{_RESET}"
-        )
+        print(f"\n{_DIM}wt.exe not found. Above commands listed for manual execution.{_RESET}")
     return launched
 
 
@@ -345,7 +327,6 @@ def cmd_reopen(args) -> int:
         return 2
     launched = reopen_sessions(indices=flat)
     return 0 if launched >= 0 else 1
-
 
 
 def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
@@ -393,11 +374,7 @@ def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
                 continue
             # Authoritative cwd from the JSONL itself (line 2 user event has cwd).
             cwd = _extract_cwd_from_jsonl(jsonl) or fallback_cwd
-            mtime_iso = (
-                datetime.fromtimestamp(mtime, tz=timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
+            mtime_iso = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
             entry = {
                 "started_at": mtime_iso,
                 "last_seen": mtime_iso,
@@ -507,9 +484,7 @@ def reconcile_live_sessions() -> dict:
         for pid, (_mtime, jsonl) in zip(pids_sorted, jsonls):
             sid = jsonl.stem
             entry = sessions.get(sid)
-            now_iso = (
-                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            )
+            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             if entry is None:
                 entry = {
                     "started_at": now_iso,

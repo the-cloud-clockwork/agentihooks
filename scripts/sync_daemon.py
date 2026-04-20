@@ -1013,6 +1013,7 @@ def _run_daemon(poll_sec: int) -> None:
                 _log(f"New project check error: {proj_err}")
             try:
                 from hooks.context.broadcast import heartbeat_sessions
+
                 hb = heartbeat_sessions()
                 if hb.get("flipped_dead") or hb.get("pruned"):
                     _log(
@@ -1035,6 +1036,7 @@ def _run_daemon(poll_sec: int) -> None:
             # Clean up stale broadcast sessions (dead PIDs)
             try:
                 from hooks.context.broadcast import get_active_sessions
+
                 get_active_sessions(cleanup=True)
             except Exception:
                 pass  # broadcast module may not be importable in all envs

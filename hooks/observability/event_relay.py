@@ -58,6 +58,7 @@ def _get_redis():
         return None
     try:
         import redis
+
         client = redis.from_url(url, decode_responses=True, socket_timeout=2.0)
         client.ping()
         return client
@@ -114,14 +115,18 @@ def extract_events_from_assistant(entry: dict) -> list[dict]:
             if text:
                 out.append({"event_type": "thinking", "content": text})
         elif bt == "tool_use":
-            out.append({
-                "event_type": "tool_use",
-                "content": json.dumps({
-                    "id": block.get("id", ""),
-                    "name": block.get("name", ""),
-                    "input": block.get("input", {}),
-                }),
-            })
+            out.append(
+                {
+                    "event_type": "tool_use",
+                    "content": json.dumps(
+                        {
+                            "id": block.get("id", ""),
+                            "name": block.get("name", ""),
+                            "input": block.get("input", {}),
+                        }
+                    ),
+                }
+            )
         elif bt == "text":
             text = block.get("text", "")
             if text:
@@ -149,14 +154,18 @@ def extract_events_from_user(entry: dict) -> list[dict]:
             text = "\n".join(parts)
         else:
             text = str(raw)
-        out.append({
-            "event_type": "tool_result",
-            "content": json.dumps({
-                "tool_use_id": block.get("tool_use_id", ""),
-                "is_error": bool(block.get("is_error", False)),
-                "output": text,
-            }),
-        })
+        out.append(
+            {
+                "event_type": "tool_result",
+                "content": json.dumps(
+                    {
+                        "tool_use_id": block.get("tool_use_id", ""),
+                        "is_error": bool(block.get("is_error", False)),
+                        "output": text,
+                    }
+                ),
+            }
+        )
     return out
 
 
@@ -182,7 +191,9 @@ def extract_events_from_entry(entry: dict, drop_tool_events: bool = False) -> li
 
 
 def read_new_transcript_events(
-    session_id: str, transcript_path: str, drop_tool_events: bool = False,
+    session_id: str,
+    transcript_path: str,
+    drop_tool_events: bool = False,
 ) -> tuple[list[dict], int]:
     """Returns (events, new_position). Reads transcript JSONL from byte offset.
 
@@ -285,14 +296,18 @@ def events_from_post_tool_use(payload: dict) -> list[dict]:
         return out
     tool_input = payload.get("tool_input", {}) or {}
     tool_use_id = payload.get("tool_use_id", "")
-    out.append({
-        "event_type": "tool_use",
-        "content": json.dumps({
-            "id": tool_use_id,
-            "name": tool_name,
-            "input": tool_input,
-        }),
-    })
+    out.append(
+        {
+            "event_type": "tool_use",
+            "content": json.dumps(
+                {
+                    "id": tool_use_id,
+                    "name": tool_name,
+                    "input": tool_input,
+                }
+            ),
+        }
+    )
 
     tool_response = payload.get("tool_response")
     if tool_response is None:
@@ -320,14 +335,18 @@ def events_from_post_tool_use(payload: dict) -> list[dict]:
     if not output_text and not is_error:
         return out
 
-    out.append({
-        "event_type": "tool_result",
-        "content": json.dumps({
-            "tool_use_id": tool_use_id,
-            "is_error": is_error,
-            "output": output_text,
-        }),
-    })
+    out.append(
+        {
+            "event_type": "tool_result",
+            "content": json.dumps(
+                {
+                    "tool_use_id": tool_use_id,
+                    "is_error": is_error,
+                    "output": output_text,
+                }
+            ),
+        }
+    )
     return out
 
 
@@ -371,7 +390,9 @@ def main() -> None:
         else:
             drop_tools = hook_name == "Stop"
             events_from_file, new_pos = read_new_transcript_events(
-                session_id, transcript_path, drop_tool_events=drop_tools,
+                session_id,
+                transcript_path,
+                drop_tool_events=drop_tools,
             )
             if events_from_file:
                 all_events.extend(events_from_file)
