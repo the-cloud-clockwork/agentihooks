@@ -72,7 +72,7 @@ Search by account ID (exact match) or profile name (regex pattern). Provide one 
 
 These tools parse the static AWS config file — they do not make live AWS API calls or assume any particular credential provider. They are useful when an agent needs to enumerate available environments before taking action (e.g., choosing which account to deploy to).
 
-For live AWS operations (DynamoDB, Lambda, S3, SQS), see [Database](database.md), [Compute](compute.md), [Storage](storage.md), and [Messaging](messaging.md).
+For live AWS operations (DynamoDB, Lambda, S3), see [Database](database.md), [Compute](compute.md), and [Storage](storage.md).
 
 ---
 

@@ -460,7 +460,7 @@ agentihooks status
 | **Daemons** | Checks PID file for sync daemon, verifies process is alive |
 | **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
 | **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
-| **Guardrails** | Lists all 6 cost guardrails with descriptions and enabled/disabled state |
+| **Guardrails** | Lists all 8 guardrails with descriptions and enabled/disabled state |
 | **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, checks per-project blacklists, shows fleet total vs active in current project |
 
 ### MCP fleet introspection

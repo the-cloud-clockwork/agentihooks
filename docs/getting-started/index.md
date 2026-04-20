@@ -13,7 +13,7 @@ AgentiHooks is a lifecycle hook system and MCP tool server for [Claude Code](htt
 
 - **[Cost management](../cost-management/)** -- slash your token burn with output filtering, file read dedup, lazy MCP loading, context warnings, and native rate limit display. All on by default. [See what you save ->](../cost-management/)
 - **10 lifecycle hooks** -- intercept every Claude Code event (SessionStart, PreToolUse, Stop, etc.) to log transcripts, inject context, scan for secrets, and learn from tool errors
-- **26 MCP tools** across 8 categories -- AWS, email, messaging, storage, database, compute, observability, and utilities
+- **26 MCP tools** across 7 categories -- AWS, email, storage, database, compute, observability, and utilities
 - **Profile system** -- swap agent personalities, skills, and tool access by choosing a profile at install time
 - **3-layer asset merge** -- agentihooks built-in, bundle global, and profile-specific skills/agents/commands/rules
 - **Sync daemon** -- auto-propagates new skills, agents, commands, and rules within 60s
