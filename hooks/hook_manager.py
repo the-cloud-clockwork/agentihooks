@@ -743,40 +743,41 @@ def on_pre_tool_use(payload: dict) -> None:
             hits = scan(command, mode=SECRETS_MODE)
             if hits:
                 names = ", ".join(hits)
-                if SECRETS_MODE == "warn":
-                    from hooks.common import inject_context
+                # Detect file-write operators: >, >>, tee, dd of=
+                # If the command is writing secrets to a file, block.
+                import re as _re
 
-                    inject_context(
-                        f"WARNING: Possible secret(s) detected in Bash command ({names}). "
-                        "Never pass credentials as inline command arguments. "
-                        "Use environment variables instead."
-                    )
-                else:
-                    otel.emit_event(
-                        "agentihooks.guardrail.secret_detected",
-                        {
-                            "session.id": payload.get("session_id", ""),
-                            "tool_name": tool_name,
-                            "secret_types": names,
-                            "action": "block",
-                        },
-                    )
-                    _tracer = otel.get_tracer()
-                    if _tracer:
-                        with _tracer.start_as_current_span(
-                            "agentihooks.guardrail.secret_blocked",
-                            attributes={
-                                "session.id": payload.get("session_id", ""),
-                                "tool_name": tool_name,
-                                "secret_types": names,
-                            },
-                        ):
-                            pass
+                _writes_file = bool(
+                    _re.search(r"(?<![<&])>\s*['\"]?[^>&|\s]", command)
+                    or _re.search(r">>", command)
+                    or _re.search(r"\btee\b", command)
+                    or _re.search(r"\bdd\b[^|&;\n]*of=", command)
+                )
+                otel.emit_event(
+                    "agentihooks.guardrail.secret_detected",
+                    {
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": tool_name,
+                        "secret_types": names,
+                        "action": "block" if _writes_file else "warn",
+                        "writes_file": _writes_file,
+                    },
+                )
+                if _writes_file:
                     raise BlockAction(
-                        f"BLOCKED: Secret(s) detected in Bash command ({names}). "
-                        "Never pass credentials as inline command arguments. "
-                        "Use environment variables instead."
+                        f"BLOCKED: Secret(s) detected in Bash command writing to a file ({names}). "
+                        "Secrets must never be committed to code or config files. "
+                        "Use environment variables, a vault, or operator-managed secret files."
                     )
+                # Inline secrets (no file write): scan + log + note, don't block.
+                # The operator handles transcript secrecy locally (closed system).
+                from hooks.common import inject_context
+
+                inject_context(
+                    f"NOTE: Secret(s) detected inline in Bash command ({names}). "
+                    "Logged and noted — transcript secrecy is operator-managed. "
+                    "Do not echo values back or persist them."
+                )
         elif tool_name in ("Write", "Edit"):
             content = tool_input.get("content", "") or tool_input.get("new_string", "")
             log(f"Pre tool use: {tool_name}", {"tool": tool_name})
@@ -832,6 +833,15 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("branch_guard check failed", {"error": str(e)})
             print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+    # --- Dependency install banner (supply chain defense) ---
+    if tool_name == "Bash":
+        try:
+            from hooks.context.dep_banner import check_dep_install
+
+            check_dep_install(payload)
+        except Exception as e:
+            log("dep_banner check failed", {"error": str(e)})
 
     # --- Prod lockdown: block production operations unless bypass active ---
     if tool_name == "Bash":

@@ -80,13 +80,20 @@ class TestBlockActionIntegration:
             "transcript_path": "",
         }
 
-    def test_bash_secret_exits_2(self):
-        """Bash command containing an inline secret is blocked (exit 2)."""
+    def test_bash_secret_to_file_exits_2(self):
+        """Bash command writing a secret to a file is blocked (exit 2)."""
+        key = "AKIA" + "IOSFODNN7EXAMPLE"
+        result = self._run(self._bash_payload(f"echo 'KEY={key}' > /tmp/.env"))
+        assert result.returncode == 2
+        assert "BLOCKED" in result.stderr
+
+    def test_bash_inline_secret_exits_0(self):
+        """Inline Bash secret (no file write) is noted but not blocked."""
         key_name = "aws_secret" + "_access_key"
         key_val = "wJalrXUtnFEMI" + "/K7MDENG/bPxRfiCYEXAMPLEKEY"
         result = self._run(self._bash_payload(f"export {key_name}={key_val}"))
-        assert result.returncode == 2
-        assert "BLOCKED" in result.stderr
+        assert result.returncode == 0
+        assert "NOTE" in result.stdout or "note" in result.stdout.lower()
 
     def test_write_secret_exits_2(self):
         """Write content containing a credential is blocked (exit 2)."""
@@ -156,30 +163,34 @@ class TestSecretsModesIntegration:
         assert result.returncode == 0
 
     def test_mode_warn_allows_secrets(self):
-        """mode=warn should warn but not block (exit 0)."""
+        """mode=warn should not block inline Bash secrets (exit 0)."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._bash_payload(f"echo {key}"), mode="warn")
         assert result.returncode == 0
-        assert "WARNING" in result.stdout
 
-    def test_mode_standard_blocks_secrets(self):
-        """mode=standard should block secrets (exit 2)."""
+    def test_mode_standard_notes_inline_secrets(self):
+        """mode=standard notes inline Bash secrets but does not block."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._bash_payload(f"echo {key}"), mode="standard")
+        assert result.returncode == 0
+
+    def test_mode_standard_blocks_file_write_secrets(self):
+        """mode=standard BLOCKS when secret is written to a file."""
+        key = "AKIA" + "IOSFODNN7EXAMPLE"
+        result = self._run(self._bash_payload(f"echo KEY={key} > /tmp/.env"), mode="standard")
         assert result.returncode == 2
         assert "BLOCKED" in result.stderr
 
-    def test_mode_strict_blocks_secrets(self):
-        """mode=strict should block secrets (exit 2)."""
+    def test_mode_strict_notes_inline_secrets(self):
+        """mode=strict notes inline Bash secrets but does not block."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._bash_payload(f"echo {key}"), mode="strict")
-        assert result.returncode == 2
-        assert "BLOCKED" in result.stderr
+        assert result.returncode == 0
 
-    def test_mode_strict_catches_slack_token(self):
-        """mode=strict should block Slack tokens that standard misses."""
+    def test_mode_strict_catches_slack_token_in_file_write(self):
+        """mode=strict should block Slack tokens when written to a file."""
         token = "xoxb-" + "1234567890-abcdef"
-        result = self._run(self._bash_payload(f"export SLACK={token}"), mode="strict")
+        result = self._run(self._bash_payload(f"echo SLACK={token} > /tmp/.env"), mode="strict")
         assert result.returncode == 2
         assert "slack_token" in result.stderr
 
