@@ -184,8 +184,17 @@ def gc_all_expired() -> int:
     return deleted
 
 
-def collect_profile_rules(profile_rules_dir: Path, claude_md_path: Path | None = None) -> str:
-    """Read a profile's rules directory + CLAUDE.md into a single injection payload.
+def collect_profile_rules(
+    profile_rules_dir: Path,
+    claude_md_path: Path | None = None,
+    claude_local_md_path: Path | None = None,
+) -> str:
+    """Read a profile's rules directory + CLAUDE.md + CLAUDE.local.md into a single injection payload.
+
+    Order of inclusion (highest precedence last so it can override):
+      1. CLAUDE.md (global profile)
+      2. rules/*.md (profile rules, sorted)
+      3. CLAUDE.local.md (user-level local override)
 
     Returns a formatted string suitable for inject_context.
     """
@@ -207,6 +216,11 @@ def collect_profile_rules(profile_rules_dir: Path, claude_md_path: Path | None =
             parts.append(f"--- rules/{rf.name} ---")
             parts.append(rf.read_text())
             parts.append("")
+
+    if claude_local_md_path and claude_local_md_path.exists():
+        parts.append(f"--- {claude_local_md_path.name} (local override) ---")
+        parts.append(claude_local_md_path.read_text())
+        parts.append("")
 
     parts.append("=== END PROFILE RULES REFRESH ===")
     return "\n".join(parts)

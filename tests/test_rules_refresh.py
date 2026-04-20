@@ -172,3 +172,27 @@ class TestPayloadCollection:
         claude_md.write_text("# Just claude")
         payload = rules_refresh.collect_profile_rules(tmp_path / "nope", claude_md)
         assert "# Just claude" in payload
+
+    def test_claude_local_md_is_included(self, tmp_path):
+        rules_dir = tmp_path / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "rule.md").write_text("# Regular rule")
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Global profile")
+        claude_local = tmp_path / "CLAUDE.local.md"
+        claude_local.write_text("# Local override — Skynet mode")
+
+        payload = rules_refresh.collect_profile_rules(rules_dir, claude_md, claude_local)
+        assert "# Global profile" in payload
+        assert "# Regular rule" in payload
+        assert "# Local override — Skynet mode" in payload
+        # Local override should come after CLAUDE.md and rules/ (precedence: last wins)
+        assert payload.index("# Global profile") < payload.index("# Local override")
+
+    def test_missing_claude_local_md_is_tolerated(self, tmp_path):
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Only global")
+        payload = rules_refresh.collect_profile_rules(
+            tmp_path / "nope", claude_md, tmp_path / "no-local.md"
+        )
+        assert "# Only global" in payload

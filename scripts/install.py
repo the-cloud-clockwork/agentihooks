@@ -4145,6 +4145,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     profile = args.profile or _detect_active_profile()
     rules_dir = Path.home() / ".claude" / "rules"
     claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    claude_local_md = Path.home() / ".claude" / "CLAUDE.local.md"
 
     if args.clear:
         existing = _load_marker(profile)
@@ -4158,11 +4159,11 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
             print(f"No pending marker for profile '{profile}'.")
         return
 
-    if not rules_dir.exists() and not claude_md.exists():
-        print(f"[ERROR] No rules found at {rules_dir} or {claude_md}. Is agentihooks installed?")
+    if not rules_dir.exists() and not claude_md.exists() and not claude_local_md.exists():
+        print(f"[ERROR] No rules found at {rules_dir} / {claude_md} / {claude_local_md}. Is agentihooks installed?")
         sys.exit(1)
 
-    payload = collect_profile_rules(rules_dir, claude_md)
+    payload = collect_profile_rules(rules_dir, claude_md, claude_local_md)
 
     if args.dry_run:
         import hashlib as _hash
