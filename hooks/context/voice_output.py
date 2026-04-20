@@ -200,12 +200,15 @@ def _summarize_with_haiku(text: str) -> str | None:
                 for end in [". ", "! ", "? "]:
                     idx = out[:150].rfind(end)
                     if idx > 0:
-                        out = out[:idx + 1]
+                        out = out[: idx + 1]
                         break
                 else:
                     out = out[:150]
             return out
-        log("voice_output: haiku returned empty", {"returncode": result.returncode, "stderr": (result.stderr or "")[:200]})
+        log(
+            "voice_output: haiku returned empty",
+            {"returncode": result.returncode, "stderr": (result.stderr or "")[:200]},
+        )
         return None
     except FileNotFoundError:
         log("voice_output: claude CLI not found on PATH", {})
@@ -238,6 +241,7 @@ def _is_wsl2() -> bool:
 
 def _is_macos() -> bool:
     import platform
+
     return platform.system() == "Darwin"
 
 
@@ -246,8 +250,14 @@ def _find_player() -> list[str]:
     if _is_wsl2():
         try:
             result = subprocess.run(
-                ["bash", "-c", "command -v ffplay.exe 2>/dev/null || /mnt/c/Windows/System32/where.exe ffplay 2>/dev/null | head -1"],
-                capture_output=True, text=True, timeout=5,
+                [
+                    "bash",
+                    "-c",
+                    "command -v ffplay.exe 2>/dev/null || /mnt/c/Windows/System32/where.exe ffplay 2>/dev/null | head -1",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             path = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
             if path:
@@ -269,9 +279,7 @@ def _find_player() -> list[str]:
 def _audio_path_for_player(path: str) -> str:
     if _is_wsl2():
         try:
-            result = subprocess.run(
-                ["wslpath", "-w", path], capture_output=True, text=True, timeout=5
-            )
+            result = subprocess.run(["wslpath", "-w", path], capture_output=True, text=True, timeout=5)
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except Exception:
@@ -285,7 +293,8 @@ def _convert_for_macos(ogg_path: str) -> str | None:
     try:
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", ogg_path, wav_path],
-            capture_output=True, timeout=15,
+            capture_output=True,
+            timeout=15,
         )
         if result.returncode == 0 and Path(wav_path).exists():
             return wav_path
@@ -300,7 +309,8 @@ def _kill_existing_playback() -> None:
         if _is_wsl2():
             subprocess.run(
                 ["taskkill.exe", "/IM", "ffplay.exe", "/F"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
         elif _is_macos():
             subprocess.run(["pkill", "-x", "afplay"], capture_output=True, timeout=5)
@@ -320,13 +330,19 @@ def _speak_and_play(text: str, voice_service_url: str) -> bool:
 
         payload = json.dumps({"text": text, "store": False})
         curl_cmd = [
-            "curl", "-s",
-            "-X", "POST",
+            "curl",
+            "-s",
+            "-X",
+            "POST",
             f"{voice_service_url}/speak",
-            "-H", "Content-Type: application/json",
-            "-d", payload,
-            "-o", tmp_path,
-            "-w", "%{http_code}",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            payload,
+            "-o",
+            tmp_path,
+            "-w",
+            "%{http_code}",
         ]
         if VOICE_API_KEY:
             curl_cmd.extend(["-H", f"Authorization: Bearer {VOICE_API_KEY}"])
@@ -371,7 +387,9 @@ def _speak_and_play(text: str, voice_service_url: str) -> bool:
             play_path = _audio_path_for_player(tmp_path)
 
         subprocess.Popen(
-            [*player_cmd, "-nodisp", "-autoexit", play_path] if "afplay" not in player_cmd[0] else [*player_cmd, play_path],
+            [*player_cmd, "-nodisp", "-autoexit", play_path]
+            if "afplay" not in player_cmd[0]
+            else [*player_cmd, play_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

@@ -58,12 +58,14 @@ def register(mcp):
                 else:
                     global_count += 1
 
-            return json.dumps({
-                "success": True,
-                "channels": channels,
-                "global_messages": global_count,
-                "total_messages": len(msgs),
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "channels": channels,
+                    "global_messages": global_count,
+                    "total_messages": len(msgs),
+                }
+            )
         except Exception as e:
             log("MCP channel_list failed", {"error": str(e)})
             return json.dumps({"success": False, "error": str(e)})

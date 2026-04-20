@@ -90,17 +90,43 @@ def _load() -> dict:
     path = _manifesto_path()
     try:
         if not path.is_file():
-            return {"path": str(path), "mtime": 0.0, "content": "", "release": _DEFAULT_RELEASE_SIGNALS, "hotfix": _DEFAULT_HOTFIX_SIGNALS, "branch": _DEFAULT_BRANCH_SIGNALS, "pr": _DEFAULT_PR_SIGNALS}
+            return {
+                "path": str(path),
+                "mtime": 0.0,
+                "content": "",
+                "release": _DEFAULT_RELEASE_SIGNALS,
+                "hotfix": _DEFAULT_HOTFIX_SIGNALS,
+                "branch": _DEFAULT_BRANCH_SIGNALS,
+                "pr": _DEFAULT_PR_SIGNALS,
+            }
         mtime = path.stat().st_mtime
         if _manifesto_cache["path"] == str(path) and _manifesto_cache["mtime"] == mtime and _manifesto_cache["content"]:
             return _manifesto_cache
         content = path.read_text(encoding="utf-8")
         release, hotfix, branch, pr = _parse_signals(content)
-        _manifesto_cache.update({"path": str(path), "mtime": mtime, "content": content, "release": release, "hotfix": hotfix, "branch": branch, "pr": pr})
+        _manifesto_cache.update(
+            {
+                "path": str(path),
+                "mtime": mtime,
+                "content": content,
+                "release": release,
+                "hotfix": hotfix,
+                "branch": branch,
+                "pr": pr,
+            }
+        )
         return _manifesto_cache
     except Exception as e:
         log("ci_manifesto load failed", {"path": str(path), "error": str(e)})
-        return {"path": str(path), "mtime": 0.0, "content": "", "release": _DEFAULT_RELEASE_SIGNALS, "hotfix": _DEFAULT_HOTFIX_SIGNALS, "branch": _DEFAULT_BRANCH_SIGNALS, "pr": _DEFAULT_PR_SIGNALS}
+        return {
+            "path": str(path),
+            "mtime": 0.0,
+            "content": "",
+            "release": _DEFAULT_RELEASE_SIGNALS,
+            "hotfix": _DEFAULT_HOTFIX_SIGNALS,
+            "branch": _DEFAULT_BRANCH_SIGNALS,
+            "pr": _DEFAULT_PR_SIGNALS,
+        }
 
 
 _SECTION_RE = re.compile(
@@ -129,17 +155,27 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
     for m in _SECTION_RE.finditer(content):
         header = m.group(1).lower()
         block = m.group(2).strip()
-        phrases = [line.strip().lower() for line in block.splitlines() if line.strip() and not line.strip().startswith("#")]
+        phrases = [
+            line.strip().lower() for line in block.splitlines() if line.strip() and not line.strip().startswith("#")
+        ]
         if "release" in header:
             release = phrases
         elif "hotfix" in header:
             hotfix = phrases
     bm = _BRANCH_SECTION_RE.search(content)
     if bm:
-        branch = [line.strip().lower() for line in bm.group(1).strip().splitlines() if line.strip() and not line.strip().startswith("#")]
+        branch = [
+            line.strip().lower()
+            for line in bm.group(1).strip().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
     pm = _PR_SECTION_RE.search(content)
     if pm:
-        pr = [line.strip().lower() for line in pm.group(1).strip().splitlines() if line.strip() and not line.strip().startswith("#")]
+        pr = [
+            line.strip().lower()
+            for line in pm.group(1).strip().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
     if not release:
         release = _DEFAULT_RELEASE_SIGNALS
     if not hotfix:

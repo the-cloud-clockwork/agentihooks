@@ -196,7 +196,9 @@ _BRANCH_CREATE_PATTERNS = [
     re.compile(r"\bgit\s+checkout\s+-[bB]\b"),
     re.compile(r"\bgit\s+switch\s+-[cC]\b"),
     # git branch <name> (creation form — not -d/-D/-a/-v/-l/-r/--list)
-    re.compile(r"\bgit\s+branch\s+(?!(-[aAvVlLrRdD]|--list|--all|--verbose|--delete|--remotes|--sort|--contains|--merged|--no-merged|-m|-M|--move|--copy|-c|-C|--set-upstream-to|--unset-upstream|--edit-description|--format|--show-current))\S+"),
+    re.compile(
+        r"\bgit\s+branch\s+(?!(-[aAvVlLrRdD]|--list|--all|--verbose|--delete|--remotes|--sort|--contains|--merged|--no-merged|-m|-M|--move|--copy|-c|-C|--set-upstream-to|--unset-upstream|--edit-description|--format|--show-current))\S+"
+    ),
 ]
 
 _BLOCKED_PATTERNS = [

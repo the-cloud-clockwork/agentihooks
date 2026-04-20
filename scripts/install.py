@@ -2149,10 +2149,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _install_user_mcp(last_profile)
 
     # Check if any profile in the chain has its own .mcp.json — if so, it overrides the bundle global
-    profile_has_own_mcp = any(
-        (pdir / _CLAUDE_SUBDIR / _MCP_JSON_NAME).exists()
-        for _, pdir in profile_dirs
-    )
+    profile_has_own_mcp = any((pdir / _CLAUDE_SUBDIR / _MCP_JSON_NAME).exists() for _, pdir in profile_dirs)
 
     # Layer 2: bundle .claude/.mcp.json — SKIP if profile defines its own MCP servers
     if bundle_dir and not profile_has_own_mcp:
@@ -3963,7 +3960,13 @@ def _cmd_overlay(args: argparse.Namespace) -> None:
             print("No overlays available (base profile has no allowedOverlays).")
             return
         for o in allowed:
-            status = f"{_GREEN}ACTIVE{_RESET}" if o["name"] in active_names else "available" if o["available"] else f"{_RED}not found{_RESET}"
+            status = (
+                f"{_GREEN}ACTIVE{_RESET}"
+                if o["name"] in active_names
+                else "available"
+                if o["available"]
+                else f"{_RED}not found{_RESET}"
+            )
             desc = f" — {o['description']}" if o.get("description") else ""
             print(f"  {o['name']}: {status}{desc}")
 
@@ -4539,7 +4542,9 @@ examples:
         help="List and reopen recent Claude Code sessions (24h crash-recovery registry)",
     )
     sess_sub = sess_p.add_subparsers(dest="sessions_action")
-    sess_list_p = sess_sub.add_parser("list", aliases=["ls"], help="List the most recent sessions (default: last 10 in 24h window)")
+    sess_list_p = sess_sub.add_parser(
+        "list", aliases=["ls"], help="List the most recent sessions (default: last 10 in 24h window)"
+    )
     sess_list_p.add_argument("--hours", type=int, default=24, help="Lookback window (default: 24)")
     sess_list_p.add_argument("--limit", type=int, default=10, help="How many to show (default: 10, 0 = all)")
     sess_reopen_p = sess_sub.add_parser(

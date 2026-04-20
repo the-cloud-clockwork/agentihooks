@@ -158,6 +158,7 @@ def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = 
     # Include rules from active overlays (mid-session profile activation)
     try:
         from scripts.overlay import get_active_overlays
+
         for overlay in get_active_overlays():
             rules_dir_path = overlay.get("rules_dir")
             if rules_dir_path and Path(rules_dir_path).is_dir():

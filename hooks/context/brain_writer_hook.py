@@ -7,6 +7,7 @@ extracts assistant response text, parses HTML comment markers, then routes:
 
 Outbox format: ~/.agentihooks/brain-outbox/<timestamp>-<type>-<uuid>.json
 """
+
 from __future__ import annotations
 
 import json
@@ -53,6 +54,7 @@ def _find_markers(text: str) -> list[dict[str, Any]]:
 
 # ── Transcript parsing ───────────────────────────────────────────────
 
+
 def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> list[dict]:
     """Read JSONL transcript, extract markers from assistant responses."""
     path = Path(transcript_path)
@@ -83,6 +85,7 @@ def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> lis
 
 # ── Outbox write ─────────────────────────────────────────────────────
 
+
 def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> int:
     """Write markers as individual JSON files to the outbox directory."""
     outbox = Path(outbox_dir)
@@ -109,6 +112,7 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
 
 
 # ── Redis publish ────────────────────────────────────────────────────
+
 
 def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
     """Publish milestone/signal markers to Redis event bus via SSH + redis-cli."""
@@ -148,9 +152,10 @@ def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
 
         try:
             result = subprocess.run(
-                ["ssh", "-i", ssh_key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
-                 f"root@{host}", cmd],
-                capture_output=True, text=True, timeout=10,
+                ["ssh", "-i", ssh_key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"root@{host}", cmd],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode == 0:
                 count += 1
@@ -163,6 +168,7 @@ def _publish_to_redis(markers: list[dict], redis_url: str, ssh_key: str) -> int:
 
 
 # ── Main entry point ─────────────────────────────────────────────────
+
 
 def write_markers(session_id: str, transcript_path: str, last_message: str = "") -> dict:
     """Scan transcript for brain markers, write to outbox, publish to Redis.

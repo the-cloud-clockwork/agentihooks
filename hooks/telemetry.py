@@ -12,6 +12,7 @@ Three entry points:
 All functions read config via hooks.config OTEL_* vars. When OTEL_HOOKS_ENABLED
 is false they become no-ops.
 """
+
 from __future__ import annotations
 
 import json

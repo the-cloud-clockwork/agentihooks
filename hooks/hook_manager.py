@@ -380,6 +380,7 @@ def on_session_start(payload: dict) -> None:
     # Voice output — cleanup stale flags from dead sessions
     try:
         from hooks.context.voice_output import cleanup_stale_flags
+
         cleaned = cleanup_stale_flags()
         if cleaned:
             log("voice_output: cleaned stale flags", {"count": cleaned})
@@ -391,6 +392,7 @@ def on_session_start(payload: dict) -> None:
         auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
         if auto_overlays:
             from scripts.overlay import overlay_add
+
             for name in auto_overlays.split(","):
                 name = name.strip()
                 if name:
@@ -684,17 +686,27 @@ def on_user_prompt_submit(payload: dict) -> None:
                     set_voice_enabled(session_id)
                     log("voice_output: voice enabled for session", {"session_id": session_id})
                     from hooks.common import inject_banner
-                    inject_banner("VOICE", "Voice output ENABLED. All responses will be spoken aloud. Say 'disable voice' to stop. This is a system toggle — no action needed from you.")
+
+                    inject_banner(
+                        "VOICE",
+                        "Voice output ENABLED. All responses will be spoken aloud. Say 'disable voice' to stop. This is a system toggle — no action needed from you.",
+                    )
                 elif contains_disable_signal(prompt):
                     clear_voice_enabled(session_id)
                     log("voice_output: voice disabled for session", {"session_id": session_id})
                     from hooks.common import inject_banner
-                    inject_banner("VOICE", "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.")
+
+                    inject_banner(
+                        "VOICE",
+                        "Voice output DISABLED. Responses will no longer be spoken. This is a system toggle — no action needed from you.",
+                    )
             # Check quota banner (even if no enable/disable signal this turn)
             from hooks.context.voice_output import check_quota_banner
+
             quota_msg = check_quota_banner(session_id)
             if quota_msg:
                 from hooks.common import inject_banner
+
                 inject_banner("VOICE", quota_msg)
     except Exception as e:
         log("voice_output signal detection failed", {"error": str(e)})
@@ -1251,13 +1263,16 @@ def on_subagent_start(payload: dict) -> None:
     """
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
-    log("Subagent started", {
-        "agent_id": agent_id,
-        "agent_type": agent_type,
-        "otel_endpoint": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "<unset>"),
-        "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "<unset>"),
-        "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", "<unset>"),
-    })
+    log(
+        "Subagent started",
+        {
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+            "otel_endpoint": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "<unset>"),
+            "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "<unset>"),
+            "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", "<unset>"),
+        },
+    )
 
     # CI Manifesto — inject doctrine into subagents too
     try:
@@ -1302,9 +1317,7 @@ def on_subagent_start(payload: dict) -> None:
 def on_subagent_stop(payload: dict) -> None:
     """Handle SubagentStop event — capture brain markers from subagent output."""
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
-    transcript_path = (
-        payload.get("agent_transcript_path") or payload.get("transcript_path", "")
-    )
+    transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
 
@@ -1326,6 +1339,7 @@ def on_subagent_stop(payload: dict) -> None:
         auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
         if auto_overlays:
             from scripts.overlay import overlay_remove
+
             for name in auto_overlays.split(","):
                 name = name.strip()
                 if name:
