@@ -607,6 +607,14 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto refresh failed", {"error": str(e)})
 
+    # --- Rules refresh: one-shot re-injection for running sessions ---
+    try:
+        from hooks.context.rules_refresh import maybe_inject as rules_refresh_inject
+
+        rules_refresh_inject(session_id)
+    except Exception as e:
+        log("rules_refresh inject failed", {"error": str(e)})
+
     # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
     try:
         from hooks.config import AMYGDALA_ENABLED
