@@ -240,6 +240,8 @@ agentihooks refresh-rules --clear
 
 Crash-recovery session picker. Lists recent Claude Code sessions (24h window) with names, lifetimes, and IDs. Reopen a session by index from the list.
 
+![agentihooks sessions output showing alive, closed, and superseded sessions with NAME and AGE columns](/agentihooks/assets/sessions-list-with-names.png)
+
 ```bash
 agentihooks sessions list [--hours N] [--limit N]
 agentihooks sessions reopen <IDX> [--force]
