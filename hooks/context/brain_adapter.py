@@ -356,7 +356,6 @@ def force_refresh() -> bool:
         # No brain content — clear channel
         try:
             from hooks.config import BRAIN_CHANNEL
-
             from hooks.context.broadcast import clear_broadcasts
 
             clear_broadcasts(channel=BRAIN_CHANNEL)
