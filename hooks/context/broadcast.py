@@ -571,22 +571,35 @@ def heartbeat_sessions() -> dict:
     return summary
 
 
-def get_active_sessions(cleanup: bool = False) -> dict:
+def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dict:
+    """Return session entries from the registry.
+
+    By default returns only entries with status="alive" — this matches the
+    semantic of "active" (one per live PID, after the supersede fix).
+    Pass include_all=True to get the full registry including superseded,
+    closed, and dead entries.
+
+    When cleanup=True, entries whose PID is gone are marked "dead" (not
+    deleted — preserved for the 24h retention window used by
+    `sessions list`).
+    """
     sessions = _load_sessions()
     if cleanup:
-        dead = []
+        changed = False
         for sid, info in sessions.items():
             pid = info.get("pid")
-            if pid:
-                try:
-                    os.kill(pid, 0)
-                except (OSError, ProcessLookupError):
-                    dead.append(sid)
-        if dead:
-            for sid in dead:
-                del sessions[sid]
+            if not pid or info.get("status") in ("dead", "closed", "superseded"):
+                continue
+            try:
+                os.kill(pid, 0)
+            except (OSError, ProcessLookupError):
+                info["status"] = "dead"
+                changed = True
+        if changed:
             _save_sessions(sessions)
-    return sessions
+    if include_all:
+        return sessions
+    return {sid: info for sid, info in sessions.items() if info.get("status") == "alive"}
 
 
 # ---------------------------------------------------------------------------
