@@ -111,11 +111,11 @@ _SECTION_RE = re.compile(
 # "Unlock (per-turn operator signal)" fenced-block convention. We match
 # by section title (section numbering changes when new sections land).
 _BRANCH_SECTION_RE = re.compile(
-    r"##\s*\d+\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
+    r"##\s*\d+\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\([^)]*operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
 _PR_SECTION_RE = re.compile(
-    r"##\s*\d+\.\s*PR\s+Discipline.*?###\s*Unlock\s*\(per-turn operator signal\).*?```(.*?)```",
+    r"##\s*\d+\.\s*PR\s+Discipline.*?###\s*Unlock\s*\([^)]*operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
 

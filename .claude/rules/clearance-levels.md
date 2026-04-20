@@ -1,5 +1,5 @@
 ---
-description: Operator clearance levels — full clearance is the default
+description: Operator clearance levels — what agents may and may not do
 alwaysApply: true
 ---
 
@@ -7,28 +7,41 @@ alwaysApply: true
 
 ## Default: Full Clearance
 
-The operator grants **full clearance** by default. This means:
+Full clearance is the default. Most operations proceed without asking.
 
-- All git operations: push to any branch (including main), force push, branch delete, merge
-- All destructive ops: `rm -rf`, `kubectl delete`, `docker rm`, `DROP TABLE` — proceed without asking
-- All deploy ops: production restarts, rollouts, scaling — proceed without asking
-- All infrastructure ops: SSH, SCP, service management — proceed without asking
+### Always Allowed (no signal needed)
+- Git read ops: pull, fetch, log, diff, status, show, clone
+- Push to any branch except main/master
+- All destructive local ops: rm -rf, kubectl delete, docker rm, DROP TABLE
+- Deploy ops: production restarts, rollouts, scaling
+- Infrastructure: SSH, SCP, service management
 
-**The only exception at ANY clearance level: secrets.** Never handle credentials, API keys, tokens, or passwords in plaintext. Ever.
+### Permanently Blocked (hook-enforced, no clearance overrides)
+- git push to main/master (direct push)
+- git merge / git rebase targeting main/master
+- git push --force / -f / --force-with-lease (any branch)
+- git tag (use the release.yml workflow)
+- git commit while HEAD is on main/master
+- gh pr create without --base main
+
+### Signal-Gated Operations
+
+| Operation | Required Signal | Persistence |
+|---|---|---|
+| git checkout -b, git switch -c, git branch \<name\> | "new branch" / "create branch" / "feature branch" | Per-turn |
+| gh pr create --base main | "open a PR" / "create a PR" / "make a PR" / "pr please" | Session (max 3, then re-signal) |
+| gh pr merge to main, gh workflow run release.yml | "merge to main" / "ship it" / "release to prod" | Session |
+| Docker/image ops with :latest/:prod/:stable | "hotfix" / "prod is down" / "outage" | Session |
 
 ## Restricting Clearance
 
-The operator can REDUCE permissions with a verbal command:
-
 | Command | Effect |
 |---|---|
-| "restrict clearance" / "careful mode" | Main branch protected. Destructive ops require confirmation. Production restarts require confirmation. |
-| "full clearance" / "back to normal" | Returns to default full clearance. |
+| "restrict clearance" / "careful mode" | Destructive ops require confirmation |
+| "full clearance" / "back to normal" | Returns to default |
 
-## Rules
+Restricted mode applies for the current task only, then reverts.
 
-- Full clearance is the DEFAULT. You do not need the operator to say "full clearance" to have it.
-- Restricted mode is temporary — it applies for the current task only, then reverts to full clearance.
-- Secrets are NEVER bypassed at any clearance level. This is the one absolute.
-- When operating in restricted mode, prefix actions that would normally be blocked with: `[restricted — asking]`
-- The hook system may still enforce its own blocks (e.g., main branch protection hooks). Clearance governs YOUR behavior for decisions hooks don't catch.
+## Secrets — Absolute
+
+Never handle credentials, API keys, tokens, or passwords in plaintext. No clearance level overrides this.

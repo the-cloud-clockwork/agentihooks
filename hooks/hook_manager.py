@@ -510,13 +510,18 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear prod lockdown bypass flag + branch/PR signals for this session
+    # Clear all signals at session end (per-turn + session-scoped)
     try:
         from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
-        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+        from hooks.context.prod_lockdown import (
+            clear_bypass,
+            clear_hotfix_signal,
+            clear_release_signal,
+        )
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
+        clear_hotfix_signal(session_id)
         clear_branch_signal(session_id)
         clear_pr_signal(session_id)
     except Exception:
@@ -642,8 +647,7 @@ def on_user_prompt_submit(payload: dict) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
-        from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
-        from hooks.context.prod_lockdown import set_release_signal
+        from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
         if prompt:
@@ -651,8 +655,8 @@ def on_user_prompt_submit(payload: dict) -> None:
                 set_release_signal(session_id)
                 log("ci_manifesto: release-gate signal active this turn", {"session_id": session_id})
             if contains_hotfix_signal(prompt):
-                _set_full_bypass(session_id)
-                log("ci_manifesto: hotfix signal active this turn", {"session_id": session_id})
+                set_hotfix_signal(session_id)
+                log("ci_manifesto: hotfix signal active this session", {"session_id": session_id})
             if contains_branch_signal(prompt):
                 set_branch_signal(session_id)
                 log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
@@ -955,8 +959,7 @@ def on_post_tool_use(payload: dict) -> None:
                 contains_pr_signal,
                 contains_release_signal,
             )
-            from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
-            from hooks.context.prod_lockdown import set_release_signal
+            from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
             session_id = payload.get("session_id", "")
             resp = payload.get("tool_response") or payload.get("tool_output") or {}
@@ -979,8 +982,8 @@ def on_post_tool_use(payload: dict) -> None:
                     set_release_signal(session_id)
                     log("ci_manifesto: release-gate signal via AskUserQuestion answer", {"session_id": session_id})
                 if contains_hotfix_signal(combined):
-                    _set_full_bypass(session_id)
-                    log("ci_manifesto: hotfix signal via AskUserQuestion answer", {"session_id": session_id})
+                    set_hotfix_signal(session_id)
+                    log("ci_manifesto: hotfix signal via AskUserQuestion answer (session-scoped)", {"session_id": session_id})
                 if contains_branch_signal(combined):
                     set_branch_signal(session_id)
                     log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
@@ -1173,15 +1176,14 @@ def on_stop(payload: dict) -> None:
     # Check for errors and notify
     notify_on_error(transcript_path)
 
-    # Clear prod lockdown bypass + release + branch + PR signals for this turn
+    # Clear per-turn signals only; session-scoped signals (PR, release, hotfix)
+    # persist until on_session_end
     try:
-        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
-        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+        from hooks.context.branch_guard import clear_branch_signal
+        from hooks.context.prod_lockdown import clear_bypass
 
         clear_bypass(session_id)
-        clear_release_signal(session_id)
         clear_branch_signal(session_id)
-        clear_pr_signal(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 

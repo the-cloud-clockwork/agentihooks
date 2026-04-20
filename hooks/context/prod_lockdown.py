@@ -22,7 +22,8 @@ from hooks.common import log
 from hooks.hook_manager import BlockAction
 
 BYPASS_TYPE = "prod_lockdown_bypass"
-BYPASS_TTL = 300  # 5 min — covers the longest expected tool-call sequence per turn
+BYPASS_TTL = 300  # 5 min — per-turn legacy bypass (--emergency-prod)
+_SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotfix)
 
 # Legacy hotfix/emergency vocabulary — kept for backwards-compat.
 # Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
@@ -124,7 +125,7 @@ def set_release_signal(session_id: str) -> None:
     r = get_redis()
     if r:
         try:
-            r.setex(_release_key(session_id), BYPASS_TTL, "1")
+            r.setex(_release_key(session_id), _SESSION_SIGNAL_TTL, "1")
         except Exception as e:
             log("prod_lockdown.set_release_signal redis failed", {"error": str(e)})
     try:
@@ -146,6 +147,54 @@ def clear_release_signal(session_id: str) -> None:
         _release_flag(session_id).unlink(missing_ok=True)
     except Exception:
         pass
+
+
+def _hotfix_key(session_id: str) -> str:
+    return redis_key("hotfix_signal", session_id)
+
+
+def _hotfix_flag(session_id: str) -> Path:
+    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.hotfix"
+
+
+def set_hotfix_signal(session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.setex(_hotfix_key(session_id), _SESSION_SIGNAL_TTL, "1")
+        except Exception as e:
+            log("prod_lockdown.set_hotfix_signal redis failed", {"error": str(e)})
+    try:
+        f = _hotfix_flag(session_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("1")
+    except Exception as e:
+        log("prod_lockdown.set_hotfix_signal file failed", {"error": str(e)})
+
+
+def clear_hotfix_signal(session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.delete(_hotfix_key(session_id))
+        except Exception:
+            pass
+    try:
+        _hotfix_flag(session_id).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _has_hotfix_signal(session_id: str) -> bool:
+    if not session_id:
+        return False
+    r = get_redis()
+    if r:
+        try:
+            return bool(r.exists(_hotfix_key(session_id)))
+        except Exception:
+            pass
+    return _hotfix_flag(session_id).exists()
 
 
 def _strip_safe_content(command: str) -> str:
@@ -178,9 +227,11 @@ def _has_release_signal(session_id: str) -> bool:
 
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
-    # Legacy full bypass (--emergency-prod etc.) — unlocks everything
+    # Legacy full bypass (--emergency-prod etc.) — unlocks everything, per-turn
     full_bypass = bool(session_id and is_bypass_active(session_id))
-    # Release-gate signal — unlocks only release-category blocks
+    # Session-scoped hotfix signal — unlocks everything
+    hotfix_unlock = bool(session_id and _has_hotfix_signal(session_id))
+    # Session-scoped release-gate signal — unlocks only release-category blocks
     release_unlock = bool(session_id and _has_release_signal(session_id))
 
     command = payload.get("tool_input", {}).get("command", "")
@@ -192,7 +243,7 @@ def check_prod_lockdown(payload: dict) -> None:
     for pattern, name, reason, category in _BLOCKED:
         if not pattern.search(check_text):
             continue
-        if full_bypass:
+        if full_bypass or hotfix_unlock:
             return
         if category == "release" and release_unlock:
             return
