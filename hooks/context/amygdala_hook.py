@@ -8,6 +8,7 @@ This is faster than waiting for brain_adapter's 30-turn refresh cycle.
 The file is written by amygdala.py (brain-tools) which consumes Redis
 Streams events and classifies severity deterministically.
 """
+
 from __future__ import annotations
 
 import hashlib

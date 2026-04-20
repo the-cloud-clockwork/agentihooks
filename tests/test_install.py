@@ -555,7 +555,12 @@ class TestInitProfileRecall:
 
         state = self._make_state("anton")
         args = argparse.Namespace(
-            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile=None,
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -565,6 +570,7 @@ class TestInitProfileRecall:
         ):
             # Remove AGENTIHOOKS_PROFILE if set
             import os
+
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
             install.cmd_init_unified(args)
             called_args = mock_install.call_args[0][0]
@@ -576,7 +582,12 @@ class TestInitProfileRecall:
 
         state = self._make_state("anton", settings_profile="admin")
         args = argparse.Namespace(
-            profile="anton", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile="anton",
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -585,6 +596,7 @@ class TestInitProfileRecall:
             patch.dict("os.environ", {}, clear=False),
         ):
             import os
+
             os.environ.pop("AGENTIHOOKS_SETTINGS_PROFILE", None)
             install.cmd_init_unified(args)
             called_args = mock_install.call_args[0][0]
@@ -596,7 +608,12 @@ class TestInitProfileRecall:
 
         state = self._make_state("default")
         args = argparse.Namespace(
-            profile="anton", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile="anton",
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -614,7 +631,12 @@ class TestInitProfileRecall:
 
         state = self._make_state("default")
         args = argparse.Namespace(
-            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile=None,
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value=state),
@@ -631,7 +653,12 @@ class TestInitProfileRecall:
         import argparse
 
         args = argparse.Namespace(
-            profile=None, init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False,
+            profile=None,
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
         )
         with (
             patch.object(install, "_load_state", return_value={}),
@@ -643,6 +670,7 @@ class TestInitProfileRecall:
             patch.dict("os.environ", {}, clear=False),
         ):
             import os
+
             os.environ.pop("AGENTIHOOKS_PROFILE", None)
             mock_stdin.isatty.return_value = True
             install.cmd_init_unified(args)

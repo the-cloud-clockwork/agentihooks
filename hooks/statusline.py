@@ -390,9 +390,7 @@ def main() -> None:
                             f"{_YELLOW}PEAK — sessions burn faster until {local_end:02d}:00 {local_abbrev}{_RESET}"
                         )
                     else:
-                        parts_3.append(
-                            f"{_YELLOW}PEAK {local_start:02d}:00-{local_end:02d}:00 {local_abbrev}{_RESET}"
-                        )
+                        parts_3.append(f"{_YELLOW}PEAK {local_start:02d}:00-{local_end:02d}:00 {local_abbrev}{_RESET}")
                 else:
                     parts_3.append(f"{_GREEN}OFF-PEAK — full session rate{_RESET}")
         except Exception:
