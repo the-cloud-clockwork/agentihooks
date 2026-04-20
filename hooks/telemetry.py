@@ -23,7 +23,6 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-
 _SDK_TRACER = None
 _SDK_INIT_ATTEMPTED = False
 _SDK_LOCK = threading.Lock()

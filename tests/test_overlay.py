@@ -1,7 +1,5 @@
 """Tests for the runtime overlay system."""
 
-import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
