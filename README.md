@@ -36,6 +36,7 @@ agentihooks init --local --profile infra    # per-repo identity
 - **Two-axis model** — persona (rules/CLAUDE.md) and settings (permissions/MCP) are independent layers
 - **Bundle system** — external repos of profiles, auto-discovered via `agentihooks bundle link`
 - **Built-in profiles:** `default` (auto mode), `coding` (acceptEdits), `admin` (bypassPermissions)
+- **Live rule refresh** — `agentihooks refresh-rules` pushes rule updates into every running Claude session without restart. One-shot per session, session-snapshotted so new sessions don't re-consume.
 
 [Full docs: Identity](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/identity/)
 
@@ -45,9 +46,11 @@ agentihooks init --local --profile infra    # per-repo identity
 
 | Guardrail | What it does |
 |-----------|-------------|
-| **Secrets scanning** | Detects credentials in prompts and tool inputs |
-| **Retry breaker** | Soft warning → hard block on repeated failures |
-| **Branch guard** | Protects main/master from accidental pushes |
+| **Secrets — two-tier** | Hard-block on Write/Edit/Bash-to-file containing secrets; inline Bash args scan + log + note only (operator-managed transcript) |
+| **Branch + PR guard** | Default-deny branch creation and `gh pr create`; unlocked per-turn (branch) or per-session (PR) by operator signal phrases |
+| **Prod lockdown** | Default-deny `gh pr merge main`, `release.yml`, `:latest`/`:prod`/`:stable` image tags; session-scoped unlock via release/hotfix signals |
+| **Retry breaker** | Soft directive at N=5 (launch error-researcher agents) → hard block at N=10 on repeated identical failures |
+| **Dependency banner** | Visible banner on every pip/npm/cargo/uv/poetry/apt/brew install — supply chain audit surface |
 | **Version guard** | Blocks AI from editing version fields in manifests |
 | **CLAUDE.md sanity** | Prevents bloat past configurable line limit |
 | **MCP surface area** | Warns when too many tools are loaded |
@@ -119,6 +122,12 @@ agentihooks init
 
 `agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, installs the CLI globally, and starts the sync daemon. Re-run any time — it is idempotent.
 
+## A CLI that keeps up with your fleet
+
+`agentihooks sessions` shows every running Claude Code session at a glance — session names from `/rename`, accurate lifetimes, and reopen by index for crash recovery.
+
+![agentihooks sessions listing 5 alive Claude Code sessions with NAME, AGE, CWD, and ID columns](docs/assets/sessions-list-with-names.png)
+
 ## Architecture
 
 ```
@@ -178,6 +187,16 @@ agentihooks channel unsubscribe brain        # unsubscribe CWD project
 # Brain adapter (knowledge injection)
 agentihooks brain status                     # source type, entries, refresh state
 agentihooks brain refresh                    # force re-read + republish
+
+# Live rule refresh (push rule updates into running sessions)
+agentihooks refresh-rules --dry-run          # preview payload + target session IDs
+agentihooks refresh-rules                    # one-shot push to all alive sessions
+agentihooks refresh-rules --clear            # cancel a pending marker
+
+# Session registry (crash recovery + session picker)
+agentihooks sessions                         # list recent sessions with NAME + AGE columns
+agentihooks sessions reopen <IDX>            # reopen by index from the list
+agentihooks sessions backfill                # seed registry from JSONL transcripts
 
 # Diagnostics
 agentihooks status                           # full system health

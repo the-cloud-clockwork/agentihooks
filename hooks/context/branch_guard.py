@@ -23,6 +23,8 @@ _BRANCH_SIGNAL_TYPE = "branch_create_signal"
 # Per-turn PR-creation signal (CI Manifesto §15)
 _PR_SIGNAL_TYPE = "pr_create_signal"
 _BRANCH_SIGNAL_TTL = 300
+_PR_SIGNAL_TTL = 14400  # session-scoped (CI Manifesto §15)
+_PR_SIGNAL_MAX_COUNT = 3  # re-signal required after N PR creations
 
 
 def _branch_signal_key(session_id: str) -> str:
@@ -85,7 +87,7 @@ def set_pr_signal(session_id: str) -> None:
     r = get_redis()
     if r:
         try:
-            r.setex(_pr_signal_key(session_id), _BRANCH_SIGNAL_TTL, "1")
+            r.setex(_pr_signal_key(session_id), _PR_SIGNAL_TTL, "1")
         except Exception as e:
             log("branch_guard.set_pr_signal redis failed", {"error": str(e)})
     try:
@@ -107,6 +109,64 @@ def clear_pr_signal(session_id: str) -> None:
         _pr_signal_flag(session_id).unlink(missing_ok=True)
     except Exception:
         pass
+    clear_pr_counter(session_id)
+
+
+def _pr_counter_key(session_id: str) -> str:
+    return redis_key("pr_create_count", session_id)
+
+
+def _pr_counter_flag(session_id: str) -> Path:
+    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.pr_count"
+
+
+def increment_pr_counter(session_id: str) -> int:
+    r = get_redis()
+    if r:
+        try:
+            count = int(r.incr(_pr_counter_key(session_id)))
+            r.expire(_pr_counter_key(session_id), _PR_SIGNAL_TTL)
+            return count
+        except Exception as e:
+            log("branch_guard.increment_pr_counter redis failed", {"error": str(e)})
+    try:
+        f = _pr_counter_flag(session_id)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        existing = int(f.read_text().strip()) if f.exists() else 0
+        count = existing + 1
+        f.write_text(str(count))
+        return count
+    except Exception as e:
+        log("branch_guard.increment_pr_counter file failed", {"error": str(e)})
+    return 0
+
+
+def _get_pr_counter(session_id: str) -> int:
+    r = get_redis()
+    if r:
+        try:
+            v = r.get(_pr_counter_key(session_id))
+            return int(v) if v else 0
+        except Exception:
+            pass
+    try:
+        f = _pr_counter_flag(session_id)
+        return int(f.read_text().strip()) if f.exists() else 0
+    except Exception:
+        return 0
+
+
+def clear_pr_counter(session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.delete(_pr_counter_key(session_id))
+        except Exception:
+            pass
+    try:
+        _pr_counter_flag(session_id).unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _has_pr_signal(session_id: str) -> bool:
@@ -124,6 +184,9 @@ def _has_pr_signal(session_id: str) -> bool:
 # PR creation pattern (CI Manifesto §15). Blocks `gh pr create` in any form.
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
 _PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
+
+# PR base-branch enforcement — gh pr create must target main
+_PR_BASE_MAIN_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+main\b")
 
 
 # Branch-creation patterns (blocked without branch signal).
@@ -146,12 +209,12 @@ _BLOCKED_PATTERNS = [
     ),
     # Merge into main/master (direct merge bypasses PR workflow)
     (
-        re.compile(r"git\s+merge\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Direct merge into main/master is blocked. Create a PR instead.",
     ),
     # Rebase onto main/master
     (
-        re.compile(r"git\s+rebase\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Rebasing onto main/master is blocked. Create a PR instead.",
     ),
     # Delete main/master branch
@@ -161,7 +224,7 @@ _BLOCKED_PATTERNS = [
     ),
     # Reset main/master (destructive — rewrites history)
     (
-        re.compile(r"git\s+reset\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+reset\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Resetting main/master is blocked — this rewrites history.",
     ),
     # Force push (any branch — can destroy remote history)
@@ -198,9 +261,9 @@ def check_branch_guard(payload: dict) -> None:
     if not command:
         return
 
-    check_text = re.sub(r"<<'?EOF'?.*", "", command, flags=re.DOTALL)
-    check_text = re.sub(r'-m\s+"[^"]*"', "-m MSG", check_text)
-    check_text = re.sub(r"-m\s+'[^']*'", "-m MSG", check_text)
+    from hooks.context._strip import strip_non_command_content
+
+    check_text = strip_non_command_content(command)
 
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
@@ -231,19 +294,41 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    # PR creation — default-deny unless operator signaled this turn (§15)
+    # PR creation — default-deny unless operator signaled this session (§15)
     if _PR_CREATE_PATTERN.search(check_text):
         if not _has_pr_signal(session_id):
             log(
-                "branch_guard: PR creation blocked",
+                "branch_guard: PR creation blocked (no signal)",
                 {"command": command[:200], "session_id": session_id},
             )
             raise BlockAction(
                 "BLOCKED: agent PR creation is disabled (CI Manifesto §15).\n"
                 "Agents commit and push — the operator decides when to open a PR.\n"
-                "To unlock for this turn, operator must include a PR signal "
+                "To unlock for this session, include a PR phrase in your message\n"
                 "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
             )
+        count = _get_pr_counter(session_id)
+        if count >= _PR_SIGNAL_MAX_COUNT:
+            log(
+                "branch_guard: PR creation blocked (counter limit)",
+                {"count": count, "session_id": session_id},
+            )
+            raise BlockAction(
+                f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
+                "Include a PR phrase in your next message to re-authorize and reset the counter."
+            )
+        if not _PR_BASE_MAIN_PATTERN.search(check_text):
+            log(
+                "branch_guard: PR creation blocked (non-main base)",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: PRs must target main only (--base main required).\n"
+                "For dev branch changes, push directly — no PR needed.\n"
+                "Correct form: gh pr create --base main ..."
+            )
+        new_count = increment_pr_counter(session_id)
+        log("branch_guard: PR creation allowed", {"count": new_count, "session_id": session_id})
 
 
 _COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")

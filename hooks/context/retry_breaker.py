@@ -191,36 +191,57 @@ def _reset_state(session_id: str, op_key: str) -> None:
 
 
 def _inject_breaker_message(tool_name: str, tool_input: dict, error_text: str, count: int) -> None:
-    """Print circuit breaker instructions to stdout (Claude sees this)."""
+    """Print circuit breaker instructions to stdout (Claude sees this) AND stderr."""
+    import sys
+
     from hooks.common import inject_banner
+    from hooks.config import RETRY_BREAKER_HARD_MAX
     from hooks.tool_memory import _extract_input_summary
 
     input_summary = _extract_input_summary(tool_input)
+    remaining = RETRY_BREAKER_HARD_MAX - count
 
-    inject_banner(
-        f"CIRCUIT BREAKER: Repeated failure detected ({count}x) — stop retrying",
-        f"""You have failed at the same operation {count} times in a row.
-STOP retrying this approach. Instead, do the following:
+    directive = f"""STOP. You have failed the SAME operation {count} times consecutively.
+Hard block activates at {RETRY_BREAKER_HARD_MAX} failures — you have {remaining} attempts left.
 
-1. Launch 2 error-researcher agents IN PARALLEL (single message, 2 Agent tool calls):
-   Agent(description="research error", subagent_type="error-researcher", model="haiku",
-         prompt="<error context below>")
-   - Agent 1: search for the exact error message
-   - Agent 2: search for the tool/command + common causes
+This is a HARD DIRECTIVE from the operator's retry-breaker rule:
 
-2. Wait for both agents to return results.
+1. DO NOT retry the same command. Not with minor tweaks. Not "one more time".
+   Same approach = same failure. Stop.
 
-3. Apply the findings to try a DIFFERENT approach.
+2. Launch TWO error-researcher agents in ONE message (both Agent calls in a single tool-use block):
 
-If error-researcher agent is unavailable, use WebSearch directly.
+   Agent(description="error exact text",
+         subagent_type="error-researcher",
+         model="haiku",
+         prompt="Search the web for exact error: '<paste exact error>'. Report top 3 causes and fixes.")
+
+   Agent(description="tool + root causes",
+         subagent_type="error-researcher",
+         model="haiku",
+         prompt="Search for '<tool_name> <verb>' common failure modes and workarounds. Report findings.")
+
+3. Read BOTH agent reports. Pick a DIFFERENT approach based on their findings.
+
+4. Retry with the new approach. Do not invoke the original command again until step 3 is done.
 
 ERROR CONTEXT:
   Tool: {tool_name}
   Input: {input_summary}
   Error: {error_text[:200]}
-  Consecutive failures: {count}
+  Consecutive failures: {count}/{RETRY_BREAKER_HARD_MAX}
 
-DO NOT retry the same command. Research first, then try a new approach.""",
+Retry-breaker is not a suggestion. It is operator policy."""
+
+    inject_banner(
+        f"CIRCUIT BREAKER TRIPPED ({count}x) — launch error-researcher agents",
+        directive,
+    )
+    # Also surface on stderr for maximum visibility (Claude Code reads stderr for hook output)
+    print(
+        f"[retry-breaker] FAILURE #{count} on {tool_name}:{_compute_operation_key(tool_name, tool_input)} — launch 2 error-researcher agents NOW",
+        file=sys.stderr,
+        flush=True,
     )
 
 
@@ -304,11 +325,17 @@ def check_hard_block(payload: dict) -> None:
     if state["count"] >= RETRY_BREAKER_HARD_MAX:
         error_text = state.get("last_error_text", "unknown error")
         raise BlockAction(
-            f"BLOCKED: Circuit breaker hard stop. "
-            f"This operation ({op_key}) has failed {state['count']} times consecutively. "
-            f"Launch error-researcher agents for web research before retrying. "
-            f"If unavailable, use WebSearch directly. "
-            f"Last error: {error_text[:100]}"
+            f"BLOCKED: Circuit breaker HARD STOP.\n"
+            f"Operation '{op_key}' has failed {state['count']} times consecutively.\n"
+            f"\n"
+            f"You MUST now launch 2 error-researcher agents (single message, 2 Agent tool calls):\n"
+            f"  Agent(subagent_type='error-researcher', model='haiku', prompt='<exact error>')\n"
+            f"  Agent(subagent_type='error-researcher', model='haiku', prompt='<tool + causes>')\n"
+            f"\n"
+            f"Then read BOTH reports and pick a DIFFERENT approach.\n"
+            f"If error-researcher is unavailable, use WebSearch directly.\n"
+            f"\n"
+            f"Last error: {error_text[:150]}"
         )
 
 

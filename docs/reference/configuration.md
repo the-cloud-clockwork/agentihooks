@@ -264,3 +264,35 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | Variable | Integrations affected |
 |----------|-----------------------|
 | `IS_EVALUATION` | S3, DynamoDB, PostgreSQL, Lambda |
+
+---
+
+## Brain Adapter
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BRAIN_ENABLED` | `false` | Enable the brain adapter for knowledge injection via broadcast channels. |
+| `BRAIN_SOURCE_TYPE` | `file` | Brain source backend. Currently only `file` is shipped. |
+| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory containing brain `.md` files (YAML frontmatter + markdown body). |
+| `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content delivery. |
+| `BRAIN_REFRESH_INTERVAL` | `30` | Re-inject brain content every N turns (counter-gated). |
+
+---
+
+## Runtime Overlays
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OVERLAY_INJECTION_ENABLED` | `true` | Enable mid-session profile overlay injection via UserPromptSubmit hook. |
+
+---
+
+## Guardrails
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIHOOKS_SECRETS_MODE` | `standard` | Secrets scanning mode: `off`, `warn`, `standard`, `strict`. |
+| `RETRY_BREAKER_ENABLED` | `true` | Enable the retry circuit breaker guardrail. |
+| `RETRY_BREAKER_MAX` | `5` | Soft limit -- warn after this many identical failures. |
+| `RETRY_BREAKER_HARD_MAX` | `10` | Hard limit -- block after this many identical failures. |
+| `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |

@@ -4115,6 +4115,88 @@ def _cmd_brain(args: argparse.Namespace) -> None:
             print("No changes (content unchanged or source empty).")
 
 
+def _detect_active_profile() -> str:
+    """Find the active profile from ~/.claude/CLAUDE.md symlink target."""
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    try:
+        if claude_md.is_symlink():
+            target = os.readlink(str(claude_md))
+            # Extract profile name from path like ".../profiles/anton/.claude/CLAUDE.md"
+            parts = Path(target).parts
+            if "profiles" in parts:
+                idx = parts.index("profiles")
+                if idx + 1 < len(parts):
+                    return parts[idx + 1]
+    except OSError:
+        pass
+    return "anton"  # fallback default
+
+
+def _cmd_refresh_rules(args: argparse.Namespace) -> None:
+    """Handle the refresh-rules CLI command — push rules to running sessions."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context.rules_refresh import (
+        _delete_marker,
+        _load_marker,
+        collect_profile_rules,
+        write_refresh_marker,
+    )
+
+    profile = args.profile or _detect_active_profile()
+    rules_dir = Path.home() / ".claude" / "rules"
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    claude_local_md = Path.home() / ".claude" / "CLAUDE.local.md"
+
+    if args.clear:
+        existing = _load_marker(profile)
+        if existing:
+            _delete_marker(profile)
+            print(
+                f"{_GREEN}[OK]{_RESET} Cleared pending marker for profile '{profile}' "
+                f"(was targeting {len(existing.get('pending', []))} sessions)."
+            )
+        else:
+            print(f"No pending marker for profile '{profile}'.")
+        return
+
+    if not rules_dir.exists() and not claude_md.exists() and not claude_local_md.exists():
+        print(f"[ERROR] No rules found at {rules_dir} / {claude_md} / {claude_local_md}. Is agentihooks installed?")
+        sys.exit(1)
+
+    payload = collect_profile_rules(rules_dir, claude_md, claude_local_md)
+
+    if args.dry_run:
+        import hashlib as _hash
+
+        content_hash = _hash.sha256(payload.encode("utf-8")).hexdigest()[:16]
+        from hooks.context.rules_refresh import _collect_pending_sessions
+
+        pending = _collect_pending_sessions()
+        print("=== DRY RUN — no marker written ===")
+        print(f"Profile:        {profile}")
+        print(f"Content hash:   {content_hash}")
+        print(f"Payload size:   {len(payload):,} chars")
+        print(f"Alive sessions: {len(pending)}")
+        for sid in pending:
+            print(f"  - {sid}")
+        print("=====================================")
+        return
+
+    result = write_refresh_marker(profile, payload)
+    marker_path = result["marker_path"]
+    pending_count = result["pending_count"]
+    content_hash = result["content_hash"]
+
+    print(f"{_GREEN}[OK]{_RESET} Refresh marker written for profile '{profile}'.")
+    print(f"  Marker:         {marker_path}")
+    print(f"  Content hash:   {content_hash}")
+    print(f"  Alive sessions: {pending_count}")
+    if pending_count == 0:
+        print("  No running sessions to notify — marker will GC in 24h.")
+    else:
+        print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+
 def _cmd_broadcast(args: argparse.Namespace) -> None:
     """Handle the broadcast CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -4536,6 +4618,28 @@ examples:
     brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
     brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
 
+    # --- Rules refresh subcommand ---
+    rr_p = sub.add_parser(
+        "refresh-rules",
+        help="Push profile rule updates into all running Claude sessions (one-shot)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  agentihooks refresh-rules                    # detect active profile, refresh all alive sessions
+  agentihooks refresh-rules --profile anton    # explicit profile
+  agentihooks refresh-rules --dry-run          # show what would be pushed without writing marker
+  agentihooks refresh-rules --clear            # delete any existing marker (cancel a pending push)
+
+notes:
+  - Each running session consumes the refresh ONCE on its next UserPromptSubmit
+  - Sessions that start AFTER the push never see the marker (they get fresh rules at SessionStart)
+  - Marker auto-expires after 24h
+""",
+    )
+    rr_p.add_argument("--profile", default=None, help="Profile name (default: active profile)")
+    rr_p.add_argument("--dry-run", action="store_true", help="Print what would be pushed without writing")
+    rr_p.add_argument("--clear", action="store_true", help="Delete existing marker instead of pushing")
+
     # --- Sessions subcommand ---
     sess_p = sub.add_parser(
         "sessions",
@@ -4707,6 +4811,8 @@ examples:
         _cmd_channel(args)
     elif args.command == "brain":
         _cmd_brain(args)
+    elif args.command == "refresh-rules":
+        _cmd_refresh_rules(args)
     elif args.command == "sessions":
         _cmd_sessions(args)
 

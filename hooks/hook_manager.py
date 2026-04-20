@@ -512,13 +512,18 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear prod lockdown bypass flag + branch/PR signals for this session
+    # Clear all signals at session end (per-turn + session-scoped)
     try:
         from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
-        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+        from hooks.context.prod_lockdown import (
+            clear_bypass,
+            clear_hotfix_signal,
+            clear_release_signal,
+        )
 
         clear_bypass(session_id)
         clear_release_signal(session_id)
+        clear_hotfix_signal(session_id)
         clear_branch_signal(session_id)
         clear_pr_signal(session_id)
     except Exception:
@@ -602,6 +607,14 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto refresh failed", {"error": str(e)})
 
+    # --- Rules refresh: one-shot re-injection for running sessions ---
+    try:
+        from hooks.context.rules_refresh import maybe_inject as rules_refresh_inject
+
+        rules_refresh_inject(session_id)
+    except Exception as e:
+        log("rules_refresh inject failed", {"error": str(e)})
+
     # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
     try:
         from hooks.config import AMYGDALA_ENABLED
@@ -644,21 +657,20 @@ def on_user_prompt_submit(payload: dict) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
-        from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
-        from hooks.context.prod_lockdown import set_release_signal
+        from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
         if prompt:
-            if contains_release_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log("ci_manifesto: release-gate signal active this turn", {"session_id": session_id})
-            if contains_hotfix_signal(prompt):
-                _set_full_bypass(session_id)
-                log("ci_manifesto: hotfix signal active this turn", {"session_id": session_id})
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_hotfix_signal(prompt):
+                set_hotfix_signal(session_id)
+                log("ci_manifesto: hotfix signal active this session", {"session_id": session_id})
             if contains_branch_signal(prompt):
                 set_branch_signal(session_id)
                 log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
-            if contains_pr_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
                 set_pr_signal(session_id)
                 log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
@@ -739,40 +751,41 @@ def on_pre_tool_use(payload: dict) -> None:
             hits = scan(command, mode=SECRETS_MODE)
             if hits:
                 names = ", ".join(hits)
-                if SECRETS_MODE == "warn":
-                    from hooks.common import inject_context
+                # Detect file-write operators: >, >>, tee, dd of=
+                # If the command is writing secrets to a file, block.
+                import re as _re
 
-                    inject_context(
-                        f"WARNING: Possible secret(s) detected in Bash command ({names}). "
-                        "Never pass credentials as inline command arguments. "
-                        "Use environment variables instead."
-                    )
-                else:
-                    otel.emit_event(
-                        "agentihooks.guardrail.secret_detected",
-                        {
-                            "session.id": payload.get("session_id", ""),
-                            "tool_name": tool_name,
-                            "secret_types": names,
-                            "action": "block",
-                        },
-                    )
-                    _tracer = otel.get_tracer()
-                    if _tracer:
-                        with _tracer.start_as_current_span(
-                            "agentihooks.guardrail.secret_blocked",
-                            attributes={
-                                "session.id": payload.get("session_id", ""),
-                                "tool_name": tool_name,
-                                "secret_types": names,
-                            },
-                        ):
-                            pass
+                _writes_file = bool(
+                    _re.search(r"(?<![<&])>\s*['\"]?[^>&|\s]", command)
+                    or _re.search(r">>", command)
+                    or _re.search(r"\btee\b", command)
+                    or _re.search(r"\bdd\b[^|&;\n]*of=", command)
+                )
+                otel.emit_event(
+                    "agentihooks.guardrail.secret_detected",
+                    {
+                        "session.id": payload.get("session_id", ""),
+                        "tool_name": tool_name,
+                        "secret_types": names,
+                        "action": "block" if _writes_file else "warn",
+                        "writes_file": _writes_file,
+                    },
+                )
+                if _writes_file:
                     raise BlockAction(
-                        f"BLOCKED: Secret(s) detected in Bash command ({names}). "
-                        "Never pass credentials as inline command arguments. "
-                        "Use environment variables instead."
+                        f"BLOCKED: Secret(s) detected in Bash command writing to a file ({names}). "
+                        "Secrets must never be committed to code or config files. "
+                        "Use environment variables, a vault, or operator-managed secret files."
                     )
+                # Inline secrets (no file write): scan + log + note, don't block.
+                # The operator handles transcript secrecy locally (closed system).
+                from hooks.common import inject_context
+
+                inject_context(
+                    f"NOTE: Secret(s) detected inline in Bash command ({names}). "
+                    "Logged and noted — transcript secrecy is operator-managed. "
+                    "Do not echo values back or persist them."
+                )
         elif tool_name in ("Write", "Edit"):
             content = tool_input.get("content", "") or tool_input.get("new_string", "")
             log(f"Pre tool use: {tool_name}", {"tool": tool_name})
@@ -827,6 +840,16 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("branch_guard check failed", {"error": str(e)})
+            print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+    # --- Dependency install banner (supply chain defense) ---
+    if tool_name == "Bash":
+        try:
+            from hooks.context.dep_banner import check_dep_install
+
+            check_dep_install(payload)
+        except Exception as e:
+            log("dep_banner check failed", {"error": str(e)})
 
     # --- Prod lockdown: block production operations unless bypass active ---
     if tool_name == "Bash":
@@ -838,6 +861,7 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("prod_lockdown check failed", {"error": str(e)})
+            print(f"WARNING: prod_lockdown check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -967,8 +991,7 @@ def on_post_tool_use(payload: dict) -> None:
                 contains_pr_signal,
                 contains_release_signal,
             )
-            from hooks.context.prod_lockdown import set_bypass as _set_full_bypass
-            from hooks.context.prod_lockdown import set_release_signal
+            from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
             session_id = payload.get("session_id", "")
             resp = payload.get("tool_response") or payload.get("tool_output") or {}
@@ -991,8 +1014,11 @@ def on_post_tool_use(payload: dict) -> None:
                     set_release_signal(session_id)
                     log("ci_manifesto: release-gate signal via AskUserQuestion answer", {"session_id": session_id})
                 if contains_hotfix_signal(combined):
-                    _set_full_bypass(session_id)
-                    log("ci_manifesto: hotfix signal via AskUserQuestion answer", {"session_id": session_id})
+                    set_hotfix_signal(session_id)
+                    log(
+                        "ci_manifesto: hotfix signal via AskUserQuestion answer (session-scoped)",
+                        {"session_id": session_id},
+                    )
                 if contains_branch_signal(combined):
                     set_branch_signal(session_id)
                     log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
@@ -1185,15 +1211,14 @@ def on_stop(payload: dict) -> None:
     # Check for errors and notify
     notify_on_error(transcript_path)
 
-    # Clear prod lockdown bypass + release + branch + PR signals for this turn
+    # Clear per-turn signals only; session-scoped signals (PR, release, hotfix)
+    # persist until on_session_end
     try:
-        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
-        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+        from hooks.context.branch_guard import clear_branch_signal
+        from hooks.context.prod_lockdown import clear_bypass
 
         clear_bypass(session_id)
-        clear_release_signal(session_id)
         clear_branch_signal(session_id)
-        clear_pr_signal(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
@@ -1261,6 +1286,7 @@ def on_subagent_start(payload: dict) -> None:
     """
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
+    _KNOWN_SUBAGENT_IDS.add(agent_id)
     log(
         "Subagent started",
         {
@@ -1331,6 +1357,18 @@ def on_subagent_stop(payload: dict) -> None:
             log("brain_writer subagent: result", stats)
     except Exception as e:
         log("brain_writer subagent_stop failed", {"error": str(e)})
+
+    # Clear any signals set during the subagent's lifetime
+    try:
+        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
+        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+
+        clear_bypass(agent_id)
+        clear_release_signal(agent_id)
+        clear_branch_signal(agent_id)
+        clear_pr_signal(agent_id)
+    except Exception:
+        pass
 
     # Auto-overlay cleanup — remove overlays activated at session start
     try:
@@ -1416,6 +1454,9 @@ def on_permission_request(payload: dict) -> None:
 # EVENT ROUTER
 # =============================================================================
 
+# Track subagent session IDs to prevent signal self-arming (audit finding 6.2)
+_KNOWN_SUBAGENT_IDS: set[str] = set()
+
 EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
@@ -1454,6 +1495,7 @@ def main() -> None:
         log("Failed to parse JSON payload")
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

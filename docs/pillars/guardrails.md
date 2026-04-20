@@ -15,7 +15,18 @@ Claude Code agents are powerful. Without boundaries, they can push to production
 > Your fleet operates within boundaries you set.
 
 {: .highlight }
-> **8 guardrails ship active by default.** No configuration required. They fire silently when everything is fine and block loudly when something would go wrong.
+> **10+ guardrails ship active by default.** No configuration required. They fire silently when everything is fine, block loudly when something would go wrong, and surface informational banners for supply chain changes.
+
+## What's new (Unreleased)
+
+- **Two-tier secrets** — code-file writes still hard-block; inline Bash args (no file redirect) scan + log + note only. Lets agents pass a token to `curl -H` without breaking the workflow, while keeping durable storage locked.
+- **Session-scoped PR / release / hotfix signals** — one signal phrase from the operator unlocks an entire workflow until session end, instead of expiring per-turn. PR has a 3-per-session counter.
+- **Subagent signal isolation** — subagents cannot self-arm release or hotfix signals. Only top-level operator sessions can.
+- **`gh pr create --base main` required** — PRs to branches other than main are now blocked. Dev work pushes directly, no PR needed.
+- **Dependency banner** — every `pip/npm/cargo/...` install emits a visible banner. Never blocks — surfaces supply chain additions for operator audit.
+- **Negation-aware signals** — "don't merge to main" no longer arms the release gate. Matchers skip phrases preceded by `don't`, `not`, `never`, `shouldn't`, `won't`, `can't`.
+- **Shared `_strip.py`** — strip heredocs (any delimiter), echo/printf/curl/python-c/jq quoted arguments before guards apply regex. Eliminates false-positive blocks on documentation text in command payloads.
+- **Guards fail-closed** — unexpected exceptions in branch_guard / prod_lockdown now emit a stderr warning and the outer main exits 1. Silent hook failures are no longer possible.
 
 ## Table of contents
 {: .no_toc .text-delta }

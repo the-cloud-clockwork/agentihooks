@@ -1,8 +1,20 @@
 """Channel + brain MCP tools — publish, subscribe, and manage broadcast channels."""
 
 import json
+import re
 
 from hooks.common import log
+
+_VALID_CHANNEL_NAME = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _validate_channel(channel: str) -> str | None:
+    """Return error message if channel name is invalid, None if OK."""
+    if not channel or len(channel) > 64:
+        return "Channel name required (max 64 chars)"
+    if not _VALID_CHANNEL_NAME.match(channel):
+        return "Channel name may only contain letters, digits, dots, dashes, underscores"
+    return None
 
 
 def register(mcp):

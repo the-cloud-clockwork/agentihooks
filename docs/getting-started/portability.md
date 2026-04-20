@@ -47,8 +47,8 @@ MCP_SONAR_PROXY_API_KEY=...
 MCP_AGENTIBRIDGE_API_KEY=...
 
 # Service endpoints
-LITELLM_URL=http://10.10.30.130:4000
-GRAFANA_URL=http://10.10.30.130:3000
+LITELLM_URL=http://your-litellm-host:4000
+GRAFANA_URL=http://your-grafana-host:3000
 
 # GitHub
 GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
@@ -117,7 +117,7 @@ Drop a `.env` file alongside your MCP JSON to provide the env vars it needs:
 ```
 ~/.agentihooks/
 ├── anton-mcp.json     # MCP server definitions (${ANTON_HOST}, etc.)
-├── anton-mcp.env      # ANTON_HOST=10.10.30.130, ANTON_API_KEY=...
+├── anton-mcp.env      # ANTON_HOST=your-anton-host, ANTON_API_KEY=...
 ├── staging.json
 └── staging.env
 ```

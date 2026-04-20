@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`agentihooks refresh-rules` CLI** — one-shot push of profile rule updates into running Claude sessions without restart. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` with the current rule payload (`CLAUDE.md` + `rules/*.md` + `CLAUDE.local.md`) and a snapshot of alive session IDs. On each session's next `UserPromptSubmit`, the hook injects the payload if that session is in pending, then removes it from the list. Sessions started AFTER the push never see the marker. Markers auto-GC after 24h. Flags: `--profile`, `--dry-run`, `--clear`.
+- **`hooks/context/dep_banner.py`** — PreToolUse hook that emits a visible banner when Bash runs a dependency install (pip, npm, cargo, uv, poetry, pipx, yarn, pnpm, go, gem, apt, brew, pacman, dnf, yum, apk). Never blocks — surfaces every third-party code addition for supply chain audit.
+- **`hooks/context/rules_refresh.py`** — module backing `refresh-rules`. Public API: `write_refresh_marker`, `maybe_inject`, `gc_all_expired`, `collect_profile_rules`.
+- **`hooks/context/_strip.py`** — shared command-stripping utility. Removes heredoc bodies (any delimiter), echo/printf/curl/python-c/jq/awk/sed quoted arguments before guards apply regex. Prevents false-positive blocks on documentation text in command payloads.
+- **Two-tier secrets handling** — Write/Edit/Bash-with-file-redirect containing a secret still hard-blocks. Inline Bash secrets (no file write) scan + log + NOTE only. Transcript secrecy is operator-managed.
+- **Session-scoped signal persistence** — PR creation, release gate (`gh pr merge`, `release.yml`), and hotfix signals now persist for the full session. Branch creation and `--emergency-prod` stay per-turn. PR signal has a 3-per-session counter; re-signal resets it. `gh pr create` enforces `--base main`.
+- **Subagent signal isolation** — subagents cannot self-arm release/hotfix/PR signals via their own prompt text. Only top-level operator sessions can arm prod-impacting signals.
+- **Session supersede on re-register** — when a new `session_id` registers from a PID that already has an alive session, the previous entry is marked `status="superseded"` (kept 24h, not deleted). Fixes the "alive session flood" where one long-running Claude process accumulated 35 stale entries from `/resume` / `/clear` cycles.
+- **`sessions list` UX** — new NAME column reading `custom-title` / `agent-name` events from JSONL (set by Claude Code `/rename` or `--name` per April 2026 release). `register_session` preserves `started_at` across re-registrations so AGE reflects true session lifetime. Sort ranks alive above closed/dead/superseded.
+- **Negation-aware signal matching** — signal matchers skip matches preceded by `don't`, `not`, `never`, `shouldn't`, `won't`, `can't`. Prevents "don't merge to main" from arming the release gate.
 - **Per-project profile override** — `.agentihooks.json` `profile` field controls which profile generates `settings.local.json` and `CLAUDE.local.md` per project. Supports profile chains.
 - **`CLAUDE.local.md` generation** — `agentihooks init --local` generates `.claude/CLAUDE.local.md` from the resolved profile's `CLAUDE.md`. Auto-gitignored.
 - **Hierarchy-aware MCP blacklist** — parent projects exclude MCP servers that child projects whitelist via `.agentihooks.json`.
@@ -33,8 +43,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`get_active_sessions()` filters to alive-only by default** — previously returned every registry entry (including superseded, closed, dead), so `agentihooks status` reported 40 sessions when only 5 were actually alive. New `include_all=True` param for callers who need the full registry. `cleanup=True` now MARKS dead entries instead of deleting (preserves the 24h retention window).
+- **Guards fail-closed on hook exception** — branch_guard and prod_lockdown now emit a stderr warning when an unexpected exception escapes the guard body. The outer `main()` catch now exits 1 on infrastructure errors (previously exited 0, so hook failures were silent).
+- **`get_env` MCP tool hardened** — requires a non-empty filter (≥2 chars), refuses to dump the full environment. Redacts values of keys matching `key|secret|token|password|credential|dsn|auth|private|signing`.
+- **Retry circuit breaker reinforced** — message at N=5 now includes explicit `Agent(subagent_type="error-researcher", model="haiku")` spec and counter visibility. Hard-block at N=10 rewritten with the same explicit spawn instructions. Stderr signal added for maximum visibility.
+- **CI Manifesto doctrine updated** — added §15 Dependency Install Protocol, §16 Secrets Two-Tier, §17 Execute-End-to-End Doctrine. §12 clarifies `dev` is the ONLY auto-created branch without signal. §4/§14 scope language updated to reflect session-scoped signals.
+- **Anton profile rules** — `operator-live-deploy.md` inverted: commit-push-CI-Monitor is the primary path, live-patch is a troubleshooting exception. `operator-delegation.md` rewritten: execute-end-to-end is a hard rule, defer log is documentation not a pause trigger. `operator-clearance.md` aligned with hook authority (hooks are enforcement, rules describe intent). New `operator-dependency-protocol.md`.
 - **`BlockAction` stderr fix** — `BlockAction` exceptions now print to **stderr** (not stdout) so Claude Code displays the block reason cleanly.
 - **10 hook events (not 11)** — `StatusLine` is not a hook event. Valid hook events: `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `UserPromptSubmit`, `Notification`, `PreCompact`, `PermissionRequest`.
+
+### Fixed
+
+- **False-positive guard blocks** — `_strip_safe_content` in `branch_guard` and `prod_lockdown` only stripped heredoc bodies with literal `<<'EOF'` or `<<EOF`. Bash commands containing `echo "gh pr merge to main"`, `curl -d '{"msg":"..."}'`, `python -c "print(...)"`, or heredocs with alternate delimiters (`<<YAML`, `<<-EOF`) triggered false blocks. Now delegates to shared `hooks/context/_strip.py` which handles all these cases.
+- **Cross-pipe pattern matches** — `.*` in branch_guard merge/rebase/reset patterns crossed `&&` and `|` boundaries, so multi-command lines referencing `main` in a read subcommand could trip the merge guard. Replaced with `[^|&;\n]*` to respect command separators.
+- **Subagent signal leak** — `on_subagent_stop` did not clear subagent signals under `agent_id`, so a subsequent subagent with the same `agent_id` inherited the previous one's signal state for up to 5 minutes. Added signal-clear block mirroring `on_stop`.
+- **Container log parameter injection** — kubectl/docker/aws argv parameters in `tail_container_logs` MCP tool were unsanitized. Added `^[a-zA-Z0-9._:/@-]+$` validation and a 200-char cap on `filter_regex` to prevent flag injection and ReDoS.
+- **Channel name validation** — `channel_subscribe` and `channel_unsubscribe` MCP tools now validate names against `^[a-zA-Z0-9._-]+$` to prevent config corruption from path-traversal or JSON-special characters.
+- **`auto_dev_switch` env stripping** — `_git` helper constructed a minimal env that stripped `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `SSH_AUTH_SOCK`, credential-helper vars. The `git push -u origin dev` step silently failed on SSH-gated origins. Now inherits `os.environ` and overlays only `GIT_ALLOW_MAIN_PUSH=1`.
 
 ## [0.3.0] - 2026-03-07
 
