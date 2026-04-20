@@ -668,9 +668,9 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         if VOICE_ENABLED:
             from hooks.context.voice_output import (
+                clear_voice_enabled,
                 contains_disable_signal,
                 contains_enable_signal,
-                clear_voice_enabled,
                 set_voice_enabled,
             )
 
