@@ -58,30 +58,46 @@ def register(mcp):
 
     @mcp.tool()
     def get_env(filter: str = "") -> str:
-        """Get environment variables, optionally filtered by a substring.
+        """Get environment variables, filtered by a substring.
 
-        Returns environment variables that contain the filter string (case-insensitive).
-        If no filter is provided, returns all environment variables.
+        A non-empty filter is REQUIRED. Values of sensitive keys are redacted.
 
         Args:
-            filter: Substring to filter environment variable names (case-insensitive).
+            filter: Substring to filter environment variable names (case-insensitive). Required.
 
         Returns:
-            JSON with matching environment variables (names and values)
+            JSON with matching environment variables (names and redacted values)
         """
+        import re as _re
+
+        if not filter or len(filter) < 2:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "A filter of at least 2 characters is required. Full env dump is not allowed.",
+                }
+            )
+
+        _SECRET_PATTERN = _re.compile(
+            r"(key|secret|token|password|credential|dsn|auth|private|signing)", _re.IGNORECASE
+        )
+
         try:
             env_vars = dict(os.environ)
-
-            if filter:
-                filter_lower = filter.lower()
-                filtered_vars = {k: v for k, v in env_vars.items() if filter_lower in k.lower()}
-            else:
-                filtered_vars = env_vars
+            filter_lower = filter.lower()
+            filtered_vars = {}
+            for k, v in env_vars.items():
+                if filter_lower not in k.lower():
+                    continue
+                if _SECRET_PATTERN.search(k):
+                    filtered_vars[k] = "[REDACTED]"
+                else:
+                    filtered_vars[k] = v
 
             return json.dumps(
                 {
                     "success": True,
-                    "filter": filter if filter else None,
+                    "filter": filter,
                     "count": len(filtered_vars),
                     "variables": filtered_vars,
                 }

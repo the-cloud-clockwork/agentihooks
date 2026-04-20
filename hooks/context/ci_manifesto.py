@@ -203,32 +203,54 @@ def get_pr_signals() -> list[str]:
     return _load().get("pr", _DEFAULT_PR_SIGNALS)
 
 
-def contains_release_signal(text: str) -> bool:
+_NEGATION_PREFIXES = (
+    "don't ",
+    "dont ",
+    "do not ",
+    "not ",
+    "never ",
+    "shouldn't ",
+    "shouldnt ",
+    "should not ",
+    "won't ",
+    "wont ",
+    "will not ",
+    "can't ",
+    "cannot ",
+)
+
+
+def _signal_match(text: str, signals: list[str]) -> bool:
+    """Check if any signal phrase is present WITHOUT being negated."""
     if not text:
         return False
     low = text.lower()
-    return any(p in low for p in get_release_signals())
+    for phrase in signals:
+        idx = low.find(phrase)
+        if idx == -1:
+            continue
+        # Check for negation in the 20 chars before the match
+        prefix = low[max(0, idx - 20) : idx].strip()
+        if any(prefix.endswith(neg.strip()) for neg in _NEGATION_PREFIXES):
+            continue
+        return True
+    return False
+
+
+def contains_release_signal(text: str) -> bool:
+    return _signal_match(text, get_release_signals())
 
 
 def contains_hotfix_signal(text: str) -> bool:
-    if not text:
-        return False
-    low = text.lower()
-    return any(p in low for p in get_hotfix_signals())
+    return _signal_match(text, get_hotfix_signals())
 
 
 def contains_branch_signal(text: str) -> bool:
-    if not text:
-        return False
-    low = text.lower()
-    return any(p in low for p in get_branch_signals())
+    return _signal_match(text, get_branch_signals())
 
 
 def contains_pr_signal(text: str) -> bool:
-    if not text:
-        return False
-    low = text.lower()
-    return any(p in low for p in get_pr_signals())
+    return _signal_match(text, get_pr_signals())
 
 
 def _build_injection() -> str:

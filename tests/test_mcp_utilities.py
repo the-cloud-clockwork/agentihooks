@@ -75,13 +75,11 @@ class TestWriteMarkdown:
 
 
 class TestGetEnv:
-    def test_returns_all_vars(self, mcp_tools):
+    def test_rejects_empty_filter(self, mcp_tools):
         fn = mcp_tools["get_env"]
         result = json.loads(fn())
-        assert result["success"] is True
-        assert result["filter"] is None
-        assert result["count"] > 0
-        assert isinstance(result["variables"], dict)
+        assert result["success"] is False
+        assert "filter" in result["error"].lower()
 
     def test_filters_by_name(self, mcp_tools):
         fn = mcp_tools["get_env"]

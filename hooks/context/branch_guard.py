@@ -209,12 +209,12 @@ _BLOCKED_PATTERNS = [
     ),
     # Merge into main/master (direct merge bypasses PR workflow)
     (
-        re.compile(r"git\s+merge\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Direct merge into main/master is blocked. Create a PR instead.",
     ),
     # Rebase onto main/master
     (
-        re.compile(r"git\s+rebase\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Rebasing onto main/master is blocked. Create a PR instead.",
     ),
     # Delete main/master branch
@@ -224,7 +224,7 @@ _BLOCKED_PATTERNS = [
     ),
     # Reset main/master (destructive — rewrites history)
     (
-        re.compile(r"git\s+reset\s+.*(?<![\w-])(main|master)(?![/\w-])"),
+        re.compile(r"git\s+reset\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Resetting main/master is blocked — this rewrites history.",
     ),
     # Force push (any branch — can destroy remote history)
@@ -261,9 +261,9 @@ def check_branch_guard(payload: dict) -> None:
     if not command:
         return
 
-    check_text = re.sub(r"<<'?EOF'?.*", "", command, flags=re.DOTALL)
-    check_text = re.sub(r'-m\s+"[^"]*"', "-m MSG", check_text)
-    check_text = re.sub(r"-m\s+'[^']*'", "-m MSG", check_text)
+    from hooks.context._strip import strip_non_command_content
+
+    check_text = strip_non_command_content(command)
 
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):

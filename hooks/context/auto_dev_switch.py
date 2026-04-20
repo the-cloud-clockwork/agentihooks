@@ -18,6 +18,7 @@ See CI Manifesto §13 for doctrine.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -33,7 +34,7 @@ def _git(args: list[str], cwd: str, timeout: int = 10) -> tuple[int, str, str]:
             text=True,
             timeout=timeout,
             check=False,
-            env={"GIT_ALLOW_MAIN_PUSH": "1", "PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(Path.home())},
+            env={**os.environ, "GIT_ALLOW_MAIN_PUSH": "1"},
         )
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:

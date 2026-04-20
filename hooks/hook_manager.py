@@ -653,16 +653,16 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         prompt = payload.get("prompt", "")
         if prompt:
-            if contains_release_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log("ci_manifesto: release-gate signal active this turn", {"session_id": session_id})
-            if contains_hotfix_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_hotfix_signal(prompt):
                 set_hotfix_signal(session_id)
                 log("ci_manifesto: hotfix signal active this session", {"session_id": session_id})
             if contains_branch_signal(prompt):
                 set_branch_signal(session_id)
                 log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
-            if contains_pr_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
                 set_pr_signal(session_id)
                 log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
     except Exception as e:
@@ -831,6 +831,7 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("branch_guard check failed", {"error": str(e)})
+            print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
     # --- Prod lockdown: block production operations unless bypass active ---
     if tool_name == "Bash":
@@ -842,6 +843,7 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("prod_lockdown check failed", {"error": str(e)})
+            print(f"WARNING: prod_lockdown check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -995,7 +997,10 @@ def on_post_tool_use(payload: dict) -> None:
                     log("ci_manifesto: release-gate signal via AskUserQuestion answer", {"session_id": session_id})
                 if contains_hotfix_signal(combined):
                     set_hotfix_signal(session_id)
-                    log("ci_manifesto: hotfix signal via AskUserQuestion answer (session-scoped)", {"session_id": session_id})
+                    log(
+                        "ci_manifesto: hotfix signal via AskUserQuestion answer (session-scoped)",
+                        {"session_id": session_id},
+                    )
                 if contains_branch_signal(combined):
                     set_branch_signal(session_id)
                     log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
@@ -1263,6 +1268,7 @@ def on_subagent_start(payload: dict) -> None:
     """
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
+    _KNOWN_SUBAGENT_IDS.add(agent_id)
     log(
         "Subagent started",
         {
@@ -1333,6 +1339,18 @@ def on_subagent_stop(payload: dict) -> None:
             log("brain_writer subagent: result", stats)
     except Exception as e:
         log("brain_writer subagent_stop failed", {"error": str(e)})
+
+    # Clear any signals set during the subagent's lifetime
+    try:
+        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
+        from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
+
+        clear_bypass(agent_id)
+        clear_release_signal(agent_id)
+        clear_branch_signal(agent_id)
+        clear_pr_signal(agent_id)
+    except Exception:
+        pass
 
     # Auto-overlay cleanup — remove overlays activated at session start
     try:
@@ -1418,6 +1436,9 @@ def on_permission_request(payload: dict) -> None:
 # EVENT ROUTER
 # =============================================================================
 
+# Track subagent session IDs to prevent signal self-arming (audit finding 6.2)
+_KNOWN_SUBAGENT_IDS: set[str] = set()
+
 EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
@@ -1456,6 +1477,7 @@ def main() -> None:
         log("Failed to parse JSON payload")
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

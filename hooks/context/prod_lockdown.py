@@ -198,17 +198,14 @@ def _has_hotfix_signal(session_id: str) -> bool:
 
 
 def _strip_safe_content(command: str) -> str:
-    """Strip heredoc bodies and commit messages before pattern matching.
+    """Strip non-command content before pattern matching.
 
-    Same pre-processing as branch_guard to avoid false positives on
-    commit message content, heredoc bodies, and echo text.
+    Delegates to shared utility that handles heredocs, commit messages,
+    echo/printf bodies, curl payloads, python -c strings, and jq/awk args.
     """
-    # Strip heredoc bodies (<<'EOF' ... EOF) — these are data, not commands
-    check = re.sub(r"<<'?EOF'?.*", "", command, flags=re.DOTALL)
-    # Strip git commit messages (-m "..." or -m '...')
-    check = re.sub(r'-m\s+"[^"]*"', "-m MSG", check)
-    check = re.sub(r"-m\s+'[^']*'", "-m MSG", check)
-    return check
+    from hooks.context._strip import strip_non_command_content
+
+    return strip_non_command_content(command)
 
 
 def _has_release_signal(session_id: str) -> bool:

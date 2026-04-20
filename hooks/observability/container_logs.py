@@ -45,6 +45,14 @@ class ContainerLogTailer:
         if not target:
             raise ValueError("Target container identifier is required")
 
+        # Sanitize all string parameters — prevent flag injection
+        _SAFE_ID = re.compile(r"^[a-zA-Z0-9._:/@-]+$")
+        for param_name, param_val in [("target", target)] + [(k, v) for k, v in kwargs.items() if isinstance(v, str)]:
+            if param_val and not _SAFE_ID.match(param_val):
+                raise ValueError(
+                    f"Invalid characters in '{param_name}': only alphanumeric, dots, dashes, underscores, colons, slashes, and @ are allowed"
+                )
+
         self.runtime = runtime
         self.target = target
         self.kwargs = kwargs
@@ -204,6 +212,8 @@ class ContainerLogTailer:
         """
         pattern = None
         if filter_regex:
+            if len(filter_regex) > 200:
+                raise ValueError("Regex too long (max 200 chars) — simplify the filter")
             try:
                 pattern = re.compile(filter_regex)
             except re.error as e:
