@@ -195,6 +195,81 @@ agentihooks broadcast --clear
 
 ---
 
+## `agentihooks refresh-rules`
+
+Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
+
+```bash
+agentihooks refresh-rules [--profile <name>] [--dry-run] [--clear]
+```
+
+### How it works
+
+1. Reads the installed rules: `~/.claude/CLAUDE.md`, every `~/.claude/rules/*.md`, and `~/.claude/CLAUDE.local.md` (if present).
+2. Takes a snapshot of currently-alive session IDs from the broadcast registry.
+3. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` containing the payload + pending session list.
+4. On each targeted session's next `UserPromptSubmit`, the hook injects the payload and removes the session from pending.
+5. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
+
+Sessions started AFTER the push never see the marker — they get fresh rules at `SessionStart`, so re-injection would be redundant.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--profile <name>` | Profile name (default: detected from the `~/.claude/CLAUDE.md` symlink target) |
+| `--dry-run` | Print what would be pushed (profile, content hash, payload size, target session IDs) without writing the marker |
+| `--clear` | Delete any existing pending marker for the profile (cancel a push in progress) |
+
+### Examples
+
+```bash
+# Preview which sessions would be hit
+agentihooks refresh-rules --dry-run
+
+# Push the current rules to all alive sessions
+agentihooks refresh-rules
+
+# Cancel a pending marker without waiting for TTL
+agentihooks refresh-rules --clear
+```
+
+---
+
+## `agentihooks sessions`
+
+Crash-recovery session picker. Lists recent Claude Code sessions (24h window) with names, lifetimes, and IDs. Reopen a session by index from the list.
+
+```bash
+agentihooks sessions list [--hours N] [--limit N]
+agentihooks sessions reopen <IDX> [--force]
+agentihooks sessions backfill [--hours N]
+```
+
+### Columns
+
+| Column | Meaning |
+|--------|---------|
+| `IDX` | Index to pass to `reopen` |
+| `STATUS` | `alive` / `closed` / `dead` / `superseded` |
+| `AGE` | For `alive`: session lifetime (time since `started_at`). For others: time since last activity. |
+| `NAME` | Session title from Claude Code `/rename` or `--name` flag, or first user message snippet |
+| `CWD` | Working directory (home-relative, truncated if long) |
+| `ID` | Session UUID |
+
+### Subcommands
+
+- **`list`** (alias `ls`) — show recent sessions. Default: 10 most recent in the last 24h. `--hours` controls the lookback window; `--limit 0` shows all.
+- **`reopen <IDX>`** (alias `open`) — relaunch Claude Code resuming the selected session. Uses Windows Terminal on WSL when available.
+- **`backfill`** — seed the registry from `~/.claude/projects/*.jsonl` for sessions that started before agentihooks was installed.
+- **`reconcile`** — health-check the registry.
+
+### Sort behavior
+
+Alive sessions appear first (longest-running on top), followed by closed, dead, and superseded. Supersede is used for session IDs that were cycled by `/resume` or `/clear` within the same PID — they're kept for audit but can't be reopened.
+
+---
+
 ## `agentihooks uninstall`
 
 Remove everything agentihooks installed from the system.
