@@ -1,10 +1,6 @@
 """Tests for hooks.observability.event_relay."""
 
 import json
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -241,7 +237,7 @@ class TestReadNewTranscriptEvents:
 
 class TestPublish:
     def test_publish_events_xadd(self, fake_redis):
-        from hooks.observability.event_relay import publish_events, _stream_key
+        from hooks.observability.event_relay import _stream_key, publish_events
         events = [
             {"event_type": "thinking", "content": "thinking text"},
             {"event_type": "assistant_text", "content": "hello"},
@@ -256,14 +252,14 @@ class TestPublish:
         assert items[1][1]["event_type"] == "assistant_text"
 
     def test_publish_done_sentinel(self, fake_redis):
-        from hooks.observability.event_relay import publish_done, _stream_key
+        from hooks.observability.event_relay import _stream_key, publish_done
         publish_done("corr-2", "sess-2")
         items = fake_redis.xrange(_stream_key("corr-2"))
         assert len(items) == 1
         assert items[0][1]["event_type"] == "done"
 
     def test_publish_empty_no_op(self, fake_redis):
-        from hooks.observability.event_relay import publish_events, _stream_key
+        from hooks.observability.event_relay import _stream_key, publish_events
         n = publish_events("corr-3", "sess-3", [])
         assert n == 0
         assert fake_redis.exists(_stream_key("corr-3")) == 0

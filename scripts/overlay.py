@@ -203,8 +203,8 @@ def overlay_add(name: str, base_profile_dir: Path | None = None, added_by: str =
 
     # Force immediate rules re-injection for current session
     try:
-        from hooks.context.context_refresh import force_rules_refresh
         from hooks.context.broadcast import _load_sessions
+        from hooks.context.context_refresh import force_rules_refresh
         sessions = _load_sessions()  # dict keyed by session_id
         if sessions:
             latest_sid = max(sessions, key=lambda sid: sessions[sid].get("registered_at", ""))
@@ -217,6 +217,7 @@ def overlay_add(name: str, base_profile_dir: Path | None = None, added_by: str =
         from hooks.config import PROFILE_BROADCAST_ENABLED
         if PROFILE_BROADCAST_ENABLED:
             import os
+
             from hooks.context.broadcast import create_broadcast
             agent = os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown"))
             create_broadcast(
@@ -250,6 +251,7 @@ def overlay_remove(name: str) -> dict:
         from hooks.config import PROFILE_BROADCAST_ENABLED
         if PROFILE_BROADCAST_ENABLED:
             import os
+
             from hooks.context.broadcast import create_broadcast
             agent = os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown"))
             create_broadcast(

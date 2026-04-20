@@ -352,12 +352,12 @@ def force_rules_refresh(session_id: str, project_dir: str = "") -> None:
     Called when an overlay is activated/deactivated to ensure the session
     gets the new rules immediately instead of waiting for the next interval.
     """
+    from hooks.common import inject_context
     from hooks.config import (
-        CONTEXT_REFRESH_RULES_DIR,
         CONTEXT_REFRESH_INCLUDE_PROJECT,
         CONTEXT_REFRESH_INTERVAL,
+        CONTEXT_REFRESH_RULES_DIR,
     )
-    from hooks.common import inject_context
 
     rules = _load_rules_files(CONTEXT_REFRESH_RULES_DIR, CONTEXT_REFRESH_INCLUDE_PROJECT, project_dir)
     if not rules:
