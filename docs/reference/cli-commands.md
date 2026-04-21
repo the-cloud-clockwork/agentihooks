@@ -405,37 +405,48 @@ Registered targets are stored in `~/.agentihooks/state.json` under the `targets`
 
 ## `agentihooks memory-sync`
 
-Cross-machine auto-memory sync. Mirrors **only** `~/.claude/projects/*/memory/`
-to a private git remote via [gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam);
-pulls peer branches and merges them back in on every sync daemon tick.
+Cross-machine auto-memory sync with PR-gated fleet propagation. Mirrors
+**only** `~/.claude/projects/*/memory/` to a private git remote via
+[gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam); each machine
+pushes to its own `gitfoam/<hostname>/main` branch, consumers merge from
+`origin/main` only, and promotion is a GitHub PR.
 
 ```bash
-agentihooks memory-sync <action> [--purge]
+agentihooks memory-sync <action> [--purge] [--auto-merge] [--idle-days N]
 ```
 
 ### Actions
 
 | Action | Description |
 |--------|-------------|
-| `install` | Build/verify `gitfoam`, init the mirror repo, start the daemon |
+| `install` | Build/verify `gitfoam`, **seed `origin/main`** from local memory, init mirror, start daemon |
 | `start` | Start the gitfoam watch daemon on the mirror directory |
 | `stop` | Stop the gitfoam daemon |
-| `status` *(default)* | Show config, binary path, and daemon PID |
-| `sync-now` | Run one `tick()` manually (rsync in + git fetch + merge) |
+| `status` *(default)* | Show mode, config, binary path, and daemon PID |
+| `sync-now` | Run one `tick()` manually (rsync in + git fetch main + merge) |
+| `propose` | Open a PR from `gitfoam/<hostname>/main` → `main` via `gh pr create`. `--auto-merge` arms `gh pr merge --auto --squash`. |
+| `sweep-branches` | Delete remote branches already merged to main + idle > `MEMORY_MIRROR_SWEEP_IDLE_DAYS` |
 | `uninstall` | Stop daemon (add `--purge` to also remove the mirror directory) |
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MEMORY_MIRROR_ENABLED` | `false` | Master switch. Must be `true` for the sync daemon to tick. |
+| `MEMORY_MIRROR_MODE` | `off` | `off` / `write` / `write-local-only`. Legacy `MEMORY_MIRROR_ENABLED=true` maps to `write`. |
 | `MEMORY_MIRROR_REMOTE` | *(unset)* | Git URL of the private mirror repo. **Required.** |
 | `MEMORY_MIRROR_DIR` | `~/.agentihooks/memory-mirror` | Local mirror directory (owned by agentihooks). |
 | `MEMORY_MIRROR_BRANCH_PREFIX` | `gitfoam` | Branch namespace; machine pushes to `<prefix>/<hostname>/main`. |
 | `MEMORY_MIRROR_INTERVAL_SEC` | `60` | Pull tick interval (push is always ~500ms via gitfoam). |
+| `MEMORY_MIRROR_SWEEP_IDLE_DAYS` | `15` | Minimum idle days before a merged branch is swept. |
 | `MEMORY_MIRROR_CLAUDE_PROJECTS` | `~/.claude/projects` | Source tree. Override for testing only. |
 | `GITFOAM_BINARY` | `~/.cargo/bin/gitfoam` | Path to the gitfoam binary. |
 | `GITFOAM_LOCAL_SOURCE` | *(unset)* | Local gitfoam checkout; if set and binary missing, install runs `cargo install --path`. |
+
+### Modes
+
+- `off` — dormant (default)
+- `write` — snapshot + gitfoam push + fetch main + merge (normal fleet member)
+- `write-local-only` — snapshot + push only; no fetch / no merge (air-gapped contributor)
 
 ### Scope — memory only
 
@@ -446,24 +457,28 @@ from `--delete` by a `--filter=P /.git` rule.
 
 ### Conflict model
 
-On divergent edits between ticks, the merge step writes the remote version to a
-sibling `<name>.conflict-<hostname>-<epoch><ext>` — the local file is never
-overwritten. Resolve via `/memory`, then delete the conflict file.
+On divergent edits between local and `origin/main`, the merge step writes the
+incoming version to a sibling `<name>.conflict-<hostname>-<epoch><ext>` — the
+local file is never overwritten. Resolve via `/memory`, then delete the
+conflict file.
 
 ### Examples
 
 ```bash
-# First-time setup (after setting env vars)
+# First-time setup (after creating the private repo and setting env vars)
+gh repo create <org>/claude-memory-mirror --private --confirm
 agentihooks memory-sync install
 
-# Verify after install
-agentihooks memory-sync status
+# Promote today's learnings to main
+agentihooks memory-sync propose
+agentihooks memory-sync propose --auto-merge     # auto-merge when PR is clean
 
-# Force one merge cycle without waiting for the daemon
+# Force a tick
 agentihooks memory-sync sync-now
 
-# Stop pushing but keep the mirror on disk
-agentihooks memory-sync stop
+# Housekeeping (safe on cron)
+agentihooks memory-sync sweep-branches
+agentihooks memory-sync sweep-branches --idle-days 30
 
 # Full rollback
 agentihooks memory-sync uninstall --purge

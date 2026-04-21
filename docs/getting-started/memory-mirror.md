@@ -1,13 +1,13 @@
-# Memory Mirror — cross-machine auto-memory sync
+# Memory Mirror — cross-machine auto-memory sync (PR-gated)
 
 Claude Code's native auto-memory lives at `~/.claude/projects/<project-key>/memory/`
 and is machine-local. The **memory mirror** feature syncs only those `memory/`
 subtrees across your fleet using [gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam)
-for push (~500ms latency) and a lightweight consumer on the sync daemon tick
-for pull (~60s by default).
+for push (~500ms latency per machine) and a lightweight main-only consumer
+on the sync daemon tick for pull (~60s).
 
 **Scope:** memory only. Transcripts, session JSONLs, `ctx_refresh_*.json`
-snapshots, and `todos/` are explicitly excluded by the rsync filter.
+snapshots, and `todos/` are excluded by the rsync filter.
 
 ## Topology
 
@@ -16,119 +16,166 @@ machine A                                       machine B
 ─────────                                       ─────────
 ~/.claude/projects/*/memory/                    ~/.claude/projects/*/memory/
       │                                               ▲
-      │ rsync (memory-only filter)                    │ merge (with conflict-file fallback)
+      │ rsync (memory-only)                           │ merge — .conflict sibling on divergence
       ▼                                               │
 ~/.agentihooks/memory-mirror/                   ~/.agentihooks/memory-mirror/
       │                                               ▲
-      │ gitfoam push 500ms                            │ git fetch every tick
+      │ gitfoam force-push 500ms                      │ git fetch origin main every 60s
       ▼                                               │
-                        GitHub private repo
-                         gitfoam/<host>/main branches
+    gitfoam/A/main  ┐                                origin/main
+                    │                                     ▲
+                    └────── gh pr create ────────────────┘
+                         (operator reviews + merges)
 ```
 
-Each machine pushes to its own branch (`gitfoam/<hostname>/main`) and fetches
-every other branch. Self-branch is skipped to avoid loops.
+Each machine pushes to its OWN `gitfoam/<hostname>/main` branch. Nobody
+consumes anyone else's branch directly. Everyone consumes `origin/main`.
+Promotion is a GitHub PR.
 
 ## Prerequisites
 
-- `git`, `rsync`, and `tar` on PATH (they usually already are on Linux/macOS)
-- A private GitHub repo you own, seeded with one commit on `main`
-- `gitfoam` binary — either install globally or build locally from a checkout
+- `git`, `rsync`, `tar` on PATH
+- `gh` CLI (for `memory-sync propose`)
+- A **private** GitHub repo you own — agentihooks does **NOT** create it
+- `gitfoam` binary — either installed upstream or a local checkout pointed at by `GITFOAM_LOCAL_SOURCE`
 
 ## Enable
 
-### 1. Configure `~/.agentihooks/.env`
+### 1. Create the private repo
 
 ```bash
-MEMORY_MIRROR_ENABLED=true
-MEMORY_MIRROR_REMOTE=git@github.com:YOUR-ORG/claude-memory-mirror.git
-# Optional (defaults shown):
+gh repo create <org>/claude-memory-mirror --private --confirm
+```
+
+### 2. Configure `~/.agentihooks/.env`
+
+```bash
+MEMORY_MIRROR_MODE=write
+MEMORY_MIRROR_REMOTE=git@github.com:<org>/claude-memory-mirror.git
+# Optional (defaults):
 # MEMORY_MIRROR_DIR=~/.agentihooks/memory-mirror
 # MEMORY_MIRROR_BRANCH_PREFIX=gitfoam
 # MEMORY_MIRROR_INTERVAL_SEC=60
+# MEMORY_MIRROR_SWEEP_IDLE_DAYS=15
 # GITFOAM_BINARY=~/.cargo/bin/gitfoam
-# GITFOAM_LOCAL_SOURCE=/path/to/gitfoam    # for cargo install --path
+# GITFOAM_LOCAL_SOURCE=/path/to/gitfoam    # for `cargo install --path`
 ```
 
-### 2. Install
+Legacy `MEMORY_MIRROR_ENABLED=true` (v1) is still accepted and maps to
+`MEMORY_MIRROR_MODE=write`.
+
+### 3. Install
 
 ```bash
 agentihooks memory-sync install
 ```
 
-This will:
-- Verify or build `gitfoam` (from `$GITFOAM_LOCAL_SOURCE` via `cargo install --path …`)
-- `git init` `$MEMORY_MIRROR_DIR` and add your remote
-- Register the mirror with `gitfoam init`
-- Start the gitfoam daemon with its PID at `~/.agentihooks/gitfoam.pid`
+What this does:
+- Verifies `gh` and remote reachability
+- Builds or finds `gitfoam`
+- Runs `ensure_mirror_repo` (git init, add remote)
+- **Seeds `origin/main`** from your current memory (if main doesn't exist yet)
+- Registers the mirror with `gitfoam init`
+- Starts the gitfoam daemon (PID at `~/.agentihooks/gitfoam.pid`)
 
-The sync daemon (already running if you ran `agentihooks init`) will start
-calling the pull side on every poll.
-
-### 3. Verify
+### 4. Verify
 
 ```bash
 agentihooks memory-sync status
-# enabled:   True
-# remote:    git@github.com:…
-# mirror:    /home/you/.agentihooks/memory-mirror
-# prefix:    gitfoam
-# interval:  60s
-# gitfoam:   /home/you/.cargo/bin/gitfoam
-# daemon:    running (PID …)
+# mode:       write
+# remote:     git@github.com:<org>/claude-memory-mirror.git
+# mirror:     /home/you/.agentihooks/memory-mirror
+# prefix:     gitfoam
+# interval:   60s
+# sweep idle: 15d
+# gitfoam:    /home/you/.cargo/bin/gitfoam
+# daemon:     running (PID …)
 ```
 
-Touch a file in `~/.claude/projects/*/memory/` and within a second or two
-you should see a force-push on `gitfoam/<hostname>/main` in your GitHub repo.
+## Promoting a machine's learnings to main
+
+```bash
+agentihooks memory-sync propose                 # open PR, review on GitHub, merge manually
+agentihooks memory-sync propose --auto-merge    # arm gh pr merge --auto --squash
+```
+
+`propose` compares `gitfoam/<hostname>/main` to `origin/main`; if they're
+identical, it exits cleanly with "nothing to propose." Otherwise it opens a
+PR with a short log summary as the body.
+
+## Modes
+
+| `MEMORY_MIRROR_MODE` | Behaviour |
+|----------------------|-----------|
+| `off` (default)      | Feature dormant. Tick no-ops. |
+| `write`              | Snapshot + gitfoam push + fetch main + merge. Normal fleet member. |
+| `write-local-only`   | Snapshot + gitfoam push. Never fetches or merges. For air-gapped contributors. |
+
+## Housekeeping
+
+```bash
+agentihooks memory-sync sweep-branches            # uses MEMORY_MIRROR_SWEEP_IDLE_DAYS (default 15)
+agentihooks memory-sync sweep-branches --idle-days 30
+```
+
+Deletes remote branches matching `<prefix>/*` that are:
+1. Already merged into `origin/main` (via `git merge-base --is-ancestor`), AND
+2. Idle (no new commits) longer than the threshold.
+
+Unmerged branches are never deleted. Safe to put on a daily cron.
+
+## Conflict model
+
+`origin/main` evolves via PRs from many machines. When your local memory
+differs from main on the same file, the merge step writes the incoming (main)
+version to `<name>.conflict-<hostname>-<epoch><ext>` — your local file is
+never overwritten. Resolve via `/memory`, delete the conflict sibling.
 
 ## Operations
 
 ```bash
 agentihooks memory-sync start       # start gitfoam daemon
 agentihooks memory-sync stop        # stop gitfoam daemon
-agentihooks memory-sync sync-now    # manual tick (snapshot + fetch + merge)
+agentihooks memory-sync sync-now    # force one tick now (snapshot + fetch main + merge)
 agentihooks memory-sync uninstall           # stop daemon
 agentihooks memory-sync uninstall --purge   # stop daemon AND delete mirror dir
 ```
 
-The gitfoam log is at `~/.agentihooks/logs/gitfoam.log`. The pull side is
-logged by the sync daemon at `~/.agentihooks/logs/sync-daemon.log`.
-
-## Conflicts
-
-When two machines modify the same memory file between ticks, the merge step
-refuses to overwrite. Instead it writes a sibling file named
-`<stem>.conflict-<hostname>-<epoch><ext>` next to the target. Inspect with
-`/memory`, reconcile manually, delete the conflict file when done.
+Logs:
+- gitfoam daemon: `~/.agentihooks/logs/gitfoam.log`
+- pull tick: `~/.agentihooks/logs/sync-daemon.log`
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `MEMORY_MIRROR_REMOTE is not set` | Remote missing from `.env` | Set it, re-run `install` |
-| `gitfoam not found` on install | Neither binary nor `GITFOAM_LOCAL_SOURCE` present | Install rust + gitfoam checkout, or use the upstream installer |
-| Nothing pushes to GitHub | gitfoam daemon not running | `agentihooks memory-sync status` → `start` |
-| Other machines' memory never lands | Sync daemon not running, or mirror repo has no remote | `agentihooks daemon status`, `agentihooks memory-sync status` |
-| Transcripts leak into GitHub commits | rsync filter bug | Report a bug — this is P0 |
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `MEMORY_MIRROR_REMOTE is not set` | env var missing | Set it, re-run `install` |
+| `cannot reach MEMORY_MIRROR_REMOTE` | Repo doesn't exist, SSH key missing, or wrong URL | `gh repo create <org>/<name> --private --confirm`; check SSH |
+| `gh` CLI not found (on `propose`) | Missing dependency | Install GitHub CLI: <https://cli.github.com/> |
+| `gitfoam not found` on install | No binary, no local source | Install upstream OR set `GITFOAM_LOCAL_SOURCE` OR `GITFOAM_BINARY` |
+| Transcripts appear on GitHub | Filter bug | **Report immediately — P0** |
+| Nothing pushes | gitfoam daemon not running | `agentihooks memory-sync status` → `start` |
+| Main stays empty across machines | No one seeded it | Re-run `agentihooks memory-sync install` — seed is idempotent |
 
-## Known limitations (V1)
+## Known limitations (v2)
 
 - **Same username required across machines.** Project keys under
-  `~/.claude/projects/` encode the absolute path, so `/home/alice/...` and
-  `/home/bob/...` produce different sub-directories. A project-identity
-  resolver is on the roadmap.
-- **Last-write-wins per tick.** Simultaneous writes to the same file are
-  turned into conflict-file siblings rather than being merged content-wise.
-- **Deletion is not authoritative.** A file deleted on machine A will be
-  re-created by machine B's next push if B still has the file. Until a
-  proper tombstone mechanism lands, prefer editing over deleting.
+  `~/.claude/projects/` encode the absolute path. Different usernames → different
+  keys → memory doesn't match up. V2 still assumes same username fleet-wide.
+- **Multi-tenant writers on a single machine race at the filesystem.** Ten pods
+  sharing one mount all writing to the same `MEMORY.md` → last writer wins at
+  the OS layer, before git sees anything. Upstream problem.
+- **Propagation latency = PR review latency.** Machines see each other's writes
+  only after a PR is merged to main. By design.
+- **Tombstone-free deletion.** A file deleted on machine A is still on main;
+  machine B will re-push it. Until a tombstone mechanism lands, prefer editing
+  over deleting.
 
 ## Design notes
 
-- Push is delegated to `gitfoam`. It handles throttling, entropy-based secret
-  detection, and per-host branch isolation. This feature intentionally does
-  not reimplement any of that.
-- Pull runs inside the existing `scripts/sync_daemon.py` poll loop rather
-  than a new process — one daemon, one tick. Gated on `MEMORY_MIRROR_ENABLED`.
-- The feature is opt-in. A machine that does not set the env vars is a
-  no-op, even with the code installed.
+- Push delegated to gitfoam — handles per-host branch naming, secrets scanning,
+  force-push throttling.
+- Pull runs inside `scripts/sync_daemon.py`'s existing poll loop. No new daemon.
+- PR gate via `gh pr create` — no server-side component.
+- Seed step uses `git commit-tree` + `git update-ref` so it doesn't touch
+  gitfoam's working branch, avoiding any race with the 500ms push loop.
