@@ -403,6 +403,76 @@ Registered targets are stored in `~/.agentihooks/state.json` under the `targets`
 
 ---
 
+## `agentihooks memory-sync`
+
+Cross-machine auto-memory sync. Mirrors **only** `~/.claude/projects/*/memory/`
+to a private git remote via [gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam);
+pulls peer branches and merges them back in on every sync daemon tick.
+
+```bash
+agentihooks memory-sync <action> [--purge]
+```
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `install` | Build/verify `gitfoam`, init the mirror repo, start the daemon |
+| `start` | Start the gitfoam watch daemon on the mirror directory |
+| `stop` | Stop the gitfoam daemon |
+| `status` *(default)* | Show config, binary path, and daemon PID |
+| `sync-now` | Run one `tick()` manually (rsync in + git fetch + merge) |
+| `uninstall` | Stop daemon (add `--purge` to also remove the mirror directory) |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_MIRROR_ENABLED` | `false` | Master switch. Must be `true` for the sync daemon to tick. |
+| `MEMORY_MIRROR_REMOTE` | *(unset)* | Git URL of the private mirror repo. **Required.** |
+| `MEMORY_MIRROR_DIR` | `~/.agentihooks/memory-mirror` | Local mirror directory (owned by agentihooks). |
+| `MEMORY_MIRROR_BRANCH_PREFIX` | `gitfoam` | Branch namespace; machine pushes to `<prefix>/<hostname>/main`. |
+| `MEMORY_MIRROR_INTERVAL_SEC` | `60` | Pull tick interval (push is always ~500ms via gitfoam). |
+| `MEMORY_MIRROR_CLAUDE_PROJECTS` | `~/.claude/projects` | Source tree. Override for testing only. |
+| `GITFOAM_BINARY` | `~/.cargo/bin/gitfoam` | Path to the gitfoam binary. |
+| `GITFOAM_LOCAL_SOURCE` | *(unset)* | Local gitfoam checkout; if set and binary missing, install runs `cargo install --path`. |
+
+### Scope — memory only
+
+A unit-tested rsync filter (`scripts/memory_mirror_sync.RSYNC_MEMORY_FILTER`)
+matches only `*/memory/**` subtrees. Transcripts (`*.jsonl`), `ctx_refresh_*.json`,
+`todos/`, and `tool-results/` are dropped. The mirror's own `.git/` is protected
+from `--delete` by a `--filter=P /.git` rule.
+
+### Conflict model
+
+On divergent edits between ticks, the merge step writes the remote version to a
+sibling `<name>.conflict-<hostname>-<epoch><ext>` — the local file is never
+overwritten. Resolve via `/memory`, then delete the conflict file.
+
+### Examples
+
+```bash
+# First-time setup (after setting env vars)
+agentihooks memory-sync install
+
+# Verify after install
+agentihooks memory-sync status
+
+# Force one merge cycle without waiting for the daemon
+agentihooks memory-sync sync-now
+
+# Stop pushing but keep the mirror on disk
+agentihooks memory-sync stop
+
+# Full rollback
+agentihooks memory-sync uninstall --purge
+```
+
+See also: [Memory Mirror guide](../getting-started/memory-mirror.md).
+
+---
+
 ## `agentihooks ignore`
 
 Create a `.claudeignore` in the current working directory (or a given path). Claude Code uses `.claudeignore` to exclude files from reading and indexing -- keeping credentials, build artefacts, and binaries out of the context window.
