@@ -206,12 +206,13 @@ agentihooks mcp report                       # MCP surface area
 # Daemon
 agentihooks daemon start|stop|status|logs    # sync daemon
 
-# Memory mirror (cross-machine auto-memory sync — opt-in, PR-gated)
+# Memory mirror (cross-machine auto-memory sync — opt-in, PR-gated, by-project layout)
 agentihooks memory-sync install              # build gitfoam + seed main + init mirror + start daemon
 agentihooks memory-sync status               # mode, config, binary path, PID
 agentihooks memory-sync sync-now             # one manual tick (snapshot + fetch main + merge)
 agentihooks memory-sync propose [--auto-merge]  # PR from gitfoam/<host>/main → main
 agentihooks memory-sync sweep-branches       # prune merged + idle branches (default 15d)
+agentihooks memory-sync migrate-layout [--confirm]  # one-off: rewrite main to v3 by-project/ layout
 agentihooks memory-sync start|stop           # gitfoam daemon lifecycle
 agentihooks memory-sync uninstall [--purge]  # stop daemon (+ optional mirror rm)
 
@@ -364,6 +365,18 @@ Promotion from a machine branch to `main` is a PR — `agentihooks memory-sync
 propose` opens it via `gh pr create` and optionally auto-merges when clean.
 This gives you a review gate against bad or malicious memory without taking
 away each agent's ability to accumulate its own learnings.
+
+**Identity-keyed layout (v3).** The mirror stores memory under `by-project/<key>/memory/`
+where `<key>` is the repo or agent name — not the absolute path. An identity
+resolver reverse-walks each `~/.claude/projects/<encoded>/` dir to find the
+package or agent boundary (`agent.yml` > `pyproject.toml`/`Cargo.toml`/`package.json`/`go.mod`
+> `.git`) and uses its basename as the key. So:
+
+- Laptop `/home/iamroot/dev/tccw-ecosystem/agenticore` → key `agenticore`
+- Fleet pod `/app/agenticore` → key `agenticore` (same key, memory pools!)
+- Agent `.../agentihub/agents/finops/package` → key `finops` (skips past `package/`)
+- Hyphenated repos like `tccw-toolbelt` stay intact (the resolver reads the real FS, not the encoded name)
+- Unresolvable paths fall back to `_unmapped/<encoded>/` so nothing is lost.
 
 **Enable (three commands)**
 

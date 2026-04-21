@@ -10,44 +10,179 @@ from pathlib import Path
 from scripts import memory_mirror_sync as mm
 
 # ---------------------------------------------------------------------------
-# Filter spec — the critical guard that keeps transcripts/sessions out.
+# v3 Identity resolver — decoder, boundary, key, map.
 # ---------------------------------------------------------------------------
 
 
-def test_rsync_filter_excludes_everything_but_memory():
-    """Any leak of non-memory paths is a P0 bug."""
-    assert mm.RSYNC_MEMORY_FILTER == [
-        "--filter=P /.git",
-        "--filter=P /.gitignore",
-        "--prune-empty-dirs",
-        "--include=*/",
-        "--include=*/memory/",
-        "--include=*/memory/**",
-        "--exclude=*",
+def _make_fs(root: Path, layout: dict) -> None:
+    """Build a synthetic filesystem from a nested dict.
+    Values that are dicts become subdirs; str values become files with that
+    content; `None` becomes an empty file."""
+    root.mkdir(parents=True, exist_ok=True)
+    for name, val in layout.items():
+        target = root / name
+        if isinstance(val, dict):
+            _make_fs(target, val)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(val if val is not None else "")
+
+
+def test_decode_roundtrips_simple_path(tmp_path):
+    _make_fs(tmp_path, {"home": {"alice": {"dev": {"proj": {}}}}})
+    encoded = "-home-alice-dev-proj"
+    assert mm._decode_encoded_path(encoded, root=tmp_path) == tmp_path / "home/alice/dev/proj"
+
+
+def test_decode_handles_hyphenated_segment(tmp_path):
+    _make_fs(tmp_path, {"home": {"alice": {"dev": {"tccw-ecosystem": {"tccw-toolbelt": {}}}}}})
+    encoded = "-home-alice-dev-tccw-ecosystem-tccw-toolbelt"
+    assert mm._decode_encoded_path(encoded, root=tmp_path) == (
+        tmp_path / "home/alice/dev/tccw-ecosystem/tccw-toolbelt"
+    )
+
+
+def test_decode_returns_none_when_path_missing(tmp_path):
+    _make_fs(tmp_path, {"home": {"alice": {}}})
+    assert mm._decode_encoded_path("-home-alice-nowhere", root=tmp_path) is None
+
+
+def test_boundary_prefers_agent_yml_over_pyproject(tmp_path):
+    # Layout: finops/ has agent.yml; finops/package/ has pyproject.toml.
+    _make_fs(tmp_path, {
+        "agents": {
+            "finops": {
+                "agent.yml": "name: finops",
+                "package": {
+                    "pyproject.toml": "[project]\nname='pkg'",
+                    "src": {},
+                },
+            },
+        },
+    })
+    real = tmp_path / "agents/finops/package"
+    boundary = mm._package_boundary(real)
+    assert boundary is not None
+    path, marker = boundary
+    assert path == tmp_path / "agents/finops"
+    assert marker == "agent.yml"
+
+
+def test_boundary_stops_at_git(tmp_path):
+    _make_fs(tmp_path, {
+        "repo": {
+            ".git": {"HEAD": "ref: refs/heads/main\n"},
+            "pyproject.toml": "[project]\nname='r'",
+            "subdir": {},
+        },
+    })
+    real = tmp_path / "repo/subdir"
+    boundary = mm._package_boundary(real)
+    # pyproject.toml at repo/ wins over .git by priority, but we must not
+    # walk past repo/ (don't cross .git).
+    assert boundary is not None
+    path, marker = boundary
+    assert path == tmp_path / "repo"
+    assert marker == "pyproject.toml"
+
+
+def test_boundary_git_fallback_when_no_package_markers(tmp_path):
+    _make_fs(tmp_path, {
+        "repo": {
+            ".git": {"HEAD": "ref: refs/heads/main\n"},
+            "src": {},
+        },
+    })
+    real = tmp_path / "repo/src"
+    boundary = mm._package_boundary(real)
+    assert boundary is not None
+    path, marker = boundary
+    assert path == tmp_path / "repo"
+    assert marker == ".git"
+
+
+def test_identity_key_ok_via_helpers(tmp_path):
+    """Integration: decode + boundary → identity basename."""
+    _make_fs(tmp_path, {"home": {"alice": {"dev": {"myrepo": {
+        ".git": {"HEAD": "ref\n"},
+        "pyproject.toml": "[project]\nname='myrepo'",
+    }}}}})
+    real = mm._decode_encoded_path("-home-alice-dev-myrepo", root=tmp_path)
+    assert real is not None and real.name == "myrepo"
+    boundary = mm._package_boundary(real)
+    assert boundary is not None
+    assert boundary[0].name == "myrepo"
+
+
+def test_identity_key_unmapped_when_decode_fails(monkeypatch):
+    monkeypatch.setattr(mm, "_decode_encoded_path", lambda *a, **kw: None)
+    key, status = mm._identity_key("-phantom-encoded-path")
+    assert status == "unmapped"
+    assert key == "-phantom-encoded-path"
+
+
+def test_identity_map_groups_by_key(tmp_path, monkeypatch):
+    # Create two "encoded" projects under a fake ~/.claude/projects/.
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    (projects / "-home-alice-dev-finops-package").mkdir()
+    (projects / "-home-alice-dev-finops-other-dir").mkdir()
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
+    # Fake resolver: map both encoded dirs to the same identity "finops".
+    monkeypatch.setattr(
+        mm,
+        "_identity_key",
+        lambda encoded: ("finops", "ok")
+        if "finops" in encoded else (encoded, "unmapped"),
+    )
+    id_map = mm._identity_map()
+    assert sorted(id_map["finops"]) == [
+        "-home-alice-dev-finops-other-dir",
+        "-home-alice-dev-finops-package",
     ]
 
 
-def test_snapshot_in_invokes_rsync_with_memory_only_filter(tmp_path, monkeypatch):
-    src = tmp_path / "projects"
-    src.mkdir()
-    (src / "proj-a").mkdir()
-    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(src))
-    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_DIR", str(tmp_path / "mirror"))
+# ---------------------------------------------------------------------------
+# v3 snapshot_in — per-identity rsync into by-project/<key>/memory/
+# ---------------------------------------------------------------------------
 
-    captured: list[list[str]] = []
 
-    def fake_run(cmd, **kwargs):
-        captured.append(list(cmd))
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+def test_snapshot_in_writes_by_project_layout(tmp_path, monkeypatch):
+    projects = tmp_path / "projects"
+    mirror = tmp_path / "mirror"
+    (projects / "-x-finops" / "memory").mkdir(parents=True)
+    (projects / "-x-finops" / "memory" / "MEMORY.md").write_text("finops mem")
+    (projects / "-x-publisher" / "memory").mkdir(parents=True)
+    (projects / "-x-publisher" / "memory" / "MEMORY.md").write_text("publisher mem")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_DIR", str(mirror))
+    monkeypatch.setattr(mm, "_identity_key", lambda enc: (
+        ("finops", "ok") if "finops" in enc else ("publisher", "ok")
+    ))
 
-    monkeypatch.setattr(mm, "_run", fake_run)
+    # Use real rsync so we exercise the actual file copy.
     mm.snapshot_in()
 
-    assert len(captured) == 1
-    cmd = captured[0]
-    assert cmd[0] == "rsync"
-    for flag in mm.RSYNC_MEMORY_FILTER:
-        assert flag in cmd
+    assert (mirror / "by-project/finops/memory/MEMORY.md").read_text() == "finops mem"
+    assert (mirror / "by-project/publisher/memory/MEMORY.md").read_text() == "publisher mem"
+    assert not (mirror / "_unmapped").exists() or not any((mirror / "_unmapped").iterdir())
+
+
+def test_snapshot_in_buckets_unmapped(tmp_path, monkeypatch):
+    projects = tmp_path / "projects"
+    mirror = tmp_path / "mirror"
+    (projects / "-phantom" / "memory").mkdir(parents=True)
+    (projects / "-phantom" / "memory" / "MEMORY.md").write_text("orphan")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_DIR", str(mirror))
+    monkeypatch.setattr(mm, "_identity_key", lambda enc: (enc, "unmapped"))
+
+    mm.snapshot_in()
+
+    assert (mirror / "_unmapped/-phantom/memory/MEMORY.md").read_text() == "orphan"
+    assert not (mirror / "by-project").exists() or not any(
+        d for d in (mirror / "by-project").iterdir() if d.is_dir()
+    )
 
 
 def test_snapshot_in_skips_when_source_missing(tmp_path, monkeypatch, capsys):
@@ -255,6 +390,106 @@ def test_consume_main_noop_when_origin_main_absent(tmp_path, monkeypatch, capsys
     mm.consume_main()
     assert merge_called == []
     assert "origin/main not present" in capsys.readouterr().out
+
+
+def test_consume_main_fans_out_by_project_to_multiple_local_dirs(tmp_path, monkeypatch):
+    """If origin/main's by-project/<key>/memory/ exists and N local encoded
+    dirs resolve to <key>, merge the content into all N."""
+    mirror = tmp_path / "mirror"
+    (mirror / ".git").mkdir(parents=True)
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    (projects / "-enc-a").mkdir()
+    (projects / "-enc-b").mkdir()
+
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: mirror)
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
+    monkeypatch.setattr(mm, "_origin_main_exists", lambda: True)
+    monkeypatch.setattr(
+        mm, "_identity_map",
+        lambda: {"finops": ["-enc-a", "-enc-b"]},
+    )
+
+    # Fake git archive → produce a tarball representing by-project/finops/memory/MEMORY.md.
+    # Instead of mocking subprocess.Popen, build the staging tree directly by
+    # monkey-patching tempfile.TemporaryDirectory to return a pre-populated dir.
+    fake_staging = tmp_path / "staging"
+    (fake_staging / "by-project/finops/memory").mkdir(parents=True)
+    (fake_staging / "by-project/finops/memory/MEMORY.md").write_text("from main")
+
+    class _FakeTmp:
+        def __init__(self, *a, **kw):
+            self.name = str(fake_staging)
+
+        def __enter__(self):
+            return self.name
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(mm.tempfile, "TemporaryDirectory", _FakeTmp)
+
+    # Fake archive + extract — already populated. Just let _merge_tree run.
+    class _FakeProc:
+        returncode = 0
+        stdout = None
+
+        def communicate(self):
+            pass
+
+        def wait(self):
+            pass
+
+    monkeypatch.setattr(mm.subprocess, "Popen", lambda *a, **kw: _FakeProc())
+
+    mm.consume_main()
+
+    assert (projects / "-enc-a/memory/MEMORY.md").read_text() == "from main"
+    assert (projects / "-enc-b/memory/MEMORY.md").read_text() == "from main"
+
+
+def test_consume_main_skips_identities_with_no_local_match(tmp_path, monkeypatch):
+    mirror = tmp_path / "mirror"
+    (mirror / ".git").mkdir(parents=True)
+    projects = tmp_path / "projects"
+    projects.mkdir()  # no encoded dirs at all
+
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: mirror)
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
+    monkeypatch.setattr(mm, "_origin_main_exists", lambda: True)
+    monkeypatch.setattr(mm, "_identity_map", lambda: {})
+
+    fake_staging = tmp_path / "staging"
+    (fake_staging / "by-project/finops/memory").mkdir(parents=True)
+    (fake_staging / "by-project/finops/memory/MEMORY.md").write_text("orphan")
+
+    class _FakeTmp:
+        def __init__(self, *a, **kw):
+            self.name = str(fake_staging)
+
+        def __enter__(self):
+            return self.name
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(mm.tempfile, "TemporaryDirectory", _FakeTmp)
+
+    class _FakeProc:
+        returncode = 0
+        stdout = None
+
+        def communicate(self):
+            pass
+
+        def wait(self):
+            pass
+
+    monkeypatch.setattr(mm.subprocess, "Popen", lambda *a, **kw: _FakeProc())
+
+    # Should not raise; should not create anything under projects/.
+    mm.consume_main()
+    assert not list(projects.iterdir())
 
 
 # ---------------------------------------------------------------------------

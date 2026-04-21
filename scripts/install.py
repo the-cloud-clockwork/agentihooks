@@ -4526,6 +4526,9 @@ actions:
                   (--auto-merge arms gh pr merge --auto --squash)
   sweep-branches  delete remote branches already merged to main and idle
                   longer than MEMORY_MIRROR_SWEEP_IDLE_DAYS (default 15)
+  migrate-layout  (one-off) rewrite main to the v3 by-project/<key>/ layout;
+                  deletes old gitfoam/* and proposal/* branches. Dry-run by
+                  default; add --confirm to execute.
   uninstall       stop daemon (add --purge to also delete the mirror dir)
 
 env (see ~/.agentihooks/.env):
@@ -4552,6 +4555,7 @@ env (see ~/.agentihooks/.env):
             "sync-now",
             "propose",
             "sweep-branches",
+            "migrate-layout",
             "uninstall",
         ],
     )
@@ -4570,6 +4574,11 @@ env (see ~/.agentihooks/.env):
         type=int,
         default=None,
         help="(sweep-branches) Override MEMORY_MIRROR_SWEEP_IDLE_DAYS (default 15)",
+    )
+    memsync_p.add_argument(
+        "--confirm",
+        action="store_true",
+        help="(migrate-layout) Execute the migration (default: dry-run)",
     )
 
     # ── Token optimization CLI tools ──────────────────────────────────
@@ -5156,6 +5165,51 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
             print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
             sys.exit(1)
         print(f"{_GREEN}[OK]{_RESET} swept {n} branch(es).")
+        return
+
+    if action == "migrate-layout":
+        try:
+            plan = memory_mirror_sync.plan_migrate_layout()
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print("[migrate-layout] Plan:")
+        print(f"  Mirror:         {plan['mirror']}")
+        print(f"  Local projects: {plan['local_projects']}")
+        print(f"  Identities ({len(plan['identities'])}):")
+        for k in plan["identities"]:
+            print(f"    - {k}")
+        if plan["unmapped_encoded"]:
+            print(f"  Unmapped ({len(plan['unmapped_encoded'])}) — will go to _unmapped/:")
+            for k in plan["unmapped_encoded"]:
+                print(f"    - {k}")
+        print(f"  Remote branches to delete ({len(plan['branches_to_delete'])}):")
+        for b in plan["branches_to_delete"]:
+            print(f"    - {b}")
+
+        if not getattr(args, "confirm", False):
+            print()
+            print("[migrate-layout] Dry-run complete. Re-run with --confirm to execute.")
+            return
+
+        print()
+        print("[migrate-layout] Executing…")
+        _stop_gitfoam()
+        try:
+            commit_sha = memory_mirror_sync.force_reseed_main()
+            print(f"{_GREEN}[OK]{_RESET} force-pushed origin/main @ {commit_sha[:12]}")
+            deleted = memory_mirror_sync.delete_remote_branches(
+                plan["branches_to_delete"]
+            )
+            print(f"{_GREEN}[OK]{_RESET} deleted {deleted} remote branch(es)")
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} migration failed: {exc}", file=sys.stderr)
+            _start_gitfoam()  # restart anyway so we don't leave the daemon dead
+            sys.exit(1)
+        _start_gitfoam()
+        print(f"{_GREEN}[OK]{_RESET} migrate-layout complete. "
+              "gitfoam will republish gitfoam/<hostname>/main with the v3 layout on its next push.")
         return
 
     if action == "uninstall":
