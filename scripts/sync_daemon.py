@@ -1045,9 +1045,12 @@ def _run_daemon(poll_sec: int) -> None:
             try:
                 from hooks import config as _cfg
 
-                if (_cfg.MEMORY_MIRROR_MODE or "off").lower() != "off" and (
-                    _cfg.MEMORY_MIRROR_REMOTE or ""
-                ).strip():
+                _mm_role = (
+                    getattr(_cfg, "MEMORY_MIRROR_ROLE", None)
+                    or _cfg.MEMORY_MIRROR_MODE
+                    or "off"
+                ).lower()
+                if _mm_role != "off" and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
                     from scripts import memory_mirror_sync
 
                     memory_mirror_sync.tick()

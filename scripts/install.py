@@ -5050,9 +5050,10 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
             sys.exit(1)
         if not _cfg.MEMORY_MIRROR_ENABLED:
             print(
-                f"{_YELLOW}[WARN]{_RESET} MEMORY_MIRROR_ENABLED=false — "
-                "the sync daemon tick will no-op until you set it true."
+                f"{_YELLOW}[WARN]{_RESET} MEMORY_MIRROR_ROLE=off — "
+                "the sync daemon tick will no-op until you set a role."
             )
+        _role = (getattr(_cfg, "MEMORY_MIRROR_ROLE", "off") or "off").lower()
         # Probe the remote before doing anything else so "repo does not exist"
         # fails fast and loudly instead of silently after gitfoam is up.
         print(f"[memory-sync] Probing remote: {remote_url}")
@@ -5081,7 +5082,12 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        bin_ = _require_gitfoam()
+        # Consumers don't push, so they don't need gitfoam.
+        if _role == "consumer":
+            bin_ = None
+            print("[memory-sync] role=consumer — skipping gitfoam build/install/start.")
+        else:
+            bin_ = _require_gitfoam()
         mirror = memory_mirror_sync.ensure_mirror_repo()
         # Seed main BEFORE starting gitfoam — avoids racing with its force-push
         # loop on the machine branch. No-op if origin/main already exists.
@@ -5101,12 +5107,14 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 "to retry the seed.",
                 file=sys.stderr,
             )
-        # Register the mirror with gitfoam (idempotent)
-        _sp.run([bin_, "init", str(mirror)], check=False)
-        _start_gitfoam()
+        # Register the mirror with gitfoam (idempotent) — skip for consumer.
+        if bin_ is not None:
+            _sp.run([bin_, "init", str(mirror)], check=False)
+            _start_gitfoam()
         print(f"{_GREEN}[OK]{_RESET} memory-sync installed.")
         print(f"  Mirror:     {mirror}")
         print(f"  Remote:     {remote_url}")
+        print(f"  Role:       {_role}")
         print(f"  Mode:       {_cfg.MEMORY_MIRROR_MODE}")
         print(f"  Branch:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}/<hostname>/…")
         print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon (origin/main)")
@@ -5124,6 +5132,8 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
     if action == "status":
         bin_ = _gitfoam_bin()
         pid = _gitfoam_running()
+        role = (getattr(_cfg, "MEMORY_MIRROR_ROLE", "off") or "off").lower()
+        print(f"  role:       {role}")
         print(f"  mode:       {_cfg.MEMORY_MIRROR_MODE}")
         print(f"  remote:     {_cfg.MEMORY_MIRROR_REMOTE or '(unset)'}")
         print(f"  mirror:     {_cfg.MEMORY_MIRROR_DIR}")

@@ -197,22 +197,53 @@ CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
 # merge ONLY origin/main. Promotion is a PR via `agentihooks memory-sync
 # propose`. Scope: only ~/.claude/projects/*/memory/** (transcripts excluded).
 #
-# MEMORY_MIRROR_MODE:
-#   off               feature dormant (default)
-#   write             snapshot + gitfoam push + fetch main + merge
-#   write-local-only  snapshot + gitfoam push; no fetch/merge (air-gapped)
+# MEMORY_MIRROR_ROLE (v4 — tiered trust, preferred):
+#   off          feature dormant (default)
+#   consumer     fetch + consume main only (no snapshot, no gitfoam push)
+#   offline      snapshot + gitfoam push only (no fetch/merge; air-gapped)
+#   contributor  v3 default: snapshot + push + fetch + merge; manual PR to promote
+#   authority    single-leader: contributor pipeline + direct force-with-lease
+#                push to origin/main. EXACTLY ONE authority per fleet.
 #
-# Back-compat: legacy MEMORY_MIRROR_ENABLED=true (v1) is treated as write.
+# MEMORY_MIRROR_MODE (v3 legacy):
+#   off | write | write-local-only
+#   Derivation when ROLE is unset: write→contributor, write-local-only→offline,
+#   off→off. Legacy MEMORY_MIRROR_ENABLED=true (v1) → contributor.
 _memory_mirror_mode_raw = os.getenv("MEMORY_MIRROR_MODE", "").strip().lower()
+_memory_mirror_role_raw = os.getenv("MEMORY_MIRROR_ROLE", "").strip().lower()
 _memory_mirror_legacy_enabled = _env_bool("MEMORY_MIRROR_ENABLED", "false")
+
+_VALID_MEMORY_MIRROR_ROLES = frozenset(
+    {"off", "consumer", "offline", "contributor", "authority"}
+)
+if _memory_mirror_role_raw in _VALID_MEMORY_MIRROR_ROLES:
+    MEMORY_MIRROR_ROLE: str = _memory_mirror_role_raw
+elif _memory_mirror_mode_raw == "write":
+    MEMORY_MIRROR_ROLE = "contributor"
+elif _memory_mirror_mode_raw == "write-local-only":
+    MEMORY_MIRROR_ROLE = "offline"
+elif _memory_mirror_mode_raw == "off":
+    MEMORY_MIRROR_ROLE = "off"
+elif _memory_mirror_legacy_enabled:
+    MEMORY_MIRROR_ROLE = "contributor"
+else:
+    MEMORY_MIRROR_ROLE = "off"
+
+# Legacy MODE kept as a shadow for anything still reading it.
 if _memory_mirror_mode_raw in ("off", "write", "write-local-only"):
     MEMORY_MIRROR_MODE: str = _memory_mirror_mode_raw
-elif _memory_mirror_legacy_enabled:
+elif MEMORY_MIRROR_ROLE == "contributor":
+    MEMORY_MIRROR_MODE = "write"
+elif MEMORY_MIRROR_ROLE == "offline":
+    MEMORY_MIRROR_MODE = "write-local-only"
+elif MEMORY_MIRROR_ROLE in ("consumer", "authority"):
+    # No direct v3 equivalent — treat as write for any legacy callers that
+    # only check "is this machine active?".
     MEMORY_MIRROR_MODE = "write"
 else:
     MEMORY_MIRROR_MODE = "off"
 # Legacy alias kept so existing call sites (and operator scripts) don't break.
-MEMORY_MIRROR_ENABLED = MEMORY_MIRROR_MODE != "off"
+MEMORY_MIRROR_ENABLED = MEMORY_MIRROR_ROLE != "off"
 
 MEMORY_MIRROR_DIR: str = os.getenv(
     "MEMORY_MIRROR_DIR", str(Path(AGENTIHOOKS_HOME) / "memory-mirror")

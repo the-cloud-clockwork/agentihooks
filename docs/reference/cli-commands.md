@@ -433,7 +433,8 @@ agentihooks memory-sync <action> [--purge] [--auto-merge] [--idle-days N]
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MEMORY_MIRROR_MODE` | `off` | `off` / `write` / `write-local-only`. Legacy `MEMORY_MIRROR_ENABLED=true` maps to `write`. |
+| `MEMORY_MIRROR_ROLE` | `off` | v4 node role. `off` / `consumer` / `offline` / `contributor` / `authority`. Preferred over `MODE`. |
+| `MEMORY_MIRROR_MODE` | `off` | v3 legacy. `off` / `write` / `write-local-only`. Derived to `off` / `contributor` / `offline` when `ROLE` unset. Legacy `MEMORY_MIRROR_ENABLED=true` maps to `contributor`. |
 | `MEMORY_MIRROR_REMOTE` | *(unset)* | Git URL of the private mirror repo. **Required.** |
 | `MEMORY_MIRROR_DIR` | `~/.agentihooks/memory-mirror` | Local mirror directory (owned by agentihooks). |
 | `MEMORY_MIRROR_BRANCH_PREFIX` | `gitfoam` | Branch namespace; machine pushes to `<prefix>/<hostname>/main`. |
@@ -443,11 +444,21 @@ agentihooks memory-sync <action> [--purge] [--auto-merge] [--idle-days N]
 | `GITFOAM_BINARY` | `~/.cargo/bin/gitfoam` | Path to the gitfoam binary. |
 | `GITFOAM_LOCAL_SOURCE` | *(unset)* | Local gitfoam checkout; if set and binary missing, install runs `cargo install --path`. |
 
-### Modes
+### Roles (v4)
+
+Each node's behavior in the tick loop is determined by `MEMORY_MIRROR_ROLE`:
 
 - `off` — dormant (default)
-- `write` — snapshot + gitfoam push + fetch main + merge (normal fleet member)
-- `write-local-only` — snapshot + push only; no fetch / no merge (air-gapped contributor)
+- `consumer` — fetch + consume main only; no snapshot, no gitfoam push (read-only pods)
+- `offline` — snapshot + gitfoam push only; no fetch/merge (air-gapped contributors)
+- `contributor` — snapshot + push + fetch + merge; promote to main via `propose` (v3 default)
+- `authority` — contributor pipeline + direct `git push --force-with-lease` to `origin/main`. EXACTLY ONE per fleet.
+
+Consumers install without gitfoam — `agentihooks memory-sync install` skips
+the Rust build/daemon entirely when `ROLE=consumer`. `propose` and
+`sweep-branches` error out on non-contributor roles.
+
+Legacy `MEMORY_MIRROR_MODE` (v3): `write`→`contributor`, `write-local-only`→`offline`.
 
 ### Scope — memory only
 

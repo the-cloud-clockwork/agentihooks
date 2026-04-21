@@ -124,13 +124,75 @@ agentihooks memory-sync propose --auto-merge    # arm gh pr merge --auto --squas
 identical, it exits cleanly with "nothing to propose." Otherwise it opens a
 PR with a short log summary as the body.
 
-## Modes
+## Roles (v4 — tiered trust)
 
-| `MEMORY_MIRROR_MODE` | Behaviour |
-|----------------------|-----------|
-| `off` (default)      | Feature dormant. Tick no-ops. |
-| `write`              | Snapshot + gitfoam push + fetch main + merge. Normal fleet member. |
-| `write-local-only`   | Snapshot + gitfoam push. Never fetches or merges. For air-gapped contributors. |
+Each node declares its role via `MEMORY_MIRROR_ROLE`. The role determines what
+happens in the tick loop.
+
+| `MEMORY_MIRROR_ROLE` | Snapshot | gitfoam push | Fetch main | Consume main | Push main | Propose |
+|---|---|---|---|---|---|---|
+| `off` *(default)*    | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| `consumer`           | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `offline`            | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
+| `contributor`        | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ (manual) |
+| `authority`          | ✓ | ✓ | ✓ | ✓ | ✓ (force-with-lease) | — |
+
+**EXACTLY ONE authority per fleet.** Two authorities racing force-pushes will
+ping-pong on main; `--force-with-lease` prevents data loss but convergence
+slows. Enforce single-authority by operator convention — the code does not
+police it.
+
+**Consumer** pods on a deployment mount can safely read fleet memory without
+ever writing to main; they skip gitfoam entirely (no daemon to run, no branch
+to push).
+
+**Authority** is typically the operator's laptop — its writes go straight to
+`origin/main` on each tick (~60s), so peers pick them up without a PR.
+Contributors continue to open PRs as before; the authority's force-with-lease
+check makes those PR merges safe (if a peer PR lands between the authority's
+fetch and push, the lease is invalidated and the authority retries next tick).
+
+### Legacy `MEMORY_MIRROR_MODE` (v3, still honored)
+
+| Legacy MODE | Derived ROLE |
+|---|---|
+| `off`                | `off` |
+| `write`              | `contributor` |
+| `write-local-only`   | `offline` |
+| `MEMORY_MIRROR_ENABLED=true` (v1) | `contributor` |
+
+When both `ROLE` and `MODE` are set, `ROLE` wins.
+
+## Authority setup
+
+```bash
+# On the operator's laptop only:
+echo 'MEMORY_MIRROR_ROLE=authority' >> ~/.agentihooks/.env
+agentihooks memory-sync install   # idempotent — refreshes gitfoam/daemon
+agentihooks memory-sync status    # verify role: authority
+```
+
+Every ~60s the authority tick will:
+1. snapshot local memory into `by-project/<key>/`
+2. fetch `origin/main`
+3. merge peer changes into `~/.claude/projects/*/memory/`
+4. re-snapshot (picks up any `.conflict` siblings written in step 3)
+5. force-with-lease push the commit back to `origin/main`
+
+If a peer PR merged between steps 2 and 5, the lease check fails server-side,
+the tick logs `authority push lease invalidated`, and the next tick tries
+again.
+
+## Consumer setup
+
+```bash
+# On read-only pods / deployments:
+echo 'MEMORY_MIRROR_ROLE=consumer' >> ~/.agentihooks/.env
+agentihooks memory-sync install   # gitfoam build/install/start is skipped
+```
+
+The consumer daemon only ever calls `git fetch origin main` and merges into
+local memory. It never pushes.
 
 ## Housekeeping
 
