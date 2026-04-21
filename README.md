@@ -206,6 +206,13 @@ agentihooks mcp report                       # MCP surface area
 # Daemon
 agentihooks daemon start|stop|status|logs    # sync daemon
 
+# Memory mirror (cross-machine auto-memory sync — opt-in)
+agentihooks memory-sync install              # build gitfoam + init mirror + start daemon
+agentihooks memory-sync status               # config, binary path, PID
+agentihooks memory-sync sync-now             # one manual tick (snapshot + fetch + merge)
+agentihooks memory-sync start|stop           # gitfoam daemon lifecycle
+agentihooks memory-sync uninstall [--purge]  # stop daemon (+ optional mirror rm)
+
 # Utilities
 agentihooks ignore [path]                    # create .claudeignore
 agentihooks --list-profiles                  # available profiles
@@ -323,6 +330,69 @@ agentihooks init --local --profile coding    # override profile for this project
 ```
 
 Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` + `.claude/CLAUDE.local.md`.
+
+## Memory Mirror — cross-machine auto-memory sync
+
+Claude Code's auto-memory at `~/.claude/projects/<project>/memory/` is machine-local.
+This feature mirrors **only the `memory/` subtrees** across every machine in your
+fleet via a private GitHub repo. Transcripts, session JSONLs, and `ctx_refresh`
+snapshots are excluded by a unit-tested rsync filter.
+
+**How it works**
+
+```
+machine A                                         machine B
+─────────                                         ─────────
+~/.claude/projects/*/memory/                      ~/.claude/projects/*/memory/
+      │ rsync (memory-only)                             ▲ merge (.conflict sibling on divergence)
+      ▼                                                 │
+~/.agentihooks/memory-mirror/                     ~/.agentihooks/memory-mirror/
+      │ gitfoam push ~500ms                             │ git fetch every 60s
+      ▼                                                 │
+                    GitHub (private repo)
+                     gitfoam/<host>/main branches
+```
+
+Each machine pushes to its own branch (`gitfoam/<hostname>/main`) via
+[gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam) — a Rust daemon that
+force-pushes an orphan commit every 500ms with built-in secrets scanning.
+The agentihooks sync daemon pulls every other machine's branch on each tick
+and merges their memory into the local `~/.claude/projects/`.
+
+**Enable (three commands)**
+
+```bash
+echo 'MEMORY_MIRROR_ENABLED=true'                                >> ~/.agentihooks/.env
+echo 'MEMORY_MIRROR_REMOTE=git@github.com:YOU/claude-memory.git' >> ~/.agentihooks/.env
+agentihooks memory-sync install
+```
+
+**Verify**
+
+```bash
+agentihooks memory-sync status
+# enabled:   True
+# remote:    git@github.com:YOU/claude-memory.git
+# mirror:    /home/you/.agentihooks/memory-mirror
+# prefix:    gitfoam
+# interval:  60s
+# gitfoam:   /home/you/.cargo/bin/gitfoam
+# daemon:    running (PID 12345)
+```
+
+**Conflict handling**
+
+When two machines edit the same file between ticks, the merge step writes the
+remote version to `<name>.conflict-<host>-<epoch><ext>` next to the target — the
+local file is never overwritten. Resolve via `/memory`, delete the conflict
+file when done.
+
+**Opt-in, opt-out, purge**
+
+Nothing happens unless `MEMORY_MIRROR_ENABLED=true` and `MEMORY_MIRROR_REMOTE`
+is set. Rollback with `agentihooks memory-sync uninstall --purge`.
+
+Full guide: [docs/getting-started/memory-mirror.md](docs/getting-started/memory-mirror.md)
 
 ## Portability
 

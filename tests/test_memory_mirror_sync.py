@@ -14,6 +14,8 @@ from scripts import memory_mirror_sync as mm
 def test_rsync_filter_excludes_everything_but_memory():
     """Any leak of non-memory paths is a P0 bug."""
     assert mm.RSYNC_MEMORY_FILTER == [
+        "--filter=P /.git",
+        "--filter=P /.gitignore",
         "--prune-empty-dirs",
         "--include=*/",
         "--include=*/memory/",

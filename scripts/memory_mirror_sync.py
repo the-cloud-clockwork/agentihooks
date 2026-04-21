@@ -127,7 +127,11 @@ def ensure_mirror_repo() -> Path:
 # Applied relative to ~/.claude/projects/. Every path outside a */memory/
 # subtree is dropped by the final --exclude='*'. Transcripts, sessions,
 # ctx_refresh JSONs, and todos therefore never enter the mirror.
+# The leading protect-filter keeps the mirror's own .git/ dir alive across
+# --delete passes (rsync would otherwise wipe it because it's not in src).
 RSYNC_MEMORY_FILTER: list[str] = [
+    "--filter=P /.git",
+    "--filter=P /.gitignore",
     "--prune-empty-dirs",
     "--include=*/",
     "--include=*/memory/",
