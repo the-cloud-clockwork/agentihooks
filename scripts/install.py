@@ -4510,6 +4510,38 @@ def main() -> None:
     )
     daemon_p.add_argument("--foreground", action="store_true", help="Run in foreground (for debugging)")
 
+    # --- Memory mirror subcommand ---
+    memsync_p = sub.add_parser(
+        "memory-sync",
+        help="Manage cross-machine auto-memory sync (gitfoam push + git pull)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+actions:
+  install       build/verify gitfoam, init the mirror repo, start the daemon
+  start         start the gitfoam watch daemon on MEMORY_MIRROR_DIR
+  stop          stop the gitfoam daemon
+  status        show config, binary path, and daemon PID
+  sync-now      run one tick() manually (rsync in + fetch + merge)
+  uninstall     stop daemon (add --purge to also delete the mirror dir)
+
+env (see ~/.agentihooks/.env):
+  MEMORY_MIRROR_ENABLED, MEMORY_MIRROR_REMOTE, MEMORY_MIRROR_DIR,
+  MEMORY_MIRROR_BRANCH_PREFIX, MEMORY_MIRROR_INTERVAL_SEC,
+  GITFOAM_BINARY, GITFOAM_LOCAL_SOURCE
+""",
+    )
+    memsync_p.add_argument(
+        "action",
+        nargs="?",
+        default="status",
+        choices=["install", "start", "stop", "status", "sync-now", "uninstall"],
+    )
+    memsync_p.add_argument(
+        "--purge",
+        action="store_true",
+        help="(uninstall) Also remove the mirror directory on disk",
+    )
+
     # ── Token optimization CLI tools ──────────────────────────────────
     lint_p = sub.add_parser("lint-claude", help="Analyze CLAUDE.md token cost and suggest skill extraction")
     lint_p.add_argument("lint_path", nargs="?", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
@@ -4815,6 +4847,184 @@ notes:
         _cmd_refresh_rules(args)
     elif args.command == "sessions":
         _cmd_sessions(args)
+    elif args.command == "memory-sync":
+        _cmd_memory_sync(args)
+
+
+def _cmd_memory_sync(args: "argparse.Namespace") -> None:
+    """Manage the cross-machine memory mirror (gitfoam + git)."""
+    import subprocess as _sp
+
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks import config as _cfg
+    from scripts import memory_mirror_sync
+
+    pid_file = AGENTIHOOKS_STATE_DIR / "gitfoam.pid"
+    log_file = AGENTIHOOKS_STATE_DIR / "logs" / "gitfoam.log"
+    action = getattr(args, "action", None) or "status"
+
+    def _gitfoam_bin() -> str | None:
+        candidate = os.path.expanduser(_cfg.GITFOAM_BINARY or "")
+        if candidate and Path(candidate).is_file():
+            return candidate
+        return shutil.which("gitfoam")
+
+    def _require_gitfoam() -> str:
+        bin_ = _gitfoam_bin()
+        if bin_:
+            return bin_
+        src = (_cfg.GITFOAM_LOCAL_SOURCE or "").strip()
+        if not src or not Path(src).is_dir():
+            print(
+                f"{_RED}[ERROR]{_RESET} gitfoam not found. Install it or set "
+                "GITFOAM_LOCAL_SOURCE to a gitfoam checkout:",
+                file=sys.stderr,
+            )
+            print(
+                "  curl -fsSL https://raw.githubusercontent.com/"
+                "The-Cloud-Clock-Work/gitfoam/main/install.sh | sh",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        cargo = shutil.which("cargo")
+        if not cargo:
+            print(
+                f"{_RED}[ERROR]{_RESET} `cargo` not found — cannot build gitfoam from {src}.",
+                file=sys.stderr,
+            )
+            print("Install the Rust toolchain first: https://rustup.rs", file=sys.stderr)
+            sys.exit(1)
+        print(f"[memory-sync] Building gitfoam from {src} via cargo…")
+        result = _sp.run(["cargo", "install", "--path", src], check=False)
+        if result.returncode != 0:
+            print(
+                f"{_RED}[ERROR]{_RESET} cargo install failed (exit {result.returncode}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        bin_ = _gitfoam_bin()
+        if not bin_:
+            print(
+                f"{_RED}[ERROR]{_RESET} gitfoam not found after install — "
+                "check GITFOAM_BINARY / PATH.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return bin_
+
+    def _gitfoam_running() -> int | None:
+        if not pid_file.exists():
+            return None
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+            return pid
+        except (ProcessLookupError, ValueError, PermissionError):
+            pid_file.unlink(missing_ok=True)
+            return None
+
+    def _start_gitfoam() -> None:
+        running = _gitfoam_running()
+        if running:
+            print(f"[memory-sync] gitfoam daemon already running (PID {running}).")
+            return
+        bin_ = _require_gitfoam()
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_fd = open(log_file, "a")  # noqa: SIM115
+        proc = _sp.Popen(
+            [bin_, "daemon"],
+            stdout=log_fd,
+            stderr=log_fd,
+            start_new_session=True,
+        )
+        log_fd.close()
+        pid_file.write_text(str(proc.pid))
+        print(f"{_GREEN}[OK]{_RESET} gitfoam daemon started (PID {proc.pid}).")
+        print(f"  Logs: tail -f {log_file}")
+
+    def _stop_gitfoam() -> None:
+        pid = _gitfoam_running()
+        if not pid:
+            print("[memory-sync] gitfoam daemon not running.")
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print(f"[memory-sync] gitfoam daemon stopped (PID {pid}).")
+        except ProcessLookupError:
+            pass
+        pid_file.unlink(missing_ok=True)
+
+    if action == "install":
+        if not (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
+            print(
+                f"{_RED}[ERROR]{_RESET} MEMORY_MIRROR_REMOTE is not set in "
+                "~/.agentihooks/.env",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not _cfg.MEMORY_MIRROR_ENABLED:
+            print(
+                f"{_YELLOW}[WARN]{_RESET} MEMORY_MIRROR_ENABLED=false — "
+                "the sync daemon tick will no-op until you set it true."
+            )
+        bin_ = _require_gitfoam()
+        mirror = memory_mirror_sync.ensure_mirror_repo()
+        # Register the mirror with gitfoam (idempotent)
+        _sp.run([bin_, "init", str(mirror)], check=False)
+        _start_gitfoam()
+        print(f"{_GREEN}[OK]{_RESET} memory-sync installed.")
+        print(f"  Mirror:     {mirror}")
+        print(f"  Remote:     {_cfg.MEMORY_MIRROR_REMOTE}")
+        print(f"  Branch:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}/<hostname>/…")
+        print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon")
+        return
+
+    if action == "start":
+        _start_gitfoam()
+        return
+
+    if action == "stop":
+        _stop_gitfoam()
+        return
+
+    if action == "status":
+        bin_ = _gitfoam_bin()
+        pid = _gitfoam_running()
+        print(f"  enabled:   {_cfg.MEMORY_MIRROR_ENABLED}")
+        print(f"  remote:    {_cfg.MEMORY_MIRROR_REMOTE or '(unset)'}")
+        print(f"  mirror:    {_cfg.MEMORY_MIRROR_DIR}")
+        print(f"  prefix:    {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}")
+        print(f"  interval:  {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s")
+        print(f"  gitfoam:   {bin_ or '(not installed)'}")
+        print(
+            "  daemon:    "
+            + (f"running (PID {pid})" if pid else "not running")
+        )
+        return
+
+    if action == "sync-now":
+        try:
+            memory_mirror_sync.tick()
+            print(f"{_GREEN}[OK]{_RESET} Manual tick completed.")
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if action == "uninstall":
+        _stop_gitfoam()
+        mirror = Path(os.path.expanduser(_cfg.MEMORY_MIRROR_DIR))
+        if mirror.is_dir() and getattr(args, "purge", False):
+            shutil.rmtree(mirror, ignore_errors=True)
+            print(f"[memory-sync] Removed mirror directory {mirror}")
+        print(
+            f"{_GREEN}[OK]{_RESET} memory-sync uninstalled "
+            "(gitfoam binary left in place)."
+        )
+        return
+
+    print(f"Unknown memory-sync action: {action}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _cmd_sessions(args) -> None:
