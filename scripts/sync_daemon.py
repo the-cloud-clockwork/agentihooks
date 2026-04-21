@@ -1041,11 +1041,13 @@ def _run_daemon(poll_sec: int) -> None:
             except Exception:
                 pass  # broadcast module may not be importable in all envs
 
-            # Memory mirror tick — cross-machine auto-memory sync (opt-in)
+            # Memory mirror tick — cross-machine auto-memory sync (opt-in via MEMORY_MIRROR_MODE)
             try:
                 from hooks import config as _cfg
 
-                if _cfg.MEMORY_MIRROR_ENABLED and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
+                if (_cfg.MEMORY_MIRROR_MODE or "off").lower() != "off" and (
+                    _cfg.MEMORY_MIRROR_REMOTE or ""
+                ).strip():
                     from scripts import memory_mirror_sync
 
                     memory_mirror_sync.tick()

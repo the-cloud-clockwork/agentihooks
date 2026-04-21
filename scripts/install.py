@@ -4517,29 +4517,59 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 actions:
-  install       build/verify gitfoam, init the mirror repo, start the daemon
-  start         start the gitfoam watch daemon on MEMORY_MIRROR_DIR
-  stop          stop the gitfoam daemon
-  status        show config, binary path, and daemon PID
-  sync-now      run one tick() manually (rsync in + fetch + merge)
-  uninstall     stop daemon (add --purge to also delete the mirror dir)
+  install         build/verify gitfoam, seed main, init mirror, start daemon
+  start           start the gitfoam watch daemon on MEMORY_MIRROR_DIR
+  stop            stop the gitfoam daemon
+  status          show config, binary path, daemon PID, mode
+  sync-now        run one tick() manually (rsync in + fetch main + merge)
+  propose         open a PR from gitfoam/<host>/main → main via `gh pr create`
+                  (--auto-merge arms gh pr merge --auto --squash)
+  sweep-branches  delete remote branches already merged to main and idle
+                  longer than MEMORY_MIRROR_SWEEP_IDLE_DAYS (default 15)
+  uninstall       stop daemon (add --purge to also delete the mirror dir)
 
 env (see ~/.agentihooks/.env):
-  MEMORY_MIRROR_ENABLED, MEMORY_MIRROR_REMOTE, MEMORY_MIRROR_DIR,
-  MEMORY_MIRROR_BRANCH_PREFIX, MEMORY_MIRROR_INTERVAL_SEC,
-  GITFOAM_BINARY, GITFOAM_LOCAL_SOURCE
+  MEMORY_MIRROR_MODE         off | write | write-local-only (legacy:
+                             MEMORY_MIRROR_ENABLED=true → write)
+  MEMORY_MIRROR_REMOTE       git URL of the private mirror repo (required)
+  MEMORY_MIRROR_DIR          local mirror path (default ~/.agentihooks/memory-mirror)
+  MEMORY_MIRROR_BRANCH_PREFIX  branch namespace (default gitfoam)
+  MEMORY_MIRROR_INTERVAL_SEC   pull tick (default 60)
+  MEMORY_MIRROR_SWEEP_IDLE_DAYS  sweep threshold (default 15)
+  GITFOAM_BINARY               path to gitfoam (default ~/.cargo/bin/gitfoam)
+  GITFOAM_LOCAL_SOURCE         gitfoam checkout for `cargo install --path`
 """,
     )
     memsync_p.add_argument(
         "action",
         nargs="?",
         default="status",
-        choices=["install", "start", "stop", "status", "sync-now", "uninstall"],
+        choices=[
+            "install",
+            "start",
+            "stop",
+            "status",
+            "sync-now",
+            "propose",
+            "sweep-branches",
+            "uninstall",
+        ],
     )
     memsync_p.add_argument(
         "--purge",
         action="store_true",
         help="(uninstall) Also remove the mirror directory on disk",
+    )
+    memsync_p.add_argument(
+        "--auto-merge",
+        action="store_true",
+        help="(propose) Arm gh pr merge --auto --squash after creating the PR",
+    )
+    memsync_p.add_argument(
+        "--idle-days",
+        type=int,
+        default=None,
+        help="(sweep-branches) Override MEMORY_MIRROR_SWEEP_IDLE_DAYS (default 15)",
     )
 
     # ── Token optimization CLI tools ──────────────────────────────────
@@ -5044,14 +5074,34 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
             sys.exit(1)
         bin_ = _require_gitfoam()
         mirror = memory_mirror_sync.ensure_mirror_repo()
+        # Seed main BEFORE starting gitfoam — avoids racing with its force-push
+        # loop on the machine branch. No-op if origin/main already exists.
+        try:
+            seeded = memory_mirror_sync.seed_main()
+            if seeded:
+                print(f"{_GREEN}[OK]{_RESET} seeded origin/main from local memory.")
+            else:
+                print("[memory-sync] origin/main already exists; seed skipped.")
+        except Exception as seed_err:
+            print(
+                f"{_YELLOW}[WARN]{_RESET} seed_main failed: {seed_err}",
+                file=sys.stderr,
+            )
+            print(
+                "  Install will continue; you can re-run `memory-sync install` "
+                "to retry the seed.",
+                file=sys.stderr,
+            )
         # Register the mirror with gitfoam (idempotent)
         _sp.run([bin_, "init", str(mirror)], check=False)
         _start_gitfoam()
         print(f"{_GREEN}[OK]{_RESET} memory-sync installed.")
         print(f"  Mirror:     {mirror}")
         print(f"  Remote:     {remote_url}")
+        print(f"  Mode:       {_cfg.MEMORY_MIRROR_MODE}")
         print(f"  Branch:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}/<hostname>/…")
-        print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon")
+        print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon (origin/main)")
+        print("  Promote:    agentihooks memory-sync propose [--auto-merge]")
         return
 
     if action == "start":
@@ -5065,14 +5115,15 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
     if action == "status":
         bin_ = _gitfoam_bin()
         pid = _gitfoam_running()
-        print(f"  enabled:   {_cfg.MEMORY_MIRROR_ENABLED}")
-        print(f"  remote:    {_cfg.MEMORY_MIRROR_REMOTE or '(unset)'}")
-        print(f"  mirror:    {_cfg.MEMORY_MIRROR_DIR}")
-        print(f"  prefix:    {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}")
-        print(f"  interval:  {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s")
-        print(f"  gitfoam:   {bin_ or '(not installed)'}")
+        print(f"  mode:       {_cfg.MEMORY_MIRROR_MODE}")
+        print(f"  remote:     {_cfg.MEMORY_MIRROR_REMOTE or '(unset)'}")
+        print(f"  mirror:     {_cfg.MEMORY_MIRROR_DIR}")
+        print(f"  prefix:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}")
+        print(f"  interval:   {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s")
+        print(f"  sweep idle: {_cfg.MEMORY_MIRROR_SWEEP_IDLE_DAYS}d")
+        print(f"  gitfoam:    {bin_ or '(not installed)'}")
         print(
-            "  daemon:    "
+            "  daemon:     "
             + (f"running (PID {pid})" if pid else "not running")
         )
         return
@@ -5084,6 +5135,27 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         except Exception as exc:
             print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
             sys.exit(1)
+        return
+
+    if action == "propose":
+        try:
+            rc = memory_mirror_sync.propose_pr(
+                auto_merge=bool(getattr(args, "auto_merge", False))
+            )
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(rc)
+
+    if action == "sweep-branches":
+        try:
+            n = memory_mirror_sync.sweep_branches(
+                idle_days=getattr(args, "idle_days", None)
+            )
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"{_GREEN}[OK]{_RESET} swept {n} branch(es).")
         return
 
     if action == "uninstall":

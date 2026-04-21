@@ -191,12 +191,29 @@ CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
 
 # =============================================================================
-# MEMORY MIRROR — cross-machine auto-memory sync (gitfoam push / git pull)
+# MEMORY MIRROR — cross-machine auto-memory sync (gitfoam push / git pull main)
 # =============================================================================
-# Opt-in: set MEMORY_MIRROR_ENABLED=true + MEMORY_MIRROR_REMOTE=<git url>, then run
-#   agentihooks memory-sync install
-# Scope: only ~/.claude/projects/*/memory/** is mirrored (transcripts excluded).
-MEMORY_MIRROR_ENABLED = _env_bool("MEMORY_MIRROR_ENABLED", "false")
+# Each machine pushes to its own gitfoam/<hostname>/main branch; consumers
+# merge ONLY origin/main. Promotion is a PR via `agentihooks memory-sync
+# propose`. Scope: only ~/.claude/projects/*/memory/** (transcripts excluded).
+#
+# MEMORY_MIRROR_MODE:
+#   off               feature dormant (default)
+#   write             snapshot + gitfoam push + fetch main + merge
+#   write-local-only  snapshot + gitfoam push; no fetch/merge (air-gapped)
+#
+# Back-compat: legacy MEMORY_MIRROR_ENABLED=true (v1) is treated as write.
+_memory_mirror_mode_raw = os.getenv("MEMORY_MIRROR_MODE", "").strip().lower()
+_memory_mirror_legacy_enabled = _env_bool("MEMORY_MIRROR_ENABLED", "false")
+if _memory_mirror_mode_raw in ("off", "write", "write-local-only"):
+    MEMORY_MIRROR_MODE: str = _memory_mirror_mode_raw
+elif _memory_mirror_legacy_enabled:
+    MEMORY_MIRROR_MODE = "write"
+else:
+    MEMORY_MIRROR_MODE = "off"
+# Legacy alias kept so existing call sites (and operator scripts) don't break.
+MEMORY_MIRROR_ENABLED = MEMORY_MIRROR_MODE != "off"
+
 MEMORY_MIRROR_DIR: str = os.getenv(
     "MEMORY_MIRROR_DIR", str(Path(AGENTIHOOKS_HOME) / "memory-mirror")
 )
@@ -206,6 +223,7 @@ MEMORY_MIRROR_INTERVAL_SEC: int = int(os.getenv("MEMORY_MIRROR_INTERVAL_SEC", "6
 MEMORY_MIRROR_CLAUDE_PROJECTS: str = os.getenv(
     "MEMORY_MIRROR_CLAUDE_PROJECTS", str(Path.home() / ".claude" / "projects")
 )
+MEMORY_MIRROR_SWEEP_IDLE_DAYS: int = int(os.getenv("MEMORY_MIRROR_SWEEP_IDLE_DAYS", "15"))
 GITFOAM_BINARY: str = os.getenv("GITFOAM_BINARY", str(Path.home() / ".cargo" / "bin" / "gitfoam"))
 GITFOAM_LOCAL_SOURCE: str = os.getenv("GITFOAM_LOCAL_SOURCE", "")
 
