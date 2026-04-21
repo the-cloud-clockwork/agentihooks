@@ -4873,16 +4873,48 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         bin_ = _gitfoam_bin()
         if bin_:
             return bin_
+        # Neither GITFOAM_BINARY nor PATH has it. Show exactly what was checked.
+        checked_bin = os.path.expanduser(_cfg.GITFOAM_BINARY or "") or "(GITFOAM_BINARY unset)"
         src = (_cfg.GITFOAM_LOCAL_SOURCE or "").strip()
+        src_display = os.path.expanduser(src) if src else "(GITFOAM_LOCAL_SOURCE unset)"
         if not src or not Path(src).is_dir():
             print(
-                f"{_RED}[ERROR]{_RESET} gitfoam not found. Install it or set "
-                "GITFOAM_LOCAL_SOURCE to a gitfoam checkout:",
+                f"{_RED}[ERROR]{_RESET} gitfoam not found — agentihooks does "
+                "NOT download it automatically.",
+                file=sys.stderr,
+            )
+            print("  Checked binary path:  " + checked_bin, file=sys.stderr)
+            print("  Checked PATH:         shutil.which('gitfoam') returned None", file=sys.stderr)
+            print("  Checked local source: " + src_display, file=sys.stderr)
+            print("", file=sys.stderr)
+            print("  Fix by ONE of:", file=sys.stderr)
+            print(
+                "    (a) install gitfoam upstream:",
                 file=sys.stderr,
             )
             print(
-                "  curl -fsSL https://raw.githubusercontent.com/"
+                "        curl -fsSL https://raw.githubusercontent.com/"
                 "The-Cloud-Clock-Work/gitfoam/main/install.sh | sh",
+                file=sys.stderr,
+            )
+            print(
+                "    (b) clone gitfoam locally and point GITFOAM_LOCAL_SOURCE at it:",
+                file=sys.stderr,
+            )
+            print(
+                "        git clone git@github.com:The-Cloud-Clock-Work/gitfoam.git ~/dev/gitfoam",
+                file=sys.stderr,
+            )
+            print(
+                "        echo 'GITFOAM_LOCAL_SOURCE=~/dev/gitfoam' >> ~/.agentihooks/.env",
+                file=sys.stderr,
+            )
+            print(
+                "    (c) if the binary is already somewhere odd, set GITFOAM_BINARY:",
+                file=sys.stderr,
+            )
+            print(
+                "        echo 'GITFOAM_BINARY=/opt/tools/gitfoam' >> ~/.agentihooks/.env",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -4955,10 +4987,25 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         pid_file.unlink(missing_ok=True)
 
     if action == "install":
-        if not (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
+        remote_url = (_cfg.MEMORY_MIRROR_REMOTE or "").strip()
+        if not remote_url:
             print(
                 f"{_RED}[ERROR]{_RESET} MEMORY_MIRROR_REMOTE is not set in "
                 "~/.agentihooks/.env",
+                file=sys.stderr,
+            )
+            print("", file=sys.stderr)
+            print(
+                "  agentihooks does NOT create the GitHub repo. Fastest path:",
+                file=sys.stderr,
+            )
+            print(
+                "    gh repo create <org>/claude-memory-mirror --private --confirm",
+                file=sys.stderr,
+            )
+            print(
+                "    echo 'MEMORY_MIRROR_REMOTE=git@github.com:<org>/claude-memory-mirror.git' "
+                ">> ~/.agentihooks/.env",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -4967,6 +5014,34 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 f"{_YELLOW}[WARN]{_RESET} MEMORY_MIRROR_ENABLED=false — "
                 "the sync daemon tick will no-op until you set it true."
             )
+        # Probe the remote before doing anything else so "repo does not exist"
+        # fails fast and loudly instead of silently after gitfoam is up.
+        print(f"[memory-sync] Probing remote: {remote_url}")
+        probe = _sp.run(
+            ["git", "ls-remote", "--heads", remote_url],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if probe.returncode != 0:
+            print(
+                f"{_RED}[ERROR]{_RESET} cannot reach MEMORY_MIRROR_REMOTE:",
+                file=sys.stderr,
+            )
+            print(f"  {remote_url}", file=sys.stderr)
+            for line in (probe.stderr or "").strip().splitlines()[:6]:
+                print(f"  git: {line}", file=sys.stderr)
+            print("", file=sys.stderr)
+            print(
+                "  Common causes: repo doesn't exist yet, SSH key not "
+                "authorised, or wrong URL.",
+                file=sys.stderr,
+            )
+            print(
+                "  Create it:  gh repo create <org>/<name> --private --confirm",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         bin_ = _require_gitfoam()
         mirror = memory_mirror_sync.ensure_mirror_repo()
         # Register the mirror with gitfoam (idempotent)
@@ -4974,7 +5049,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         _start_gitfoam()
         print(f"{_GREEN}[OK]{_RESET} memory-sync installed.")
         print(f"  Mirror:     {mirror}")
-        print(f"  Remote:     {_cfg.MEMORY_MIRROR_REMOTE}")
+        print(f"  Remote:     {remote_url}")
         print(f"  Branch:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}/<hostname>/…")
         print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon")
         return
