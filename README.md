@@ -206,9 +206,11 @@ agentihooks mcp report                       # MCP surface area
 # Daemon
 agentihooks daemon start|stop|status|logs    # sync daemon
 
-# Memory mirror (cross-machine auto-memory sync — opt-in, PR-gated, by-project layout)
-agentihooks memory-sync install              # build gitfoam + seed main + init mirror + start daemon
-agentihooks memory-sync status               # mode, config, binary path, PID
+# Memory mirror (cross-machine auto-memory sync — opt-in, role-based, by-project layout)
+# Roles (v4): off / consumer / offline / contributor / authority.
+# Set MEMORY_MIRROR_ROLE in ~/.agentihooks/.env. One authority per fleet.
+agentihooks memory-sync install              # build gitfoam + seed main + init mirror + start daemon (skips gitfoam for consumer)
+agentihooks memory-sync status               # role, mode, config, binary path, PID
 agentihooks memory-sync sync-now             # one manual tick (snapshot + fetch main + merge)
 agentihooks memory-sync propose [--auto-merge]  # PR from gitfoam/<host>/main → main
 agentihooks memory-sync sweep-branches       # prune merged + idle branches (default 15d)

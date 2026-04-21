@@ -267,6 +267,7 @@ def test_merge_tree_writes_conflict_on_divergence(tmp_path, monkeypatch):
 
 def test_tick_noop_when_mode_off(monkeypatch):
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_MODE", "off")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_ROLE", "off")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@host:r.git")
 
     called = []
@@ -281,6 +282,7 @@ def test_tick_noop_when_mode_off(monkeypatch):
 
 def test_tick_write_mode_full_pipeline(monkeypatch):
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_MODE", "write")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_ROLE", "contributor")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@host:r.git")
 
     order = []
@@ -295,6 +297,7 @@ def test_tick_write_mode_full_pipeline(monkeypatch):
 
 def test_tick_write_local_only_skips_fetch_and_merge(monkeypatch):
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_MODE", "write-local-only")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_ROLE", "offline")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@host:r.git")
 
     order = []
@@ -309,6 +312,7 @@ def test_tick_write_local_only_skips_fetch_and_merge(monkeypatch):
 
 def test_tick_skips_when_remote_unset(monkeypatch, capsys):
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_MODE", "write")
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_ROLE", "contributor")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "")
     mm.tick()
     assert "MEMORY_MIRROR_REMOTE not set" in capsys.readouterr().out
@@ -667,6 +671,7 @@ def test_config_mode_defaults_off(monkeypatch):
 
     # Strip both the .env-loaded value and the shell env so we see the true default.
     monkeypatch.delenv("MEMORY_MIRROR_MODE", raising=False)
+    monkeypatch.delenv("MEMORY_MIRROR_ROLE", raising=False)
     monkeypatch.delenv("MEMORY_MIRROR_ENABLED", raising=False)
     # Prevent the module-level .env loader from re-setting these from ~/.agentihooks/*.env
     # by pointing AGENTIHOOKS_HOME at an empty tmp dir.
@@ -674,4 +679,229 @@ def test_config_mode_defaults_off(monkeypatch):
     Path("/tmp/__agentihooks_empty__").mkdir(parents=True, exist_ok=True)
     importlib.reload(cfg)
     assert cfg.MEMORY_MIRROR_MODE == "off"
+    assert cfg.MEMORY_MIRROR_ROLE == "off"
     assert cfg.MEMORY_MIRROR_ENABLED is False
+
+
+# ---------------------------------------------------------------------------
+# v4 — role derivation from legacy MODE / ENABLED, explicit ROLE wins.
+# ---------------------------------------------------------------------------
+
+
+def _reload_cfg_empty_home(monkeypatch, tmp_path):
+    """Reload hooks.config against an empty AGENTIHOOKS_HOME so the module-level
+    .env loader can't leak values from ~/.agentihooks/*.env into the test."""
+    from hooks import config as cfg
+
+    empty_home = tmp_path / "_ah_empty"
+    empty_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(empty_home))
+    importlib.reload(cfg)
+    return cfg
+
+
+def test_role_derives_from_legacy_mode_write(monkeypatch, tmp_path):
+    monkeypatch.delenv("MEMORY_MIRROR_ROLE", raising=False)
+    monkeypatch.delenv("MEMORY_MIRROR_ENABLED", raising=False)
+    monkeypatch.setenv("MEMORY_MIRROR_MODE", "write")
+    cfg = _reload_cfg_empty_home(monkeypatch, tmp_path)
+    assert cfg.MEMORY_MIRROR_ROLE == "contributor"
+    assert cfg.MEMORY_MIRROR_ENABLED is True
+
+
+def test_role_derives_from_legacy_mode_local_only(monkeypatch, tmp_path):
+    monkeypatch.delenv("MEMORY_MIRROR_ROLE", raising=False)
+    monkeypatch.delenv("MEMORY_MIRROR_ENABLED", raising=False)
+    monkeypatch.setenv("MEMORY_MIRROR_MODE", "write-local-only")
+    cfg = _reload_cfg_empty_home(monkeypatch, tmp_path)
+    assert cfg.MEMORY_MIRROR_ROLE == "offline"
+
+
+def test_role_derives_from_legacy_enabled_flag(monkeypatch, tmp_path):
+    monkeypatch.delenv("MEMORY_MIRROR_ROLE", raising=False)
+    monkeypatch.delenv("MEMORY_MIRROR_MODE", raising=False)
+    monkeypatch.setenv("MEMORY_MIRROR_ENABLED", "true")
+    cfg = _reload_cfg_empty_home(monkeypatch, tmp_path)
+    assert cfg.MEMORY_MIRROR_ROLE == "contributor"
+
+
+def test_role_explicit_wins_over_legacy(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEMORY_MIRROR_ROLE", "authority")
+    monkeypatch.setenv("MEMORY_MIRROR_MODE", "write-local-only")
+    cfg = _reload_cfg_empty_home(monkeypatch, tmp_path)
+    assert cfg.MEMORY_MIRROR_ROLE == "authority"
+
+
+def test_role_invalid_value_falls_back(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEMORY_MIRROR_ROLE", "banana")
+    monkeypatch.setenv("MEMORY_MIRROR_MODE", "write")
+    cfg = _reload_cfg_empty_home(monkeypatch, tmp_path)
+    # Invalid role → fall through to legacy MODE derivation.
+    assert cfg.MEMORY_MIRROR_ROLE == "contributor"
+
+
+# ---------------------------------------------------------------------------
+# v4 — tick() role dispatch.
+# ---------------------------------------------------------------------------
+
+
+def _patch_tick_hooks(monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(mm, "ensure_mirror_repo", lambda: order.append("ensure"))
+    monkeypatch.setattr(mm, "snapshot_in", lambda: order.append("snap"))
+    monkeypatch.setattr(mm, "fetch_remote", lambda: order.append("fetch"))
+    monkeypatch.setattr(mm, "consume_main", lambda: order.append("consume"))
+    monkeypatch.setattr(mm, "_authority_push_main",
+                        lambda: order.append("authority_push") or True)
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@host:r.git")
+    return order
+
+
+def test_tick_dispatch_off_role(monkeypatch):
+    order = _patch_tick_hooks(monkeypatch)
+    monkeypatch.setattr(mm, "_role", lambda: "off")
+    mm.tick()
+    assert order == []
+
+
+def test_tick_dispatch_consumer(monkeypatch):
+    order = _patch_tick_hooks(monkeypatch)
+    monkeypatch.setattr(mm, "_role", lambda: "consumer")
+    mm.tick()
+    assert order == ["ensure", "fetch", "consume"]
+    assert "snap" not in order
+    assert "authority_push" not in order
+
+
+def test_tick_dispatch_offline(monkeypatch):
+    order = _patch_tick_hooks(monkeypatch)
+    monkeypatch.setattr(mm, "_role", lambda: "offline")
+    mm.tick()
+    assert order == ["ensure", "snap"]
+
+
+def test_tick_dispatch_contributor(monkeypatch):
+    order = _patch_tick_hooks(monkeypatch)
+    monkeypatch.setattr(mm, "_role", lambda: "contributor")
+    mm.tick()
+    assert order == ["ensure", "snap", "fetch", "consume"]
+    assert "authority_push" not in order
+
+
+def test_tick_dispatch_authority(monkeypatch):
+    order = _patch_tick_hooks(monkeypatch)
+    monkeypatch.setattr(mm, "_role", lambda: "authority")
+    mm.tick()
+    # Authority re-snapshots after consume_main before pushing.
+    assert order == ["ensure", "snap", "fetch", "consume", "snap", "authority_push"]
+
+
+# ---------------------------------------------------------------------------
+# v4 — _authority_push_main: force-with-lease semantics.
+# ---------------------------------------------------------------------------
+
+
+def test_authority_push_uses_force_with_lease(monkeypatch, tmp_path):
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: tmp_path)
+    monkeypatch.setattr(mm, "_hostname", lambda: "laptop")
+
+    old_sha = "a" * 40
+    tree_sha = "b" * 40
+    commit_sha = "c" * 40
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1] == "refs/remotes/origin/main":
+            return subprocess.CompletedProcess(cmd, 0, old_sha, "")
+        if cmd[:2] == ["git", "write-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, tree_sha, "")
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1].endswith("^{tree}"):
+            # Different tree → push proceeds.
+            return subprocess.CompletedProcess(cmd, 0, "d" * 40, "")
+        if cmd[:2] == ["git", "commit-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, commit_sha, "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mm, "_run", fake_run)
+    assert mm._authority_push_main() is True
+
+    push_cmds = [c for c in calls if c[:2] == ["git", "push"]]
+    assert push_cmds, "expected a git push"
+    assert any(
+        f"--force-with-lease=main:{old_sha}" in c for c in push_cmds
+    ), f"force-with-lease refspec missing; push cmds: {push_cmds}"
+
+
+def test_authority_push_aborts_on_lease_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: tmp_path)
+    monkeypatch.setattr(mm, "_hostname", lambda: "laptop")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1] == "refs/remotes/origin/main":
+            return subprocess.CompletedProcess(cmd, 0, "a" * 40, "")
+        if cmd[:2] == ["git", "write-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, "b" * 40, "")
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1].endswith("^{tree}"):
+            return subprocess.CompletedProcess(cmd, 0, "d" * 40, "")
+        if cmd[:2] == ["git", "commit-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, "c" * 40, "")
+        if cmd[:2] == ["git", "push"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "stale info")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mm, "_run", fake_run)
+    # Must not raise; returns False so the next tick can retry.
+    assert mm._authority_push_main() is False
+
+
+def test_authority_push_noop_when_tree_matches_main(monkeypatch, tmp_path):
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: tmp_path)
+    monkeypatch.setattr(mm, "_hostname", lambda: "laptop")
+
+    same_tree = "b" * 40
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1] == "refs/remotes/origin/main":
+            return subprocess.CompletedProcess(cmd, 0, "a" * 40, "")
+        if cmd[:2] == ["git", "write-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, same_tree, "")
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1].endswith("^{tree}"):
+            return subprocess.CompletedProcess(cmd, 0, same_tree, "")
+        if cmd[:2] == ["git", "push"]:
+            raise AssertionError("push should not happen when tree is identical")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mm, "_run", fake_run)
+    assert mm._authority_push_main() is False
+
+
+def test_authority_push_skips_when_main_unseeded(monkeypatch, tmp_path):
+    monkeypatch.setattr(mm, "_mirror_dir", lambda: tmp_path)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"] and cmd[-1] == "refs/remotes/origin/main":
+            return subprocess.CompletedProcess(cmd, 128, "", "unknown revision")
+        raise AssertionError(f"should have bailed before {cmd}")
+
+    monkeypatch.setattr(mm, "_run", fake_run)
+    assert mm._authority_push_main() is False
+
+
+# ---------------------------------------------------------------------------
+# v4 — propose_pr / sweep_branches are gated to the right roles.
+# ---------------------------------------------------------------------------
+
+
+def test_propose_errors_out_for_non_contributor(monkeypatch, capsys):
+    monkeypatch.setattr(mm, "_role", lambda: "authority")
+    rc = mm.propose_pr()
+    assert rc == 2
+    assert "role=contributor" in capsys.readouterr().out
+
+
+def test_sweep_branches_errors_out_for_consumer(monkeypatch, capsys):
+    monkeypatch.setattr(mm, "_role", lambda: "consumer")
+    n = mm.sweep_branches()
+    assert n == 0
+    assert "consumer has no fleet branches" in capsys.readouterr().out

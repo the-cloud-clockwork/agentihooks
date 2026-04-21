@@ -93,6 +93,14 @@ def _mode() -> str:
     return (config.MEMORY_MIRROR_MODE or "off").lower()
 
 
+def _role() -> str:
+    """Resolved fleet role (v4). Always one of: off/consumer/offline/
+    contributor/authority. Derived in ``hooks/config.py`` from
+    ``MEMORY_MIRROR_ROLE`` with legacy fallback to ``MEMORY_MIRROR_MODE`` /
+    ``MEMORY_MIRROR_ENABLED``."""
+    return (getattr(config, "MEMORY_MIRROR_ROLE", "off") or "off").lower()
+
+
 # ---------------------------------------------------------------------------
 # Identity resolver — v3 core
 # ---------------------------------------------------------------------------
@@ -533,7 +541,20 @@ def _remote_slug() -> str | None:
 
 def propose_pr(auto_merge: bool = False) -> int:
     """Open a PR promoting the machine's tree into main via a proposal branch
-    rooted at origin/main. Returns 0 on success, 1 on noop, 2 on error."""
+    rooted at origin/main. Returns 0 on success, 1 on noop, 2 on error.
+
+    Non-contributor roles have nothing to promote:
+      - consumer/off: no local gitfoam branch exists
+      - offline: no remote tracking refs
+      - authority: pushes to main directly; PRs are redundant
+    """
+    role = _role()
+    if role != "contributor":
+        _log(
+            f"ERROR: propose requires role=contributor (current role={role}). "
+            "Consumer/offline/authority nodes do not open PRs."
+        )
+        return 2
     slug = _remote_slug()
     if not slug:
         _log("ERROR: MEMORY_MIRROR_REMOTE is not a github.com URL; cannot use `gh pr create`")
@@ -653,6 +674,11 @@ def propose_pr(auto_merge: bool = False) -> int:
 
 
 def sweep_branches(idle_days: int | None = None) -> int:
+    role = _role()
+    if role == "consumer":
+        _log("ERROR: sweep-branches requires role=contributor or authority "
+             "(consumer has no fleet branches to sweep).")
+        return 0
     if idle_days is None:
         idle_days = config.MEMORY_MIRROR_SWEEP_IDLE_DAYS
     cutoff = time.time() - (idle_days * 86400)
@@ -808,21 +834,129 @@ def plan_migrate_layout() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _authority_push_main() -> bool:
+    """Commit the current mirror tree on top of origin/main and push with
+    ``--force-with-lease``. Returns True if main advanced, False if the lease
+    was invalidated (peer PR landed since fetch) or nothing to push.
+
+    The lease refspec ``--force-with-lease=main:<OLD_SHA>`` tells the server:
+    "only accept this push if origin/main is still at OLD_SHA." If a peer
+    force-pushed (or the operator merged a PR) between our fetch and push,
+    the lease check fails server-side and we abort cleanly — the next tick
+    re-fetches and tries again.
+    """
+    mirror = _mirror_dir()
+    rev = _run(
+        ["git", "rev-parse", "refs/remotes/origin/main"],
+        cwd=mirror,
+        capture=True,
+        check=False,
+    )
+    old_sha = (rev.stdout or "").strip()
+    if not old_sha or rev.returncode != 0:
+        _log("authority: origin/main not seeded; skipping push")
+        return False
+
+    _run(["git", "add", "-A"], cwd=mirror)
+    tree_proc = _run(["git", "write-tree"], cwd=mirror, capture=True)
+    tree_sha = (tree_proc.stdout or "").strip()
+    if not tree_sha:
+        _log("authority: git write-tree produced empty SHA; skipping push")
+        return False
+
+    # If the tree is identical to origin/main's tree, nothing to push.
+    main_tree_proc = _run(
+        ["git", "rev-parse", f"{old_sha}^{{tree}}"],
+        cwd=mirror,
+        capture=True,
+        check=False,
+    )
+    if (main_tree_proc.stdout or "").strip() == tree_sha:
+        return False
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
+        "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
+        "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
+        "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local",
+    }
+    commit_proc = _run(
+        ["git", "commit-tree", tree_sha, "-p", old_sha,
+         "-m", f"authority: sync from {_hostname()} {ts}"],
+        cwd=mirror,
+        capture=True,
+        env=env,
+        check=False,
+    )
+    commit_sha = (commit_proc.stdout or "").strip()
+    if not commit_sha:
+        _log(f"authority: commit-tree failed: {(commit_proc.stderr or '').strip()}")
+        return False
+
+    _run(["git", "update-ref", "refs/heads/main", commit_sha],
+         cwd=mirror, check=False)
+
+    push_env = {**os.environ, "GIT_ALLOW_MAIN_PUSH": "1"}
+    push = _run(
+        ["git", "push",
+         f"--force-with-lease=main:{old_sha}",
+         "origin", "refs/heads/main:refs/heads/main"],
+        cwd=mirror,
+        capture=True,
+        check=False,
+        env=push_env,
+    )
+    if push.returncode != 0:
+        stderr = (push.stderr or "").strip()
+        _log(
+            "authority push lease invalidated (peer PR merged since fetch); "
+            f"will retry next tick: {stderr}"
+        )
+        return False
+    _log(f"authority pushed main @ {commit_sha[:12]}")
+    return True
+
+
 def tick() -> None:
-    """One cycle: mode-aware snapshot → fetch main → merge."""
-    mode = _mode()
-    if mode == "off":
+    """One cycle: role-aware snapshot / fetch / consume / push (v4).
+
+    Dispatch matrix:
+      off          no-op
+      consumer     fetch + consume only (no snapshot, no push)
+      offline      snapshot only (no fetch, no consume)
+      contributor  snapshot + fetch + consume (v3 default)
+      authority    snapshot + fetch + consume + re-snapshot + force-with-lease
+                   push to origin/main
+    """
+    role = _role()
+    if role == "off":
         return
     if not (config.MEMORY_MIRROR_REMOTE or "").strip():
         _log("SKIP: MEMORY_MIRROR_REMOTE not set")
         return
 
     ensure_mirror_repo()
-    snapshot_in()
-    if mode == "write-local-only":
+
+    if role == "consumer":
+        fetch_remote()
+        consume_main()
         return
+
+    snapshot_in()
+
+    if role == "offline":
+        return
+
     fetch_remote()
     consume_main()
+
+    if role == "authority":
+        # Re-snapshot so any .conflict siblings consume_main just wrote are
+        # included in the authoritative push.
+        snapshot_in()
+        _authority_push_main()
 
 
 def main() -> int:
