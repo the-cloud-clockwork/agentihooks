@@ -266,14 +266,20 @@ def ensure_mirror_repo() -> Path:
 
 
 def _prepare_layout_dirs(mirror: Path) -> None:
-    """Wipe and recreate ``by-project/`` and ``_unmapped/`` so each snapshot
-    has authoritative delete semantics per-key (removed local projects stop
-    appearing in the mirror). .git/ is untouched."""
-    for sub in ("by-project", "_unmapped"):
-        target = mirror / sub
-        if target.is_dir():
-            shutil.rmtree(target)
-        target.mkdir(parents=True, exist_ok=True)
+    """Wipe EVERYTHING in the mirror root except ``.git`` and recreate the
+    two managed subtrees. This makes each snapshot authoritative — stale
+    top-level dirs from legacy v2 layouts, old _unmapped buckets, or any
+    cruft from previous ticks disappear instead of being re-published by
+    ``git add -A``."""
+    for child in mirror.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    (mirror / "by-project").mkdir(parents=True, exist_ok=True)
+    (mirror / "_unmapped").mkdir(parents=True, exist_ok=True)
 
 
 def snapshot_in() -> None:

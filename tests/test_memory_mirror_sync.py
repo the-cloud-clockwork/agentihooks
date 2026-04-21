@@ -530,6 +530,7 @@ def test_remote_slug_non_github_returns_none(monkeypatch):
 
 
 def test_propose_pr_noop_when_no_diff(monkeypatch, capsys):
+    monkeypatch.setattr(mm, "_role", lambda: "contributor")
     monkeypatch.setattr(
         mm.config,
         "MEMORY_MIRROR_REMOTE",
@@ -551,6 +552,7 @@ def test_propose_pr_noop_when_no_diff(monkeypatch, capsys):
 def test_propose_pr_noop_when_tree_matches_main(monkeypatch, capsys):
     """Seed commits + gitfoam's push yield different SHAs but identical trees —
     don't open an empty PR."""
+    monkeypatch.setattr(mm, "_role", lambda: "contributor")
     monkeypatch.setattr(
         mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git"
     )
@@ -571,6 +573,7 @@ def test_propose_pr_noop_when_tree_matches_main(monkeypatch, capsys):
 
 
 def test_propose_pr_requires_gh_cli(monkeypatch, capsys):
+    monkeypatch.setattr(mm, "_role", lambda: "contributor")
     monkeypatch.setattr(
         mm.config,
         "MEMORY_MIRROR_REMOTE",
@@ -583,6 +586,7 @@ def test_propose_pr_requires_gh_cli(monkeypatch, capsys):
 
 
 def test_propose_pr_rejects_non_github_remote(monkeypatch, capsys):
+    monkeypatch.setattr(mm, "_role", lambda: "contributor")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@gitlab.com:x/y.git")
     rc = mm.propose_pr()
     assert rc == 2
