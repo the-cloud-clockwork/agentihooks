@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""agentihooks memory mirror — cross-machine auto-memory sync (v2).
+"""agentihooks memory mirror — cross-machine auto-memory sync (v3).
 
-Scope: ONLY ``~/.claude/projects/*/memory/`` subtrees. Transcripts,
-session JSONLs, ctx_refresh snapshots, todos, etc. are explicitly excluded
-by the rsync filter.
+Scope: ONLY ``~/.claude/projects/*/memory/`` subtrees. Transcripts, session
+JSONLs, and anything outside ``memory/`` are excluded by sourcing only the
+memory/ subdir per project.
 
-v2 topology (PR-gated fleet propagation):
-  push: rsync ~/.claude/projects/*/memory/ → MEMORY_MIRROR_DIR
-        (gitfoam force-pushes to origin/<prefix>/<hostname>/main every ~500ms)
-  pull: git fetch origin main → git archive origin/main | tar -x → temp staging
-        merge into ~/.claude/projects/ (new file → copy; divergent → write
-        <name>.conflict-<host>-<epoch><ext> sibling, never overwrite local).
+v3 topology — identity-keyed layout:
+  write: for each ~/.claude/projects/<encoded>/, resolve the identity
+         (repo / agent name) via reverse-walk of the filesystem + package
+         boundary detection (agent.yml > pyproject/Cargo/package.json/go.mod
+         > .git). rsync <encoded>/memory/ into MIRROR_DIR/by-project/<key>/memory/.
+         Unresolvable keys land in MIRROR_DIR/_unmapped/<encoded>/memory/.
+  push:  gitfoam force-pushes MIRROR_DIR to origin/gitfoam/<hostname>/main
+         every ~500ms.
+  pull:  git fetch origin main → git archive origin/main → tar -x → for
+         each staging/by-project/<key>/memory/, apply to EVERY local
+         ~/.claude/projects/<encoded>/memory/ that resolves to <key>.
+         Divergent local files get <name>.conflict-<host>-<epoch><ext>.
+  propose: build a proposal branch rooted at origin/main with gitfoam/<host>/main's
+         tree on top, open PR via `gh pr create`.
 
-Peer branches are NOT consumed directly anymore. Promotion to main happens
-via ``agentihooks memory-sync propose`` which opens a PR on GitHub.
-
-Usage (standalone, e.g. from cron as a fallback):
+Usage (standalone):
     python -m scripts.memory_mirror_sync
 
 The module is also driven every poll by ``sync_daemon._run_daemon``.
@@ -89,6 +94,121 @@ def _mode() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Identity resolver — v3 core
+# ---------------------------------------------------------------------------
+
+# Package / agent boundary markers. Lower priority number = wins over higher.
+MARKER_PRIORITY: list[tuple[str, int]] = [
+    ("agent.yml", 0),          # fleet-agent boundary (highest priority)
+    ("pyproject.toml", 1),     # Python package
+    ("Cargo.toml", 1),         # Rust crate
+    ("package.json", 1),       # Node package
+    ("go.mod", 1),             # Go module
+    (".git", 2),               # repo root (fallback)
+]
+
+
+def _decode_encoded_path(encoded: str, root: Path = Path("/")) -> Path | None:
+    """Reverse-walk the filesystem to recover the real path that produced a
+    Claude project directory name.
+
+    The encoding replaces every ``/`` with ``-``. Directory names may
+    themselves contain ``-`` (``tccw-ecosystem``, ``tccw-toolbelt``), so we
+    try to consume 1 segment, then 2, then 3, etc. at each level, matching
+    against what actually exists on disk. Backtracks on dead ends.
+    Returns ``None`` if the encoded path cannot be resolved.
+    """
+    parts = encoded.lstrip("-").split("-")
+    if not parts or parts == [""]:
+        return None
+
+    def walk(i: int, cur: Path) -> Path | None:
+        if i >= len(parts):
+            return cur
+        for end in range(i + 1, len(parts) + 1):
+            name = "-".join(parts[i:end])
+            nxt = cur / name
+            if nxt.is_dir():
+                found = walk(end, nxt)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(0, root)
+
+
+def _package_boundary(real_path: Path) -> tuple[Path, str] | None:
+    """Walk up from *real_path* looking for package / agent boundary markers.
+    Returns ``(boundary_dir, marker_name)`` or ``None``.
+
+    Stops at the first ``.git`` ancestor (does not cross repo boundaries).
+    Among all candidates collected along the walk, picks the one with the
+    lowest priority number; ties broken by smallest distance from
+    *real_path*.
+    """
+    candidates: list[tuple[int, int, Path, str]] = []
+    cur = real_path
+    distance = 0
+    while True:
+        best_here: tuple[int, str] | None = None
+        for marker, prio in MARKER_PRIORITY:
+            path = cur / marker
+            exists = path.exists() if marker == ".git" else path.is_file()
+            if exists:
+                if best_here is None or prio < best_here[0]:
+                    best_here = (prio, marker)
+        if best_here is not None:
+            candidates.append((best_here[0], distance, cur, best_here[1]))
+        if (cur / ".git").exists():
+            break  # do not cross repo root
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+        distance += 1
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]))
+    _, _, path, marker = candidates[0]
+    return path, marker
+
+
+def _identity_key(encoded: str) -> tuple[str, str]:
+    """Resolve ``encoded`` to an identity key.
+    Returns ``(key, status)`` where status is ``"ok"`` or ``"unmapped"``.
+
+    ``ok``: ``key`` is ``basename()`` of the resolved package/agent boundary.
+    ``unmapped``: ``key`` is the original encoded string (fallback bucket).
+    """
+    real = _decode_encoded_path(encoded)
+    if real is None:
+        return (encoded, "unmapped")
+    boundary = _package_boundary(real)
+    if boundary is None:
+        return (encoded, "unmapped")
+    return (boundary[0].name, "ok")
+
+
+def _identity_map() -> dict[str, list[str]]:
+    """Walk ``~/.claude/projects/*/`` and group encoded dirs by identity key.
+    Unresolvable dirs land under pseudo-keys ``_unmapped/<encoded>``.
+    """
+    projects = _claude_projects()
+    out: dict[str, list[str]] = {}
+    if not projects.is_dir():
+        return out
+    for child in projects.iterdir():
+        if not child.is_dir():
+            continue
+        key, status = _identity_key(child.name)
+        if status == "unmapped":
+            key = f"_unmapped/{child.name}"
+        out.setdefault(key, []).append(child.name)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
 
@@ -133,27 +253,24 @@ def ensure_mirror_repo() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Push-side snapshot — memory-only rsync filter
+# Push-side snapshot — v3 by-project layout
 # ---------------------------------------------------------------------------
 
-# Applied relative to ~/.claude/projects/. Every path outside a */memory/
-# subtree is dropped by the final --exclude='*'. Transcripts, sessions,
-# ctx_refresh JSONs, and todos therefore never enter the mirror.
-# The leading protect-filter keeps the mirror's own .git/ dir alive across
-# --delete passes (rsync would otherwise wipe it because it's not in src).
-RSYNC_MEMORY_FILTER: list[str] = [
-    "--filter=P /.git",
-    "--filter=P /.gitignore",
-    "--prune-empty-dirs",
-    "--include=*/",
-    "--include=*/memory/",
-    "--include=*/memory/**",
-    "--exclude=*",
-]
+
+def _prepare_layout_dirs(mirror: Path) -> None:
+    """Wipe and recreate ``by-project/`` and ``_unmapped/`` so each snapshot
+    has authoritative delete semantics per-key (removed local projects stop
+    appearing in the mirror). .git/ is untouched."""
+    for sub in ("by-project", "_unmapped"):
+        target = mirror / sub
+        if target.is_dir():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
 
 
 def snapshot_in() -> None:
-    """rsync ~/.claude/projects/*/memory/ → MEMORY_MIRROR_DIR/"""
+    """Per-project rsync: ~/.claude/projects/<encoded>/memory/ →
+    MIRROR/by-project/<identity>/memory/ (or _unmapped/<encoded>/memory/)."""
     src = _claude_projects()
     if not src.is_dir():
         _log(f"SKIP snapshot: {src} does not exist")
@@ -161,20 +278,34 @@ def snapshot_in() -> None:
 
     mirror = _mirror_dir()
     mirror.mkdir(parents=True, exist_ok=True)
+    _prepare_layout_dirs(mirror)
 
-    cmd = [
-        "rsync",
-        "-a",
-        "--delete",
-        *RSYNC_MEMORY_FILTER,
-        f"{src}/",
-        f"{mirror}/",
-    ]
-    _run(cmd)
+    id_map = _identity_map()
+    copied = 0
+    for key, encoded_dirs in id_map.items():
+        if key.startswith("_unmapped/"):
+            dest = mirror / key  # mirror/_unmapped/<encoded>
+        else:
+            dest = mirror / "by-project" / key
+        mem_dest = dest / "memory"
+        for encoded in encoded_dirs:
+            source_memory = src / encoded / "memory"
+            if not source_memory.is_dir():
+                continue
+            mem_dest.mkdir(parents=True, exist_ok=True)
+            _run([
+                "rsync",
+                "-a",
+                f"{source_memory}/",
+                f"{mem_dest}/",
+            ])
+            copied += 1
+    _log(f"snapshot: mirrored memory for {copied} project(s) into "
+         f"{len(id_map)} identity bucket(s)")
 
 
 # ---------------------------------------------------------------------------
-# Seed — push initial main commit on first install
+# Seed — first-install push of main
 # ---------------------------------------------------------------------------
 
 
@@ -186,62 +317,75 @@ def _remote_has_main() -> bool:
         capture=True,
         check=False,
     )
-    return probe.returncode == 0 and "refs/heads/main" in (probe.stdout or "")
-
-
-def seed_main() -> bool:
-    """If origin/main does not exist yet, create it from the current local
-    snapshot. Returns True if a seed commit was pushed, False otherwise.
-
-    Uses commit-tree + update-ref so it never touches gitfoam's branch or
-    the working tree's checked-out ref — avoids racing with the gitfoam
-    daemon (which force-pushes to gitfoam/<host>/main every 500ms).
-    """
-    ensure_mirror_repo()
-    if _remote_has_main():
+    if probe.returncode != 0:
         return False
+    # ls-remote prints `<sha> refs/heads/main`. Must match the FULL ref.
+    for line in (probe.stdout or "").splitlines():
+        parts = line.strip().split()
+        if len(parts) == 2 and parts[1] == "refs/heads/main":
+            return True
+    return False
 
-    snapshot_in()
-    mirror = _mirror_dir()
 
-    # Stage the snapshot so git write-tree sees it.
+def _commit_current_tree(mirror: Path, *, parents: list[str], message: str) -> str:
+    """Stage everything in *mirror*, write a tree, commit it with *parents*
+    and *message*. Returns the commit SHA."""
     _run(["git", "add", "-A"], cwd=mirror)
     tree_proc = _run(["git", "write-tree"], cwd=mirror, capture=True)
     tree_sha = (tree_proc.stdout or "").strip()
     if not tree_sha:
-        raise RuntimeError("git write-tree produced empty SHA during seed")
-
-    msg = f"seed main from {_hostname()}"
-    env = {**os.environ, "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
+        raise RuntimeError("git write-tree produced empty SHA")
+    env = {**os.environ,
+           "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
            "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
            "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
            "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local"}
-    commit_proc = _run(
-        ["git", "commit-tree", tree_sha, "-m", msg],
-        cwd=mirror,
-        capture=True,
-        env=env,
-    )
+    cmd = ["git", "commit-tree", tree_sha]
+    for p in parents:
+        cmd += ["-p", p]
+    cmd += ["-m", message]
+    commit_proc = _run(cmd, cwd=mirror, capture=True, env=env)
     commit_sha = (commit_proc.stdout or "").strip()
     if not commit_sha:
-        raise RuntimeError("git commit-tree produced empty SHA during seed")
+        raise RuntimeError("git commit-tree produced empty SHA")
+    return commit_sha
 
+
+def _push_main(commit_sha: str, *, force: bool = False) -> None:
+    mirror = _mirror_dir()
     _run(["git", "update-ref", "refs/heads/main", commit_sha], cwd=mirror)
-    # The memory-mirror is a data repo, not a code repo — the operator's
-    # main-prod-lockdown OS hook is a guard for agentihooks/agenticore/antoncore
-    # code repos. Bypass it for THIS single seed push only.
     push_env = {**os.environ, "GIT_ALLOW_MAIN_PUSH": "1"}
+    refspec = f"{'+' if force else ''}refs/heads/main:refs/heads/main"
     _run(
-        ["git", "push", "origin", "refs/heads/main:refs/heads/main"],
+        ["git", "push", "origin", refspec],
         cwd=mirror,
         env=push_env,
     )
+
+
+def seed_main() -> bool:
+    """If origin/main doesn't exist, create it from the current local snapshot.
+    Returns True if a seed commit was pushed.
+
+    Uses commit-tree + update-ref + bypass of the operator's main-prod-lockdown
+    hook (memory-mirror is a data repo, not a code repo)."""
+    ensure_mirror_repo()
+    if _remote_has_main():
+        return False
+    snapshot_in()
+    mirror = _mirror_dir()
+    commit_sha = _commit_current_tree(
+        mirror,
+        parents=[],
+        message=f"seed main from {_hostname()}",
+    )
+    _push_main(commit_sha)
     _log(f"seeded origin/main @ {commit_sha[:12]}")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Pull-side consume — ORIGIN/MAIN ONLY (v2)
+# Pull-side consume — v3 by-project layout
 # ---------------------------------------------------------------------------
 
 
@@ -280,7 +424,6 @@ def _files_equal(a: Path, b: Path) -> bool:
 
 
 def _conflict_filename(target: Path) -> Path:
-    """Produce <name>.conflict-<host>-<epoch><ext> next to *target*."""
     ts = int(time.time())
     host = _hostname()
     stem = target.stem or "memory"
@@ -290,7 +433,7 @@ def _conflict_filename(target: Path) -> Path:
 
 def _merge_tree(staging: Path, target: Path) -> None:
     """Merge staging → target. Byte-level conflict writes a sibling
-    .conflict-<host>-<epoch><ext> file; the original is never overwritten."""
+    .conflict-<host>-<epoch><ext>; the original is never overwritten."""
     if not staging.is_dir():
         return
     for src_file in staging.rglob("*"):
@@ -310,10 +453,10 @@ def _merge_tree(staging: Path, target: Path) -> None:
 
 
 def consume_main() -> None:
-    """Archive origin/main into a temp tree and merge into ~/.claude/projects/.
+    """Archive origin/main into a temp tree and merge each by-project/<key>/
+    bucket into EVERY local encoded dir that resolves to <key>.
 
-    Noop if origin/main has not been fetched yet (fresh install before first
-    seed from any machine)."""
+    Noop if origin/main absent or by-project/ missing."""
     mirror = _mirror_dir()
     if not (mirror / ".git").is_dir():
         return
@@ -321,8 +464,8 @@ def consume_main() -> None:
         _log("SKIP consume: origin/main not present yet (run `memory-sync install` to seed)")
         return
 
-    target = _claude_projects()
-    target.mkdir(parents=True, exist_ok=True)
+    target_root = _claude_projects()
+    target_root.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="agentihooks-mm-") as tmp:
         staging = Path(tmp)
@@ -340,9 +483,32 @@ def consume_main() -> None:
         extract.communicate()
         archive.wait()
         if extract.returncode != 0 or archive.returncode != 0:
-            _log("archive/extract failed for origin/main (skipping)")
+            _log("archive/extract failed for origin/main")
             return
-        _merge_tree(staging, target)
+
+        by_proj = staging / "by-project"
+        if not by_proj.is_dir():
+            _log("origin/main has no by-project/ tree yet — nothing to consume")
+            return
+
+        id_map = _identity_map()
+        merged = 0
+        for key_dir in by_proj.iterdir():
+            if not key_dir.is_dir():
+                continue
+            key = key_dir.name
+            mem = key_dir / "memory"
+            if not mem.is_dir():
+                continue
+            local_encodeds = id_map.get(key, [])
+            if not local_encodeds:
+                continue  # no local project resolves to this identity
+            for encoded in local_encodeds:
+                local_memory = target_root / encoded / "memory"
+                local_memory.mkdir(parents=True, exist_ok=True)
+                _merge_tree(mem, local_memory)
+                merged += 1
+        _log(f"consume: merged main into {merged} local project memory dir(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -351,12 +517,9 @@ def consume_main() -> None:
 
 
 def _remote_slug() -> str | None:
-    """Derive <owner>/<repo> from MEMORY_MIRROR_REMOTE if it looks like a
-    GitHub SSH or HTTPS URL."""
     url = (config.MEMORY_MIRROR_REMOTE or "").strip()
     if not url:
         return None
-    # git@github.com:owner/repo(.git)?
     if url.startswith("git@github.com:"):
         slug = url[len("git@github.com:"):]
     elif url.startswith("https://github.com/"):
@@ -369,15 +532,8 @@ def _remote_slug() -> str | None:
 
 
 def propose_pr(auto_merge: bool = False) -> int:
-    """Open a PR proposing the current machine's memory tree into main.
-
-    gitfoam writes ORPHAN commits (no parent) on gitfoam/<host>/main, so that
-    ref has no common ancestor with main — gh pr create would fail. We build
-    a "proposal branch" rooted at origin/main with the machine's tree as a
-    single commit on top, push it, and open the PR against that branch.
-
-    Returns 0 on success, 1 on noop (no tree diff), 2 on error.
-    """
+    """Open a PR promoting the machine's tree into main via a proposal branch
+    rooted at origin/main. Returns 0 on success, 1 on noop, 2 on error."""
     slug = _remote_slug()
     if not slug:
         _log("ERROR: MEMORY_MIRROR_REMOTE is not a github.com URL; cannot use `gh pr create`")
@@ -390,7 +546,6 @@ def propose_pr(auto_merge: bool = False) -> int:
     host_branch = _self_branch()
     _run(["git", "fetch", "--prune", "origin"], cwd=mirror, check=False)
 
-    # Tree-level equality check — noop if gitfoam branch has same tree as main.
     diff = _run(
         ["git", "diff", "--quiet", "origin/main", f"refs/remotes/origin/{host_branch}"],
         cwd=mirror,
@@ -400,7 +555,6 @@ def propose_pr(auto_merge: bool = False) -> int:
         _log(f"{host_branch} has same tree as main — nothing to propose")
         return 1
 
-    # Extract the tree SHA of the host branch.
     rev = _run(
         ["git", "rev-parse", f"refs/remotes/origin/{host_branch}^{{tree}}"],
         cwd=mirror,
@@ -456,18 +610,13 @@ def propose_pr(auto_merge: bool = False) -> int:
         _log(f"ERROR: failed to push {proposal_branch}: {(push.stderr or '').strip()}")
         return 2
 
-    body_lines = [
+    body = "\n".join([
         f"Promote memory tree from `{host_branch}` → `main`.",
         "",
         f"Host:  `{_hostname()}`",
         f"Tree:  `{tree_sha[:12]}`",
         f"Based: `{main_sha[:12]}` (origin/main)",
-        "",
-        "Review the file diff below. This proposal is a single commit that "
-        "replaces/adds memory files on top of main.",
-    ]
-    body = "\n".join(body_lines)
-
+    ])
     create = _run(
         ["gh", "pr", "create",
          "--repo", slug,
@@ -504,9 +653,6 @@ def propose_pr(auto_merge: bool = False) -> int:
 
 
 def sweep_branches(idle_days: int | None = None) -> int:
-    """Delete remote branches matching <prefix>/* that are already merged into
-    main AND whose last commit is older than *idle_days*. Returns the count
-    of branches deleted."""
     if idle_days is None:
         idle_days = config.MEMORY_MIRROR_SWEEP_IDLE_DAYS
     cutoff = time.time() - (idle_days * 86400)
@@ -544,7 +690,7 @@ def sweep_branches(idle_days: int | None = None) -> int:
         except ValueError:
             continue
         if committed_at > cutoff:
-            continue  # too fresh
+            continue
         ancestor = _run(
             ["git", "merge-base", "--is-ancestor",
              full_ref, "refs/remotes/origin/main"],
@@ -552,7 +698,7 @@ def sweep_branches(idle_days: int | None = None) -> int:
             check=False,
         )
         if ancestor.returncode != 0:
-            continue  # unmerged, leave it
+            continue
         push = _run(
             ["git", "push", "origin", "--delete", short],
             cwd=mirror,
@@ -568,17 +714,102 @@ def sweep_branches(idle_days: int | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Migrate layout — one-off rewrite to v3 layout
+# ---------------------------------------------------------------------------
+
+
+def list_non_main_remote_branches() -> list[str]:
+    """Return all remote branches except main/HEAD."""
+    mirror = _mirror_dir()
+    _run(["git", "fetch", "--prune", "origin"], cwd=mirror, check=False)
+    proc = _run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/"],
+        cwd=mirror,
+        capture=True,
+        check=False,
+    )
+    out: list[str] = []
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("origin/"):
+            continue
+        short = line[len("origin/"):]
+        if short in ("main", "HEAD"):
+            continue
+        out.append(short)
+    return out
+
+
+def delete_remote_branches(branches: list[str]) -> int:
+    """Delete remote branches. Returns count of successful deletes."""
+    if not branches:
+        return 0
+    mirror = _mirror_dir()
+    deleted = 0
+    for b in branches:
+        push = _run(
+            ["git", "push", "origin", "--delete", b],
+            cwd=mirror,
+            capture=True,
+            check=False,
+        )
+        if push.returncode == 0:
+            _log(f"deleted origin/{b}")
+            deleted += 1
+        else:
+            _log(f"failed to delete {b}: {(push.stderr or '').strip()}")
+    return deleted
+
+
+def force_reseed_main() -> str:
+    """Wipe the local mirror working tree contents (not .git), re-snapshot,
+    and force-push a fresh main. Returns the new commit SHA."""
+    mirror = _mirror_dir()
+    # Wipe everything except .git
+    for child in mirror.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    # Clear the index so `git add -A` picks up a fresh state
+    _run(["git", "read-tree", "--empty"], cwd=mirror, check=False)
+
+    snapshot_in()
+    commit_sha = _commit_current_tree(
+        mirror,
+        parents=[],
+        message=f"layout: migrate to by-project/<key>/ v3 from {_hostname()}",
+    )
+    _push_main(commit_sha, force=True)
+    return commit_sha
+
+
+def plan_migrate_layout() -> dict:
+    """Produce a dry-run plan showing what migrate_layout would do."""
+    mirror = _mirror_dir()
+    ensure_mirror_repo()
+    branches = list_non_main_remote_branches()
+    id_map = _identity_map()
+    ok_keys = {k: v for k, v in id_map.items() if not k.startswith("_unmapped/")}
+    unmapped_keys = {k: v for k, v in id_map.items() if k.startswith("_unmapped/")}
+    return {
+        "mirror": str(mirror),
+        "branches_to_delete": branches,
+        "identities": sorted(ok_keys.keys()),
+        "unmapped_encoded": [k.split("/", 1)[1] for k in sorted(unmapped_keys.keys())],
+        "local_projects": sum(len(v) for v in id_map.values()),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
 
 def tick() -> None:
-    """One cycle: (mode-aware) snapshot → fetch main → merge.
-
-    - off             → noop
-    - write           → snapshot + fetch main + consume main
-    - write-local-only → snapshot only (no fetch / no merge)
-    """
+    """One cycle: mode-aware snapshot → fetch main → merge."""
     mode = _mode()
     if mode == "off":
         return

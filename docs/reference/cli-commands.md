@@ -426,6 +426,7 @@ agentihooks memory-sync <action> [--purge] [--auto-merge] [--idle-days N]
 | `sync-now` | Run one `tick()` manually (rsync in + git fetch main + merge) |
 | `propose` | Open a PR from `gitfoam/<hostname>/main` → `main` via `gh pr create`. `--auto-merge` arms `gh pr merge --auto --squash`. |
 | `sweep-branches` | Delete remote branches already merged to main + idle > `MEMORY_MIRROR_SWEEP_IDLE_DAYS` |
+| `migrate-layout` | One-off: rewrite `origin/main` to the v3 `by-project/<key>/` layout from the machine's current identity map. Dry-run by default; `--confirm` executes. Also deletes all `gitfoam/*` and `proposal/*` branches to clear the old layout. |
 | `uninstall` | Stop daemon (add `--purge` to also remove the mirror directory) |
 
 ### Environment variables
@@ -450,10 +451,26 @@ agentihooks memory-sync <action> [--purge] [--auto-merge] [--idle-days N]
 
 ### Scope — memory only
 
-A unit-tested rsync filter (`scripts/memory_mirror_sync.RSYNC_MEMORY_FILTER`)
-matches only `*/memory/**` subtrees. Transcripts (`*.jsonl`), `ctx_refresh_*.json`,
-`todos/`, and `tool-results/` are dropped. The mirror's own `.git/` is protected
-from `--delete` by a `--filter=P /.git` rule.
+The snapshot rsync sources only `<encoded>/memory/` per project, so transcripts
+(`*.jsonl`), `ctx_refresh_*.json`, `todos/`, and `tool-results/` are never even
+visible to the mirror. Each project's memory lands at
+`by-project/<identity-key>/memory/` (or `_unmapped/<encoded>/memory/` for
+unresolvable paths).
+
+### Identity resolution (v3)
+
+For each `~/.claude/projects/<encoded>/` dir, the resolver:
+
+1. **Decodes** the encoded name back to a real filesystem path by greedy-walking
+   (handles hyphenated directory names like `tccw-toolbelt` correctly).
+2. **Walks up** from that path looking for a package/agent boundary marker in
+   this priority order:
+   - `agent.yml` (fleet agent boundary — highest)
+   - `pyproject.toml` / `Cargo.toml` / `package.json` / `go.mod`
+   - `.git/` (repo root — fallback)
+3. **Uses `basename()`** of the boundary dir as the identity key.
+
+If decoding or boundary detection fails, the project lands in `_unmapped/`.
 
 ### Conflict model
 
@@ -479,6 +496,10 @@ agentihooks memory-sync sync-now
 # Housekeeping (safe on cron)
 agentihooks memory-sync sweep-branches
 agentihooks memory-sync sweep-branches --idle-days 30
+
+# v3 one-off: migrate a v1/v2 mirror to the by-project/<key>/ layout
+agentihooks memory-sync migrate-layout              # dry-run (prints plan)
+agentihooks memory-sync migrate-layout --confirm    # execute
 
 # Full rollback
 agentihooks memory-sync uninstall --purge

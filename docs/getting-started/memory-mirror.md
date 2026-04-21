@@ -32,6 +32,27 @@ Each machine pushes to its OWN `gitfoam/<hostname>/main` branch. Nobody
 consumes anyone else's branch directly. Everyone consumes `origin/main`.
 Promotion is a GitHub PR.
 
+**The mirror is identity-keyed (v3).** Instead of storing memory under the raw
+Claude Code path encoding (`-home-iamroot-dev-tccw-ecosystem-agenticore/...`),
+the mirror uses `by-project/<key>/memory/` where `<key>` is the repo or agent
+name — the same key on every machine, regardless of where the repo lives on
+disk. A resolver reverse-walks the filesystem and stops at the first
+package/agent boundary:
+
+| Priority | Marker | Meaning |
+|---|---|---|
+| 0 | `agent.yml` | fleet agent boundary |
+| 1 | `pyproject.toml` / `Cargo.toml` / `package.json` / `go.mod` | package |
+| 2 | `.git/` | repo root (fallback) |
+
+Example: `/home/iamroot/dev/tccw-ecosystem/agentihub/agents/finops/package`
+→ walks up past `package/` (pyproject.toml) → hits `finops/` (agent.yml) →
+identity = `finops`. A pod running the same agent at `/app/finops/package`
+also resolves to `finops` and they share memory.
+
+Unresolvable paths (dir no longer exists, no marker found) land under
+`_unmapped/<encoded>/` so nothing is lost.
+
 ## Prerequisites
 
 - `git`, `rsync`, `tar` on PATH
@@ -157,11 +178,27 @@ Logs:
 | Nothing pushes | gitfoam daemon not running | `agentihooks memory-sync status` → `start` |
 | Main stays empty across machines | No one seeded it | Re-run `agentihooks memory-sync install` — seed is idempotent |
 
-## Known limitations (v2)
+## Migrating from v1/v2 layout
 
-- **Same username required across machines.** Project keys under
-  `~/.claude/projects/` encode the absolute path. Different usernames → different
-  keys → memory doesn't match up. V2 still assumes same username fleet-wide.
+If you're upgrading from a mirror that used the old raw-path layout
+(`-home-iamroot-.../memory/` at the repo root), run:
+
+```bash
+agentihooks memory-sync migrate-layout              # dry-run
+agentihooks memory-sync migrate-layout --confirm    # execute
+```
+
+This stops gitfoam, force-pushes a fresh `main` with the v3 `by-project/<key>/`
+layout from your current machine's snapshot, and deletes all old
+`gitfoam/*` / `proposal/*` branches. gitfoam restarts and republishes your
+`gitfoam/<hostname>/main` under the new layout on its next push.
+
+## Known limitations
+
+- **Basename collisions.** Two different repos with the same folder name
+  (say, two unrelated `publisher/` repos in different orgs) will pool into
+  one mirror key. Your current fleet has no collisions; flag if this ever
+  changes.
 - **Multi-tenant writers on a single machine race at the filesystem.** Ten pods
   sharing one mount all writing to the same `MEMORY.md` → last writer wins at
   the OS layer, before git sees anything. Upstream problem.
