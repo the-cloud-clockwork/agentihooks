@@ -1041,6 +1041,17 @@ def _run_daemon(poll_sec: int) -> None:
             except Exception:
                 pass  # broadcast module may not be importable in all envs
 
+            # Memory mirror tick — cross-machine auto-memory sync (opt-in)
+            try:
+                from hooks import config as _cfg
+
+                if _cfg.MEMORY_MIRROR_ENABLED and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
+                    from scripts import memory_mirror_sync
+
+                    memory_mirror_sync.tick()
+            except Exception as mm_err:
+                _log(f"Memory mirror tick error: {mm_err}")
+
         except Exception as e:
             _log(f"ERROR in poll cycle: {e}")
             import traceback

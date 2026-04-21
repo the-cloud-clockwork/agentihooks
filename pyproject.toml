@@ -35,6 +35,9 @@ otel = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
+# Memory mirror feature has no Python deps (git, rsync, tar, gitfoam are system binaries).
+# Declared as an empty extra so users can "pip install agentihooks[memory-sync]" for discovery.
+memory-sync = []
 all = [
     "psycopg2-binary>=2.9.9",
     "redis>=5.0.0",

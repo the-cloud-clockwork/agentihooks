@@ -191,6 +191,25 @@ CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
 
 # =============================================================================
+# MEMORY MIRROR — cross-machine auto-memory sync (gitfoam push / git pull)
+# =============================================================================
+# Opt-in: set MEMORY_MIRROR_ENABLED=true + MEMORY_MIRROR_REMOTE=<git url>, then run
+#   agentihooks memory-sync install
+# Scope: only ~/.claude/projects/*/memory/** is mirrored (transcripts excluded).
+MEMORY_MIRROR_ENABLED = _env_bool("MEMORY_MIRROR_ENABLED", "false")
+MEMORY_MIRROR_DIR: str = os.getenv(
+    "MEMORY_MIRROR_DIR", str(Path(AGENTIHOOKS_HOME) / "memory-mirror")
+)
+MEMORY_MIRROR_REMOTE: str = os.getenv("MEMORY_MIRROR_REMOTE", "")
+MEMORY_MIRROR_BRANCH_PREFIX: str = os.getenv("MEMORY_MIRROR_BRANCH_PREFIX", "gitfoam")
+MEMORY_MIRROR_INTERVAL_SEC: int = int(os.getenv("MEMORY_MIRROR_INTERVAL_SEC", "60"))
+MEMORY_MIRROR_CLAUDE_PROJECTS: str = os.getenv(
+    "MEMORY_MIRROR_CLAUDE_PROJECTS", str(Path.home() / ".claude" / "projects")
+)
+GITFOAM_BINARY: str = os.getenv("GITFOAM_BINARY", str(Path.home() / ".cargo" / "bin" / "gitfoam"))
+GITFOAM_LOCAL_SOURCE: str = os.getenv("GITFOAM_LOCAL_SOURCE", "")
+
+# =============================================================================
 # CONTEXT AUDIT — per-tool token consumption tracking
 # =============================================================================
 CONTEXT_AUDIT_ENABLED = _env_bool("CONTEXT_AUDIT_ENABLED", "true")

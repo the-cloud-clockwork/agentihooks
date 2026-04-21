@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentihooks"
-version = "1.7.0"
+version = "1.8.0"
 source = { virtual = "." }
 dependencies = [
     { name = "httpx" },
@@ -80,7 +80,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
 ]
-provides-extras = ["postgres", "otel", "all", "dev"]
+provides-extras = ["postgres", "otel", "memory-sync", "all", "dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.2" }]
