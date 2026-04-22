@@ -126,6 +126,67 @@ class FileBrainSource(BrainSource):
         return entries
 
 
+class HttpBrainSource(BrainSource):
+    """Reads brain content from kernel kb-router /feed over HTTP.
+
+    When BRAIN_URL is set, agentihooks resolves feed entries against the
+    kernel instead of a filesystem mount. Response shape mirrors
+    `feed_payload()` in kb-router: hot_arcs + inject_blocks + entries, each
+    carrying the same frontmatter fields that FileBrainSource produces.
+
+    On any HTTP error the source returns an empty list; upstream logic
+    ("force_refresh") then clears the broadcast channel. Callers that want
+    to keep prior state on failure should layer that themselves.
+    """
+
+    def fetch(self) -> list[BrainEntry]:
+        from hooks._brain_http import get
+
+        payload = get("/feed")
+        if not payload or not isinstance(payload, dict):
+            return []
+
+        entries: list[BrainEntry] = []
+        buckets = [
+            payload.get("hot_arcs") or [],
+            payload.get("inject_blocks") or [],
+            payload.get("entries") or [],
+        ]
+        seen: set[str] = set()
+        for bucket in buckets:
+            for item in bucket:
+                if not isinstance(item, dict):
+                    continue
+                entry_id = str(item.get("id") or item.get("title") or "")
+                if not entry_id or entry_id in seen:
+                    continue
+                seen.add(entry_id)
+                content = (item.get("content") or "").strip()
+                if not content:
+                    continue
+                try:
+                    priority = int(item.get("priority", 5))
+                except (TypeError, ValueError):
+                    priority = 5
+                try:
+                    ttl = int(item.get("ttl", 3600))
+                except (TypeError, ValueError):
+                    ttl = 3600
+                entries.append(
+                    BrainEntry(
+                        id=entry_id,
+                        title=str(item.get("title") or entry_id),
+                        content=content,
+                        priority=priority,
+                        ttl=ttl,
+                        severity=str(item.get("severity") or "info"),
+                        metadata=item.get("metadata") or {},
+                    )
+                )
+        entries.sort(key=lambda e: e.priority, reverse=True)
+        return entries
+
+
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from markdown text. Returns (frontmatter_dict, body)."""
     if not text.startswith("---"):
@@ -153,15 +214,22 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def _get_source() -> BrainSource | None:
-    """Create the configured brain source."""
+    """Create the configured brain source.
+
+    Precedence:
+      1. BRAIN_URL set → HttpBrainSource (kernel kb-router /feed)
+      2. BRAIN_SOURCE_TYPE == "file" → FileBrainSource (legacy filesystem)
+    """
     try:
+        from hooks._brain_http import brain_http_enabled
         from hooks.config import BRAIN_SOURCE_PATH, BRAIN_SOURCE_TYPE
     except ImportError:
         return None
 
+    if brain_http_enabled():
+        return HttpBrainSource()
     if BRAIN_SOURCE_TYPE == "file":
         return FileBrainSource(BRAIN_SOURCE_PATH)
-    # Future: elif BRAIN_SOURCE_TYPE == "mcp": return McpBrainSource(...)
     return None
 
 
