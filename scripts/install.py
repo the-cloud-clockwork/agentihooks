@@ -1258,9 +1258,10 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         )
         _cprint(f"[OK] Sync daemon started (PID {proc.pid}).")
 
-    # --- Update bashrc block (agentienv + agenti alias) ---
-    if _ENV_FILE_DST.is_file():
-        _update_bashrc_block()
+    # --- Update bashrc block (agentienv + agenti alias + PATH) ---
+    # Always write — the block is self-guarding (agentienv checks for the
+    # env file at runtime) and the alias/PATH lines must land regardless.
+    _update_bashrc_block()
 
 
 def _remove_bashrc_block() -> bool:
@@ -1563,7 +1564,13 @@ def _seed_user_env_file() -> None:
         _cprint(f"  [OK] Created {_ENV_FILE_DST}")
         print(f"       Configure your integrations: {_ENV_FILE_DST}")
     else:
-        _cprint(f"  [!!] .env.example not found — could not seed {_ENV_FILE_DST}")
+        # Wheel install — .env.example isn't packaged. Create an empty
+        # placeholder so the bashrc block has a valid source target.
+        _ENV_FILE_DST.write_text(
+            "# agentihooks user env file — add KEY=VALUE lines here\n",
+            encoding="utf-8",
+        )
+        _cprint(f"  [OK] Created empty {_ENV_FILE_DST} (no .env.example in wheel)")
 
 
 # ---------------------------------------------------------------------------
