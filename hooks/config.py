@@ -185,6 +185,14 @@ BRAIN_WRITER_SSH_KEY = os.getenv("BRAIN_WRITER_SSH_KEY", str(Path.home() / ".ssh
 BRAIN_WRITER_REDIS_URL = os.getenv("BRAIN_WRITER_REDIS_URL", "")
 BRAIN_WRITER_MAX_MARKERS = int(os.getenv("BRAIN_WRITER_MAX_MARKERS", "5"))
 
+# Brain HTTP — kernel kb-router client (Phase 7). When BRAIN_URL is set, the
+# brain hooks call the kernel instead of reading/writing the filesystem. With
+# BRAIN_URL unset, hooks fall back to the legacy filesystem + SSH paths above,
+# preserving local/offline operation.
+BRAIN_URL = os.getenv("BRAIN_URL", "").rstrip("/")
+BRAIN_HTTP_TOKEN = os.getenv("BRAIN_HTTP_TOKEN", "") or os.getenv("KB_ROUTER_TOKEN", "")
+BRAIN_HTTP_TIMEOUT = float(os.getenv("BRAIN_HTTP_TIMEOUT", "3"))
+
 # Console quota display
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))

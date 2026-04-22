@@ -96,6 +96,14 @@ def _get_version() -> str:
 # ---------------------------------------------------------------------------
 
 AGENTIHOOKS_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _is_source_checkout() -> bool:
+    """True when agentihooks is running from a source tree (has pyproject.toml).
+
+    False when installed as a wheel into site-packages (PyPI install).
+    """
+    return (AGENTIHOOKS_ROOT / "pyproject.toml").exists()
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 BASE_SETTINGS = PROFILES_DIR / "_base" / "settings.base.json"
 
@@ -1296,7 +1304,8 @@ def _update_bashrc_block() -> None:
         f'  echo "[agentienv] loaded $_c env file(s) from {env_dir}"\n'
         f"}}\n"
         f"agentienv\n"
-        f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
+        f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
+        f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
@@ -1594,7 +1603,7 @@ def _cmd_loadenv(env_file: Path, exec_cmd: list[str], *, force: bool = False) ->
         f"}}\n"
         f"agentienv\n"
         f"# alias: launch claude with profile flags + env\n"
-        f'command -v agentihooks >/dev/null 2>&1 && alias agenti="agentihooks claude"\n'
+        f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
@@ -2732,14 +2741,17 @@ def _install_cli_tool() -> None:
         print("       Then re-run: uv run agentihooks init")
         return
 
-    result = subprocess.run(
-        [uv, "tool", "install", "--editable", "--force", "."],
-        cwd=AGENTIHOOKS_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    if _is_source_checkout():
+        cmd = [uv, "tool", "install", "--editable", "--force", "."]
+        cwd = str(AGENTIHOOKS_ROOT)
+        label = "uv tool install --editable ."
+    else:
+        cmd = [uv, "tool", "install", "--force", "agentihooks"]
+        cwd = None
+        label = "uv tool install agentihooks"
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     if result.returncode == 0:
-        _cprint("  [OK] CLI installed via: uv tool install --editable .")
+        _cprint(f"  [OK] CLI installed via: {label}")
     else:
         _cprint(f"  [!!] uv tool install failed: {result.stderr.strip()}")
 
@@ -4768,9 +4780,15 @@ notes:
 
         ver_before = _get_version()
         print(f"Current version: {ver_before}")
-        source = getattr(args, "source", "") or "."
-        root = Path(__file__).resolve().parent.parent
-        cmd = ["uv", "tool", "install", "--editable", "--force", str(root)]
+        if _is_source_checkout():
+            # Editable reinstall from the source tree
+            cmd = ["uv", "tool", "install", "--editable", "--force", str(AGENTIHOOKS_ROOT)]
+        else:
+            # Wheel install — pull latest from PyPI via uv tool, fall back to pip
+            if shutil.which("uv"):
+                cmd = ["uv", "tool", "install", "--force", "agentihooks"]
+            else:
+                cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "agentihooks"]
         print(f"Running: {' '.join(cmd)}")
         result = _sp.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
