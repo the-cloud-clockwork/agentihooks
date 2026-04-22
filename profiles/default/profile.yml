@@ -1,0 +1,33 @@
+# -- agentihooks fields (read by install.py) --
+name: default
+description: "Autonomous coding worker"
+mcp_categories: all
+
+# -- MCP blacklist-by-default: only these servers stay enabled per-project --
+enabledMcpServers: []
+
+# -- otel fields (read by install.py for settings.json env block) --
+otel:
+  enabled: true
+  endpoint: ""
+  protocol: grpc
+  resource_attributes:
+    agent.type: default
+  langfuse:
+    enabled: false
+    endpoint: ""
+    public_key: ""
+    secret_key: ""
+
+# -- agenticore fields (read by agenticore, not agentihooks) --
+claude:
+  model: sonnet
+  max_turns: 80
+  permission_mode: bypassPermissions
+  no_session_persistence: true
+  output_format: json
+  worktree: true
+  effort: high
+  timeout: 3600
+
+auto_pr: true
