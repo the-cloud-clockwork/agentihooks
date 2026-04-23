@@ -545,20 +545,44 @@ def _remote_slug() -> str | None:
     return slug or None
 
 
-def propose_pr(auto_merge: bool = False) -> int:
-    """Open a PR promoting the machine's tree into main via a proposal branch
-    rooted at origin/main. Returns 0 on success, 1 on noop, 2 on error.
+def pull_only() -> None:
+    """Event-driven consumer pull — used by the UserPromptSubmit hook.
+    ensure_mirror_repo + fetch_remote + consume_main. No snapshot, no push.
+    Fast no-op when role is off.
+    """
+    role = _role()
+    if role == "off":
+        return
+    if not (config.MEMORY_MIRROR_REMOTE or "").strip():
+        return
+    ensure_mirror_repo()
+    fetch_remote()
+    consume_main()
 
-    Non-contributor roles have nothing to promote:
-      - consumer/off: no local gitfoam branch exists
-      - offline: no remote tracking refs
-      - authority: pushes to main directly; PRs are redundant
+
+def propose_pr(
+    auto_merge: bool = False,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+) -> int:
+    """Open a PR promoting this node's current memory tree into main.
+
+    v5 event-driven flow: snapshots local memory inline, writes the mirror
+    tree to a commit parented on origin/main, pushes to a session-scoped
+    branch, opens a PR. No dependency on a gitfoam host branch — contributor
+    pods no longer run the 60s daemon.
+
+    Branch: ``memory/<agent_name>/<session_id>`` (session-scoped so
+    concurrent contributor sessions don't collide).
+    Title:  ``memory: <agent_name> — <N> file(s) touched``.
+
+    Returns 0 on success, 1 on noop (no diff vs main), 2 on error.
     """
     role = _role()
     if role != "contributor":
         _log(
             f"ERROR: propose requires role=contributor (current role={role}). "
-            "Consumer/offline/authority nodes do not open PRs."
+            "Consumer/authority nodes do not open PRs."
         )
         return 2
     slug = _remote_slug()
@@ -569,28 +593,36 @@ def propose_pr(auto_merge: bool = False) -> int:
         _log("ERROR: `gh` CLI not found. Install GitHub CLI: https://cli.github.com/")
         return 2
 
-    mirror = _mirror_dir()
-    host_branch = _self_branch()
-    _run(["git", "fetch", "--prune", "origin"], cwd=mirror, check=False)
+    # Default naming for manual / daemon-era use.
+    if not agent_name:
+        agent_name = (
+            os.getenv("AGENTICORE_AGENT_NAME")
+            or os.getenv("AGENT_NAME")
+            or _hostname()
+        )
+    if not session_id:
+        session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
-    diff = _run(
-        ["git", "diff", "--quiet", "origin/main", f"refs/remotes/origin/{host_branch}"],
-        cwd=mirror,
-        check=False,
-    )
-    if diff.returncode == 0:
-        _log(f"{host_branch} has same tree as main — nothing to propose")
-        return 1
+    mirror = ensure_mirror_repo()
+    snapshot_in()
+    fetch_remote()
 
-    rev = _run(
-        ["git", "rev-parse", f"refs/remotes/origin/{host_branch}^{{tree}}"],
+    # Build a tree from the mirror's current working state. snapshot_in()
+    # already wipes + repopulates + git-adds via the sync_daemon flow, but
+    # to be safe we re-add here (idempotent).
+    add_proc = _run(["git", "add", "-A"], cwd=mirror, capture=True, check=False)
+    if add_proc.returncode != 0:
+        _log(f"ERROR: git add -A failed: {(add_proc.stderr or '').strip()}")
+        return 2
+    tree_proc = _run(
+        ["git", "write-tree"],
         cwd=mirror,
         capture=True,
         check=False,
     )
-    tree_sha = (rev.stdout or "").strip()
+    tree_sha = (tree_proc.stdout or "").strip()
     if not tree_sha:
-        _log(f"ERROR: could not resolve tree for {host_branch}")
+        _log(f"ERROR: write-tree failed: {(tree_proc.stderr or '').strip()}")
         return 2
 
     main_rev = _run(
@@ -603,17 +635,46 @@ def propose_pr(auto_merge: bool = False) -> int:
     if not main_sha:
         _log("ERROR: origin/main not found; run `memory-sync install` first to seed it")
         return 2
+    main_tree_proc = _run(
+        ["git", "rev-parse", f"{main_sha}^{{tree}}"],
+        cwd=mirror,
+        capture=True,
+        check=False,
+    )
+    main_tree = (main_tree_proc.stdout or "").strip()
+    if main_tree == tree_sha:
+        _log("nothing to propose — mirror tree identical to main")
+        return 1
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    proposal_branch = f"proposal/{_hostname()}/{today}-{tree_sha[:8]}"
-    title = f"memory: promote {_hostname()} {today}"
-    commit_msg = f"{title}\n\nTree: {tree_sha[:12]}\nSource: {host_branch}\n"
+    # Changed-file count for the title.
+    diff_proc = _run(
+        ["git", "diff", "--name-only", f"{main_sha}", tree_sha],
+        cwd=mirror,
+        capture=True,
+        check=False,
+    )
+    changed_files = [
+        line for line in (diff_proc.stdout or "").splitlines() if line.strip()
+    ]
+    n_files = len(changed_files)
 
-    env = {**os.environ,
-           "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
-           "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
-           "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
-           "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local"}
+    proposal_branch = f"memory/{agent_name}/{session_id}"
+    title = f"memory: {agent_name} — {n_files} file(s) touched"
+    commit_msg = (
+        f"{title}\n\n"
+        f"Agent:    {agent_name}\n"
+        f"Session:  {session_id}\n"
+        f"Tree:     {tree_sha[:12]}\n"
+        f"Based on: {main_sha[:12]} (origin/main)\n"
+    )
+
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
+        "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
+        "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
+        "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local",
+    }
     commit_proc = _run(
         ["git", "commit-tree", tree_sha, "-p", main_sha, "-m", commit_msg],
         cwd=mirror,
@@ -627,7 +688,7 @@ def propose_pr(auto_merge: bool = False) -> int:
         return 2
 
     push = _run(
-        ["git", "push", "origin",
+        ["git", "push", "--force", "origin",
          f"{commit_sha}:refs/heads/{proposal_branch}"],
         cwd=mirror,
         capture=True,
@@ -637,13 +698,16 @@ def propose_pr(auto_merge: bool = False) -> int:
         _log(f"ERROR: failed to push {proposal_branch}: {(push.stderr or '').strip()}")
         return 2
 
-    body = "\n".join([
-        f"Promote memory tree from `{host_branch}` → `main`.",
-        "",
-        f"Host:  `{_hostname()}`",
-        f"Tree:  `{tree_sha[:12]}`",
-        f"Based: `{main_sha[:12]}` (origin/main)",
-    ])
+    file_lines = "\n".join(f"- `{f}`" for f in changed_files[:20])
+    if n_files > 20:
+        file_lines += f"\n- … and {n_files - 20} more"
+    body = (
+        f"Agent **{agent_name}** wrote memory during session `{session_id}`.\n\n"
+        f"**Files touched ({n_files}):**\n{file_lines}\n\n"
+        f"Based on: `{main_sha[:12]}` (origin/main)\n"
+        f"Tree: `{tree_sha[:12]}`\n\n"
+        "_Generated by agentihooks memory-sync v5._\n"
+    )
     create = _run(
         ["gh", "pr", "create",
          "--repo", slug,
