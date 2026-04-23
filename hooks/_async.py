@@ -23,7 +23,6 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-
 _LOG_FILE = Path.home() / ".agentihooks" / "logs" / "async-hooks.log"
 
 
