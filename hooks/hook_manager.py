@@ -1406,18 +1406,24 @@ def on_subagent_stop(payload: dict) -> None:
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
 
-    # Brain writer — scan subagent transcript for emitted markers
-    # Same pattern as on_stop but routed through subagent identifiers
+    # Brain writer — forked (same as on_stop).
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
         if BRAIN_WRITER_ENABLED and (transcript_path or last_msg):
+            from hooks._async import fork_and_call
             from hooks.context.brain_writer_hook import write_markers
 
-            stats = write_markers(agent_id, transcript_path, last_message=last_msg)
-            log("brain_writer subagent: result", stats)
+            fork_and_call(
+                write_markers,
+                agent_id,
+                transcript_path,
+                last_message=last_msg,
+                timeout_sec=60,
+                task_name="brain_writer_subagent",
+            )
     except Exception as e:
-        log("brain_writer subagent_stop failed", {"error": str(e)})
+        log("brain_writer subagent_stop dispatch failed", {"error": str(e)})
 
     # Clear any signals set during the subagent's lifetime
     try:
@@ -1445,11 +1451,21 @@ def on_subagent_stop(payload: dict) -> None:
     except Exception as e:
         log("auto_overlay subagent_stop failed", {"error": str(e)})
 
-    # Log transcript entries to hooks.log (for debugging)
+    # Log transcript entries to hooks.log — forked (Redis GET/SETEX).
     if agent_id and transcript_path:
-        from hooks.observability.transcript import log_new_entries
+        try:
+            from hooks._async import fork_and_call
+            from hooks.observability.transcript import log_new_entries
 
-        log_new_entries(agent_id, transcript_path)
+            fork_and_call(
+                log_new_entries,
+                agent_id,
+                transcript_path,
+                timeout_sec=15,
+                task_name="transcript_log_subagent",
+            )
+        except Exception as e:
+            log("log_new_entries subagent dispatch failed", {"error": str(e)})
 
 
 def on_status_line(payload: dict) -> None:
