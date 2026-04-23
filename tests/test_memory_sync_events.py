@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from hooks.context import memory_sync_events as mse
 from scripts import memory_mirror_sync as mm
-
 
 # ---------------------------------------------------------------------------
 # pull_only() — inline CLI action behind UserPromptSubmit.
