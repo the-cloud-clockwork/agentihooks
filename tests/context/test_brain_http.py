@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import tempfile
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -121,8 +120,9 @@ def test_brain_http_swallows_http_error(monkeypatch):
     _reload_config_with_env(
         monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
     )
-    import hooks._brain_http as bh
     from urllib.error import HTTPError
+
+    import hooks._brain_http as bh
 
     importlib.reload(bh)
 
