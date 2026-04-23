@@ -68,9 +68,7 @@ def test_brain_http_disabled_when_url_empty(monkeypatch):
 
 
 def test_brain_http_get_sends_bearer(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken")
     import hooks._brain_http as bh
 
     importlib.reload(bh)
@@ -92,9 +90,7 @@ def test_brain_http_get_sends_bearer(monkeypatch):
 
 
 def test_brain_http_post_serializes_body_and_idem_key(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken")
     import hooks._brain_http as bh
 
     importlib.reload(bh)
@@ -117,9 +113,7 @@ def test_brain_http_post_serializes_body_and_idem_key(monkeypatch):
 
 
 def test_brain_http_swallows_http_error(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     from urllib.error import HTTPError
 
     import hooks._brain_http as bh
@@ -137,9 +131,7 @@ def test_brain_http_swallows_http_error(monkeypatch):
 
 
 def test_http_brain_source_parses_feed_payload(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_adapter as ba
 
@@ -168,9 +160,7 @@ def test_http_brain_source_parses_feed_payload(monkeypatch):
 
 
 def test_http_brain_source_returns_empty_on_failure(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_adapter as ba
 
@@ -182,9 +172,7 @@ def test_http_brain_source_returns_empty_on_failure(monkeypatch):
 
 
 def test_brain_adapter_selects_http_when_enabled(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_adapter as ba
 
@@ -195,9 +183,7 @@ def test_brain_adapter_selects_http_when_enabled(monkeypatch):
 
 
 def test_brain_adapter_falls_back_to_file(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="", BRAIN_SOURCE_TYPE="file", BRAIN_SOURCE_PATH="/tmp/nowhere"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="", BRAIN_SOURCE_TYPE="file", BRAIN_SOURCE_PATH="/tmp/nowhere")
     import hooks._brain_http as bh
     import hooks.context.brain_adapter as ba
 
@@ -211,9 +197,7 @@ def test_brain_adapter_falls_back_to_file(monkeypatch):
 
 
 def test_amygdala_http_publishes_broadcast_on_active_signal(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.amygdala_hook as ah
 
@@ -234,9 +218,11 @@ def test_amygdala_http_publishes_broadcast_on_active_signal(monkeypatch):
         called.update(kwargs)
         return "msg-1"
 
-    with patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)), patch(
-        "hooks.context.amygdala_hook.create_broadcast", side_effect=fake_create
-    ), patch("hooks.context.amygdala_hook.clear_broadcasts"):
+    with (
+        patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
+        patch("hooks.context.amygdala_hook.create_broadcast", side_effect=fake_create),
+        patch("hooks.context.amygdala_hook.clear_broadcasts"),
+    ):
         assert ah._check_via_http() is True
 
     assert called["severity"] == "critical"
@@ -245,9 +231,7 @@ def test_amygdala_http_publishes_broadcast_on_active_signal(monkeypatch):
 
 
 def test_amygdala_http_clears_when_signal_absent(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.amygdala_hook as ah
 
@@ -261,9 +245,11 @@ def test_amygdala_http_clears_when_signal_absent(monkeypatch):
     def fake_clear(channel):
         cleared["channel"] = channel
 
-    with patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)), patch(
-        "hooks.context.amygdala_hook.clear_broadcasts", side_effect=fake_clear
-    ), patch("hooks.context.amygdala_hook.create_broadcast"):
+    with (
+        patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
+        patch("hooks.context.amygdala_hook.clear_broadcasts", side_effect=fake_clear),
+        patch("hooks.context.amygdala_hook.create_broadcast"),
+    ):
         assert ah._check_via_http() is True
 
     assert cleared.get("channel") == "amygdala"
@@ -271,9 +257,7 @@ def test_amygdala_http_clears_when_signal_absent(monkeypatch):
 
 
 def test_amygdala_http_dedups_on_same_hash(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.amygdala_hook as ah
 
@@ -282,9 +266,11 @@ def test_amygdala_http_dedups_on_same_hash(monkeypatch):
     ah._last_hash = "h1"
 
     payload = {"active": True, "severity": "warning", "title": "t", "content": "b", "hash": "h1"}
-    with patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)), patch(
-        "hooks.context.amygdala_hook.create_broadcast"
-    ) as create, patch("hooks.context.amygdala_hook.clear_broadcasts"):
+    with (
+        patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
+        patch("hooks.context.amygdala_hook.create_broadcast") as create,
+        patch("hooks.context.amygdala_hook.clear_broadcasts"),
+    ):
         ah._check_via_http()
     assert create.called is False
 
@@ -293,9 +279,7 @@ def test_amygdala_http_dedups_on_same_hash(monkeypatch):
 
 
 def test_brain_writer_http_posts_each_marker(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_writer_hook as bw
 
@@ -320,9 +304,7 @@ def test_brain_writer_http_posts_each_marker(monkeypatch):
 
 
 def test_brain_writer_http_failure_returns_pending(monkeypatch):
-    _reload_config_with_env(
-        monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t"
-    )
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_writer_hook as bw
 

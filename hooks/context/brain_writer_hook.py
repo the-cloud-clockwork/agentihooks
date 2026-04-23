@@ -251,11 +251,7 @@ def write_markers(session_id: str, transcript_path: str, last_message: str = "")
         http_count, pending = _publish_to_http(markers, session_id)
 
         outbox_count = _write_to_outbox(pending, session_id, BRAIN_WRITER_OUTBOX) if pending else 0
-        redis_count = (
-            _publish_to_redis(pending, BRAIN_WRITER_REDIS_URL, BRAIN_WRITER_SSH_KEY)
-            if pending
-            else 0
-        )
+        redis_count = _publish_to_redis(pending, BRAIN_WRITER_REDIS_URL, BRAIN_WRITER_SSH_KEY) if pending else 0
 
         span.set_attrs(
             {

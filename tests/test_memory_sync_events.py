@@ -109,40 +109,40 @@ def test_on_post_tool_marks_dirty_on_memory_write(monkeypatch, tmp_path):
 def test_on_post_tool_ignores_non_memory_write(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "contributor")
     monkeypatch.setattr(mse, "_DIRTY_DIR", tmp_path / "memory_dirty")
-    mse.on_post_tool({
-        "tool_name": "Write",
-        "tool_input": {"file_path": "/tmp/foo.md"},
-        "session_id": "sess-123",
-    })
-    assert not (tmp_path / "memory_dirty").exists() or not any(
-        (tmp_path / "memory_dirty").iterdir()
+    mse.on_post_tool(
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/foo.md"},
+            "session_id": "sess-123",
+        }
     )
+    assert not (tmp_path / "memory_dirty").exists() or not any((tmp_path / "memory_dirty").iterdir())
 
 
 def test_on_post_tool_ignores_non_write_tool(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "contributor")
     monkeypatch.setattr(mse, "_DIRTY_DIR", tmp_path / "memory_dirty")
-    mse.on_post_tool({
-        "tool_name": "Bash",
-        "tool_input": {"command": "ls"},
-        "session_id": "sess-123",
-    })
-    assert not (tmp_path / "memory_dirty").exists() or not any(
-        (tmp_path / "memory_dirty").iterdir()
+    mse.on_post_tool(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "session_id": "sess-123",
+        }
     )
+    assert not (tmp_path / "memory_dirty").exists() or not any((tmp_path / "memory_dirty").iterdir())
 
 
 def test_on_post_tool_ignores_when_role_consumer(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "consumer")
     monkeypatch.setattr(mse, "_DIRTY_DIR", tmp_path / "memory_dirty")
-    mse.on_post_tool({
-        "tool_name": "Write",
-        "tool_input": {"file_path": "/home/x/.claude/projects/abc/memory/note.md"},
-        "session_id": "sess-123",
-    })
-    assert not (tmp_path / "memory_dirty").exists() or not any(
-        (tmp_path / "memory_dirty").iterdir()
+    mse.on_post_tool(
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/home/x/.claude/projects/abc/memory/note.md"},
+            "session_id": "sess-123",
+        }
     )
+    assert not (tmp_path / "memory_dirty").exists() or not any((tmp_path / "memory_dirty").iterdir())
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,8 @@ def test_on_stop_forks_propose_when_dirty(monkeypatch, tmp_path):
 
     calls: list[dict] = []
     monkeypatch.setattr(
-        mse, "_fork_and_call",
+        mse,
+        "_fork_and_call",
         lambda func, *a, **kw: calls.append({"func": func, "args": a, "kwargs": kw}),
     )
     mse.on_stop({"session_id": "sess-abc12345extra"})
@@ -219,9 +220,7 @@ def test_on_stop_skips_for_consumer(monkeypatch, tmp_path):
 def test_propose_pr_uses_new_branch_naming(monkeypatch):
     """propose_pr(session_id=..., agent_name=...) → branch memory/<agent>/<sid>."""
     monkeypatch.setattr(mm, "_role", lambda: "contributor")
-    monkeypatch.setattr(
-        mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git"
-    )
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git")
     monkeypatch.setattr(mm.shutil, "which", lambda cmd: "/usr/bin/gh")
     monkeypatch.setattr(mm, "ensure_mirror_repo", lambda: Path("/fake/mirror"))
     monkeypatch.setattr(mm, "snapshot_in", lambda: None)

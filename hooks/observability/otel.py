@@ -62,9 +62,7 @@ def _ensure_worker() -> None:
         if _worker is not None:
             return
         _q = _queue.Queue(maxsize=1000)
-        _worker = _threading.Thread(
-            target=_worker_loop, name="otel-worker", daemon=True
-        )
+        _worker = _threading.Thread(target=_worker_loop, name="otel-worker", daemon=True)
         _worker.start()
 
 
@@ -103,9 +101,7 @@ def _dispatch_op(op: tuple) -> None:
         attrs = dict(attrs)
         attrs["event.name"] = name
         attrs["event.timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        _log_emitter.emit(
-            LogRecord(body=name, severity_number=SeverityNumber.INFO, attributes=attrs)
-        )
+        _log_emitter.emit(LogRecord(body=name, severity_number=SeverityNumber.INFO, attributes=attrs))
     elif kind == "gauge":
         _, name, value, attrs = op
         if _meter is None:

@@ -33,11 +33,7 @@ _fork_and_call = fork_and_call
 
 
 def _agent_name() -> str:
-    return (
-        os.getenv("AGENTICORE_AGENT_NAME")
-        or os.getenv("AGENT_NAME")
-        or socket.gethostname()
-    )
+    return os.getenv("AGENTICORE_AGENT_NAME") or os.getenv("AGENT_NAME") or socket.gethostname()
 
 
 def on_user_prompt(payload: dict) -> None:

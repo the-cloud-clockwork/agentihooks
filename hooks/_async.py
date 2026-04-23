@@ -80,9 +80,7 @@ def fork_and_call(
         try:
             func(*args, **kwargs)
         except Exception as e:  # noqa: BLE001
-            sys.stderr.write(
-                f"[async] {task_name}: FAILED: {type(e).__name__}: {e}\n"
-            )
+            sys.stderr.write(f"[async] {task_name}: FAILED: {type(e).__name__}: {e}\n")
             os._exit(1)
         os._exit(0)
     finally:

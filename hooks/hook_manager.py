@@ -111,9 +111,7 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
                     timestamp_str = entry.get("timestamp")
                     if timestamp_str:
                         try:
-                            ts = datetime.fromisoformat(
-                                timestamp_str.replace("Z", "+00:00")
-                            )
+                            ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
                             if first_timestamp is None:
                                 first_timestamp = ts
                             last_timestamp = ts
@@ -441,9 +439,7 @@ def on_session_start(payload: dict) -> None:
 
             servers = _mod.load_all_mcp_configs()
             if servers:
-                warning = _mod.generate_warning(
-                    servers, MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS
-                )
+                warning = _mod.generate_warning(servers, MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS)
                 if warning:
                     from hooks.common import inject_context as _inject2
 
@@ -696,9 +692,7 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         prompt = payload.get("prompt", "")
         if prompt:
-            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(
-                prompt
-            ):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log(
                     "ci_manifesto: release-gate signal active this turn",
@@ -1223,11 +1217,7 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.observability.context_audit import record_tool_usage
 
             output = payload.get("tool_output", "")
-            output_size = (
-                len(output.encode("utf-8"))
-                if isinstance(output, str)
-                else len(str(output))
-            )
+            output_size = len(output.encode("utf-8")) if isinstance(output, str) else len(str(output))
             if payload.get("session_id") and output_size > 0:
                 record_tool_usage(payload["session_id"], tool_name, output_size)
     except Exception as e:
@@ -1257,9 +1247,7 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.common import inject_context as _inject_effort
             from hooks.context.thinking_policy import check_subagent_effort
 
-            warning = check_subagent_effort(
-                payload.get("tool_input", {}), DEFAULT_EFFORT
-            )
+            warning = check_subagent_effort(payload.get("tool_input", {}), DEFAULT_EFFORT)
             if warning:
                 _inject_effort(warning)
     except Exception as e:
@@ -1303,9 +1291,7 @@ def on_stop(payload: dict) -> None:
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
-        if BRAIN_WRITER_ENABLED and (
-            transcript_path or payload.get("last_assistant_message")
-        ):
+        if BRAIN_WRITER_ENABLED and (transcript_path or payload.get("last_assistant_message")):
             from hooks._async import fork_and_call
             from hooks.context.brain_writer_hook import write_markers
 
@@ -1508,9 +1494,7 @@ def on_subagent_start(payload: dict) -> None:
 def on_subagent_stop(payload: dict) -> None:
     """Handle SubagentStop event — capture brain markers from subagent output."""
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
-    transcript_path = payload.get("agent_transcript_path") or payload.get(
-        "transcript_path", ""
-    )
+    transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
 
@@ -1682,9 +1666,7 @@ def main() -> None:
             log(f"Unknown event: {event_name}", payload)
 
     except BlockAction as e:
-        print(
-            str(e), file=sys.stderr, flush=True
-        )  # Claude Code reads stderr for hook messages
+        print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)

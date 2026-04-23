@@ -1050,11 +1050,7 @@ def _run_daemon(poll_sec: int) -> None:
             try:
                 from hooks import config as _cfg
 
-                _mm_role = (
-                    getattr(_cfg, "MEMORY_MIRROR_ROLE", None)
-                    or _cfg.MEMORY_MIRROR_MODE
-                    or "off"
-                ).lower()
+                _mm_role = (getattr(_cfg, "MEMORY_MIRROR_ROLE", None) or _cfg.MEMORY_MIRROR_MODE or "off").lower()
                 if _mm_role == "authority" and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
                     from scripts import memory_mirror_sync
 

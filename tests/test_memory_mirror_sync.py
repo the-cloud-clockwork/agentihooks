@@ -37,9 +37,7 @@ def test_decode_roundtrips_simple_path(tmp_path):
 def test_decode_handles_hyphenated_segment(tmp_path):
     _make_fs(tmp_path, {"home": {"alice": {"dev": {"tccw-ecosystem": {"tccw-toolbelt": {}}}}}})
     encoded = "-home-alice-dev-tccw-ecosystem-tccw-toolbelt"
-    assert mm._decode_encoded_path(encoded, root=tmp_path) == (
-        tmp_path / "home/alice/dev/tccw-ecosystem/tccw-toolbelt"
-    )
+    assert mm._decode_encoded_path(encoded, root=tmp_path) == (tmp_path / "home/alice/dev/tccw-ecosystem/tccw-toolbelt")
 
 
 def test_decode_returns_none_when_path_missing(tmp_path):
@@ -49,17 +47,20 @@ def test_decode_returns_none_when_path_missing(tmp_path):
 
 def test_boundary_prefers_agent_yml_over_pyproject(tmp_path):
     # Layout: finops/ has agent.yml; finops/package/ has pyproject.toml.
-    _make_fs(tmp_path, {
-        "agents": {
-            "finops": {
-                "agent.yml": "name: finops",
-                "package": {
-                    "pyproject.toml": "[project]\nname='pkg'",
-                    "src": {},
+    _make_fs(
+        tmp_path,
+        {
+            "agents": {
+                "finops": {
+                    "agent.yml": "name: finops",
+                    "package": {
+                        "pyproject.toml": "[project]\nname='pkg'",
+                        "src": {},
+                    },
                 },
             },
         },
-    })
+    )
     real = tmp_path / "agents/finops/package"
     boundary = mm._package_boundary(real)
     assert boundary is not None
@@ -69,13 +70,16 @@ def test_boundary_prefers_agent_yml_over_pyproject(tmp_path):
 
 
 def test_boundary_stops_at_git(tmp_path):
-    _make_fs(tmp_path, {
-        "repo": {
-            ".git": {"HEAD": "ref: refs/heads/main\n"},
-            "pyproject.toml": "[project]\nname='r'",
-            "subdir": {},
+    _make_fs(
+        tmp_path,
+        {
+            "repo": {
+                ".git": {"HEAD": "ref: refs/heads/main\n"},
+                "pyproject.toml": "[project]\nname='r'",
+                "subdir": {},
+            },
         },
-    })
+    )
     real = tmp_path / "repo/subdir"
     boundary = mm._package_boundary(real)
     # pyproject.toml at repo/ wins over .git by priority, but we must not
@@ -87,12 +91,15 @@ def test_boundary_stops_at_git(tmp_path):
 
 
 def test_boundary_git_fallback_when_no_package_markers(tmp_path):
-    _make_fs(tmp_path, {
-        "repo": {
-            ".git": {"HEAD": "ref: refs/heads/main\n"},
-            "src": {},
+    _make_fs(
+        tmp_path,
+        {
+            "repo": {
+                ".git": {"HEAD": "ref: refs/heads/main\n"},
+                "src": {},
+            },
         },
-    })
+    )
     real = tmp_path / "repo/src"
     boundary = mm._package_boundary(real)
     assert boundary is not None
@@ -103,10 +110,21 @@ def test_boundary_git_fallback_when_no_package_markers(tmp_path):
 
 def test_identity_key_ok_via_helpers(tmp_path):
     """Integration: decode + boundary → identity basename."""
-    _make_fs(tmp_path, {"home": {"alice": {"dev": {"myrepo": {
-        ".git": {"HEAD": "ref\n"},
-        "pyproject.toml": "[project]\nname='myrepo'",
-    }}}}})
+    _make_fs(
+        tmp_path,
+        {
+            "home": {
+                "alice": {
+                    "dev": {
+                        "myrepo": {
+                            ".git": {"HEAD": "ref\n"},
+                            "pyproject.toml": "[project]\nname='myrepo'",
+                        }
+                    }
+                }
+            }
+        },
+    )
     real = mm._decode_encoded_path("-home-alice-dev-myrepo", root=tmp_path)
     assert real is not None and real.name == "myrepo"
     boundary = mm._package_boundary(real)
@@ -132,8 +150,7 @@ def test_identity_map_groups_by_key(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mm,
         "_identity_key",
-        lambda encoded: ("finops", "ok")
-        if "finops" in encoded else (encoded, "unmapped"),
+        lambda encoded: ("finops", "ok") if "finops" in encoded else (encoded, "unmapped"),
     )
     id_map = mm._identity_map()
     assert sorted(id_map["finops"]) == [
@@ -156,9 +173,7 @@ def test_snapshot_in_writes_by_project_layout(tmp_path, monkeypatch):
     (projects / "-x-publisher" / "memory" / "MEMORY.md").write_text("publisher mem")
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_DIR", str(mirror))
-    monkeypatch.setattr(mm, "_identity_key", lambda enc: (
-        ("finops", "ok") if "finops" in enc else ("publisher", "ok")
-    ))
+    monkeypatch.setattr(mm, "_identity_key", lambda enc: ("finops", "ok") if "finops" in enc else ("publisher", "ok"))
 
     # Use real rsync so we exercise the actual file copy.
     mm.snapshot_in()
@@ -180,15 +195,11 @@ def test_snapshot_in_buckets_unmapped(tmp_path, monkeypatch):
     mm.snapshot_in()
 
     assert (mirror / "_unmapped/-phantom/memory/MEMORY.md").read_text() == "orphan"
-    assert not (mirror / "by-project").exists() or not any(
-        d for d in (mirror / "by-project").iterdir() if d.is_dir()
-    )
+    assert not (mirror / "by-project").exists() or not any(d for d in (mirror / "by-project").iterdir() if d.is_dir())
 
 
 def test_snapshot_in_skips_when_source_missing(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(
-        mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(tmp_path / "nope")
-    )
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(tmp_path / "nope"))
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_DIR", str(tmp_path / "mirror"))
 
     called = []
@@ -255,9 +266,7 @@ def test_merge_tree_writes_conflict_on_divergence(tmp_path, monkeypatch):
 
     mm._merge_tree(staging, target)
     assert (target / "proj/memory/MEMORY.md").read_text() == "local"
-    assert (
-        target / "proj/memory/MEMORY.conflict-alpha-1700000002.md"
-    ).read_text() == "remote"
+    assert (target / "proj/memory/MEMORY.conflict-alpha-1700000002.md").read_text() == "remote"
 
 
 # ---------------------------------------------------------------------------
@@ -362,11 +371,7 @@ def test_seed_main_creates_commit_and_pushes_when_missing(monkeypatch):
     assert any(c[:2] == ["git", "write-tree"] for c in calls)
     assert any(c[:2] == ["git", "commit-tree"] for c in calls)
     assert any(c[:2] == ["git", "update-ref"] for c in calls)
-    assert any(
-        c[:3] == ["git", "push", "origin"]
-        and "refs/heads/main:refs/heads/main" in c
-        for c in calls
-    )
+    assert any(c[:3] == ["git", "push", "origin"] and "refs/heads/main:refs/heads/main" in c for c in calls)
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +415,8 @@ def test_consume_main_fans_out_by_project_to_multiple_local_dirs(tmp_path, monke
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_CLAUDE_PROJECTS", str(projects))
     monkeypatch.setattr(mm, "_origin_main_exists", lambda: True)
     monkeypatch.setattr(
-        mm, "_identity_map",
+        mm,
+        "_identity_map",
         lambda: {"finops": ["-enc-a", "-enc-b"]},
     )
 
@@ -532,9 +538,7 @@ def test_remote_slug_non_github_returns_none(monkeypatch):
 def test_propose_pr_noop_when_tree_matches_main(monkeypatch, capsys):
     """v5 — mirror tree identical to origin/main → noop (rc=1), no PR."""
     monkeypatch.setattr(mm, "_role", lambda: "contributor")
-    monkeypatch.setattr(
-        mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git"
-    )
+    monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git")
     monkeypatch.setattr(mm.shutil, "which", lambda cmd: "/usr/bin/gh")
     monkeypatch.setattr(mm, "ensure_mirror_repo", lambda: Path("/fake/mirror"))
     monkeypatch.setattr(mm, "snapshot_in", lambda: None)
@@ -742,8 +746,7 @@ def _patch_tick_hooks(monkeypatch):
     monkeypatch.setattr(mm, "snapshot_in", lambda: order.append("snap"))
     monkeypatch.setattr(mm, "fetch_remote", lambda: order.append("fetch"))
     monkeypatch.setattr(mm, "consume_main", lambda: order.append("consume"))
-    monkeypatch.setattr(mm, "_authority_push_main",
-                        lambda: order.append("authority_push") or True)
+    monkeypatch.setattr(mm, "_authority_push_main", lambda: order.append("authority_push") or True)
     monkeypatch.setattr(mm.config, "MEMORY_MIRROR_REMOTE", "git@host:r.git")
     return order
 
@@ -819,9 +822,9 @@ def test_authority_push_uses_force_with_lease(monkeypatch, tmp_path):
 
     push_cmds = [c for c in calls if c[:2] == ["git", "push"]]
     assert push_cmds, "expected a git push"
-    assert any(
-        f"--force-with-lease=main:{old_sha}" in c for c in push_cmds
-    ), f"force-with-lease refspec missing; push cmds: {push_cmds}"
+    assert any(f"--force-with-lease=main:{old_sha}" in c for c in push_cmds), (
+        f"force-with-lease refspec missing; push cmds: {push_cmds}"
+    )
 
 
 def test_authority_push_aborts_on_lease_failure(monkeypatch, tmp_path):
