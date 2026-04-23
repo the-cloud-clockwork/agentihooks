@@ -1205,19 +1205,26 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("memory_sync_events.on_stop failed", {"error": str(e)})
 
-    # Brain writer — FIRST priority, scan transcript for agent-emitted markers
-    # Must run early: Stop hooks in -p mode have limited execution time
+    # Brain writer — scan transcript for agent-emitted markers + publish.
+    # Forked: transcript scan + per-marker SSH/HTTP publish can take 10s+.
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
         if BRAIN_WRITER_ENABLED and (transcript_path or payload.get("last_assistant_message")):
+            from hooks._async import fork_and_call
             from hooks.context.brain_writer_hook import write_markers
 
             last_msg = payload.get("last_assistant_message", "")
-            stats = write_markers(session_id, transcript_path, last_message=last_msg)
-            log("brain_writer: result", stats)
+            fork_and_call(
+                write_markers,
+                session_id,
+                transcript_path,
+                last_message=last_msg,
+                timeout_sec=60,
+                task_name="brain_writer",
+            )
     except Exception as e:
-        log("brain_writer_hook failed", {"error": str(e)})
+        log("brain_writer_hook dispatch failed", {"error": str(e)})
 
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
@@ -1232,8 +1239,19 @@ def on_stop(payload: dict) -> None:
         ):
             pass
 
-    # Check for errors and notify
-    notify_on_error(transcript_path)
+    # Check for errors and notify — forked: full transcript scan + SMTP/HTTP
+    # email send can take 5-10s and MUST NOT block session cleanup.
+    try:
+        from hooks._async import fork_and_call
+
+        fork_and_call(
+            notify_on_error,
+            transcript_path,
+            timeout_sec=30,
+            task_name="notify_on_error",
+        )
+    except Exception as e:
+        log("notify_on_error dispatch failed", {"error": str(e)})
 
     # Clear per-turn signals only; session-scoped signals (PR, release, hotfix)
     # persist until on_session_end
@@ -1251,22 +1269,41 @@ def on_stop(payload: dict) -> None:
 
     scan_transcript(payload)
 
-    # Log transcript entries to hooks.log (for debugging)
+    # Log transcript entries to hooks.log — forked: Redis GET/SETEX round-trips
+    # + full transcript line scan can take 1-2s.
     if session_id and transcript_path:
-        from hooks.observability.transcript import log_new_entries
+        try:
+            from hooks._async import fork_and_call
+            from hooks.observability.transcript import log_new_entries
 
-        log_new_entries(session_id, transcript_path)
+            fork_and_call(
+                log_new_entries,
+                session_id,
+                transcript_path,
+                timeout_sec=15,
+                task_name="transcript_log",
+            )
+        except Exception as e:
+            log("log_new_entries dispatch failed", {"error": str(e)})
 
-    # Auto-save session memory
+    # Auto-save session memory — forked: reads full transcript + Redis write
+    # (or blocks on Redis connection timeout if unreachable). Can take 3-8s.
     try:
         from hooks.config import MEMORY_AUTO_SAVE
 
         if MEMORY_AUTO_SAVE and session_id and transcript_path:
+            from hooks._async import fork_and_call
             from hooks.memory.auto_save import auto_save_session
 
-            auto_save_session(session_id, transcript_path)
+            fork_and_call(
+                auto_save_session,
+                session_id,
+                transcript_path,
+                timeout_sec=30,
+                task_name="auto_save",
+            )
     except Exception as e:
-        log("Memory auto-save failed", {"error": str(e)})
+        log("Memory auto-save dispatch failed", {"error": str(e)})
 
     # Context audit — emit report if fill_pct exceeds threshold
     try:

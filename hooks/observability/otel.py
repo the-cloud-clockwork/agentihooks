@@ -5,9 +5,12 @@ Layer 1 (Claude Code native OTEL) uses the same endpoint via env vars.
 
 Design constraints:
   - Hook processes are short-lived (one Python process per event)
-  - SimpleSpanProcessor/SimpleLogRecordProcessor for immediate export
+  - BatchSpanProcessor / BatchLogRecordProcessor — non-blocking export;
+    emit returns immediately, a background thread batches + ships. Short
+    hook processes may lose the tail on exit, but hooks MUST NOT block
+    on OTel I/O. atexit force_flush(500ms) best-effort catches most.
   - No-op when OTEL SDK not installed or endpoint not configured
-  - All providers shut down via atexit to flush pending data
+  - All providers shut down via atexit with a short flush budget
 """
 
 from __future__ import annotations
@@ -55,12 +58,12 @@ def init() -> None:
     try:
         from opentelemetry import metrics, trace
         from opentelemetry.sdk._logs import LoggerProvider
-        from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         from hooks.config import OTEL_HOOKS_SERVICE_NAME
 
@@ -78,7 +81,7 @@ def init() -> None:
 
         # Traces — immediate export (safe for short-lived processes)
         tp = TracerProvider(resource=resource)
-        tp.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter()))
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
         trace.set_tracer_provider(tp)
         _tracer = trace.get_tracer("agentihooks")
 
@@ -105,7 +108,7 @@ def init() -> None:
                     "x-langfuse-ingestion-version": "4",
                 },
             )
-            tp.add_span_processor(SimpleSpanProcessor(langfuse_exporter))
+            tp.add_span_processor(BatchSpanProcessor(langfuse_exporter))
 
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=60_000)
@@ -115,22 +118,22 @@ def init() -> None:
 
         # Logs/Events — immediate export (matches Claude Code's event pattern)
         lp = LoggerProvider(resource=resource)
-        lp.add_log_record_processor(SimpleLogRecordProcessor(OTLPLogExporter()))
+        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
         _log_emitter = lp.get_logger("agentihooks")
 
         def _shutdown():
             try:
-                tp.force_flush(timeout_millis=2000)
+                tp.force_flush(timeout_millis=500)
             except Exception:
                 pass
             tp.shutdown()
             try:
-                mp.force_flush(timeout_millis=2000)
+                mp.force_flush(timeout_millis=500)
             except Exception:
                 pass
             mp.shutdown()
             try:
-                lp.force_flush(timeout_millis=2000)
+                lp.force_flush(timeout_millis=500)
             except Exception:
                 pass
             lp.shutdown()
