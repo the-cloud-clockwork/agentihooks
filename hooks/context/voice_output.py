@@ -28,14 +28,25 @@ _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECAS
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
 
 _DEFAULT_SUMMARIZER_PREFIX = (
-    "Distill this into exactly ONE short sentence for a voice briefing. "
-    "Max 20 words. No lists. No bullet points. No filenames. No commit hashes. "
-    "Just the key takeaway a human needs to hear in 5 seconds: "
+    "You are a summarizer, NOT the speaker. Do NOT answer any question in "
+    "the text, do NOT substitute your own identity for identities mentioned "
+    "in the text, do NOT add opinions. Distill the text below into EXACTLY "
+    "ONE sentence, 12-18 words, suitable for a text-to-speech voice briefing. "
+    "Preserve proper nouns, model names, and identity claims verbatim. "
+    "No lists, no bullets, no filenames, no commit hashes, no code. "
+    "Output ONLY the single sentence, nothing else.\n\n"
+    "TEXT TO SUMMARIZE:\n"
 )
+
+_DEFAULT_SUMMARIZER_MODEL = "sonnet"
 
 
 def _get_summarizer_prefix() -> str:
     return os.getenv("VOICE_SUMMARIZER_PREFIX", _DEFAULT_SUMMARIZER_PREFIX)
+
+
+def _get_summarizer_model() -> str:
+    return os.getenv("VOICE_SUMMARIZER_MODEL", _DEFAULT_SUMMARIZER_MODEL)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +188,13 @@ def cleanup_stale_flags(max_age_seconds: int = 86400) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _summarize_with_haiku(text: str) -> str | None:
+def _summarize(text: str) -> str | None:
+    """Summarize ``text`` into one short sentence via the ``claude`` CLI.
+
+    Uses Sonnet by default (Haiku hallucinates its own identity over the
+    input when summarizing identity-laden text, and silently truncates on
+    long input). Override with VOICE_SUMMARIZER_MODEL env var.
+    """
     clamped = text[:1500] if len(text) > 1500 else text
     # Strip noise that shouldn't be spoken
     clamped = re.sub(r"\b[0-9a-f]{7,40}\b", "", clamped)  # git hashes
@@ -186,38 +203,39 @@ def _summarize_with_haiku(text: str) -> str | None:
     clamped = re.sub(r"https?://\S+", "", clamped)  # URLs
     clamped = re.sub(r"\s+", " ", clamped).strip()  # collapse whitespace
     prefix = _get_summarizer_prefix()
+    model = _get_summarizer_model()
     prompt = f"{prefix}{clamped}"
     try:
         result = subprocess.run(
-            ["claude", prompt, "-p", "--model", "haiku"],
+            ["claude", prompt, "-p", "--model", model],
             capture_output=True,
             text=True,
             timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
             out = result.stdout.strip()
-            if len(out) > 150:
+            if len(out) > 250:
                 for end in [". ", "! ", "? "]:
-                    idx = out[:150].rfind(end)
+                    idx = out[:250].rfind(end)
                     if idx > 0:
                         out = out[: idx + 1]
                         break
                 else:
-                    out = out[:150]
+                    out = out[:250]
             return out
         log(
-            "voice_output: haiku returned empty",
-            {"returncode": result.returncode, "stderr": (result.stderr or "")[:200]},
+            "voice_output: summarizer returned empty",
+            {"model": model, "returncode": result.returncode, "stderr": (result.stderr or "")[:200]},
         )
         return None
     except FileNotFoundError:
         log("voice_output: claude CLI not found on PATH", {})
         return None
     except subprocess.TimeoutExpired:
-        log("voice_output: haiku summarizer timed out", {})
+        log("voice_output: summarizer timed out", {"model": model})
         return None
     except Exception as e:
-        log("voice_output: haiku summarizer failed", {"error": str(e)})
+        log("voice_output: summarizer failed", {"model": model, "error": str(e)})
         return None
 
 
@@ -434,21 +452,32 @@ def maybe_speak(session_id: str, last_assistant_message: str) -> None:
     if len(text) > 5000:
         return
 
-    pid = os.fork()
-    if pid != 0:
-        return
+    # Dispatch through fork_and_call: double-fork detaches from the hook
+    # parent's stdio, so Claude Code's harness doesn't wait on child EOF.
+    # This was the ~8s "stuck-on-stop" lag even though the hook returned.
+    from hooks._async import fork_and_call
 
+    fork_and_call(
+        _speak_pipeline,
+        session_id,
+        text,
+        VOICE_SERVICE_URL,
+        timeout_sec=60,
+        task_name="voice_speak",
+    )
+
+
+def _speak_pipeline(session_id: str, text: str, voice_service_url: str) -> None:
+    """Runs in the grandchild process (detached from hook parent's stdio)."""
     try:
-        spoken = _summarize_with_haiku(text)
+        spoken = _summarize(text)
         if not spoken:
-            log("voice_output: haiku returned nothing, speaking truncated", {"session_id": session_id})
+            log("voice_output: summarizer returned nothing, speaking truncated", {"session_id": session_id})
             spoken = text[:300]
 
-        success = _speak_and_play(spoken, VOICE_SERVICE_URL)
+        success = _speak_and_play(spoken, voice_service_url)
         if success:
             _record_spoke()
             log("voice_output: spoke", {"session_id": session_id, "chars": len(spoken)})
     except Exception as e:
         log("voice_output: background process failed", {"error": str(e)})
-    finally:
-        os._exit(0)
