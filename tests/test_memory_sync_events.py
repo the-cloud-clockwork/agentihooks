@@ -78,7 +78,11 @@ def test_on_user_prompt_spawns_pull_for_consumer(monkeypatch):
     assert len(spawned) == 1
     cmd = spawned[0]
     assert cmd[:2] == ["timeout", "--kill-after=10"]
-    assert cmd[3:6] == ["agentihooks", "memory-sync", "pull"]
+    # cmd[3..] is the resolved CLI prefix ("agentihooks" or python -m scripts.install)
+    # followed by the action. Assert the action tokens appear, order-independent of prefix.
+    assert "memory-sync" in cmd
+    assert "pull" in cmd
+    assert cmd[-2:] == ["memory-sync", "pull"]
 
 
 def test_on_user_prompt_noop_when_role_off(monkeypatch):
