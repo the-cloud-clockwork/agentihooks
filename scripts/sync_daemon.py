@@ -1041,7 +1041,12 @@ def _run_daemon(poll_sec: int) -> None:
             except Exception:
                 pass  # broadcast module may not be importable in all envs
 
-            # Memory mirror tick — cross-machine auto-memory sync (opt-in via MEMORY_MIRROR_MODE)
+            # Memory mirror tick — authority-only in v5. Consumer + contributor
+            # roles are driven by Claude Code hooks (UserPromptSubmit /
+            # PostToolUse / Stop), not wall-clock polling. The daemon still
+            # owns authority because authority memory can mutate outside any
+            # Claude session (operator editing files directly in vim /
+            # Obsidian on the laptop).
             try:
                 from hooks import config as _cfg
 
@@ -1050,7 +1055,7 @@ def _run_daemon(poll_sec: int) -> None:
                     or _cfg.MEMORY_MIRROR_MODE
                     or "off"
                 ).lower()
-                if _mm_role != "off" and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
+                if _mm_role == "authority" and (_cfg.MEMORY_MIRROR_REMOTE or "").strip():
                     from scripts import memory_mirror_sync
 
                     memory_mirror_sync.tick()

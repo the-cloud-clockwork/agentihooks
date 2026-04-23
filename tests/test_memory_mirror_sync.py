@@ -529,47 +529,34 @@ def test_remote_slug_non_github_returns_none(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_propose_pr_noop_when_no_diff(monkeypatch, capsys):
+def test_propose_pr_noop_when_tree_matches_main(monkeypatch, capsys):
+    """v5 — mirror tree identical to origin/main → noop (rc=1), no PR."""
     monkeypatch.setattr(mm, "_role", lambda: "contributor")
     monkeypatch.setattr(
-        mm.config,
-        "MEMORY_MIRROR_REMOTE",
-        "git@github.com:owner/repo.git",
+        mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git"
     )
     monkeypatch.setattr(mm.shutil, "which", lambda cmd: "/usr/bin/gh")
+    monkeypatch.setattr(mm, "ensure_mirror_repo", lambda: Path("/fake/mirror"))
+    monkeypatch.setattr(mm, "snapshot_in", lambda: None)
+    monkeypatch.setattr(mm, "fetch_remote", lambda: None)
 
     def fake_run(cmd, **kwargs):
-        if cmd[:3] == ["git", "rev-list", "--count"]:
-            return subprocess.CompletedProcess(cmd, 0, "0\n", "")
+        if cmd[:3] == ["git", "add", "-A"]:
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        if cmd[:2] == ["git", "write-tree"]:
+            return subprocess.CompletedProcess(cmd, 0, "tree-sha-same\n", "")
+        if cmd[:2] == ["git", "rev-parse"]:
+            # Both origin/main rev and main^{tree} return same tree sha → noop
+            if "refs/remotes/origin/main" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "main-sha-xxx\n", "")
+            if "^{tree}" in "".join(cmd):
+                return subprocess.CompletedProcess(cmd, 0, "tree-sha-same\n", "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(mm, "_run", fake_run)
     rc = mm.propose_pr(auto_merge=False)
     assert rc == 1
     assert "nothing to propose" in capsys.readouterr().out
-
-
-def test_propose_pr_noop_when_tree_matches_main(monkeypatch, capsys):
-    """Seed commits + gitfoam's push yield different SHAs but identical trees —
-    don't open an empty PR."""
-    monkeypatch.setattr(mm, "_role", lambda: "contributor")
-    monkeypatch.setattr(
-        mm.config, "MEMORY_MIRROR_REMOTE", "git@github.com:owner/repo.git"
-    )
-    monkeypatch.setattr(mm.shutil, "which", lambda cmd: "/usr/bin/gh")
-
-    def fake_run(cmd, **kwargs):
-        if cmd[:3] == ["git", "rev-list", "--count"]:
-            return subprocess.CompletedProcess(cmd, 0, "1\n", "")
-        if cmd[:3] == ["git", "diff", "--quiet"]:
-            # 0 = no diff → tree identical
-            return subprocess.CompletedProcess(cmd, 0, "", "")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    monkeypatch.setattr(mm, "_run", fake_run)
-    rc = mm.propose_pr(auto_merge=False)
-    assert rc == 1
-    assert "same tree as main" in capsys.readouterr().out
 
 
 def test_propose_pr_requires_gh_cli(monkeypatch, capsys):

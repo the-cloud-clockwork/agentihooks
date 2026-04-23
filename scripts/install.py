@@ -4572,6 +4572,7 @@ env (see ~/.agentihooks/.env):
             "stop",
             "status",
             "sync-now",
+            "pull",
             "propose",
             "sweep-branches",
             "migrate-layout",
@@ -4587,6 +4588,16 @@ env (see ~/.agentihooks/.env):
         "--auto-merge",
         action="store_true",
         help="(propose) Arm gh pr merge --auto --squash after creating the PR",
+    )
+    memsync_p.add_argument(
+        "--session-id",
+        default=None,
+        help="(propose) Short session id for branch naming (memory/<agent>/<session-id>)",
+    )
+    memsync_p.add_argument(
+        "--agent-name",
+        default=None,
+        help="(propose) Agent name for branch naming (defaults to AGENTICORE_AGENT_NAME or hostname)",
     )
     memsync_p.add_argument(
         "--idle-days",
@@ -4915,6 +4926,47 @@ notes:
         _cmd_memory_sync(args)
 
 
+class _MemorySyncLockBusy(Exception):
+    """Raised by _memory_sync_lock when another memory-sync CLI invocation
+    already holds the lock. Callers use this to exit cleanly instead of
+    racing with the in-flight tick/pull/propose."""
+
+
+@contextlib.contextmanager
+def _memory_sync_lock():
+    """Flock-based mutex around memory-sync CLI actions.
+
+    Rapid invocations (e.g. many UserPromptSubmit hooks firing ``pull`` in
+    quick succession) serialize here — the first holder does the work, all
+    others raise ``_MemorySyncLockBusy`` and exit cleanly.
+
+    The lock is per-user (``~/.agentihooks/memory-sync.lock``). It is
+    released automatically when the process exits because the kernel closes
+    the fd; explicit release on normal exit via ``finally`` is defensive.
+    """
+    lock_path = AGENTIHOOKS_STATE_DIR / "memory-sync.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise _MemorySyncLockBusy()
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def _cmd_memory_sync(args: "argparse.Namespace") -> None:
     """Manage the cross-machine memory mirror (gitfoam + git)."""
     import subprocess as _sp
@@ -5174,8 +5226,25 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
 
     if action == "sync-now":
         try:
-            memory_mirror_sync.tick()
+            with _memory_sync_lock():
+                memory_mirror_sync.tick()
             print(f"{_GREEN}[OK]{_RESET} Manual tick completed.")
+        except _MemorySyncLockBusy:
+            print(f"{_YELLOW}[--]{_RESET} another memory-sync is already running; skipping.")
+            return
+        except Exception as exc:
+            print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if action == "pull":
+        try:
+            with _memory_sync_lock():
+                memory_mirror_sync.pull_only()
+        except _MemorySyncLockBusy:
+            # Event-driven pull from hooks: another pull already in flight.
+            # Silent success — the other process is doing the work.
+            return
         except Exception as exc:
             print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
             sys.exit(1)
@@ -5183,9 +5252,15 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
 
     if action == "propose":
         try:
-            rc = memory_mirror_sync.propose_pr(
-                auto_merge=bool(getattr(args, "auto_merge", False))
-            )
+            with _memory_sync_lock():
+                rc = memory_mirror_sync.propose_pr(
+                    auto_merge=bool(getattr(args, "auto_merge", False)),
+                    session_id=getattr(args, "session_id", None),
+                    agent_name=getattr(args, "agent_name", None),
+                )
+        except _MemorySyncLockBusy:
+            print(f"{_YELLOW}[--]{_RESET} another memory-sync is already running; skipping propose.")
+            return
         except Exception as exc:
             print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
             sys.exit(2)
