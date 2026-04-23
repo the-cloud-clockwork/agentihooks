@@ -61,44 +61,35 @@ def _patch_role(monkeypatch, role: str, remote: str = "git@github.com:o/r.git"):
     monkeypatch.setattr(_cfg, "MEMORY_MIRROR_REMOTE", remote)
 
 
-def test_on_user_prompt_spawns_pull_for_consumer(monkeypatch):
+def test_on_user_prompt_forks_pull_for_consumer(monkeypatch):
     _patch_role(monkeypatch, "consumer")
-    spawned: list[list[str]] = []
+    calls: list[dict] = []
 
-    def fake_popen(cmd, **kwargs):
-        spawned.append(list(cmd))
+    def fake_fork(func, *args, **kwargs):
+        calls.append({"func": func, "args": args, "kwargs": kwargs})
 
-        class _P:
-            pass
-
-        return _P()
-
-    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(mse, "_fork_and_call", fake_fork)
     mse.on_user_prompt({"session_id": "abc"})
-    assert len(spawned) == 1
-    cmd = spawned[0]
-    assert cmd[:2] == ["timeout", "--kill-after=10"]
-    # cmd[3..] is the resolved CLI prefix ("agentihooks" or python -m scripts.install)
-    # followed by the action. Assert the action tokens appear, order-independent of prefix.
-    assert "memory-sync" in cmd
-    assert "pull" in cmd
-    assert cmd[-2:] == ["memory-sync", "pull"]
+    assert len(calls) == 1
+    assert calls[0]["func"].__name__ == "pull_only"
+    assert calls[0]["kwargs"].get("timeout_sec") == 120
+    assert calls[0]["kwargs"].get("task_name") == "pull"
 
 
 def test_on_user_prompt_noop_when_role_off(monkeypatch):
     _patch_role(monkeypatch, "off")
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    calls: list[dict] = []
+    monkeypatch.setattr(mse, "_fork_and_call", lambda *a, **kw: calls.append((a, kw)))
     mse.on_user_prompt({})
-    assert spawned == []
+    assert calls == []
 
 
 def test_on_user_prompt_noop_when_remote_unset(monkeypatch):
     _patch_role(monkeypatch, "consumer", remote="")
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    calls: list[dict] = []
+    monkeypatch.setattr(mse, "_fork_and_call", lambda *a, **kw: calls.append((a, kw)))
     mse.on_user_prompt({})
-    assert spawned == []
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +155,7 @@ def test_on_post_tool_ignores_when_role_consumer(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_on_stop_spawns_propose_when_dirty(monkeypatch, tmp_path):
+def test_on_stop_forks_propose_when_dirty(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "contributor")
     dirty_dir = tmp_path / "memory_dirty"
     dirty_dir.mkdir(parents=True)
@@ -172,18 +163,19 @@ def test_on_stop_spawns_propose_when_dirty(monkeypatch, tmp_path):
     monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
     monkeypatch.setenv("AGENTICORE_AGENT_NAME", "publisher")
 
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(list(cmd)))
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        mse, "_fork_and_call",
+        lambda func, *a, **kw: calls.append({"func": func, "args": a, "kwargs": kw}),
+    )
     mse.on_stop({"session_id": "sess-abc12345extra"})
 
-    assert len(spawned) == 1
-    cmd = spawned[0]
-    assert "propose" in cmd
-    assert "--agent-name" in cmd and "publisher" in cmd
-    assert "--session-id" in cmd
+    assert len(calls) == 1
+    assert calls[0]["func"].__name__ == "propose_pr"
+    assert calls[0]["kwargs"]["agent_name"] == "publisher"
     # Session id is truncated to 8 chars
-    sid_idx = cmd.index("--session-id")
-    assert cmd[sid_idx + 1] == "sess-abc"
+    assert calls[0]["kwargs"]["session_id"] == "sess-abc"
+    assert calls[0]["kwargs"]["task_name"] == "propose"
     # Flag was consumed
     assert not (dirty_dir / "sess-abc12345extra").exists()
 
@@ -191,10 +183,10 @@ def test_on_stop_spawns_propose_when_dirty(monkeypatch, tmp_path):
 def test_on_stop_noop_when_not_dirty(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "contributor")
     monkeypatch.setattr(mse, "_DIRTY_DIR", tmp_path / "memory_dirty")
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    calls: list = []
+    monkeypatch.setattr(mse, "_fork_and_call", lambda *a, **kw: calls.append((a, kw)))
     mse.on_stop({"session_id": "sess-xyz"})
-    assert spawned == []
+    assert calls == []
 
 
 def test_on_stop_skips_for_authority(monkeypatch, tmp_path):
@@ -205,10 +197,10 @@ def test_on_stop_skips_for_authority(monkeypatch, tmp_path):
     (dirty_dir / "sess-abc").write_text("x")
     monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
 
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    calls: list = []
+    monkeypatch.setattr(mse, "_fork_and_call", lambda *a, **kw: calls.append((a, kw)))
     mse.on_stop({"session_id": "sess-abc"})
-    assert spawned == []
+    assert calls == []
 
 
 def test_on_stop_skips_for_consumer(monkeypatch, tmp_path):
@@ -218,10 +210,10 @@ def test_on_stop_skips_for_consumer(monkeypatch, tmp_path):
     (dirty_dir / "sess-abc").write_text("x")
     monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
 
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    calls: list = []
+    monkeypatch.setattr(mse, "_fork_and_call", lambda *a, **kw: calls.append((a, kw)))
     mse.on_stop({"session_id": "sess-abc"})
-    assert spawned == []
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
