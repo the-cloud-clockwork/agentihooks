@@ -221,9 +221,7 @@ _memory_mirror_mode_raw = os.getenv("MEMORY_MIRROR_MODE", "").strip().lower()
 _memory_mirror_role_raw = os.getenv("MEMORY_MIRROR_ROLE", "").strip().lower()
 _memory_mirror_legacy_enabled = _env_bool("MEMORY_MIRROR_ENABLED", "false")
 
-_VALID_MEMORY_MIRROR_ROLES = frozenset(
-    {"off", "consumer", "offline", "contributor", "authority"}
-)
+_VALID_MEMORY_MIRROR_ROLES = frozenset({"off", "consumer", "offline", "contributor", "authority"})
 if _memory_mirror_role_raw in _VALID_MEMORY_MIRROR_ROLES:
     MEMORY_MIRROR_ROLE: str = _memory_mirror_role_raw
 elif _memory_mirror_mode_raw == "write":
@@ -253,9 +251,7 @@ else:
 # Legacy alias kept so existing call sites (and operator scripts) don't break.
 MEMORY_MIRROR_ENABLED = MEMORY_MIRROR_ROLE != "off"
 
-MEMORY_MIRROR_DIR: str = os.getenv(
-    "MEMORY_MIRROR_DIR", str(Path(AGENTIHOOKS_HOME) / "memory-mirror")
-)
+MEMORY_MIRROR_DIR: str = os.getenv("MEMORY_MIRROR_DIR", str(Path(AGENTIHOOKS_HOME) / "memory-mirror"))
 MEMORY_MIRROR_REMOTE: str = os.getenv("MEMORY_MIRROR_REMOTE", "")
 MEMORY_MIRROR_BRANCH_PREFIX: str = os.getenv("MEMORY_MIRROR_BRANCH_PREFIX", "gitfoam")
 MEMORY_MIRROR_INTERVAL_SEC: int = int(os.getenv("MEMORY_MIRROR_INTERVAL_SEC", "60"))

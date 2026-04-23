@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "agentihooks"
-version = "1.8.0"
+version = "1.8.3"
 source = { virtual = "." }
 dependencies = [
     { name = "httpx" },

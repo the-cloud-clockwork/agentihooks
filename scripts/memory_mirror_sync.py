@@ -107,12 +107,12 @@ def _role() -> str:
 
 # Package / agent boundary markers. Lower priority number = wins over higher.
 MARKER_PRIORITY: list[tuple[str, int]] = [
-    ("agent.yml", 0),          # fleet-agent boundary (highest priority)
-    ("pyproject.toml", 1),     # Python package
-    ("Cargo.toml", 1),         # Rust crate
-    ("package.json", 1),       # Node package
-    ("go.mod", 1),             # Go module
-    (".git", 2),               # repo root (fallback)
+    ("agent.yml", 0),  # fleet-agent boundary (highest priority)
+    ("pyproject.toml", 1),  # Python package
+    ("Cargo.toml", 1),  # Rust crate
+    ("package.json", 1),  # Node package
+    ("go.mod", 1),  # Go module
+    (".git", 2),  # repo root (fallback)
 ]
 
 
@@ -240,9 +240,7 @@ def ensure_mirror_repo() -> Path:
 
     remote = (config.MEMORY_MIRROR_REMOTE or "").strip()
     if not remote:
-        raise RuntimeError(
-            "MEMORY_MIRROR_REMOTE is not set. Add it to ~/.agentihooks/.env"
-        )
+        raise RuntimeError("MEMORY_MIRROR_REMOTE is not set. Add it to ~/.agentihooks/.env")
 
     have_remote = _run(
         ["git", "remote", "get-url", "origin"],
@@ -307,15 +305,16 @@ def snapshot_in() -> None:
             if not source_memory.is_dir():
                 continue
             mem_dest.mkdir(parents=True, exist_ok=True)
-            _run([
-                "rsync",
-                "-a",
-                f"{source_memory}/",
-                f"{mem_dest}/",
-            ])
+            _run(
+                [
+                    "rsync",
+                    "-a",
+                    f"{source_memory}/",
+                    f"{mem_dest}/",
+                ]
+            )
             copied += 1
-    _log(f"snapshot: mirrored memory for {copied} project(s) into "
-         f"{len(id_map)} identity bucket(s)")
+    _log(f"snapshot: mirrored memory for {copied} project(s) into {len(id_map)} identity bucket(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -349,11 +348,13 @@ def _commit_current_tree(mirror: Path, *, parents: list[str], message: str) -> s
     tree_sha = (tree_proc.stdout or "").strip()
     if not tree_sha:
         raise RuntimeError("git write-tree produced empty SHA")
-    env = {**os.environ,
-           "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
-           "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
-           "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
-           "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "agentihooks-memory-mirror",
+        "GIT_AUTHOR_EMAIL": "memory-mirror@agentihooks.local",
+        "GIT_COMMITTER_NAME": "agentihooks-memory-mirror",
+        "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local",
+    }
     cmd = ["git", "commit-tree", tree_sha]
     for p in parents:
         cmd += ["-p", p]
@@ -410,8 +411,7 @@ def fetch_remote() -> None:
         _log("SKIP fetch: mirror is not a git repo yet")
         return
     _run(
-        ["git", "fetch", "--prune", "origin",
-         "refs/heads/main:refs/remotes/origin/main"],
+        ["git", "fetch", "--prune", "origin", "refs/heads/main:refs/remotes/origin/main"],
         cwd=mirror,
         check=False,
     )
@@ -535,9 +535,9 @@ def _remote_slug() -> str | None:
     if not url:
         return None
     if url.startswith("git@github.com:"):
-        slug = url[len("git@github.com:"):]
+        slug = url[len("git@github.com:") :]
     elif url.startswith("https://github.com/"):
-        slug = url[len("https://github.com/"):]
+        slug = url[len("https://github.com/") :]
     else:
         return None
     if slug.endswith(".git"):
@@ -581,8 +581,7 @@ def propose_pr(
     role = _role()
     if role != "contributor":
         _log(
-            f"ERROR: propose requires role=contributor (current role={role}). "
-            "Consumer/authority nodes do not open PRs."
+            f"ERROR: propose requires role=contributor (current role={role}). Consumer/authority nodes do not open PRs."
         )
         return 2
     slug = _remote_slug()
@@ -595,11 +594,7 @@ def propose_pr(
 
     # Default naming for manual / daemon-era use.
     if not agent_name:
-        agent_name = (
-            os.getenv("AGENTICORE_AGENT_NAME")
-            or os.getenv("AGENT_NAME")
-            or _hostname()
-        )
+        agent_name = os.getenv("AGENTICORE_AGENT_NAME") or os.getenv("AGENT_NAME") or _hostname()
     if not session_id:
         session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
@@ -653,9 +648,7 @@ def propose_pr(
         capture=True,
         check=False,
     )
-    changed_files = [
-        line for line in (diff_proc.stdout or "").splitlines() if line.strip()
-    ]
+    changed_files = [line for line in (diff_proc.stdout or "").splitlines() if line.strip()]
     n_files = len(changed_files)
 
     proposal_branch = f"memory/{agent_name}/{session_id}"
@@ -688,8 +681,7 @@ def propose_pr(
         return 2
 
     push = _run(
-        ["git", "push", "--force", "origin",
-         f"{commit_sha}:refs/heads/{proposal_branch}"],
+        ["git", "push", "--force", "origin", f"{commit_sha}:refs/heads/{proposal_branch}"],
         cwd=mirror,
         capture=True,
         check=False,
@@ -709,12 +701,21 @@ def propose_pr(
         "_Generated by agentihooks memory-sync v5._\n"
     )
     create = _run(
-        ["gh", "pr", "create",
-         "--repo", slug,
-         "--base", "main",
-         "--head", proposal_branch,
-         "--title", title,
-         "--body", body],
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            slug,
+            "--base",
+            "main",
+            "--head",
+            proposal_branch,
+            "--title",
+            title,
+            "--body",
+            body,
+        ],
         capture=True,
         check=False,
     )
@@ -731,8 +732,7 @@ def propose_pr(
             check=False,
         )
         if merge.returncode != 0:
-            _log(f"gh pr merge --auto failed (PR still open): "
-                 f"{(merge.stderr or '').strip()}")
+            _log(f"gh pr merge --auto failed (PR still open): {(merge.stderr or '').strip()}")
             return 2
         _log(f"auto-merge armed on {pr_url}")
     return 0
@@ -746,8 +746,7 @@ def propose_pr(
 def sweep_branches(idle_days: int | None = None) -> int:
     role = _role()
     if role == "consumer":
-        _log("ERROR: sweep-branches requires role=contributor or authority "
-             "(consumer has no fleet branches to sweep).")
+        _log("ERROR: sweep-branches requires role=contributor or authority (consumer has no fleet branches to sweep).")
         return 0
     if idle_days is None:
         idle_days = config.MEMORY_MIRROR_SWEEP_IDLE_DAYS
@@ -765,9 +764,7 @@ def sweep_branches(idle_days: int | None = None) -> int:
 
     prefix = _branch_prefix()
     listing = _run(
-        ["git", "for-each-ref",
-         "--format=%(refname:short) %(committerdate:unix)",
-         f"refs/remotes/origin/{prefix}/"],
+        ["git", "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", f"refs/remotes/origin/{prefix}/"],
         cwd=mirror,
         capture=True,
         check=False,
@@ -780,7 +777,7 @@ def sweep_branches(idle_days: int | None = None) -> int:
         full_ref, ts_str = parts
         if not full_ref.startswith("origin/"):
             continue
-        short = full_ref[len("origin/"):]
+        short = full_ref[len("origin/") :]
         try:
             committed_at = int(ts_str)
         except ValueError:
@@ -788,8 +785,7 @@ def sweep_branches(idle_days: int | None = None) -> int:
         if committed_at > cutoff:
             continue
         ancestor = _run(
-            ["git", "merge-base", "--is-ancestor",
-             full_ref, "refs/remotes/origin/main"],
+            ["git", "merge-base", "--is-ancestor", full_ref, "refs/remotes/origin/main"],
             cwd=mirror,
             check=False,
         )
@@ -829,7 +825,7 @@ def list_non_main_remote_branches() -> list[str]:
         line = line.strip()
         if not line.startswith("origin/"):
             continue
-        short = line[len("origin/"):]
+        short = line[len("origin/") :]
         if short in ("main", "HEAD"):
             continue
         out.append(short)
@@ -953,8 +949,7 @@ def _authority_push_main() -> bool:
         "GIT_COMMITTER_EMAIL": "memory-mirror@agentihooks.local",
     }
     commit_proc = _run(
-        ["git", "commit-tree", tree_sha, "-p", old_sha,
-         "-m", f"authority: sync from {_hostname()} {ts}"],
+        ["git", "commit-tree", tree_sha, "-p", old_sha, "-m", f"authority: sync from {_hostname()} {ts}"],
         cwd=mirror,
         capture=True,
         env=env,
@@ -965,14 +960,11 @@ def _authority_push_main() -> bool:
         _log(f"authority: commit-tree failed: {(commit_proc.stderr or '').strip()}")
         return False
 
-    _run(["git", "update-ref", "refs/heads/main", commit_sha],
-         cwd=mirror, check=False)
+    _run(["git", "update-ref", "refs/heads/main", commit_sha], cwd=mirror, check=False)
 
     push_env = {**os.environ, "GIT_ALLOW_MAIN_PUSH": "1"}
     push = _run(
-        ["git", "push",
-         f"--force-with-lease=main:{old_sha}",
-         "origin", "refs/heads/main:refs/heads/main"],
+        ["git", "push", f"--force-with-lease=main:{old_sha}", "origin", "refs/heads/main:refs/heads/main"],
         cwd=mirror,
         capture=True,
         check=False,
@@ -980,10 +972,7 @@ def _authority_push_main() -> bool:
     )
     if push.returncode != 0:
         stderr = (push.stderr or "").strip()
-        _log(
-            "authority push lease invalidated (peer PR merged since fetch); "
-            f"will retry next tick: {stderr}"
-        )
+        _log(f"authority push lease invalidated (peer PR merged since fetch); will retry next tick: {stderr}")
         return False
     _log(f"authority pushed main @ {commit_sha[:12]}")
     return True

@@ -104,6 +104,8 @@ def _is_source_checkout() -> bool:
     False when installed as a wheel into site-packages (PyPI install).
     """
     return (AGENTIHOOKS_ROOT / "pyproject.toml").exists()
+
+
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 BASE_SETTINGS = PROFILES_DIR / "_base" / "settings.base.json"
 
@@ -4995,8 +4997,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         src_display = os.path.expanduser(src) if src else "(GITFOAM_LOCAL_SOURCE unset)"
         if not src or not Path(src).is_dir():
             print(
-                f"{_RED}[ERROR]{_RESET} gitfoam not found — agentihooks does "
-                "NOT download it automatically.",
+                f"{_RED}[ERROR]{_RESET} gitfoam not found — agentihooks does NOT download it automatically.",
                 file=sys.stderr,
             )
             print("  Checked binary path:  " + checked_bin, file=sys.stderr)
@@ -5053,8 +5054,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         bin_ = _gitfoam_bin()
         if not bin_:
             print(
-                f"{_RED}[ERROR]{_RESET} gitfoam not found after install — "
-                "check GITFOAM_BINARY / PATH.",
+                f"{_RED}[ERROR]{_RESET} gitfoam not found after install — check GITFOAM_BINARY / PATH.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -5106,8 +5106,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         remote_url = (_cfg.MEMORY_MIRROR_REMOTE or "").strip()
         if not remote_url:
             print(
-                f"{_RED}[ERROR]{_RESET} MEMORY_MIRROR_REMOTE is not set in "
-                "~/.agentihooks/.env",
+                f"{_RED}[ERROR]{_RESET} MEMORY_MIRROR_REMOTE is not set in ~/.agentihooks/.env",
                 file=sys.stderr,
             )
             print("", file=sys.stderr)
@@ -5120,8 +5119,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 file=sys.stderr,
             )
             print(
-                "    echo 'MEMORY_MIRROR_REMOTE=git@github.com:<org>/claude-memory-mirror.git' "
-                ">> ~/.agentihooks/.env",
+                "    echo 'MEMORY_MIRROR_REMOTE=git@github.com:<org>/claude-memory-mirror.git' >> ~/.agentihooks/.env",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -5150,8 +5148,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 print(f"  git: {line}", file=sys.stderr)
             print("", file=sys.stderr)
             print(
-                "  Common causes: repo doesn't exist yet, SSH key not "
-                "authorised, or wrong URL.",
+                "  Common causes: repo doesn't exist yet, SSH key not authorised, or wrong URL.",
                 file=sys.stderr,
             )
             print(
@@ -5180,8 +5177,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 file=sys.stderr,
             )
             print(
-                "  Install will continue; you can re-run `memory-sync install` "
-                "to retry the seed.",
+                "  Install will continue; you can re-run `memory-sync install` to retry the seed.",
                 file=sys.stderr,
             )
         # Register the mirror with gitfoam (idempotent) — skip for consumer.
@@ -5218,10 +5214,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         print(f"  interval:   {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s")
         print(f"  sweep idle: {_cfg.MEMORY_MIRROR_SWEEP_IDLE_DAYS}d")
         print(f"  gitfoam:    {bin_ or '(not installed)'}")
-        print(
-            "  daemon:     "
-            + (f"running (PID {pid})" if pid else "not running")
-        )
+        print("  daemon:     " + (f"running (PID {pid})" if pid else "not running"))
         return
 
     if action == "sync-now":
@@ -5268,9 +5261,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
 
     if action == "sweep-branches":
         try:
-            n = memory_mirror_sync.sweep_branches(
-                idle_days=getattr(args, "idle_days", None)
-            )
+            n = memory_mirror_sync.sweep_branches(idle_days=getattr(args, "idle_days", None))
         except Exception as exc:
             print(f"{_RED}[ERROR]{_RESET} {exc}", file=sys.stderr)
             sys.exit(1)
@@ -5309,17 +5300,17 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         try:
             commit_sha = memory_mirror_sync.force_reseed_main()
             print(f"{_GREEN}[OK]{_RESET} force-pushed origin/main @ {commit_sha[:12]}")
-            deleted = memory_mirror_sync.delete_remote_branches(
-                plan["branches_to_delete"]
-            )
+            deleted = memory_mirror_sync.delete_remote_branches(plan["branches_to_delete"])
             print(f"{_GREEN}[OK]{_RESET} deleted {deleted} remote branch(es)")
         except Exception as exc:
             print(f"{_RED}[ERROR]{_RESET} migration failed: {exc}", file=sys.stderr)
             _start_gitfoam()  # restart anyway so we don't leave the daemon dead
             sys.exit(1)
         _start_gitfoam()
-        print(f"{_GREEN}[OK]{_RESET} migrate-layout complete. "
-              "gitfoam will republish gitfoam/<hostname>/main with the v3 layout on its next push.")
+        print(
+            f"{_GREEN}[OK]{_RESET} migrate-layout complete. "
+            "gitfoam will republish gitfoam/<hostname>/main with the v3 layout on its next push."
+        )
         return
 
     if action == "uninstall":
@@ -5328,10 +5319,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         if mirror.is_dir() and getattr(args, "purge", False):
             shutil.rmtree(mirror, ignore_errors=True)
             print(f"[memory-sync] Removed mirror directory {mirror}")
-        print(
-            f"{_GREEN}[OK]{_RESET} memory-sync uninstalled "
-            "(gitfoam binary left in place)."
-        )
+        print(f"{_GREEN}[OK]{_RESET} memory-sync uninstalled (gitfoam binary left in place).")
         return
 
     print(f"Unknown memory-sync action: {action}", file=sys.stderr)
