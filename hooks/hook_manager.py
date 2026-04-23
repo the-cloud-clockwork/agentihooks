@@ -111,7 +111,9 @@ def parse_transcript_metrics(transcript_path: str) -> dict:
                     timestamp_str = entry.get("timestamp")
                     if timestamp_str:
                         try:
-                            ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                            ts = datetime.fromisoformat(
+                                timestamp_str.replace("Z", "+00:00")
+                            )
                             if first_timestamp is None:
                                 first_timestamp = ts
                             last_timestamp = ts
@@ -319,7 +321,11 @@ def on_session_start(payload: dict) -> None:
 
     # Thinking/effort policy guidance
     try:
-        from hooks.config import DEFAULT_EFFORT, EFFORT_POLICY_ENABLED, THINKING_BUDGET_TOKENS
+        from hooks.config import (
+            DEFAULT_EFFORT,
+            EFFORT_POLICY_ENABLED,
+            THINKING_BUDGET_TOKENS,
+        )
 
         if EFFORT_POLICY_ENABLED:
             from hooks.common import inject_context as _inject
@@ -336,7 +342,9 @@ def on_session_start(payload: dict) -> None:
         from hooks.config import AUTO_DEV_SWITCH_ENABLED
 
         if AUTO_DEV_SWITCH_ENABLED:
-            from hooks.context.auto_dev_switch import inject_on_session_start as _auto_dev
+            from hooks.context.auto_dev_switch import (
+                inject_on_session_start as _auto_dev,
+            )
 
             _auto_dev(payload.get("cwd", ""))
     except Exception as e:
@@ -347,7 +355,9 @@ def on_session_start(payload: dict) -> None:
         from hooks.config import CI_MANIFESTO_ENABLED
 
         if CI_MANIFESTO_ENABLED:
-            from hooks.context.ci_manifesto import inject_on_session_start as inject_ci_manifesto
+            from hooks.context.ci_manifesto import (
+                inject_on_session_start as inject_ci_manifesto,
+            )
 
             inject_ci_manifesto()
     except Exception as e:
@@ -370,9 +380,17 @@ def on_session_start(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
-            from hooks.context.broadcast import check_and_inject_broadcasts, register_session
+            from hooks.context.broadcast import (
+                check_and_inject_broadcasts,
+                register_session,
+            )
 
-            register_session(session_id, pid=os.getppid(), cwd=payload.get("cwd", ""), model=payload.get("model", ""))
+            register_session(
+                session_id,
+                pid=os.getppid(),
+                cwd=payload.get("cwd", ""),
+                model=payload.get("model", ""),
+            )
             check_and_inject_broadcasts(session_id)
         except Exception as e:
             log("broadcast session_start failed", {"error": str(e)})
@@ -400,7 +418,10 @@ def on_session_start(payload: dict) -> None:
                     if result.get("success"):
                         log("auto_overlay: activated", {"name": name})
                     else:
-                        log("auto_overlay: skip", {"name": name, "reason": result.get("error", "")})
+                        log(
+                            "auto_overlay: skip",
+                            {"name": name, "reason": result.get("error", "")},
+                        )
     except Exception as e:
         log("auto_overlay session_start failed", {"error": str(e)})
 
@@ -420,7 +441,9 @@ def on_session_start(payload: dict) -> None:
 
             servers = _mod.load_all_mcp_configs()
             if servers:
-                warning = _mod.generate_warning(servers, MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS)
+                warning = _mod.generate_warning(
+                    servers, MCP_TOOL_WARN_THRESHOLD, MCP_SCHEMA_AVG_TOKENS
+                )
                 if warning:
                     from hooks.common import inject_context as _inject2
 
@@ -476,7 +499,9 @@ def on_session_end(payload: dict) -> None:
 
     # Clear image persistence reminder counter for this session
     try:
-        from hooks.context.image_persistence_reminder import clear_session_state as _clear_img_persist
+        from hooks.context.image_persistence_reminder import (
+            clear_session_state as _clear_img_persist,
+        )
 
         _clear_img_persist(session_id)
     except Exception:
@@ -495,7 +520,9 @@ def on_session_end(payload: dict) -> None:
 
     if CONTEXT_REFRESH_ENABLED:
         try:
-            from hooks.context.context_refresh import clear_session_state as clear_refresh
+            from hooks.context.context_refresh import (
+                clear_session_state as clear_refresh,
+            )
 
             clear_refresh(session_id)
         except Exception:
@@ -669,18 +696,32 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         prompt = payload.get("prompt", "")
         if prompt:
-            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
+            if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(
+                prompt
+            ):
                 set_release_signal(session_id)
-                log("ci_manifesto: release-gate signal active this turn", {"session_id": session_id})
+                log(
+                    "ci_manifesto: release-gate signal active this turn",
+                    {"session_id": session_id},
+                )
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_hotfix_signal(prompt):
                 set_hotfix_signal(session_id)
-                log("ci_manifesto: hotfix signal active this session", {"session_id": session_id})
+                log(
+                    "ci_manifesto: hotfix signal active this session",
+                    {"session_id": session_id},
+                )
             if contains_branch_signal(prompt):
                 set_branch_signal(session_id)
-                log("ci_manifesto: branch-creation signal active this turn", {"session_id": session_id})
+                log(
+                    "ci_manifesto: branch-creation signal active this turn",
+                    {"session_id": session_id},
+                )
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
                 set_pr_signal(session_id)
-                log("ci_manifesto: PR-creation signal active this turn", {"session_id": session_id})
+                log(
+                    "ci_manifesto: PR-creation signal active this turn",
+                    {"session_id": session_id},
+                )
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
@@ -700,7 +741,10 @@ def on_user_prompt_submit(payload: dict) -> None:
             if prompt:
                 if contains_enable_signal(prompt):
                     set_voice_enabled(session_id)
-                    log("voice_output: voice enabled for session", {"session_id": session_id})
+                    log(
+                        "voice_output: voice enabled for session",
+                        {"session_id": session_id},
+                    )
                     from hooks.common import inject_banner
 
                     inject_banner(
@@ -709,7 +753,10 @@ def on_user_prompt_submit(payload: dict) -> None:
                     )
                 elif contains_disable_signal(prompt):
                     clear_voice_enabled(session_id)
-                    log("voice_output: voice disabled for session", {"session_id": session_id})
+                    log(
+                        "voice_output: voice disabled for session",
+                        {"session_id": session_id},
+                    )
                     from hooks.common import inject_banner
 
                     inject_banner(
@@ -747,7 +794,10 @@ def on_pre_tool_use(payload: dict) -> None:
     tool_input = payload.get("tool_input", {})
 
     if SECRETS_MODE == "off":
-        log(f"Pre tool use: {tool_name} (secrets scanning skipped, mode=off)", {"tool": tool_name})
+        log(
+            f"Pre tool use: {tool_name} (secrets scanning skipped, mode=off)",
+            {"tool": tool_name},
+        )
     else:
         from hooks.secrets import redact, scan
 
@@ -755,7 +805,10 @@ def on_pre_tool_use(payload: dict) -> None:
         if tool_name == "Bash":
             command = tool_input.get("command", "")
             safe_command = redact(command, mode=SECRETS_MODE)[:500]
-            log(f"Pre tool use: {tool_name}", {"tool": tool_name, "command": safe_command})
+            log(
+                f"Pre tool use: {tool_name}",
+                {"tool": tool_name, "command": safe_command},
+            )
             hits = scan(command, mode=SECRETS_MODE)
             if hits:
                 names = ", ".join(hits)
@@ -840,7 +893,10 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Branch guard: block git operations targeting main/master ---
     if tool_name == "Bash":
         try:
-            from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
+            from hooks.context.branch_guard import (
+                check_branch_guard,
+                check_commit_on_main,
+            )
 
             check_branch_guard(payload)
             check_commit_on_main(payload)
@@ -848,7 +904,11 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("branch_guard check failed", {"error": str(e)})
-            print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+            print(
+                f"WARNING: branch_guard check failed ({e}) — guard bypassed",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":
@@ -869,7 +929,11 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("prod_lockdown check failed", {"error": str(e)})
-            print(f"WARNING: prod_lockdown check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+            print(
+                f"WARNING: prod_lockdown check failed ({e}) — guard bypassed",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -1007,7 +1071,10 @@ def on_post_tool_use(payload: dict) -> None:
                 contains_pr_signal,
                 contains_release_signal,
             )
-            from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
+            from hooks.context.prod_lockdown import (
+                set_hotfix_signal,
+                set_release_signal,
+            )
 
             session_id = payload.get("session_id", "")
             resp = payload.get("tool_response") or payload.get("tool_output") or {}
@@ -1028,7 +1095,10 @@ def on_post_tool_use(payload: dict) -> None:
             if combined and session_id:
                 if contains_release_signal(combined):
                     set_release_signal(session_id)
-                    log("ci_manifesto: release-gate signal via AskUserQuestion answer", {"session_id": session_id})
+                    log(
+                        "ci_manifesto: release-gate signal via AskUserQuestion answer",
+                        {"session_id": session_id},
+                    )
                 if contains_hotfix_signal(combined):
                     set_hotfix_signal(session_id)
                     log(
@@ -1037,12 +1107,21 @@ def on_post_tool_use(payload: dict) -> None:
                     )
                 if contains_branch_signal(combined):
                     set_branch_signal(session_id)
-                    log("ci_manifesto: branch signal via AskUserQuestion answer", {"session_id": session_id})
+                    log(
+                        "ci_manifesto: branch signal via AskUserQuestion answer",
+                        {"session_id": session_id},
+                    )
                 if contains_pr_signal(combined):
                     set_pr_signal(session_id)
-                    log("ci_manifesto: PR signal via AskUserQuestion answer", {"session_id": session_id})
+                    log(
+                        "ci_manifesto: PR signal via AskUserQuestion answer",
+                        {"session_id": session_id},
+                    )
         except Exception as e:
-            log("ci_manifesto AskUserQuestion signal detection failed", {"error": str(e)})
+            log(
+                "ci_manifesto AskUserQuestion signal detection failed",
+                {"error": str(e)},
+            )
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
@@ -1060,7 +1139,11 @@ def on_post_tool_use(payload: dict) -> None:
             if BASH_FILTER_ENABLED:
                 from hooks.context.bash_output_filter import filter_bash_output
 
-                filtered = filter_bash_output(tool_name, payload.get("tool_input", {}), payload.get("tool_output", ""))
+                filtered = filter_bash_output(
+                    tool_name,
+                    payload.get("tool_input", {}),
+                    payload.get("tool_output", ""),
+                )
                 if filtered is not None:
                     import json as _json
 
@@ -1076,7 +1159,10 @@ def on_post_tool_use(payload: dict) -> None:
                         from hooks.config import CONTEXT_COMPRESSION_SCOPE
 
                         if CONTEXT_COMPRESSION_SCOPE == "all":
-                            from hooks.context.preprocessor import get_level_from_config, preprocess
+                            from hooks.context.preprocessor import (
+                                get_level_from_config,
+                                preprocess,
+                            )
 
                             level = get_level_from_config()
                             if level > 0:
@@ -1137,7 +1223,11 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.observability.context_audit import record_tool_usage
 
             output = payload.get("tool_output", "")
-            output_size = len(output.encode("utf-8")) if isinstance(output, str) else len(str(output))
+            output_size = (
+                len(output.encode("utf-8"))
+                if isinstance(output, str)
+                else len(str(output))
+            )
             if payload.get("session_id") and output_size > 0:
                 record_tool_usage(payload["session_id"], tool_name, output_size)
     except Exception as e:
@@ -1149,7 +1239,9 @@ def on_post_tool_use(payload: dict) -> None:
 
         if IMAGE_PERSISTENCE_REMINDER_ENABLED:
             from hooks.common import inject_context as _inject_img_persist
-            from hooks.context.image_persistence_reminder import on_post_tool_result as _img_persist_tick
+            from hooks.context.image_persistence_reminder import (
+                on_post_tool_result as _img_persist_tick,
+            )
 
             reminder = _img_persist_tick(payload)
             if reminder:
@@ -1165,7 +1257,9 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.common import inject_context as _inject_effort
             from hooks.context.thinking_policy import check_subagent_effort
 
-            warning = check_subagent_effort(payload.get("tool_input", {}), DEFAULT_EFFORT)
+            warning = check_subagent_effort(
+                payload.get("tool_input", {}), DEFAULT_EFFORT
+            )
             if warning:
                 _inject_effort(warning)
     except Exception as e:
@@ -1179,7 +1273,6 @@ def on_stop(payload: dict) -> None:
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
-
     log(
         "Claude stopped",
         {
@@ -1210,7 +1303,9 @@ def on_stop(payload: dict) -> None:
     try:
         from hooks.config import BRAIN_WRITER_ENABLED
 
-        if BRAIN_WRITER_ENABLED and (transcript_path or payload.get("last_assistant_message")):
+        if BRAIN_WRITER_ENABLED and (
+            transcript_path or payload.get("last_assistant_message")
+        ):
             from hooks._async import fork_and_call
             from hooks.context.brain_writer_hook import write_markers
 
@@ -1310,7 +1405,10 @@ def on_stop(payload: dict) -> None:
         from hooks.config import CONTEXT_AUDIT_ENABLED, CONTEXT_AUDIT_THRESHOLD_PCT
 
         if CONTEXT_AUDIT_ENABLED and session_id:
-            from hooks.observability.context_audit import format_audit_report, get_audit_summary
+            from hooks.observability.context_audit import (
+                format_audit_report,
+                get_audit_summary,
+            )
             from hooks.observability.token_monitor import get_context_fill_pct
 
             fill_pct = get_context_fill_pct(payload)
@@ -1319,7 +1417,10 @@ def on_stop(payload: dict) -> None:
                 if summary:
                     report = format_audit_report(summary, fill_pct)
                     if report:
-                        log("Context audit report", {"fill_pct": fill_pct, "report": report})
+                        log(
+                            "Context audit report",
+                            {"fill_pct": fill_pct, "report": report},
+                        )
     except Exception as e:
         log("context_audit report failed", {"error": str(e)})
 
@@ -1364,7 +1465,9 @@ def on_subagent_start(payload: dict) -> None:
         from hooks.config import CI_MANIFESTO_ENABLED
 
         if CI_MANIFESTO_ENABLED:
-            from hooks.context.ci_manifesto import inject_on_session_start as inject_ci_manifesto
+            from hooks.context.ci_manifesto import (
+                inject_on_session_start as inject_ci_manifesto,
+            )
 
             inject_ci_manifesto()
     except Exception as e:
@@ -1386,7 +1489,10 @@ def on_subagent_start(payload: dict) -> None:
         from hooks.config import BROADCAST_ENABLED
 
         if BROADCAST_ENABLED and agent_id:
-            from hooks.context.broadcast import check_and_inject_broadcasts, register_session
+            from hooks.context.broadcast import (
+                check_and_inject_broadcasts,
+                register_session,
+            )
 
             register_session(
                 agent_id,
@@ -1402,7 +1508,9 @@ def on_subagent_start(payload: dict) -> None:
 def on_subagent_stop(payload: dict) -> None:
     """Handle SubagentStop event — capture brain markers from subagent output."""
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
-    transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
+    transcript_path = payload.get("agent_transcript_path") or payload.get(
+        "transcript_path", ""
+    )
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
 
@@ -1550,7 +1658,15 @@ EVENT_HANDLERS = {
 
 
 def main() -> None:
-    """Main entry point - routes events to handlers."""
+    """Main entry point - routes events to handlers.
+
+    Uses ``os._exit`` instead of ``sys.exit`` to bypass Python's shutdown
+    sequence. This is critical: non-daemon OTEL exporter / BatchProcessor
+    threads would otherwise block process exit for 10-20s while they drain
+    retries against an unreachable collector. The hook's output is already
+    flushed by the handlers (stderr for banners, log() files), so skipping
+    atexit handlers is safe.
+    """
     try:
         # Read payload from stdin
         payload: dict[str, Any] = json.load(sys.stdin)
@@ -1566,13 +1682,23 @@ def main() -> None:
             log(f"Unknown event: {event_name}", payload)
 
     except BlockAction as e:
-        print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
-        sys.exit(2)  # blocks the action
+        print(
+            str(e), file=sys.stderr, flush=True
+        )  # Claude Code reads stderr for hook messages
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)
     except json.JSONDecodeError:
         log("Failed to parse JSON payload")
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
-        sys.exit(1)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":
