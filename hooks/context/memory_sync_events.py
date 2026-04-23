@@ -22,7 +22,6 @@ from pathlib import Path
 from hooks._async import fork_and_call
 from hooks.common import log
 
-
 _MEMORY_PATH_RE = re.compile(r"/\.claude/projects/[^/]+/memory/")
 _VALID_ROLES_PULL = ("consumer", "contributor", "authority")
 _MEMORY_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
