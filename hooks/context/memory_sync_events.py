@@ -38,6 +38,40 @@ _DIRTY_DIR = Path.home() / ".agentihooks" / "state" / "memory_dirty"
 _LOG_FILE = Path.home() / ".agentihooks" / "logs" / "memory-sync-hooks.log"
 
 
+def _resolve_cli() -> list[str] | None:
+    """Return the argv prefix to invoke agentihooks memory-sync.
+
+    Prefers the live clone at ``$AGENTICORE_AGENTIHOOKS_PATH`` or
+    ``/shared/agentihooks`` when present — this carries the latest dev
+    commit even if the pip-installed ``agentihooks`` CLI in the image is
+    pinned to an older release. Falls back to the PATH ``agentihooks``
+    executable (laptop install or PyPI-installed pod).
+    """
+    import sys as _sys
+    from shutil import which as _which
+
+    env_path = os.environ.get("AGENTICORE_AGENTIHOOKS_PATH", "").strip()
+    candidates = [p for p in (env_path, "/shared/agentihooks") if p]
+    for path in candidates:
+        install_py = Path(path) / "scripts" / "install.py"
+        if install_py.is_file():
+            return [_sys.executable, "-m", "scripts.install"]
+    cli = _which("agentihooks")
+    if cli:
+        return [cli]
+    return None
+
+
+def _resolve_cwd() -> str | None:
+    """Matching cwd for the CLI invocation — clone root when using -m, else
+    ``None`` (PATH executable doesn't need a cwd)."""
+    env_path = os.environ.get("AGENTICORE_AGENTIHOOKS_PATH", "").strip()
+    for path in (env_path, "/shared/agentihooks"):
+        if path and (Path(path) / "scripts" / "install.py").is_file():
+            return path
+    return None
+
+
 def _spawn_memory_sync(action: str, *args: str, timeout_sec: int = 120) -> None:
     """Fire-and-forget ``agentihooks memory-sync <action>`` subprocess.
 
@@ -47,11 +81,15 @@ def _spawn_memory_sync(action: str, *args: str, timeout_sec: int = 120) -> None:
     and gets reaped. No zombies, no accumulation.
     """
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    prefix = _resolve_cli()
+    if prefix is None:
+        log("memory_sync: no agentihooks CLI resolvable", {"action": action})
+        return
     cmd = [
         "timeout",
         "--kill-after=10",
         str(timeout_sec),
-        "agentihooks",
+        *prefix,
         "memory-sync",
         action,
         *args,
@@ -64,10 +102,10 @@ def _spawn_memory_sync(action: str, *args: str, timeout_sec: int = 120) -> None:
             stdin=subprocess.DEVNULL,
             start_new_session=True,
             close_fds=True,
+            cwd=_resolve_cwd(),
         )
     except (FileNotFoundError, OSError) as e:
-        # ``agentihooks`` or ``timeout`` binary missing — silent no-op.
-        # Laptop + agentihooks-installed pods always have both.
+        # ``timeout`` binary missing — silent no-op. Every standard Linux has it.
         log("memory_sync: spawn skipped", {"action": action, "error": str(e)})
 
 
