@@ -73,6 +73,16 @@ def _hostname() -> str:
     return socket.gethostname()
 
 
+def _copy_tree(src: Path, dst: Path) -> None:
+    """Python-native replacement for ``rsync -a src/ dst/``.
+
+    Replicates rsync's trailing-slash semantics (copy contents, not the dir
+    itself) using shutil.copytree with dirs_exist_ok. Avoids the rsync
+    binary dependency, which isn't present on slim container images.
+    """
+    shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=True)
+
+
 def _branch_prefix() -> str:
     return (config.MEMORY_MIRROR_BRANCH_PREFIX or "gitfoam").strip("/")
 
@@ -305,14 +315,7 @@ def snapshot_in() -> None:
             if not source_memory.is_dir():
                 continue
             mem_dest.mkdir(parents=True, exist_ok=True)
-            _run(
-                [
-                    "rsync",
-                    "-a",
-                    f"{source_memory}/",
-                    f"{mem_dest}/",
-                ]
-            )
+            _copy_tree(source_memory, mem_dest)
             copied += 1
     _log(f"snapshot: mirrored memory for {copied} project(s) into {len(id_map)} identity bucket(s)")
 
