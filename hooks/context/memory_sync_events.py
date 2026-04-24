@@ -115,7 +115,15 @@ def on_post_tool(payload: dict) -> None:
     session_id = payload.get("session_id", "") or "unknown"
     try:
         _DIRTY_DIR.mkdir(parents=True, exist_ok=True)
-        (_DIRTY_DIR / session_id).write_text(fp)
+        flag = _DIRTY_DIR / session_id
+        # Append one path per line; deduplicate so repeated writes to the
+        # same file don't bloat the flag.
+        existing: set[str] = set()
+        if flag.exists():
+            existing = {line.strip() for line in flag.read_text().splitlines() if line.strip()}
+        if fp not in existing:
+            with flag.open("a") as fh:
+                fh.write(fp + "\n")
     except OSError as e:
         log("memory_sync: dirty-mark failed", {"error": str(e)})
 
@@ -145,6 +153,12 @@ def on_stop(payload: dict) -> None:
     except ImportError as e:
         log("memory_sync: import propose_pr failed", {"error": str(e)})
         return
+    # Read the list of memory paths touched during the session. Deduplicated
+    # line-per-path format written by on_post_tool.
+    try:
+        touched = [line.strip() for line in flag.read_text().splitlines() if line.strip()]
+    except OSError:
+        touched = []
     # Delete the flag BEFORE forking — otherwise the grandchild and parent
     # race on the same file and if the user starts a new session before the
     # grandchild finishes, the stale flag could trigger a duplicate propose.
@@ -158,4 +172,5 @@ def on_stop(payload: dict) -> None:
         task_name="propose",
         session_id=short,
         agent_name=agent,
+        touched_paths=touched,
     )

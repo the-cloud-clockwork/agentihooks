@@ -622,10 +622,54 @@ def pull_only() -> None:
     consume_main()
 
 
+def _copy_touched_to_mirror(touched_paths: list[str], mirror: Path) -> list[Path]:
+    """Copy ONLY the files listed in touched_paths into the mirror tree.
+
+    Each touched path is of the form ``/.../.claude/projects/<encoded>/memory/<file>``.
+    Maps that to the mirror destination via the same identity resolver used
+    by ``snapshot_in``:
+        - mapped:   mirror/by-project/<key>/memory/<relative>
+        - unmapped: mirror/_unmapped/<encoded>/memory/<relative>
+
+    Returns the list of destination paths actually written (so the caller
+    can ``git add`` exactly those paths — NOT ``git add -A``).
+    """
+    claude_projects = _claude_projects()
+    dests: list[Path] = []
+    for src_str in touched_paths:
+        src = Path(src_str)
+        if not src.is_file():
+            _log(f"touched path vanished: {src_str}")
+            continue
+        try:
+            rel = src.relative_to(claude_projects)
+        except ValueError:
+            _log(f"touched path outside projects root: {src_str}")
+            continue
+        # rel should look like "<encoded>/memory/<file...>"
+        parts = rel.parts
+        if len(parts) < 3 or parts[1] != "memory":
+            _log(f"touched path not under memory/: {src_str}")
+            continue
+        encoded = parts[0]
+        inside_memory = Path(*parts[2:])
+        key, status = _identity_key(encoded)
+        if status == "unmapped":
+            dest_root = mirror / "_unmapped" / encoded / "memory"
+        else:
+            dest_root = mirror / "by-project" / key / "memory"
+        dest = dest_root / inside_memory
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        dests.append(dest)
+    return dests
+
+
 def propose_pr(
     auto_merge: bool = False,
     session_id: str | None = None,
     agent_name: str | None = None,
+    touched_paths: list[str] | None = None,
 ) -> int:
     """Open a PR promoting this node's current memory tree into main.
 
@@ -661,13 +705,28 @@ def propose_pr(
         session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
     mirror = ensure_mirror_repo()
-    snapshot_in()
     fetch_remote()
 
-    # Build a tree from the mirror's current working state. snapshot_in()
-    # already wipes + repopulates + git-adds via the sync_daemon flow, but
-    # to be safe we re-add here (idempotent).
-    add_proc = _run(["git", "add", "-A"], cwd=mirror, capture=True, check=False)
+    if touched_paths:
+        # Narrow path (v5 event-driven). Reset mirror working tree to match
+        # origin/main so nothing stale leaks into the commit, copy ONLY the
+        # session's touched files into their mirror destinations, then
+        # ``git add`` exactly those paths.
+        _run(["git", "reset", "--hard", "refs/remotes/origin/main"], cwd=mirror, check=False)
+        _run(["git", "clean", "-fdx"], cwd=mirror, check=False)
+        dests = _copy_touched_to_mirror(touched_paths, mirror)
+        if not dests:
+            _log("propose_pr: no mapped destinations for touched paths — nothing to push")
+            return 1
+        rel_paths = [str(d.relative_to(mirror)) for d in dests]
+        add_proc = _run(["git", "add", *rel_paths], cwd=mirror, capture=True, check=False)
+    else:
+        # Wholesale path (legacy — authority daemon / manual CLI). Snapshot
+        # everything, ``git add -A``. Produces multi-thousand-file PRs when
+        # the mirror has accumulated unmerged state; use the narrow path
+        # whenever the caller knows what files changed.
+        snapshot_in()
+        add_proc = _run(["git", "add", "-A"], cwd=mirror, capture=True, check=False)
     if add_proc.returncode != 0:
         _log(f"ERROR: git add -A failed: {(add_proc.stderr or '').strip()}")
         return 2
