@@ -83,6 +83,65 @@ def _copy_tree(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=True)
 
 
+def _mint_github_app_token() -> str | None:
+    """Mint a fresh GitHub App installation token if GITHUB_APP_* env vars are set.
+
+    Returns the token string on success, None if the env vars are missing or
+    PyJWT/httpx aren't available. Caller falls back to whatever ``gh`` picks
+    up from ``GITHUB_TOKEN`` / ``GH_TOKEN`` in that case.
+
+    The token is short-lived (1h). Used per-call to authenticate ``gh pr
+    create`` on pods where the static ``GITHUB_TOKEN`` env is a user PAT
+    without repo scope for the mirror. git push already uses the same app
+    via the credential helper.
+    """
+    pk = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+    app_id = os.environ.get("GITHUB_APP_ID", "")
+    inst = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+    if not (pk and app_id and inst):
+        return None
+    try:
+        import httpx
+        import jwt
+    except ImportError:
+        _log("github-app token mint: PyJWT/httpx missing; gh will use GITHUB_TOKEN")
+        return None
+    try:
+        now = int(time.time())
+        j = jwt.encode(
+            {"iat": now - 60, "exp": now + 540, "iss": app_id},
+            pk,
+            algorithm="RS256",
+        )
+        r = httpx.post(
+            f"https://api.github.com/app/installations/{inst}/access_tokens",
+            headers={"Authorization": f"Bearer {j}", "Accept": "application/vnd.github+json"},
+            timeout=10.0,
+        )
+        if r.status_code >= 300:
+            _log(f"github-app mint failed: {r.status_code} {r.text[:200]}")
+            return None
+        return r.json().get("token")
+    except Exception as e:
+        _log(f"github-app mint error: {e}")
+        return None
+
+
+def _gh_env() -> dict[str, str]:
+    """Build env for gh subprocess, preferring a fresh App installation token.
+
+    Falls back to inheriting ``os.environ`` when no App is configured — so
+    laptop manual use keeps working with whatever the user has logged into
+    ``gh auth login``.
+    """
+    env = os.environ.copy()
+    token = _mint_github_app_token()
+    if token:
+        env["GH_TOKEN"] = token
+        env["GITHUB_TOKEN"] = token  # some gh paths prefer one over the other
+    return env
+
+
 def _branch_prefix() -> str:
     return (config.MEMORY_MIRROR_BRANCH_PREFIX or "gitfoam").strip("/")
 
@@ -721,6 +780,7 @@ def propose_pr(
         ],
         capture=True,
         check=False,
+        env=_gh_env(),
     )
     if create.returncode != 0:
         _log(f"gh pr create failed: {(create.stderr or '').strip()}")
@@ -733,6 +793,7 @@ def propose_pr(
             ["gh", "pr", "merge", "--auto", "--squash", pr_url],
             capture=True,
             check=False,
+            env=_gh_env(),
         )
         if merge.returncode != 0:
             _log(f"gh pr merge --auto failed (PR still open): {(merge.stderr or '').strip()}")
