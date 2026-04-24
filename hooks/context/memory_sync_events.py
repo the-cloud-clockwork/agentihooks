@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import socket
+import time
 from pathlib import Path
 
 from hooks._async import fork_and_call
@@ -26,6 +27,43 @@ _MEMORY_PATH_RE = re.compile(r"/\.claude/projects/[^/]+/memory/")
 _VALID_ROLES_PULL = ("consumer", "contributor", "authority")
 _MEMORY_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 _DIRTY_DIR = Path.home() / ".agentihooks" / "state" / "memory_dirty"
+_DIRTY_TTL_SEC = 7 * 24 * 3600
+_SWEEP_INTERVAL_SEC = 24 * 3600
+_SWEEP_STAMP = Path.home() / ".agentihooks" / "state" / "memory_dirty_sweep.stamp"
+
+
+def _sweep_stale_dirty_flags() -> None:
+    """Remove dirty-flag files older than _DIRTY_TTL_SEC. Throttled to once/day.
+
+    Called from on_user_prompt so any active role does housekeeping. Cheap:
+    one stat on the stamp, one listdir on a tiny directory.
+    """
+    try:
+        now = time.time()
+        try:
+            if now - _SWEEP_STAMP.stat().st_mtime < _SWEEP_INTERVAL_SEC:
+                return
+        except FileNotFoundError:
+            pass
+        if not _DIRTY_DIR.exists():
+            _SWEEP_STAMP.parent.mkdir(parents=True, exist_ok=True)
+            _SWEEP_STAMP.touch()
+            return
+        removed = 0
+        cutoff = now - _DIRTY_TTL_SEC
+        for f in _DIRTY_DIR.iterdir():
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        _SWEEP_STAMP.parent.mkdir(parents=True, exist_ok=True)
+        _SWEEP_STAMP.touch()
+        if removed:
+            log("memory_sync: swept stale dirty flags", {"removed": removed})
+    except Exception as e:
+        log("memory_sync: sweep failed", {"error": str(e)})
 
 
 # Re-export for tests that monkeypatch this symbol.
@@ -46,6 +84,7 @@ def on_user_prompt(payload: dict) -> None:
         return
     if not (MEMORY_MIRROR_REMOTE or "").strip():
         return
+    _sweep_stale_dirty_flags()
     try:
         from scripts.memory_mirror_sync import pull_only
     except ImportError as e:

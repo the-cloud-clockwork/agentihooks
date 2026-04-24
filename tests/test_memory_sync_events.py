@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 from hooks.context import memory_sync_events as mse
@@ -265,3 +266,52 @@ def test_propose_pr_uses_new_branch_naming(monkeypatch):
     title = pr_cmd[title_idx + 1]
     assert "memory: publisher —" in title
     assert "1 file(s) touched" in title
+
+
+# ---------------------------------------------------------------------------
+# Stale dirty-flag sweep.
+# ---------------------------------------------------------------------------
+
+
+def test_sweep_removes_stale_flags(monkeypatch, tmp_path):
+    """Flags older than TTL are deleted; fresh ones kept."""
+    dirty_dir = tmp_path / "memory_dirty"
+    dirty_dir.mkdir(parents=True)
+    stamp = tmp_path / "sweep.stamp"
+    monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
+    monkeypatch.setattr(mse, "_SWEEP_STAMP", stamp)
+
+    stale = dirty_dir / "session-old"
+    stale.write_text("/x")
+    fresh = dirty_dir / "session-new"
+    fresh.write_text("/y")
+    old_time = time.time() - (mse._DIRTY_TTL_SEC + 3600)
+    import os
+
+    os.utime(stale, (old_time, old_time))
+
+    mse._sweep_stale_dirty_flags()
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert stamp.exists()
+
+
+def test_sweep_throttled_by_stamp(monkeypatch, tmp_path):
+    """Subsequent call within interval is a no-op."""
+    dirty_dir = tmp_path / "memory_dirty"
+    dirty_dir.mkdir(parents=True)
+    stamp = tmp_path / "sweep.stamp"
+    stamp.touch()
+    monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
+    monkeypatch.setattr(mse, "_SWEEP_STAMP", stamp)
+
+    stale = dirty_dir / "session-old"
+    stale.write_text("/x")
+    import os
+
+    old_time = time.time() - (mse._DIRTY_TTL_SEC + 3600)
+    os.utime(stale, (old_time, old_time))
+
+    mse._sweep_stale_dirty_flags()
+    assert stale.exists(), "throttled sweep should not have touched files"
