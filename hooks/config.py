@@ -5,7 +5,13 @@ from pathlib import Path
 
 
 def _parse_env_file(env_file: Path) -> None:
-    """Parse a single .env file and set variables in os.environ."""
+    """Parse a single .env file and set variables in os.environ.
+
+    Process env takes precedence — only unset keys get populated from the
+    file. Otherwise a stale PVC-persisted .env silently masks Helm env
+    changes (observed: MEMORY_MIRROR_ROLE cached as 'consumer' in
+    /shared/.agentihooks/.env overriding Helm's 'contributor').
+    """
     if not env_file.is_file():
         return
     for _raw in env_file.read_text(encoding="utf-8").splitlines():
@@ -29,7 +35,7 @@ def _parse_env_file(env_file: Path) -> None:
             # Strip inline comment: KEY=value # comment
             _val = _val[: _val.index("#")].rstrip()
         if _key:
-            os.environ[_key] = _val
+            os.environ.setdefault(_key, _val)
 
 
 def _load_user_env() -> None:

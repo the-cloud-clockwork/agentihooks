@@ -73,6 +73,75 @@ def _hostname() -> str:
     return socket.gethostname()
 
 
+def _copy_tree(src: Path, dst: Path) -> None:
+    """Python-native replacement for ``rsync -a src/ dst/``.
+
+    Replicates rsync's trailing-slash semantics (copy contents, not the dir
+    itself) using shutil.copytree with dirs_exist_ok. Avoids the rsync
+    binary dependency, which isn't present on slim container images.
+    """
+    shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=True)
+
+
+def _mint_github_app_token() -> str | None:
+    """Mint a fresh GitHub App installation token if GITHUB_APP_* env vars are set.
+
+    Returns the token string on success, None if the env vars are missing or
+    PyJWT/httpx aren't available. Caller falls back to whatever ``gh`` picks
+    up from ``GITHUB_TOKEN`` / ``GH_TOKEN`` in that case.
+
+    The token is short-lived (1h). Used per-call to authenticate ``gh pr
+    create`` on pods where the static ``GITHUB_TOKEN`` env is a user PAT
+    without repo scope for the mirror. git push already uses the same app
+    via the credential helper.
+    """
+    pk = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+    app_id = os.environ.get("GITHUB_APP_ID", "")
+    inst = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
+    if not (pk and app_id and inst):
+        return None
+    try:
+        import httpx
+        import jwt
+    except ImportError:
+        _log("github-app token mint: PyJWT/httpx missing; gh will use GITHUB_TOKEN")
+        return None
+    try:
+        now = int(time.time())
+        j = jwt.encode(
+            {"iat": now - 60, "exp": now + 540, "iss": app_id},
+            pk,
+            algorithm="RS256",
+        )
+        r = httpx.post(
+            f"https://api.github.com/app/installations/{inst}/access_tokens",
+            headers={"Authorization": f"Bearer {j}", "Accept": "application/vnd.github+json"},
+            timeout=10.0,
+        )
+        if r.status_code >= 300:
+            _log(f"github-app mint failed: {r.status_code} {r.text[:200]}")
+            return None
+        return r.json().get("token")
+    except Exception as e:
+        _log(f"github-app mint error: {e}")
+        return None
+
+
+def _gh_env() -> dict[str, str]:
+    """Build env for gh subprocess, preferring a fresh App installation token.
+
+    Falls back to inheriting ``os.environ`` when no App is configured — so
+    laptop manual use keeps working with whatever the user has logged into
+    ``gh auth login``.
+    """
+    env = os.environ.copy()
+    token = _mint_github_app_token()
+    if token:
+        env["GH_TOKEN"] = token
+        env["GITHUB_TOKEN"] = token  # some gh paths prefer one over the other
+    return env
+
+
 def _branch_prefix() -> str:
     return (config.MEMORY_MIRROR_BRANCH_PREFIX or "gitfoam").strip("/")
 
@@ -305,14 +374,7 @@ def snapshot_in() -> None:
             if not source_memory.is_dir():
                 continue
             mem_dest.mkdir(parents=True, exist_ok=True)
-            _run(
-                [
-                    "rsync",
-                    "-a",
-                    f"{source_memory}/",
-                    f"{mem_dest}/",
-                ]
-            )
+            _copy_tree(source_memory, mem_dest)
             copied += 1
     _log(f"snapshot: mirrored memory for {copied} project(s) into {len(id_map)} identity bucket(s)")
 
@@ -560,10 +622,54 @@ def pull_only() -> None:
     consume_main()
 
 
+def _copy_touched_to_mirror(touched_paths: list[str], mirror: Path) -> list[Path]:
+    """Copy ONLY the files listed in touched_paths into the mirror tree.
+
+    Each touched path is of the form ``/.../.claude/projects/<encoded>/memory/<file>``.
+    Maps that to the mirror destination via the same identity resolver used
+    by ``snapshot_in``:
+        - mapped:   mirror/by-project/<key>/memory/<relative>
+        - unmapped: mirror/_unmapped/<encoded>/memory/<relative>
+
+    Returns the list of destination paths actually written (so the caller
+    can ``git add`` exactly those paths — NOT ``git add -A``).
+    """
+    claude_projects = _claude_projects()
+    dests: list[Path] = []
+    for src_str in touched_paths:
+        src = Path(src_str)
+        if not src.is_file():
+            _log(f"touched path vanished: {src_str}")
+            continue
+        try:
+            rel = src.relative_to(claude_projects)
+        except ValueError:
+            _log(f"touched path outside projects root: {src_str}")
+            continue
+        # rel should look like "<encoded>/memory/<file...>"
+        parts = rel.parts
+        if len(parts) < 3 or parts[1] != "memory":
+            _log(f"touched path not under memory/: {src_str}")
+            continue
+        encoded = parts[0]
+        inside_memory = Path(*parts[2:])
+        key, status = _identity_key(encoded)
+        if status == "unmapped":
+            dest_root = mirror / "_unmapped" / encoded / "memory"
+        else:
+            dest_root = mirror / "by-project" / key / "memory"
+        dest = dest_root / inside_memory
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        dests.append(dest)
+    return dests
+
+
 def propose_pr(
     auto_merge: bool = False,
     session_id: str | None = None,
     agent_name: str | None = None,
+    touched_paths: list[str] | None = None,
 ) -> int:
     """Open a PR promoting this node's current memory tree into main.
 
@@ -599,13 +705,28 @@ def propose_pr(
         session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
     mirror = ensure_mirror_repo()
-    snapshot_in()
     fetch_remote()
 
-    # Build a tree from the mirror's current working state. snapshot_in()
-    # already wipes + repopulates + git-adds via the sync_daemon flow, but
-    # to be safe we re-add here (idempotent).
-    add_proc = _run(["git", "add", "-A"], cwd=mirror, capture=True, check=False)
+    if touched_paths:
+        # Narrow path (v5 event-driven). Reset mirror working tree to match
+        # origin/main so nothing stale leaks into the commit, copy ONLY the
+        # session's touched files into their mirror destinations, then
+        # ``git add`` exactly those paths.
+        _run(["git", "reset", "--hard", "refs/remotes/origin/main"], cwd=mirror, check=False)
+        _run(["git", "clean", "-fdx"], cwd=mirror, check=False)
+        dests = _copy_touched_to_mirror(touched_paths, mirror)
+        if not dests:
+            _log("propose_pr: no mapped destinations for touched paths — nothing to push")
+            return 1
+        rel_paths = [str(d.relative_to(mirror)) for d in dests]
+        add_proc = _run(["git", "add", *rel_paths], cwd=mirror, capture=True, check=False)
+    else:
+        # Wholesale path (legacy — authority daemon / manual CLI). Snapshot
+        # everything, ``git add -A``. Produces multi-thousand-file PRs when
+        # the mirror has accumulated unmerged state; use the narrow path
+        # whenever the caller knows what files changed.
+        snapshot_in()
+        add_proc = _run(["git", "add", "-A"], cwd=mirror, capture=True, check=False)
     if add_proc.returncode != 0:
         _log(f"ERROR: git add -A failed: {(add_proc.stderr or '').strip()}")
         return 2
@@ -718,6 +839,7 @@ def propose_pr(
         ],
         capture=True,
         check=False,
+        env=_gh_env(),
     )
     if create.returncode != 0:
         _log(f"gh pr create failed: {(create.stderr or '').strip()}")
@@ -730,6 +852,7 @@ def propose_pr(
             ["gh", "pr", "merge", "--auto", "--squash", pr_url],
             capture=True,
             check=False,
+            env=_gh_env(),
         )
         if merge.returncode != 0:
             _log(f"gh pr merge --auto failed (PR still open): {(merge.stderr or '').strip()}")

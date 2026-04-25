@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 from hooks.context import memory_sync_events as mse
@@ -103,7 +104,25 @@ def test_on_post_tool_marks_dirty_on_memory_write(monkeypatch, tmp_path):
     mse.on_post_tool(payload)
     flag = tmp_path / "memory_dirty" / "sess-123"
     assert flag.exists()
-    assert flag.read_text() == "/home/x/.claude/projects/abc/memory/note.md"
+    assert flag.read_text().strip().splitlines() == ["/home/x/.claude/projects/abc/memory/note.md"]
+
+
+def test_on_post_tool_appends_and_dedupes(monkeypatch, tmp_path):
+    """Repeated writes accumulate as lines; duplicate writes dedupe."""
+    _patch_role(monkeypatch, "contributor")
+    monkeypatch.setattr(mse, "_DIRTY_DIR", tmp_path / "memory_dirty")
+    base = "/home/x/.claude/projects/abc/memory"
+    for fp in [f"{base}/a.md", f"{base}/b.md", f"{base}/a.md"]:  # a.md twice
+        mse.on_post_tool(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": fp},
+                "session_id": "sess-multi",
+            }
+        )
+    flag = tmp_path / "memory_dirty" / "sess-multi"
+    lines = [line for line in flag.read_text().splitlines() if line]
+    assert sorted(lines) == [f"{base}/a.md", f"{base}/b.md"]
 
 
 def test_on_post_tool_ignores_non_memory_write(monkeypatch, tmp_path):
@@ -154,7 +173,9 @@ def test_on_stop_forks_propose_when_dirty(monkeypatch, tmp_path):
     _patch_role(monkeypatch, "contributor")
     dirty_dir = tmp_path / "memory_dirty"
     dirty_dir.mkdir(parents=True)
-    (dirty_dir / "sess-abc12345extra").write_text("/home/x/.../memory/x.md")
+    (dirty_dir / "sess-abc12345extra").write_text(
+        "/home/x/.claude/projects/abc/memory/x.md\n/home/x/.claude/projects/abc/memory/y.md\n"
+    )
     monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
     monkeypatch.setenv("AGENTICORE_AGENT_NAME", "publisher")
 
@@ -172,6 +193,12 @@ def test_on_stop_forks_propose_when_dirty(monkeypatch, tmp_path):
     # Session id is truncated to 8 chars
     assert calls[0]["kwargs"]["session_id"] == "sess-abc"
     assert calls[0]["kwargs"]["task_name"] == "propose"
+    # The dirty flag's line-list is forwarded so propose_pr can open a
+    # narrow PR containing only the session's touched files.
+    assert calls[0]["kwargs"]["touched_paths"] == [
+        "/home/x/.claude/projects/abc/memory/x.md",
+        "/home/x/.claude/projects/abc/memory/y.md",
+    ]
     # Flag was consumed
     assert not (dirty_dir / "sess-abc12345extra").exists()
 
@@ -265,3 +292,52 @@ def test_propose_pr_uses_new_branch_naming(monkeypatch):
     title = pr_cmd[title_idx + 1]
     assert "memory: publisher —" in title
     assert "1 file(s) touched" in title
+
+
+# ---------------------------------------------------------------------------
+# Stale dirty-flag sweep.
+# ---------------------------------------------------------------------------
+
+
+def test_sweep_removes_stale_flags(monkeypatch, tmp_path):
+    """Flags older than TTL are deleted; fresh ones kept."""
+    dirty_dir = tmp_path / "memory_dirty"
+    dirty_dir.mkdir(parents=True)
+    stamp = tmp_path / "sweep.stamp"
+    monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
+    monkeypatch.setattr(mse, "_SWEEP_STAMP", stamp)
+
+    stale = dirty_dir / "session-old"
+    stale.write_text("/x")
+    fresh = dirty_dir / "session-new"
+    fresh.write_text("/y")
+    old_time = time.time() - (mse._DIRTY_TTL_SEC + 3600)
+    import os
+
+    os.utime(stale, (old_time, old_time))
+
+    mse._sweep_stale_dirty_flags()
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert stamp.exists()
+
+
+def test_sweep_throttled_by_stamp(monkeypatch, tmp_path):
+    """Subsequent call within interval is a no-op."""
+    dirty_dir = tmp_path / "memory_dirty"
+    dirty_dir.mkdir(parents=True)
+    stamp = tmp_path / "sweep.stamp"
+    stamp.touch()
+    monkeypatch.setattr(mse, "_DIRTY_DIR", dirty_dir)
+    monkeypatch.setattr(mse, "_SWEEP_STAMP", stamp)
+
+    stale = dirty_dir / "session-old"
+    stale.write_text("/x")
+    import os
+
+    old_time = time.time() - (mse._DIRTY_TTL_SEC + 3600)
+    os.utime(stale, (old_time, old_time))
+
+    mse._sweep_stale_dirty_flags()
+    assert stale.exists(), "throttled sweep should not have touched files"

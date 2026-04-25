@@ -22,12 +22,33 @@ from hooks.common import log
 
 
 def brain_http_enabled() -> bool:
-    """True when BRAIN_URL is set in the environment."""
+    """True when BRAIN_URL is set in the environment.
+
+    When running inside a K8s pod (KUBERNETES_SERVICE_HOST set) and BRAIN_URL
+    is empty, a critical warning is logged once per process — the file/SSH
+    fallback should never be the path of record for fleet pods.
+    """
+    import os
+
     try:
         from hooks.config import BRAIN_URL
     except ImportError:
         return False
-    return bool(BRAIN_URL)
+    enabled = bool(BRAIN_URL)
+    if not enabled and os.getenv("KUBERNETES_SERVICE_HOST") and not _K8S_FALLBACK_WARNED["v"]:
+        log(
+            "brain_http_disabled_in_k8s",
+            {
+                "msg": "BRAIN_URL unset on a K8s pod — falling back to filesystem. "
+                "Wire BRAIN_URL=http://agentibrain-kb-router.<ns>.svc:8080.",
+                "severity": "critical",
+            },
+        )
+        _K8S_FALLBACK_WARNED["v"] = True
+    return enabled
+
+
+_K8S_FALLBACK_WARNED: dict[str, bool] = {"v": False}
 
 
 def _auth_headers() -> dict[str, str]:
