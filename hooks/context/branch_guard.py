@@ -72,6 +72,13 @@ def clear_branch_signal(session_id: str) -> None:
 
 
 def _has_branch_signal(session_id: str) -> bool:
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        if is_controls_disabled(session_id):
+            return True
+    except Exception:
+        pass
     if not session_id:
         return False
     r = get_redis()
@@ -170,6 +177,13 @@ def clear_pr_counter(session_id: str) -> None:
 
 
 def _has_pr_signal(session_id: str) -> bool:
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        if is_controls_disabled(session_id):
+            return True
+    except Exception:
+        pass
     if not session_id:
         return False
     r = get_redis()
@@ -227,9 +241,16 @@ _BLOCKED_PATTERNS = [
         re.compile(r"git\s+reset\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Resetting main/master is blocked — this rewrites history.",
     ),
-    # Force push (any branch — can destroy remote history)
-    (re.compile(r"git\s+push\s+--force"), "Force push is blocked — this can destroy remote history."),
-    (re.compile(r"git\s+push\s+-f\b"), "Force push is blocked — this can destroy remote history."),
+    # Force push (any branch — can destroy remote history).
+    # Bypass-eligible: short-circuited when 'disable controls' is active.
+    (
+        re.compile(r"git\s+push\s+--force(?!-with-lease)"),
+        "Force push is blocked — this can destroy remote history.",
+    ),
+    (
+        re.compile(r"git\s+push\s+-f\b"),
+        "Force push is blocked — this can destroy remote history.",
+    ),
     (
         re.compile(r"git\s+push\s+.*--force-with-lease"),
         "Force push (with lease) is blocked — this can destroy remote history.",
@@ -265,8 +286,19 @@ def check_branch_guard(payload: dict) -> None:
 
     check_text = strip_non_command_content(command)
 
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        _bypass_active = is_controls_disabled(payload.get("session_id", ""))
+    except Exception:
+        _bypass_active = False
+
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
+            if _bypass_active and "Force push" in message:
+                # Force-push is bypass-eligible per controls-toggle rule.
+                # Direct-to-main push still caught by the main/master pattern above.
+                continue
             log(
                 "branch_guard: blocked",
                 {
@@ -307,8 +339,14 @@ def check_branch_guard(payload: dict) -> None:
                 "To unlock for this session, include a PR phrase in your message\n"
                 "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
             )
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+
+            _bypass_counter = _ctl_off(session_id)
+        except Exception:
+            _bypass_counter = False
         count = _get_pr_counter(session_id)
-        if count >= _PR_SIGNAL_MAX_COUNT:
+        if not _bypass_counter and count >= _PR_SIGNAL_MAX_COUNT:
             log(
                 "branch_guard: PR creation blocked (counter limit)",
                 {"count": count, "session_id": session_id},

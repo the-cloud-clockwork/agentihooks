@@ -296,3 +296,4 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | `RETRY_BREAKER_MAX` | `5` | Soft limit -- warn after this many identical failures. |
 | `RETRY_BREAKER_HARD_MAX` | `10` | Hard limit -- block after this many identical failures. |
 | `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |
+| `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` short-circuits branch / PR / release-merge / hotfix / non-main force-push gates session-wide. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |

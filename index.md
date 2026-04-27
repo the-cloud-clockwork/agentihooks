@@ -82,7 +82,7 @@ The profile system gives each agent a distinct personality, skill set, and permi
 
 **Agents that stay in bounds — automatically.**
 
-Guardrails run on every hook event. Secret patterns are scanned before any tool output reaches the model. Cost limits cut off sessions before they blow the weekly quota. Tool permissions block operations the operator never approved. Output filtering strips the 3000-line `docker logs` dump before it floods context. Guardrails are not opt-in safety theater — they are always on, zero configuration required.
+Guardrails run on every hook event. Secret patterns are scanned before any tool output reaches the model. Cost limits cut off sessions before they blow the weekly quota. Tool permissions block operations the operator never approved. Output filtering strips the 3000-line `docker logs` dump before it floods context. The operator can also flip a session-wide bypass with `disable controls` to lift branch / PR / release-merge / hotfix / non-main-force-push gates at once for high-velocity work — HARD FLOOR (push-to-main, secrets-in-files) still holds. Guardrails are not opt-in safety theater — they are always on, zero configuration required.
 
 [Read Pillar 2: Guardrails →]({{ site.baseurl }}/docs/pillars/guardrails/){: .btn }
 
