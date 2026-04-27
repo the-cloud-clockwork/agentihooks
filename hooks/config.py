@@ -344,8 +344,14 @@ BROADCAST_PRETOOL_MIN_SEVERITY: str = os.getenv("BROADCAST_PRETOOL_MIN_SEVERITY"
 
 # Cadence controls — skip re-injecting identical or too-frequent broadcasts per session.
 BROADCAST_DEDUP_BY_HASH = _env_bool("BROADCAST_DEDUP_BY_HASH", "true")
-BROADCAST_MIN_INTERVAL_SEC: int = int(os.getenv("BROADCAST_MIN_INTERVAL_SEC", "300"))
-BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "6"))
+# Throttle window between same-message redeliveries. 300s was empirically too
+# strict — combined with hash-dedup it suppressed ~96% of brain markers per
+# brain-keeper Apr 13 audit. 120s lets a 2h tick land + ad-hoc markers
+# without re-injecting the same persistent banner every prompt.
+BROADCAST_MIN_INTERVAL_SEC: int = int(os.getenv("BROADCAST_MIN_INTERVAL_SEC", "120"))
+# Per-prompt cap. Raised 2→6→8 so brain feed (5 entries) + amygdala (1-2)
+# + profile transitions all land in the same prompt without contention.
+BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     "BROADCAST_DELIVERY_STATE_FILE",
