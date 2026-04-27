@@ -19,6 +19,7 @@ Claude Code agents are powerful. Without boundaries, they can push to production
 
 ## What's new (Unreleased)
 
+- **Controls toggle (bypass mode)** — operator phrase `disable controls` flips a session-wide bypass that lifts every CI-manifesto signal gate at once: branch creation, PR creation, release-merge, hotfix-category prod ops, and force-push to non-main branches. Spawned subagents inherit it. HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced. Restored by `enable controls` or SessionEnd. See [Guardrail 9](#guardrail-9-controls-toggle-bypass-mode).
 - **Two-tier secrets** — code-file writes still hard-block; inline Bash args (no file redirect) scan + log + note only. Lets agents pass a token to `curl -H` without breaking the workflow, while keeping durable storage locked.
 - **Session-scoped PR / release / hotfix signals** — one signal phrase from the operator unlocks an entire workflow until session end, instead of expiring per-turn. PR has a 3-per-session counter.
 - **Subagent signal isolation** — subagents cannot self-arm release or hotfix signals. Only top-level operator sessions can.
@@ -344,6 +345,66 @@ File identity is tracked by path + `mtime`. A file modified on disk since the la
 
 ---
 
+## Guardrail 9: Controls toggle (bypass mode)
+
+**Hook:** `UserPromptSubmit` (signal detection), `PreToolUse` (consumed by branch_guard + prod_lockdown), `SessionEnd` (cleanup)
+**Default:** On — `CONTROLS_BYPASS_ENABLED=true`
+
+A session-level escape hatch the operator activates by saying **`disable controls`**
+(or `turn off controls`, `deactivate controls`, `kill controls`). While active, every CI-manifesto signal gate is short-circuited at once. Restored by **`enable controls`** (or `turn on`, `activate`, `restore`) or by SessionEnd of the activating session.
+
+### What it unlocks
+
+While bypass mode is ACTIVE:
+
+- Branch creation (CI Manifesto §13) — `git checkout -b`, `git switch -c`, `git branch <name>`
+- PR creation (§14) — `gh pr create` with no per-session counter cap
+- Release-gate merges (§4) — `gh pr merge` to main/master
+- Release workflow trigger — `gh workflow run release.yml`
+- Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
+- Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`
+
+### What stays HARD FLOOR
+
+These remain blocked even with controls disabled — no toggle reaches them:
+
+- Direct `git push` to main/master (also blocked at OS layer + GitHub ruleset)
+- Force push to main/master (caught by the main-push pattern that runs first)
+- `git commit` while HEAD is on main/master
+- `--base main` requirement on `gh pr create` (correctness, not permission)
+- `git reset` on main, `git tag`, `git branch -D main`
+- Secrets written to code files (Write/Edit/Bash-redirect into a file)
+
+### Subagent inheritance
+
+The flag is global (single file at `~/.agentihooks/controls_flags/active.flag` + Redis key `controls_disabled:_global` storing the owner session ID). Any subagent spawned during the bypass window inherits the unlock without per-session signaling. SessionEnd of the *parent* session clears it — child SessionEnds are no-ops, so a long-running parent doesn't lose its bypass when a subagent ends.
+
+### Operator phrases
+
+| Phrase | Effect |
+|---|---|
+| `disable controls`, `turn off controls`, `deactivate controls`, `kill controls` | Activate bypass |
+| `enable controls`, `turn on controls`, `activate controls`, `restore controls` | Restore gates |
+
+A `CONTROLS` banner is injected on every transition and on each turn while bypass is active, so the operator (and the agent) can never silently forget the gates are down.
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `CONTROLS_BYPASS_ENABLED` | `true` | Master switch — set `false` to disable the feature entirely |
+
+### When the operator is likely to invoke it
+
+- Multi-step main-targeted work where re-signaling each gate would be friction
+- Spawning a fleet of subagents to open multiple PRs in parallel
+- Hotfix sequences where the operator has already validated and just wants speed
+- Force-push to a feature branch after a rebase
+
+Agents must NOT volunteer the toggle ("want me to disable controls?"). The operator decides; the agent doesn't suggest the escape hatch.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |
@@ -356,6 +417,7 @@ File identity is tracked by path + `mtime`. A file modified on disk since the la
 | 6 | MCP surface area | `SessionStart` | On | Warn | `MCP_TOOL_WARN_THRESHOLD` |
 | 7 | Output token limit | `SessionStart` | Passive | Inject awareness | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` |
 | 8 | File read dedup | `PreToolUse` / `PostToolUse` | On | Block | `FILE_READ_CACHE_ENABLED` |
+| 9 | Controls toggle (bypass) | `UserPromptSubmit` / `PreToolUse` / `SessionEnd` | On | Operator-toggled | `CONTROLS_BYPASS_ENABLED` |
 
 ---
 
