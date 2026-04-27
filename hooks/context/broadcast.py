@@ -67,7 +67,13 @@ def _msg_hash(msg: dict) -> str:
 
 
 def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
-    key = msg.get("channel") or ("_msg_" + msg.get("id", ""))
+    # Dedup per-message, not per-channel. A channel like "brain" carries many
+    # distinct entries (hot-arcs, operator-intent, tick-diff, signals…); keying
+    # on channel collapses them all into one bucket and throttles 4-5 entries
+    # as if they were duplicates of a single broadcast — agents end up seeing
+    # only the first 1-2 to land. Keying on message id keeps each entry on its
+    # own throttle clock.
+    key = msg.get("id") or msg.get("channel") or "_global"
     prev = sess_state.get(key)
     persistent = bool(msg.get("persistent"))
     if not prev:
@@ -86,7 +92,8 @@ def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
 def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
     state = _load_delivery_state()
     sess = state.setdefault(sid, {})
-    key = msg.get("channel") or ("_msg_" + msg.get("id", ""))
+    # Match _should_skip: per-message id, not per-channel.
+    key = msg.get("id") or msg.get("channel") or "_global"
     sess[key] = {"hash": _msg_hash(msg), "ts": now_ts}
     _save_delivery_state(state)
 
