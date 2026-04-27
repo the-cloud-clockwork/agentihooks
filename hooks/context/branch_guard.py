@@ -72,6 +72,13 @@ def clear_branch_signal(session_id: str) -> None:
 
 
 def _has_branch_signal(session_id: str) -> bool:
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        if is_controls_disabled(session_id):
+            return True
+    except Exception:
+        pass
     if not session_id:
         return False
     r = get_redis()
@@ -170,6 +177,13 @@ def clear_pr_counter(session_id: str) -> None:
 
 
 def _has_pr_signal(session_id: str) -> bool:
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        if is_controls_disabled(session_id):
+            return True
+    except Exception:
+        pass
     if not session_id:
         return False
     r = get_redis()
@@ -307,8 +321,14 @@ def check_branch_guard(payload: dict) -> None:
                 "To unlock for this session, include a PR phrase in your message\n"
                 "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
             )
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+
+            _bypass_counter = _ctl_off(session_id)
+        except Exception:
+            _bypass_counter = False
         count = _get_pr_counter(session_id)
-        if count >= _PR_SIGNAL_MAX_COUNT:
+        if not _bypass_counter and count >= _PR_SIGNAL_MAX_COUNT:
             log(
                 "branch_guard: PR creation blocked (counter limit)",
                 {"count": count, "session_id": session_id},

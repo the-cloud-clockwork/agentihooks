@@ -224,6 +224,15 @@ def _has_release_signal(session_id: str) -> bool:
 
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
+    # Operator-toggled bypass mode — unlocks everything, session-scoped
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        controls_off = is_controls_disabled(session_id)
+    except Exception:
+        controls_off = False
+    if controls_off:
+        return
     # Legacy full bypass (--emergency-prod etc.) — unlocks everything, per-turn
     full_bypass = bool(session_id and is_bypass_active(session_id))
     # Session-scoped hotfix signal — unlocks everything

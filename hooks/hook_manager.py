@@ -560,6 +560,14 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    # Clear controls bypass IF this session is the owner (subagent ends are no-ops)
+    try:
+        from hooks.context.controls_toggle import clear_controls_disabled
+
+        clear_controls_disabled(session_id)
+    except Exception:
+        pass
+
     # --- Broadcast: deregister session ---
     from hooks.config import BROADCAST_ENABLED
 
@@ -767,6 +775,58 @@ def on_user_prompt_submit(payload: dict) -> None:
                 inject_banner("VOICE", quota_msg)
     except Exception as e:
         log("voice_output signal detection failed", {"error": str(e)})
+
+    # --- Controls toggle: detect "disable controls" / "enable controls" ---
+    try:
+        from hooks.config import CONTROLS_BYPASS_ENABLED
+
+        if CONTROLS_BYPASS_ENABLED:
+            from hooks.context.controls_toggle import (
+                clear_controls_disabled,
+                is_controls_disabled,
+                set_controls_disabled,
+            )
+            from hooks.context.controls_toggle import (
+                contains_disable_signal as _ctl_disable,
+            )
+            from hooks.context.controls_toggle import (
+                contains_enable_signal as _ctl_enable,
+            )
+
+            prompt = payload.get("prompt", "")
+            if prompt:
+                from hooks.common import inject_banner
+
+                if _ctl_disable(prompt):
+                    set_controls_disabled(session_id)
+                    log(
+                        "controls_toggle: bypass mode ACTIVE",
+                        {"session_id": session_id},
+                    )
+                    inject_banner(
+                        "CONTROLS",
+                        "Bypass mode ACTIVE — branch/PR/release-merge/hotfix gates short-circuited "
+                        "for this session and all spawned subagents. Direct push to main and "
+                        "commit-on-main remain blocked. Say 'enable controls' to restore.",
+                    )
+                elif _ctl_enable(prompt):
+                    clear_controls_disabled(session_id, force=True)
+                    log(
+                        "controls_toggle: bypass mode CLEARED",
+                        {"session_id": session_id},
+                    )
+                    inject_banner(
+                        "CONTROLS",
+                        "Bypass mode DISABLED — CI-manifesto signal gates restored. "
+                        "Branch/PR/release ops require their normal signals.",
+                    )
+                elif is_controls_disabled(session_id):
+                    inject_banner(
+                        "CONTROLS",
+                        "Bypass mode is ACTIVE this session. Say 'enable controls' to restore gates.",
+                    )
+    except Exception as e:
+        log("controls_toggle signal detection failed", {"error": str(e)})
 
     # --- Broadcast: inject pending messages ---
     from hooks.config import BROADCAST_ENABLED
@@ -1111,6 +1171,35 @@ def on_post_tool_use(payload: dict) -> None:
                         "ci_manifesto: PR signal via AskUserQuestion answer",
                         {"session_id": session_id},
                     )
+                try:
+                    from hooks.config import CONTROLS_BYPASS_ENABLED
+
+                    if CONTROLS_BYPASS_ENABLED:
+                        from hooks.context.controls_toggle import (
+                            clear_controls_disabled,
+                            set_controls_disabled,
+                        )
+                        from hooks.context.controls_toggle import (
+                            contains_disable_signal as _ctl_disable,
+                        )
+                        from hooks.context.controls_toggle import (
+                            contains_enable_signal as _ctl_enable,
+                        )
+
+                        if _ctl_disable(combined):
+                            set_controls_disabled(session_id)
+                            log(
+                                "controls_toggle: bypass via AskUserQuestion",
+                                {"session_id": session_id},
+                            )
+                        elif _ctl_enable(combined):
+                            clear_controls_disabled(session_id, force=True)
+                            log(
+                                "controls_toggle: cleared via AskUserQuestion",
+                                {"session_id": session_id},
+                            )
+                except Exception as e:
+                    log("controls_toggle AskUserQuestion failed", {"error": str(e)})
         except Exception as e:
             log(
                 "ci_manifesto AskUserQuestion signal detection failed",

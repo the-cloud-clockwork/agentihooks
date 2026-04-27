@@ -364,6 +364,12 @@ VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "")
 VOICE_API_KEY: str = os.getenv("VOICE_API_KEY", "")
 
 # =============================================================================
+# CONTROLS BYPASS — operator-toggled session-level CI-gate bypass
+# Phrase: "disable controls" / "enable controls". Default-on (feature wired).
+# =============================================================================
+CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
+
+# =============================================================================
 # CI MANIFESTO — doctrine-as-context injection
 # =============================================================================
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
