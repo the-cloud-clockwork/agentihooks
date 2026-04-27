@@ -149,6 +149,28 @@ class TestBranchGuardIntegration:
         with pytest.raises(BlockAction):
             self._check("git push origin main")
 
+    def test_force_push_blocked_normally(self):
+        from hooks.hook_manager import BlockAction
+
+        with pytest.raises(BlockAction):
+            self._check("git push --force origin feat/x")
+
+    def test_force_push_allowed_with_bypass(self):
+        from hooks.context.controls_toggle import set_controls_disabled
+
+        set_controls_disabled("test")
+        self._check("git push --force origin feat/x")
+        self._check("git push -f origin feat/x")
+        self._check("git push --force-with-lease origin feat/x")
+
+    def test_force_push_to_main_still_blocked(self):
+        from hooks.context.controls_toggle import set_controls_disabled
+        from hooks.hook_manager import BlockAction
+
+        set_controls_disabled("test")
+        with pytest.raises(BlockAction):
+            self._check("git push --force origin main")
+
     def test_subagent_inherits_pr_unlock(self):
         from hooks.context.controls_toggle import set_controls_disabled
 

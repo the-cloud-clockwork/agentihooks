@@ -241,9 +241,16 @@ _BLOCKED_PATTERNS = [
         re.compile(r"git\s+reset\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
         "Resetting main/master is blocked — this rewrites history.",
     ),
-    # Force push (any branch — can destroy remote history)
-    (re.compile(r"git\s+push\s+--force"), "Force push is blocked — this can destroy remote history."),
-    (re.compile(r"git\s+push\s+-f\b"), "Force push is blocked — this can destroy remote history."),
+    # Force push (any branch — can destroy remote history).
+    # Bypass-eligible: short-circuited when 'disable controls' is active.
+    (
+        re.compile(r"git\s+push\s+--force(?!-with-lease)"),
+        "Force push is blocked — this can destroy remote history.",
+    ),
+    (
+        re.compile(r"git\s+push\s+-f\b"),
+        "Force push is blocked — this can destroy remote history.",
+    ),
     (
         re.compile(r"git\s+push\s+.*--force-with-lease"),
         "Force push (with lease) is blocked — this can destroy remote history.",
@@ -279,8 +286,19 @@ def check_branch_guard(payload: dict) -> None:
 
     check_text = strip_non_command_content(command)
 
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        _bypass_active = is_controls_disabled(payload.get("session_id", ""))
+    except Exception:
+        _bypass_active = False
+
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
+            if _bypass_active and "Force push" in message:
+                # Force-push is bypass-eligible per controls-toggle rule.
+                # Direct-to-main push still caught by the main/master pattern above.
+                continue
             log(
                 "branch_guard: blocked",
                 {
