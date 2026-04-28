@@ -1086,8 +1086,12 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
 
-    # --- Broadcast: critical alerts on every tool call ---
-    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED
+    # --- Combined PreToolUse context injection: broadcast + enforcement ---
+    # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
+    # two separate JSON lines makes Claude Code drop the second.
+    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+
+    _pretool_blocks: list[str] = []
 
     if BROADCAST_ENABLED and BROADCAST_CRITICAL_ON_PRETOOL:
         try:
@@ -1095,44 +1099,33 @@ def on_pre_tool_use(payload: dict) -> None:
 
             _broadcast_ctx = get_pretool_context(session_id)
             if _broadcast_ctx:
-                import json as _json
-
-                print(
-                    _json.dumps(
-                        {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "additionalContext": _broadcast_ctx,
-                            }
-                        }
-                    )
-                )
+                _pretool_blocks.append(_broadcast_ctx)
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
-    # --- Enforcement: drumbeat reminders every N tool calls ---
-    try:
-        from hooks.config import ENFORCEMENT_INJECTION_ENABLED
-
-        if ENFORCEMENT_INJECTION_ENABLED:
+    if ENFORCEMENT_INJECTION_ENABLED:
+        try:
             from hooks.context.enforcement import get_pretool_enforcements
 
             _enf_ctx = get_pretool_enforcements(session_id)
             if _enf_ctx:
-                import json as _json
+                _pretool_blocks.append(_enf_ctx)
+        except Exception as e:
+            log("enforcement pretool failed", {"error": str(e)})
 
-                print(
-                    _json.dumps(
-                        {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "additionalContext": _enf_ctx,
-                            }
-                        }
-                    )
-                )
-    except Exception as e:
-        log("enforcement pretool failed", {"error": str(e)})
+    if _pretool_blocks:
+        import json as _json
+
+        print(
+            _json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": "\n\n".join(_pretool_blocks),
+                    }
+                }
+            )
+        )
 
 
 def on_post_tool_use(payload: dict) -> None:
