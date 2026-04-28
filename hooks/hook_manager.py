@@ -1110,6 +1110,30 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
+    # --- Enforcement: drumbeat reminders every N tool calls ---
+    try:
+        from hooks.config import ENFORCEMENT_INJECTION_ENABLED
+
+        if ENFORCEMENT_INJECTION_ENABLED:
+            from hooks.context.enforcement import get_pretool_enforcements
+
+            _enf_ctx = get_pretool_enforcements(session_id)
+            if _enf_ctx:
+                import json as _json
+
+                print(
+                    _json.dumps(
+                        {
+                            "hookSpecificOutput": {
+                                "hookEventName": "PreToolUse",
+                                "additionalContext": _enf_ctx,
+                            }
+                        }
+                    )
+                )
+    except Exception as e:
+        log("enforcement pretool failed", {"error": str(e)})
+
 
 def on_post_tool_use(payload: dict) -> None:
     """Handle PostToolUse event."""

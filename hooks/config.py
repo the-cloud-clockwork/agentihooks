@@ -364,6 +364,18 @@ BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     str(Path.home() / ".agentihooks" / "broadcast_delivery_state.json"),
 )
 
+# =============================================================================
+# ENFORCEMENT — operator-curated drumbeat reminders, cadence-driven re-injection
+# =============================================================================
+ENFORCEMENT_INJECTION_ENABLED = _env_bool("ENFORCEMENT_INJECTION_ENABLED", "true")
+ENFORCEMENT_FILE: str = os.getenv(
+    "ENFORCEMENT_FILE", str(Path.home() / ".agentihooks" / "enforcements.json")
+)
+ENFORCEMENT_COUNTER_FILE: str = os.getenv(
+    "ENFORCEMENT_COUNTER_FILE",
+    str(Path.home() / ".agentihooks" / "enforcement_counters.json"),
+)
+
 # Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
 BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "5"))
 BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "1536"))
