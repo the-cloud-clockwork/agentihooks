@@ -4280,6 +4280,79 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_enforcement(args: argparse.Namespace) -> None:
+    """Handle the enforcement CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context.enforcement import (
+        add_enforcement,
+        clear_enforcement,
+        list_enforcements,
+    )
+
+    action = getattr(args, "action", None)
+
+    if action == "list":
+        entries = list_enforcements()
+        if not entries:
+            print("No active enforcements.")
+            return
+        print(f"{'ID':<10} {'CADENCE':<8} {'TAG':<20} MESSAGE")
+        for e in entries:
+            eid = e.get("id", "?")
+            cad = e.get("cadence", "?")
+            tag = e.get("tag", "") or "-"
+            msg = e.get("message", "")
+            print(f"{eid:<10} {cad:<8} {tag:<20} {msg}")
+        return
+
+    if action == "clear":
+        enf_id = getattr(args, "enf_id", "") or ""
+        tag = getattr(args, "tag", "") or ""
+        if enf_id:
+            count = clear_enforcement(enforcement_id=enf_id)
+            print(f"Cleared {count} enforcement(s) matching id={enf_id}.")
+        elif tag:
+            count = clear_enforcement(tag=tag)
+            print(f"Cleared {count} enforcement(s) matching tag={tag}.")
+        else:
+            count = clear_enforcement()
+            print(f"Cleared all {count} enforcement(s).")
+        return
+
+    if action == "set":
+        words = getattr(args, "enf_args", None) or []
+        if len(words) < 2:
+            print(
+                "Error: enforcement set requires <message> <cadence>. "
+                "Example: agentihooks enforcement set \"patches forbidden\" 5",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            cadence = int(words[-1])
+        except ValueError:
+            print(f"Error: cadence must be an integer (got '{words[-1]}').", file=sys.stderr)
+            sys.exit(1)
+        if cadence < 1:
+            print("Error: cadence must be >= 1.", file=sys.stderr)
+            sys.exit(1)
+        message = " ".join(words[:-1]).strip()
+        if not message:
+            print("Error: message is required.", file=sys.stderr)
+            sys.exit(1)
+        tag = getattr(args, "tag", "") or None
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag)
+        if enf_id:
+            print(f"Enforcement created: {enf_id} (every {cadence} tool calls)")
+        else:
+            print("Error: failed to create enforcement.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print("Error: unknown enforcement action.", file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_migrate(args) -> None:
     """Remap ~/.claude.json project entries when repos move to a new parent dir."""
     target = Path(args.target_path).expanduser().resolve()
@@ -4713,6 +4786,31 @@ examples:
     brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
     brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
 
+    # --- Enforcement subcommand ---
+    enf_p = sub.add_parser(
+        "enforcement",
+        help="Manage drumbeat enforcement reminders (re-inject every N tool calls)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  agentihooks enforcement list
+  agentihooks enforcement set "patches forbidden — code only" 5 --tag no-patch
+  agentihooks enforcement set "use Monitor not CronCreate" 10
+  agentihooks enforcement clear --id abc12345
+  agentihooks enforcement clear --tag no-patch
+  agentihooks enforcement clear   # remove ALL
+""",
+    )
+    enf_p.add_argument("action", choices=["set", "list", "clear"], help="Enforcement action")
+    enf_p.add_argument(
+        "enf_args",
+        nargs="*",
+        default=None,
+        help="set: <message> <cadence>",
+    )
+    enf_p.add_argument("--tag", default="", help="Optional grouping tag")
+    enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
+
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
         "refresh-rules",
@@ -4910,6 +5008,8 @@ notes:
         _cmd_overlay(args)
     elif args.command == "channel":
         _cmd_channel(args)
+    elif args.command == "enforcement":
+        _cmd_enforcement(args)
     elif args.command == "brain":
         _cmd_brain(args)
     elif args.command == "refresh-rules":
