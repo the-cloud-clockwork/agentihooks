@@ -205,7 +205,7 @@ agentihooks refresh-rules [--profile <name>] [--dry-run] [--clear]
 
 ### How it works
 
-1. Reads the installed rules: `~/.claude/CLAUDE.md`, every `~/.claude/rules/*.md`, and `~/.claude/CLAUDE.local.md` (if present).
+1. Reads the installed rules: `~/.claude/CLAUDE.md` and every `~/.claude/rules/*.md`.
 2. Takes a snapshot of currently-alive session IDs from the broadcast registry.
 3. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` containing the payload + pending session list.
 4. On each targeted session's next `UserPromptSubmit`, the hook injects the payload and removes the session from pending.

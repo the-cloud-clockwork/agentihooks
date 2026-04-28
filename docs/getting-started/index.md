@@ -32,5 +32,5 @@ AgentiHooks is a lifecycle hook system and MCP tool server for [Claude Code](htt
 |------|---------------|
 | [Installation](installation.md) | Install agentihooks globally into `~/.claude` |
 | [Profiles](profiles.md) | Choose and switch agent profiles, 3-layer merge |
-| [Per-Project Configuration](per-project.md) | `.agentihooks.json`, local profiles, MCP whitelists, CLAUDE.local.md |
+| [Per-Project Configuration](per-project.md) | `.agentihooks.json`, local profiles, MCP whitelists |
 | [Portability & Reusability](portability.md) | Move setups across machines, manage credentials |
