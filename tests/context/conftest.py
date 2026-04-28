@@ -15,9 +15,7 @@ import pytest
 def _isolate_controls_state(tmp_path, monkeypatch):
     flag_dir = tmp_path / "controls_flags"
     monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", flag_dir)
-    monkeypatch.setattr(
-        "hooks.context.controls_toggle._GLOBAL_FLAG", flag_dir / "active.flag"
-    )
+    monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", flag_dir / "active.flag")
     with (
         patch("hooks.context.controls_toggle.get_redis", return_value=None),
         patch("hooks.context.branch_guard.get_redis", return_value=None),
