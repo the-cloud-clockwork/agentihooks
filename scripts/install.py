@@ -4791,6 +4791,13 @@ examples:
         help="Manage drumbeat enforcement reminders (re-inject every N tool calls)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
+cadence:
+  How often the message re-injects into the agent's context.
+  Cadence = N means "every Nth tool call, the agent sees this reminder again."
+  Lower N = more drumbeat (cadence 3 = harder enforcement).
+  Higher N = quieter nudge (cadence 15 = soft style cue).
+  Default: 5.
+
 examples:
   agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
@@ -4804,7 +4811,7 @@ examples:
         "enf_args",
         nargs="*",
         default=None,
-        help="set: <message> <cadence>",
+        help="set: <message> [cadence]. Cadence = re-inject every N tool calls (default 5)",
     )
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
