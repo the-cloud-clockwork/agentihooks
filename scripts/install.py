@@ -4321,22 +4321,21 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
 
     if action == "set":
         words = getattr(args, "enf_args", None) or []
-        if len(words) < 2:
+        if not words:
             print(
-                "Error: enforcement set requires <message> <cadence>. "
-                "Example: agentihooks enforcement set \"patches forbidden\" 5",
+                "Error: enforcement set requires a message. "
+                'Example: agentihooks enforcement set "patches forbidden"',
                 file=sys.stderr,
             )
             sys.exit(1)
-        try:
+        # Last token is cadence ONLY if it's a positive integer; otherwise
+        # treat the whole input as the message and use default cadence.
+        cadence = 5
+        if len(words) >= 2 and words[-1].isdigit() and int(words[-1]) >= 1:
             cadence = int(words[-1])
-        except ValueError:
-            print(f"Error: cadence must be an integer (got '{words[-1]}').", file=sys.stderr)
-            sys.exit(1)
-        if cadence < 1:
-            print("Error: cadence must be >= 1.", file=sys.stderr)
-            sys.exit(1)
-        message = " ".join(words[:-1]).strip()
+            message = " ".join(words[:-1]).strip()
+        else:
+            message = " ".join(words).strip()
         if not message:
             print("Error: message is required.", file=sys.stderr)
             sys.exit(1)
@@ -4793,12 +4792,11 @@ examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
+  agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
+  agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
   agentihooks enforcement list
-  agentihooks enforcement set "patches forbidden — code only" 5 --tag no-patch
-  agentihooks enforcement set "use Monitor not CronCreate" 10
-  agentihooks enforcement clear --id abc12345
-  agentihooks enforcement clear --tag no-patch
-  agentihooks enforcement clear   # remove ALL
+  agentihooks enforcement clear                                     # remove ALL
+  agentihooks enforcement clear --id abc12345                       # remove one
 """,
     )
     enf_p.add_argument("action", choices=["set", "list", "clear"], help="Enforcement action")
