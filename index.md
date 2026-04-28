@@ -240,11 +240,11 @@ cat > .agentihooks.json << 'EOF'
 {"profile": "coding", "enabledMcpServers": ["gateway-core", "hooks-utils"]}
 EOF
 
-# Generate settings.local.json + CLAUDE.local.md
+# Generate settings.local.json
 agentihooks init --local
 ```
 
-This generates `.claude/settings.local.json` (env, permissions, MCP whitelist) and `.claude/CLAUDE.local.md` (profile system prompt) — both gitignored automatically.
+This generates `.claude/settings.local.json` (env, permissions, MCP whitelist) — gitignored automatically. The profile-rendered system prompt lives only in the global `~/.claude/CLAUDE.md`; per-project `.claude/CLAUDE.local.md` is no longer generated.
 
 See [Per-Project Configuration]({{ site.baseurl }}/docs/getting-started/per-project/) for the full guide.
 

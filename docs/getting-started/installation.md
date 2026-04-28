@@ -192,9 +192,8 @@ agentihooks init --local --profile coding    # override profile for this project
 
 This reads `.agentihooks.json` from the project root and generates:
 - `.claude/settings.local.json` — permissions, env vars, MCP whitelist
-- `.claude/CLAUDE.local.md` — profile system prompt (concatenated for chains)
 
-Both files are auto-gitignored. See [Per-Project Configuration](per-project.md) for the full guide.
+Auto-gitignored. The profile chain's system prompt is rendered into the global `~/.claude/CLAUDE.md`; per-project `.claude/CLAUDE.local.md` is not generated. See [Per-Project Configuration](per-project.md) for the full guide.
 
 ---
 

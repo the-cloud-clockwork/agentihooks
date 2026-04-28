@@ -1505,31 +1505,28 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     if all_env:
         print(f"     Env vars: {len(all_env)}")
 
-    # Generate CLAUDE.local.md from profile chain
+    # NOTE: per-project .claude/CLAUDE.local.md generation removed. The global
+    # ~/.claude/CLAUDE.md (also rendered from the profile chain) is the single
+    # source for the prompt. Per-project local prompt files were redundant in
+    # any fleet running a uniform profile and produced fleet-wide phantom
+    # writes on every profile edit (incl. into .github/-style meta repos).
+    # Stale per-project files have been purged; the writer is gone.
     if not dry_run:
         claude_local_md = claude_dir / "CLAUDE.local.md"
-        claude_md_parts: list[str] = []
-        for pname, pdir in profile_dirs:
-            src = pdir / _CLAUDE_MD_NAME
-            if src.exists():
-                content = src.read_text().strip()
-                if content:
-                    if len(profile_dirs) > 1:
-                        claude_md_parts.append(f"<!-- profile: {pname} -->\n{content}")
-                    else:
-                        claude_md_parts.append(content)
-        if claude_md_parts:
-            claude_local_md.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
-            sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
-            _cprint(f"  [OK] Wrote CLAUDE.local.md ({' + '.join(sources)})")
+        if claude_local_md.exists():
+            try:
+                claude_local_md.unlink()
+                _cprint(f"  [OK] Removed legacy CLAUDE.local.md from {repo_dir}")
+            except OSError:
+                pass
 
-    # Ensure .gitignore covers settings.local.json and CLAUDE.local.md
+    # Ensure .gitignore covers settings.local.json
     _ensure_local_settings_gitignored(repo_dir)
 
 
 def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
-    """Ensure .claude/settings.local.json and CLAUDE.local.md are gitignored."""
-    entries = [".claude/settings.local.json", ".claude/CLAUDE.local.md"]
+    """Ensure .claude/settings.local.json is gitignored."""
+    entries = [".claude/settings.local.json"]
     gitignore = repo_dir / ".gitignore"
     if gitignore.exists():
         content = gitignore.read_text()

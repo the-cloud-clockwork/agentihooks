@@ -334,7 +334,7 @@ agentihooks init --local                     # per-repo config for current direc
 agentihooks init --local --profile coding    # override profile for this project
 ```
 
-Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` + `.claude/CLAUDE.local.md`.
+Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` (per-project permissions, MCP whitelist, env). The prompt rendered from the profile chain lives only in the global `~/.claude/CLAUDE.md` — per-project `.claude/CLAUDE.local.md` is no longer generated, and any pre-existing copy is removed on init.
 
 ## Memory Mirror — cross-machine auto-memory sync (PR-gated)
 
