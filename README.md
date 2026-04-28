@@ -320,7 +320,6 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
-| `IMAGE_PERSISTENCE_REMINDER_ENABLED` | `true` | Remind to rebuild images after live patches |
 | `BRAIN_ENABLED` | `false` | Brain adapter master switch |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory to read brain content from |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content |
