@@ -954,6 +954,25 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
+    # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
+    if tool_name == "Bash":
+        try:
+            from hooks.config import KUBECTL_MUTATION_GUARD_ENABLED
+
+            if KUBECTL_MUTATION_GUARD_ENABLED:
+                from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
+
+                check_kubectl_mutation(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("kubectl_mutation_guard check failed", {"error": str(e)})
+            print(
+                f"WARNING: kubectl_mutation_guard check failed ({e}) — guard bypassed",
+                file=sys.stderr,
+                flush=True,
+            )
+
     # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":
         try:

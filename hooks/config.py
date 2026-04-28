@@ -153,6 +153,19 @@ RETRY_BREAKER_HARD_MAX = int(os.getenv("RETRY_BREAKER_HARD_MAX", "10"))
 RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 
 # =============================================================================
+# KUBECTL MUTATION GUARD — HARD FLOOR
+# =============================================================================
+# PreToolUse hook on Bash that blocks live-system state mutation (kubectl edit,
+# patch, set, scale, exec writes, cp INTO pod, helm install/upgrade outside
+# CI, ssh-edit, scp INTO host, docker exec writes, etc.). Doctrine: code is
+# the source of truth; behavior changes go through code → CI → deploy.
+# Default-on. Disabling requires the operator to set the env var explicitly
+# (never via signal, bypass mode, or any other clearance).
+# See: documents/anton/ANTON-CORE-CI-MANIFESTO.md §3.5
+#      agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
+KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
+
+# =============================================================================
 # OVERLAY INJECTION
 # =============================================================================
 # Injects active overlay profile content on every UserPromptSubmit turn.
