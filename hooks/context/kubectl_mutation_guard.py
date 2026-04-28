@@ -1,17 +1,30 @@
-"""kubectl_mutation_guard.py — block live-system state mutation at the tool boundary.
+"""kubectl_mutation_guard.py — block live-system manifest/behavior mutation at the tool boundary.
 
-Doctrine: code is the source of truth. Behavior changes go through code →
-commit → push → CI → deploy. kubectl exec / kubectl cp / kubectl edit /
-kubectl patch / kubectl set / SSH-edit / docker-exec writes / helm install
-outside CI / argocd app sync --local are forbidden. This hook denies the
-patterns at PreToolUse for Bash with exit code 2.
+Doctrine: code is the source of truth. **Behavior** changes — anything that
+modifies a manifest, container image, env var, command, replica selector, or
+HPA — go through code → commit → push → CI → deploy. **Operational
+lifecycle** actions — restarting pods, scaling for capacity, draining nodes,
+labelling for ops, ad-hoc debug pods — are allowed because they are
+troubleshooting, not feature work.
+
+The blocklist focuses on commands that *encode behavior into the live cluster
+without going through git*:
+  kubectl edit / patch / set / autoscale / cp INTO pod / exec writes
+  helm install / upgrade / rollback outside CI
+  argocd app sync --local
+  ssh-edit / scp INTO host / docker exec writes/installs
+
+The blocklist deliberately does NOT include lifecycle ops (rollout restart,
+scale, drain, cordon, taint, debug, annotate, label, create, apply -f, delete)
+because those are part of operational troubleshooting and the operator wants
+them available without ceremony.
 
 This is a HARD FLOOR. The hook does not honor bypass mode, hotfix signals, or
 release-gate signals. To change a running system's behavior, change code.
 
 References:
+- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §3.5
 - agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
-- documents/anton/ANTON-CORE-CI-MANIFESTO.md §3.5
 """
 
 from __future__ import annotations
@@ -26,63 +39,44 @@ from typing import Optional
 
 _RE_FLAGS = re.IGNORECASE | re.DOTALL
 
-# Each entry: (pattern, short rule key, human description)
+# Each entry: (pattern, short rule key, human description).
+#
+# Scope rule: this list contains ONLY commands that encode behavior into the
+# live cluster without going through git. Operational lifecycle commands
+# (rollout restart/pause/resume, scale, drain, cordon, taint, debug,
+# annotate, label, create, apply -f, replace -f, delete) are deliberately
+# absent — those are troubleshooting tools and the operator must be free to
+# use them without ceremony.
 _WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
-    # kubectl edit / patch / set / scale
+    # kubectl edit — opens an in-place editor on the live manifest. Behavior
+    # change disguised as ops.
     (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?edit\b", _RE_FLAGS),
      "kubectl-edit",
-     "kubectl edit (live state mutation — change the manifest in code, push, let CI/ArgoCD apply)"),
+     "kubectl edit (in-place manifest edit — change the manifest in code, push, let CI/ArgoCD apply)"),
+
+    # kubectl patch — strategic/JSON merge patch on a live resource. Behavior
+    # change disguised as ops.
     (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?patch\b", _RE_FLAGS),
      "kubectl-patch",
-     "kubectl patch (live state mutation — change the manifest in code, push, let CI/ArgoCD apply)"),
+     "kubectl patch (in-place manifest patch — change the manifest in code, push, let CI/ArgoCD apply)"),
+
+    # kubectl set env/image/resources/... — direct field mutation.
     (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?set\s+(?:env|image|resources?|serviceaccount|selector|subject)\b", _RE_FLAGS),
      "kubectl-set",
-     "kubectl set <subcommand> (live state mutation — put it in the manifest)"),
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?scale\b", _RE_FLAGS),
-     "kubectl-scale",
-     "kubectl scale (replica change — put it in the manifest, push, redeploy)"),
+     "kubectl set <env|image|resources|...> (field mutation — put it in the manifest)"),
 
-    # kubectl rollout restart/pause/resume
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?rollout\s+(?:restart|pause|resume)\b", _RE_FLAGS),
-     "kubectl-rollout-mutate",
-     "kubectl rollout restart/pause/resume (forced restart of unchanged image; image changes go through code → CI → ArgoCD)"),
-
-    # kubectl annotate / label
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?(?:annotate|label)\b", _RE_FLAGS),
-     "kubectl-meta-mutate",
-     "kubectl annotate/label (state mutation — put metadata in the manifest)"),
-
-    # kubectl drain / cordon / uncordon / taint
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?(?:drain|cordon|uncordon|taint)\b", _RE_FLAGS),
-     "kubectl-node-mutate",
-     "kubectl drain/cordon/uncordon/taint (node state mutation)"),
-
-    # kubectl debug
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?debug\b", _RE_FLAGS),
-     "kubectl-debug",
-     "kubectl debug (creates ephemeral container — use logs/describe/read-only exec for diagnostics)"),
-
-    # kubectl autoscale
+    # kubectl autoscale — creates an HPA. HPA is a behavior config, belongs
+    # in the chart.
     (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?autoscale\b", _RE_FLAGS),
      "kubectl-autoscale",
-     "kubectl autoscale (HPA goes in the manifest)"),
+     "kubectl autoscale (HPA is a behavior config — put it in the chart)"),
 
-    # kubectl create / apply / replace -f (ad-hoc manifest application)
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?(?:create|apply|replace)\s+(?:-f|--filename)\b", _RE_FLAGS),
-     "kubectl-apply-f",
-     "kubectl create/apply/replace -f (ad-hoc manifest application — manifests reach the cluster via git + ArgoCD)"),
-
-    # kubectl create <kind> ... (without -f) — block all forms
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?create\s+(?!-f|--filename)\S", _RE_FLAGS),
-     "kubectl-create",
-     "kubectl create <kind> (ad-hoc resource creation — go through manifest + git)"),
-
-    # helm install / upgrade / rollback (deploys are git-driven via ArgoCD)
+    # helm install / upgrade / rollback — deploys are git-driven via ArgoCD.
     (re.compile(r"\bhelm\s+(?:[^\n;|&]*?\s)?(?:install|upgrade|rollback)\b", _RE_FLAGS),
      "helm-deploy",
      "helm install/upgrade/rollback (deploys go through git + ArgoCD)"),
 
-    # argocd app sync --local
+    # argocd app sync --local — bypasses git as source of truth.
     (re.compile(r"\bargocd\s+app\s+sync\b[^\n;|&]*?--local\b", _RE_FLAGS),
      "argocd-sync-local",
      "argocd app sync --local (bypasses git as source of truth)"),
@@ -197,7 +191,7 @@ _SSH_WRITE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bsystemctl\s+(?:start|stop|restart|reload|enable|disable)\b", _RE_FLAGS), "ssh-systemctl-mutate"),
     (re.compile(r"\b(?:apt(?:-get)?|pip3?|npm|yarn|apk|gem)\s+(?:install|add)\b", _RE_FLAGS), "ssh-pkg-install"),
     (re.compile(r"\bdocker\s+exec\b", _RE_FLAGS), "ssh-docker-exec"),
-    (re.compile(r"\bkubectl\s+(?:edit|patch|set|scale|annotate|label|drain|cordon|taint|debug|create|apply|replace|autoscale|rollout\s+(?:restart|pause|resume))\b", _RE_FLAGS), "ssh-kubectl-mutate"),
+    (re.compile(r"\bkubectl\s+(?:edit|patch|set\s+(?:env|image|resources?|serviceaccount|selector|subject)|autoscale)\b", _RE_FLAGS), "ssh-kubectl-mutate"),
 ]
 
 # scp INTO remote host: any scp where the destination contains `<host>:<path>`

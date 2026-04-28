@@ -50,9 +50,26 @@ ALLOWED_COMMANDS = [
     # kubectl cp OUT of pod
     "kubectl cp mypod:/etc/config.yaml /tmp/config.yaml",
     "kubectl cp anton-prod/mypod:/var/log/app.log /tmp/app.log",
-    # lifecycle
+    # lifecycle / troubleshooting ops — allowed (these are operational
+    # actions, not behavior changes encoded into the cluster)
     "kubectl delete pod mypod -n anton-dev",
     "kubectl port-forward svc/myservice 8080:80",
+    "kubectl rollout restart deploy/foo",
+    "kubectl rollout pause deploy/foo",
+    "kubectl rollout resume deploy/foo",
+    "kubectl scale deploy foo --replicas=5",
+    "kubectl drain node-1 --ignore-daemonsets",
+    "kubectl cordon node-1",
+    "kubectl uncordon node-1",
+    "kubectl taint node node-1 key=value:NoSchedule",
+    "kubectl debug pod/foo --image=busybox",
+    "kubectl annotate deploy foo key=value",
+    "kubectl label pod foo new-label=true",
+    "kubectl create configmap myconfig --from-literal=key=value",
+    "kubectl create secret generic mysecret --from-literal=key=value",
+    "kubectl create deployment foo --image=foo:latest",
+    "kubectl apply -f manifest.yaml",
+    "kubectl replace -f manifest.yaml",
     # SSH read-only
     "ssh anton ls /tmp",
     "ssh anton 'cat /etc/hostname'",
@@ -93,35 +110,13 @@ ALLOWED_COMMANDS = [
 # ---------------------------------------------------------------------------
 
 BLOCKED_COMMANDS = [
-    # kubectl edit / patch / set / scale
+    # kubectl edit / patch / set / autoscale (manifest/behavior mutation only)
     ("kubectl edit deploy/foo", "kubectl-edit"),
     ("kubectl edit configmap myconfig -n anton-dev", "kubectl-edit"),
     ("kubectl patch deploy foo --type=strategic -p '{}'", "kubectl-patch"),
     ("kubectl set env deploy/foo FOO=bar", "kubectl-set"),
     ("kubectl set image deploy/foo container=img:tag", "kubectl-set"),
-    ("kubectl scale deploy foo --replicas=5", "kubectl-scale"),
-    # kubectl rollout mutate
-    ("kubectl rollout restart deploy/foo", "kubectl-rollout-mutate"),
-    ("kubectl rollout pause deploy/foo", "kubectl-rollout-mutate"),
-    ("kubectl rollout resume deploy/foo", "kubectl-rollout-mutate"),
-    # kubectl meta mutate
-    ("kubectl annotate deploy foo key=value", "kubectl-meta-mutate"),
-    ("kubectl label pod foo new-label=true", "kubectl-meta-mutate"),
-    # kubectl node mutate
-    ("kubectl drain node-1 --ignore-daemonsets", "kubectl-node-mutate"),
-    ("kubectl cordon node-1", "kubectl-node-mutate"),
-    ("kubectl taint node node-1 key=value:NoSchedule", "kubectl-node-mutate"),
-    # kubectl debug
-    ("kubectl debug pod/foo --image=busybox", "kubectl-debug"),
-    # kubectl autoscale
     ("kubectl autoscale deploy foo --min=2 --max=10", "kubectl-autoscale"),
-    # kubectl create / apply / replace
-    ("kubectl apply -f manifest.yaml", "kubectl-apply-f"),
-    ("kubectl create -f manifest.yaml", "kubectl-apply-f"),
-    ("kubectl replace -f manifest.yaml", "kubectl-apply-f"),
-    ("kubectl create deployment foo --image=foo:latest", "kubectl-create"),
-    ("kubectl create configmap myconfig --from-literal=key=value", "kubectl-create"),
-    ("kubectl create secret generic mysecret --from-literal=key=value", "kubectl-create"),
     # kubectl exec write
     ("kubectl exec mypod -- tee /etc/config.yaml", "exec-tee"),
     ("kubectl exec mypod -- sed -i 's/x/y/' /etc/config", "exec-sed-i"),
