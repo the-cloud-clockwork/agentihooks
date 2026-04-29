@@ -161,13 +161,12 @@ BLOCKED_COMMANDS = [
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("command", ALLOWED_COMMANDS)
 def test_allowed_commands_are_not_blocked(command):
     """Read-only diagnostic commands must NOT be blocked."""
     result = check_kubectl_mutation_command(command)
-    assert result is None, (
-        f"Command was unexpectedly blocked:\n  {command}\n\n  Result:\n{result}"
-    )
+    assert result is None, f"Command was unexpectedly blocked:\n  {command}\n\n  Result:\n{result}"
 
 
 @pytest.mark.parametrize("command,expected_rule", BLOCKED_COMMANDS)
@@ -176,9 +175,7 @@ def test_blocked_commands_are_blocked(command, expected_rule):
     result = check_kubectl_mutation_command(command)
     assert result is not None, f"Command was unexpectedly allowed: {command}"
     assert "BLOCKED by kubectl_mutation_guard" in result
-    assert expected_rule in result, (
-        f"Expected rule '{expected_rule}' not in violation message:\n{result}"
-    )
+    assert expected_rule in result, f"Expected rule '{expected_rule}' not in violation message:\n{result}"
 
 
 def test_empty_command_returns_none():
