@@ -3,10 +3,16 @@
 Parallel to broadcast.py but semantically distinct:
 - No severity, no TTL, no per-session targeting.
 - Global: every session sees every enforcement.
-- Permanent until operator clears.
+- Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Storage: ~/.agentihooks/enforcements.json (separate from broadcast.json).
+Three-source resolution (priority: runtime > profile > bundle):
+  1. <bundle_path>/enforcements.json                          → source: "bundle"
+  2. <bundle_path>/profiles/<active_profile>/enforcements.json → source: "profile"
+  3. ~/.agentihooks/enforcements.json                          → source: "runtime"
+
+Runtime store: ~/.agentihooks/enforcements.json (mutable via CLI/MCP).
+Bundle/profile stores: read-only at runtime, editable only in git.
 Counter: per-session, persisted at ~/.agentihooks/enforcement_counters.json.
 """
 
@@ -74,6 +80,85 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_STATE_PATH = Path.home() / ".agentihooks" / "state.json"
+
+
+def _read_state() -> dict:
+    try:
+        if _STATE_PATH.exists():
+            return json.loads(_STATE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _get_bundle_path() -> Path | None:
+    bp = _read_state().get("bundle", {}).get("path")
+    if bp:
+        p = Path(bp).expanduser()
+        if p.is_dir():
+            return p
+    return None
+
+
+def _get_active_profile() -> str | None:
+    return _read_state().get("targets", {}).get("global", {}).get("profile") or None
+
+
+def _load_json_enforcements(path: Path, source: str) -> list[dict]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        data = json.loads(path.read_text())
+        if isinstance(data, list):
+            entries = data
+        elif isinstance(data, dict):
+            entries = data.get("enforcements", [])
+            if not isinstance(entries, list):
+                return []
+        else:
+            return []
+        for e in entries:
+            e["source"] = source
+        return entries
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _load_bundle_enforcements() -> list[dict]:
+    bp = _get_bundle_path()
+    if not bp:
+        return []
+    return _load_json_enforcements(bp / "enforcements.json", "bundle")
+
+
+def _load_profile_enforcements() -> list[dict]:
+    bp = _get_bundle_path()
+    profile = _get_active_profile()
+    if not bp or not profile:
+        return []
+    return _load_json_enforcements(bp / "profiles" / profile / "enforcements.json", "profile")
+
+
+def load_all_enforcements() -> list[dict]:
+    """Merge bundle → profile → runtime. Runtime wins on ID collision."""
+    by_id: dict[str, dict] = {}
+    for e in _load_bundle_enforcements():
+        eid = e.get("id")
+        if eid:
+            by_id[eid] = e
+    for e in _load_profile_enforcements():
+        eid = e.get("id")
+        if eid:
+            by_id[eid] = e
+    for e in _load_store():
+        e["source"] = "runtime"
+        eid = e.get("id")
+        if eid:
+            by_id[eid] = e
+    return list(by_id.values())
+
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
@@ -99,7 +184,7 @@ def add_enforcement(message: str, cadence: int, tag: str | None = None) -> str |
 
 
 def list_enforcements() -> list[dict]:
-    return _load_store()
+    return load_all_enforcements()
 
 
 def clear_enforcement(enforcement_id: str | None = None, tag: str | None = None) -> int:
@@ -135,7 +220,7 @@ def get_due_enforcements(tool_call_count: int) -> list[dict]:
     """Return enforcements whose cadence divides the current count."""
     if tool_call_count <= 0:
         return []
-    entries = _load_store()
+    entries = load_all_enforcements()
     due: list[dict] = []
     for e in entries:
         cadence = int(e.get("cadence", 0) or 0)

@@ -4296,13 +4296,14 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
         if not entries:
             print("No active enforcements.")
             return
-        print(f"{'ID':<10} {'CADENCE':<8} {'TAG':<20} MESSAGE")
+        print(f"{'SOURCE':<10} {'ID':<12} {'CADENCE':<8} {'TAG':<16} MESSAGE")
         for e in entries:
+            src = e.get("source", "runtime")
             eid = e.get("id", "?")
             cad = e.get("cadence", "?")
             tag = e.get("tag", "") or "-"
             msg = e.get("message", "")
-            print(f"{eid:<10} {cad:<8} {tag:<20} {msg}")
+            print(f"[{src}]".ljust(10) + f"{eid:<12} {cad:<8} {tag:<16} {msg}")
         return
 
     if action == "clear":

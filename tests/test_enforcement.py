@@ -1,5 +1,6 @@
 """Tests for the enforcement drumbeat injection system."""
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -7,14 +8,32 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_enforcement(tmp_path):
-    """Redirect enforcement state files to tmp dir."""
+    """Redirect enforcement state files to tmp dir; disable bundle/profile loading by default."""
     store = tmp_path / "enforcements.json"
     counters = tmp_path / "enforcement_counters.json"
     with (
         patch("hooks.context.enforcement._store_path", return_value=store),
         patch("hooks.context.enforcement._counter_path", return_value=counters),
+        patch("hooks.context.enforcement._get_bundle_path", return_value=None),
+        patch("hooks.context.enforcement._get_active_profile", return_value=None),
     ):
         yield
+
+
+@pytest.fixture()
+def bundle_dir(tmp_path):
+    """Create a tmp bundle with enforcements.json + profile enforcements."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "enforcements.json").write_text(json.dumps({
+        "enforcements": [{"id": "b-1", "message": "bundle msg", "cadence": 3, "tag": ""}]
+    }))
+    profile_dir = bundle / "profiles" / "testprofile"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "enforcements.json").write_text(json.dumps({
+        "enforcements": [{"id": "p-1", "message": "profile msg", "cadence": 4, "tag": "doctrine"}]
+    }))
+    return bundle
 
 
 class TestCRUD:
@@ -178,3 +197,111 @@ class TestBannerFormat:
         msg = {"id": "x", "message": "m", "cadence": 1, "tag": ""}
         banner = format_enforcement_banner(msg)
         assert "Tag:" not in banner
+
+
+class TestThreeSourceMerge:
+    def test_bundle_only(self, bundle_dir):
+        from hooks.context.enforcement import load_all_enforcements
+
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value=None),
+        ):
+            entries = load_all_enforcements()
+            assert len(entries) == 1
+            assert entries[0]["id"] == "b-1"
+            assert entries[0]["source"] == "bundle"
+
+    def test_profile_only(self, bundle_dir):
+        from hooks.context.enforcement import load_all_enforcements
+
+        empty_bundle = bundle_dir / "enforcements.json"
+        empty_bundle.write_text(json.dumps({"enforcements": []}))
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        ):
+            entries = load_all_enforcements()
+            assert len(entries) == 1
+            assert entries[0]["id"] == "p-1"
+            assert entries[0]["source"] == "profile"
+
+    def test_runtime_only(self):
+        from hooks.context.enforcement import add_enforcement, load_all_enforcements
+
+        add_enforcement("runtime msg", 2)
+        entries = load_all_enforcements()
+        assert len(entries) == 1
+        assert entries[0]["source"] == "runtime"
+
+    def test_all_three_sources(self, bundle_dir):
+        from hooks.context.enforcement import add_enforcement, load_all_enforcements
+
+        add_enforcement("runtime msg", 2)
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        ):
+            entries = load_all_enforcements()
+            sources = {e["source"] for e in entries}
+            assert sources == {"bundle", "profile", "runtime"}
+            assert len(entries) == 3
+
+    def test_id_collision_runtime_wins(self, bundle_dir):
+        from hooks.context.enforcement import add_enforcement, load_all_enforcements
+
+        (bundle_dir / "enforcements.json").write_text(json.dumps({
+            "enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]
+        }))
+        profile_dir = bundle_dir / "profiles" / "testprofile"
+        (profile_dir / "enforcements.json").write_text(json.dumps({
+            "enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]
+        }))
+        # Runtime also has same id — write directly to store
+        from hooks.context.enforcement import _save_store
+        _save_store([{"id": "clash", "message": "from runtime", "cadence": 5, "tag": ""}])
+
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        ):
+            entries = load_all_enforcements()
+            assert len(entries) == 1
+            assert entries[0]["message"] == "from runtime"
+            assert entries[0]["source"] == "runtime"
+
+    def test_id_collision_profile_wins_over_bundle(self, bundle_dir):
+        from hooks.context.enforcement import load_all_enforcements
+
+        (bundle_dir / "enforcements.json").write_text(json.dumps({
+            "enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]
+        }))
+        profile_dir = bundle_dir / "profiles" / "testprofile"
+        (profile_dir / "enforcements.json").write_text(json.dumps({
+            "enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]
+        }))
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        ):
+            entries = load_all_enforcements()
+            assert len(entries) == 1
+            assert entries[0]["message"] == "from profile"
+            assert entries[0]["source"] == "profile"
+
+    def test_clear_only_touches_runtime(self, bundle_dir):
+        from hooks.context.enforcement import add_enforcement, clear_enforcement, load_all_enforcements
+
+        add_enforcement("runtime msg", 2)
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
+        ):
+            before = len(load_all_enforcements())
+            clear_enforcement()
+            after = load_all_enforcements()
+            bundle_profile = [e for e in after if e["source"] in ("bundle", "profile")]
+            runtime = [e for e in after if e["source"] == "runtime"]
+            assert len(bundle_profile) == 2
+            assert len(runtime) == 0
+            assert len(after) == before - 1
