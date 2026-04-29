@@ -1505,31 +1505,28 @@ def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = Fal
     if all_env:
         print(f"     Env vars: {len(all_env)}")
 
-    # Generate CLAUDE.local.md from profile chain
+    # NOTE: per-project .claude/CLAUDE.local.md generation removed. The global
+    # ~/.claude/CLAUDE.md (also rendered from the profile chain) is the single
+    # source for the prompt. Per-project local prompt files were redundant in
+    # any fleet running a uniform profile and produced fleet-wide phantom
+    # writes on every profile edit (incl. into .github/-style meta repos).
+    # Stale per-project files have been purged; the writer is gone.
     if not dry_run:
         claude_local_md = claude_dir / "CLAUDE.local.md"
-        claude_md_parts: list[str] = []
-        for pname, pdir in profile_dirs:
-            src = pdir / _CLAUDE_MD_NAME
-            if src.exists():
-                content = src.read_text().strip()
-                if content:
-                    if len(profile_dirs) > 1:
-                        claude_md_parts.append(f"<!-- profile: {pname} -->\n{content}")
-                    else:
-                        claude_md_parts.append(content)
-        if claude_md_parts:
-            claude_local_md.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
-            sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
-            _cprint(f"  [OK] Wrote CLAUDE.local.md ({' + '.join(sources)})")
+        if claude_local_md.exists():
+            try:
+                claude_local_md.unlink()
+                _cprint(f"  [OK] Removed legacy CLAUDE.local.md from {repo_dir}")
+            except OSError:
+                pass
 
-    # Ensure .gitignore covers settings.local.json and CLAUDE.local.md
+    # Ensure .gitignore covers settings.local.json
     _ensure_local_settings_gitignored(repo_dir)
 
 
 def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
-    """Ensure .claude/settings.local.json and CLAUDE.local.md are gitignored."""
-    entries = [".claude/settings.local.json", ".claude/CLAUDE.local.md"]
+    """Ensure .claude/settings.local.json is gitignored."""
+    entries = [".claude/settings.local.json"]
     gitignore = repo_dir / ".gitignore"
     if gitignore.exists():
         content = gitignore.read_text()
@@ -4283,6 +4280,79 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_enforcement(args: argparse.Namespace) -> None:
+    """Handle the enforcement CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context.enforcement import (
+        add_enforcement,
+        clear_enforcement,
+        list_enforcements,
+    )
+
+    action = getattr(args, "action", None)
+
+    if action == "list":
+        entries = list_enforcements()
+        if not entries:
+            print("No active enforcements.")
+            return
+        print(f"{'SOURCE':<10} {'ID':<12} {'CADENCE':<8} {'TAG':<16} MESSAGE")
+        for e in entries:
+            src = e.get("source", "runtime")
+            eid = e.get("id", "?")
+            cad = e.get("cadence", "?")
+            tag = e.get("tag", "") or "-"
+            msg = e.get("message", "")
+            print(f"[{src}]".ljust(10) + f"{eid:<12} {cad:<8} {tag:<16} {msg}")
+        return
+
+    if action == "clear":
+        enf_id = getattr(args, "enf_id", "") or ""
+        tag = getattr(args, "tag", "") or ""
+        if enf_id:
+            count = clear_enforcement(enforcement_id=enf_id)
+            print(f"Cleared {count} enforcement(s) matching id={enf_id}.")
+        elif tag:
+            count = clear_enforcement(tag=tag)
+            print(f"Cleared {count} enforcement(s) matching tag={tag}.")
+        else:
+            count = clear_enforcement()
+            print(f"Cleared all {count} enforcement(s).")
+        return
+
+    if action == "set":
+        words = getattr(args, "enf_args", None) or []
+        if not words:
+            print(
+                "Error: enforcement set requires a message. "
+                'Example: agentihooks enforcement set "patches forbidden"',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Last token is cadence ONLY if it's a positive integer; otherwise
+        # treat the whole input as the message and use default cadence.
+        cadence = 5
+        if len(words) >= 2 and words[-1].isdigit() and int(words[-1]) >= 1:
+            cadence = int(words[-1])
+            message = " ".join(words[:-1]).strip()
+        else:
+            message = " ".join(words).strip()
+        if not message:
+            print("Error: message is required.", file=sys.stderr)
+            sys.exit(1)
+        tag = getattr(args, "tag", "") or None
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag)
+        if enf_id:
+            print(f"Enforcement created: {enf_id} (every {cadence} tool calls)")
+        else:
+            print("Error: failed to create enforcement.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print("Error: unknown enforcement action.", file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_migrate(args) -> None:
     """Remap ~/.claude.json project entries when repos move to a new parent dir."""
     target = Path(args.target_path).expanduser().resolve()
@@ -4716,6 +4786,37 @@ examples:
     brain_p = sub.add_parser("brain", help="Manage the brain adapter (knowledge injection)")
     brain_p.add_argument("action", choices=["status", "refresh"], help="Brain action")
 
+    # --- Enforcement subcommand ---
+    enf_p = sub.add_parser(
+        "enforcement",
+        help="Manage drumbeat enforcement reminders (re-inject every N tool calls)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+cadence:
+  How often the message re-injects into the agent's context.
+  Cadence = N means "every Nth tool call, the agent sees this reminder again."
+  Lower N = more drumbeat (cadence 3 = harder enforcement).
+  Higher N = quieter nudge (cadence 15 = soft style cue).
+  Default: 5.
+
+examples:
+  agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
+  agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
+  agentihooks enforcement list
+  agentihooks enforcement clear                                     # remove ALL
+  agentihooks enforcement clear --id abc12345                       # remove one
+""",
+    )
+    enf_p.add_argument("action", choices=["set", "list", "clear"], help="Enforcement action")
+    enf_p.add_argument(
+        "enf_args",
+        nargs="*",
+        default=None,
+        help="set: <message> [cadence]. Cadence = re-inject every N tool calls (default 5)",
+    )
+    enf_p.add_argument("--tag", default="", help="Optional grouping tag")
+    enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
+
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
         "refresh-rules",
@@ -4913,6 +5014,8 @@ notes:
         _cmd_overlay(args)
     elif args.command == "channel":
         _cmd_channel(args)
+    elif args.command == "enforcement":
+        _cmd_enforcement(args)
     elif args.command == "brain":
         _cmd_brain(args)
     elif args.command == "refresh-rules":

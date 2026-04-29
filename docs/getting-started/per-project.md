@@ -19,14 +19,13 @@ nav_order: 5
 
 Each project can have its own profile, MCP whitelist, and system prompt — independent of the global install. Per-project configuration is driven by a `.agentihooks.json` file at the project root.
 
-Running `agentihooks init --local` (or `agentihooks init --repo <path>`) generates two files inside `.claude/`:
+Running `agentihooks init --local` (or `agentihooks init --repo <path>`) generates one file inside `.claude/`:
 
 | Generated file | Purpose | Gitignored? |
 |---|---|---|
 | `.claude/settings.local.json` | Env vars, permissions, MCP whitelist | Yes (auto) |
-| `.claude/CLAUDE.local.md` | System prompt from the resolved profile | Yes (auto) |
 
-Both are the highest-priority configuration files in Claude Code — they override global `~/.claude/settings.json` and `~/.claude/CLAUDE.md` for that project.
+It is the highest-priority project-level configuration file in Claude Code — it overrides global `~/.claude/settings.json` for that project. The system prompt rendered from the profile chain lives in the global `~/.claude/CLAUDE.md` only — per-project `.claude/CLAUDE.local.md` is no longer generated.
 
 ---
 
@@ -74,7 +73,7 @@ cat > .agentihooks.json << 'EOF'
 }
 EOF
 
-# Generate settings.local.json + CLAUDE.local.md
+# Generate settings.local.json
 agentihooks init --local
 ```
 
@@ -87,7 +86,6 @@ Output:
      Profile: coding
      Enabled MCPs (2): ['gateway-core', 'hooks-utils']
      Blacklisted MCPs (30): [...]
-  [OK] Wrote CLAUDE.local.md (coding)
 ```
 
 ---
@@ -97,8 +95,8 @@ Output:
 The `profile` field controls which profile generates the project's local configuration:
 
 - **`settings.local.json`** — env vars and permissions from the profile's `settings.overrides.json`
-- **`CLAUDE.local.md`** — generated from the profile's `CLAUDE.md`
 - **MCP whitelist** — the profile's `enabledMcpServers` from `profile.yml` are unioned with the repo's whitelist
+- **System prompt** — rendered from the profile chain into the global `~/.claude/CLAUDE.md` (per-project `.claude/CLAUDE.local.md` is no longer generated)
 
 ### Profile chains
 
@@ -111,7 +109,7 @@ Comma-separated profiles are supported:
 ```
 
 This produces:
-- `CLAUDE.local.md` concatenated from both profiles (with `<!-- profile: name -->` markers and `---` separators)
+- Global `~/.claude/CLAUDE.md` concatenated from both profile `CLAUDE.md` files (with `<!-- profile: name -->` markers and `---` separators)
 - Settings overrides merged sequentially (coding first, anton on top)
 - MCP whitelists unioned across both profiles
 
@@ -139,21 +137,20 @@ Use `--profile` to override without changing `.agentihooks.json`:
 agentihooks init --local --profile admin
 ```
 
-This generates `CLAUDE.local.md` and `settings.local.json` using the `admin` profile, but `.agentihooks.json` retains its original `profile` value.
+This generates `settings.local.json` using the `admin` profile, but `.agentihooks.json` retains its original `profile` value.
 
 ---
 
-## CLAUDE.local.md
+## System prompt
 
-This file is generated from the resolved profile's `CLAUDE.md` and written to `.claude/CLAUDE.local.md`. Claude Code loads it as a project-level system prompt that overrides the global `~/.claude/CLAUDE.md`.
+The profile chain's `CLAUDE.md` files are concatenated and written to the global
+`~/.claude/CLAUDE.md`. Claude Code loads that as the system prompt for every
+session. There is no per-project `.claude/CLAUDE.local.md` — that artifact was
+removed because it was a fleet-wide duplicate of the global file. If a project
+genuinely needs project-scoped instructions, hand-write them in the project's
+top-level `CLAUDE.md` (Claude Code reads that automatically).
 
-| Scenario | Behavior |
-|---|---|
-| Single profile (`"coding"`) | Content is copied directly from the profile's `CLAUDE.md` |
-| Profile chain (`"coding,anton"`) | All profiles' `CLAUDE.md` files concatenated with markers |
-| No `CLAUDE.md` in profile | File is not generated |
-
-Chain mode output:
+Chain mode output (in `~/.claude/CLAUDE.md`):
 
 ```markdown
 <!-- profile: coding -->
@@ -166,9 +163,6 @@ Chain mode output:
 # Anton Profile
 ...
 ```
-
-{: .note }
-`CLAUDE.local.md` is auto-gitignored. It is regenerated every time `agentihooks init --local` runs or the sync daemon detects source changes.
 
 ---
 
@@ -225,7 +219,7 @@ Servers prefixed with `claude.ai ` (web-session managed) are never pruned — th
 
 The sync daemon (`agentihooks daemon`) monitors source files and automatically re-applies per-project settings when changes are detected. For registered projects (added via `init --repo` or `init --local`), the daemon:
 
-1. Re-generates `settings.local.json` and `CLAUDE.local.md` when profile files change
+1. Re-generates `settings.local.json` when profile files change
 2. Adds new MCP servers to disabled lists (respecting whitelists)
 3. Prunes orphaned MCP servers
 4. Backfills `disabledMcpServers` for newly discovered project entries

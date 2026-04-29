@@ -8,6 +8,7 @@ CATEGORY_MODULES = {
     "compute": "hooks.mcp.compute",
     "observability": "hooks.mcp.observability",
     "channels": "hooks.mcp.channels",
+    "enforcement": "hooks.mcp.enforcement",
     "profiles": "hooks.mcp.profiles",
     "utilities": "hooks.mcp.utilities",
 }

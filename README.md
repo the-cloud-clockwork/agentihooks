@@ -320,7 +320,6 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
-| `IMAGE_PERSISTENCE_REMINDER_ENABLED` | `true` | Remind to rebuild images after live patches |
 | `BRAIN_ENABLED` | `false` | Brain adapter master switch |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory to read brain content from |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content |
@@ -335,7 +334,7 @@ agentihooks init --local                     # per-repo config for current direc
 agentihooks init --local --profile coding    # override profile for this project
 ```
 
-Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` + `.claude/CLAUDE.local.md`.
+Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` (per-project permissions, MCP whitelist, env). The prompt rendered from the profile chain lives only in the global `~/.claude/CLAUDE.md` — per-project `.claude/CLAUDE.local.md` is no longer generated, and any pre-existing copy is removed on init.
 
 ## Memory Mirror — cross-machine auto-memory sync (PR-gated)
 

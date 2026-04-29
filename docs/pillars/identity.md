@@ -201,7 +201,8 @@ This writes two gitignored files that Claude Code treats as highest priority:
 | File | Purpose |
 |------|---------|
 | `.claude/settings.local.json` | Project-scoped permissions and env vars |
-| `.claude/CLAUDE.local.md` | Project-scoped system prompt from the resolved profile |
+
+The system prompt rendered from the profile chain lives in the global `~/.claude/CLAUDE.md` — per-project `.claude/CLAUDE.local.md` is no longer generated.
 
 ### Querying the active profile
 

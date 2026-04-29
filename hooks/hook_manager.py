@@ -493,16 +493,6 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
-    # Clear image persistence reminder counter for this session
-    try:
-        from hooks.context.image_persistence_reminder import (
-            clear_session_state as _clear_img_persist,
-        )
-
-        _clear_img_persist(session_id)
-    except Exception:
-        pass
-
     # Clear brain adapter counter for this session
     try:
         from hooks.context.brain_adapter import clear_session_state as _clear_brain
@@ -964,6 +954,25 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
+    # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
+    if tool_name == "Bash":
+        try:
+            from hooks.config import KUBECTL_MUTATION_GUARD_ENABLED
+
+            if KUBECTL_MUTATION_GUARD_ENABLED:
+                from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
+
+                check_kubectl_mutation(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("kubectl_mutation_guard check failed", {"error": str(e)})
+            print(
+                f"WARNING: kubectl_mutation_guard check failed ({e}) — guard bypassed",
+                file=sys.stderr,
+                flush=True,
+            )
+
     # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":
         try:
@@ -1077,8 +1086,12 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("retry_breaker pre-tool failed", {"error": str(e)})
 
-    # --- Broadcast: critical alerts on every tool call ---
-    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED
+    # --- Combined PreToolUse context injection: broadcast + enforcement ---
+    # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
+    # two separate JSON lines makes Claude Code drop the second.
+    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+
+    _pretool_blocks: list[str] = []
 
     if BROADCAST_ENABLED and BROADCAST_CRITICAL_ON_PRETOOL:
         try:
@@ -1086,20 +1099,33 @@ def on_pre_tool_use(payload: dict) -> None:
 
             _broadcast_ctx = get_pretool_context(session_id)
             if _broadcast_ctx:
-                import json as _json
-
-                print(
-                    _json.dumps(
-                        {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "additionalContext": _broadcast_ctx,
-                            }
-                        }
-                    )
-                )
+                _pretool_blocks.append(_broadcast_ctx)
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
+
+    if ENFORCEMENT_INJECTION_ENABLED:
+        try:
+            from hooks.context.enforcement import get_pretool_enforcements
+
+            _enf_ctx = get_pretool_enforcements(session_id)
+            if _enf_ctx:
+                _pretool_blocks.append(_enf_ctx)
+        except Exception as e:
+            log("enforcement pretool failed", {"error": str(e)})
+
+    if _pretool_blocks:
+        import json as _json
+
+        print(
+            _json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": "\n\n".join(_pretool_blocks),
+                    }
+                }
+            )
+        )
 
 
 def on_post_tool_use(payload: dict) -> None:
@@ -1311,22 +1337,6 @@ def on_post_tool_use(payload: dict) -> None:
                 record_tool_usage(payload["session_id"], tool_name, output_size)
     except Exception as e:
         log("context_audit record failed", {"error": str(e)})
-
-    # Image persistence reminder — inject every N tool calls
-    try:
-        from hooks.config import IMAGE_PERSISTENCE_REMINDER_ENABLED
-
-        if IMAGE_PERSISTENCE_REMINDER_ENABLED:
-            from hooks.common import inject_context as _inject_img_persist
-            from hooks.context.image_persistence_reminder import (
-                on_post_tool_result as _img_persist_tick,
-            )
-
-            reminder = _img_persist_tick(payload)
-            if reminder:
-                _inject_img_persist(reminder, skip_compression=True)
-    except Exception as e:
-        log("image_persistence_reminder failed", {"error": str(e)})
 
     # Thinking/effort policy — check subagent effort alignment
     try:
