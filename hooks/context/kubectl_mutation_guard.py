@@ -443,8 +443,22 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
 
 
 def check_kubectl_mutation(payload: dict) -> None:
-    """PreToolUse Bash hook entrypoint. Raises BlockAction on violation."""
+    """PreToolUse Bash hook entrypoint. Raises BlockAction on violation.
+
+    When bypass mode is active (operator said ``disable controls``), the
+    guard steps aside — the operator is explicitly authorizing live
+    troubleshooting / experimentation.
+    """
     from hooks.hook_manager import BlockAction
+
+    session_id = payload.get("session_id", "")
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        if is_controls_disabled(session_id):
+            return
+    except Exception:
+        pass
 
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""
