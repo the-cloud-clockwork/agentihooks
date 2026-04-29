@@ -295,9 +295,10 @@ def check_branch_guard(payload: dict) -> None:
 
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
-            if _bypass_active and "Force push" in message:
-                # Force-push is bypass-eligible per controls-toggle rule.
-                # Direct-to-main push still caught by the main/master pattern above.
+            if _bypass_active and ("Force push" in message or "Rebasing onto" in message):
+                # Force-push and rebase-onto-main are bypass-eligible per
+                # controls-toggle rule. Direct-to-main push still caught by
+                # the main/master push pattern above.
                 continue
             log(
                 "branch_guard: blocked",
