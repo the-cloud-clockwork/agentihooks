@@ -25,14 +25,14 @@ def bundle_dir(tmp_path):
     """Create a tmp bundle with enforcements.json + profile enforcements."""
     bundle = tmp_path / "bundle"
     bundle.mkdir()
-    (bundle / "enforcements.json").write_text(json.dumps({
-        "enforcements": [{"id": "b-1", "message": "bundle msg", "cadence": 3, "tag": ""}]
-    }))
+    (bundle / "enforcements.json").write_text(
+        json.dumps({"enforcements": [{"id": "b-1", "message": "bundle msg", "cadence": 3, "tag": ""}]})
+    )
     profile_dir = bundle / "profiles" / "testprofile"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "enforcements.json").write_text(json.dumps({
-        "enforcements": [{"id": "p-1", "message": "profile msg", "cadence": 4, "tag": "doctrine"}]
-    }))
+    (profile_dir / "enforcements.json").write_text(
+        json.dumps({"enforcements": [{"id": "p-1", "message": "profile msg", "cadence": 4, "tag": "doctrine"}]})
+    )
     return bundle
 
 
@@ -161,7 +161,7 @@ class TestPretoolEntry:
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
             assert get_pretool_enforcements("sess-1") is None  # count=1
             assert get_pretool_enforcements("sess-1") is None  # count=2
-            ctx = get_pretool_enforcements("sess-1")            # count=3
+            ctx = get_pretool_enforcements("sess-1")  # count=3
             assert ctx is not None
             assert "no patches — code only" in ctx
             assert "ENFORCEMENT" in ctx
@@ -250,15 +250,16 @@ class TestThreeSourceMerge:
     def test_id_collision_runtime_wins(self, bundle_dir):
         from hooks.context.enforcement import load_all_enforcements
 
-        (bundle_dir / "enforcements.json").write_text(json.dumps({
-            "enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]
-        }))
+        (bundle_dir / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]})
+        )
         profile_dir = bundle_dir / "profiles" / "testprofile"
-        (profile_dir / "enforcements.json").write_text(json.dumps({
-            "enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]
-        }))
+        (profile_dir / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]})
+        )
         # Runtime also has same id — write directly to store
         from hooks.context.enforcement import _save_store
+
         _save_store([{"id": "clash", "message": "from runtime", "cadence": 5, "tag": ""}])
 
         with (
@@ -273,13 +274,13 @@ class TestThreeSourceMerge:
     def test_id_collision_profile_wins_over_bundle(self, bundle_dir):
         from hooks.context.enforcement import load_all_enforcements
 
-        (bundle_dir / "enforcements.json").write_text(json.dumps({
-            "enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]
-        }))
+        (bundle_dir / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]})
+        )
         profile_dir = bundle_dir / "profiles" / "testprofile"
-        (profile_dir / "enforcements.json").write_text(json.dumps({
-            "enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]
-        }))
+        (profile_dir / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "clash", "message": "from profile", "cadence": 5, "tag": ""}]})
+        )
         with (
             patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
             patch("hooks.context.enforcement._get_active_profile", return_value="testprofile"),
