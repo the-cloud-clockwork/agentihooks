@@ -4324,8 +4324,7 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
         words = getattr(args, "enf_args", None) or []
         if not words:
             print(
-                "Error: enforcement set requires a message. "
-                'Example: agentihooks enforcement set "patches forbidden"',
+                'Error: enforcement set requires a message. Example: agentihooks enforcement set "patches forbidden"',
                 file=sys.stderr,
             )
             sys.exit(1)
