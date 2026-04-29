@@ -17,7 +17,6 @@ from hooks.context.kubectl_mutation_guard import (
     check_kubectl_mutation_command,
 )
 
-
 # ---------------------------------------------------------------------------
 # ALLOWED — read-only diagnostics
 # ---------------------------------------------------------------------------

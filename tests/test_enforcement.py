@@ -248,7 +248,7 @@ class TestThreeSourceMerge:
             assert len(entries) == 3
 
     def test_id_collision_runtime_wins(self, bundle_dir):
-        from hooks.context.enforcement import add_enforcement, load_all_enforcements
+        from hooks.context.enforcement import load_all_enforcements
 
         (bundle_dir / "enforcements.json").write_text(json.dumps({
             "enforcements": [{"id": "clash", "message": "from bundle", "cadence": 5, "tag": ""}]

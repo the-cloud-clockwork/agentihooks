@@ -50,36 +50,45 @@ _RE_FLAGS = re.IGNORECASE | re.DOTALL
 _WHOLE_CMD_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     # kubectl edit — opens an in-place editor on the live manifest. Behavior
     # change disguised as ops.
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?edit\b", _RE_FLAGS),
-     "kubectl-edit",
-     "kubectl edit (in-place manifest edit — change the manifest in code, push, let CI/ArgoCD apply)"),
-
+    (
+        re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?edit\b", _RE_FLAGS),
+        "kubectl-edit",
+        "kubectl edit (in-place manifest edit — change the manifest in code, push, let CI/ArgoCD apply)",
+    ),
     # kubectl patch — strategic/JSON merge patch on a live resource. Behavior
     # change disguised as ops.
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?patch\b", _RE_FLAGS),
-     "kubectl-patch",
-     "kubectl patch (in-place manifest patch — change the manifest in code, push, let CI/ArgoCD apply)"),
-
+    (
+        re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?patch\b", _RE_FLAGS),
+        "kubectl-patch",
+        "kubectl patch (in-place manifest patch — change the manifest in code, push, let CI/ArgoCD apply)",
+    ),
     # kubectl set env/image/resources/... — direct field mutation.
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?set\s+(?:env|image|resources?|serviceaccount|selector|subject)\b", _RE_FLAGS),
-     "kubectl-set",
-     "kubectl set <env|image|resources|...> (field mutation — put it in the manifest)"),
-
+    (
+        re.compile(
+            r"\bkubectl\s+(?:[^\n;|&]*?\s)?set\s+(?:env|image|resources?|serviceaccount|selector|subject)\b", _RE_FLAGS
+        ),
+        "kubectl-set",
+        "kubectl set <env|image|resources|...> (field mutation — put it in the manifest)",
+    ),
     # kubectl autoscale — creates an HPA. HPA is a behavior config, belongs
     # in the chart.
-    (re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?autoscale\b", _RE_FLAGS),
-     "kubectl-autoscale",
-     "kubectl autoscale (HPA is a behavior config — put it in the chart)"),
-
+    (
+        re.compile(r"\bkubectl\s+(?:[^\n;|&]*?\s)?autoscale\b", _RE_FLAGS),
+        "kubectl-autoscale",
+        "kubectl autoscale (HPA is a behavior config — put it in the chart)",
+    ),
     # helm install / upgrade / rollback — deploys are git-driven via ArgoCD.
-    (re.compile(r"\bhelm\s+(?:[^\n;|&]*?\s)?(?:install|upgrade|rollback)\b", _RE_FLAGS),
-     "helm-deploy",
-     "helm install/upgrade/rollback (deploys go through git + ArgoCD)"),
-
+    (
+        re.compile(r"\bhelm\s+(?:[^\n;|&]*?\s)?(?:install|upgrade|rollback)\b", _RE_FLAGS),
+        "helm-deploy",
+        "helm install/upgrade/rollback (deploys go through git + ArgoCD)",
+    ),
     # argocd app sync --local — bypasses git as source of truth.
-    (re.compile(r"\bargocd\s+app\s+sync\b[^\n;|&]*?--local\b", _RE_FLAGS),
-     "argocd-sync-local",
-     "argocd app sync --local (bypasses git as source of truth)"),
+    (
+        re.compile(r"\bargocd\s+app\s+sync\b[^\n;|&]*?--local\b", _RE_FLAGS),
+        "argocd-sync-local",
+        "argocd app sync --local (bypasses git as source of truth)",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -97,24 +106,35 @@ _KUBECTL_EXEC_RE = re.compile(
 
 # Things that, immediately after --, indicate a write/install inside the pod.
 _EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str, str]] = [
-    (re.compile(r"^\s*tee\b", _RE_FLAGS),
-     "exec-tee",
-     "kubectl exec ... -- tee (writes a file inside the pod)"),
-    (re.compile(r"^\s*sed\s+-i\b", _RE_FLAGS),
-     "exec-sed-i",
-     "kubectl exec ... -- sed -i (edits a file inside the pod)"),
-    (re.compile(r"^\s*(?:vi|vim|nano|emacs)\b", _RE_FLAGS),
-     "exec-editor",
-     "kubectl exec ... -- vi/vim/nano/emacs (interactive file edit inside the pod)"),
-    (re.compile(r"^\s*(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b", _RE_FLAGS),
-     "exec-pkg-install",
-     "kubectl exec ... -- <pkg-mgr> install (in-pod install — bake it into the image)"),
-    (re.compile(r"^\s*(?:rm|mv|cp)\s+(?:-[a-zA-Z]+\s+)*['\"]?/(?:etc|var|opt|srv|usr|root|home|tmp)\b", _RE_FLAGS),
-     "exec-fs-mutate",
-     "kubectl exec ... -- rm/mv/cp on filesystem paths (live mutation)"),
-    (re.compile(r"^\s*(?:sh|bash|ash|zsh|dash)\s+-c\s+['\"]", _RE_FLAGS),
-     "exec-shell-c",
-     None),  # special handling — inspect inside the quoted shell
+    (re.compile(r"^\s*tee\b", _RE_FLAGS), "exec-tee", "kubectl exec ... -- tee (writes a file inside the pod)"),
+    (
+        re.compile(r"^\s*sed\s+-i\b", _RE_FLAGS),
+        "exec-sed-i",
+        "kubectl exec ... -- sed -i (edits a file inside the pod)",
+    ),
+    (
+        re.compile(r"^\s*(?:vi|vim|nano|emacs)\b", _RE_FLAGS),
+        "exec-editor",
+        "kubectl exec ... -- vi/vim/nano/emacs (interactive file edit inside the pod)",
+    ),
+    (
+        re.compile(
+            r"^\s*(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b",
+            _RE_FLAGS,
+        ),
+        "exec-pkg-install",
+        "kubectl exec ... -- <pkg-mgr> install (in-pod install — bake it into the image)",
+    ),
+    (
+        re.compile(r"^\s*(?:rm|mv|cp)\s+(?:-[a-zA-Z]+\s+)*['\"]?/(?:etc|var|opt|srv|usr|root|home|tmp)\b", _RE_FLAGS),
+        "exec-fs-mutate",
+        "kubectl exec ... -- rm/mv/cp on filesystem paths (live mutation)",
+    ),
+    (
+        re.compile(r"^\s*(?:sh|bash|ash|zsh|dash)\s+-c\s+['\"]", _RE_FLAGS),
+        "exec-shell-c",
+        None,
+    ),  # special handling — inspect inside the quoted shell
 ]
 
 # Inside `sh -c '...'` — flag mutation patterns within the quoted command
@@ -124,7 +144,12 @@ _INNER_SHELL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"<<\s*['\"]?[A-Z_]+", _RE_FLAGS), "heredoc-to-file"),
     (re.compile(r"\btee\b", _RE_FLAGS), "tee"),
     (re.compile(r"\bsed\s+-i\b", _RE_FLAGS), "sed-i"),
-    (re.compile(r"\b(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b", _RE_FLAGS), "pkg-install"),
+    (
+        re.compile(
+            r"\b(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b", _RE_FLAGS
+        ),
+        "pkg-install",
+    ),
     (re.compile(r"\brm\s+-r?f?\b", _RE_FLAGS), "rm-rf"),
     (re.compile(r"\bsystemctl\s+(?:start|stop|restart|reload|enable|disable)\b", _RE_FLAGS), "systemctl-mutate"),
 ]
@@ -175,8 +200,7 @@ def _check_kubectl_cp_into_pod(cmd_args: str) -> bool:
 _CMD_POSITION_PREFIX = r"(?:^|[;&|]\s*|\n\s*|`|\$\(\s*)"
 
 _SSH_RE = re.compile(
-    _CMD_POSITION_PREFIX
-    + r"\bssh\s+(?:-[a-zA-Z0-9_-]+(?:[=\s]+[^\s]+)?\s+)*[^\s]+\s+(.+)",
+    _CMD_POSITION_PREFIX + r"\bssh\s+(?:-[a-zA-Z0-9_-]+(?:[=\s]+[^\s]+)?\s+)*[^\s]+\s+(.+)",
     _RE_FLAGS,
 )
 
@@ -191,7 +215,13 @@ _SSH_WRITE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bsystemctl\s+(?:start|stop|restart|reload|enable|disable)\b", _RE_FLAGS), "ssh-systemctl-mutate"),
     (re.compile(r"\b(?:apt(?:-get)?|pip3?|npm|yarn|apk|gem)\s+(?:install|add)\b", _RE_FLAGS), "ssh-pkg-install"),
     (re.compile(r"\bdocker\s+exec\b", _RE_FLAGS), "ssh-docker-exec"),
-    (re.compile(r"\bkubectl\s+(?:edit|patch|set\s+(?:env|image|resources?|serviceaccount|selector|subject)|autoscale)\b", _RE_FLAGS), "ssh-kubectl-mutate"),
+    (
+        re.compile(
+            r"\bkubectl\s+(?:edit|patch|set\s+(?:env|image|resources?|serviceaccount|selector|subject)|autoscale)\b",
+            _RE_FLAGS,
+        ),
+        "ssh-kubectl-mutate",
+    ),
 ]
 
 # scp INTO remote host: any scp where the destination contains `<host>:<path>`
@@ -240,10 +270,19 @@ _DOCKER_EXEC_RE = re.compile(
 _DOCKER_EXEC_MUTATION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\btee\b", _RE_FLAGS), "docker-exec-tee"),
     (re.compile(r"\bsed\s+-i\b", _RE_FLAGS), "docker-exec-sed-i"),
-    (re.compile(r"\b(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b", _RE_FLAGS),
-     "docker-exec-pkg-install"),
-    (re.compile(r"(?:sh|bash|ash|zsh|dash)\s+-c\s+['\"][^'\"]*?(?:>\s*['\"]?(?:/|\$|~)|>>\s*['\"]?(?:/|\$|~)|\btee\b|\bsed\s+-i\b|<<\s*['\"]?[A-Z_]+)", _RE_FLAGS),
-     "docker-exec-shell-write"),
+    (
+        re.compile(
+            r"\b(?:apt(?:-get)?|pip3?|npm|yarn|cargo|gem|apk|brew|dnf|yum|pacman)\s+(?:install|add|-S|-Sy)\b", _RE_FLAGS
+        ),
+        "docker-exec-pkg-install",
+    ),
+    (
+        re.compile(
+            r"(?:sh|bash|ash|zsh|dash)\s+-c\s+['\"][^'\"]*?(?:>\s*['\"]?(?:/|\$|~)|>>\s*['\"]?(?:/|\$|~)|\btee\b|\bsed\s+-i\b|<<\s*['\"]?[A-Z_]+)",
+            _RE_FLAGS,
+        ),
+        "docker-exec-shell-write",
+    ),
     (re.compile(r">\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "docker-exec-redirect"),
     (re.compile(r">>\s*['\"]?(?:/|\$|~)", _RE_FLAGS), "docker-exec-append"),
 ]

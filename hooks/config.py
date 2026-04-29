@@ -368,9 +368,7 @@ BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
 # ENFORCEMENT — operator-curated drumbeat reminders, cadence-driven re-injection
 # =============================================================================
 ENFORCEMENT_INJECTION_ENABLED = _env_bool("ENFORCEMENT_INJECTION_ENABLED", "true")
-ENFORCEMENT_FILE: str = os.getenv(
-    "ENFORCEMENT_FILE", str(Path.home() / ".agentihooks" / "enforcements.json")
-)
+ENFORCEMENT_FILE: str = os.getenv("ENFORCEMENT_FILE", str(Path.home() / ".agentihooks" / "enforcements.json"))
 ENFORCEMENT_COUNTER_FILE: str = os.getenv(
     "ENFORCEMENT_COUNTER_FILE",
     str(Path.home() / ".agentihooks" / "enforcement_counters.json"),
@@ -397,6 +395,8 @@ CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
 # CI MANIFESTO — doctrine-as-context injection
 # =============================================================================
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
+
+
 # Manifesto resolution (first hit wins):
 #   1. $CI_MANIFESTO_PATH explicit env override
 #   2. $MANIFESTOS_DIR/<MANIFESTO_NAME>.md (multi-manifesto bundle pattern)
