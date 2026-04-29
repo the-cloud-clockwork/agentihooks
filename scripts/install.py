@@ -1143,6 +1143,13 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if repo_path:
         # Per-repo mode — delegate to existing cmd_init
         cmd_init(args)
+        # Always sweep MCP blacklist across ALL project entries in ~/.claude.json
+        # after any init invocation. Project entries registered later by Claude
+        # itself (different CWD) won't have a disabledMcpServers block — without
+        # this sweep, those projects fall back to the user-level mcpServers (all
+        # known servers) and the per-agent whitelist is silently bypassed.
+        if not getattr(args, "dry_run", False):
+            _sweep_all_projects_blacklist()
         return
 
     # Global mode
@@ -2402,6 +2409,23 @@ def _collect_child_enabled_mcps(parent_path: Path, all_project_paths: set[str]) 
         except (json.JSONDecodeError, OSError):
             pass
     return enabled
+
+
+def _sweep_all_projects_blacklist() -> None:
+    """Resolve the active global profile from state and sweep the blacklist.
+
+    Wraps _blacklist_all_projects_mcps with profile lookup so callers (e.g. per-repo
+    cmd_init) don't need to know which global profile is active. No-op if no profile
+    is registered or the profile cannot be resolved.
+    """
+    state = _load_state()
+    active_profile = state.get("targets", {}).get("global", {}).get("profile")
+    if not active_profile:
+        return
+    profile_dir = _resolve_profile_dir(active_profile)
+    if not profile_dir:
+        return
+    _blacklist_all_projects_mcps(profile_dir)
 
 
 def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
