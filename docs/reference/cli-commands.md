@@ -46,6 +46,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--repo <path>` | Target repo directory for per-repo configuration |
+| `--force` | Clean install — wipes `~/.agentihooks/` (except `.env` and `.venv`) and all symlinked assets in `~/.claude/`, then re-initializes from scratch |
 
 ### Environment variables
 
@@ -68,6 +69,9 @@ agentihooks init
 
 # Install with a different profile
 agentihooks init --profile admin
+
+# Clean install (fresh state, preserves .env)
+agentihooks init --force --profile coding
 
 # Install with persona + settings overlay
 agentihooks init --profile anton --settings-profile admin

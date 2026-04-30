@@ -1130,13 +1130,64 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
     install_global(global_args)
 
 
+def _clean_state_dir() -> None:
+    """Wipe ~/.agentihooks/ (except .env and .venv) and ~/.claude/ symlinked assets for a fresh install."""
+    import shutil
+
+    state_dir = AGENTIHOOKS_STATE_DIR
+    if not state_dir.exists():
+        return
+
+    _PRESERVE = {".env", ".venv"}
+    removed = 0
+    for entry in sorted(state_dir.iterdir()):
+        if entry.name in _PRESERVE:
+            continue
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+            removed += 1
+        except Exception as e:
+            print(f"  {_YELLOW}[WARN] Could not remove {entry.name}: {e}{_RESET}")
+
+    # Clean ~/.claude/ symlinked assets and generated files
+    claude_dir = CLAUDE_HOME
+    for subdir in ("rules", "skills", "agents", "commands"):
+        target = claude_dir / subdir
+        if target.is_symlink() or target.is_dir():
+            try:
+                if target.is_symlink():
+                    target.unlink()
+                else:
+                    shutil.rmtree(target)
+                removed += 1
+            except Exception:
+                pass
+    for fname in ("settings.json", "settings.local.json", "CLAUDE.md"):
+        target = claude_dir / fname
+        if target.exists() or target.is_symlink():
+            try:
+                target.unlink()
+                removed += 1
+            except Exception:
+                pass
+
+    print(f"  {_GREEN}[OK] Clean install: removed {removed} items from ~/.agentihooks/ and ~/.claude/{_RESET}")
+    print(f"  {_DIM}[--] Preserved: {', '.join(sorted(_PRESERVE))}{_RESET}")
+
+
 def cmd_init_unified(args: argparse.Namespace) -> None:
     """Unified init command — routes to global or per-repo install.
 
     agentihooks init --bundle <path>    → link bundle + global install
     agentihooks init                    → re-run global install (bundle must be linked)
     agentihooks init --repo <path>      → per-repo config with profile picker
+    agentihooks init --force            → clean install (wipe state, re-init from scratch)
     """
+    if getattr(args, "force", False):
+        _clean_state_dir()
     bundle_path = getattr(args, "bundle", None)
     repo_path = getattr(args, "repo", None)
 
@@ -4545,6 +4596,7 @@ def main() -> None:
         "--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)"
     )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
+    init_p.add_argument("--force", action="store_true", default=False, help="Clean install — wipe ~/.agentihooks/ (except .env) and re-init from scratch")
     init_p.add_argument(
         "--settings-profile",
         dest="init_settings_profile",
