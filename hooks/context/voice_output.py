@@ -19,7 +19,9 @@ from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
 VOICE_TYPE = "voice_enabled"
-_FLAG_DIR = Path.home() / ".agentihooks" / "voice_flags"
+from hooks.config import AGENTIHOOKS_HOME
+
+_FLAG_DIR = AGENTIHOOKS_HOME / "voice_flags"
 _QUOTA_FLAG = _FLAG_DIR / "quota_exhausted"
 _LAST_SPOKE_FLAG = _FLAG_DIR / "last_spoke_ts"
 _COOLDOWN_SECONDS = 10

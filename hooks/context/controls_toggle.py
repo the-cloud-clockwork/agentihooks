@@ -22,13 +22,14 @@ Public API:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
 CONTROLS_TYPE = "controls_disabled"
-_FLAG_DIR = Path.home() / ".agentihooks" / "controls_flags"
+from hooks.config import AGENTIHOOKS_HOME
+
+_FLAG_DIR = AGENTIHOOKS_HOME / "controls_flags"
 _GLOBAL_FLAG = _FLAG_DIR / "active.flag"
 _GLOBAL_REDIS_KEY = redis_key(CONTROLS_TYPE, "_global")
 

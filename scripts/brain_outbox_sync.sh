@@ -3,7 +3,7 @@ set -euo pipefail
 # Sync brain-outbox marker files to Anton vault, then quick-refresh brain-feed.
 # Cron: */5 * * * *
 
-OUTBOX="${BRAIN_WRITER_OUTBOX:-$HOME/.agentihooks/brain-outbox}"
+OUTBOX="${BRAIN_WRITER_OUTBOX:-${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/brain-outbox}"
 VAULT_SSH="${BRAIN_WRITER_VAULT_SSH:-root@10.10.30.130}"
 VAULT_PATH="${BRAIN_WRITER_VAULT_PATH:-/mnt/user/appdata/obsidian/vault}"
 SSH_KEY="${BRAIN_WRITER_SSH_KEY:-$HOME/.ssh/anton_id_ed25519}"
@@ -20,7 +20,7 @@ SSH_CMD="ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=5 $VAULT_SSH"
 $SSH_CMD "mkdir -p '$CLUSTER_DIR' && chmod 777 '$CLUSTER_DIR'" 2>/dev/null || true
 
 # Ensure logs dir exists
-mkdir -p "$HOME/.agentihooks/logs"
+mkdir -p "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/logs"
 
 PROCESSED=0
 for f in "$OUTBOX"/*.json; do
@@ -82,7 +82,7 @@ done
 
 if [[ "$PROCESSED" -gt 0 ]]; then
     # Sync brain-feed back to local
-    rsync -az -e "ssh -i $SSH_KEY" "$VAULT_SSH:$VAULT_PATH/brain-feed/" "$HOME/.agentihooks/brain-feed/" 2>/dev/null || true
+    rsync -az -e "ssh -i $SSH_KEY" "$VAULT_SSH:$VAULT_PATH/brain-feed/" "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/brain-feed/" 2>/dev/null || true
 
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) synced $PROCESSED markers" >> "$HOME/.agentihooks/logs/brain-outbox-sync.log"
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) synced $PROCESSED markers" >> "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/logs/brain-outbox-sync.log"
 fi

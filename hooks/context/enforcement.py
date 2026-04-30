@@ -80,7 +80,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-_STATE_PATH = Path.home() / ".agentihooks" / "state.json"
+from hooks.config import AGENTIHOOKS_HOME
+
+_STATE_PATH = AGENTIHOOKS_HOME / "state.json"
 
 
 def _read_state() -> dict:

@@ -20,10 +20,11 @@ from __future__ import annotations
 import os
 import signal
 import sys
-from pathlib import Path
 from typing import Any, Callable
 
-_LOG_FILE = Path.home() / ".agentihooks" / "logs" / "async-hooks.log"
+from hooks.config import AGENTIHOOKS_HOME
+
+_LOG_FILE = AGENTIHOOKS_HOME / "logs" / "async-hooks.log"
 
 
 def fork_and_call(

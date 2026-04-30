@@ -19,6 +19,7 @@ from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
+from hooks.config import AGENTIHOOKS_HOME
 from hooks.hook_manager import BlockAction
 
 BYPASS_TYPE = "prod_lockdown_bypass"
@@ -67,7 +68,7 @@ def _bypass_key(session_id: str) -> str:
 
 
 def _flag_file(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.flag"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.flag"
 
 
 def set_bypass(session_id: str) -> None:
@@ -118,7 +119,7 @@ def _release_key(session_id: str) -> str:
 
 
 def _release_flag(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.release"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.release"
 
 
 def set_release_signal(session_id: str) -> None:
@@ -154,7 +155,7 @@ def _hotfix_key(session_id: str) -> str:
 
 
 def _hotfix_flag(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.hotfix"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.hotfix"
 
 
 def set_hotfix_signal(session_id: str) -> None:
@@ -217,7 +218,7 @@ def _has_release_signal(session_id: str) -> bool:
         except Exception:
             pass
     try:
-        return (Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.release").exists()
+        return (AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.release").exists()
     except Exception:
         return False
 
