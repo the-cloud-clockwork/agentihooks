@@ -195,10 +195,14 @@ def test_chained_command_with_safe_prefix_still_blocks():
     assert check_kubectl_mutation_command(cmd) is not None
 
 
-def test_check_kubectl_mutation_payload_raises_block_action():
+def test_check_kubectl_mutation_payload_raises_block_action(monkeypatch):
     """The payload-based entrypoint raises BlockAction."""
+    from hooks.context import controls_toggle
     from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
     from hooks.hook_manager import BlockAction
+
+    # Bypass mode short-circuits the guard — force it off for this test.
+    monkeypatch.setattr(controls_toggle, "is_controls_disabled", lambda *_a, **_kw: False)
 
     payload = {"tool_input": {"command": "kubectl edit deploy/foo"}}
     with pytest.raises(BlockAction):
