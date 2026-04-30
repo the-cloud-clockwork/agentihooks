@@ -1226,6 +1226,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
 
     # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
+    _is_force = getattr(args, "force", False)
     profile_name = args.profile
     if not profile_name:
         profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
@@ -1233,9 +1234,11 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     _migrate_profile_rename(_prev_state, "colt", "anton")
     _prev_global = _prev_state.get("targets", {}).get("global", {})
     if not profile_name:
-        stored_profile = _prev_global.get("profile", "")
-        if stored_profile:
-            profile_name = stored_profile
+        if _is_force:
+            # --force = fresh install, ignore stored profile
+            profile_name = "default"
+        elif _prev_global.get("profile", ""):
+            profile_name = _prev_global["profile"]
             print(f"Using profile from previous install: {profile_name}")
         elif sys.stdin.isatty():
             available = _available_profiles()
@@ -1248,7 +1251,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     settings_profile = getattr(args, "settings_profile", None)
     if not settings_profile:
         settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
-    if not settings_profile:
+    if not settings_profile and not _is_force:
         settings_profile = _prev_global.get("settings_profile", "")
 
     # Build args for _install_global_inner
