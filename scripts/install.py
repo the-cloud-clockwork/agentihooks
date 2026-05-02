@@ -3697,11 +3697,10 @@ def cmd_claude(extra_args: list[str]) -> None:
     if claude_flags.get("worktree"):
         cmd.append("--worktree")
 
-    # Append system prompt from profile
-    if profile_dir:
-        system_prompt = profile_dir / "CLAUDE.md"
-        if system_prompt.exists():
-            cmd.extend(["--append-system-prompt-file", str(system_prompt)])
+    # NOTE: do NOT pass --append-system-prompt-file. The active profile's
+    # CLAUDE.md is already installed at ~/.claude/CLAUDE.md by `init`, and
+    # Claude Code loads it automatically. Re-passing it as a flag duplicates
+    # the prompt and triggers auto-worktree behavior in Claude Code v2.1.
 
     # Pass through any extra args from the user
     cmd.extend(extra_args)
