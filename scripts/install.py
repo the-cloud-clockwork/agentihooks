@@ -4396,7 +4396,12 @@ def main() -> None:
         "--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)"
     )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
-    init_p.add_argument("--force", action="store_true", default=False, help="Clean install — wipe ~/.agentihooks/ (except .env) and re-init from scratch")
+    init_p.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Clean install — wipe ~/.agentihooks/ (except .env) and re-init from scratch",
+    )
     init_p.add_argument(
         "--settings-profile",
         dest="init_settings_profile",
