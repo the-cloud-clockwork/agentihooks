@@ -3688,8 +3688,10 @@ def cmd_claude(extra_args: list[str]) -> None:
 
     # Simple key→flag mappings (skip empty/None — empty model triggers
     # CLI fallbacks in some Claude Code versions, including auto-worktree)
+    # Defaults: effort=medium when profile doesn't set one.
+    _claude_defaults = {"effort": "medium"}
     for key, flag in {"model": "--model", "effort": "--effort"}.items():
-        val = claude_flags.get(key)
+        val = claude_flags.get(key) or _claude_defaults.get(key)
         if val:
             cmd.extend([flag, str(val)])
 
