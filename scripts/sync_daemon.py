@@ -27,7 +27,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 AGENTIHOOKS_ROOT = Path(__file__).resolve().parent.parent
-AGENTIHOOKS_STATE_DIR = Path.home() / ".agentihooks"
+AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 
 # Ensure the agentihooks package root is importable when this script is
 # launched directly via `python sync_daemon.py` from any cwd. Without this,

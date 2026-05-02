@@ -139,6 +139,28 @@ Profiles from both the agentihooks repo and linked bundle are listed.
 
 ---
 
+## Profile resolution order
+
+When `agentihooks init` runs, the profile is resolved through this precedence chain:
+
+1. **`--profile` CLI flag** — explicit selection
+2. **`AGENTIHOOKS_PROFILE` env var** — useful in CI/Docker
+3. **`state.json` → `targets.global.profile`** — previous install remembered
+4. **Interactive prompt** (if TTY) — defaults to `default` on empty input
+5. **Hardcoded `default`** (non-interactive) — headless fallback
+
+If `--profile` is passed with an empty value (`--profile ""`), it is treated as unset and falls through to step 2+. This means **the `default` profile is always the final fallback** — no profile flag, empty profile flag, or missing env var all resolve to `default`.
+
+```bash
+agentihooks init                    # → resolves to "default" (or previous install)
+agentihooks init --profile ""       # → resolves to "default" (empty = unset)
+AGENTIHOOKS_PROFILE= agentihooks init  # → resolves to "default"
+```
+
+The `default` profile ships with agentihooks at `profiles/default/`. Bundle profiles (in a linked bundle's `profiles/` directory) are also discoverable — built-in profiles are checked first, then bundle profiles.
+
+---
+
 ## Switching profiles
 
 Re-run init with `--profile`:

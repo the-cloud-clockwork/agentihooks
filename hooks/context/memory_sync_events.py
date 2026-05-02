@@ -18,7 +18,6 @@ import os
 import re
 import socket
 import time
-from pathlib import Path
 
 from hooks._async import fork_and_call
 from hooks.common import log
@@ -26,10 +25,12 @@ from hooks.common import log
 _MEMORY_PATH_RE = re.compile(r"/\.claude/projects/[^/]+/memory/")
 _VALID_ROLES_PULL = ("consumer", "contributor", "authority")
 _MEMORY_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
-_DIRTY_DIR = Path.home() / ".agentihooks" / "state" / "memory_dirty"
+from hooks.config import AGENTIHOOKS_HOME
+
+_DIRTY_DIR = AGENTIHOOKS_HOME / "state" / "memory_dirty"
 _DIRTY_TTL_SEC = 7 * 24 * 3600
 _SWEEP_INTERVAL_SEC = 24 * 3600
-_SWEEP_STAMP = Path.home() / ".agentihooks" / "state" / "memory_dirty_sweep.stamp"
+_SWEEP_STAMP = AGENTIHOOKS_HOME / "state" / "memory_dirty_sweep.stamp"
 
 
 def _sweep_stale_dirty_flags() -> None:

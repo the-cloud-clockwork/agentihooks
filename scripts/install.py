@@ -133,7 +133,8 @@ def _resolve_claude_home() -> Path:
 CLAUDE_HOME = _resolve_claude_home()
 
 # Persistent state directory for user-level agentihooks configuration.
-AGENTIHOOKS_STATE_DIR = Path.home() / ".agentihooks"
+# Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
+AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 
 # Repeated path fragment constants (avoids S1192 duplicate-literal warnings)
@@ -1130,13 +1131,95 @@ def _cmd_settings_profile(args: argparse.Namespace) -> None:
     install_global(global_args)
 
 
+def _clean_state_dir() -> None:
+    """Reset install state + session caches for a fresh install. Preserves persistent data."""
+    import shutil
+
+    state_dir = AGENTIHOOKS_STATE_DIR
+    if not state_dir.exists():
+        return
+
+    # Whitelist: only these are deleted. Everything else survives.
+    _DELETE_FILES = {
+        "state.json",
+        "sync-hashes.json",
+        "sync.lock",
+        "active-sessions.json",
+        "active_overlays.json",
+        "mcp-tool-cache.json",
+        "broadcast_delivery_state.json",
+        "memory-sync.lock",
+    }
+    _DELETE_DIRS = {
+        "controls_flags",
+        "voice_flags",
+        "prod_bypass",
+        "force_refresh",
+        "state",
+    }
+    _DELETE_GLOBS = ["ctx_refresh_*.json", "*.pid"]
+
+    removed = 0
+    for name in _DELETE_FILES:
+        target = state_dir / name
+        if target.exists():
+            try:
+                target.unlink()
+                removed += 1
+            except Exception as e:
+                print(f"  {_YELLOW}[WARN] Could not remove {name}: {e}{_RESET}")
+    for name in _DELETE_DIRS:
+        target = state_dir / name
+        if target.is_dir():
+            try:
+                shutil.rmtree(target)
+                removed += 1
+            except Exception as e:
+                print(f"  {_YELLOW}[WARN] Could not remove {name}/: {e}{_RESET}")
+    for pattern in _DELETE_GLOBS:
+        for target in state_dir.glob(pattern):
+            try:
+                target.unlink()
+                removed += 1
+            except Exception:
+                pass
+
+    # Clean ~/.claude/ symlinked assets and generated files
+    claude_dir = CLAUDE_HOME
+    for subdir in ("rules", "skills", "agents", "commands"):
+        target = claude_dir / subdir
+        if target.is_symlink() or target.is_dir():
+            try:
+                if target.is_symlink():
+                    target.unlink()
+                else:
+                    shutil.rmtree(target)
+                removed += 1
+            except Exception:
+                pass
+    for fname in ("settings.json", "settings.local.json", "CLAUDE.md"):
+        target = claude_dir / fname
+        if target.exists() or target.is_symlink():
+            try:
+                target.unlink()
+                removed += 1
+            except Exception:
+                pass
+
+    print(f"  {_GREEN}[OK] Clean install: reset {removed} items (install state + session caches){_RESET}")
+    print(f"  {_DIM}[--] Preserved: broadcasts, enforcements, brain data, logs, .env, .venv{_RESET}")
+
+
 def cmd_init_unified(args: argparse.Namespace) -> None:
     """Unified init command — routes to global or per-repo install.
 
     agentihooks init --bundle <path>    → link bundle + global install
     agentihooks init                    → re-run global install (bundle must be linked)
     agentihooks init --repo <path>      → per-repo config with profile picker
+    agentihooks init --force            → clean install (wipe state, re-init from scratch)
     """
+    if getattr(args, "force", False):
+        _clean_state_dir()
     bundle_path = getattr(args, "bundle", None)
     repo_path = getattr(args, "repo", None)
 
@@ -1175,6 +1258,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
 
     # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
+    _is_force = getattr(args, "force", False)
     profile_name = args.profile
     if not profile_name:
         profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
@@ -1182,9 +1266,11 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     _migrate_profile_rename(_prev_state, "colt", "anton")
     _prev_global = _prev_state.get("targets", {}).get("global", {})
     if not profile_name:
-        stored_profile = _prev_global.get("profile", "")
-        if stored_profile:
-            profile_name = stored_profile
+        if _is_force:
+            # --force = fresh install, ignore stored profile
+            profile_name = "default"
+        elif _prev_global.get("profile", ""):
+            profile_name = _prev_global["profile"]
             print(f"Using profile from previous install: {profile_name}")
         elif sys.stdin.isatty():
             available = _available_profiles()
@@ -1197,41 +1283,12 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     settings_profile = getattr(args, "settings_profile", None)
     if not settings_profile:
         settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
-    if not settings_profile:
+    if not settings_profile and not _is_force:
         settings_profile = _prev_global.get("settings_profile", "")
 
     # Build args for _install_global_inner
     global_args = argparse.Namespace(profile=profile_name, settings_profile=settings_profile or "")
     install_global(global_args)
-
-    # --- Auto-start daemons if accounts/config exist ---
-    accounts_dir = AGENTIHOOKS_STATE_DIR / "quota-accounts"
-    if accounts_dir.exists() and any(accounts_dir.glob("*.json")):
-        pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
-        already_running = False
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                already_running = True
-            except (ProcessLookupError, ValueError, PermissionError):
-                pid_file.unlink(missing_ok=True)
-        if not already_running:
-            watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
-            python = str(_detect_venv() or sys.executable)
-            if watcher.exists():
-                import subprocess
-
-                proc = subprocess.Popen(
-                    [python, str(watcher)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                _cprint(f"\n{_GREEN}[OK] Quota daemon started (PID {proc.pid}).{_RESET}")
-        else:
-            print(f"\n{_DIM}[--] Quota daemon already running.{_RESET}")
 
     # --- Restart sync daemon (always restart on init to pick up code changes) ---
     sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
@@ -3124,12 +3181,8 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         _cprint(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
 
-    # --- 7. Stop quota + sync daemons ---
+    # --- 7. Stop sync daemon ---
     print()
-    if _quota_stop_daemon():
-        _cprint("[OK] Quota daemon stopped.")
-    else:
-        print("[--] Quota daemon not running.")
     sync_pid = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
     if sync_pid.exists():
         import signal
@@ -3602,32 +3655,6 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
         os.execv(python, cmd)
 
 
-def _quota_stop_daemon() -> bool:
-    """Stop the quota daemon if running. Returns True if it was running."""
-    import signal
-
-    pid_file = Path.home() / ".agentihooks" / "quota-watcher.pid"
-    if not pid_file.exists():
-        return False
-    try:
-        pid = int(pid_file.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
-        pid_file.unlink(missing_ok=True)
-        print(f"[quota] Daemon stopped (PID {pid}).")
-        return True
-    except (ProcessLookupError, ValueError):
-        pid_file.unlink(missing_ok=True)
-        return False
-
-
-def _quota_start_daemon(python: str, watcher: Path, poll: int = 60) -> None:
-    """Start the quota daemon."""
-    cmd = [python, str(watcher)]
-    if poll != 60:
-        cmd += ["--poll", str(poll)]
-    os.execv(python, cmd)
-
-
 def cmd_claude(extra_args: list[str]) -> None:
     """Launch claude with flags from the active profile's claude: section."""
     state = _load_state()
@@ -3694,182 +3721,6 @@ def cmd_claude(extra_args: list[str]) -> None:
                         os.environ[k] = v
 
     os.execvp("claude", cmd)
-
-
-def cmd_quota(args: "argparse.Namespace") -> None:
-    """Launch or interact with the Claude.ai quota watcher."""
-    watcher = AGENTIHOOKS_ROOT / "scripts" / "claude_usage_watcher.py"
-    if not watcher.exists():
-        print(f"ERROR: quota watcher not found at {watcher}", file=sys.stderr)
-        sys.exit(1)
-
-    python = str(_detect_venv() or sys.executable)
-    accounts_dir = AGENTIHOOKS_STATE_DIR / "quota-accounts"
-    legacy_auth = AGENTIHOOKS_STATE_DIR / "claude_auth_state.json"
-
-    # Migrate legacy single-account auth to multi-account
-    if not accounts_dir.exists() and legacy_auth.exists():
-        accounts_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy_auth, accounts_dir / "default.json")
-        state = _load_state()
-        state["active_quota_account"] = "default"
-        _save_state(state)
-        print("[quota] Migrated auth → quota-accounts/default.json")
-
-    state = _load_state()
-    active = state.get("active_quota_account", "default")
-
-    if args.action == "auth":
-        account = getattr(args, "quota_account", None)
-        cmd = [python, str(watcher), "--auth"]
-        if account:
-            cmd += ["--account", account]
-        os.execv(python, cmd)
-
-    elif args.action == "import-cookies":
-        account = getattr(args, "quota_account", None)
-        cmd = [python, str(watcher), "--import-cookies"]
-        if account:
-            cmd += ["--account", account]
-        os.execv(python, cmd)
-
-    elif args.action == "dump-html":
-        os.execv(python, [python, str(watcher), "--dump-html"])
-
-    elif args.action == "list":
-        if not accounts_dir.exists():
-            print("[quota] No accounts. Run:  agentihooks quota auth <name>")
-            return
-        accounts = sorted(p.stem for p in accounts_dir.glob("*.json"))
-        if not accounts:
-            print("[quota] No accounts. Run:  agentihooks quota auth <name>")
-            return
-        print("Quota accounts:")
-        for name in accounts:
-            marker = " (active)" if name == active else ""
-            print(f"  {name}{marker}")
-
-    elif args.action == "switch":
-        account = getattr(args, "quota_account", None)
-        if not account:
-            # Interactive picker
-            if not accounts_dir.exists():
-                print("[quota] No accounts. Run:  agentihooks quota auth <name>")
-                sys.exit(1)
-            accounts = sorted(p.stem for p in accounts_dir.glob("*.json"))
-            if not accounts:
-                print("[quota] No accounts. Run:  agentihooks quota auth <name>")
-                sys.exit(1)
-            print("Quota accounts:")
-            for i, name in enumerate(accounts, 1):
-                marker = " (active)" if name == active else ""
-                print(f"  {i}. {name}{marker}")
-            try:
-                choice = input("\nSwitch to [number]: ").strip()
-                idx = int(choice) - 1
-                if 0 <= idx < len(accounts):
-                    account = accounts[idx]
-                else:
-                    sys.exit("Invalid choice.")
-            except (EOFError, KeyboardInterrupt, ValueError):
-                sys.exit("\nAborted.")
-        # Verify account exists
-        if not (accounts_dir / f"{account}.json").exists():
-            print(f"[quota] Account '{account}' not found. Run:  agentihooks quota auth {account}")
-            sys.exit(1)
-        state["active_quota_account"] = account
-        _save_state(state)
-        print(f"[quota] Switched to account: {account}")
-        _quota_stop_daemon()
-        print("[quota] Restarting daemon...")
-        _quota_start_daemon(python, watcher, args.poll)
-
-    elif args.action == "restart":
-        _quota_stop_daemon()
-        print("[quota] Starting daemon...")
-        _quota_start_daemon(python, watcher, args.poll)
-
-    elif args.action == "remove":
-        account = getattr(args, "quota_account", None)
-        if not account:
-            print("Usage: agentihooks quota remove <name>")
-            sys.exit(1)
-        target = accounts_dir / f"{account}.json"
-        if not target.exists():
-            print(f"[quota] Account '{account}' not found.")
-            sys.exit(1)
-        if account == active:
-            print(f"[quota] WARNING: '{account}' is the active account.")
-            _quota_stop_daemon()
-        target.unlink()
-        print(f"[quota] Removed account: {account}")
-
-    elif args.action == "logs":
-        log_file = Path.home() / ".agentihooks" / "logs" / "quota-watcher.log"
-        if not log_file.exists():
-            print("No log file yet. Start the daemon first:  agentihooks quota")
-            sys.exit(0)
-        os.execlp("tail", "tail", "-f", str(log_file))
-
-    elif args.action == "stop":
-        if not _quota_stop_daemon():
-            print("[quota] No daemon running.")
-
-    elif args.action == "status":
-        import json as _json
-
-        print(f"[quota] Active account: {active}")
-        usage_file = Path(os.getenv("CLAUDE_USAGE_FILE", str(Path.home() / ".agentihooks" / "claude_usage.json")))
-        if not usage_file.exists():
-            print("No quota data yet. Run:  agentihooks quota")
-            sys.exit(0)
-        data = _json.loads(usage_file.read_text())
-        print(_json.dumps(data, indent=2))
-
-    else:  # watch (default)
-        # If already running, show status + available commands
-        pid_file = AGENTIHOOKS_STATE_DIR / "quota-watcher.pid"
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                print(f"[quota] Daemon running (PID {pid}), account: {active}")
-                usage_file = Path(
-                    os.getenv(
-                        "CLAUDE_USAGE_FILE",
-                        str(AGENTIHOOKS_STATE_DIR / "claude_usage.json"),
-                    )
-                )
-                if usage_file.exists():
-                    import json as _json2
-
-                    try:
-                        data = _json2.loads(usage_file.read_text())
-                        s = data.get("session", {})
-                        w = (data.get("weekly") or {}).get("all_models", {})
-                        parts = []
-                        if s.get("used_pct") is not None:
-                            parts.append(f"session:{s['used_pct']:.0f}%")
-                        if w.get("used_pct") is not None:
-                            parts.append(f"weekly:{w['used_pct']:.0f}%")
-                        if parts:
-                            print(f"  {' | '.join(parts)}")
-                    except (json.JSONDecodeError, OSError):
-                        pass
-                print()
-                print("Commands:")
-                print("  agentihooks quota status       # full quota JSON")
-                print("  agentihooks quota list          # show accounts")
-                print("  agentihooks quota switch [NAME] # switch account")
-                print("  agentihooks quota auth [NAME]   # add/update account")
-                print("  agentihooks quota restart       # restart daemon")
-                print("  agentihooks quota stop          # stop daemon")
-                print("  agentihooks quota logs          # tail daemon log")
-                print("  agentihooks quota remove NAME   # delete account")
-                return
-            except (ProcessLookupError, ValueError, PermissionError):
-                pid_file.unlink(missing_ok=True)
-        _quota_start_daemon(python, watcher, args.poll)
 
 
 # ---------------------------------------------------------------------------
@@ -4546,6 +4397,12 @@ def main() -> None:
     )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Clean install — wipe ~/.agentihooks/ (except .env) and re-init from scratch",
+    )
+    init_p.add_argument(
         "--settings-profile",
         dest="init_settings_profile",
         default=None,
@@ -4576,32 +4433,6 @@ def main() -> None:
         action="store_true",
         help="Overwrite an existing .claudeignore",
     )
-
-    quota_p = sub.add_parser(
-        "quota",
-        help="Manage the Claude.ai console quota watcher",
-    )
-    quota_p.add_argument(
-        "action",
-        nargs="?",
-        default="watch",
-        choices=[
-            "watch",
-            "auth",
-            "import-cookies",
-            "status",
-            "logs",
-            "stop",
-            "list",
-            "switch",
-            "restart",
-            "remove",
-            "dump-html",
-        ],
-        help="watch | auth | switch | list | restart | stop | status | logs | remove | import-cookies | dump-html",
-    )
-    quota_p.add_argument("quota_account", nargs="?", default=None, help="Account name (for auth, switch, remove)")
-    quota_p.add_argument("--poll", type=int, default=60, help="Poll interval in seconds (default: 60)")
 
     daemon_p = sub.add_parser("daemon", help="Manage the sync daemon (auto-propagation)")
     daemon_p.add_argument(
@@ -4958,8 +4789,6 @@ notes:
         _cmd_settings_profile(args)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
-    elif args.command == "quota":
-        cmd_quota(args)
     elif args.command == "claude":
         # Pass everything after "claude" as extra args
         try:

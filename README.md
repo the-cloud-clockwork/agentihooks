@@ -321,11 +321,34 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
 | `BRAIN_ENABLED` | `false` | Brain adapter master switch |
-| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory to read brain content from |
+| `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
+| `BRAIN_HTTP_TOKEN` | `""` | Bearer token for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
+| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Filesystem fallback when `BRAIN_URL` unset. |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
+| `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
+| `BRAIN_WRITER_ENABLED` | `false` | POST `/marker` on Stop / SubagentStop. |
 
 Complete table: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
+
+### Remote brain quickstart
+
+To wire a Claude Code session into a brain stack you already deployed
+(e.g. via `agentibrain-kernel`'s docker compose or helm charts), drop the
+following four lines into `~/.agentihooks/.env`:
+
+```bash
+BRAIN_URL=http://<your-kb-router-host>:<port>
+BRAIN_HTTP_TOKEN=<KB_ROUTER_TOKEN from your bootstrap>
+BRAIN_ENABLED=true
+AMYGDALA_ENABLED=true
+# optional — write back markers from this session
+BRAIN_WRITER_ENABLED=true
+```
+
+Restart your Claude Code session. The hook stack will fetch hot arcs +
+active signals on every prompt and inject them as broadcast banners. No
+profile install required — works alongside any profile (or none).
 
 ## Per-Repo Config
 

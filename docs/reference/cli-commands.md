@@ -46,6 +46,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--repo <path>` | Target repo directory for per-repo configuration |
+| `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`, memory mirror. |
 
 ### Environment variables
 
@@ -56,6 +57,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 | `AGENTIHOOKS_MCP_FILE` | Path to an MCP JSON file to auto-merge into `~/.claude.json` during install |
 | `CLAUDE_CODE_HOME_DIR` | Home-directory root override -- `.claude` is appended automatically (default: `$HOME`) |
 | `AGENTIHOOKS_CLAUDE_HOME` | Legacy: direct path to the `.claude` directory (default: `~/.claude`) |
+| `AGENTIHOOKS_HOME` | Override the agentihooks state directory (default: `~/.agentihooks`). Used for per-pod isolation on shared filesystems — set to `/shared/.agentihooks-<pod-name>` so each pod gets its own state without racing on `state.json`. |
 
 ### Examples
 
@@ -68,6 +70,9 @@ agentihooks init
 
 # Install with a different profile
 agentihooks init --profile admin
+
+# Clean install (fresh state, preserves .env)
+agentihooks init --force --profile coding
 
 # Install with persona + settings overlay
 agentihooks init --profile anton --settings-profile admin

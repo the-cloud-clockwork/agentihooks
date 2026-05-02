@@ -16,6 +16,7 @@ from pathlib import Path
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
+from hooks.config import AGENTIHOOKS_HOME
 from hooks.hook_manager import BlockAction
 
 # Per-turn branch-creation signal (CI Manifesto §14)
@@ -32,7 +33,7 @@ def _branch_signal_key(session_id: str) -> str:
 
 
 def _branch_signal_flag(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.branch"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.branch"
 
 
 def _pr_signal_key(session_id: str) -> str:
@@ -40,7 +41,7 @@ def _pr_signal_key(session_id: str) -> str:
 
 
 def _pr_signal_flag(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.pr"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.pr"
 
 
 def set_branch_signal(session_id: str) -> None:
@@ -124,7 +125,7 @@ def _pr_counter_key(session_id: str) -> str:
 
 
 def _pr_counter_flag(session_id: str) -> Path:
-    return Path.home() / ".agentihooks" / "prod_bypass" / f"{session_id}.pr_count"
+    return AGENTIHOOKS_HOME / "prod_bypass" / f"{session_id}.pr_count"
 
 
 def increment_pr_counter(session_id: str) -> int:
@@ -295,7 +296,7 @@ def check_branch_guard(payload: dict) -> None:
 
     for pattern, message in _BLOCKED_PATTERNS:
         if pattern.search(check_text):
-            if _bypass_active and ("Force push" in message or "Rebasing onto" in message):
+            if _bypass_active and ("Force push" in message or "Rebasing onto" in message or "Direct merge" in message):
                 # Force-push and rebase-onto-main are bypass-eligible per
                 # controls-toggle rule. Direct-to-main push still caught by
                 # the main/master push pattern above.

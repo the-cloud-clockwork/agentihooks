@@ -45,7 +45,9 @@ from hooks.common import log
 # In-memory state
 _memory_counter: dict[str, int] = {}
 _content_hash: str = ""
-_HASH_CACHE_FILE = Path.home() / ".agentihooks" / "brain_adapter_hash.json"
+from hooks.config import AGENTIHOOKS_HOME
+
+_HASH_CACHE_FILE = AGENTIHOOKS_HOME / "brain_adapter_hash.json"
 
 
 def _load_persisted_hash() -> str:

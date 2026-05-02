@@ -318,7 +318,9 @@ def main() -> None:
             _voice_str = ""
             _voice_sid = payload.get("session_id", "")
             if _voice_sid:
-                _vf = Path.home() / ".agentihooks" / "voice_flags" / f"{_voice_sid}.voice"
+                from hooks.config import AGENTIHOOKS_HOME as _AH_HOME
+
+                _vf = _AH_HOME / "voice_flags" / f"{_voice_sid}.voice"
                 if _vf.exists():
                     _voice_str = f"  {_CYAN}voice:ON{_RESET}"
 

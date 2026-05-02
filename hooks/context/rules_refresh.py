@@ -25,7 +25,9 @@ MAX_AGE_SECONDS = 24 * 3600  # 24h — markers older than this are GCed
 
 
 def _refresh_dir() -> Path:
-    return Path.home() / ".agentihooks" / "force_refresh"
+    from hooks.config import AGENTIHOOKS_HOME
+
+    return AGENTIHOOKS_HOME / "force_refresh"
 
 
 def _marker_path(profile: str) -> Path:

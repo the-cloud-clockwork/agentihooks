@@ -14,7 +14,11 @@ from hooks.context import rules_refresh
 def tmp_home(tmp_path, monkeypatch):
     """Redirect ~/.agentihooks to a tmp path for isolation."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".agentihooks").mkdir()
+    state_dir = tmp_path / ".agentihooks"
+    state_dir.mkdir()
+    from hooks import config as _cfg
+
+    monkeypatch.setattr(_cfg, "AGENTIHOOKS_HOME", state_dir)
     return tmp_path
 
 

@@ -58,9 +58,10 @@ except ImportError:
     def log(msg, ctx=None):
         print(f"[LOG] {msg}: {ctx}", file=sys.stderr)
 
+    import os as _os
     from pathlib import Path as _Path
 
-    AGENTIHOOKS_HOME = _Path.home() / ".agentihooks"
+    AGENTIHOOKS_HOME = _Path(_os.environ.get("AGENTIHOOKS_HOME", str(_Path.home() / ".agentihooks")))
 
 
 # =============================================================================

@@ -35,7 +35,9 @@ def load_quota() -> Optional[dict]:
     if (datetime.now(timezone.utc) - updated).total_seconds() > stale_sec:
         return {"stale": True}
     # Include active account name
-    state_file = Path.home() / ".agentihooks" / "state.json"
+    from hooks.config import AGENTIHOOKS_HOME
+
+    state_file = AGENTIHOOKS_HOME / "state.json"
     if state_file.exists():
         try:
             state = json.loads(state_file.read_text(encoding="utf-8"))
