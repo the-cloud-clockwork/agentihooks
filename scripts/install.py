@@ -3686,10 +3686,11 @@ def cmd_claude(extra_args: list[str]) -> None:
     elif perm and perm != "default":
         cmd.extend(["--permission-mode", perm])
 
-    # Simple key→flag mappings
+    # Simple key→flag mappings (skip empty/None — empty model triggers
+    # CLI fallbacks in some Claude Code versions, including auto-worktree)
     for key, flag in {"model": "--model", "effort": "--effort"}.items():
         val = claude_flags.get(key)
-        if val is not None:
+        if val:
             cmd.extend([flag, str(val)])
 
     # Boolean flags
