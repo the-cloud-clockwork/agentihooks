@@ -3686,21 +3686,23 @@ def cmd_claude(extra_args: list[str]) -> None:
     elif perm and perm != "default":
         cmd.extend(["--permission-mode", perm])
 
-    # Simple key→flag mappings
+    # Simple key→flag mappings (skip empty/None — empty model triggers
+    # CLI fallbacks in some Claude Code versions, including auto-worktree)
+    # Defaults: effort=medium when profile doesn't set one.
+    _claude_defaults = {"effort": "medium"}
     for key, flag in {"model": "--model", "effort": "--effort"}.items():
-        val = claude_flags.get(key)
-        if val is not None:
+        val = claude_flags.get(key) or _claude_defaults.get(key)
+        if val:
             cmd.extend([flag, str(val)])
 
     # Boolean flags
     if claude_flags.get("worktree"):
         cmd.append("--worktree")
 
-    # Append system prompt from profile
-    if profile_dir:
-        system_prompt = profile_dir / "CLAUDE.md"
-        if system_prompt.exists():
-            cmd.extend(["--append-system-prompt-file", str(system_prompt)])
+    # NOTE: do NOT pass --append-system-prompt-file. The active profile's
+    # CLAUDE.md is already installed at ~/.claude/CLAUDE.md by `init`, and
+    # Claude Code loads it automatically. Re-passing it as a flag duplicates
+    # the prompt and triggers auto-worktree behavior in Claude Code v2.1.
 
     # Pass through any extra args from the user
     cmd.extend(extra_args)
