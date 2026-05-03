@@ -40,6 +40,10 @@ class BlockAction(Exception):
     """Raised by a hook handler to block the current Claude Code action (exit 2)."""
 
 
+_OTEL_SECRET_DETECTED = "agentihooks.guardrail.secret_detected"
+_UNSET = "<unset>"
+
+
 # Heavy imports are lazy-loaded in functions that need them:
 # - hooks.integrations.email.send_email -> only in notify_on_error()
 # - hooks.observability.transcript.log_new_entries -> only in handlers that need it
@@ -876,7 +880,7 @@ def on_pre_tool_use(payload: dict) -> None:
                     or _re.search(r"\bdd\b[^|&;\n]*of=", command)
                 )
                 otel.emit_event(
-                    "agentihooks.guardrail.secret_detected",
+                    _OTEL_SECRET_DETECTED,
                     {
                         "session.id": payload.get("session_id", ""),
                         "tool_name": tool_name,
@@ -926,7 +930,7 @@ def on_pre_tool_use(payload: dict) -> None:
                     )
                 elif _secrets_bypass:
                     otel.emit_event(
-                        "agentihooks.guardrail.secret_detected",
+                        _OTEL_SECRET_DETECTED,
                         {
                             "session.id": payload.get("session_id", ""),
                             "tool_name": tool_name,
@@ -944,7 +948,7 @@ def on_pre_tool_use(payload: dict) -> None:
                     )
                 else:
                     otel.emit_event(
-                        "agentihooks.guardrail.secret_detected",
+                        _OTEL_SECRET_DETECTED,
                         {
                             "session.id": payload.get("session_id", ""),
                             "tool_name": tool_name,
@@ -1577,9 +1581,9 @@ def on_subagent_start(payload: dict) -> None:
         {
             "agent_id": agent_id,
             "agent_type": agent_type,
-            "otel_endpoint": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "<unset>"),
-            "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "<unset>"),
-            "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", "<unset>"),
+            "otel_endpoint": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", _UNSET),
+            "otel_protocol": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", _UNSET),
+            "otel_hooks_enabled": os.environ.get("OTEL_HOOKS_ENABLED", _UNSET),
         },
     )
 
