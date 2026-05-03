@@ -845,6 +845,15 @@ def on_pre_tool_use(payload: dict) -> None:
     else:
         from hooks.secrets import redact, scan
 
+        # Bypass mode lifts the secrets-in-files block (operator decides when to allow it).
+        # Detection still runs — we log and emit telemetry so the operator can audit.
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled
+
+            _secrets_bypass = is_controls_disabled(payload.get("session_id", ""))
+        except Exception:
+            _secrets_bypass = False
+
         # Log command details for Bash
         if tool_name == "Bash":
             command = tool_input.get("command", "")
@@ -877,11 +886,21 @@ def on_pre_tool_use(payload: dict) -> None:
                     },
                 )
                 if _writes_file:
-                    raise BlockAction(
-                        f"BLOCKED: Secret(s) detected in Bash command writing to a file ({names}). "
-                        "Secrets must never be committed to code or config files. "
-                        "Use environment variables, a vault, or operator-managed secret files."
-                    )
+                    if _secrets_bypass:
+                        from hooks.common import inject_context
+
+                        inject_context(
+                            f"NOTE: Secret(s) detected in Bash command writing to a file "
+                            f"({names}) — bypass mode ACTIVE, write allowed. "
+                            "Operator authorized via 'disable controls'."
+                        )
+                    else:
+                        raise BlockAction(
+                            f"BLOCKED: Secret(s) detected in Bash command writing to a file ({names}). "
+                            "Secrets must never be committed to code or config files. "
+                            "Use environment variables, a vault, or operator-managed secret files. "
+                            "To override for this session: say 'disable controls'."
+                        )
                 # Inline secrets (no file write): scan + log + note, don't block.
                 # The operator handles transcript secrecy locally (closed system).
                 from hooks.common import inject_context
@@ -905,6 +924,24 @@ def on_pre_tool_use(payload: dict) -> None:
                         "Never write credential values to files. "
                         "Use environment variables instead."
                     )
+                elif _secrets_bypass:
+                    otel.emit_event(
+                        "agentihooks.guardrail.secret_detected",
+                        {
+                            "session.id": payload.get("session_id", ""),
+                            "tool_name": tool_name,
+                            "secret_types": names,
+                            "action": "warn",
+                            "bypass": True,
+                        },
+                    )
+                    from hooks.common import inject_context
+
+                    inject_context(
+                        f"NOTE: Secret(s) detected in {tool_name} content ({names}) — "
+                        "bypass mode ACTIVE, write allowed. "
+                        "Operator authorized via 'disable controls'."
+                    )
                 else:
                     otel.emit_event(
                         "agentihooks.guardrail.secret_detected",
@@ -918,7 +955,8 @@ def on_pre_tool_use(payload: dict) -> None:
                     raise BlockAction(
                         f"BLOCKED: Secret(s) detected in {tool_name} content ({names}). "
                         "Never write credential values to files. "
-                        "Use environment variables instead."
+                        "Use environment variables instead. "
+                        "To override for this session: say 'disable controls'."
                     )
         else:
             log(f"Pre tool use: {tool_name}", {"tool": tool_name})
