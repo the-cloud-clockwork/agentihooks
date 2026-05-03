@@ -568,11 +568,18 @@ def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
     if not chain:
         return []
     dirs: list[tuple[str, Path]] = []
+    linked_names = {e.get("name") for e in _get_linked_profiles()}
     for name in chain:
         d = _resolve_profile_dir(name)
         if d is None:
-            _cprint(f"  [WARN] Profile '{name}' in chain '{profile_input}' not found — skipping chain")
-            return []
+            if name in linked_names:
+                _cprint(
+                    f"  [WARN] Linked profile '{name}' path is missing — "
+                    f"run 'agentihooks link-profile unlink {name}' to clean up. Skipping."
+                )
+            else:
+                _cprint(f"  [WARN] Profile '{name}' in chain '{profile_input}' not found — skipping.")
+            continue
         dirs.append((name, d))
     return dirs
 
@@ -740,14 +747,16 @@ def cmd_link_profile(
 ) -> None:
     """Handle 'agentihooks link-profile' subcommands."""
     if action == "link":
-        _link_profile_link(
-            Path(path).expanduser().resolve() if path else None,
-            name=name,
-            append=not no_append,
-            run_init=not no_init,
-        )
+        with _sync_lock():
+            _link_profile_link(
+                Path(path).expanduser().resolve() if path else None,
+                name=name,
+                append=not no_append,
+                run_init=not no_init,
+            )
     elif action == "unlink":
-        _link_profile_unlink(name, run_init=not no_init)
+        with _sync_lock():
+            _link_profile_unlink(name, run_init=not no_init)
     elif action == "list":
         _link_profile_list()
     else:
@@ -830,6 +839,11 @@ def _link_profile_link(
 
     settings_profile = global_target.get("settings_profile", "")
 
+    if not run_init and append and chain_changed:
+        # No follow-up install will refresh installed_at — bump it here so the
+        # sync daemon notices the chain change.
+        global_target["installed_at"] = datetime.now(timezone.utc).isoformat()
+
     _save_state(state)
 
     _cprint(f"[OK] Linked profile: {derived_name} -> {profile_dir}")
@@ -848,11 +862,17 @@ def _link_profile_link(
 
 
 def _sweep_symlinks_into(target_root: Path) -> None:
-    """Remove any symlinks under ~/.claude/{rules,agents,commands,skills} whose target sits under *target_root*."""
+    """Remove any symlinks under ~/.claude/{rules,agents,commands,skills} whose target sits under *target_root*.
+
+    Uses ``os.readlink`` on the raw target string so dangling symlinks (whose
+    target was deleted along with the linked profile) are still detected and
+    removed.
+    """
+    target_str = str(target_root).rstrip("/")
     try:
-        target_resolved = target_root.resolve()
+        target_resolved = str(target_root.resolve()).rstrip("/")
     except OSError:
-        return
+        target_resolved = target_str
     for subdir in ("rules", "agents", "commands", "skills"):
         d = CLAUDE_HOME / subdir
         if not d.is_dir():
@@ -861,12 +881,26 @@ def _sweep_symlinks_into(target_root: Path) -> None:
             if not link.is_symlink():
                 continue
             try:
-                t = link.resolve()
+                raw_target = os.readlink(link)
             except OSError:
                 continue
-            try:
-                t.relative_to(target_resolved)
-            except ValueError:
+            # Match either the raw symlink target or its resolved form.
+            raw = raw_target.rstrip("/")
+            matches = (
+                raw == target_str
+                or raw == target_resolved
+                or raw.startswith(target_str + "/")
+                or raw.startswith(target_resolved + "/")
+            )
+            if not matches:
+                # Resolve symlink chain only when the raw target wasn't decisive.
+                try:
+                    resolved = str(link.resolve()).rstrip("/")
+                except OSError:
+                    resolved = ""
+                if resolved and (resolved == target_resolved or resolved.startswith(target_resolved + "/")):
+                    matches = True
+            if not matches:
                 continue
             link.unlink()
             _cprint(f"  [RM] Removed orphan symlink: {subdir}/{link.name}")
@@ -896,9 +930,18 @@ def _link_profile_unlink(name: str | None, *, run_init: bool = True) -> None:
     chain = [p.strip() for p in global_target.get("profile", "").split(",") if p.strip()]
     was_in_chain = name in chain
     chain = [p for p in chain if p != name]
-    new_chain_str = ",".join(chain) if chain else "default"
+    if chain:
+        new_chain_str = ",".join(chain)
+    else:
+        # Fall back to first available profile (default if it exists, else
+        # whatever's there). Never leave the chain string empty.
+        avail = _available_profiles()
+        new_chain_str = "default" if "default" in avail else (avail[0] if avail else "default")
     global_target["profile"] = new_chain_str
     settings_profile = global_target.get("settings_profile", "")
+
+    if not run_init and was_in_chain:
+        global_target["installed_at"] = datetime.now(timezone.utc).isoformat()
 
     _save_state(state)
 
@@ -2312,18 +2355,32 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print("ERROR: No profile specified.", file=sys.stderr)
         sys.exit(1)
 
-    # Validate all profiles exist
+    # Validate profiles — drop unresolvable entries with a hint, only exit if all fail
     profile_dirs: list[tuple[str, Path]] = []
+    linked_names = {e.get("name") for e in _get_linked_profiles()}
+    surviving_chain: list[str] = []
     for pname in profile_chain:
         pdir = _resolve_profile_dir(pname)
         if pdir is None:
-            available = _available_profiles()
-            print(f"ERROR: Profile '{pname}' not found.", file=sys.stderr)
-            print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
-            sys.exit(1)
+            if pname in linked_names:
+                _cprint(
+                    f"  [WARN] Linked profile '{pname}' path is missing — "
+                    f"run 'agentihooks link-profile unlink {pname}' to clean up. Dropping from chain."
+                )
+            else:
+                _cprint(f"  [WARN] Profile '{pname}' not found — dropping from chain.")
+            continue
         profile_dirs.append((pname, pdir))
+        surviving_chain.append(pname)
 
-    # For display and state storage, use the full chain string
+    if not profile_dirs:
+        available = _available_profiles()
+        print(f"ERROR: No profile in chain '{profile_input}' could be resolved.", file=sys.stderr)
+        print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
+        sys.exit(1)
+
+    profile_chain = surviving_chain
+    # For display and state storage, use the surviving chain string
     profile_name = ",".join(profile_chain)
 
     profile_sources = []

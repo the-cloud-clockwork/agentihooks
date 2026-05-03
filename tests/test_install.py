@@ -722,3 +722,229 @@ class TestQueryActiveProfile:
         out = capsys.readouterr().out
         assert "anton" in out
         assert "settings:" not in out
+
+
+# ---------------------------------------------------------------------------
+# link-profile feature
+# ---------------------------------------------------------------------------
+
+
+class TestLinkProfile:
+    """Tests for `agentihooks link-profile <path>` and friends."""
+
+    def _setup(self, tmp_path: Path):
+        """Create a fixture with a fresh STATE_JSON, CLAUDE_HOME, PROFILES_DIR, no bundle."""
+        state_json = tmp_path / "state.json"
+        claude_home = tmp_path / ".claude"
+        claude_home.mkdir()
+        for sub in ("rules", "agents", "commands", "skills"):
+            (claude_home / sub).mkdir()
+        profiles_dir = tmp_path / "profiles"
+        profiles_dir.mkdir()
+        # Pre-existing built-in 'anton' fixture
+        (profiles_dir / "anton").mkdir()
+        return state_json, claude_home, profiles_dir
+
+    # --- _resolve_profile_dir tier ordering ---
+
+    def test_resolver_prefers_builtin_over_linked(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "anton"
+        external.mkdir(parents=True)
+        state_json.write_text(json.dumps({"linked_profiles": [{"name": "anton", "path": str(external)}]}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            resolved = install._resolve_profile_dir("anton")
+        assert resolved == profiles_dir / "anton"
+
+    def test_resolver_falls_through_to_linked(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(json.dumps({"linked_profiles": [{"name": "brain", "path": str(external)}]}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            resolved = install._resolve_profile_dir("brain")
+        assert resolved == external
+
+    def test_profile_source_label(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(json.dumps({"linked_profiles": [{"name": "brain", "path": str(external)}]}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            assert install._profile_source_label("anton") == "built-in"
+            assert install._profile_source_label("brain") == "linked"
+            assert install._profile_source_label("nope") == "unknown"
+
+    # --- collision guard ---
+
+    def test_collision_with_builtin_rejects(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "anton"
+        external.mkdir(parents=True)
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            pytest.raises(SystemExit) as exc,
+        ):
+            install._link_profile_link(external, name=None, append=True, run_init=False)
+        assert exc.value.code == 1
+
+    # --- happy path link ---
+
+    def test_link_appends_to_chain_and_writes_state(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(json.dumps({"targets": {"global": {"profile": "anton", "settings_profile": ""}}}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            install._link_profile_link(external, name=None, append=True, run_init=False)
+        result = json.loads(state_json.read_text())
+        assert result["targets"]["global"]["profile"] == "anton,brain"
+        assert result["linked_profiles"][0]["name"] == "brain"
+        assert result["linked_profiles"][0]["path"] == str(external)
+        # --no-init should bump installed_at
+        assert "installed_at" in result["targets"]["global"]
+
+    def test_link_idempotent_re_link(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(
+            json.dumps(
+                {
+                    "targets": {"global": {"profile": "anton,brain"}},
+                    "linked_profiles": [{"name": "brain", "path": str(external)}],
+                }
+            )
+        )
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            install._link_profile_link(external, name=None, append=True, run_init=False)
+        result = json.loads(state_json.read_text())
+        # No duplicate in chain
+        assert result["targets"]["global"]["profile"] == "anton,brain"
+        assert len(result["linked_profiles"]) == 1
+
+    # --- unlink ---
+
+    def test_unlink_strips_chain(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(
+            json.dumps(
+                {
+                    "targets": {"global": {"profile": "anton,brain"}},
+                    "linked_profiles": [{"name": "brain", "path": str(external)}],
+                }
+            )
+        )
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "CLAUDE_HOME", tmp_path / ".claude"),
+            patch.object(install, "_available_profiles", return_value=["anton", "default"]),
+        ):
+            install._link_profile_unlink("brain", run_init=False)
+        result = json.loads(state_json.read_text())
+        assert result["targets"]["global"]["profile"] == "anton"
+        assert result["linked_profiles"] == []
+
+    def test_unlink_empty_chain_falls_back_to_default(self, tmp_path):
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        external.mkdir(parents=True)
+        state_json.write_text(
+            json.dumps(
+                {
+                    "targets": {"global": {"profile": "brain"}},
+                    "linked_profiles": [{"name": "brain", "path": str(external)}],
+                }
+            )
+        )
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "CLAUDE_HOME", tmp_path / ".claude"),
+            patch.object(install, "_available_profiles", return_value=["anton", "default"]),
+        ):
+            install._link_profile_unlink("brain", run_init=False)
+        result = json.loads(state_json.read_text())
+        assert result["targets"]["global"]["profile"] == "default"
+
+    def test_unlink_unknown_name_exits(self, tmp_path):
+        state_json, _, _ = self._setup(tmp_path)
+        state_json.write_text(json.dumps({"linked_profiles": []}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            pytest.raises(SystemExit) as exc,
+        ):
+            install._link_profile_unlink("nope", run_init=False)
+        assert exc.value.code == 1
+
+    # --- _sweep_symlinks_into ---
+
+    def test_sweep_removes_dangling_symlink(self, tmp_path):
+        """Q3 regression: dangling symlink whose target was deleted alongside the linked profile."""
+        state_json, claude_home, _ = self._setup(tmp_path)
+        external = tmp_path / "external" / "brain"
+        target = external / ".claude" / "rules" / "brain-only.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("# brain rule")
+        link = claude_home / "rules" / "brain-only.md"
+        link.symlink_to(target)
+        # Delete the external profile dir entirely → link is now dangling
+        import shutil
+
+        shutil.rmtree(external)
+        assert link.is_symlink() and not link.exists()  # dangling
+        with patch.object(install, "CLAUDE_HOME", claude_home):
+            install._sweep_symlinks_into(external)
+        assert not link.exists() and not link.is_symlink()
+
+    def test_sweep_preserves_unrelated_symlinks(self, tmp_path):
+        state_json, claude_home, _ = self._setup(tmp_path)
+        unrelated = tmp_path / "elsewhere" / "rule.md"
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_text("# elsewhere")
+        link = claude_home / "rules" / "rule.md"
+        link.symlink_to(unrelated)
+        # Sweep against an unrelated dir
+        with patch.object(install, "CLAUDE_HOME", claude_home):
+            install._sweep_symlinks_into(tmp_path / "external" / "brain")
+        assert link.exists()  # untouched
+
+    # --- _resolve_profile_chain stale-path resilience ---
+
+    def test_resolve_chain_drops_missing_continues(self, tmp_path, capsys):
+        """Q6 regression: stale linked path must not brick the chain — surviving members proceed."""
+        state_json, _, profiles_dir = self._setup(tmp_path)
+        state_json.write_text(json.dumps({"linked_profiles": [{"name": "brain", "path": "/nonexistent/path"}]}))
+        with (
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "PROFILES_DIR", profiles_dir),
+            patch.object(install, "_get_bundle_path", return_value=None),
+        ):
+            result = install._resolve_profile_chain("anton,brain")
+        assert len(result) == 1
+        assert result[0][0] == "anton"
+        captured = capsys.readouterr().out
+        assert "link-profile unlink brain" in captured  # hint included

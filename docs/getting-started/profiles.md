@@ -379,3 +379,23 @@ This gives you:
 - **anton's** operator behavioral model, delegation map, response template
 - Both profiles' settings merged (hooks appended, env vars combined)
 - Both profiles' rules, skills, agents, commands all present
+
+### Linking external profile dirs into the chain
+
+Profiles outside the agentihooks repo and the linked bundle can be added to the chain via `link-profile`:
+
+```bash
+# One-shot: register an external dir, append to chain, re-install
+agentihooks link-profile link ~/dev/brain-profile
+
+# If the dir basename collides with a built-in or bundle name, alias it
+agentihooks link-profile link ~/dev/anton-fork --name anton2
+
+# Inspect linked entries
+agentihooks link-profile list
+
+# Remove from chain (sweeps any orphan symlinks pointing into the linked dir)
+agentihooks link-profile unlink brain-profile
+```
+
+By default `link` auto-appends the new name to the active chain and re-runs `agentihooks init`, so a single command takes a chain from `anton` to `anton,brain-profile` end-to-end. Use `--no-append` to register the path without modifying the chain, or `--no-init` to skip the immediate re-install. Built-in/bundle names always win on collision — the link is rejected unless you pass `--name <alias>`. Linked dirs whose path is later deleted from disk are warn-skipped from the chain on the next `agentihooks init`, with a hint pointing at `link-profile unlink`. See `agentihooks link-profile` in the [CLI reference](../reference/cli-commands.md#agentihooks-link-profile) for full flag and state details.
