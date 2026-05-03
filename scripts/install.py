@@ -2649,12 +2649,62 @@ def manage_user_mcp(mcp_path: Path, *, uninstall: bool = False) -> None:
         _state_add_mcp(mcp_path)
 
 
+def _reseed_managed_mcp_sources() -> None:
+    """Re-merge bundle + active-profile .mcp.json into ~/.claude.json mcpServers.
+
+    Idempotent. Used by `init` and the sync daemon so the source-of-truth
+    files (bundle .claude/.mcp.json, profile .claude/.mcp.json, and the
+    hooks-utils server) are always present in user scope after a tick.
+    """
+    state = _load_state()
+    profile_name = state.get("targets", {}).get("global", {}).get("profile")
+
+    # Layer 1: hooks-utils (driven by profile mcp_categories)
+    if profile_name:
+        try:
+            _install_user_mcp(profile_name)
+        except Exception as exc:
+            _cprint(f"  [WARN] Could not reseed hooks-utils MCP: {exc}")
+
+    # Layer 2: bundle .mcp.json
+    bundle_dir = _get_bundle_path()
+    if bundle_dir:
+        for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
+            if candidate.exists():
+                try:
+                    servers = load_json(candidate).get("mcpServers", {})
+                    if servers:
+                        _merge_mcp_to_user_scope(servers)
+                except (json.JSONDecodeError, OSError) as exc:
+                    _cprint(f"  [WARN] Could not reseed bundle .mcp.json: {exc}")
+                break
+
+    # Layer 3: active profile .mcp.json
+    if profile_name:
+        profile_dir = _resolve_profile_dir(profile_name)
+        if profile_dir:
+            profile_mcp = profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+            if profile_mcp.exists():
+                try:
+                    servers = load_json(profile_mcp).get("mcpServers", {})
+                    if servers:
+                        _merge_mcp_to_user_scope(servers)
+                except (json.JSONDecodeError, OSError) as exc:
+                    _cprint(f"  [WARN] Could not reseed profile .mcp.json: {exc}")
+
+
 def sync_user_mcp() -> None:
-    """Re-apply all MCP files tracked in ~/.agentihooks/state.json.
+    """Re-apply MCP source-of-truth files into ~/.claude.json mcpServers.
+
+    Order:
+    1. Reseed bundle + active-profile .mcp.json + hooks-utils (managed sources)
+    2. Re-merge user-tracked .mcp.json files from ~/.agentihooks/state.json mcpFiles
 
     Skips paths that no longer exist (with a warning) so a missing
     repo doesn't abort the whole sync.
     """
+    _reseed_managed_mcp_sources()
+
     state = _load_state()
     paths: list[str] = state.get("mcpFiles", [])
     if not paths:

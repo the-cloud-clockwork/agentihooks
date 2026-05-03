@@ -891,6 +891,26 @@ def _check_new_projects(known_servers_file: Path) -> None:
 
 
 def _run_daemon(poll_sec: int) -> None:
+    # Singleton enforcement via flock on PID file. Foreground daemons started
+    # outside _start_daemon (e.g. directly by `python sync_daemon.py --foreground`)
+    # otherwise can stack up and race on ~/.claude.json. The flock is held for
+    # the lifetime of the process; whoever already holds it stays in charge.
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    pid_fd = open(PID_FILE, "a+")  # noqa: SIM115 — held until process exit
+    try:
+        fcntl.flock(pid_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        pid_fd.seek(0)
+        existing = pid_fd.read().strip() or "?"
+        pid_fd.close()
+        _log(f"Sync daemon already running (PID {existing}) — exiting")
+        print(f"[sync] Daemon already running (PID {existing}) — exiting", flush=True)
+        return
+
+    pid_fd.seek(0)
+    pid_fd.truncate()
+    pid_fd.write(str(os.getpid()))
+    pid_fd.flush()
     _log(f"Sync daemon started (poll={poll_sec}s, pid={os.getpid()})")
 
     running = True
@@ -1065,6 +1085,11 @@ def _run_daemon(poll_sec: int) -> None:
             traceback.print_exc()
 
     _log("Sync daemon stopped")
+    try:
+        fcntl.flock(pid_fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    pid_fd.close()
     PID_FILE.unlink(missing_ok=True)
 
 
