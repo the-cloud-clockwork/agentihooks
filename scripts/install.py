@@ -3904,13 +3904,12 @@ def _cmd_overlay(args: argparse.Namespace) -> None:
             print("No overlays available (base profile has no allowedOverlays).")
             return
         for o in allowed:
-            status = (
-                f"{_GREEN}ACTIVE{_RESET}"
-                if o["name"] in active_names
-                else "available"
-                if o["available"]
-                else f"{_RED}not found{_RESET}"
-            )
+            if o["name"] in active_names:
+                status = f"{_GREEN}ACTIVE{_RESET}"
+            elif o["available"]:
+                status = "available"
+            else:
+                status = f"{_RED}not found{_RESET}"
             desc = f" — {o['description']}" if o.get("description") else ""
             print(f"  {o['name']}: {status}{desc}")
 

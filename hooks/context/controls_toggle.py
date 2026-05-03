@@ -107,5 +107,10 @@ def clear_controls_disabled(session_id: str | None = None, force: bool = False) 
 
 
 def is_controls_disabled(session_id: str | None = None) -> bool:
-    """Return True if bypass mode is active. Global — subagents inherit."""
+    """Return True if bypass mode is active. Global — subagents inherit.
+
+    `session_id` is accepted for API compatibility with prior owner-scoped checks
+    but is intentionally ignored: bypass is now a global flag.
+    """
+    del session_id
     return _read_owner() is not None
