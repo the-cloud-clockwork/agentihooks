@@ -3749,9 +3749,12 @@ def cmd_claude(extra_args: list[str]) -> None:
         if val:
             cmd.extend([flag, str(val)])
 
-    # Boolean flags
-    if claude_flags.get("worktree"):
-        cmd.append("--worktree")
+    # NOTE: profile.yml's `worktree:` flag is intentionally NOT mapped to
+    # `--worktree` here. Worktree creation is an operator decision per session,
+    # not a profile-level default. agenticore manages its own worktrees in
+    # AGENT_MODE without `--worktree` (it cwds into the prepared worktree dir
+    # instead). To open a worktree manually, use Claude Code's EnterWorktree
+    # tool or pass `--worktree` explicitly via `agenti -- --worktree`.
 
     # NOTE: do NOT pass --append-system-prompt-file. The active profile's
     # CLAUDE.md is already installed at ~/.claude/CLAUDE.md by `init`, and

@@ -26,7 +26,6 @@ claude:
   permission_mode: bypassPermissions
   no_session_persistence: true
   output_format: json
-  worktree: true
   effort: high
   timeout: 3600
 
