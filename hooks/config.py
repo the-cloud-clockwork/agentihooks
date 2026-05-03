@@ -288,6 +288,16 @@ CONTEXT_AUDIT_THRESHOLD_PCT: int = int(os.getenv("CONTEXT_AUDIT_THRESHOLD_PCT", 
 POST_TOOL_TRACE = _env_bool("POST_TOOL_TRACE", "false")
 
 # =============================================================================
+# AUTONOMY ENFORCER — blocks premature Stop after tool failures (bypass mode only)
+# When CLAUDE.md says "never suggest stopping" but the model stalls anyway,
+# the Stop hook returns {"decision":"block"} and forces continuation.
+# Only fires when bypass mode (`disable controls`) is active.
+# =============================================================================
+AUTONOMY_ENFORCER_ENABLED = _env_bool("AUTONOMY_ENFORCER_ENABLED", "true")
+AUTONOMY_BLOCK_MAX: int = int(os.getenv("AUTONOMY_BLOCK_MAX", "5"))
+AUTONOMY_LOOKBACK: int = int(os.getenv("AUTONOMY_LOOKBACK", "8"))
+
+# =============================================================================
 # THINKING / EFFORT POLICY
 # =============================================================================
 EFFORT_POLICY_ENABLED = _env_bool("EFFORT_POLICY_ENABLED", "true")
