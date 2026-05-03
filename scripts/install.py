@@ -779,16 +779,14 @@ def _link_profile_link(
     # Collision guard: built-in or bundle profile of same name
     if (PROFILES_DIR / derived_name).is_dir():
         print(
-            f"ERROR: Name '{derived_name}' collides with a built-in profile. "
-            f"Pass --name <alias> to disambiguate.",
+            f"ERROR: Name '{derived_name}' collides with a built-in profile. Pass --name <alias> to disambiguate.",
             file=sys.stderr,
         )
         sys.exit(1)
     bundle = _get_bundle_path()
     if bundle and (bundle / "profiles" / derived_name).is_dir():
         print(
-            f"ERROR: Name '{derived_name}' collides with a bundle profile. "
-            f"Pass --name <alias> to disambiguate.",
+            f"ERROR: Name '{derived_name}' collides with a bundle profile. Pass --name <alias> to disambiguate.",
             file=sys.stderr,
         )
         sys.exit(1)
