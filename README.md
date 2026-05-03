@@ -173,6 +173,12 @@ agenti                                       # alias (after source ~/.bashrc)
 agentihooks bundle link ~/dev/my-tools       # link a bundle
 agentihooks bundle pull                      # update linked bundle
 
+# Link an external profile dir into the chain
+agentihooks link-profile link ~/dev/brain-profile     # auto-appends to chain + re-installs
+agentihooks link-profile link ~/dev/brain --name br   # disambiguate name on collision
+agentihooks link-profile list                         # show all linked external profiles
+agentihooks link-profile unlink brain-profile         # remove from chain + sweep symlinks
+
 # Runtime overlays (mid-session profile shifting)
 agentihooks overlay list                     # available overlays for current base
 agentihooks overlay add patch-mode           # activate overlay

@@ -621,6 +621,73 @@ agentihooks bundle unlink
 
 ---
 
+## `agentihooks link-profile`
+
+Link an external directory as a chain-able profile. Where `bundle link` registers a *collection* of profiles, `link-profile` registers a *single* profile dir at any path on disk and (by default) appends it to the active chain.
+
+```bash
+agentihooks link-profile link <path> [--name <alias>] [--no-append] [--no-init]
+agentihooks link-profile unlink <name> [--no-init]
+agentihooks link-profile list
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `link <path>` | Register `<path>` as a linked profile. Default behavior: append the basename to the active global chain and re-run `agentihooks init` so settings, CLAUDE.md, rules, and MCP all reflect the new chain. |
+| `unlink <name>` | Remove the linked profile from the registry, strip it from the active chain, sweep any symlinks pointing into it, and re-install. |
+| `list` | Show all linked profiles, their paths, the link date, and which are currently in the chain. Flags missing paths as `[MISSING]`. |
+
+### Flags
+
+| Flag | Effect |
+|------|--------|
+| `--name <alias>` | Use `<alias>` instead of the directory basename. Required if the basename collides with a built-in or bundle profile (link will refuse otherwise). |
+| `--no-append` | Register the path in `state.linked_profiles` but do not modify the active chain. |
+| `--no-init` | Update state but skip the immediate re-install. Operator runs `agentihooks init` later. |
+
+### Examples
+
+```bash
+# Link an external profile dir → chain becomes anton,brain → install reapplied
+agentihooks link-profile link ~/dev/brain-profile
+
+# Link with explicit alias (avoids collision with built-in)
+agentihooks link-profile link ~/dev/anton-fork --name anton2
+
+# Register without touching the chain or running install
+agentihooks link-profile link ~/dev/brain --no-append --no-init
+
+# Show all linked profiles
+agentihooks link-profile list
+
+# Remove from chain and clean up symlinks
+agentihooks link-profile unlink brain-profile
+```
+
+### State
+
+Linked profiles live in `state.json` under a `linked_profiles` array:
+
+```json
+"linked_profiles": [
+  {"name": "brain", "path": "/abs/path/brain", "linked_at": "<iso>"}
+]
+```
+
+`_resolve_profile_dir` consults this array as the third lookup tier (after built-in and bundle), so `agentihooks init --profile anton,brain` works as soon as `brain` is registered.
+
+### Stale paths
+
+If a linked profile's directory is later deleted from disk, `agentihooks init` will WARN-skip it and continue with the surviving chain members. The hint message names the exact unlink command:
+
+```
+[WARN] Linked profile 'brain' path is missing — run 'agentihooks link-profile unlink brain' to clean up. Skipping.
+```
+
+---
+
 ## `agentihooks --query`
 
 Print the currently active profile (or chain) and exit.
