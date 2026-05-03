@@ -48,7 +48,12 @@ class TestBlockActionIntegration:
     """Integration tests: BlockAction propagates through main() with exit 2."""
 
     def _run(self, payload: dict) -> subprocess.CompletedProcess:
-        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": "standard", "AGENTIHOOKS_HOME": self._empty_home}
+        env = {
+            **os.environ,
+            "AGENTIHOOKS_SECRETS_MODE": "standard",
+            "AGENTIHOOKS_HOME": self._empty_home,
+            "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
+        }
         return subprocess.run(
             [sys.executable, "-m", "hooks"],
             input=json.dumps(payload),
@@ -124,7 +129,12 @@ class TestSecretsModesIntegration:
     """Integration tests: AGENTIHOOKS_SECRETS_MODE controls blocking behavior."""
 
     def _run(self, payload: dict, *, mode: str) -> subprocess.CompletedProcess:
-        env = {**os.environ, "AGENTIHOOKS_SECRETS_MODE": mode, "AGENTIHOOKS_HOME": self._empty_home}
+        env = {
+            **os.environ,
+            "AGENTIHOOKS_SECRETS_MODE": mode,
+            "AGENTIHOOKS_HOME": self._empty_home,
+            "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
+        }
         return subprocess.run(
             [sys.executable, "-m", "hooks"],
             input=json.dumps(payload),
