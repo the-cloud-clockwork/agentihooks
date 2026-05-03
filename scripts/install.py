@@ -1358,7 +1358,7 @@ def _update_bashrc_block() -> None:
     block = (
         f"{_BLOCK_START}\n"
         f"agentienv() {{\n"
-        f'  local _c=0\n'
+        f"  local _c=0\n"
         f"  set -a\n"
         f'  if [[ -f "{env_file}" ]]; then\n'
         f'    . "{env_file}" 2>/dev/null && _c=$((_c + 1))\n'
@@ -1370,7 +1370,7 @@ def _update_bashrc_block() -> None:
         f'    . "$HOME/.env" 2>/dev/null && _c=$((_c + 1))\n'
         f"  fi\n"
         f"  set +a\n"
-        f'  if (( _c > 0 )); then\n'
+        f"  if (( _c > 0 )); then\n"
         f'    echo "[agentienv] loaded $_c env file(s)"\n'
         f"  fi\n"
         f"}}\n"
