@@ -508,8 +508,28 @@ def _get_bundle_path() -> Path | None:
     return None
 
 
+def _get_linked_profiles() -> list[dict]:
+    """Return the list of externally linked profiles from state.json."""
+    state = _load_state()
+    entries = state.get("linked_profiles", [])
+    if not isinstance(entries, list):
+        return []
+    return entries
+
+
+def _resolve_linked_profile_dir(profile_name: str) -> Path | None:
+    """Resolve a profile name from the linked_profiles registry."""
+    for entry in _get_linked_profiles():
+        if entry.get("name") == profile_name:
+            p = Path(entry.get("path", ""))
+            if p.is_dir():
+                return p
+            return None
+    return None
+
+
 def _resolve_profile_dir(profile_name: str) -> Path | None:
-    """Resolve a profile name to its directory — built-in first, then bundle."""
+    """Resolve a profile name to its directory — built-in, bundle, then linked."""
     # Built-in profiles
     local = PROFILES_DIR / profile_name
     if local.is_dir():
@@ -520,7 +540,23 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
         bp = bundle / "profiles" / profile_name
         if bp.is_dir():
             return bp
+    # Linked external profiles
+    linked = _resolve_linked_profile_dir(profile_name)
+    if linked is not None:
+        return linked
     return None
+
+
+def _profile_source_label(profile_name: str) -> str:
+    """Return 'built-in', 'bundle', or 'linked' for a profile name."""
+    if (PROFILES_DIR / profile_name).is_dir():
+        return "built-in"
+    bundle = _get_bundle_path()
+    if bundle and (bundle / "profiles" / profile_name).is_dir():
+        return "bundle"
+    if _resolve_linked_profile_dir(profile_name) is not None:
+        return "linked"
+    return "unknown"
 
 
 def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
@@ -687,6 +723,230 @@ def _bundle_list() -> None:
             for name in conn_names:
                 print(f"  {name}")
             print()
+
+
+# ---------------------------------------------------------------------------
+# Linked profile helpers (external dirs added to the chain)
+# ---------------------------------------------------------------------------
+
+
+def cmd_link_profile(
+    action: str,
+    path: str | None = None,
+    name: str | None = None,
+    *,
+    no_append: bool = False,
+    no_init: bool = False,
+) -> None:
+    """Handle 'agentihooks link-profile' subcommands."""
+    if action == "link":
+        _link_profile_link(
+            Path(path).expanduser().resolve() if path else None,
+            name=name,
+            append=not no_append,
+            run_init=not no_init,
+        )
+    elif action == "unlink":
+        _link_profile_unlink(name, run_init=not no_init)
+    elif action == "list":
+        _link_profile_list()
+    else:
+        print(f"Unknown link-profile action: {action}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _link_profile_link(
+    profile_dir: Path | None,
+    *,
+    name: str | None = None,
+    append: bool = True,
+    run_init: bool = True,
+) -> None:
+    """Register an external directory as a chain-able profile and (by default) re-apply install."""
+    if profile_dir is None:
+        print("ERROR: Provide the path to a profile directory.", file=sys.stderr)
+        sys.exit(1)
+
+    if not profile_dir.is_dir():
+        print(f"ERROR: {profile_dir} is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    derived_name = (name or profile_dir.name).strip()
+    if not derived_name:
+        print("ERROR: Could not derive profile name. Use --name <alias>.", file=sys.stderr)
+        sys.exit(1)
+
+    # Collision guard: built-in or bundle profile of same name
+    if (PROFILES_DIR / derived_name).is_dir():
+        print(
+            f"ERROR: Name '{derived_name}' collides with a built-in profile. "
+            f"Pass --name <alias> to disambiguate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    bundle = _get_bundle_path()
+    if bundle and (bundle / "profiles" / derived_name).is_dir():
+        print(
+            f"ERROR: Name '{derived_name}' collides with a bundle profile. "
+            f"Pass --name <alias> to disambiguate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    state = _load_state()
+    entries = state.get("linked_profiles", [])
+    if not isinstance(entries, list):
+        entries = []
+
+    # Upsert
+    existing = next((e for e in entries if e.get("name") == derived_name), None)
+    if existing:
+        old_path = existing.get("path", "")
+        if old_path != str(profile_dir):
+            print(f"Replacing linked profile '{derived_name}': {old_path} -> {profile_dir}")
+        existing["path"] = str(profile_dir)
+        existing["linked_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        entries.append(
+            {
+                "name": derived_name,
+                "path": str(profile_dir),
+                "linked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    state["linked_profiles"] = entries
+
+    # Append to global chain (idempotent)
+    global_target = state.setdefault("targets", {}).setdefault("global", {})
+    current_chain_str = global_target.get("profile", "")
+    chain_after = [p.strip() for p in current_chain_str.split(",") if p.strip()]
+    chain_changed = False
+    if append:
+        if derived_name not in chain_after:
+            chain_after.append(derived_name)
+            chain_changed = True
+        new_chain_str = ",".join(chain_after) if chain_after else derived_name
+        global_target["profile"] = new_chain_str
+    else:
+        new_chain_str = current_chain_str
+
+    settings_profile = global_target.get("settings_profile", "")
+
+    _save_state(state)
+
+    _cprint(f"[OK] Linked profile: {derived_name} -> {profile_dir}")
+    if append and chain_changed:
+        print(f"     Chain: {new_chain_str}")
+    elif append and not chain_changed:
+        print(f"     Chain unchanged: {new_chain_str}")
+
+    if run_init and append and new_chain_str:
+        print()
+        global_args = argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
+        install_global(global_args)
+    elif not run_init:
+        print()
+        print("Run 'agentihooks init' to apply.")
+
+
+def _sweep_symlinks_into(target_root: Path) -> None:
+    """Remove any symlinks under ~/.claude/{rules,agents,commands,skills} whose target sits under *target_root*."""
+    try:
+        target_resolved = target_root.resolve()
+    except OSError:
+        return
+    for subdir in ("rules", "agents", "commands", "skills"):
+        d = CLAUDE_HOME / subdir
+        if not d.is_dir():
+            continue
+        for link in sorted(d.iterdir()):
+            if not link.is_symlink():
+                continue
+            try:
+                t = link.resolve()
+            except OSError:
+                continue
+            try:
+                t.relative_to(target_resolved)
+            except ValueError:
+                continue
+            link.unlink()
+            _cprint(f"  [RM] Removed orphan symlink: {subdir}/{link.name}")
+
+
+def _link_profile_unlink(name: str | None, *, run_init: bool = True) -> None:
+    """Remove a linked profile from the registry and the global chain."""
+    if not name:
+        print("ERROR: Provide the linked profile name.", file=sys.stderr)
+        sys.exit(1)
+
+    state = _load_state()
+    entries = state.get("linked_profiles", [])
+    if not isinstance(entries, list):
+        entries = []
+
+    entry = next((e for e in entries if e.get("name") == name), None)
+    if not entry:
+        print(f"ERROR: No linked profile named '{name}'.", file=sys.stderr)
+        sys.exit(1)
+
+    entries = [e for e in entries if e.get("name") != name]
+    state["linked_profiles"] = entries
+
+    # Strip from chain
+    global_target = state.setdefault("targets", {}).setdefault("global", {})
+    chain = [p.strip() for p in global_target.get("profile", "").split(",") if p.strip()]
+    was_in_chain = name in chain
+    chain = [p for p in chain if p != name]
+    new_chain_str = ",".join(chain) if chain else "default"
+    global_target["profile"] = new_chain_str
+    settings_profile = global_target.get("settings_profile", "")
+
+    _save_state(state)
+
+    _cprint(f"[OK] Unlinked profile: {name} (path was {entry.get('path', '?')})")
+    if was_in_chain:
+        print(f"     Chain: {new_chain_str}")
+    else:
+        print("     Was not in chain — registry entry removed only.")
+
+    # Sweep orphan symlinks pointing into the unlinked path before re-install
+    old_path = entry.get("path", "")
+    if old_path:
+        _sweep_symlinks_into(Path(old_path))
+
+    if run_init and was_in_chain:
+        print()
+        global_args = argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
+        install_global(global_args)
+    elif not run_init:
+        print()
+        print("Run 'agentihooks init' to apply.")
+
+
+def _link_profile_list() -> None:
+    """Show all externally linked profiles."""
+    entries = _get_linked_profiles()
+    if not entries:
+        print("No linked profiles.")
+        print()
+        print("Link one with:")
+        print("  agentihooks link-profile <path> [--name <alias>]")
+        return
+
+    state = _load_state()
+    chain = [p.strip() for p in state.get("targets", {}).get("global", {}).get("profile", "").split(",") if p.strip()]
+
+    print(f"Linked profiles ({len(entries)}):")
+    for e in entries:
+        n = e.get("name", "?")
+        p = e.get("path", "?")
+        linked_at = e.get("linked_at", "?")
+        in_chain = " [in chain]" if n in chain else ""
+        exists = "" if Path(p).is_dir() else " [MISSING]"
+        print(f"  {n}{in_chain}{exists}")
+        print(f"    path:   {p}")
+        print(f"    linked: {linked_at}")
 
 
 # ---------------------------------------------------------------------------
@@ -1857,13 +2117,18 @@ def _resolve_profile_hook_paths(settings: dict, profile_dir: Path) -> dict:
 
 
 def _available_profiles() -> list[str]:
-    """Return profile names from built-in profiles/ and linked bundle."""
+    """Return profile names from built-in profiles/, linked bundle, and linked external dirs."""
     names = {d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_")}
     bundle = _get_bundle_path()
     if bundle:
         bp = bundle / "profiles"
         if bp.is_dir():
             names.update(d.name for d in bp.iterdir() if d.is_dir() and not d.name.startswith("_"))
+    for entry in _get_linked_profiles():
+        name = entry.get("name", "")
+        path = Path(entry.get("path", ""))
+        if name and path.is_dir():
+            names.add(name)
     return sorted(names)
 
 
@@ -1938,11 +2203,7 @@ def list_profiles() -> None:
         if not profile_dir:
             continue
         desc = _read_profile_description(profile_dir)
-        # Determine source
-        if (PROFILES_DIR / name).is_dir():
-            source = "built-in"
-        else:
-            source = "bundle"
+        source = _profile_source_label(name)
         marker = ""
         claude_md = profile_dir / _CLAUDE_MD_NAME
         if not claude_md.exists():
@@ -2069,7 +2330,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     profile_sources = []
     for pname, _ in profile_dirs:
-        src = "built-in" if (PROFILES_DIR / pname).is_dir() else "bundle"
+        src = _profile_source_label(pname)
         profile_sources.append(f"{pname} ({src})")
 
     print(f"{_BOLD}agentihooks root{_RESET} : {AGENTIHOOKS_ROOT}")
@@ -2081,7 +2342,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print(f"Profile          : {profile_name}")
     _settings_profile_display = getattr(args, "settings_profile", "") or ""
     if _settings_profile_display:
-        sp_src = "built-in" if (PROFILES_DIR / _settings_profile_display).is_dir() else "bundle"
+        sp_src = _profile_source_label(_settings_profile_display)
         print(f"Settings profile : {_settings_profile_display} ({sp_src})")
     _canonical_python = str(_detect_venv() or sys.executable)
     print(f"Python           : {_canonical_python}")
@@ -2126,7 +2387,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             sp_data = load_json(sp_overrides)
             sp_data = _resolve_profile_hook_paths(sp_data, settings_profile_dir)
             rendered = _deep_merge(rendered, sp_data)
-            src = "built-in" if (PROFILES_DIR / settings_profile_name).is_dir() else "bundle"
+            src = _profile_source_label(settings_profile_name)
             print(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
 
     # --- 1c. Apply linked connectors (from last profile in chain) ---
@@ -4477,6 +4738,28 @@ def main() -> None:
     bundle_p.add_argument("bundle_path", nargs="?", default=None, help="Bundle directory path (for link)")
     bundle_p.add_argument("--rebase", action="store_true", help="Use --rebase when pulling")
 
+    lp_p = sub.add_parser(
+        "link-profile",
+        help="Link an external profile directory and append it to the chain (link | unlink | list)",
+    )
+    lp_p.add_argument(
+        "action",
+        choices=["link", "unlink", "list"],
+        help="link <path> | unlink <name> | list",
+    )
+    lp_p.add_argument("target", nargs="?", default=None, help="Path to link, or name to unlink")
+    lp_p.add_argument("--name", default=None, help="Alias for the linked profile (defaults to dir basename)")
+    lp_p.add_argument(
+        "--no-append",
+        action="store_true",
+        help="Register the path but do not modify the active chain",
+    )
+    lp_p.add_argument(
+        "--no-init",
+        action="store_true",
+        help="Skip the immediate re-install (operator runs 'agentihooks init' later)",
+    )
+
     sub.add_parser("claude", help="Launch claude with profile flags (model, permission-mode, effort, etc.)")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
@@ -4837,6 +5120,23 @@ notes:
         uninstall_global(args)
     elif args.command == "bundle":
         cmd_bundle(args.action, path=args.bundle_path, rebase=args.rebase)
+    elif args.command == "link-profile":
+        if args.action == "link":
+            cmd_link_profile(
+                "link",
+                path=args.target,
+                name=args.name,
+                no_append=args.no_append,
+                no_init=args.no_init,
+            )
+        elif args.action == "unlink":
+            cmd_link_profile(
+                "unlink",
+                name=args.target or args.name,
+                no_init=args.no_init,
+            )
+        elif args.action == "list":
+            cmd_link_profile("list")
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
         args.settings_profile = getattr(args, "init_settings_profile", None) or ""
