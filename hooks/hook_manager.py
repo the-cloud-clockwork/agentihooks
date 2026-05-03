@@ -24,6 +24,8 @@ to reduce startup time for frequent events like PreToolUse/PostToolUse.
 import json
 import os
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -1170,21 +1172,74 @@ def on_pre_tool_use(payload: dict) -> None:
         )
 
 
+def _trace_mark(phase: str, tool_name: str, session_id: str = "") -> None:
+    """Emit a 'phase entered' marker to hooks.log for random-stop bisection.
+
+    No-op unless POST_TOOL_TRACE=1. Cheap (single log call). Order in
+    hooks.log = order phases ran. The last marker before a stop = the
+    handler that swallowed the turn.
+    """
+    from hooks.config import POST_TOOL_TRACE
+
+    if not POST_TOOL_TRACE:
+        return
+    log(
+        f"post_tool_trace: phase={phase}",
+        {"tool": tool_name, "session_id": session_id, "t_ns": time.perf_counter_ns()},
+    )
+
+
+@contextmanager
+def _trace_phase(phase: str, tool_name: str, session_id: str = ""):
+    """Wrap a sub-handler with entry/exit/duration logs.
+
+    Use only on phases whose body is a single try/except block at the
+    function's top indent level (so the `with` adds one level cleanly).
+    Active only when POST_TOOL_TRACE=1.
+    """
+    from hooks.config import POST_TOOL_TRACE
+
+    if not POST_TOOL_TRACE:
+        yield
+        return
+
+    t0 = time.perf_counter()
+    log(f"post_tool_trace: ENTER {phase}", {"tool": tool_name, "session_id": session_id})
+    try:
+        yield
+    except BaseException as e:
+        dt_ms = (time.perf_counter() - t0) * 1000
+        log(
+            f"post_tool_trace: RAISE {phase}",
+            {"tool": tool_name, "duration_ms": round(dt_ms, 2), "error": f"{type(e).__name__}: {e}"},
+        )
+        raise
+    else:
+        dt_ms = (time.perf_counter() - t0) * 1000
+        log(
+            f"post_tool_trace: EXIT {phase}",
+            {"tool": tool_name, "duration_ms": round(dt_ms, 2)},
+        )
+
+
 def on_post_tool_use(payload: dict) -> None:
     """Handle PostToolUse event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
+    _trace_session_id = payload.get("session_id", "")
 
     # --- Memory-mirror v5 dirty-marker (contributor / authority) ---
-    try:
-        from hooks.context.memory_sync_events import on_post_tool as _mm_on_post
+    with _trace_phase("memory_sync_events", tool_name, _trace_session_id):
+        try:
+            from hooks.context.memory_sync_events import on_post_tool as _mm_on_post
 
-        _mm_on_post(payload)
-    except Exception as e:
-        log("memory_sync_events.on_post_tool failed", {"error": str(e)})
+            _mm_on_post(payload)
+        except Exception as e:
+            log("memory_sync_events.on_post_tool failed", {"error": str(e)})
 
     # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
+        _trace_mark("ask_user_question_signals", tool_name, _trace_session_id)
         try:
             from hooks.context.branch_guard import set_branch_signal, set_pr_signal
             from hooks.context.ci_manifesto import (
@@ -1278,12 +1333,14 @@ def on_post_tool_use(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     if session_id and transcript_path:
+        _trace_mark("transcript_logger", tool_name, _trace_session_id)
         from hooks.observability.transcript import log_new_entries
 
         log_new_entries(session_id, transcript_path)
 
     # Bash output filtering
     if tool_name == "Bash":
+        _trace_mark("bash_output_filter", tool_name, _trace_session_id)
         try:
             from hooks.config import BASH_FILTER_ENABLED
 
@@ -1326,6 +1383,7 @@ def on_post_tool_use(payload: dict) -> None:
 
     # Mark file as read in cache
     if tool_name == "Read":
+        _trace_mark("file_read_cache_mark", tool_name, _trace_session_id)
         try:
             from hooks.config import FILE_READ_CACHE_ENABLED
 
@@ -1339,6 +1397,7 @@ def on_post_tool_use(payload: dict) -> None:
             log("file_read_cache mark failed", {"error": str(e)})
 
     # Record tool errors to memory file
+    _trace_mark("tool_memory_record_error", tool_name, _trace_session_id)
     from hooks.tool_memory import record_error
 
     record_error(payload)
@@ -1347,6 +1406,7 @@ def on_post_tool_use(payload: dict) -> None:
     is_error = payload.get("is_error", False)
     exit_code = payload.get("tool_input", {}).get("exitCode")
     if is_error or (exit_code and str(exit_code) != "0"):
+        _trace_mark("otel_error_event", tool_name, _trace_session_id)
         otel.emit_event(
             "agentihooks.error.recorded",
             {
@@ -1359,6 +1419,7 @@ def on_post_tool_use(payload: dict) -> None:
     from hooks.config import RETRY_BREAKER_ENABLED
 
     if RETRY_BREAKER_ENABLED:
+        _trace_mark("retry_breaker", tool_name, _trace_session_id)
         try:
             from hooks.context.retry_breaker import on_post_tool_result
 
@@ -1367,6 +1428,7 @@ def on_post_tool_use(payload: dict) -> None:
             log("retry_breaker post-tool failed", {"error": str(e)})
 
     # Context audit — record tool output size
+    _trace_mark("context_audit", tool_name, _trace_session_id)
     try:
         from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -1381,6 +1443,8 @@ def on_post_tool_use(payload: dict) -> None:
         log("context_audit record failed", {"error": str(e)})
 
     # Thinking/effort policy — check subagent effort alignment
+    if tool_name == "Agent":
+        _trace_mark("thinking_policy", tool_name, _trace_session_id)
     try:
         from hooks.config import DEFAULT_EFFORT, EFFORT_POLICY_ENABLED
 
@@ -1393,6 +1457,8 @@ def on_post_tool_use(payload: dict) -> None:
                 _inject_effort(warning)
     except Exception as e:
         log("thinking_policy check failed", {"error": str(e)})
+
+    _trace_mark("post_tool_use_done", tool_name, _trace_session_id)
 
 
 def on_stop(payload: dict) -> None:

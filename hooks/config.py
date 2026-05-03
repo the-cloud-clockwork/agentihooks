@@ -281,6 +281,13 @@ CONTEXT_AUDIT_ENABLED = _env_bool("CONTEXT_AUDIT_ENABLED", "true")
 CONTEXT_AUDIT_THRESHOLD_PCT: int = int(os.getenv("CONTEXT_AUDIT_THRESHOLD_PCT", "70"))
 
 # =============================================================================
+# POST-TOOL-USE PHASE TRACE (debug aid for random-stop diagnosis)
+# Logs entry/exit/duration of each sub-handler in on_post_tool_use to hooks.log.
+# Off by default — enable with POST_TOOL_TRACE=1 when bisecting handler bugs.
+# =============================================================================
+POST_TOOL_TRACE = _env_bool("POST_TOOL_TRACE", "false")
+
+# =============================================================================
 # THINKING / EFFORT POLICY
 # =============================================================================
 EFFORT_POLICY_ENABLED = _env_bool("EFFORT_POLICY_ENABLED", "true")
