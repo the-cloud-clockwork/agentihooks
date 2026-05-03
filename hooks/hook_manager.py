@@ -499,6 +499,14 @@ def on_session_end(payload: dict) -> None:
         except Exception:
             pass
 
+    # Clear autonomy enforcer block count for this session
+    try:
+        from hooks.context.autonomy_enforcer import clear_count as _clear_autonomy
+
+        _clear_autonomy(session_id)
+    except Exception:
+        pass
+
     # Clear brain adapter counter for this session
     try:
         from hooks.context.brain_adapter import clear_session_state as _clear_brain
@@ -1476,6 +1484,17 @@ def on_stop(payload: dict) -> None:
             "duration_ms": metrics.get("duration_ms"),
         },
     )
+
+    # Autonomy enforcer — block premature Stop after tool failures when bypass active.
+    # Must run early; emits JSON decision to stdout that Claude Code reads to block.
+    try:
+        from hooks.context.autonomy_enforcer import evaluate_stop_block
+
+        decision = evaluate_stop_block(payload)
+        if decision is not None:
+            print(json.dumps(decision), flush=True)
+    except Exception as e:
+        log("autonomy_enforcer.evaluate_stop_block failed", {"error": str(e)})
     otel.emit_event(
         "agentihooks.session.ended",
         {
