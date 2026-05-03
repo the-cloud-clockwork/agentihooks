@@ -37,6 +37,7 @@ if str(AGENTIHOOKS_ROOT) not in sys.path:
 STATE_JSON = AGENTIHOOKS_STATE_DIR / "state.json"
 HASH_FILE = AGENTIHOOKS_STATE_DIR / "sync-hashes.json"
 PID_FILE = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
+SINGLETON_LOCK_FILE = AGENTIHOOKS_STATE_DIR / ".sync-daemon.singleton.lock"
 LOG_FILE = AGENTIHOOKS_STATE_DIR / "logs" / "sync-daemon.log"
 LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
@@ -92,6 +93,39 @@ def _load_json(path: Path) -> dict:
 
 
 def _daemon_running() -> int | None:
+    """Return PID of running daemon if any, else None.
+
+    Uses two independent signals so a stale/empty PID file doesn't fool us:
+
+    1. Flock probe on the singleton lock file. If something else holds the
+       exclusive flock, a daemon is alive even if the PID file is empty or
+       missing. Returns the PID from the PID file (best effort) or -1 if
+       unknown.
+    2. PID file fallback (legacy). If flock probe is inconclusive, fall back
+       to reading the PID file and signalling 0.
+    """
+    # Signal 1: flock probe — definitive
+    try:
+        SINGLETON_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        probe = open(SINGLETON_LOCK_FILE, "a+")  # noqa: SIM115
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # We acquired it → no daemon running on this lock-file inode.
+            fcntl.flock(probe, fcntl.LOCK_UN)
+        except (BlockingIOError, OSError):
+            # Someone holds it → a daemon is alive.
+            try:
+                pid = int(PID_FILE.read_text().strip()) if PID_FILE.exists() else -1
+            except (ValueError, OSError):
+                pid = -1
+            probe.close()
+            return pid
+        finally:
+            probe.close()
+    except OSError:
+        pass
+
+    # Signal 2: PID file fallback (in case flock not supported on the FS)
     if not PID_FILE.exists():
         return None
     try:
@@ -891,27 +925,40 @@ def _check_new_projects(known_servers_file: Path) -> None:
 
 
 def _run_daemon(poll_sec: int) -> None:
-    # Singleton enforcement via flock on PID file. Foreground daemons started
-    # outside _start_daemon (e.g. directly by `python sync_daemon.py --foreground`)
-    # otherwise can stack up and race on ~/.claude.json. The flock is held for
-    # the lifetime of the process; whoever already holds it stays in charge.
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    pid_fd = open(PID_FILE, "a+")  # noqa: SIM115 — held until process exit
+    # Singleton enforcement via flock on a DEDICATED lock file (not the PID file).
+    # The PID file gets deleted by `init`, `--force`, manual cleanup, daemon stop,
+    # etc. — flock is per-inode, so deleting the PID file would orphan the flock
+    # and let the next daemon coexist. The singleton lock file lives at a stable
+    # dotfile path that no install/force/clean code path touches.
+    SINGLETON_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(SINGLETON_LOCK_FILE, "a+")  # noqa: SIM115 — held for life
     try:
-        fcntl.flock(pid_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (BlockingIOError, OSError):
-        pid_fd.seek(0)
-        existing = pid_fd.read().strip() or "?"
-        pid_fd.close()
+        try:
+            existing = PID_FILE.read_text().strip() if PID_FILE.exists() else "?"
+        except OSError:
+            existing = "?"
+        lock_fd.close()
         _log(f"Sync daemon already running (PID {existing}) — exiting")
         print(f"[sync] Daemon already running (PID {existing}) — exiting", flush=True)
         return
 
-    pid_fd.seek(0)
-    pid_fd.truncate()
-    pid_fd.write(str(os.getpid()))
-    pid_fd.flush()
-    _log(f"Sync daemon started (poll={poll_sec}s, pid={os.getpid()})")
+    # Capture the lock-file inode so we can detect deletion-and-recreate
+    # (someone unlinks the lock file → next start gets a fresh inode and would
+    # silently coexist with us; we self-exit on next tick to prevent that).
+    try:
+        _lock_inode = os.fstat(lock_fd.fileno()).st_ino
+    except OSError:
+        _lock_inode = -1
+
+    # Write PID to the (separate) PID file — informational only
+    try:
+        PID_FILE.write_text(str(os.getpid()))
+    except OSError as e:
+        _log(f"Could not write PID file: {e}")
+
+    _log(f"Sync daemon started (poll={poll_sec}s, pid={os.getpid()}, lock_inode={_lock_inode})")
 
     running = True
 
@@ -966,6 +1013,25 @@ def _run_daemon(poll_sec: int) -> None:
     while running:
         time.sleep(poll_sec)
         if not running:
+            break
+
+        # Self-check: if our singleton lock file's inode changed (someone
+        # deleted+recreated the file), exit cleanly. A new daemon may have
+        # already grabbed the new inode; staying alive would mean two
+        # daemons coexisting on different inodes — the original sprawl bug.
+        try:
+            current_inode = os.stat(SINGLETON_LOCK_FILE).st_ino
+            if _lock_inode != -1 and current_inode != _lock_inode:
+                _log(
+                    f"Singleton lock inode changed ({_lock_inode} -> {current_inode}); "
+                    "another daemon may have taken over. Exiting."
+                )
+                running = False
+                break
+        except OSError:
+            # Lock file missing — same risk; exit and let the next start re-establish.
+            _log("Singleton lock file vanished; exiting to avoid sprawl.")
+            running = False
             break
 
         try:
@@ -1086,11 +1152,13 @@ def _run_daemon(poll_sec: int) -> None:
 
     _log("Sync daemon stopped")
     try:
-        fcntl.flock(pid_fd, fcntl.LOCK_UN)
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except OSError:
         pass
-    pid_fd.close()
+    lock_fd.close()
     PID_FILE.unlink(missing_ok=True)
+    # Note: SINGLETON_LOCK_FILE itself is intentionally NOT unlinked —
+    # keeping the inode stable across daemon restarts is the whole point.
 
 
 # ---------------------------------------------------------------------------

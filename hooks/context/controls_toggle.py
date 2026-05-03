@@ -21,6 +21,7 @@ Public API:
 
 from __future__ import annotations
 
+import os
 import re
 
 from hooks._redis import get_redis, redis_key
@@ -111,6 +112,13 @@ def is_controls_disabled(session_id: str | None = None) -> bool:
 
     `session_id` is accepted for API compatibility with prior owner-scoped checks
     but is intentionally ignored: bypass is now a global flag.
+
+    Test escape hatch: set ``AGENTIHOOKS_DISABLE_BYPASS_LOOKUP=1`` to force
+    this check to return False regardless of redis/file state. Used by tests
+    that share a redis instance with an operator session that may have an
+    active bypass.
     """
     del session_id
+    if os.getenv("AGENTIHOOKS_DISABLE_BYPASS_LOOKUP") == "1":
+        return False
     return _read_owner() is not None
