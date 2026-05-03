@@ -1358,17 +1358,21 @@ def _update_bashrc_block() -> None:
     block = (
         f"{_BLOCK_START}\n"
         f"agentienv() {{\n"
-        f'  if [[ ! -f "{env_file}" ]]; then\n'
-        f"    return 0\n"
-        f"  fi\n"
+        f'  local _c=0\n'
         f"  set -a\n"
-        f'  . "{env_file}" 2>/dev/null || {{ set +a; return 1; }}\n'
-        f"  local _c=1\n"
-        f'  for f in "{env_dir}"/*.env; do\n'
-        f'    [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{ . "$f" 2>/dev/null; _c=$((_c + 1)); }}\n'
-        f"  done\n"
+        f'  if [[ -f "{env_file}" ]]; then\n'
+        f'    . "{env_file}" 2>/dev/null && _c=$((_c + 1))\n'
+        f'    for f in "{env_dir}"/*.env; do\n'
+        f'      [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{ . "$f" 2>/dev/null && _c=$((_c + 1)); }}\n'
+        f"    done\n"
+        f"  fi\n"
+        f'  if [[ -f "$HOME/.env" ]]; then\n'
+        f'    . "$HOME/.env" 2>/dev/null && _c=$((_c + 1))\n'
+        f"  fi\n"
         f"  set +a\n"
-        f'  echo "[agentienv] loaded $_c env file(s) from {env_dir}"\n'
+        f'  if (( _c > 0 )); then\n'
+        f'    echo "[agentienv] loaded $_c env file(s)"\n'
+        f"  fi\n"
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
