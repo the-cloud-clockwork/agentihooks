@@ -70,9 +70,9 @@ include = ["hooks*", "scripts*", "profiles*"]
 "profiles.coding" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
 
 [project.urls]
-Homepage = "https://github.com/The-Cloud-Clock-Work/agentihooks"
-Repository = "https://github.com/The-Cloud-Clock-Work/agentihooks"
-Issues = "https://github.com/The-Cloud-Clock-Work/agentihooks/issues"
+Homepage = "https://github.com/The-Cloud-Clockwork/agentihooks"
+Repository = "https://github.com/The-Cloud-Clockwork/agentihooks"
+Issues = "https://github.com/The-Cloud-Clockwork/agentihooks/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

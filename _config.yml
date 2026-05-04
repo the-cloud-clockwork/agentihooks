@@ -4,7 +4,7 @@ title: AgentiHooks
 description: >-
   Hook system and MCP tool server for Claude Code agents.
   Event-driven hooks, 26 MCP tools across 8 categories, profile-based configuration.
-url: "https://the-cloud-clock-work.github.io"
+url: "https://the-cloud-clockwork.github.io"
 baseurl: "/agentihooks"
 
 remote_theme: just-the-docs/just-the-docs@v0.10.0
@@ -21,19 +21,19 @@ mermaid:
   version: "11"
 
 aux_links:
-  GitHub: "https://github.com/The-Cloud-Clock-Work/agentihooks"
+  GitHub: "https://github.com/The-Cloud-Clockwork/agentihooks"
 aux_links_new_tab: true
 
 gh_edit_link: true
 gh_edit_link_text: "Edit this page on GitHub"
-gh_edit_repository: "https://github.com/The-Cloud-Clock-Work/agentihooks"
+gh_edit_repository: "https://github.com/The-Cloud-Clockwork/agentihooks"
 gh_edit_branch: "main"
 gh_edit_view_mode: "edit"
 
 footer_content: >-
   AgentiHooks is open source under the
-  <a href="https://github.com/The-Cloud-Clock-Work/agentihooks/blob/main/LICENSE">MIT License</a>.
-  Maintained by <a href="https://github.com/The-Cloud-Clock-Work">The Cloud Clockwork</a>.
+  <a href="https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE">MIT License</a>.
+  Maintained by <a href="https://github.com/The-Cloud-Clockwork">The Cloud Clockwork</a>.
 
 back_to_top: true
 back_to_top_text: "Back to top"
