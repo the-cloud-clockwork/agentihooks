@@ -412,7 +412,7 @@ Registered targets are stored in `~/.agentihooks/state.json` under the `targets`
 
 Cross-machine auto-memory sync with PR-gated fleet propagation. Mirrors
 **only** `~/.claude/projects/*/memory/` to a private git remote via
-[gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam); each machine
+[gitfoam](https://github.com/The-Cloud-Clockwork/gitfoam); each machine
 pushes to its own `gitfoam/<hostname>/main` branch, consumers merge from
 `origin/main` only, and promotion is a GitHub PR.
 

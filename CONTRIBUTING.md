@@ -57,4 +57,4 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Please be r
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/The-Cloud-Clock-Work/agentihooks/discussions) or file an issue.
+Open a [GitHub Discussion](https://github.com/The-Cloud-Clockwork/agentihooks/discussions) or file an issue.
