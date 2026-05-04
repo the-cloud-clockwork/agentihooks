@@ -1,14 +1,14 @@
 # agentihooks
 
-[![Standalone](https://img.shields.io/badge/runs-standalone-brightgreen)](https://the-cloud-clock-work.github.io/agentihooks/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clock-Work/agentihooks/blob/main/LICENSE)
-[![CI](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml)
+[![Standalone](https://img.shields.io/badge/runs-standalone-brightgreen)](https://the-cloud-clockwork.github.io/agentihooks/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
+[![CI](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clock-work.github.io/agentihooks/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clockwork.github.io/agentihooks/)
 
 The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with smart profiles that shift mid-session, guardrails, context intelligence, and real-time broadcast messaging across every active session.
 
-> **Full documentation:** [the-cloud-clock-work.github.io/agentihooks](https://the-cloud-clock-work.github.io/agentihooks/)
+> **Full documentation:** [the-cloud-clockwork.github.io/agentihooks](https://the-cloud-clockwork.github.io/agentihooks/)
 
 ---
 
@@ -38,7 +38,7 @@ agentihooks init --local --profile infra    # per-repo identity
 - **Built-in profiles:** `default` (auto mode), `coding` (acceptEdits), `admin` (bypassPermissions)
 - **Live rule refresh** — `agentihooks refresh-rules` pushes rule updates into every running Claude session without restart. One-shot per session, session-snapshotted so new sessions don't re-consume.
 
-[Full docs: Identity](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/identity/)
+[Full docs: Identity](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/identity/)
 
 ### Pillar 2: Guardrails — *What keeps them safe*
 
@@ -58,7 +58,7 @@ agentihooks init --local --profile infra    # per-repo identity
 | **Bash output filter** | Truncates verbose output to save tokens |
 | **File read dedup** | Blocks redundant re-reads of unchanged files |
 
-[Full docs: Guardrails](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/guardrails/)
+[Full docs: Guardrails](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/guardrails/)
 
 ### Pillar 3: Context Intelligence — *What keeps them sharp*
 
@@ -77,7 +77,7 @@ CONTEXT_REFRESH_COMPRESSION=standard    # default
 CONTEXT_COMPRESSION_SCOPE=all           # compress all injections
 ```
 
-[Full docs: Context Intelligence](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/context/)
+[Full docs: Context Intelligence](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/context/)
 
 ### Pillar 4: Fleet Command — *Talk to your entire fleet*
 
@@ -101,7 +101,7 @@ agentihooks broadcast emit "clear all broadcasts"
 
 `emit` is sandboxed: Claude Haiku can **only** run `agentihooks broadcast` commands — all other tools are disallowed.
 
-[Full docs: Fleet Command](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/fleet-command/)
+[Full docs: Fleet Command](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/fleet-command/)
 
 ---
 
@@ -110,7 +110,7 @@ agentihooks broadcast emit "clear all broadcasts"
 **Requirement:** [uv](https://docs.astral.sh/uv/getting-started/installation/) must be installed.
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentihooks
+git clone https://github.com/The-Cloud-Clockwork/agentihooks
 cd agentihooks
 
 # 1. Create the dedicated venv and install everything
@@ -284,7 +284,7 @@ agent calls → overlay_remove("patch-mode")
 
 Back to `anton`. Full autonomy. Image rebuild in parallel. Zero session restart, zero context loss. The base profile's `allowedOverlays` field controls which overlays agents can activate — no escalation to profiles they weren't designed for.
 
-This is a **smart profile system** — agents don't just have identities, they shift between complementary modes like a musician moving between tension and release. [Full docs: Runtime Overlays](https://the-cloud-clock-work.github.io/agentihooks/docs/pillars/overlays/)
+This is a **smart profile system** — agents don't just have identities, they shift between complementary modes like a musician moving between tension and release. [Full docs: Runtime Overlays](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/overlays/)
 
 **Settings profiles (two-axis model):** Control settings independently from persona:
 
@@ -335,7 +335,7 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
 | `BRAIN_WRITER_ENABLED` | `false` | POST `/marker` on Stop / SubagentStop. |
 
-Complete table: [Configuration Reference](https://the-cloud-clock-work.github.io/agentihooks/docs/reference/configuration/)
+Complete table: [Configuration Reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/configuration/)
 
 ### Remote brain quickstart
 
@@ -390,7 +390,7 @@ machine A                                         machine B
 ```
 
 Every machine still writes to its **own** `gitfoam/<hostname>/main` branch via
-[gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam) (Rust daemon, 500ms
+[gitfoam](https://github.com/The-Cloud-Clockwork/gitfoam) (Rust daemon, 500ms
 force-push, built-in secrets scanning). **Consumers read `origin/main` only.**
 Promotion from a machine branch to `main` is a PR — `agentihooks memory-sync
 propose` opens it via `gh pr create` and optionally auto-merges when clean.
@@ -480,8 +480,8 @@ agentihooks init
 
 | Project | Description |
 |---------|-------------|
-| [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) | Claude Code runner and orchestrator |
-| [agentibridge](https://github.com/The-Cloud-Clock-Work/agentibridge) | MCP server for session persistence and remote control |
+| [agenticore](https://github.com/The-Cloud-Clockwork/agenticore) | Claude Code runner and orchestrator |
+| [agentibridge](https://github.com/The-Cloud-Clockwork/agentibridge) | MCP server for session persistence and remote control |
 
 ## License
 

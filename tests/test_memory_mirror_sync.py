@@ -511,9 +511,9 @@ def test_remote_slug_ssh(monkeypatch):
     monkeypatch.setattr(
         mm.config,
         "MEMORY_MIRROR_REMOTE",
-        "git@github.com:The-Cloud-Clock-Work/anton-memory-mirror.git",
+        "git@github.com:The-Cloud-Clockwork/anton-memory-mirror.git",
     )
-    assert mm._remote_slug() == "The-Cloud-Clock-Work/anton-memory-mirror"
+    assert mm._remote_slug() == "The-Cloud-Clockwork/anton-memory-mirror"
 
 
 def test_remote_slug_https(monkeypatch):
