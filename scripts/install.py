@@ -745,18 +745,29 @@ def cmd_link_profile(
     no_append: bool = False,
     no_init: bool = False,
 ) -> None:
-    """Handle 'agentihooks link-profile' subcommands."""
+    """Handle 'agentihooks link-profile' subcommands.
+
+    State mutation runs under ``_sync_lock``. ``install_global`` is invoked
+    *outside* the lock to avoid a same-process flock deadlock (it acquires
+    its own ``_sync_lock``).
+    """
     if action == "link":
         with _sync_lock():
-            _link_profile_link(
+            install_args = _link_profile_link(
                 Path(path).expanduser().resolve() if path else None,
                 name=name,
                 append=not no_append,
                 run_init=not no_init,
             )
+        if install_args is not None:
+            print()
+            install_global(install_args)
     elif action == "unlink":
         with _sync_lock():
-            _link_profile_unlink(name, run_init=not no_init)
+            install_args = _link_profile_unlink(name, run_init=not no_init)
+        if install_args is not None:
+            print()
+            install_global(install_args)
     elif action == "list":
         _link_profile_list()
     else:
@@ -770,8 +781,13 @@ def _link_profile_link(
     name: str | None = None,
     append: bool = True,
     run_init: bool = True,
-) -> None:
-    """Register an external directory as a chain-able profile and (by default) re-apply install."""
+) -> argparse.Namespace | None:
+    """Register an external directory as a chain-able profile.
+
+    Returns the ``install_global`` argparse namespace when the caller should
+    re-run install (so it can be invoked outside the lock), or ``None`` if
+    no install is needed.
+    """
     if profile_dir is None:
         print("ERROR: Provide the path to a profile directory.", file=sys.stderr)
         sys.exit(1)
@@ -853,12 +869,11 @@ def _link_profile_link(
         print(f"     Chain unchanged: {new_chain_str}")
 
     if run_init and append and new_chain_str:
-        print()
-        global_args = argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
-        install_global(global_args)
-    elif not run_init:
+        return argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
+    if not run_init:
         print()
         print("Run 'agentihooks init' to apply.")
+    return None
 
 
 def _sweep_symlinks_into(target_root: Path) -> None:
@@ -906,8 +921,12 @@ def _sweep_symlinks_into(target_root: Path) -> None:
             _cprint(f"  [RM] Removed orphan symlink: {subdir}/{link.name}")
 
 
-def _link_profile_unlink(name: str | None, *, run_init: bool = True) -> None:
-    """Remove a linked profile from the registry and the global chain."""
+def _link_profile_unlink(name: str | None, *, run_init: bool = True) -> argparse.Namespace | None:
+    """Remove a linked profile from the registry and the global chain.
+
+    Returns the ``install_global`` argparse namespace when the caller should
+    re-run install, or ``None`` if no install is needed.
+    """
     if not name:
         print("ERROR: Provide the linked profile name.", file=sys.stderr)
         sys.exit(1)
@@ -957,12 +976,11 @@ def _link_profile_unlink(name: str | None, *, run_init: bool = True) -> None:
         _sweep_symlinks_into(Path(old_path))
 
     if run_init and was_in_chain:
-        print()
-        global_args = argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
-        install_global(global_args)
-    elif not run_init:
+        return argparse.Namespace(profile=new_chain_str, settings_profile=settings_profile)
+    if not run_init:
         print()
         print("Run 'agentihooks init' to apply.")
+    return None
 
 
 def _link_profile_list() -> None:
