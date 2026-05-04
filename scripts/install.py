@@ -5391,8 +5391,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
                 file=sys.stderr,
             )
             print(
-                "        curl -fsSL https://raw.githubusercontent.com/"
-                "The-Cloud-Clockwork/gitfoam/main/install.sh | sh",
+                "        curl -fsSL https://raw.githubusercontent.com/The-Cloud-Clockwork/gitfoam/main/install.sh | sh",
                 file=sys.stderr,
             )
             print(
