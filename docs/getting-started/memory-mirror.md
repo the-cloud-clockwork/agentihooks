@@ -2,7 +2,7 @@
 
 Claude Code's native auto-memory lives at `~/.claude/projects/<project-key>/memory/`
 and is machine-local. The **memory mirror** feature syncs only those `memory/`
-subtrees across your fleet using [gitfoam](https://github.com/The-Cloud-Clock-Work/gitfoam)
+subtrees across your fleet using [gitfoam](https://github.com/The-Cloud-Clockwork/gitfoam)
 for push (~500ms latency per machine) and a lightweight main-only consumer
 on the sync daemon tick for pull (~60s).
 

@@ -15,11 +15,11 @@ The definitive Claude Code harness — built on four pillars that make your agen
 <div class="hero-actions text-center mb-8" markdown="0">
   <a href="#install" class="btn btn-primary fs-5 mr-2">Get Started</a>
   <a href="{{ site.baseurl }}/docs/cost-management/" class="btn btn-green fs-5 mr-2">Cost Management</a>
-  <a href="https://github.com/The-Cloud-Clock-Work/agentihooks" class="btn fs-5" target="_blank">View on GitHub</a>
+  <a href="https://github.com/The-Cloud-Clockwork/agentihooks" class="btn fs-5" target="_blank">View on GitHub</a>
 </div>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clock-Work/agentihooks/blob/main/LICENSE)
-[![CI](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clock-Work/agentihooks/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
+[![CI](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
@@ -339,12 +339,12 @@ rm -rf ~/.agentihooks
 
 | Project | Description |
 |---------|-------------|
-| [agenticore](https://github.com/The-Cloud-Clock-Work/agenticore) | Claude Code runner and orchestrator (uses agentihooks) |
-| [agentibridge](https://github.com/The-Cloud-Clock-Work/agentibridge) | MCP server for session persistence and remote control |
+| [agenticore](https://github.com/The-Cloud-Clockwork/agenticore) | Claude Code runner and orchestrator (uses agentihooks) |
+| [agentibridge](https://github.com/The-Cloud-Clockwork/agentibridge) | MCP server for session persistence and remote control |
 
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/The-Cloud-Clock-Work">The Cloud Clockwork</a> &middot;
-  <a href="https://github.com/The-Cloud-Clock-Work/agentihooks/blob/main/LICENSE">MIT License</a>
+  Built by <a href="https://github.com/The-Cloud-Clockwork">The Cloud Clockwork</a> &middot;
+  <a href="https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE">MIT License</a>
 </p>

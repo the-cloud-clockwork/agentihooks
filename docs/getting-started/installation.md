@@ -33,7 +33,7 @@ uv --version
 ## 2. Clone the repository
 
 ```bash
-git clone https://github.com/The-Cloud-Clock-Work/agentihooks
+git clone https://github.com/The-Cloud-Clockwork/agentihooks
 cd agentihooks
 ```
 

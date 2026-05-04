@@ -196,7 +196,7 @@ Companion env files are auto-sourced by:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Clone the repo
-git clone https://github.com/The-Cloud-Clock-Work/agentihooks
+git clone https://github.com/The-Cloud-Clockwork/agentihooks
 cd agentihooks
 
 # 3. Create the venv and install
