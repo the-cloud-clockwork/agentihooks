@@ -408,8 +408,8 @@ CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 #   1. $CI_MANIFESTO_PATH explicit env override
 #   2. $MANIFESTOS_DIR/<MANIFESTO_NAME>.md (multi-manifesto bundle pattern)
 #   3. $AGENTIHOOKS_BUNDLE_ROOT/manifestos/ANTON-CORE-CI-MANIFESTO.md
-#   4. ~/dev/tccw-ecosystem/agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md (default)
-#   5. legacy fallback ~/dev/tccw-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md
+#   4. ~/dev/tcc-ecosystem/agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md (default)
+#   5. legacy fallback ~/dev/tcc-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md
 def _resolve_manifesto_path() -> str:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
@@ -425,10 +425,10 @@ def _resolve_manifesto_path() -> str:
         candidate = Path(bundle_root).expanduser() / "manifestos" / f"{name}.md"
         if candidate.exists():
             return str(candidate)
-    default = Path.home() / "dev" / "tccw-ecosystem" / "agentihooks-bundle" / "manifestos" / f"{name}.md"
+    default = Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos" / f"{name}.md"
     if default.exists():
         return str(default)
-    legacy = Path.home() / "dev" / "tccw-ecosystem" / "documents" / "anton" / f"{name}.md"
+    legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / f"{name}.md"
     return str(legacy)
 
 

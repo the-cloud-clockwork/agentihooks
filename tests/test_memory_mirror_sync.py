@@ -35,9 +35,9 @@ def test_decode_roundtrips_simple_path(tmp_path):
 
 
 def test_decode_handles_hyphenated_segment(tmp_path):
-    _make_fs(tmp_path, {"home": {"alice": {"dev": {"tccw-ecosystem": {"tccw-toolbelt": {}}}}}})
-    encoded = "-home-alice-dev-tccw-ecosystem-tccw-toolbelt"
-    assert mm._decode_encoded_path(encoded, root=tmp_path) == (tmp_path / "home/alice/dev/tccw-ecosystem/tccw-toolbelt")
+    _make_fs(tmp_path, {"home": {"alice": {"dev": {"tcc-ecosystem": {"tcc-toolbelt": {}}}}}})
+    encoded = "-home-alice-dev-tcc-ecosystem-tcc-toolbelt"
+    assert mm._decode_encoded_path(encoded, root=tmp_path) == (tmp_path / "home/alice/dev/tcc-ecosystem/tcc-toolbelt")
 
 
 def test_decode_returns_none_when_path_missing(tmp_path):

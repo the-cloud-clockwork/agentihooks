@@ -403,10 +403,10 @@ resolver reverse-walks each `~/.claude/projects/<encoded>/` dir to find the
 package or agent boundary (`agent.yml` > `pyproject.toml`/`Cargo.toml`/`package.json`/`go.mod`
 > `.git`) and uses its basename as the key. So:
 
-- Laptop `/home/iamroot/dev/tccw-ecosystem/agenticore` → key `agenticore`
+- Laptop `/home/iamroot/dev/tcc-ecosystem/agenticore` → key `agenticore`
 - Fleet pod `/app/agenticore` → key `agenticore` (same key, memory pools!)
 - Agent `.../agentihub/agents/finops/package` → key `finops` (skips past `package/`)
-- Hyphenated repos like `tccw-toolbelt` stay intact (the resolver reads the real FS, not the encoded name)
+- Hyphenated repos like `tcc-toolbelt` stay intact (the resolver reads the real FS, not the encoded name)
 - Unresolvable paths fall back to `_unmapped/<encoded>/` so nothing is lost.
 
 **Enable (three commands)**
