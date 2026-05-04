@@ -190,7 +190,7 @@ def _decode_encoded_path(encoded: str, root: Path = Path("/")) -> Path | None:
     Claude project directory name.
 
     The encoding replaces every ``/`` with ``-``. Directory names may
-    themselves contain ``-`` (``tccw-ecosystem``, ``tccw-toolbelt``), so we
+    themselves contain ``-`` (``tcc-ecosystem``, ``tcc-toolbelt``), so we
     try to consume 1 segment, then 2, then 3, etc. at each level, matching
     against what actually exists on disk. Backtracks on dead ends.
     Returns ``None`` if the encoded path cannot be resolved.

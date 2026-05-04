@@ -10,7 +10,7 @@ source of truth rather than hardcoding.
 
 Config (env vars via hooks.config):
     CI_MANIFESTO_ENABLED          (bool, default True)
-    CI_MANIFESTO_PATH             (str,  default $HOME/dev/tccw-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md)
+    CI_MANIFESTO_PATH             (str,  default $HOME/dev/tcc-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md)
     CI_MANIFESTO_REFRESH_EVERY    (int,  default 8 turns)
 
 Public API:
