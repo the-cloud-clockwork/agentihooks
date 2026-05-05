@@ -18,6 +18,8 @@ from hooks.config import (
     BROADCAST_DELIVERY_STATE_FILE,
     BROADCAST_ENABLED,
     BROADCAST_FILE,
+    BROADCAST_MAX_BYTES_PRETOOL,
+    BROADCAST_MAX_BYTES_PROMPT,
     BROADCAST_MAX_MESSAGES,
     BROADCAST_MAX_PER_PROMPT,
     BROADCAST_MIN_INTERVAL_SEC,
@@ -25,6 +27,61 @@ from hooks.config import (
 )
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
+
+# Display label for the BROADCAST header. Source severity stays canonical
+# (info/alert/critical) for routing; the display map prevents low-priority
+# `info` content from rendering as `[ALERT]`-style framing that Claude Code
+# treats as a hook-error contamination signal (issue #34713).
+_SEVERITY_DISPLAY_LABEL = {
+    "nuclear": "NUCLEAR",
+    "critical": "CRITICAL",
+    "alert": "ALERT",
+    "warning": "WARNING",
+    "info": "INFO",
+    "resolved": "RESOLVED",
+}
+
+# Bodies that signal "no content to deliver" — emitted by the brain adapter
+# when the upstream feed is empty. Suppressed before formatting so the model
+# does not see noise framed as an alert.
+_EMPTY_BODY_SENTINELS = frozenset(
+    {
+        "no active signals.",
+        "no inject blocks.",
+        "no data.",
+        "none.",
+        "",
+    }
+)
+
+
+def _body_is_empty(msg: dict) -> bool:
+    """Return True for messages whose body conveys no signal."""
+    body = (msg.get("message") or "").strip()
+    if not body:
+        return True
+    # Strip leading "[Title]\n" prefix if present so titled empty bodies
+    # like "[Active Signals]\nNo active signals." are also caught.
+    if body.startswith("[") and "]\n" in body:
+        body = body.split("]\n", 1)[1].strip()
+    return body.lower() in _EMPTY_BODY_SENTINELS
+
+
+def _truncate_body(body: str, max_bytes: int) -> str:
+    """Truncate utf-8 body to max_bytes with a marker, preserving char boundaries."""
+    if max_bytes <= 0:
+        return ""
+    encoded = body.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return body
+    marker = "\n[...truncated]"
+    keep = max(0, max_bytes - len(marker.encode("utf-8")))
+    truncated = encoded[:keep].decode("utf-8", errors="ignore")
+    return truncated + marker
+
+
+def _display_label(severity: str) -> str:
+    return _SEVERITY_DISPLAY_LABEL.get(severity.lower(), severity.upper())
 
 
 def _delivery_state_path() -> Path:
@@ -640,9 +697,10 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
 
 
 def format_broadcast_banner(msg: dict) -> str:
-    severity = msg.get("severity", "alert").upper()
+    severity_raw = msg.get("severity", "alert")
+    severity = _display_label(severity_raw)
     source = msg.get("source", "unknown")
-    message = msg.get("message", "")
+    message = _truncate_body(msg.get("message", ""), BROADCAST_MAX_BYTES_PROMPT)
     msg_id = msg.get("id", "")
 
     lines = [
@@ -658,11 +716,37 @@ def format_broadcast_banner(msg: dict) -> str:
 def format_critical_context(msgs: list[dict]) -> str:
     if not msgs:
         return ""
-    lines = ["BROADCAST ALERTS (PreToolUse):"]
+    # Drop empty-body messages — `[ALERT] No active signals.` is a #34713
+    # contamination vector and conveys zero signal.
+    msgs = [m for m in msgs if not _body_is_empty(m)]
+    if not msgs:
+        return ""
+    # Dedup within one formatting pass: when multiple messages share a
+    # content_hash, keep only the most recent (highest created_at).
+    seen: dict[str, dict] = {}
     for m in msgs:
+        h = m.get("content_hash") or _msg_hash(m)
+        prev = seen.get(h)
+        if prev is None or (m.get("created_at", "") > prev.get("created_at", "")):
+            seen[h] = m
+    deduped = list(seen.values())
+    deduped.sort(key=lambda m: _SEVERITY_RANK.get(m.get("severity", "info"), 9))
+
+    header = "BROADCAST ALERTS (PreToolUse):"
+    budget = max(0, BROADCAST_MAX_BYTES_PRETOOL - len(header.encode("utf-8")) - 1)
+    lines = [header]
+    for m in deduped:
         msg_id = m.get("id", "")
-        sev = m.get("severity", "critical").upper()
-        lines.append(f"  - [{sev}] (id:{msg_id}) {m['message']}")
+        sev = _display_label(m.get("severity", "alert"))
+        body = _truncate_body(m.get("message", ""), max(0, budget // max(1, len(deduped))))
+        line = f"  - [{sev}] (id:{msg_id}) {body}"
+        line_bytes = len(line.encode("utf-8")) + 1
+        if line_bytes > budget:
+            break
+        lines.append(line)
+        budget -= line_bytes
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines)
 
 
@@ -689,6 +773,8 @@ def check_and_inject_broadcasts(session_id: str) -> None:
         injected = 0
         for msg in pending:
             skip_reason = _should_skip(msg, sess_state, now_ts)
+            if not skip_reason and _body_is_empty(msg):
+                skip_reason = "empty"
             if not skip_reason and injected >= BROADCAST_MAX_PER_PROMPT:
                 skip_reason = "cap"
 
