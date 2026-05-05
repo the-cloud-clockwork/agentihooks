@@ -253,17 +253,47 @@ def contains_pr_signal(text: str) -> bool:
     return _signal_match(text, get_pr_signals())
 
 
+# Claude Code injects hook stdout / additionalContext into context up to a
+# 10,000-char cap; beyond that the harness writes to a temp file and the
+# model receives a filepath instead of body content. The full Anton CI
+# manifesto is ~36KB, so we MUST inject under-cap or it gets silently
+# substituted (and the bundle CLAUDE.md rule "If the manifesto is not
+# visible, alert operator" never fires because the model thinks it loaded).
+#
+# Strategy: emit the manifesto verbatim up to a safe byte budget, then a
+# trailer pointing the agent at the canonical file path so the model can
+# Read on demand for any section it needs in full.
+_INJECTION_BUDGET_BYTES = 7500
+_INJECTION_TRAILER_TEMPLATE = (
+    "\n[TRUNCATED — the full doctrine is at: {path}]\n"
+    "Read that path with the Read tool when you need section details.\n"
+    "=== END CI MANIFESTO ===\n"
+)
+_INJECTION_HEADER_TEMPLATE = (
+    "=== CI MANIFESTO (auto-injected doctrine — source of truth) ===\n"
+    "Source: {path}\n\n"
+)
+
+
 def _build_injection() -> str:
     data = _load()
     content = data["content"]
     if not content:
         return ""
-    return (
-        "=== CI MANIFESTO (auto-injected doctrine — source of truth) ===\n"
-        f"Source: {data['path']}\n\n"
-        f"{content}\n"
-        "=== END CI MANIFESTO ===\n"
-    )
+    path_str = str(data["path"])
+    header = _INJECTION_HEADER_TEMPLATE.format(path=path_str)
+    full_trailer = "\n=== END CI MANIFESTO ===\n"
+    full_payload = header + content + full_trailer
+    if len(full_payload.encode("utf-8")) <= _INJECTION_BUDGET_BYTES:
+        return full_payload
+    # Need to truncate. Compute room left for content after header + trailer.
+    trailer = _INJECTION_TRAILER_TEMPLATE.format(path=path_str)
+    overhead = len((header + trailer).encode("utf-8"))
+    body_budget = max(0, _INJECTION_BUDGET_BYTES - overhead)
+    body_bytes = content.encode("utf-8")[:body_budget]
+    # Avoid splitting a multi-byte char.
+    body = body_bytes.decode("utf-8", errors="ignore")
+    return header + body + trailer
 
 
 def inject_on_session_start() -> None:
