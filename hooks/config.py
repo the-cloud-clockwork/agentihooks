@@ -352,8 +352,15 @@ AGENTIHOOKS_AUTO_OVERLAY = os.getenv("AGENTIHOOKS_AUTO_OVERLAY", "")
 BROADCAST_ENABLED = _env_bool("BROADCAST_ENABLED", "true")
 BROADCAST_FILE: str = os.getenv("BROADCAST_FILE", str(Path.home() / ".agentihooks" / "broadcast.json"))
 BROADCAST_MAX_MESSAGES: int = int(os.getenv("BROADCAST_MAX_MESSAGES", "50"))
-BROADCAST_CRITICAL_ON_PRETOOL = _env_bool("BROADCAST_CRITICAL_ON_PRETOOL", "true")
-BROADCAST_PRETOOL_MIN_SEVERITY: str = os.getenv("BROADCAST_PRETOOL_MIN_SEVERITY", "alert")
+# Default OFF — alert-tier broadcasts on every PreToolUse is a #34713
+# contamination vector ("Hook Error"-shaped injections erode model
+# confidence at scale). Operators on incident response can opt back in via
+# ~/.agentihooks/.env.
+BROADCAST_CRITICAL_ON_PRETOOL = _env_bool("BROADCAST_CRITICAL_ON_PRETOOL", "false")
+# PreToolUse threshold raised to "critical" so only true-emergency
+# broadcasts fire on every tool call. Routine alerts still land via
+# UserPromptSubmit.
+BROADCAST_PRETOOL_MIN_SEVERITY: str = os.getenv("BROADCAST_PRETOOL_MIN_SEVERITY", "critical")
 
 # Cadence controls — skip re-injecting identical or too-frequent broadcasts per session.
 BROADCAST_DEDUP_BY_HASH = _env_bool("BROADCAST_DEDUP_BY_HASH", "true")
