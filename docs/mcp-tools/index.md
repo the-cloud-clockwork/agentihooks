@@ -2,7 +2,6 @@
 title: MCP Tools
 nav_order: 5
 has_children: true
-permalink: /docs/mcp-tools/
 ---
 
 # MCP Tools

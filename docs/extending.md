@@ -1,5 +1,6 @@
 ---
-title: Extending AgentiHooks
+title: Extending
+parent: Hook System
 nav_order: 8
 ---
 

@@ -1,3 +1,8 @@
+---
+title: Bundles
+parent: Getting Started
+nav_order: 9
+---
 # Bundles
 
 A bundle is a single external directory containing all your personal agentihooks customizations -- custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.

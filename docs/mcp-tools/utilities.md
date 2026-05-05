@@ -1,6 +1,7 @@
 ---
 title: Utilities
 nav_order: 13
+parent: MCP Tools
 ---
 
 # Utilities Tools

@@ -1,6 +1,7 @@
 ---
 title: Storage
 nav_order: 7
+parent: MCP Tools
 ---
 
 # Storage Tools

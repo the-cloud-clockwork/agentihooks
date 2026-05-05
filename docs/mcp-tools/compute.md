@@ -1,6 +1,7 @@
 ---
 title: Compute
 nav_order: 9
+parent: MCP Tools
 ---
 
 # Compute Tools

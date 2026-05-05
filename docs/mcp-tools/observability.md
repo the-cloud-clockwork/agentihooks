@@ -1,6 +1,7 @@
 ---
 title: Observability
 nav_order: 10
+parent: MCP Tools
 ---
 
 # Observability Tools

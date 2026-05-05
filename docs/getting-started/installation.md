@@ -1,6 +1,7 @@
 ---
 title: Installation
 nav_order: 2
+parent: Getting Started
 ---
 
 # Installation
