@@ -50,6 +50,70 @@ from hooks.config import AGENTIHOOKS_HOME
 _HASH_CACHE_FILE = AGENTIHOOKS_HOME / "brain_adapter_hash.json"
 
 
+_HALT_PHRASE_REWRITES: tuple[tuple[str, str], ...] = (
+    ("do you understand", "is this clear"),
+    ("elaborate to me", "expand on"),
+    ("stop all tool calls", "pause tool usage"),
+    ("wait for confirmation", "awaiting input"),
+)
+
+
+def _scrub_halt_phrases(text: str) -> str:
+    """Rewrite halt-trigger substrings that the operator profile (operator-behavior.md)
+    treats as STOP signals. Brain content is system-channel state, never a directive
+    — but a literal substring match in the model's halt rule cannot tell them apart.
+
+    Case-insensitive; preserves surrounding text.
+    """
+    if not text:
+        return text
+    out = text
+    for needle, replacement in _HALT_PHRASE_REWRITES:
+        # Case-insensitive replace preserving original casing of the rest.
+        i = 0
+        while True:
+            lower = out.lower()
+            j = lower.find(needle, i)
+            if j < 0:
+                break
+            out = out[:j] + replacement + out[j + len(needle):]
+            i = j + len(replacement)
+    return out
+
+
+_FRAMED_TITLES = frozenset(
+    {"Operator Intent", "Active Hot Arcs", "last-tick-diff", "Tick Diff"}
+)
+
+
+def _wrap_with_framing(title: str, body: str) -> str:
+    """For long natural-language broadcasts, prefix with explicit informational
+    framing so the model does not pivot as if the operator gave a new directive.
+    """
+    if title in _FRAMED_TITLES:
+        return (
+            "STATUS BROADCAST (informational, no action required):\n\n"
+            + body
+        )
+    return body
+
+
+_EMPTY_SIGNAL_BODIES = frozenset(
+    {"no active signals.", "no inject blocks.", "no data.", "none.", ""}
+)
+
+
+def _normalize_severity_for_empty(title: str, body: str, severity: str) -> str:
+    """Empty signal payloads should not ride the alert severity bus — that is
+    the #34713 contamination shape. Downgrade to info so the source side is
+    correct, regardless of what upstream emits.
+    """
+    stripped = (body or "").strip().lower()
+    if title.lower() in {"active signals", "amygdala", "signals"} and stripped in _EMPTY_SIGNAL_BODIES:
+        return "info"
+    return severity
+
+
 def _load_persisted_hash() -> str:
     """Read last-published content hash from disk. Empty on miss."""
     try:
@@ -321,6 +385,11 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
         # uuid).
         new_hashes: dict[str, BrainEntry] = {}
         for entry in entries:
+            entry.content = _scrub_halt_phrases(entry.content)
+            entry.content = _wrap_with_framing(entry.title, entry.content)
+            entry.severity = _normalize_severity_for_empty(
+                entry.title, entry.content, entry.severity
+            )
             probe = {
                 "channel": BRAIN_CHANNEL,
                 "severity": entry.severity,

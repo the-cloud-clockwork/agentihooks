@@ -156,9 +156,11 @@ def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
 
 
 # Default TTL per severity (seconds). 0 = use default.
-_DEFAULT_TTL = {"critical": 1800, "alert": 3600, "info": 14400}
-_DEFAULT_PERSISTENT = {"critical": True, "alert": True, "info": False}
-_VALID_SEVERITIES = frozenset({"critical", "alert", "info"})
+_DEFAULT_TTL = {"nuclear": 1800, "critical": 1800, "alert": 3600, "warning": 3600, "info": 14400, "resolved": 1800}
+_DEFAULT_PERSISTENT = {"nuclear": True, "critical": True, "alert": True, "warning": True, "info": False, "resolved": False}
+_VALID_SEVERITIES = frozenset(
+    {"nuclear", "critical", "alert", "warning", "info", "resolved"}
+)
 
 # Channels every session is subscribed to unconditionally.
 # The operator's rule: brain + amygdala are fleet-wide, no repo can drop them.
