@@ -307,11 +307,17 @@ def _build_injection() -> str:
 
 
 def inject_on_session_start() -> None:
-    """Emit manifesto as additionalContext at SessionStart."""
-    try:
-        from hooks.config import CI_MANIFESTO_ENABLED
+    """Emit manifesto as additionalContext at SessionStart.
 
-        if not CI_MANIFESTO_ENABLED:
+    Default OFF — the manifesto is now appended to ~/.claude/CLAUDE.md by
+    agentihooks init (memory channel, no 2KB hook cap, zero per-session
+    cost). Set CI_MANIFESTO_RUNTIME_INJECT=true to restore legacy runtime
+    injection.
+    """
+    try:
+        from hooks.config import CI_MANIFESTO_ENABLED, CI_MANIFESTO_RUNTIME_INJECT
+
+        if not CI_MANIFESTO_ENABLED or not CI_MANIFESTO_RUNTIME_INJECT:
             return
         payload = _build_injection()
         if not payload:
@@ -323,11 +329,22 @@ def inject_on_session_start() -> None:
 
 
 def maybe_refresh(session_id: str) -> None:
-    """Counter-gated re-injection on UserPromptSubmit."""
-    try:
-        from hooks.config import CI_MANIFESTO_ENABLED, CI_MANIFESTO_REFRESH_EVERY
+    """Counter-gated re-injection on UserPromptSubmit.
 
-        if not CI_MANIFESTO_ENABLED or CI_MANIFESTO_REFRESH_EVERY <= 0:
+    Like inject_on_session_start, this is gated by CI_MANIFESTO_RUNTIME_INJECT.
+    With manifesto in CLAUDE.md, periodic re-injection is unnecessary —
+    CLAUDE.md content stays in context for the whole session.
+    """
+    try:
+        from hooks.config import (
+            CI_MANIFESTO_ENABLED,
+            CI_MANIFESTO_REFRESH_EVERY,
+            CI_MANIFESTO_RUNTIME_INJECT,
+        )
+
+        if not CI_MANIFESTO_ENABLED or not CI_MANIFESTO_RUNTIME_INJECT:
+            return
+        if CI_MANIFESTO_REFRESH_EVERY <= 0:
             return
         _session_counter[session_id] = _session_counter.get(session_id, 0) + 1
         if _session_counter[session_id] % CI_MANIFESTO_REFRESH_EVERY != 0:
