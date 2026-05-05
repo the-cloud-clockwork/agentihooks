@@ -376,8 +376,8 @@ BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 # hard limit; exceeding it makes the harness write to a temp file and the
 # model receives a filepath instead of the body. Cap below the limit with
 # envelope headroom.
-BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "4096"))
-BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "8192"))
+BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "0"))
+BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "0"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     "BROADCAST_DELIVERY_STATE_FILE",
@@ -446,6 +446,11 @@ def _resolve_manifesto_path() -> str:
 
 
 CI_MANIFESTO_PATH: str = _resolve_manifesto_path()
+# Optional cap on the bytes the manifesto inject contributes to SessionStart /
+# UserPromptSubmit. 0 (default) = no cap; full doctrine ships through. Set
+# >0 to opt in to truncation when stacking multiple injections under
+# Claude Code's documented 10,000-char hook output limit.
+CI_MANIFESTO_MAX_BYTES: int = int(os.getenv("CI_MANIFESTO_MAX_BYTES", "0"))
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
 # Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.

@@ -321,7 +321,11 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Scope: `refresh` or `all` |
 | `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N turns |
 | `BROADCAST_ENABLED` | `true` | Fleet messaging master switch |
-| `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Critical alerts on every tool call |
+| `BROADCAST_CRITICAL_ON_PRETOOL` | `false` | Re-inject critical broadcasts on every PreToolUse (default off — alerts still land on UserPromptSubmit) |
+| `BROADCAST_PRETOOL_MIN_SEVERITY` | `critical` | Minimum severity for PreToolUse re-injection. `alert` widens it. |
+| `BROADCAST_MAX_BYTES_PRETOOL` | `0` | PreToolUse banner byte cap. `0` = no cap. Set >0 to opt in to truncation under Claude Code's 10K hook output limit. |
+| `BROADCAST_MAX_BYTES_PROMPT` | `0` | UserPromptSubmit banner byte cap. Same semantics. |
+| `CI_MANIFESTO_MAX_BYTES` | `0` | CI manifesto inject byte cap. `0` = full doctrine ships through. Set >0 (e.g. `7500`) to truncate with a "Read full file at \<path\>" footer. |
 | `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
@@ -336,6 +340,26 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BRAIN_WRITER_ENABLED` | `false` | POST `/marker` on Stop / SubagentStop. |
 
 Complete table: [Configuration Reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/configuration/)
+
+#### Hook output and the 10K cap
+
+Claude Code injects hook stdout (and any `hookSpecificOutput.additionalContext`)
+into the model's context up to a documented **10,000-character hard cap**.
+Beyond the cap, the harness silently writes the body to a temp file and the
+model receives a filepath instead of the content. If your SessionStart or
+UserPromptSubmit injection accumulates above 10K, it is **silently lost**.
+
+AgentiHooks does not enforce a default cap — full content ships through so
+agents have the most context possible. To audit what each event actually
+emits and whether anything is over the limit, run:
+
+```bash
+agentihooks doctor --debug-hook
+```
+
+If you stack many injections (CI manifesto + brain feed + amygdala + custom
+overlays + tool memory), use the `*_MAX_BYTES` knobs above to cap the
+biggest contributors and leave headroom for the rest.
 
 ### Remote brain quickstart
 
