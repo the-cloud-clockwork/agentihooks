@@ -278,3 +278,90 @@ class TestRunAllChecks:
         with patch("hooks._redis.get_redis", return_value=None):
             results = run_all_checks(session_id="test-sess")
             assert "session" in results
+
+
+# ---------------------------------------------------------------------------
+# P0.4 — agentihooks doctor --debug-hook
+# ---------------------------------------------------------------------------
+
+
+class TestHookInjectionProbe:
+    def test_synthetic_payload_minimal_fields(self):
+        from scripts.status_checker import _synthetic_payload
+
+        for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"):
+            p = _synthetic_payload(ev)
+            assert p["session_id"] == "doctor-probe"
+            assert p["hook_event_name"] == ev
+
+    def test_synthetic_payload_pretool_includes_tool_fields(self):
+        from scripts.status_checker import _synthetic_payload
+
+        p = _synthetic_payload("PreToolUse")
+        assert p["tool_name"] == "Bash"
+        assert p["tool_input"] == {"command": "true"}
+
+    def test_format_hook_injection_renders_passing_run(self):
+        from scripts.status_checker import format_hook_injection
+
+        result = {
+            "ok": True,
+            "events": [
+                {
+                    "event": "SessionStart",
+                    "ok": True,
+                    "exit_code": 0,
+                    "stdout_bytes": 0,
+                    "additional_context_chars": 0,
+                    "reason": None,
+                    "stderr_first_line": "",
+                }
+            ],
+            "warnings": [],
+        }
+        out = format_hook_injection(result)
+        assert "Overall: OK" in out
+        assert "✓" in out
+
+    def test_format_hook_injection_renders_failure(self):
+        from scripts.status_checker import format_hook_injection
+
+        result = {
+            "ok": False,
+            "events": [
+                {
+                    "event": "PreToolUse",
+                    "ok": False,
+                    "exit_code": 1,
+                    "stdout_bytes": 12,
+                    "additional_context_chars": 0,
+                    "reason": "exit code 1 (expected 0 or 2)",
+                    "stderr_first_line": "boom",
+                }
+            ],
+            "warnings": ["PreToolUse: exit code 1 (expected 0 or 2)"],
+        }
+        out = format_hook_injection(result)
+        assert "Overall: FAILED" in out
+        assert "exit code 1" in out
+        assert "stderr: boom" in out
+
+    def test_check_hook_injection_real_run(self):
+        """Smoke test against the real hook process. Asserts the probe runs
+        end-to-end without raising; does NOT assert ok=True (fleet may have
+        legitimate findings that the operator routes separately)."""
+        from scripts.status_checker import check_hook_injection
+
+        result = check_hook_injection()
+        assert "ok" in result
+        assert "events" in result
+        assert len(result["events"]) == 5
+        for ev in result["events"]:
+            assert ev["event"] in {
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "Stop",
+            }
+
