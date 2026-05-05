@@ -4962,6 +4962,21 @@ env (see ~/.agentihooks/.env):
 
     sub.add_parser("status", help="Show installation health, cost guardrails, and system state")
 
+    doctor_p = sub.add_parser(
+        "doctor",
+        help="Diagnose hook health: simulate every event, validate stdout JSON, surface broken hooks",
+    )
+    doctor_p.add_argument(
+        "--debug-hook",
+        action="store_true",
+        help="Run each hook event with synthetic payload and assert protocol invariants",
+    )
+    doctor_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of CLI report",
+    )
+
     prune_p = sub.add_parser("prune", help="Remove stale MCP entries from all config files")
     prune_p.add_argument("--verbose", "-v", action="store_true", help="Show details of each pruned entry")
 
@@ -5268,6 +5283,26 @@ notes:
         from scripts.status_checker import format_cli, run_all_checks
 
         print(format_cli(run_all_checks()))
+    elif args.command == "doctor":
+        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+        from scripts.status_checker import (
+            check_hook_injection,
+            format_cli,
+            format_hook_injection,
+            run_all_checks,
+        )
+
+        if args.debug_hook:
+            result = check_hook_injection()
+            if args.json:
+                import json as _json
+
+                print(_json.dumps(result, indent=2))
+            else:
+                print(format_hook_injection(result))
+            sys.exit(0 if result.get("ok") else 1)
+        else:
+            print(format_cli(run_all_checks()))
     elif args.command == "prune":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.sync_daemon import _get_valid_mcp_names, _prune_stale_mcp_servers

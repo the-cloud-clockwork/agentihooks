@@ -747,3 +747,160 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Hook injection probe (P0.4 — agentihooks doctor --debug-hook)
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_payload(event: str) -> dict:
+    """Minimal valid payload per Claude Code hook protocol."""
+    base = {
+        "session_id": "doctor-probe",
+        "transcript_path": "",
+        "cwd": str(Path.cwd()),
+        "hook_event_name": event,
+    }
+    if event in ("PreToolUse", "PostToolUse"):
+        base["tool_name"] = "Bash"
+        base["tool_input"] = {"command": "true"}
+        base["tool_response"] = {}
+    if event == "UserPromptSubmit":
+        base["prompt"] = "doctor probe"
+    return base
+
+
+def check_hook_injection() -> dict:
+    """Run each hook event with a synthetic payload via `python -m hooks` and
+    assert the upstream Claude Code protocol invariants:
+
+      1. exit code is 0 or 2 (never an unexpected non-zero like 1)
+      2. stdout is parseable JSON OR empty
+      3. if hookSpecificOutput.additionalContext is present, it is a string
+         under 10,000 chars (the documented hard cap)
+
+    Returns a dict {ok: bool, events: [...], warnings: [...]}.
+    """
+    import json as _json
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parent.parent
+    events = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+    ]
+    results: list[dict] = []
+    warnings: list[str] = []
+
+    for event in events:
+        payload = _synthetic_payload(event)
+        env = {**os.environ, "CLAUDE_HOOK_LOG_ENABLED": "false", "BROADCAST_ENABLED": "false"}
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "hooks"],
+                cwd=repo_root,
+                input=_json.dumps(payload),
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            results.append({"event": event, "ok": False, "reason": "timeout >30s"})
+            warnings.append(f"{event}: hook timed out (>30s)")
+            continue
+
+        out = (proc.stdout or "").strip()
+        rc = proc.returncode
+        ok = True
+        reason = None
+        ctx_len = 0
+
+        # Per Claude Code hooks protocol:
+        #  - SessionStart / UserPromptSubmit: plain-text stdout is valid context.
+        #  - PreToolUse / PostToolUse / Stop: prefer hookSpecificOutput JSON;
+        #    plain-text stdout is undocumented and may be ignored by some versions.
+        accepts_plain_text = event in ("SessionStart", "UserPromptSubmit")
+
+        if rc not in (0, 2):
+            ok = False
+            reason = f"exit code {rc} (expected 0 or 2)"
+        elif out:
+            parsed = None
+            try:
+                parsed = _json.loads(out)
+            except _json.JSONDecodeError as e:
+                if not accepts_plain_text:
+                    ok = False
+                    reason = (
+                        f"plain-text stdout on {event} is undocumented; emit "
+                        f"hookSpecificOutput JSON instead ({e.msg})"
+                    )
+                else:
+                    ctx_len = len(out)
+                    if ctx_len >= 10000:
+                        ok = False
+                        reason = (
+                            f"plain-text stdout is {ctx_len} chars; ≥10000 triggers "
+                            "Claude Code's tempfile-substitution path"
+                        )
+            if parsed is not None:
+                hso = parsed.get("hookSpecificOutput") or {}
+                ac = hso.get("additionalContext")
+                if ac is not None:
+                    if not isinstance(ac, str):
+                        ok = False
+                        reason = "additionalContext must be a string"
+                    else:
+                        ctx_len = len(ac)
+                        if ctx_len >= 10000:
+                            ok = False
+                            reason = (
+                                f"additionalContext is {ctx_len} chars; ≥10000 triggers "
+                                "Claude Code's tempfile-substitution path (model receives a path, not body)"
+                            )
+
+        results.append(
+            {
+                "event": event,
+                "ok": ok,
+                "exit_code": rc,
+                "stdout_bytes": len(out),
+                "additional_context_chars": ctx_len,
+                "reason": reason,
+                "stderr_first_line": (proc.stderr or "").splitlines()[0] if proc.stderr else "",
+            }
+        )
+        if not ok and reason:
+            warnings.append(f"{event}: {reason}")
+
+    return {"ok": all(r["ok"] for r in results), "events": results, "warnings": warnings}
+
+
+def format_hook_injection(result: dict) -> str:
+    lines = ["AgentiHooks doctor — hook injection probe", "=" * 50]
+    for ev in result.get("events", []):
+        status = "✓" if ev["ok"] else "✗"
+        lines.append(
+            f"  {status} {ev['event']:<20} exit={ev['exit_code']} "
+            f"out_bytes={ev['stdout_bytes']} ctx_chars={ev['additional_context_chars']}"
+        )
+        if ev.get("reason"):
+            lines.append(f"      reason: {ev['reason']}")
+        if ev.get("stderr_first_line"):
+            lines.append(f"      stderr: {ev['stderr_first_line']}")
+    if result.get("warnings"):
+        lines.append("")
+        lines.append("Warnings:")
+        for w in result["warnings"]:
+            lines.append(f"  - {w}")
+    lines.append("")
+    lines.append("Overall: " + ("OK ✓" if result.get("ok") else "FAILED ✗"))
+    return "\n".join(lines)
+
