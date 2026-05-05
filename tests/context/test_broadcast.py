@@ -590,10 +590,30 @@ class TestInjectionRobustness:
         assert "id:b" in out
         assert "id:a" not in out
 
-    def test_format_critical_context_enforces_byte_cap(self):
+    def test_format_critical_context_enforces_byte_cap_when_set(self):
+        """Cap only kicks in when env opt-in (BROADCAST_MAX_BYTES_PRETOOL > 0)."""
+        from unittest.mock import patch
+
         from hooks.context.broadcast import format_critical_context
 
-        # 50 messages with 1KB body each — total far exceeds 4KB cap.
+        msgs = [
+            {
+                "id": f"m{i}",
+                "severity": "alert",
+                "message": "x" * 1024,
+                "content_hash": f"h{i}",
+                "created_at": f"2026-05-05T10:{i:02d}:00Z",
+            }
+            for i in range(50)
+        ]
+        with patch("hooks.context.broadcast.BROADCAST_MAX_BYTES_PRETOOL", 4096):
+            out = format_critical_context(msgs)
+        assert len(out.encode("utf-8")) <= 4096
+
+    def test_format_critical_context_no_cap_emits_all(self):
+        """Default 0 → all deduped messages reach the model in full."""
+        from hooks.context.broadcast import format_critical_context
+
         msgs = [
             {
                 "id": f"m{i}",
@@ -605,15 +625,31 @@ class TestInjectionRobustness:
             for i in range(50)
         ]
         out = format_critical_context(msgs)
-        assert len(out.encode("utf-8")) <= 4096
+        # No cap → 50 lines emitted (each at 1KB+ → 50+ KB total)
+        assert out.count("- [ALERT]") == 50
 
     def test_format_broadcast_banner_truncates_long_body(self):
+        from unittest.mock import patch
+
         from hooks.context.broadcast import format_broadcast_banner
 
         msg = {"severity": "info", "source": "test", "message": "x" * 20000, "id": "abc"}
-        out = format_broadcast_banner(msg)
-        assert len(out.encode("utf-8")) <= 8192 + 200  # body cap + envelope
+        with patch("hooks.context.broadcast.BROADCAST_MAX_BYTES_PROMPT", 8192):
+            out = format_broadcast_banner(msg)
+        assert len(out.encode("utf-8")) <= 8192 + 200
         assert "[...truncated]" in out
+
+    def test_format_broadcast_banner_no_cap_emits_full(self):
+        """Default BROADCAST_MAX_BYTES_PROMPT=0 → full body reaches the model."""
+        from unittest.mock import patch
+
+        from hooks.context.broadcast import format_broadcast_banner
+
+        msg = {"severity": "info", "source": "test", "message": "x" * 5000, "id": "abc"}
+        with patch("hooks.context.broadcast.BROADCAST_MAX_BYTES_PROMPT", 0):
+            out = format_broadcast_banner(msg)
+        assert "[...truncated]" not in out
+        assert msg["message"] in out
 
     def test_format_broadcast_banner_uses_display_label(self):
         from hooks.context.broadcast import format_broadcast_banner

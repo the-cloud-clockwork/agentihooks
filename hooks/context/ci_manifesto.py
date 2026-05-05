@@ -253,17 +253,18 @@ def contains_pr_signal(text: str) -> bool:
     return _signal_match(text, get_pr_signals())
 
 
-# Claude Code injects hook stdout / additionalContext into context up to a
-# 10,000-char cap; beyond that the harness writes to a temp file and the
-# model receives a filepath instead of body content. The full Anton CI
-# manifesto is ~36KB, so we MUST inject under-cap or it gets silently
-# substituted (and the bundle CLAUDE.md rule "If the manifesto is not
-# visible, alert operator" never fires because the model thinks it loaded).
+# Claude Code injects hook stdout and additionalContext into the model's
+# context with a documented 10,000-char hard cap (over → harness silently
+# writes to a temp file and the model gets a filepath, not the body).
 #
-# Strategy: emit the manifesto verbatim up to a safe byte budget, then a
-# trailer pointing the agent at the canonical file path so the model can
-# Read on demand for any section it needs in full.
-_INJECTION_BUDGET_BYTES = 7500
+# We do NOT enforce a default cap on the manifesto inject — operators who
+# want full doctrine in context should keep the env var unset and accept
+# the upstream tradeoff. Set CI_MANIFESTO_MAX_BYTES=N to opt in to
+# truncation when you have multiple things competing for SessionStart
+# budget.
+#
+# CI_MANIFESTO_MAX_BYTES=0 (default) → unbounded; emit full manifesto.
+# CI_MANIFESTO_MAX_BYTES=7500          → cap to ~7.5 KB with trailer.
 _INJECTION_TRAILER_TEMPLATE = (
     "\n[TRUNCATED — the full doctrine is at: {path}]\n"
     "Read that path with the Read tool when you need section details.\n"
@@ -275,6 +276,14 @@ _INJECTION_HEADER_TEMPLATE = (
 )
 
 
+def _injection_budget_bytes() -> int:
+    """Read budget from env each call so operators can dial via .env edits
+    without a session restart. 0 = no cap."""
+    from hooks.config import CI_MANIFESTO_MAX_BYTES
+
+    return CI_MANIFESTO_MAX_BYTES
+
+
 def _build_injection() -> str:
     data = _load()
     content = data["content"]
@@ -284,14 +293,15 @@ def _build_injection() -> str:
     header = _INJECTION_HEADER_TEMPLATE.format(path=path_str)
     full_trailer = "\n=== END CI MANIFESTO ===\n"
     full_payload = header + content + full_trailer
-    if len(full_payload.encode("utf-8")) <= _INJECTION_BUDGET_BYTES:
+
+    budget = _injection_budget_bytes()
+    if budget <= 0 or len(full_payload.encode("utf-8")) <= budget:
         return full_payload
     # Need to truncate. Compute room left for content after header + trailer.
     trailer = _INJECTION_TRAILER_TEMPLATE.format(path=path_str)
     overhead = len((header + trailer).encode("utf-8"))
-    body_budget = max(0, _INJECTION_BUDGET_BYTES - overhead)
+    body_budget = max(0, budget - overhead)
     body_bytes = content.encode("utf-8")[:body_budget]
-    # Avoid splitting a multi-byte char.
     body = body_bytes.decode("utf-8", errors="ignore")
     return header + body + trailer
 

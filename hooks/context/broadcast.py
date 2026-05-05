@@ -68,9 +68,14 @@ def _body_is_empty(msg: dict) -> bool:
 
 
 def _truncate_body(body: str, max_bytes: int) -> str:
-    """Truncate utf-8 body to max_bytes with a marker, preserving char boundaries."""
+    """Truncate utf-8 body to max_bytes with a marker, preserving char boundaries.
+
+    max_bytes <= 0 → no cap; return body unchanged. Lets operators run with
+    truncation off by default and opt in via env var when they need
+    envelope headroom under Claude Code's 10K hook output limit.
+    """
     if max_bytes <= 0:
-        return ""
+        return body
     encoded = body.encode("utf-8")
     if len(encoded) <= max_bytes:
         return body
@@ -756,18 +761,24 @@ def format_critical_context(msgs: list[dict]) -> str:
     deduped.sort(key=lambda m: _SEVERITY_RANK.get(m.get("severity", "info"), 9))
 
     header = "BROADCAST ALERTS (PreToolUse):"
-    budget = max(0, BROADCAST_MAX_BYTES_PRETOOL - len(header.encode("utf-8")) - 1)
     lines = [header]
-    for m in deduped:
-        msg_id = m.get("id", "")
-        sev = _display_label(m.get("severity", "alert"))
-        body = _truncate_body(m.get("message", ""), max(0, budget // max(1, len(deduped))))
-        line = f"  - [{sev}] (id:{msg_id}) {body}"
-        line_bytes = len(line.encode("utf-8")) + 1
-        if line_bytes > budget:
-            break
-        lines.append(line)
-        budget -= line_bytes
+    if BROADCAST_MAX_BYTES_PRETOOL <= 0:
+        for m in deduped:
+            msg_id = m.get("id", "")
+            sev = _display_label(m.get("severity", "alert"))
+            lines.append(f"  - [{sev}] (id:{msg_id}) {m.get('message', '')}")
+    else:
+        budget = max(0, BROADCAST_MAX_BYTES_PRETOOL - len(header.encode("utf-8")) - 1)
+        for m in deduped:
+            msg_id = m.get("id", "")
+            sev = _display_label(m.get("severity", "alert"))
+            body = _truncate_body(m.get("message", ""), max(0, budget // max(1, len(deduped))))
+            line = f"  - [{sev}] (id:{msg_id}) {body}"
+            line_bytes = len(line.encode("utf-8")) + 1
+            if line_bytes > budget:
+                break
+            lines.append(line)
+            budget -= line_bytes
     if len(lines) == 1:
         return ""
     return "\n".join(lines)
