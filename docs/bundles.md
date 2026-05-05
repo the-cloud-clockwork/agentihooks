@@ -5,7 +5,9 @@ nav_order: 9
 ---
 # Bundles
 
-A bundle is a single external directory containing all your personal agentihooks customizations -- custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.
+A bundle is a single external directory containing all your personal agentihooks customizations — custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.
+
+> **Public example**: [`agentihooks-bundle-example`](https://github.com/The-Cloud-Clockwork/agentihooks-bundle-example) — a minimal, working bundle you can clone, inspect, and fork as the starting point for your own.
 
 ## Quick Start
 
