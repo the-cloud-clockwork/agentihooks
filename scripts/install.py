@@ -2561,6 +2561,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             # No CLAUDE.md in any profile — try last profile as fallback
             _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
 
+    # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
+    _append_ci_manifesto_to_claude_md()
+
     # --- 6. Install MCP servers to user scope (~/.claude.json) ---
     # Layer 1: hooks-utils from agentihooks
     _install_user_mcp(last_profile)
@@ -3343,6 +3346,63 @@ def _symlink_dir_contents(
         if not item.name.startswith("."):
             _link_item(item, dst_dir / item.name, label)
 
+
+
+
+def _append_ci_manifesto_to_claude_md() -> None:
+    """Append the CI manifesto to ~/.claude/CLAUDE.md as a fenced block.
+
+    The manifesto used to be injected at SessionStart via stdout, but Claude
+    Code's hook output is capped at ~2KB before the harness substitutes the
+    body with a filepath preview. The manifesto is ~36KB, so the model never
+    saw the doctrine. CLAUDE.md is loaded through the memory channel, which
+    has no such cap — appending the manifesto here puts it permanently in
+    the model's context for every session, at zero per-session cost.
+
+    Idempotent: if the manifesto block is already present and unchanged,
+    no write happens.
+    """
+    try:
+        from hooks import config as _cfg
+    except Exception:
+        return
+    if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
+        return
+    manifesto_path = Path(getattr(_cfg, "CI_MANIFESTO_PATH", "")).expanduser()
+    if not manifesto_path.exists():
+        _cprint(
+            f"  [--] CI manifesto not found at {manifesto_path} — skipping CLAUDE.md append."
+        )
+        return
+    dst = CLAUDE_HOME / _CLAUDE_MD_NAME
+    if not dst.exists():
+        # Nothing to append to — install_system_prompt handles its own write
+        return
+    body = manifesto_path.read_text().rstrip()
+    block = (
+        "\n\n<!-- BEGIN CI MANIFESTO (auto-injected by agentihooks init) -->\n"
+        f"<!-- Source: {manifesto_path} -->\n\n"
+        f"{body}\n\n"
+        "<!-- END CI MANIFESTO -->\n"
+    )
+    current = dst.read_text()
+    begin_marker = "<!-- BEGIN CI MANIFESTO"
+    end_marker = "<!-- END CI MANIFESTO -->"
+    if begin_marker in current and end_marker in current:
+        # Replace existing block
+        before = current.split(begin_marker, 1)[0].rstrip()
+        after_split = current.split(end_marker, 1)
+        after = after_split[1] if len(after_split) > 1 else ""
+        new_content = before + block + after.lstrip("\n")
+        if new_content == current:
+            _cprint("  [--] CI manifesto block already up to date in CLAUDE.md")
+            return
+    else:
+        new_content = current.rstrip() + block
+    dst.write_text(new_content)
+    _cprint(
+        f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)"
+    )
 
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     """Copy profile's CLAUDE.md to ~/.claude/CLAUDE.md.

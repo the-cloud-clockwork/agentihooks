@@ -451,6 +451,13 @@ CI_MANIFESTO_PATH: str = _resolve_manifesto_path()
 # >0 to opt in to truncation when stacking multiple injections under
 # Claude Code's documented 10,000-char hook output limit.
 CI_MANIFESTO_MAX_BYTES: int = int(os.getenv("CI_MANIFESTO_MAX_BYTES", "0"))
+# When True, ci_manifesto.inject_on_session_start fires on every session
+# start (legacy behavior — emits 36 KB+ on stdout, hits Claude Code's 2 KB
+# persisted-output preview cap, manifesto silently truncated to filepath).
+# Default False — manifesto is now appended to ~/.claude/CLAUDE.md by
+# `agentihooks init` and loaded through the memory channel (no hook cap,
+# no per-session cost). Flip to True to restore the old runtime injection.
+CI_MANIFESTO_RUNTIME_INJECT: bool = _env_bool("CI_MANIFESTO_RUNTIME_INJECT", "false")
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
 # Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
