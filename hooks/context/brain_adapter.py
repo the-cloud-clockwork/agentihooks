@@ -296,7 +296,12 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
     except ImportError:
         return 0
 
-    from hooks.context.broadcast import clear_broadcasts, create_broadcast
+    from hooks.context.broadcast import (
+        _load_broadcasts,
+        _msg_hash,
+        _save_broadcasts,
+        create_broadcast,
+    )
     from hooks.telemetry import span_ctx
 
     entries = [_shrink_entry(e, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES) for e in entries]
@@ -309,11 +314,38 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
             "total_bytes": total_bytes,
         },
     ) as span:
-        # Clear existing brain messages on this channel
-        clear_broadcasts(channel=BRAIN_CHANNEL)
+        # Diff-based clear: keep entries on this channel whose content_hash
+        # also exists in the new batch (stable UUIDs across ticks → delivery
+        # state finally matches; resolves "same content, fresh id" feedback
+        # loop where dedup never hit because every republish minted a new
+        # uuid).
+        new_hashes: dict[str, BrainEntry] = {}
+        for entry in entries:
+            probe = {
+                "channel": BRAIN_CHANNEL,
+                "severity": entry.severity,
+                "message": f"[{entry.title}]\n{entry.content}".strip(),
+            }
+            new_hashes[_msg_hash(probe)] = entry
+
+        existing = _load_broadcasts()
+        kept_hashes: set[str] = set()
+        rest: list[dict] = []
+        for m in existing:
+            if m.get("channel") == BRAIN_CHANNEL:
+                h = m.get("content_hash")
+                if h and h in new_hashes:
+                    rest.append(m)
+                    kept_hashes.add(h)
+                # else: drop — content no longer in batch
+            else:
+                rest.append(m)
+        _save_broadcasts(rest)
 
         count = 0
-        for entry in entries:
+        for h, entry in new_hashes.items():
+            if h in kept_hashes:
+                continue  # content already live with a stable id, do not re-mint
             msg_id = create_broadcast(
                 message=f"[{entry.title}]\n{entry.content}",
                 severity=entry.severity,
@@ -325,7 +357,7 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
             if msg_id:
                 count += 1
 
-        span.set_attrs({"published_count": count})
+        span.set_attrs({"published_count": count, "kept_count": len(kept_hashes)})
         return count
 
 

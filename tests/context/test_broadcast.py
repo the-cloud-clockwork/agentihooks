@@ -623,3 +623,60 @@ class TestInjectionRobustness:
         assert "[INFO]" in out
         assert "[ALERT]" not in out
 
+
+# ---------------------------------------------------------------------------
+# P1.2 — content_hash field on every broadcast entry
+# ---------------------------------------------------------------------------
+
+
+class TestContentHashField:
+    def test_create_broadcast_sets_content_hash(self, broadcast_file):
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
+
+        with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
+            create_broadcast("hello world", severity="alert", channel="ops")
+            msgs = _load_broadcasts()
+        assert msgs[0]["content_hash"]
+        assert isinstance(msgs[0]["content_hash"], str)
+        assert len(msgs[0]["content_hash"]) == 16
+
+    def test_content_hash_stable_for_same_content(self, broadcast_file):
+        from hooks.context.broadcast import _load_broadcasts, create_broadcast
+
+        with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
+            create_broadcast("same body", severity="info", channel="brain")
+            create_broadcast("same body", severity="info", channel="brain")
+            msgs = _load_broadcasts()
+        assert msgs[0]["content_hash"] == msgs[1]["content_hash"]
+        # but ids are different (UUIDs)
+        assert msgs[0]["id"] != msgs[1]["id"]
+
+    def test_find_broadcast_by_content_hash(self, broadcast_file):
+        from hooks.context.broadcast import (
+            _load_broadcasts,
+            create_broadcast,
+            find_broadcast_by_content_hash,
+        )
+
+        with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
+            create_broadcast("body A", severity="info", channel="brain")
+            msgs = _load_broadcasts()
+            h = msgs[0]["content_hash"]
+            found = find_broadcast_by_content_hash(h, channel="brain")
+        assert found is not None
+        assert found["message"] == "body A"
+
+    def test_find_broadcast_by_content_hash_channel_mismatch(self, broadcast_file):
+        from hooks.context.broadcast import (
+            _load_broadcasts,
+            create_broadcast,
+            find_broadcast_by_content_hash,
+        )
+
+        with patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file):
+            create_broadcast("body A", severity="info", channel="brain")
+            msgs = _load_broadcasts()
+            h = msgs[0]["content_hash"]
+            found = find_broadcast_by_content_hash(h, channel="ops")
+        assert found is None
+
