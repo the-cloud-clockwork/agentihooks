@@ -1,6 +1,7 @@
 ---
 title: Database
 nav_order: 8
+parent: MCP Tools
 ---
 
 # Database Tools

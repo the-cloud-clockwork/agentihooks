@@ -1,7 +1,7 @@
 ---
 title: Cost Management
-nav_order: 3
-permalink: /docs/cost-management/
+parent: Reference
+nav_order: 9
 ---
 
 # Cost Management

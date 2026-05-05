@@ -1,6 +1,7 @@
 ---
 title: Email
 nav_order: 5
+parent: MCP Tools
 ---
 
 # Email Tools

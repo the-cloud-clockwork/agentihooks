@@ -1,6 +1,7 @@
 ---
 title: Profiles
 nav_order: 3
+parent: Getting Started
 ---
 
 # Profiles

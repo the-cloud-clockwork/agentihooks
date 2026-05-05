@@ -1,6 +1,7 @@
 ---
 title: AWS
 nav_order: 4
+parent: MCP Tools
 ---
 
 # AWS Tools

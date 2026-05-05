@@ -1,3 +1,8 @@
+---
+title: Connectors
+parent: Hook System
+nav_order: 9
+---
 # Connectors
 
 {: .warning }

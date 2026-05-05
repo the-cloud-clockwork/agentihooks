@@ -1,6 +1,7 @@
 ---
 title: Events
 nav_order: 2
+parent: Hook System
 ---
 
 # Hook Events
