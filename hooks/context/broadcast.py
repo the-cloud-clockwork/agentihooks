@@ -342,6 +342,10 @@ def create_broadcast(
     }
     if channel:
         entry["channel"] = channel
+    # Stable content hash decouples dedup from the random uuid above so the
+    # brain adapter (which republishes the same content with fresh ids each
+    # tick) does not generate false-novelty injections.
+    entry["content_hash"] = _msg_hash(entry)
 
     msgs = _load_broadcasts()
     msgs.append(entry)
@@ -352,6 +356,23 @@ def create_broadcast(
 
     _save_broadcasts(msgs)
     return msg_id
+
+
+def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
+    """Return the most recent broadcast matching content_hash + channel, else None."""
+    if not content_hash:
+        return None
+    msgs = _load_broadcasts()
+    matches = [
+        m
+        for m in msgs
+        if m.get("content_hash") == content_hash
+        and (channel is None or m.get("channel") == channel)
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda m: m.get("created_at", ""))
+    return matches[-1]
 
 
 def list_broadcasts() -> list[dict]:
