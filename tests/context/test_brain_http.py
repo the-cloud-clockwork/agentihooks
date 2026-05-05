@@ -330,3 +330,70 @@ def test_brain_writer_http_noop_when_url_unset(monkeypatch):
     count, failed = bw._publish_to_http(markers, session_id="s")
     assert count == 0
     assert failed == markers
+
+
+# ---------------------------------------------------------------------------
+# P1.3 — phrase scrub
+# P1.4 — empty-signal severity normalization
+# A.2 — framing prefix for natural-language broadcasts
+# ---------------------------------------------------------------------------
+
+
+class TestBrainAdapterHelpers:
+    def test_scrub_replaces_do_you_understand(self):
+        from hooks.context.brain_adapter import _scrub_halt_phrases
+
+        assert _scrub_halt_phrases("Do you understand the situation?") == (
+            "is this clear the situation?"
+        )
+
+    def test_scrub_replaces_elaborate_case_insensitive(self):
+        from hooks.context.brain_adapter import _scrub_halt_phrases
+
+        assert _scrub_halt_phrases("Please ELABORATE TO ME on this.") == (
+            "Please expand on on this."
+        )
+
+    def test_scrub_no_op_on_clean_text(self):
+        from hooks.context.brain_adapter import _scrub_halt_phrases
+
+        assert _scrub_halt_phrases("nothing to scrub here") == "nothing to scrub here"
+
+    def test_framing_prefix_applied_to_operator_intent(self):
+        from hooks.context.brain_adapter import _wrap_with_framing
+
+        out = _wrap_with_framing("Operator Intent", "operator is doing X")
+        assert out.startswith("STATUS BROADCAST (informational, no action required):")
+
+    def test_framing_prefix_skipped_for_unframed_titles(self):
+        from hooks.context.brain_adapter import _wrap_with_framing
+
+        assert _wrap_with_framing("Active Signals", "real signal") == "real signal"
+
+    def test_empty_signal_severity_downgraded_to_info(self):
+        from hooks.context.brain_adapter import _normalize_severity_for_empty
+
+        assert (
+            _normalize_severity_for_empty("Active Signals", "No active signals.", "alert")
+            == "info"
+        )
+        assert (
+            _normalize_severity_for_empty("Active Signals", "", "warning") == "info"
+        )
+
+    def test_real_signal_severity_preserved(self):
+        from hooks.context.brain_adapter import _normalize_severity_for_empty
+
+        assert (
+            _normalize_severity_for_empty("Active Signals", "litellm-0 down", "alert")
+            == "alert"
+        )
+
+    def test_severity_unchanged_for_non_signal_titles(self):
+        from hooks.context.brain_adapter import _normalize_severity_for_empty
+
+        assert (
+            _normalize_severity_for_empty("Operator Intent", "No active signals.", "info")
+            == "info"
+        )
+
