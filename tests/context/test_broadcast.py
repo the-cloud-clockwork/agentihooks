@@ -510,3 +510,116 @@ class TestEdgeCases:
             create_broadcast("msg", severity="nonexistent")
             msgs = _load_broadcasts()
         assert msgs[0]["severity"] == "alert"
+
+
+# ---------------------------------------------------------------------------
+# Injection robustness — size budget, empty suppression, dedup, display label
+# (P0.1, P0.2, A.1, A.3)
+# ---------------------------------------------------------------------------
+
+
+class TestInjectionRobustness:
+    def test_body_is_empty_for_no_signals(self):
+        from hooks.context.broadcast import _body_is_empty
+
+        assert _body_is_empty({"message": "No active signals."})
+        assert _body_is_empty({"message": "[Active Signals]\nNo active signals."})
+        assert _body_is_empty({"message": "  no data.  "})
+        assert _body_is_empty({"message": ""})
+        assert _body_is_empty({})
+
+    def test_body_is_empty_false_for_real_content(self):
+        from hooks.context.broadcast import _body_is_empty
+
+        assert not _body_is_empty({"message": "deploy freeze until 3am"})
+        assert not _body_is_empty({"message": "[Active Signals]\nlitellm-0 down"})
+
+    def test_truncate_body_under_limit_passthrough(self):
+        from hooks.context.broadcast import _truncate_body
+
+        assert _truncate_body("hello", 100) == "hello"
+
+    def test_truncate_body_over_limit_marks(self):
+        from hooks.context.broadcast import _truncate_body
+
+        body = "x" * 1000
+        truncated = _truncate_body(body, 200)
+        assert len(truncated.encode("utf-8")) <= 200
+        assert truncated.endswith("[...truncated]")
+
+    def test_display_label_info_not_alert(self):
+        from hooks.context.broadcast import _display_label
+
+        assert _display_label("info") == "INFO"
+        assert _display_label("alert") == "ALERT"
+        assert _display_label("critical") == "CRITICAL"
+        assert _display_label("warning") == "WARNING"
+
+    def test_format_critical_context_skips_empty(self):
+        from hooks.context.broadcast import format_critical_context
+
+        msgs = [
+            {"id": "a", "severity": "alert", "message": "No active signals."},
+            {"id": "b", "severity": "alert", "message": ""},
+        ]
+        assert format_critical_context(msgs) == ""
+
+    def test_format_critical_context_dedups_by_content_hash(self):
+        from hooks.context.broadcast import format_critical_context
+
+        msgs = [
+            {
+                "id": "a",
+                "severity": "alert",
+                "message": "litellm down",
+                "channel": "ops",
+                "content_hash": "h1",
+                "created_at": "2026-05-05T10:00:00Z",
+            },
+            {
+                "id": "b",
+                "severity": "alert",
+                "message": "litellm down",
+                "channel": "ops",
+                "content_hash": "h1",
+                "created_at": "2026-05-05T10:01:00Z",
+            },
+        ]
+        out = format_critical_context(msgs)
+        # Only the newer (id:b) should remain.
+        assert "id:b" in out
+        assert "id:a" not in out
+
+    def test_format_critical_context_enforces_byte_cap(self):
+        from hooks.context.broadcast import format_critical_context
+
+        # 50 messages with 1KB body each — total far exceeds 4KB cap.
+        msgs = [
+            {
+                "id": f"m{i}",
+                "severity": "alert",
+                "message": "x" * 1024,
+                "content_hash": f"h{i}",
+                "created_at": f"2026-05-05T10:{i:02d}:00Z",
+            }
+            for i in range(50)
+        ]
+        out = format_critical_context(msgs)
+        assert len(out.encode("utf-8")) <= 4096
+
+    def test_format_broadcast_banner_truncates_long_body(self):
+        from hooks.context.broadcast import format_broadcast_banner
+
+        msg = {"severity": "info", "source": "test", "message": "x" * 20000, "id": "abc"}
+        out = format_broadcast_banner(msg)
+        assert len(out.encode("utf-8")) <= 8192 + 200  # body cap + envelope
+        assert "[...truncated]" in out
+
+    def test_format_broadcast_banner_uses_display_label(self):
+        from hooks.context.broadcast import format_broadcast_banner
+
+        msg = {"severity": "info", "source": "test", "message": "ok"}
+        out = format_broadcast_banner(msg)
+        assert "[INFO]" in out
+        assert "[ALERT]" not in out
+
