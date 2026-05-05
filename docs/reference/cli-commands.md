@@ -478,7 +478,7 @@ unresolvable paths).
 For each `~/.claude/projects/<encoded>/` dir, the resolver:
 
 1. **Decodes** the encoded name back to a real filesystem path by greedy-walking
-   (handles hyphenated directory names like `tccw-toolbelt` correctly).
+   (handles hyphenated directory names like `tcc-toolbelt` correctly).
 2. **Walks up** from that path looking for a package/agent boundary marker in
    this priority order:
    - `agent.yml` (fleet agent boundary — highest)

@@ -33,7 +33,7 @@ consumes anyone else's branch directly. Everyone consumes `origin/main`.
 Promotion is a GitHub PR.
 
 **The mirror is identity-keyed (v3).** Instead of storing memory under the raw
-Claude Code path encoding (`-home-iamroot-dev-tccw-ecosystem-agenticore/...`),
+Claude Code path encoding (`-home-iamroot-dev-tcc-ecosystem-agenticore/...`),
 the mirror uses `by-project/<key>/memory/` where `<key>` is the repo or agent
 name — the same key on every machine, regardless of where the repo lives on
 disk. A resolver reverse-walks the filesystem and stops at the first
@@ -45,7 +45,7 @@ package/agent boundary:
 | 1 | `pyproject.toml` / `Cargo.toml` / `package.json` / `go.mod` | package |
 | 2 | `.git/` | repo root (fallback) |
 
-Example: `/home/iamroot/dev/tccw-ecosystem/agentihub/agents/finops/package`
+Example: `/home/iamroot/dev/tcc-ecosystem/agentihub/agents/finops/package`
 → walks up past `package/` (pyproject.toml) → hits `finops/` (agent.yml) →
 identity = `finops`. A pod running the same agent at `/app/finops/package`
 also resolves to `finops` and they share memory.
