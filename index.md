@@ -14,7 +14,8 @@ The definitive Claude Code harness — built on four pillars that make your agen
 
 <div class="hero-actions text-center mb-8" markdown="0">
   <a href="#install" class="btn btn-primary fs-5 mr-2">Get Started</a>
-  <a href="{{ site.baseurl }}/docs/cost-management/" class="btn btn-green fs-5 mr-2">Cost Management</a>
+  <a href="{{ site.baseurl }}/docs/bundles/" class="btn btn-green fs-5 mr-2">Bundles</a>
+  <a href="{{ site.baseurl }}/docs/cost-management/" class="btn fs-5 mr-2">Cost Management</a>
   <a href="https://github.com/The-Cloud-Clockwork/agentihooks" class="btn fs-5" target="_blank">View on GitHub</a>
 </div>
 
@@ -113,6 +114,50 @@ agentihooks broadcast -s critical "Production incident — do NOT deploy."
 The broadcast system delivers your message to every session on its next hook event — before the next turn for `alert`, before every tool call for `critical`. Three severity tiers. File-based at small scale (no server needed), Redis-backed at Kubernetes scale. AI-assisted `emit` subcommand lets Claude Haiku pick the right severity from natural language. The session registry tracks every active agent so you know exactly who is in your fleet.
 
 [Read Pillar 4: Fleet Command →]({{ site.baseurl }}/docs/pillars/fleet-command/){: .btn .btn-blue }
+
+---
+
+## Bundles — your Claude Code stack as one repo
+{: .fs-7 .fw-600 }
+
+A **bundle** is a single external repository containing everything that defines your AI environment: profiles, MCP servers, skills, sub-agents, slash commands, and coding rules. AgentiHooks is the engine; the bundle is your data. Clone it on any machine, run one command, and you have your full setup.
+
+```
+my-bundle/
+├── .claude/                          # Bundle-global assets (skills · agents · commands · rules · MCPs)
+│   ├── .mcp.json
+│   ├── skills/
+│   ├── agents/
+│   ├── commands/
+│   └── rules/
+└── profiles/                         # One per identity / context
+    ├── infra-ops/
+    │   ├── CLAUDE.md                 # Behavior rules
+    │   ├── profile.yml               # Model, permissions, MCP categories, OTEL
+    │   └── .claude/                  # Profile-scoped overrides
+    └── coding-strict/
+        └── ...
+```
+
+Three layers merge at `agentihooks init`: built-in AgentiHooks base → bundle globals → active profile. Later layers override earlier ones, so you start with sane defaults, layer in team customizations, then tune per identity.
+
+```bash
+# Link your bundle once
+agentihooks init --bundle ~/dev/my-bundle
+
+# List every profile your bundle exposes
+agentihooks --list-profiles
+
+# Activate one
+agentihooks init --profile infra-ops
+
+# Chain several
+agentihooks init --profile coding,infra-ops
+```
+
+**Public reference**: [`agentihooks-bundle-example`](https://github.com/The-Cloud-Clockwork/agentihooks-bundle-example) — clone it, look at the layout, fork it, ship your own.
+
+[Bundles deep-dive →]({{ site.baseurl }}/docs/bundles/){: .btn .btn-green }
 
 ---
 
