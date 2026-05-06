@@ -76,14 +76,12 @@ def _scrub_halt_phrases(text: str) -> str:
             j = lower.find(needle, i)
             if j < 0:
                 break
-            out = out[:j] + replacement + out[j + len(needle):]
+            out = out[:j] + replacement + out[j + len(needle) :]
             i = j + len(replacement)
     return out
 
 
-_FRAMED_TITLES = frozenset(
-    {"Operator Intent", "Active Hot Arcs", "last-tick-diff", "Tick Diff"}
-)
+_FRAMED_TITLES = frozenset({"Operator Intent", "Active Hot Arcs", "last-tick-diff", "Tick Diff"})
 
 
 def _wrap_with_framing(title: str, body: str) -> str:
@@ -91,16 +89,11 @@ def _wrap_with_framing(title: str, body: str) -> str:
     framing so the model does not pivot as if the operator gave a new directive.
     """
     if title in _FRAMED_TITLES:
-        return (
-            "STATUS BROADCAST (informational, no action required):\n\n"
-            + body
-        )
+        return "STATUS BROADCAST (informational, no action required):\n\n" + body
     return body
 
 
-_EMPTY_SIGNAL_BODIES = frozenset(
-    {"no active signals.", "no inject blocks.", "no data.", "none.", ""}
-)
+_EMPTY_SIGNAL_BODIES = frozenset({"no active signals.", "no inject blocks.", "no data.", "none.", ""})
 
 
 def _normalize_severity_for_empty(title: str, body: str, severity: str) -> str:
@@ -387,9 +380,7 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
         for entry in entries:
             entry.content = _scrub_halt_phrases(entry.content)
             entry.content = _wrap_with_framing(entry.title, entry.content)
-            entry.severity = _normalize_severity_for_empty(
-                entry.title, entry.content, entry.severity
-            )
+            entry.severity = _normalize_severity_for_empty(entry.title, entry.content, entry.severity)
             probe = {
                 "channel": BRAIN_CHANNEL,
                 "severity": entry.severity,

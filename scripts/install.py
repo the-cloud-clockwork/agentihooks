@@ -3347,8 +3347,6 @@ def _symlink_dir_contents(
             _link_item(item, dst_dir / item.name, label)
 
 
-
-
 def _append_ci_manifesto_to_claude_md() -> None:
     """Append the CI manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
@@ -3370,9 +3368,7 @@ def _append_ci_manifesto_to_claude_md() -> None:
         return
     manifesto_path = Path(getattr(_cfg, "CI_MANIFESTO_PATH", "")).expanduser()
     if not manifesto_path.exists():
-        _cprint(
-            f"  [--] CI manifesto not found at {manifesto_path} — skipping CLAUDE.md append."
-        )
+        _cprint(f"  [--] CI manifesto not found at {manifesto_path} — skipping CLAUDE.md append.")
         return
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     if not dst.exists():
@@ -3400,9 +3396,8 @@ def _append_ci_manifesto_to_claude_md() -> None:
     else:
         new_content = current.rstrip() + block
     dst.write_text(new_content)
-    _cprint(
-        f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)"
-    )
+    _cprint(f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)")
+
 
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     """Copy profile's CLAUDE.md to ~/.claude/CLAUDE.md.
