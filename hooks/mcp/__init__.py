@@ -46,7 +46,15 @@ def build_server(categories=None, name="hooks-utils"):
         mod.register(mcp)
 
     _apply_allowed_tools_filter(mcp)
+    _strip_output_schema(mcp)
     return mcp
+
+
+def _strip_output_schema(mcp) -> None:
+    """Strip outputSchema from all tools — CC versions prior to outputSchema support fail on it."""
+    for tool in mcp._tool_manager._tools.values():
+        if getattr(tool, "output_schema", None) is not None:
+            tool.output_schema = None
 
 
 def _resolve_categories():
