@@ -343,16 +343,12 @@ class TestBrainAdapterHelpers:
     def test_scrub_replaces_do_you_understand(self):
         from hooks.context.brain_adapter import _scrub_halt_phrases
 
-        assert _scrub_halt_phrases("Do you understand the situation?") == (
-            "is this clear the situation?"
-        )
+        assert _scrub_halt_phrases("Do you understand the situation?") == ("is this clear the situation?")
 
     def test_scrub_replaces_elaborate_case_insensitive(self):
         from hooks.context.brain_adapter import _scrub_halt_phrases
 
-        assert _scrub_halt_phrases("Please ELABORATE TO ME on this.") == (
-            "Please expand on on this."
-        )
+        assert _scrub_halt_phrases("Please ELABORATE TO ME on this.") == ("Please expand on on this.")
 
     def test_scrub_no_op_on_clean_text(self):
         from hooks.context.brain_adapter import _scrub_halt_phrases
@@ -373,27 +369,15 @@ class TestBrainAdapterHelpers:
     def test_empty_signal_severity_downgraded_to_info(self):
         from hooks.context.brain_adapter import _normalize_severity_for_empty
 
-        assert (
-            _normalize_severity_for_empty("Active Signals", "No active signals.", "alert")
-            == "info"
-        )
-        assert (
-            _normalize_severity_for_empty("Active Signals", "", "warning") == "info"
-        )
+        assert _normalize_severity_for_empty("Active Signals", "No active signals.", "alert") == "info"
+        assert _normalize_severity_for_empty("Active Signals", "", "warning") == "info"
 
     def test_real_signal_severity_preserved(self):
         from hooks.context.brain_adapter import _normalize_severity_for_empty
 
-        assert (
-            _normalize_severity_for_empty("Active Signals", "litellm-0 down", "alert")
-            == "alert"
-        )
+        assert _normalize_severity_for_empty("Active Signals", "litellm-0 down", "alert") == "alert"
 
     def test_severity_unchanged_for_non_signal_titles(self):
         from hooks.context.brain_adapter import _normalize_severity_for_empty
 
-        assert (
-            _normalize_severity_for_empty("Operator Intent", "No active signals.", "info")
-            == "info"
-        )
-
+        assert _normalize_severity_for_empty("Operator Intent", "No active signals.", "info") == "info"

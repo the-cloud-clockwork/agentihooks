@@ -19,9 +19,7 @@ class TestInjectionBudget:
 
         manifest = tmp_path / "huge.md"
         manifest.write_text("# Doctrine\n" + ("padding " * 5000))  # ~40 KB
-        with patch.object(ci_manifesto, "_load") as mock_load, patch(
-            "hooks.config.CI_MANIFESTO_MAX_BYTES", 0
-        ):
+        with patch.object(ci_manifesto, "_load") as mock_load, patch("hooks.config.CI_MANIFESTO_MAX_BYTES", 0):
             mock_load.return_value = {"path": str(manifest), "content": manifest.read_text()}
             payload = ci_manifesto._build_injection()
         assert "[TRUNCATED" not in payload
@@ -35,9 +33,7 @@ class TestInjectionBudget:
 
         manifest = tmp_path / "huge.md"
         manifest.write_text("# Doctrine\n" + ("padding " * 5000))  # ~40 KB
-        with patch.object(ci_manifesto, "_load") as mock_load, patch(
-            "hooks.config.CI_MANIFESTO_MAX_BYTES", 7500
-        ):
+        with patch.object(ci_manifesto, "_load") as mock_load, patch("hooks.config.CI_MANIFESTO_MAX_BYTES", 7500):
             mock_load.return_value = {"path": str(manifest), "content": manifest.read_text()}
             payload = ci_manifesto._build_injection()
         assert len(payload.encode("utf-8")) <= 7500
@@ -51,9 +47,7 @@ class TestInjectionBudget:
 
         small = tmp_path / "small.md"
         small.write_text("# Doctrine\n\nbe nice.")
-        with patch.object(ci_manifesto, "_load") as mock_load, patch(
-            "hooks.config.CI_MANIFESTO_MAX_BYTES", 7500
-        ):
+        with patch.object(ci_manifesto, "_load") as mock_load, patch("hooks.config.CI_MANIFESTO_MAX_BYTES", 7500):
             mock_load.return_value = {"path": str(small), "content": small.read_text()}
             payload = ci_manifesto._build_injection()
         assert "be nice." in payload
@@ -68,4 +62,3 @@ class TestInjectionBudget:
         with patch.object(ci_manifesto, "_load") as mock_load:
             mock_load.return_value = {"path": "/nope", "content": ""}
             assert ci_manifesto._build_injection() == ""
-

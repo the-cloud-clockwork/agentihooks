@@ -715,4 +715,3 @@ class TestContentHashField:
             h = msgs[0]["content_hash"]
             found = find_broadcast_by_content_hash(h, channel="ops")
         assert found is None
-

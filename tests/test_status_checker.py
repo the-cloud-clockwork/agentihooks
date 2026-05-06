@@ -364,4 +364,3 @@ class TestHookInjectionProbe:
                 "PostToolUse",
                 "Stop",
             }
-
