@@ -839,8 +839,7 @@ def check_hook_injection() -> dict:
                 if not accepts_plain_text:
                     ok = False
                     reason = (
-                        f"plain-text stdout on {event} is undocumented; emit "
-                        f"hookSpecificOutput JSON instead ({e.msg})"
+                        f"plain-text stdout on {event} is undocumented; emit hookSpecificOutput JSON instead ({e.msg})"
                     )
                 else:
                     ctx_len = len(out)
@@ -903,4 +902,3 @@ def format_hook_injection(result: dict) -> str:
     lines.append("")
     lines.append("Overall: " + ("OK ✓" if result.get("ok") else "FAILED ✗"))
     return "\n".join(lines)
-

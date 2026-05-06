@@ -270,10 +270,7 @@ _INJECTION_TRAILER_TEMPLATE = (
     "Read that path with the Read tool when you need section details.\n"
     "=== END CI MANIFESTO ===\n"
 )
-_INJECTION_HEADER_TEMPLATE = (
-    "=== CI MANIFESTO (auto-injected doctrine — source of truth) ===\n"
-    "Source: {path}\n\n"
-)
+_INJECTION_HEADER_TEMPLATE = "=== CI MANIFESTO (auto-injected doctrine — source of truth) ===\nSource: {path}\n\n"
 
 
 def _injection_budget_bytes() -> int:
