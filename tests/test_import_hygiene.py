@@ -76,12 +76,6 @@ def test_module_import_does_not_write_to_stdout(module: str) -> None:
         timeout=30,
     )
     if proc.returncode != 0:
-        pytest.fail(
-            f"{module}: import failed (exit {proc.returncode})\n"
-            f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
-        )
+        pytest.fail(f"{module}: import failed (exit {proc.returncode})\nstderr: {proc.stderr}\nstdout: {proc.stdout}")
     if proc.stdout:
-        pytest.fail(
-            f"{module}: writes to stdout on import — would corrupt hook JSON.\n"
-            f"captured stdout:\n{proc.stdout}"
-        )
+        pytest.fail(f"{module}: writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{proc.stdout}")
