@@ -32,6 +32,12 @@ BROADCAST_FILE = AGENTIHOOKS_DIR / "broadcast.json"
 OUTBOX_DIR = AGENTIHOOKS_DIR / "brain-outbox"
 HOOKS_LOG = AGENTIHOOKS_DIR / "logs" / "hooks.log"
 
+# How long to wait for the brain_writer grandchild (forked by on_stop via
+# hooks/_async.fork_and_call) to finish writing the marker file. Bumped if
+# OTEL export latency in the grandchild grows.
+OUTBOX_POLL_TIMEOUT_SEC = 5.0
+OUTBOX_POLL_INTERVAL_SEC = 0.1
+
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
@@ -142,16 +148,16 @@ def test_marker_write(session_id: str) -> tuple[bool, str]:
     # the grandchild does the actual outbox write detached from the hook process,
     # so on a fast machine — and especially under OTEL where exporter init adds
     # latency to the parent — the hook returns before the grandchild has written.
-    # Poll up to 5s for the outbox to grow before declaring failure.
-    deadline = time.monotonic() + 5.0
+    # Poll the outbox so the grandchild has time to land the file.
+    deadline = time.monotonic() + OUTBOX_POLL_TIMEOUT_SEC
     after = before
     while time.monotonic() < deadline:
         after = _count_outbox_files()
         if after > before:
             break
-        time.sleep(0.1)
+        time.sleep(OUTBOX_POLL_INTERVAL_SEC)
     if after <= before:
-        return False, f"outbox did not grow ({before} -> {after}) within 5s"
+        return False, f"outbox did not grow ({before} -> {after}) within {OUTBOX_POLL_TIMEOUT_SEC:g}s"
     return True, f"outbox {before} -> {after} (+{after - before})"
 
 
