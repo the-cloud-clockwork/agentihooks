@@ -4090,6 +4090,34 @@ def cmd_daemon(args: "argparse.Namespace") -> None:
         else:
             print("  Hash file: not yet created")
 
+        # M4: heartbeat — warn when daemon is alive but not making progress.
+        heartbeat_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.heartbeat"
+        if heartbeat_file.exists():
+            try:
+                from datetime import datetime, timezone
+
+                hb = load_json(heartbeat_file)
+                last_success = hb.get("last_success")
+                last_cycle = hb.get("last_cycle")
+                cycles = hb.get("cycles", "?")
+                version = hb.get("version", "?")
+                print(f"  Heartbeat: cycles={cycles} version={version}")
+                print(f"    last_cycle:   {last_cycle or 'never'}")
+                print(f"    last_success: {last_success or 'never'}")
+                if last_success:
+                    try:
+                        ls = datetime.fromisoformat(last_success)
+                        age = (datetime.now(timezone.utc) - ls).total_seconds()
+                        threshold = max(180, 3 * args.poll if hasattr(args, "poll") else 180)
+                        if age > threshold:
+                            print(f"    [WARN] last_success is {int(age)}s old — daemon may be stuck")
+                    except ValueError:
+                        pass
+            except (json.JSONDecodeError, OSError):
+                print("  Heartbeat: unreadable")
+        else:
+            print("  Heartbeat: not yet created")
+
     else:  # start
         cmd = [python, str(daemon_script)]
         if args.foreground:
