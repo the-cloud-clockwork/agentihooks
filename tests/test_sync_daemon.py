@@ -598,6 +598,25 @@ class TestStepWatchdog:
 
         assert sync_daemon._step("err", boom, timeout=5, default=None) is None
 
+    def test_no_timeout_runs_inline(self):
+        # timeout=None disables the watchdog — used for legit long-running
+        # steps like _execute_actions where 120s would falsely flag a real
+        # install as stuck.
+        called = []
+
+        def slow():
+            called.append("ran")
+            return "ok"
+
+        assert sync_daemon._step("inline", slow, timeout=None) == "ok"
+        assert called == ["ran"]
+
+    def test_no_timeout_catches_exception(self):
+        def boom():
+            raise RuntimeError("x")
+
+        assert sync_daemon._step("inline-err", boom, timeout=None, default="fallback") == "fallback"
+
 
 # ---------------------------------------------------------------------------
 # M4 — Heartbeat
@@ -615,6 +634,16 @@ class TestHeartbeat:
         assert "last_cycle" in data
         assert "version" in data
         assert data["pid"] == os.getpid()
+        assert data["failed_cycle_count"] == 0  # default
+
+    def test_persists_failed_cycle_count(self, tmp_path, monkeypatch):
+        # Regression: M6 crash-loop bound only works if failed_cycle_count
+        # survives daemon restarts via the heartbeat file.
+        hb_file = tmp_path / "hb.json"
+        monkeypatch.setattr(sync_daemon, "HEARTBEAT_FILE", hb_file)
+        sync_daemon._write_heartbeat(last_success_iso=None, cycles=1, failed_cycle_count=2)
+        data = json.loads(hb_file.read_text())
+        assert data["failed_cycle_count"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -686,3 +715,9 @@ class TestConnectorScoping:
 
     def test_unknown_connector_returns_none(self):
         assert sync_daemon._connector_scoped_profiles("ghost", {"connectors": {}}) is None
+
+    def test_empty_path_returns_none(self):
+        # Empty path must not be silently turned into "." by Path("") —
+        # the function should treat it as unknown scope.
+        state = {"connectors": {"broken": {"path": ""}}}
+        assert sync_daemon._connector_scoped_profiles("broken", state) is None
