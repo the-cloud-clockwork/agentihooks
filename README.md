@@ -226,10 +226,9 @@ agentihooks uninstall [--yes]                # remove everything
 3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
 4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md`
 5. Installs MCP servers (hooks-utils + bundle + profile)
-6. Applies hierarchy-aware MCP blacklist to all registered projects
-7. Prunes orphaned MCP servers
-8. Installs CLI globally via `uv tool`
-9. Writes bashrc block (`agentienv` shell function + `agenti` alias)
+6. Prunes orphaned MCP servers
+7. Installs CLI globally via `uv tool`
+8. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
 > Per-repo init (`--repo` / `--local`) and `.agentihooks.json` were removed
 > 2026-05-07. `agentihooks init` is global-only.
