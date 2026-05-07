@@ -166,12 +166,6 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
 # =============================================================================
-# OVERLAY INJECTION
-# =============================================================================
-# Injects active overlay profile content on every UserPromptSubmit turn.
-OVERLAY_INJECTION_ENABLED = _env_bool("OVERLAY_INJECTION_ENABLED", "true")
-
-# =============================================================================
 # BRAIN ADAPTER
 # =============================================================================
 # Pluggable brain content injection into broadcast channels.
@@ -341,11 +335,8 @@ _raw_scope = os.getenv("CONTEXT_COMPRESSION_SCOPE", "refresh").lower().strip()
 CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_SCOPES else "refresh"
 
 # =============================================================================
-# PROFILE / OVERLAY BROADCAST — notify fleet on profile activation/deactivation
+# PROFILE BROADCAST — notify fleet on profile activation/deactivation
 PROFILE_BROADCAST_ENABLED = _env_bool("PROFILE_BROADCAST_ENABLED", "true")
-# Auto-overlay: comma-separated overlays to activate at session start
-# Can also be set per-agent via AGENTIHOOKS_AUTO_OVERLAY env var
-AGENTIHOOKS_AUTO_OVERLAY = os.getenv("AGENTIHOOKS_AUTO_OVERLAY", "")
 
 # BROADCAST SYSTEM — real-time fleet messaging
 # =============================================================================

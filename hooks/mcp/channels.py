@@ -22,7 +22,9 @@ def register(mcp):
     def channel_publish(channel: str, message: str, severity: str = "info", ttl_seconds: int = 3600) -> str:
         """Publish a message to a named broadcast channel.
 
-        Only sessions subscribed to this channel (via .agentihooks.json) will receive it.
+        Subscriptions are fleet-wide — every session is subscribed to BASE_CHANNELS
+        (brain, amygdala). Other channel names are accepted but only deliver if
+        a session has wildcard subscription.
 
         Args:
             channel: Channel name (e.g. "brain", "ops-alerts", "deploy-status")
@@ -80,66 +82,6 @@ def register(mcp):
             )
         except Exception as e:
             log("MCP channel_list failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
-    def channel_subscribe(channel: str) -> str:
-        """Add a channel subscription to the current project's .agentihooks.json.
-
-        Args:
-            channel: Channel name to subscribe to
-
-        Returns:
-            JSON with success status and updated channels list.
-        """
-        try:
-            from pathlib import Path
-
-            config_path = Path.cwd() / ".agentihooks.json"
-            cfg = {}
-            if config_path.exists():
-                cfg = json.loads(config_path.read_text())
-
-            channels = cfg.get("channels", [])
-            if not isinstance(channels, list):
-                channels = []
-            if channel not in channels:
-                channels.append(channel)
-                cfg["channels"] = channels
-                config_path.write_text(json.dumps(cfg, indent=2))
-
-            return json.dumps({"success": True, "channels": channels})
-        except Exception as e:
-            log("MCP channel_subscribe failed", {"error": str(e)})
-            return json.dumps({"success": False, "error": str(e)})
-
-    @mcp.tool()
-    def channel_unsubscribe(channel: str) -> str:
-        """Remove a channel subscription from the current project's .agentihooks.json.
-
-        Args:
-            channel: Channel name to unsubscribe from
-
-        Returns:
-            JSON with success status and updated channels list.
-        """
-        try:
-            from pathlib import Path
-
-            config_path = Path.cwd() / ".agentihooks.json"
-            if not config_path.exists():
-                return json.dumps({"success": False, "error": "No .agentihooks.json in CWD"})
-
-            cfg = json.loads(config_path.read_text())
-            channels = cfg.get("channels", [])
-            if channel in channels:
-                channels.remove(channel)
-                cfg["channels"] = channels
-                config_path.write_text(json.dumps(cfg, indent=2))
-
-            return json.dumps({"success": True, "channels": channels})
-        except Exception as e:
-            log("MCP channel_unsubscribe failed", {"error": str(e)})
             return json.dumps({"success": False, "error": str(e)})
 
     @mcp.tool()

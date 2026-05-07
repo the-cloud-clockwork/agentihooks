@@ -11,10 +11,9 @@ _USAGE_TEXT = """
 Quick start:
     agentihooks init --bundle /path/to/bundle --profile colt
     agentihooks init --profile colt          # re-run (bundle already linked)
-    agentihooks init --repo /path/to/repo    # per-repo config
 
 Commands:
-    agentihooks init [--bundle PATH] [--profile NAME] [--repo PATH]
+    agentihooks init [--bundle PATH] [--profile NAME]
         First-time setup or re-install. Links a bundle, selects a profile,
         and installs everything into ~/.claude: hooks, settings, skills,
         agents, commands, rules, CLAUDE.md, and MCP servers.
@@ -27,8 +26,7 @@ Commands:
         Manage the Claude.ai console quota watcher.
 
     agentihooks prune [-v]
-        Remove stale MCP entries from disabledMcpServers, known-mcp-servers.json,
-        and settings.local.json.
+        Remove stale MCP entries from disabledMcpServers and known-mcp-servers.json.
 
     agentihooks memory tick
         Run one memory-mirror tick (consume + authority push if applicable).
@@ -46,7 +44,6 @@ Commands:
 Profile layout (mirrors Claude Code project structure):
     profiles/<name>/
     ├── CLAUDE.md                    # system prompt (→ ~/.claude/CLAUDE.md)
-    ├── profile.yml                  # agentihooks metadata
     └── .claude/
         ├── settings.overrides.json  # merged into ~/.claude/settings.json
         ├── .mcp.json                # profile MCP servers
@@ -371,24 +368,6 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
                 print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in ~/.claude.json{_RESET}")
         except Exception:
             pass
-
-    # Also migrate .agentihooks.json files in known project directories
-    try:
-        cj2 = json.loads(claude_json.read_text()) if claude_json.exists() else {}
-        for proj_path in cj2.get("projects", {}):
-            ah_json = Path(proj_path) / ".agentihooks.json"
-            if ah_json.exists():
-                try:
-                    cfg = json.loads(ah_json.read_text())
-                    if cfg.get("profile") == old_name:
-                        cfg["profile"] = new_name
-                        ah_json.write_text(json.dumps(cfg, indent=2))
-                        print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in {ah_json}{_RESET}")
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
 
 def _state_add_mcp(mcp_path: Path) -> None:
     """Record *mcp_path* in state.json so --sync can restore it."""
@@ -739,9 +718,7 @@ def _bundle_list() -> None:
         if profile_names:
             print(f"Profiles ({len(profile_names)}):")
             for name in profile_names:
-                desc = _read_profile_description(profiles_dir / name)
-                desc_str = f" — {desc}" if desc else ""
-                print(f"  {name}{desc_str}")
+                print(f"  {name}")
             print()
 
     # Connectors
@@ -1490,7 +1467,6 @@ def _clean_state_dir() -> None:
         "sync-daemon.heartbeat",
         ".sync-daemon.singleton.lock",
         "active-sessions.json",
-        "active_overlays.json",
         "mcp-tool-cache.json",
         "broadcast_delivery_state.json",
         "memory-sync.lock",
@@ -1556,29 +1532,15 @@ def _clean_state_dir() -> None:
 
 
 def cmd_init_unified(args: argparse.Namespace) -> None:
-    """Unified init command — routes to global or per-repo install.
+    """Unified init command — global install only.
 
     agentihooks init --bundle <path>    → link bundle + global install
     agentihooks init                    → re-run global install (bundle must be linked)
-    agentihooks init --repo <path>      → per-repo config with profile picker
     agentihooks init --force            → clean install (wipe state, re-init from scratch)
     """
     if getattr(args, "force", False):
         _clean_state_dir()
     bundle_path = getattr(args, "bundle", None)
-    repo_path = getattr(args, "repo", None)
-
-    if repo_path:
-        # Per-repo mode — delegate to existing cmd_init
-        cmd_init(args)
-        # Always sweep MCP blacklist across ALL project entries in ~/.claude.json
-        # after any init invocation. Project entries registered later by Claude
-        # itself (different CWD) won't have a disabledMcpServers block — without
-        # this sweep, those projects fall back to the user-level mcpServers (all
-        # known servers) and the per-agent whitelist is silently bypassed.
-        if not getattr(args, "dry_run", False):
-            _sweep_all_projects_blacklist()
-        return
 
     # Global mode
     if bundle_path:
@@ -1743,225 +1705,6 @@ def _update_bashrc_block() -> None:
     _cprint(f"{_YELLOW}[OK] agentihooks block written to {_BASHRC}{_RESET}")
     print(f"{_DIM}     run: source ~/.bashrc{_RESET}")
 
-
-def cmd_init(args: argparse.Namespace) -> None:
-    """Set up per-repo agentihooks config → .claude/settings.local.json."""
-    repo_dir = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
-    config_path = repo_dir / ".agentihooks.json"
-    profile_arg = args.profile
-    interactive = sys.stdin.isatty()
-
-    # Create .agentihooks.json if missing
-    if not config_path.exists():
-        if not profile_arg:
-            if interactive:
-                available = _available_profiles()
-                print(f"Available profiles: {', '.join(available)}")
-                profile_arg = input(f"Profile for this repo [{available[0] if available else 'default'}]: ").strip()
-            if not profile_arg:
-                profile_arg = "default"
-
-        config = {"profile": profile_arg}
-        config_path.write_text(json.dumps(config, indent=2) + "\n")
-        _cprint(f"[OK] Created {config_path}")
-    else:
-        config = json.loads(config_path.read_text())
-        if profile_arg:
-            config["profile"] = profile_arg
-        _cprint(f"[OK] Read {config_path}")
-
-    # Resolve and write .claude/settings.local.json
-    _write_project_settings(repo_dir, config, dry_run=getattr(args, "dry_run", False))
-
-
-def _write_project_settings(repo_dir: Path, config: dict, *, dry_run: bool = False) -> None:
-    """Build and write .claude/settings.local.json from per-repo config."""
-    profile_name = config.get("profile", "default")
-
-    # Resolve profile chain (comma-separated) or single profile
-    profile_dirs = _resolve_profile_chain(profile_name)
-    if not profile_dirs:
-        _cprint(f"  [WARN] Profile '{profile_name}' not found — using default")
-        profile_dirs = _resolve_profile_chain("default")
-        if not profile_dirs:
-            profile_dirs = [("default", PROFILES_DIR / "default")]
-        profile_name = "default"
-
-    # Load profile overrides (merged across chain)
-    profile_overrides: dict = {}
-    for _pname, pdir in profile_dirs:
-        overrides_path = pdir / _CLAUDE_SUBDIR / "settings.overrides.json"
-        if not overrides_path.exists():
-            overrides_path = pdir / "settings.overrides.json"
-        if overrides_path.exists():
-            try:
-                ovr = load_json(overrides_path)
-                # Deep merge: dict keys merge additively, scalars overwrite
-                for key in ("env", "permissions"):
-                    if key in ovr:
-                        if key in profile_overrides and isinstance(profile_overrides[key], dict):
-                            profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
-                        else:
-                            profile_overrides[key] = ovr[key]
-                for k, v in ovr.items():
-                    if k not in ("env", "permissions"):
-                        profile_overrides[k] = v
-            except (json.JSONDecodeError, OSError):
-                pass
-
-    # Apply settings-profile overlay if specified in .agentihooks.json
-    sp_name = config.get("settings_profile", "")
-    if sp_name:
-        sp_dir = _resolve_profile_dir(sp_name)
-        if sp_dir is not None:
-            sp_overrides = sp_dir / _CLAUDE_SUBDIR / "settings.overrides.json"
-            if not sp_overrides.exists():
-                sp_overrides = sp_dir / "settings.overrides.json"
-            if sp_overrides.exists():
-                try:
-                    ovr = load_json(sp_overrides)
-                    # Deep merge: dict keys merge additively, scalars overwrite
-                    for key in ("env", "permissions"):
-                        if key in ovr:
-                            if key in profile_overrides and isinstance(profile_overrides[key], dict):
-                                profile_overrides[key] = {**profile_overrides[key], **ovr[key]}
-                            else:
-                                profile_overrides[key] = ovr[key]
-                    for k, v in ovr.items():
-                        if k not in ("env", "permissions"):
-                            profile_overrides[k] = v
-                    _cprint(f"  [OK] Applied settings-profile '{sp_name}' overlay (project-level)")
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-    # Load connector rules for this profile (use primary profile name)
-    primary_profile = profile_dirs[-1][0]
-    conn_env, conn_deny, conn_disabled = _load_connectors(primary_profile)
-
-    # Per-repo overrides from .agentihooks.json
-    repo_disabled = config.get("disabledMcpServers", [])
-    repo_deny = config.get("permissions", {}).get("deny", [])
-    repo_ask = config.get("permissions", {}).get("ask", [])
-    repo_env = config.get("env", {})
-
-    # Build settings.local.json — only the delta
-    local_settings: dict = {}
-
-    # Disabled MCP servers (project-scope .mcp.json only — for connectors)
-    all_disabled = list(dict.fromkeys(conn_disabled + repo_disabled))
-    if all_disabled:
-        local_settings["disabledMcpjsonServers"] = all_disabled
-
-    # Blacklist-all-by-default: disable every known MCP in ~/.claude.json
-    # projects block, except those the profile or repo whitelists.
-    all_known = _get_all_known_mcp_names()
-    # Union enabledMcpServers across all profiles in the chain
-    profile_enabled: set[str] = set()
-    for _pname, pdir in profile_dirs:
-        pe = _get_profile_enabled_servers(pdir)
-        if pe:
-            profile_enabled |= pe
-    repo_enabled = set(config.get("enabledMcpServers", []))
-    # Also respect child project whitelists so parent never blocks their servers
-    try:
-        all_project_paths = set(load_json(_CLAUDE_JSON).get("projects", {}).keys()) if _CLAUDE_JSON.exists() else set()
-    except (json.JSONDecodeError, OSError):
-        all_project_paths = set()
-    child_enabled = _collect_child_enabled_mcps(repo_dir, all_project_paths)
-    to_disable = sorted(all_known - profile_enabled - repo_enabled - child_enabled)
-    if not dry_run and all_known:
-        _write_project_disabled_mcps(repo_dir, to_disable)
-
-    # Permissions — merge profile + connector + repo overrides
-    perms: dict = {}
-    all_deny = profile_overrides.get("permissions", {}).get("deny", []) + conn_deny + repo_deny
-    all_ask = profile_overrides.get("permissions", {}).get("ask", []) + repo_ask
-    default_mode = profile_overrides.get("permissions", {}).get("defaultMode")
-
-    if all_deny:
-        perms["deny"] = list(dict.fromkeys(all_deny))
-    if all_ask:
-        perms["ask"] = list(dict.fromkeys(all_ask))
-    if default_mode:
-        perms["defaultMode"] = default_mode
-    if perms:
-        local_settings["permissions"] = perms
-
-    # Env — merge profile + connector + repo + otel
-    all_env = {}
-    all_env.update(profile_overrides.get("env", {}))
-    all_env.update(conn_env)
-    all_env.update(repo_env)
-
-    # OTEL overrides from .agentihooks.json otel section
-    otel_cfg = config.get("otel", {})
-    if otel_cfg:
-        otel_env = _build_otel_env({"otel": otel_cfg})
-        all_env.update(otel_env)
-
-    if all_env:
-        local_settings["env"] = all_env
-
-    if dry_run:
-        print(json.dumps(local_settings, indent=2))
-        return
-
-    # Write
-    claude_dir = repo_dir / ".claude"
-    claude_dir.mkdir(exist_ok=True)
-    out_path = claude_dir / "settings.local.json"
-    save_json(out_path, local_settings)
-
-    _cprint(f"[OK] Wrote {out_path}")
-    print(f"     Profile: {profile_name}")
-    if all_disabled:
-        print(f"     Disabled .mcp.json servers: {all_disabled}")
-    all_enabled = profile_enabled | repo_enabled
-    if all_enabled:
-        print(f"     Enabled MCPs ({len(all_enabled)}): {sorted(all_enabled)}")
-    if to_disable:
-        print(f"     Blacklisted MCPs ({len(to_disable)}): {to_disable[:5]}{'...' if len(to_disable) > 5 else ''}")
-    if all_deny:
-        print(f"     Deny rules: {len(all_deny)}")
-    if all_ask:
-        print(f"     Ask rules: {len(all_ask)}")
-    if all_env:
-        print(f"     Env vars: {len(all_env)}")
-
-    # NOTE: per-project .claude/CLAUDE.local.md generation removed. The global
-    # ~/.claude/CLAUDE.md (also rendered from the profile chain) is the single
-    # source for the prompt. Per-project local prompt files were redundant in
-    # any fleet running a uniform profile and produced fleet-wide phantom
-    # writes on every profile edit (incl. into .github/-style meta repos).
-    # Stale per-project files have been purged; the writer is gone.
-    if not dry_run:
-        claude_local_md = claude_dir / "CLAUDE.local.md"
-        if claude_local_md.exists():
-            try:
-                claude_local_md.unlink()
-                _cprint(f"  [OK] Removed legacy CLAUDE.local.md from {repo_dir}")
-            except OSError:
-                pass
-
-    # Ensure .gitignore covers settings.local.json
-    _ensure_local_settings_gitignored(repo_dir)
-
-
-def _ensure_local_settings_gitignored(repo_dir: Path) -> None:
-    """Ensure .claude/settings.local.json is gitignored."""
-    entries = [".claude/settings.local.json"]
-    gitignore = repo_dir / ".gitignore"
-    if gitignore.exists():
-        content = gitignore.read_text()
-        added = []
-        for entry in entries:
-            if entry not in content:
-                added.append(entry)
-        if added:
-            with open(gitignore, "a") as f:
-                f.write("\n" + "\n".join(added) + "\n")
-            _cprint(f"  [OK] Added {', '.join(added)} to .gitignore")
-    # Don't create .gitignore if it doesn't exist — not our file to create
 
 
 # User env file (~/.agentihooks/.env)
@@ -2259,50 +2002,13 @@ def _available_profiles() -> list[str]:
     return sorted(names)
 
 
-def _read_profile_field(profile_dir: Path, field: str) -> str:
-    """Read a top-level field from profile.yml (simple key: value only)."""
-    yml = profile_dir / "profile.yml"
-    if not yml.exists():
-        return ""
-    prefix = f"{field}:"
-    for line in yml.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            return stripped[len(prefix) :].strip().strip('"').strip("'")
-    return ""
-
-
-def _read_profile_description(profile_dir: Path) -> str:
-    """Return the description field from profile.yml, or '' if absent."""
-    return _read_profile_field(profile_dir, "description")
-
-
 def query_active_profile() -> None:
-    """Print the active profile for the current directory, falling back to global."""
-    # Check CWD for .agentihooks.json first
-    cwd = Path.cwd()
-    local_config = cwd / ".agentihooks.json"
+    """Print the active global profile."""
     source = "global"
-    profile_name = None
-    settings_profile = ""
-
-    if local_config.exists():
-        try:
-            cfg = load_json(local_config)
-            profile_name = cfg.get("profile")
-            settings_profile = cfg.get("settings_profile", "")
-            if profile_name:
-                source = "local"
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    # Fall back to global state
     state = _load_state()
     global_target = state.get("targets", {}).get("global", {})
-    if not profile_name:
-        profile_name = global_target.get("profile")
-    if not settings_profile:
-        settings_profile = global_target.get("settings_profile", "")
+    profile_name = global_target.get("profile")
+    settings_profile = global_target.get("settings_profile", "")
 
     if not profile_name:
         print("not installed")
@@ -2329,14 +2035,12 @@ def list_profiles() -> None:
         profile_dir = _resolve_profile_dir(name)
         if not profile_dir:
             continue
-        desc = _read_profile_description(profile_dir)
         source = _profile_source_label(name)
         marker = ""
         claude_md = profile_dir / _CLAUDE_MD_NAME
         if not claude_md.exists():
             marker = f"  [no {_CLAUDE_MD_NAME}]"
-        desc_str = f" — {desc}" if desc else ""
-        print(f"  {name} ({source}){desc_str}{marker}")
+        print(f"  {name} ({source}){marker}")
     print()
 
 
@@ -2550,18 +2254,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         rendered["disabledMcpjsonServers"] = merged_disabled
         _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
 
-    # --- 1d. OTEL baseline env vars (from last profile with a profile.yml) ---
-    for _pname, pdir in reversed(profile_dirs):
-        profile_yml_path = pdir / "profile.yml"
-        if profile_yml_path.exists():
-            import yaml
-
-            profile_data = yaml.safe_load(profile_yml_path.read_text()) or {}
-            otel_env = _build_otel_env(profile_data)
-            if otel_env:
-                rendered.setdefault("env", {}).update(otel_env)
-                _cprint(f"  [OK] OTEL env: {list(otel_env.keys())}")
-            break
+    # NOTE: OTEL env injection used to read otel: from profile.yml here.
+    # That dependency was removed 2026-05-07. _build_otel_env helper is
+    # retained for re-wiring through a different mechanism later.
 
     # --- 2. Merge personal keys from existing settings ---
     existing_settings_path = CLAUDE_HOME / "settings.json"
@@ -2697,10 +2392,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         else:
             _cprint(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
 
-    # --- 9c. Blacklist all MCPs across all projects ---
-    print()
-    print("Applying MCP blacklist to all projects...")
-    _blacklist_all_projects_mcps(profile_dirs[-1][1])
+    # NOTE: blacklist-all-by-default sweep removed 2026-05-07 with profile.yml.
+    # Whitelist had no replacement source. Per-project disabledMcpServers in
+    # ~/.claude.json is operator-managed until a new whitelist mechanism lands.
 
     # --- 10. Install agentihooks CLI tool to ~/.local/bin ---
     print()
@@ -2781,58 +2475,6 @@ def _get_all_known_mcp_names() -> set[str]:
         return set()
 
 
-def _get_profile_enabled_servers(profile_dir: Path) -> set[str] | None:
-    """Read enabledMcpServers whitelist from profile.yml.
-
-    Returns set of server names to keep enabled, or None if field absent.
-    """
-    yml_path = profile_dir / "profile.yml"
-    if not yml_path.exists():
-        return None
-    try:
-        import yaml
-
-        data = yaml.safe_load(yml_path.read_text()) or {}
-        enabled = data.get("enabledMcpServers")
-        if enabled is None:
-            return None
-        return set(enabled) if enabled else set()
-    except OSError:
-        return None
-    except Exception as exc:
-        _cprint(f"  [WARN] Could not parse enabledMcpServers from {yml_path}: {exc}")
-        return None
-
-
-def _write_project_disabled_mcps(repo_path: Path, disabled_names: list[str]) -> None:
-    """Write disabledMcpServers to ~/.claude.json projects[path] block.
-
-    Respects per-project user-enabled MCPs tracked in state.json —
-    any server the user manually enabled for this project stays enabled.
-    """
-    if not _CLAUDE_JSON.exists():
-        return
-    try:
-        # Read per-project enabled MCPs from state and subtract them
-        state = _load_state()
-        proj_state = state.get("targets", {}).get("projects", {}).get(str(repo_path), {})
-        user_enabled = set(proj_state.get("enabled_mcps", []))
-        final_disabled = sorted(set(disabled_names) - user_enabled)
-
-        data = load_json(_CLAUDE_JSON)
-        projects = data.setdefault("projects", {})
-        proj = projects.setdefault(str(repo_path), {})
-        proj["disabledMcpServers"] = final_disabled
-        save_json(_CLAUDE_JSON, data)
-        kept = len(disabled_names) - len(final_disabled)
-        msg = f"  [OK] Wrote disabledMcpServers to ~/.claude.json ({len(final_disabled)} servers)"
-        if kept:
-            msg += f" — kept {kept} user-enabled"
-        _cprint(msg)
-    except (json.JSONDecodeError, OSError) as e:
-        _cprint(f"  [WARN] Could not update ~/.claude.json: {e}")
-
-
 def _snapshot_claude_json() -> None:
     """Capture key metadata from ~/.claude.json into state.json for drift detection."""
     if not _CLAUDE_JSON.exists():
@@ -2860,107 +2502,6 @@ def _snapshot_claude_json() -> None:
     state = _load_state()
     state["claude_json_snapshot"] = snapshot
     _save_state(state)
-
-
-def _collect_child_enabled_mcps(parent_path: Path, all_project_paths: set[str]) -> set[str]:
-    """Return the union of enabledMcpServers from child project .agentihooks.json files.
-
-    When a parent project computes its disabledMcpServers, it must not block
-    servers that child projects explicitly whitelist — otherwise Claude Code's
-    upward settings resolution will override the child's whitelist.
-    """
-    prefix = str(parent_path) + "/"
-    enabled: set[str] = set()
-    for candidate in all_project_paths:
-        if not candidate.startswith(prefix):
-            continue
-        child_config = Path(candidate) / ".agentihooks.json"
-        if not child_config.exists():
-            continue
-        try:
-            data = load_json(child_config)
-            enabled.update(data.get("enabledMcpServers", []))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return enabled
-
-
-def _sweep_all_projects_blacklist() -> None:
-    """Resolve the active global profile from state and sweep the blacklist.
-
-    Wraps _blacklist_all_projects_mcps with profile lookup so callers (e.g. per-repo
-    cmd_init) don't need to know which global profile is active. No-op if no profile
-    is registered or the profile cannot be resolved.
-    """
-    state = _load_state()
-    active_profile = state.get("targets", {}).get("global", {}).get("profile")
-    if not active_profile:
-        return
-    profile_dir = _resolve_profile_dir(active_profile)
-    if not profile_dir:
-        return
-    _blacklist_all_projects_mcps(profile_dir)
-
-
-def _blacklist_all_projects_mcps(profile_dir: Path) -> None:
-    """Blacklist all known MCPs in every project entry in ~/.claude.json.
-
-    Called by 'agentihooks init' to ensure every project starts with all
-    MCPs disabled except those the profile whitelists.
-    """
-    if not _CLAUDE_JSON.exists():
-        return
-    try:
-        data = load_json(_CLAUDE_JSON)
-    except (json.JSONDecodeError, OSError):
-        return
-
-    projects = data.get("projects", {})
-    if not projects:
-        return
-
-    all_known = _get_all_known_mcp_names()
-    if not all_known:
-        return
-
-    profile_enabled = _get_profile_enabled_servers(profile_dir) or set()
-    base_disabled = all_known - profile_enabled
-
-    # Read per-project enabled MCPs from state so we don't overwrite user choices
-    state = _load_state()
-    state_projects = state.get("targets", {}).get("projects", {})
-    all_project_paths = set(projects.keys())
-
-    updated = 0
-    for proj_path, proj_data in projects.items():
-        if not isinstance(proj_data, dict):
-            continue
-        user_enabled = set(state_projects.get(proj_path, {}).get("enabled_mcps", []))
-        child_enabled = _collect_child_enabled_mcps(Path(proj_path), all_project_paths)
-        # Read this project's own .agentihooks.json whitelist + profile override
-        own_enabled: set[str] = set()
-        own_config = Path(proj_path) / ".agentihooks.json"
-        if own_config.exists():
-            try:
-                cfg = load_json(own_config)
-                own_enabled = set(cfg.get("enabledMcpServers", []))
-                # If project specifies a profile, use its enabledMcpServers too
-                proj_profile = cfg.get("profile")
-                if proj_profile:
-                    for _pname, pdir in _resolve_profile_chain(proj_profile):
-                        pe = _get_profile_enabled_servers(pdir)
-                        if pe:
-                            own_enabled |= pe
-            except (json.JSONDecodeError, OSError):
-                pass
-        proj_data["disabledMcpServers"] = sorted(base_disabled - user_enabled - child_enabled - own_enabled)
-        updated += 1
-
-    if updated:
-        save_json(_CLAUDE_JSON, data)
-        _cprint(
-            f"  [OK] Blacklisted MCPs across {updated} project(s) in ~/.claude.json (respecting per-project enables)"
-        )
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:
@@ -3069,12 +2610,9 @@ def _build_mcp_config(mcp_categories: str) -> dict:
 def _install_user_mcp(profile_name: str) -> None:
     """Generate and merge MCP server config into ~/.claude.json.
 
-    Reads ``mcp_categories`` from ``profile.yml`` (defaults to ``all``)
-    and builds the hooks-utils MCP server config dynamically.
+    Builds the hooks-utils MCP server config with all categories enabled.
     """
-    profile_dir = _resolve_profile_dir(profile_name) or PROFILES_DIR / profile_name
-    mcp_categories = _read_profile_field(profile_dir, "mcp_categories") or "all"
-    mcp_config = _build_mcp_config(mcp_categories)
+    mcp_config = _build_mcp_config("all")
     _merge_mcp_to_user_scope(mcp_config["mcpServers"])
 
 
@@ -3792,8 +3330,7 @@ def _install_project_inner(args: argparse.Namespace) -> None:
         print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
 
-    mcp_categories = _read_profile_field(profile_dir, "mcp_categories") or "all"
-    rendered_mcp = _build_mcp_config(mcp_categories)
+    rendered_mcp = _build_mcp_config("all")
 
     mcp_dst = project_path / _MCP_JSON_NAME
     if mcp_dst.exists():
@@ -3991,8 +3528,7 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
        no longer defined in any source file)
     1. disabledMcpServers in every project entry in ~/.claude.json
     2. known-mcp-servers.json
-    3. settings.local.json files in project .claude/ dirs
-    4. enabled_mcps in state.json
+    3. enabled_mcps in state.json
 
     Returns summary dict with counts.
     """
@@ -4000,7 +3536,6 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
     summary = {
         "pruned_disabled": 0,
         "pruned_known": 0,
-        "pruned_settings": 0,
         "projects_touched": 0,
         "pruned_orphaned": 0,
         "pruned_enabled": 0,
@@ -4067,41 +3602,7 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
             if verbose:
                 print(f"  Pruned {len(stale_known)} from known-mcp-servers.json: {sorted(stale_known)}")
 
-    # 3. Prune settings.local.json files in projects
-    for proj_path in projects:
-        settings_file = Path(proj_path) / ".claude" / "settings.local.json"
-        if not settings_file.exists():
-            continue
-        try:
-            settings = load_json(settings_file)
-        except (json.JSONDecodeError, OSError):
-            continue
-        dirty = False
-        for key in ("disabledMcpjsonServers", "enabledMcpjsonServers"):
-            entries = settings.get(key, [])
-            if not entries:
-                continue
-            proj_mcp_file = Path(proj_path) / ".mcp.json"
-            proj_mcp_names: set[str] = set()
-            if proj_mcp_file.exists():
-                try:
-                    proj_mcp_names = set(load_json(proj_mcp_file).get("mcpServers", {}).keys())
-                except (json.JSONDecodeError, OSError):
-                    pass
-            all_valid_for_project = valid | proj_mcp_names
-            cleaned = [s for s in entries if s in all_valid_for_project]
-            removed = len(entries) - len(cleaned)
-            if removed > 0:
-                settings[key] = sorted(cleaned)
-                dirty = True
-                summary["pruned_settings"] += removed
-                if verbose:
-                    stale_entries = set(entries) - all_valid_for_project
-                    print(f"  Pruned {removed} from {settings_file}: {sorted(stale_entries)}")
-        if dirty:
-            save_json(settings_file, settings)
-
-    # 4. Prune enabled_mcps in state.json
+    # 3. Prune enabled_mcps in state.json
     state = _load_state()
     state_projects = state.get("targets", {}).get("projects", {})
     state_dirty = False
@@ -4288,59 +3789,8 @@ def cmd_memory_tick() -> None:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    """Launch claude with flags from the active profile's claude: section."""
-    state = _load_state()
-    global_target = state.get("targets", {}).get("global", {})
-    profile_name = global_target.get("profile", "default")
-    # For chained profiles (e.g. "anton,brain"), prefer settings_profile for claude: flags,
-    # then fall back to the first profile in the chain.
-    settings_profile = global_target.get("settings_profile", "")
-    primary_name = settings_profile or profile_name.split(",")[0].strip()
-    profile_dir = _resolve_profile_dir(primary_name)
-
-    claude_flags: dict = {}
-    if profile_dir:
-        yml = profile_dir / "profile.yml"
-        if yml.exists():
-            try:
-                data = yaml.safe_load(yml.read_text(encoding="utf-8"))
-                claude_flags = data.get("claude", {}) or {}
-            except (yaml.YAMLError, OSError):
-                pass
-
-    # Map profile.yml fields → claude CLI flags
-    cmd = ["claude"]
-
-    # Permission mode — special mapping
-    perm = claude_flags.get("permission_mode")
-    if perm == "bypassPermissions":
-        cmd.append("--dangerously-skip-permissions")
-    elif perm and perm != "default":
-        cmd.extend(["--permission-mode", perm])
-
-    # Simple key→flag mappings (skip empty/None — empty model triggers
-    # CLI fallbacks in some Claude Code versions, including auto-worktree)
-    # Defaults: effort=medium when profile doesn't set one.
-    _claude_defaults = {"effort": "medium"}
-    for key, flag in {"model": "--model", "effort": "--effort"}.items():
-        val = claude_flags.get(key) or _claude_defaults.get(key)
-        if val:
-            cmd.extend([flag, str(val)])
-
-    # NOTE: profile.yml's `worktree:` flag is intentionally NOT mapped to
-    # `--worktree` here. Worktree creation is an operator decision per session,
-    # not a profile-level default. agenticore manages its own worktrees in
-    # AGENT_MODE without `--worktree` (it cwds into the prepared worktree dir
-    # instead). To open a worktree manually, use Claude Code's EnterWorktree
-    # tool or pass `--worktree` explicitly via `agenti -- --worktree`.
-
-    # NOTE: do NOT pass --append-system-prompt-file. The active profile's
-    # CLAUDE.md is already installed at ~/.claude/CLAUDE.md by `init`, and
-    # Claude Code loads it automatically. Re-passing it as a flag duplicates
-    # the prompt and triggers auto-worktree behavior in Claude Code v2.1.
-
-    # Pass through any extra args from the user
-    cmd.extend(extra_args)
+    """Launch claude with bypassPermissions. No other flags injected."""
+    cmd = ["claude", "--dangerously-skip-permissions", *extra_args]
 
     # Source env first, then exec claude
     env_file = _ENV_FILE_DST
@@ -4462,76 +3912,6 @@ def _parse_ttl_string(ttl_raw: str | None) -> int:
     sys.exit(1)
 
 
-def _cmd_overlay(args: argparse.Namespace) -> None:
-    """Handle the overlay CLI command."""
-    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-    from scripts.overlay import (
-        get_active_overlays,
-        overlay_add,
-        overlay_clear,
-        overlay_list,
-        overlay_refresh,
-        overlay_remove,
-    )
-
-    action = args.action
-    name = args.name
-
-    if action == "list":
-        allowed = overlay_list()
-        active = get_active_overlays()
-        active_names = {o.get("name") for o in active}
-        if not allowed:
-            print("No overlays available (base profile has no allowedOverlays).")
-            return
-        for o in allowed:
-            if o["name"] in active_names:
-                status = f"{_GREEN}ACTIVE{_RESET}"
-            elif o["available"]:
-                status = "available"
-            else:
-                status = f"{_RED}not found{_RESET}"
-            desc = f" — {o['description']}" if o.get("description") else ""
-            print(f"  {o['name']}: {status}{desc}")
-
-    elif action == "add":
-        if not name:
-            print("Error: overlay name required.", file=sys.stderr)
-            sys.exit(1)
-        result = overlay_add(name, added_by="cli")
-        if result.get("success"):
-            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' activated. Takes effect next turn.")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif action == "remove":
-        if not name:
-            print("Error: overlay name required.", file=sys.stderr)
-            sys.exit(1)
-        result = overlay_remove(name)
-        if result.get("success"):
-            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' removed.")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif action == "refresh":
-        if not name:
-            print("Error: overlay name required.", file=sys.stderr)
-            sys.exit(1)
-        result = overlay_refresh(name)
-        if result.get("success"):
-            print(f"{_GREEN}[OK]{_RESET} Overlay '{name}' refreshed from disk.")
-        else:
-            print(f"Error: {result.get('error')}", file=sys.stderr)
-            sys.exit(1)
-
-    elif action == "clear":
-        result = overlay_clear()
-        print(f"{_GREEN}[OK]{_RESET} Cleared {result.get('removed_count', 0)} overlay(s).")
-
-
 def _cmd_channel(args: argparse.Namespace) -> None:
     """Handle the channel CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -4580,42 +3960,6 @@ def _cmd_channel(args: argparse.Namespace) -> None:
         else:
             print("Error: empty message.", file=sys.stderr)
             sys.exit(1)
-
-    elif action == "subscribe":
-        if not args.channel_name:
-            print("Error: channel name required.", file=sys.stderr)
-            sys.exit(1)
-        config_path = Path.cwd() / ".agentihooks.json"
-        cfg = {}
-        if config_path.exists():
-            cfg = json.loads(config_path.read_text())
-        channels = cfg.get("channels", [])
-        if args.channel_name not in channels:
-            channels.append(args.channel_name)
-            cfg["channels"] = channels
-            config_path.write_text(json.dumps(cfg, indent=2))
-            print(f"{_GREEN}[OK]{_RESET} Subscribed to '{args.channel_name}' in {config_path}")
-        else:
-            print(f"Already subscribed to '{args.channel_name}'.")
-
-    elif action == "unsubscribe":
-        if not args.channel_name:
-            print("Error: channel name required.", file=sys.stderr)
-            sys.exit(1)
-        config_path = Path.cwd() / ".agentihooks.json"
-        if not config_path.exists():
-            print("No .agentihooks.json in current directory.", file=sys.stderr)
-            sys.exit(1)
-        cfg = json.loads(config_path.read_text())
-        channels = cfg.get("channels", [])
-        if args.channel_name in channels:
-            channels.remove(args.channel_name)
-            cfg["channels"] = channels
-            config_path.write_text(json.dumps(cfg, indent=2))
-            print(f"{_GREEN}[OK]{_RESET} Unsubscribed from '{args.channel_name}'")
-        else:
-            print(f"Not subscribed to '{args.channel_name}'.")
-
 
 def _cmd_brain(args: argparse.Namespace) -> None:
     """Handle the brain CLI command."""
@@ -4948,26 +4292,15 @@ def cmd_migrate(args) -> None:
         merged = {**old_data, **new_data}
         projects[new] = merged
 
-    # Re-apply MCP blacklist for all remapped projects
-    all_known = _get_all_known_mcp_names()
-    # Resolve active profile for the whitelist
+    # NOTE: blacklist re-apply removed 2026-05-07 with profile.yml.
+    # Migrated projects keep whatever disabledMcpServers they already had.
     state = _load_state()
     active_profile = state.get("targets", {}).get("global", {}).get("profile", "default")
-    profile_dir = _resolve_profile_dir(active_profile) or PROFILES_DIR / "default"
-    profile_enabled = _get_profile_enabled_servers(profile_dir)
-    to_disable = sorted(all_known - (profile_enabled or set()))
-
-    all_project_paths = set(projects.keys())
-    for _old, new in remap:
-        proj = projects.setdefault(new, {})
-        child_enabled = _collect_child_enabled_mcps(Path(new), all_project_paths)
-        proj["disabledMcpServers"] = sorted(set(to_disable) - child_enabled)
 
     # Save
     data["projects"] = projects
     save_json(_CLAUDE_JSON, data)
     print(f"[OK] Migrated {len(remap)} project(s) in ~/.claude.json")
-    print(f"[OK] Applied MCP blacklist ({len(to_disable)} servers) to migrated projects")
 
     # Register targets in state.json
     for _old, new in remap:
@@ -5022,14 +4355,10 @@ def main() -> None:
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     init_p = sub.add_parser(
-        "init", help="Initialize agentihooks (global setup from bundle, or per-repo config with --repo)"
+        "init", help="Initialize agentihooks (global setup from bundle)"
     )
     init_p.add_argument(
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
-    )
-    init_p.add_argument("--repo", default=None, help="Target repo directory (per-repo config with profile picker)")
-    init_p.add_argument(
-        "--local", action="store_true", help="Shorthand for --repo . (per-repo config for current directory)"
     )
     init_p.add_argument("--profile", dest="init_profile", default=None, help="Profile to use (headless mode)")
     init_p.add_argument(
@@ -5090,7 +4419,7 @@ def main() -> None:
         help="Skip the immediate re-install (operator runs 'agentihooks init' later)",
     )
 
-    sub.add_parser("claude", help="Launch claude with profile flags (model, permission-mode, effort, etc.)")
+    sub.add_parser("claude", help="Launch claude with --dangerously-skip-permissions (no other flags injected)")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -5293,11 +4622,6 @@ ai-assisted (emit):
         help="Clear all broadcasts, or a specific ID",
     )
 
-    # --- Overlay subcommand ---
-    overlay_p = sub.add_parser("overlay", help="Manage runtime profile overlays (mid-session profile shifting)")
-    overlay_p.add_argument("action", choices=["list", "add", "remove", "clear", "refresh"], help="Overlay action")
-    overlay_p.add_argument("name", nargs="?", default=None, help="Profile name (for add/remove/refresh)")
-
     # --- Channel subcommand ---
     chan_p = sub.add_parser(
         "channel",
@@ -5307,11 +4631,9 @@ ai-assisted (emit):
 examples:
   agentihooks channel list
   agentihooks channel publish brain "Hot arcs updated" -s info -t 1h
-  agentihooks channel subscribe brain
-  agentihooks channel unsubscribe brain
 """,
     )
-    chan_p.add_argument("action", choices=["list", "publish", "subscribe", "unsubscribe"], help="Channel action")
+    chan_p.add_argument("action", choices=["list", "publish"], help="Channel action")
     chan_p.add_argument("channel_name", nargs="?", default=None, help="Channel name")
     chan_p.add_argument("chan_message", nargs="*", default=None, help="Message (for publish)")
     chan_p.add_argument("-s", "--severity", default="info", choices=["info", "alert", "critical"])
@@ -5480,8 +4802,6 @@ notes:
     elif args.command == "init":
         args.profile = getattr(args, "init_profile", None)
         args.settings_profile = getattr(args, "init_settings_profile", None) or ""
-        if getattr(args, "local", False) and not args.repo:
-            args.repo = "."
         cmd_init_unified(args)
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
@@ -5561,7 +4881,7 @@ notes:
         valid = _get_valid_mcp_names()
         print(f"Valid MCP servers ({len(valid)}): {', '.join(sorted(valid))}")
         summary = _prune_stale_mcp_servers(known_servers_file, verbose=True)
-        total = summary["pruned_disabled"] + summary["pruned_known"] + summary["pruned_settings"]
+        total = summary["pruned_disabled"] + summary["pruned_known"]
         if total == 0:
             print("No stale MCP entries found — everything is clean.")
         else:
@@ -5572,14 +4892,10 @@ notes:
                 )
             if summary["pruned_known"]:
                 print(f"  known-mcp-servers.json: {summary['pruned_known']} entries")
-            if summary["pruned_settings"]:
-                print(f"  settings.local.json: {summary['pruned_settings']} entries")
     elif args.command == "migrate":
         cmd_migrate(args)
     elif args.command == "broadcast":
         _cmd_broadcast(args)
-    elif args.command == "overlay":
-        _cmd_overlay(args)
     elif args.command == "channel":
         _cmd_channel(args)
     elif args.command == "enforcement":

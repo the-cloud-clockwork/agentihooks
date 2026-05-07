@@ -429,7 +429,6 @@ class TestProfileListing:
         with (
             patch.object(install, "_available_profiles", return_value=["test-profile"]),
             patch.object(install, "_resolve_profile_dir", return_value=profile),
-            patch.object(install, "_read_profile_description", return_value="Test"),
         ):
             install.list_profiles()
 

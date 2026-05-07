@@ -142,17 +142,8 @@ def register(mcp):
             "channels": [
                 "channel_publish",
                 "channel_list",
-                "channel_subscribe",
-                "channel_unsubscribe",
                 "brain_refresh",
                 "brain_status",
-            ],
-            "profiles": [
-                "profile_list",
-                "profile_current",
-                "overlay_add",
-                "overlay_remove",
-                "overlay_refresh",
             ],
             "utilities": [
                 "write_markdown",
