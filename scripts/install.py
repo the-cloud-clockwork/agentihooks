@@ -491,6 +491,30 @@ def _sync_lock(*, blocking: bool = True):
 # ---------------------------------------------------------------------------
 
 
+def _print_bundle_discover_hint(*, profile_hint: str = "default") -> None:
+    """When init runs without a linked bundle and without --bundle, suggest
+    the env-var escape hatch the operator can use to register one. Read-only —
+    does NOT mutate state. Skipped when --no-discover is set.
+
+    Only $AGENTIHOOKS_BUNDLE_PATH is consulted; bundle directories can be named
+    anything, so guessing by directory name is unreliable.
+    """
+    env = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "").strip()
+    if env:
+        cand = Path(env).expanduser()
+        try:
+            cand_str = str(cand.resolve())
+        except OSError:
+            cand_str = str(cand)
+        if cand.is_dir() and (cand / "profiles").is_dir():
+            print(f"{_DIM}    [hint] $AGENTIHOOKS_BUNDLE_PATH points to a valid bundle: {cand_str}{_RESET}")
+            print(
+                f"{_DIM}           re-link with: agentihooks init --bundle {cand_str} --profile {profile_hint}{_RESET}"
+            )
+            return
+    print(f"{_DIM}    [hint] re-link a bundle with: agentihooks init --bundle <path> --profile <name>{_RESET}")
+
+
 def _get_bundle_path() -> Path | None:
     """Return the linked bundle path from state.json, or AGENTIHOOKS_BUNDLE_PATH env var."""
     state = _load_state()
@@ -1571,10 +1595,40 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _bundle_link(bundle_dir)
         print()
 
+    # B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution
+    # so the new profile names are visible to the chain validation downstream.
+    link_profile_args = list(getattr(args, "link_profile", []) or [])
+    for spec in link_profile_args:
+        if "=" not in spec:
+            print(f"ERROR: --link-profile expects NAME=PATH, got {spec!r}", file=sys.stderr)
+            sys.exit(1)
+        name, _, lp_path = spec.partition("=")
+        name = name.strip()
+        lp_path = lp_path.strip()
+        if not name or not lp_path:
+            print(f"ERROR: --link-profile expects NAME=PATH, got {spec!r}", file=sys.stderr)
+            sys.exit(1)
+        lp_dir = Path(lp_path).expanduser().resolve()
+        if not lp_dir.is_dir():
+            print(f"ERROR: --link-profile path is not a directory: {lp_dir}", file=sys.stderr)
+            sys.exit(1)
+        # run_init=False — we're about to install_global below; don't trigger an
+        # extra round-trip from inside link-profile.
+        _link_profile_link(lp_dir, name=name, append=True, run_init=False)
+
     # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
     if not bundle:
         print(f"{_DIM}[--] No bundle linked — using built-in profiles only.{_RESET}")
+        # B2: auto-discover hint — don't auto-link, just suggest the command.
+        if not getattr(args, "no_discover", False):
+            _hint_state = _load_state()
+            _hint_profile = (
+                getattr(args, "init_profile", None)
+                or _hint_state.get("targets", {}).get("global", {}).get("profile")
+                or "default"
+            )
+            _print_bundle_discover_hint(profile_hint=_hint_profile)
 
     # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
     _is_force = getattr(args, "force", False)
@@ -4884,6 +4938,19 @@ def main() -> None:
         help="Settings-only overlay profile (applies settings.json/MCP on top, keeps persona from --profile)",
     )
     init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
+    init_p.add_argument(
+        "--link-profile",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Register an external profile directory and append it to the chain. Repeatable (NAME=PATH).",
+    )
+    init_p.add_argument(
+        "--no-discover",
+        action="store_true",
+        default=False,
+        help="Skip bundle auto-discovery hint when state has no bundle linked.",
+    )
 
     bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (link, unlink, list, pull)")
     bundle_p.add_argument(

@@ -721,3 +721,78 @@ class TestConnectorScoping:
         # the function should treat it as unknown scope.
         state = {"connectors": {"broken": {"path": ""}}}
         assert sync_daemon._connector_scoped_profiles("broken", state) is None
+
+
+# ---------------------------------------------------------------------------
+# State preservation — _safe_state_update
+# ---------------------------------------------------------------------------
+
+
+class TestSafeStateUpdate:
+    def test_preserves_critical_keys_when_mutator_only_adds_snapshot(self, tmp_path, monkeypatch):
+        sj = tmp_path / "state.json"
+        sj.write_text(
+            json.dumps(
+                {
+                    "bundle": {"path": "/some/bundle"},
+                    "linked_profiles": [{"name": "x", "path": "/y"}],
+                    "targets": {"global": {"profile": "anton"}},
+                    "version": "1.11.2",
+                }
+            )
+        )
+        monkeypatch.setattr(sync_daemon, "STATE_JSON", sj)
+
+        def mutate(state):
+            state["claude_json_snapshot"] = {"captured_at": "now"}
+
+        assert sync_daemon._safe_state_update(mutate) is True
+        out = json.loads(sj.read_text())
+        assert out["bundle"] == {"path": "/some/bundle"}
+        assert out["linked_profiles"] == [{"name": "x", "path": "/y"}]
+        assert out["targets"]["global"]["profile"] == "anton"
+        assert out["claude_json_snapshot"] == {"captured_at": "now"}
+
+    def test_refuses_write_on_corrupt_state(self, tmp_path, monkeypatch, capsys):
+        sj = tmp_path / "state.json"
+        sj.write_text("{ this is not json")
+        monkeypatch.setattr(sync_daemon, "STATE_JSON", sj)
+
+        def mutate(state):
+            state["claude_json_snapshot"] = {"x": 1}
+
+        assert sync_daemon._safe_state_update(mutate) is False
+        # File on disk MUST be untouched (still corrupt) — this is the protection.
+        assert sj.read_text() == "{ this is not json"
+        out = capsys.readouterr().out
+        assert "CORRUPT JSON" in out
+
+    def test_refuses_write_when_critical_keys_would_be_wiped(self, tmp_path, monkeypatch, capsys):
+        # Pre-existing populated state with a critical key on disk; a mutator
+        # that wipes the dict (simulating someone passing in a fresh empty
+        # state) should be refused.
+        sj = tmp_path / "state.json"
+        sj.write_text(json.dumps({"bundle": {"path": "/b"}, "version": "1.0.0"}))
+        monkeypatch.setattr(sync_daemon, "STATE_JSON", sj)
+
+        def malicious(state):
+            state.clear()
+            state["claude_json_snapshot"] = {"x": 1}
+
+        assert sync_daemon._safe_state_update(malicious) is False
+        out = json.loads(sj.read_text())
+        assert out["bundle"] == {"path": "/b"}
+        captured = capsys.readouterr().out
+        assert "REFUSING" in captured
+
+    def test_allows_first_write_when_disk_empty(self, tmp_path, monkeypatch):
+        # On a brand-new install state.json doesn't exist yet — _safe_state_update
+        # must NOT refuse the first write just because critical keys are absent.
+        sj = tmp_path / "state.json"
+        monkeypatch.setattr(sync_daemon, "STATE_JSON", sj)
+
+        def mutate(state):
+            state["claude_json_snapshot"] = {"first": True}
+
+        assert sync_daemon._safe_state_update(mutate) is True
+        assert json.loads(sj.read_text())["claude_json_snapshot"]["first"] is True

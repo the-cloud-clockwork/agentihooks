@@ -129,6 +129,46 @@ def _log_corrupt(path: Path, err: Exception, action: str = "skipping this step u
     _log(f"  {action}")
 
 
+# Critical top-level keys in state.json. If a state-mutating helper would
+# write a state object that has lost ALL of these (because _load_json
+# returned {} on a transient read failure), the write is REFUSED — that
+# prevents the daemon from blanking the operator's bundle/linked-profiles
+# registration during a hiccup. See _safe_state_update.
+_STATE_CRITICAL_KEYS = frozenset({"bundle", "linked_profiles", "targets", "version"})
+
+
+def _safe_state_update(mutator) -> bool:
+    """Read state.json strictly, apply *mutator(state)*, write back atomically.
+
+    Returns True when the write succeeded; False when the cycle was refused
+    (read corruption, or the resulting state would have lost every critical
+    key on disk). The refusal path is the protection against the long-standing
+    bundle-strip defect where helpers used permissive _load_json + merge +
+    write — losing bundle/linked_profiles/targets if state was momentarily
+    unreadable.
+    """
+    try:
+        state = _load_json_strict(STATE_JSON)
+    except CorruptStateError as e:
+        _log_corrupt(e.path, e.original, action="state.json corrupt — write SKIPPED to preserve prior content")
+        return False
+    pre_critical = set(state.keys()) & _STATE_CRITICAL_KEYS
+    mutator(state)
+    post_critical = set(state.keys()) & _STATE_CRITICAL_KEYS
+    # If the on-disk file existed and was non-empty AND we used to have at
+    # least one critical key AND the post-mutation state has none of them,
+    # something is wrong — refuse rather than persist a stripped state.
+    try:
+        on_disk_size = STATE_JSON.stat().st_size if STATE_JSON.exists() else 0
+    except OSError:
+        on_disk_size = 0
+    if on_disk_size > 0 and pre_critical and not post_critical:
+        _log("REFUSING state.json write: all critical keys would be wiped (bundle/linked_profiles/targets)")
+        return False
+    _write_atomic(STATE_JSON, state)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Per-cycle ~/.claude.json snapshot (H1)
 # ---------------------------------------------------------------------------
@@ -755,27 +795,30 @@ def _snapshot_project_enabled_mcps() -> None:
     if not projects:
         return
 
-    state = _load_json(STATE_JSON)
-    targets = state.get("targets", {})
-    state_projects = targets.get("projects", {})
-    if not state_projects:
-        return
+    # Routed through _safe_state_update so a corrupt/empty state.json cannot
+    # cause this helper to merge into {} and blank bundle/linked_profiles.
+    snapshot_logged = [False]
 
-    changed = False
-    for proj_path, proj_data in projects.items():
-        if not isinstance(proj_data, dict):
-            continue
-        if proj_path not in state_projects:
-            continue
-        disabled = set(proj_data.get("disabledMcpServers", []))
-        enabled = sorted(all_servers - disabled)
-        prev = state_projects[proj_path].get("enabled_mcps")
-        if prev != enabled:
-            state_projects[proj_path]["enabled_mcps"] = enabled
-            changed = True
+    def _mutate(state: dict) -> None:
+        targets = state.get("targets", {})
+        state_projects = targets.get("projects", {})
+        if not state_projects:
+            return
+        changed = False
+        for proj_path, proj_data in projects.items():
+            if not isinstance(proj_data, dict):
+                continue
+            if proj_path not in state_projects:
+                continue
+            disabled = set(proj_data.get("disabledMcpServers", []))
+            enabled = sorted(all_servers - disabled)
+            prev = state_projects[proj_path].get("enabled_mcps")
+            if prev != enabled:
+                state_projects[proj_path]["enabled_mcps"] = enabled
+                changed = True
+        snapshot_logged[0] = changed
 
-    if changed:
-        _write_atomic(STATE_JSON, state)
+    if _safe_state_update(_mutate) and snapshot_logged[0]:
         _log("Snapshot: updated per-project enabled_mcps in state.json")
 
 
@@ -915,24 +958,25 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
         if dirty:
             _write_atomic(settings_file, settings)
 
-    # 4. Prune enabled_mcps in state.json — remove servers that no longer exist
-    state = _load_json(STATE_JSON)
-    state_projects = state.get("targets", {}).get("projects", {})
-    state_dirty = False
-    pruned_enabled = 0
-    for proj_path, proj_info in state_projects.items():
-        enabled = proj_info.get("enabled_mcps", [])
-        if not enabled:
-            continue
-        cleaned = [s for s in enabled if s in valid]
-        removed = len(enabled) - len(cleaned)
-        if removed > 0:
-            proj_info["enabled_mcps"] = cleaned
-            pruned_enabled += removed
-            state_dirty = True
-    if state_dirty:
-        _write_atomic(STATE_JSON, state)
-    summary["pruned_enabled"] = pruned_enabled
+    # 4. Prune enabled_mcps in state.json — routed through _safe_state_update
+    # so a transient corrupt read cannot blank state.
+    pruned_enabled_count = [0]
+
+    def _mutate_prune(state: dict) -> None:
+        state_projects = state.get("targets", {}).get("projects", {})
+        for proj_path, proj_info in state_projects.items():
+            enabled = proj_info.get("enabled_mcps", [])
+            if not enabled:
+                continue
+            cleaned = [s for s in enabled if s in valid]
+            removed = len(enabled) - len(cleaned)
+            if removed > 0:
+                proj_info["enabled_mcps"] = cleaned
+                pruned_enabled_count[0] += removed
+
+    _safe_state_update(_mutate_prune)
+    summary["pruned_enabled"] = pruned_enabled_count[0]
+    pruned_enabled = pruned_enabled_count[0]
 
     total = (
         summary["pruned_orphaned"]
@@ -1044,29 +1088,32 @@ def _update_claude_json_snapshot() -> None:
             "has_disabled_list": bool(disabled),
         }
 
-    state = _load_json(STATE_JSON)
-    old_snapshot = state.get("claude_json_snapshot", {})
+    # Routed through _safe_state_update — see _safe_state_update docstring
+    # for why permissive _load_json + _write_atomic was a bundle-strip risk.
+    def _mutate_snapshot(state: dict) -> None:
+        old_snapshot = state.get("claude_json_snapshot", {})
 
-    old_projects = set(old_snapshot.get("projects", {}).keys())
-    new_projects = set(snapshot["projects"].keys())
-    added = new_projects - old_projects
-    removed = old_projects - new_projects
-    old_mcps = set(old_snapshot.get("mcp_servers", []))
-    new_mcps = set(snapshot["mcp_servers"])
-    new_servers = new_mcps - old_mcps
-    gone_servers = old_mcps - new_mcps
+        old_projects = set(old_snapshot.get("projects", {}).keys())
+        new_projects = set(snapshot["projects"].keys())
+        added = new_projects - old_projects
+        removed = old_projects - new_projects
+        old_mcps = set(old_snapshot.get("mcp_servers", []))
+        new_mcps = set(snapshot["mcp_servers"])
+        new_servers = new_mcps - old_mcps
+        gone_servers = old_mcps - new_mcps
 
-    if added:
-        _log(f"Snapshot: {len(added)} new project(s): {', '.join(sorted(added)[:5])}")
-    if removed:
-        _log(f"Snapshot: {len(removed)} removed project(s): {', '.join(sorted(removed)[:5])}")
-    if new_servers:
-        _log(f"Snapshot: {len(new_servers)} new MCP server(s): {', '.join(sorted(new_servers))}")
-    if gone_servers:
-        _log(f"Snapshot: {len(gone_servers)} removed MCP server(s): {', '.join(sorted(gone_servers))}")
+        if added:
+            _log(f"Snapshot: {len(added)} new project(s): {', '.join(sorted(added)[:5])}")
+        if removed:
+            _log(f"Snapshot: {len(removed)} removed project(s): {', '.join(sorted(removed)[:5])}")
+        if new_servers:
+            _log(f"Snapshot: {len(new_servers)} new MCP server(s): {', '.join(sorted(new_servers))}")
+        if gone_servers:
+            _log(f"Snapshot: {len(gone_servers)} removed MCP server(s): {', '.join(sorted(gone_servers))}")
 
-    state["claude_json_snapshot"] = snapshot
-    _write_atomic(STATE_JSON, state)
+        state["claude_json_snapshot"] = snapshot
+
+    _safe_state_update(_mutate_snapshot)
 
 
 # H2: known-projects ledger — first-seen timestamps for each project path.
