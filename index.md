@@ -133,8 +133,7 @@ my-bundle/
 └── profiles/                         # One per identity / context
     ├── infra-ops/
     │   ├── CLAUDE.md                 # Behavior rules
-    │   ├── profile.yml               # Model, permissions, MCP categories, OTEL
-    │   └── .claude/                  # Profile-scoped overrides
+    │   └── .claude/                  # Profile-scoped overrides + MCP servers
     └── coding-strict/
         └── ...
 ```
@@ -275,26 +274,6 @@ database  compute  observability  utilities
 
 ---
 
-## Per-project configuration
-
-Each project can have its own profile, MCP whitelist, and system prompt via `.agentihooks.json`:
-
-```bash
-# Create per-project config
-cat > .agentihooks.json << 'EOF'
-{"profile": "coding", "enabledMcpServers": ["gateway-core", "hooks-utils"]}
-EOF
-
-# Generate settings.local.json
-agentihooks init --local
-```
-
-This generates `.claude/settings.local.json` (env, permissions, MCP whitelist) — gitignored automatically. The profile-rendered system prompt lives only in the global `~/.claude/CLAUDE.md`; per-project `.claude/CLAUDE.local.md` is no longer generated.
-
-See [Per-Project Configuration]({{ site.baseurl }}/docs/getting-started/per-project/) for the full guide.
-
----
-
 ## Add more MCP servers
 
 Drop `.json` files with a `mcpServers` key into `~/.agentihooks/`, then use the interactive MCP manager:
@@ -337,8 +316,8 @@ AgentiHooks is a platform, not just a tool. Fork the repo and you immediately in
 
 **Add your own profile:**
 
-Create a directory under `profiles/<name>/` with `profile.yml`, `.mcp.json`,
-and `.claude/CLAUDE.md`. Run `agentihooks init --profile <name>`.
+Create a directory under `profiles/<name>/` with `.claude/CLAUDE.md` and
+`.claude/.mcp.json`. Run `agentihooks init --profile <name>`.
 
 **Stay merge-friendly:**
 

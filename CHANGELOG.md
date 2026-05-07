@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Per-repo `.agentihooks.json`, `profile.yml`, and the runtime overlay
+  system — all gone (2026-05-07).** `agentihooks init` is now global-only:
+  no `--repo`, no `--local`, no per-project `settings.local.json` writer,
+  no `.agentihooks.json` reader anywhere in the codebase. `profile.yml` is
+  no longer read — `description`, `mcp_categories`, `enabledMcpServers`,
+  `allowedOverlays`, and the `claude:` block are gone (mcp_categories
+  hardcoded to `"all"`; `cmd_claude` now passes only
+  `--dangerously-skip-permissions`; the blacklist-by-default sweep is
+  dormant). The runtime overlay system (`scripts/overlay.py`,
+  `hooks/context/overlay_injector.py`, `hooks/mcp/profiles.py`,
+  `agentihooks overlay` CLI, `OVERLAY_INJECTION_ENABLED`,
+  `AGENTIHOOKS_AUTO_OVERLAY`, `~/.agentihooks/active_overlays.json`,
+  statusline `overlay:` column) is removed. Channel `subscribe` /
+  `unsubscribe` (CLI + MCP tools) removed; every session is hard-coded
+  to `BASE_CHANNELS = ("brain", "amygdala")`. OTEL helper
+  (`_build_otel_env`) retained for future re-wiring; OTEL env injection
+  no longer reads from `profile.yml`.
 - **Sync daemon (`scripts/sync_daemon.py`) — deleted entirely.** The auto-init loop (file-hash watcher → `_install_global_inner`) was the root cause of the chain-demotion bug class fixed across v1.11.2 → v1.11.3. `agentihooks init` is now the sole entry point that re-applies profile/bundle/MCP changes; it's idempotent and reads `state.json`. Also removed: `cmd_daemon` and the `agentihooks daemon` subcommand, daemon restart in `cmd_init`, daemon stop in `cmd_uninstall`, daemon liveness checks in `status_checker`, `tests/test_sync_daemon.py`, the `AGENTIHOOKS_SYNC_POLL_SEC` env var, and all heartbeat / hash-manifest / crash-sentinel state files. Old artifacts (`sync-daemon.pid`, `sync-daemon.heartbeat`, `.sync-daemon.singleton.lock`) are now scrubbed by `agentihooks uninstall`.
 
 ### Changed

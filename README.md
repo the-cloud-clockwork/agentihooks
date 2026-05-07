@@ -6,7 +6,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clockwork.github.io/agentihooks/)
 
-The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with smart profiles that shift mid-session, guardrails, context intelligence, and real-time broadcast messaging across every active session.
+The production harness for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turn Claude Code into a managed fleet — with profile chaining, guardrails, context intelligence, and real-time broadcast messaging across every active session.
 
 > **Full documentation:** [the-cloud-clockwork.github.io/agentihooks](https://the-cloud-clockwork.github.io/agentihooks/)
 
@@ -29,7 +29,6 @@ One command transforms your agent's entire personality, permissions, and toolset
 ```bash
 agentihooks init --profile coding,anton     # chain profiles
 agentihooks settings-profile admin          # swap permissions without touching persona
-agentihooks init --local --profile infra    # per-repo identity
 ```
 
 - **Profile chaining** — comma-separated profiles merge left-to-right (rules accumulate, settings deep-merge, CLAUDE.md concatenates)
@@ -155,7 +154,6 @@ Claude Code
 # Install / configure
 agentihooks init                             # global install with default profile
 agentihooks init --profile coding,anton       # chain profiles
-agentihooks init --local --profile infra     # per-repo config
 agentihooks settings-profile admin           # quick-switch settings layer
 
 # Fleet messaging
@@ -165,8 +163,8 @@ agentihooks broadcast emit "natural lang"    # AI-assisted
 agentihooks broadcast --list                 # active broadcasts
 agentihooks broadcast --clear                # clear all
 
-# Launch claude with profile flags
-agentihooks claude                           # reads profile.yml -> CLI flags
+# Launch claude with --dangerously-skip-permissions
+agentihooks claude                           # bypassPermissions + your extra args
 agenti                                       # alias (after source ~/.bashrc)
 
 # Bundle management
@@ -179,17 +177,9 @@ agentihooks link-profile link ~/dev/brain --name br   # disambiguate name on col
 agentihooks link-profile list                         # show all linked external profiles
 agentihooks link-profile unlink brain-profile         # remove from chain + sweep symlinks
 
-# Runtime overlays (mid-session profile shifting)
-agentihooks overlay list                     # available overlays for current base
-agentihooks overlay add patch-mode           # activate overlay
-agentihooks overlay remove patch-mode        # deactivate overlay
-agentihooks overlay clear                    # remove all overlays
-
-# Broadcast channels (targeted messaging)
+# Broadcast channels (targeted messaging — subscribe/unsubscribe being reworked)
 agentihooks channel publish brain "msg"      # publish to a channel
 agentihooks channel list                     # active channels + message counts
-agentihooks channel subscribe brain          # subscribe CWD project
-agentihooks channel unsubscribe brain        # unsubscribe CWD project
 
 # Brain adapter (knowledge injection)
 agentihooks brain status                     # source type, entries, refresh state
@@ -241,6 +231,9 @@ agentihooks uninstall [--yes]                # remove everything
 8. Installs CLI globally via `uv tool`
 9. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
+> Per-repo init (`--repo` / `--local`) and `.agentihooks.json` were removed
+> 2026-05-07. `agentihooks init` is global-only.
+
 ## Profiles
 
 Profiles mirror the Claude Code project structure:
@@ -248,7 +241,6 @@ Profiles mirror the Claude Code project structure:
 ```
 profiles/<name>/
 |-- CLAUDE.md                    # system prompt (-> ~/.claude/CLAUDE.md)
-|-- profile.yml                  # agentihooks metadata + claude flags
 +-- .claude/
     |-- settings.overrides.json  # merged into ~/.claude/settings.json
     |-- .mcp.json                # profile MCP servers
@@ -263,24 +255,6 @@ Built-in profiles: `default` (auto), `coding` (acceptEdits), `admin` (bypassPerm
 **3-layer merge:** agentihooks built-in -> bundle global `.claude/` -> profile-specific `.claude/`. Applies to skills, agents, commands, rules, and MCP servers.
 
 **Profile chaining:** `agentihooks init --profile coding,anton` applies each profile sequentially — hooks append, CLAUDE.md concatenates, rules/skills accumulate additively.
-
-**Runtime overlays — profiles that shift mid-session:**
-
-Your agent is running on `anton`. A service breaks. Instead of restarting:
-
-```
-agent calls → overlay_add("patch-mode")
-```
-
-Next turn, the agent has `patch-mode` rules layered on top — surgical mode, investigation-first, operator-gated commits. It fixes the service, operator validates, then:
-
-```
-agent calls → overlay_remove("patch-mode")
-```
-
-Back to `anton`. Full autonomy. Image rebuild in parallel. Zero session restart, zero context loss. The base profile's `allowedOverlays` field controls which overlays agents can activate — no escalation to profiles they weren't designed for.
-
-This is a **smart profile system** — agents don't just have identities, they shift between complementary modes like a musician moving between tension and release. [Full docs: Runtime Overlays](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/overlays/)
 
 **Settings profiles (two-axis model):** Control settings independently from persona:
 
@@ -299,7 +273,7 @@ agentihooks settings-profile --clear         # revert
 | `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, overlay injection, brain refresh, context refresh, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, brain refresh, context refresh, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -325,7 +299,6 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
-| `OVERLAY_INJECTION_ENABLED` | `true` | Mid-session overlay profile injection |
 | `BRAIN_ENABLED` | `false` | Brain adapter master switch |
 | `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
 | `BRAIN_HTTP_TOKEN` | `""` | Bearer token for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
@@ -375,15 +348,6 @@ BRAIN_WRITER_ENABLED=true
 Restart your Claude Code session. The hook stack will fetch hot arcs +
 active signals on every prompt and inject them as broadcast banners. No
 profile install required — works alongside any profile (or none).
-
-## Per-Repo Config
-
-```bash
-agentihooks init --local                     # per-repo config for current directory
-agentihooks init --local --profile coding    # override profile for this project
-```
-
-Reads `.agentihooks.json` from repo root and generates `.claude/settings.local.json` (per-project permissions, MCP whitelist, env). The prompt rendered from the profile chain lives only in the global `~/.claude/CLAUDE.md` — per-project `.claude/CLAUDE.local.md` is no longer generated, and any pre-existing copy is removed on init.
 
 ## Memory Mirror — cross-machine auto-memory sync (PR-gated)
 

@@ -26,10 +26,9 @@ A **profile** is a named bundle that defines *who your agent is* and *what it is
 | Component | What it controls |
 |-----------|-----------------|
 | `CLAUDE.md` | The agent's system prompt — behavioral rules, response style, operator model |
-| `settings.overrides.json` | Permissions: deny lists, ask lists, permission mode |
+| `settings.overrides.json` | Permissions, env vars, model/effort defaults |
 | `.mcp.json` | Which MCP tool servers are active |
 | `rules/`, `skills/`, `agents/`, `commands/` | Domain-specific assets available in the session |
-| `profile.yml` | Model selection, turn limits, timeout, launch flags |
 
 Profiles live under `profiles/<name>/` in the agentihooks repo or in a linked bundle. Switch one, change everything.
 
@@ -49,7 +48,6 @@ profiles/
 │   └── settings.base.json          # Canonical hooks, permissions, MCP server list
 ├── coding/
 │   ├── CLAUDE.md                   # Agent system prompt (at profile root)
-│   ├── profile.yml                 # agentihooks metadata + Claude launch config
 │   └── .claude/
 │       ├── settings.overrides.json # Merged on top of _base at install time
 │       ├── .mcp.json               # Profile MCP servers
@@ -179,58 +177,18 @@ agentihooks init --profile anton   # admin overlay applied automatically
 
 ---
 
-## Per-repo identity
-
-Each project can pin its own profile, independent of the global install. Commit a `.agentihooks.json` to the repo root:
-
-```json
-{
-  "profile": "coding",
-  "enabledMcpServers": ["gateway-core", "gateway-pm"]
-}
-```
-
-Then generate the project-local config:
-
-```bash
-agentihooks init --local
-```
-
-This writes two gitignored files that Claude Code treats as highest priority:
-
-| File | Purpose |
-|------|---------|
-| `.claude/settings.local.json` | Project-scoped permissions and env vars |
-
-The system prompt rendered from the profile chain lives in the global `~/.claude/CLAUDE.md` — per-project `.claude/CLAUDE.local.md` is no longer generated.
-
-### Querying the active profile
+## Querying the active profile
 
 ```bash
 agentihooks --query
 ```
 
 ```
-coding (local)     # project has .agentihooks.json
-anton (global)      # fallback to global install
-chain: [coding, anton]  # chained profile
+chain: [coding, anton] (global)
 ```
 
-### Monorepo example
-
-Different agents, different identities, same repo:
-
-```
-my-monorepo/
-├── .agentihooks.json          → {"profile": "anton"}
-├── agents/
-│   ├── publisher/
-│   │   └── .agentihooks.json  → {"profile": "coding", "enabledMcpServers": ["gateway-publish"]}
-│   └── reviewer/
-│       └── .agentihooks.json  → {"profile": "coding", "enabledMcpServers": ["gateway-core"]}
-└── infra/
-    └── .agentihooks.json      → {"profile": "admin", "enabledMcpServers": ["gateway-infra"]}
-```
+> Per-repo identity (`agentihooks init --local` / `.agentihooks.json`) was
+> removed 2026-05-07. The active profile chain is now global only.
 
 ---
 
@@ -246,7 +204,6 @@ my-bundle/
 └── profiles/
     ├── infra-ops/            # Custom profile
     │   ├── CLAUDE.md
-    │   ├── profile.yml
     │   └── .claude/
     └── reviewer/
         └── ...
@@ -288,87 +245,31 @@ RUN agentihooks init   # uses coding profile automatically
 
 ---
 
-## Reference: profile.yml fields
-
-```yaml
-# agentihooks metadata
-name: coding
-description: "Autonomous coding agent"
-mcp_categories: aws,utilities,observability   # MCP tool categories to enable
-
-# Claude launch config (read by `agentihooks claude` / `agenti`)
-claude:
-  model: sonnet
-  max_turns: 80
-  timeout: 3600
-  permission_mode: bypassPermissions   # maps to --dangerously-skip-permissions
-```
-
-The `agentihooks claude` command (alias: `agenti`) reads this file and translates it to Claude Code CLI flags — no manual flag management.
-
----
-
 ## Creating a custom profile
 
 ```bash
 # 1. Copy an existing profile as a starting point
 cp -r profiles/default profiles/myprofile
 
-# 2. Set identity metadata
-# Edit profiles/myprofile/profile.yml
-
-# 3. Write the system prompt
+# 2. Write the system prompt
 # Edit profiles/myprofile/CLAUDE.md
 
-# 4. Add profile-specific assets (optional)
+# 3. Add profile-specific assets (optional)
 # profiles/myprofile/.claude/rules/
 # profiles/myprofile/.claude/skills/
 # profiles/myprofile/.claude/settings.overrides.json
 
-# 5. Install it
+# 4. Install it
 agentihooks init --profile myprofile
 ```
 
 {: .note }
 Hooks are always wired from `_base/settings.base.json`. Profiles control persona, permissions, and assets — not the underlying hook infrastructure.
 
----
-
----
-
-## Runtime overlays — mid-session profile shifting
-
-Profiles are static — installed once, read at session start. But what if your agent needs to shift behavior mid-session without restarting?
-
-**Runtime overlays** solve this. An agent can layer a profile on top of its base identity, live, and peel it off when done — all without losing conversation context.
-
-```
-# Agent running on anton (general-purpose, full autonomy)
-# A service breaks. Enter surgical mode:
-
-agent → overlay_add("patch-mode")
-# → Next turn: patch-mode rules injected into context
-# → Agent investigates, applies fix, validates
-
-operator → "good, integrate it"
-
-agent → overlay_remove("patch-mode")
-# → Back to anton. Auto-commits. Kicks off image rebuild.
-```
-
-Overlays are controlled by the base profile's `allowedOverlays` whitelist in `profile.yml`:
-
-```yaml
-allowedOverlays:
-  - patch-mode
-  - router
-```
-
-Agents can shift between approved modes but cannot escalate to unapproved profiles. The whitelist is the blast radius control.
-
-Available as MCP tools (`overlay_add`, `overlay_remove`, `overlay_refresh`, `profile_list`, `profile_current`) inside any session via the `hooks-utils` server.
-
-[Full docs: Runtime Overlays](overlays.md)
+> `profile.yml` and the runtime overlay system were removed 2026-05-07.
+> Profile metadata, `claude:` launch fields, and `allowedOverlays` no
+> longer exist. Profile chaining (comma-separated `--profile`) remains the
+> only mechanism for combining profiles, applied at install time.
 
 ---
 
