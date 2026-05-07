@@ -2115,27 +2115,59 @@ def _find_requirements_files() -> list[Path]:
 def _detect_venv() -> Path | None:
     """Return the Python executable inside the active or local venv, or None.
 
-    ~/.agentihooks/.venv always wins when it exists — it is the canonical
-    environment regardless of which project venv happens to be activated.
-    """
-    # 1. Dedicated ~/.agentihooks/.venv — always preferred when present
-    agentihooks_venv = Path.home() / ".agentihooks" / ".venv" / "bin" / "python"
-    if agentihooks_venv.exists():
-        return agentihooks_venv
+    Priority — operator intent FIRST. The activated VIRTUAL_ENV wins over
+    any directory-based discovery, so a stray ``.venv`` in the cwd (created
+    by tools like ``uv run``) cannot silently shadow an explicitly
+    activated environment.
 
-    # 2. Activated venv via VIRTUAL_ENV (fallback if dedicated venv missing)
+    1. ``$VIRTUAL_ENV`` — explicit operator activation. Highest authority.
+    2. Dedicated ``~/.agentihooks/.venv`` — canonical fallback if the
+       operator has set one up but isn't currently activated.
+    3. ``./.venv`` in cwd — last-resort for plain ``cd repo && python``
+       workflows. Anything created here by ``uv run`` or similar tools
+       loses to (1) and (2).
+    """
+    # 1. Activated venv via VIRTUAL_ENV — explicit operator intent wins
     venv_env = os.environ.get("VIRTUAL_ENV")
     if venv_env:
         python = Path(venv_env) / "bin" / "python"
         if python.exists():
             return python
 
-    # 3. .venv directory in cwd
+    # 2. Dedicated ~/.agentihooks/.venv (canonical opt-in)
+    agentihooks_venv = Path.home() / ".agentihooks" / ".venv" / "bin" / "python"
+    if agentihooks_venv.exists():
+        return agentihooks_venv
+
+    # 3. .venv directory in cwd — lowest priority
     local_venv = Path.cwd() / ".venv" / "bin" / "python"
     if local_venv.exists():
         return local_venv
 
     return None
+
+
+def _python_can_import_hooks(python_path: Path | str) -> bool:
+    """Return True iff *python_path* can ``import hooks`` without cwd help.
+
+    The MCP server is launched by Claude Code from its own cwd; relying on
+    cwd-on-sys.path to make ``import hooks`` work is fragile and has caused
+    silent ``ModuleNotFoundError`` failures. This probe runs the candidate
+    python from a neutral directory so cwd cannot rescue a venv that is
+    missing the editable install.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [str(python_path), "-c", "import hooks"],
+            cwd="/",
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _prompt_install_requirements(*, force: bool = False) -> None:
@@ -3009,11 +3041,56 @@ def _remove_mcp_from_user_scope(servers: dict) -> None:
 
 
 def _build_mcp_config(mcp_categories: str) -> dict:
-    """Build MCP server config for the hooks-utils server."""
+    """Build MCP server config for the hooks-utils server.
+
+    The ``command`` path must be a python that can ``import hooks`` from
+    any cwd — Claude Code launches the MCP from its own working directory
+    and relying on cwd-on-sys.path produces silent ModuleNotFoundError.
+
+    Resolution order:
+    1. ``_detect_venv()`` — VIRTUAL_ENV first, then ``~/.agentihooks/.venv``,
+       then ``./.venv`` (operator intent).
+    2. ``sys.executable`` — the python currently running install.py.
+
+    Each candidate is probed via ``_python_can_import_hooks`` from cwd ``/``;
+    the first that succeeds wins. If none pass, install bails with a clear
+    error rather than baking a broken path into ``~/.claude.json``.
+    """
+    candidates: list[Path] = []
+    detected = _detect_venv()
+    if detected:
+        candidates.append(detected)
+    sys_exec = Path(sys.executable)
+    if sys_exec not in candidates:
+        candidates.append(sys_exec)
+
+    chosen: Path | None = None
+    failed: list[Path] = []
+    for cand in candidates:
+        if _python_can_import_hooks(cand):
+            chosen = cand
+            break
+        failed.append(cand)
+
+    if chosen is None:
+        msg_parts = [
+            "ERROR: no python found that can `import hooks` from a neutral cwd.",
+            "Refusing to write a broken hooks-utils MCP command into ~/.claude.json.",
+            "Tried:",
+        ]
+        for p in failed:
+            msg_parts.append(f"  - {p}")
+        msg_parts.append(
+            "Fix: install agentihooks editable into your venv, e.g.\n"
+            "  uv pip install --python <path-to-python> -e \".[all]\""
+        )
+        print("\n".join(msg_parts), file=sys.stderr)
+        sys.exit(1)
+
     return {
         "mcpServers": {
             "hooks-utils": {
-                "command": sys.executable,
+                "command": str(chosen),
                 "args": ["-m", "hooks.mcp"],
                 "cwd": str(AGENTIHOOKS_ROOT),
                 "env": {"MCP_CATEGORIES": mcp_categories},
