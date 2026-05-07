@@ -2466,8 +2466,13 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     profile_chain = surviving_chain
-    # For display and state storage, use the surviving chain string
+    # In-memory chain string — used for display only. STATE persistence below
+    # uses ``profile_input`` (operator intent) so a transient missing profile
+    # source (e.g. a git checkout in the bundle repo briefly removing files)
+    # cannot shrink the persisted chain. The daemon already validates source
+    # dirs before triggering reinstall; this is the second line of defense.
     profile_name = ",".join(profile_chain)
+    persisted_profile = profile_input.strip() or profile_name
 
     profile_sources = []
     for pname, _ in profile_dirs:
@@ -2707,7 +2712,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     _seed_user_env_file()
 
     # --- 12. Register as sync daemon target ---
-    _register_target_global(profile_name, settings_profile=settings_profile_name)
+    # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk
+    # runtime chain. See note above: dropping unresolvable entries from
+    # state lets a transient git operation in the bundle repo silently
+    # demote the chain to "default".
+    _register_target_global(persisted_profile, settings_profile=settings_profile_name)
     _snapshot_claude_json()
 
     # --- Track version in state.json ---
