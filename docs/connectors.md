@@ -31,7 +31,7 @@ Permission deny rules are configured in the profile's `.claude/settings.override
 }
 ```
 
-These are merged during `agentihooks init` on top of the base settings. The `disabledMcpServers` key in `~/.claude.json` provides MCP-level blacklisting across all projects.
+These are merged during `agentihooks init` on top of the base settings.
 
 ## Bundle-based approach
 

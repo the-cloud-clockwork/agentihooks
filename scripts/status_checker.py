@@ -380,7 +380,7 @@ def check_mcp() -> dict[str, Any]:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Per-project disabled list from ~/.claude.json projects block
+        # Per-project disabled state (UI toggles via /mcp) from ~/.claude.json
         cwd = str(Path.cwd())
         project_block = user_data.get("projects", {}).get(cwd, {})
         disabled: set[str] = set(project_block.get("disabledMcpServers", []))
@@ -440,9 +440,6 @@ def check_mcp() -> dict[str, Any]:
         # Save fresh cache
         _save_tool_cache(queried_tools)
 
-        # External disabled (servers in blacklist but not in user/project configs)
-        external_disabled = disabled - set(all_cfg)
-
         enabled_count = sum(1 for v in server_details.values() if v["enabled"])
         disabled_count = sum(1 for v in server_details.values() if not v["enabled"])
 
@@ -452,8 +449,6 @@ def check_mcp() -> dict[str, Any]:
             "disabled": disabled_count,
             "fleet_tools": fleet_tools,
             "active_tools": active_tools,
-            "external_disabled": len(external_disabled),
-            "external_disabled_names": sorted(external_disabled),
             "servers": server_details,
             "ok": len(server_details) > 0,
         }
@@ -638,7 +633,6 @@ def format_cli(results: dict[str, Any]) -> str:
     enabled = m.get("enabled", 0)
     disabled = m.get("disabled", 0)
     total = m.get("total", 0)
-    ext_disabled = m.get("external_disabled", 0)
     fleet_tools = m.get("fleet_tools", 0)
     active_tools = m.get("active_tools", 0)
 
@@ -654,20 +648,12 @@ def format_cli(results: dict[str, Any]) -> str:
         header += f" — {fleet_tools} tools total"
         if active_tools != fleet_tools:
             header += f", {active_tools} active here"
-    if ext_disabled:
-        header += f" + {ext_disabled} external blacklisted"
     lines.append(_cprint(f"{tag} MCP: {header}"))
 
     for sname, sinfo in m.get("servers", {}).items():
         marker = "+" if sinfo["enabled"] else "-"
         tools_str = f" ({sinfo['tools']} tools)" if sinfo.get("tools") is not None else ""
         lines.append(f"     {marker} {sname} [{sinfo['type']}]{tools_str}")
-
-    ext_names = m.get("external_disabled_names", [])
-    if ext_names:
-        lines.append(f"     Blacklisted: {', '.join(ext_names[:5])}")
-        if len(ext_names) > 5:
-            lines.append(f"       ...+{len(ext_names) - 5} more")
 
     # Quota
     q = results["quota"]

@@ -2392,10 +2392,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         else:
             _cprint(f"  [--] AGENTIHOOKS_MCP_FILE={mcp_file_env} not found — skipping.")
 
-    # NOTE: blacklist-all-by-default sweep removed 2026-05-07 with profile.yml.
-    # Whitelist had no replacement source. Per-project disabledMcpServers in
-    # ~/.claude.json is operator-managed until a new whitelist mechanism lands.
-
     # --- 10. Install agentihooks CLI tool to ~/.local/bin ---
     print()
     _install_cli_tool()
@@ -4293,8 +4289,6 @@ def cmd_migrate(args) -> None:
         merged = {**old_data, **new_data}
         projects[new] = merged
 
-    # NOTE: blacklist re-apply removed 2026-05-07 with profile.yml.
-    # Migrated projects keep whatever disabledMcpServers they already had.
     state = _load_state()
     active_profile = state.get("targets", {}).get("global", {}).get("profile", "default")
 

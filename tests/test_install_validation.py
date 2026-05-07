@@ -102,7 +102,6 @@ def install_env(tmp_path):
         "name: test-profile\n"
         "description: Test profile\n"
         "mcp_categories: all\n"
-        "enabledMcpServers: []\n"
         "otel:\n"
         "  enabled: false\n"
     )

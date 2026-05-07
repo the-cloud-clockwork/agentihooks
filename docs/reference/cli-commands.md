@@ -672,13 +672,13 @@ agentihooks status
 | **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
 | **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
 | **Guardrails** | Lists all 8 guardrails with descriptions and enabled/disabled state |
-| **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, checks per-project blacklists, shows fleet total vs active in current project |
+| **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, shows fleet total vs active in current project |
 
 ### MCP fleet introspection
 
 The status checker connects to every HTTP MCP server (even disabled ones) to get real tool counts. Auth tokens are resolved from `${ENV_VAR}` references in `~/.claude.json` headers using env vars loaded by `agentienv`. Results are cached at `~/.agentihooks/mcp-tool-cache.json` with a 1-hour TTL.
 
-Per-project blacklists are read from the `projects` block in `~/.claude.json` (the blacklist-all-by-default mechanism). The output shows fleet total (all servers) vs active tools (enabled in current project context).
+The output shows fleet total (all servers) vs active tools (enabled in current project context). Individual servers can be toggled via the `/mcp` UI — that state is stored in `~/.claude.json`'s projects block.
 
 ### In-session skill
 
