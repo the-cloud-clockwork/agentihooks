@@ -272,13 +272,6 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ---
 
-## Runtime Overlays
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OVERLAY_INJECTION_ENABLED` | `true` | Enable mid-session profile overlay injection via UserPromptSubmit hook. |
-
----
 
 ## Guardrails
 

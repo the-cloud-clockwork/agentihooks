@@ -45,7 +45,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 |---|---|---|
 | `SessionStart` | `on_session_start` | Register broadcast session, inject context, brain injection, MCP warning |
 | `SessionEnd` | `on_session_end` | Deregister session, clear caches, log summary |
-| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, overlay injection, brain refresh, context refresh, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, brain refresh, context refresh, channel-filtered broadcast delivery |
 | `PreToolUse` | `on_pre_tool_use` | Secrets scan, guardrails pipeline, critical broadcast via additionalContext |
 | `PostToolUse` | `on_post_tool_use` | Bash filter, file dedup, tool error recording |
 | `Stop` / `SubagentStop` | `on_stop` | Memory auto-save, cost logging |
@@ -64,15 +64,11 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 
 3-layer merge: agentihooks built-in → bundle global → profile-specific. Profiles chained with commas. Two-axis model: persona (rules/CLAUDE.md) independent from settings (permissions/MCP).
 
-### Runtime overlays
-
-`scripts/overlay.py` + `hooks/context/overlay_injector.py` + `hooks/mcp/profiles.py`. Agents can chain profiles mid-session via MCP tools (`overlay_add`, `overlay_remove`). State in `~/.agentihooks/active_overlays.json`. Content injected via `UserPromptSubmit` hook. Base profile's `allowedOverlays` field in `profile.yml` controls the whitelist.
-
 ### Broadcast system + channels
 
 File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/deregister via hooks. Three severity tiers (info/alert/critical). AI-assisted `emit` spawns sandboxed Haiku (Bash(agentihooks*) only).
 
-**Channels:** Messages can have an optional `channel` field. Sessions subscribe to channels in `.agentihooks.json` via `"channels": ["brain", "ops-alerts"]`. Delivery is filtered at read-time — global messages (no channel) reach everyone, channel messages reach only subscribers. Wildcard `"*"` subscribes to all.
+**Channels:** Messages can have an optional `channel` field. Every session is subscribed to `BASE_CHANNELS = ("brain", "amygdala")` — global messages (no channel) reach everyone; channel messages reach only base-channel subscribers. Per-repo channel subscription is being reworked (see project memory).
 
 ### Brain adapter
 

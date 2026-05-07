@@ -19,25 +19,27 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 ## `agentihooks init`
 
-The single entry point for installing agentihooks. Handles global setup, bundle linking, and per-repo configuration.
+The single entry point for installing agentihooks. Handles global setup and bundle linking.
 
 ```bash
-agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
+agentihooks init [--bundle <path>] [--profile <name>]
 ```
 
 ### What it does
 
 1. Links bundle directory (if `--bundle` is provided)
-2. Merges settings: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL
+2. Merges settings: `_base/settings.base.json` -> profile `.claude/settings.overrides.json`
 3. Substitutes `/app` -> real repo path and `__PYTHON__` -> venv Python in all commands
 4. Preserves personal keys (`model`, `autoUpdatesChannel`, `skipDangerousModePermissionPrompt`) from any pre-existing unmanaged settings
 5. Writes `~/.claude/settings.json` with hook wiring and tool permissions
 6. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> each profile in chain)
 7. Writes `~/.claude/CLAUDE.md` -- single profile: file copy; chained profiles: concatenated with `---` separators and `<!-- profile: name -->` markers
 8. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
-9. Applies MCP blacklist across all projects (`disabledMcpServers`)
-10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
-11. Writes managed bashrc block (`agentienv` function + `agenti` alias)
+9. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
+10. Writes managed bashrc block (`agentienv` function + `agenti` alias)
+
+> Per-repo init (`--repo` / `--local` / `.agentihooks.json`) was removed
+> 2026-05-07. `agentihooks init` is global-only.
 
 ### Flags
 
@@ -45,7 +47,6 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
-| `--repo <path>` | Target repo directory for per-repo configuration |
 | `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`, memory mirror. |
 
 ### Environment variables
@@ -85,9 +86,6 @@ agentihooks settings-profile --clear
 
 # Same, using the environment variable
 AGENTIHOOKS_PROFILE=coding agentihooks init
-
-# Per-repo configuration
-agentihooks init --repo ~/dev/my-project
 
 # Auto-merge a gateway MCP file during install
 AGENTIHOOKS_MCP_FILE=/shared/gateway-mcp.json agentihooks init
@@ -312,7 +310,7 @@ rm -rf ~/.agentihooks
 
 ## `agentihooks claude`
 
-Launch Claude Code with flags derived from the active profile's `profile.yml`.
+Launch Claude Code with `--dangerously-skip-permissions` and pass through any extra args.
 
 ```bash
 agentihooks claude [extra-args...]
@@ -322,27 +320,22 @@ agentihooks claude [extra-args...]
 
 ### How it works
 
-Reads the `claude:` section from the active profile's `profile.yml` and maps fields to Claude Code CLI flags:
+The launcher injects exactly one flag: `--dangerously-skip-permissions`. Any extra arguments are appended verbatim. Model, effort, and other Claude Code defaults come from `~/.claude/settings.json` (rendered from each profile's `settings.overrides.json`).
 
-| profile.yml field | CLI flag |
-|-------------------|----------|
-| `claude.model` | `--model <value>` |
-| `claude.max_turns` | `--max-turns <value>` |
-| `claude.permission_mode: bypassPermissions` | `--dangerously-skip-permissions` |
-
-Any extra arguments are passed through to Claude Code.
+> The `claude:` block in `profile.yml` was removed 2026-05-07; profile-level
+> CLI flag mapping no longer exists.
 
 ### Examples
 
 ```bash
-# Launch with profile settings
+# Launch
 agentihooks claude
 
 # Use the alias
 agenti
 
 # Pass extra args to claude
-agenti --verbose
+agenti --model haiku --verbose
 ```
 
 ---
