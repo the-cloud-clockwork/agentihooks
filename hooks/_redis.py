@@ -52,7 +52,10 @@ def get_redis():
             socket_connect_timeout=timeout,
         )
         _redis_client.ping()  # fail-fast on bad URL
-    except Exception:
+    except (KeyboardInterrupt, Exception):
+        # KeyboardInterrupt: operator aborted mid-import (common during
+        # SessionEnd Ctrl+C). Treat the same as any other connection failure
+        # — fall back to in-memory mode silently.
         _redis_client = None
 
     return _redis_client

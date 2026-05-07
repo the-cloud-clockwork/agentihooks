@@ -128,11 +128,15 @@ def check_and_block_redundant_read(payload: dict) -> None:
 
 def clear_session_cache(session_id: str) -> None:
     """Delete all cache entries for *session_id* from Redis and memory."""
-    r = get_redis()
-    if r is not None:
-        try:
-            r.delete(_cache_key(session_id), _mtime_key(session_id))
-        except Exception as e:
-            log("file_read_cache: Redis delete error", {"error": str(e)})
+    try:
+        r = get_redis()
+        if r is not None:
+            try:
+                r.delete(_cache_key(session_id), _mtime_key(session_id))
+            except Exception as e:
+                log("file_read_cache: Redis delete error", {"error": str(e)})
+    except KeyboardInterrupt:
+        # Operator pressed Ctrl+C mid-shutdown — exit silently.
+        pass
 
     _memory_cache.pop(session_id, None)

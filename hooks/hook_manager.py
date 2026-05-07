@@ -1835,6 +1835,12 @@ def main() -> None:
         os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)
     except json.JSONDecodeError:
         log("Failed to parse JSON payload")
+    except KeyboardInterrupt:
+        # Operator pressed Ctrl+C mid-hook (most common during SessionEnd
+        # while imports are still resolving). Exit silently — no traceback.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(130)  # standard SIGINT exit code
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
         sys.stdout.flush()
