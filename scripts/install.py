@@ -3082,7 +3082,7 @@ def _build_mcp_config(mcp_categories: str) -> dict:
             msg_parts.append(f"  - {p}")
         msg_parts.append(
             "Fix: install agentihooks editable into your venv, e.g.\n"
-            "  uv pip install --python <path-to-python> -e \".[all]\""
+            '  uv pip install --python <path-to-python> -e ".[all]"'
         )
         print("\n".join(msg_parts), file=sys.stderr)
         sys.exit(1)
