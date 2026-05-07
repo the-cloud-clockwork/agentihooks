@@ -59,11 +59,12 @@ A channel is a named topic. Messages published to a channel only reach sessions 
 
 ### Subscribing
 
-Sessions subscribe to channels in their project's `.agentihooks.json`:
+> **Current state (post 2026-05-07):** Per-project channel subscriptions via `.agentihooks.json` were removed along with the per-repo config system. Every session is currently hard-coded to `BASE_CHANNELS = ("brain", "amygdala")`. Subscription rebuild is tracked in the channel overlay follow-up work — the mechanism below documents the intended future API.
+
+Sessions will subscribe to channels via profile-level config (exact mechanism TBD):
 
 ```json
 {
-  "profile": "coding",
   "channels": ["brain", "ops-alerts"]
 }
 ```
@@ -121,8 +122,8 @@ Global broadcasts (no `channel` field) bypass the filter entirely — they reach
 |------|---------|
 | `channel_publish(channel, message, severity, ttl)` | Publish to a channel |
 | `channel_list()` | List active channels with message counts |
-| `channel_subscribe(channel)` | Add channel to current project's `.agentihooks.json` |
-| `channel_unsubscribe(channel)` | Remove channel from `.agentihooks.json` |
+| `channel_subscribe(channel)` | ~~Add channel to current project's `.agentihooks.json`~~ — removed, pending rebuild |
+| `channel_unsubscribe(channel)` | ~~Remove channel from `.agentihooks.json`~~ — removed, pending rebuild |
 
 ---
 
@@ -249,15 +250,16 @@ The amygdala (emergency broadcast) publishes directly to a channel like `"amygda
 
 ### Example: antoncore as test bunny
 
+> **Note:** `.agentihooks.json` was removed 2026-05-07. The example below shows the intended future state once per-profile channel subscriptions are rebuilt.
+
 ```json
-// antoncore/.agentihooks.json
+// profile-level channel config (future)
 {
-  "channels": ["brain"],
-  "otel": { ... }
+  "channels": ["brain"]
 }
 ```
 
-Any agent working in the antoncore project directory will receive brain channel messages. Agents in other projects without the `"brain"` channel subscription won't see them.
+Any agent running with a profile subscribed to `brain` will receive brain channel messages. Agents on profiles without the subscription won't see them.
 
 ---
 

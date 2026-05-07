@@ -26,9 +26,6 @@ agentihooks init --profile coding,my-custom-profile
 
 # Update bundle from remote
 agentihooks bundle pull
-
-# Per-repo config
-agentihooks init --repo ~/dev/some-project
 ```
 
 ## Bundle Layout
@@ -44,7 +41,7 @@ my-tools/                                   <- the bundle directory
 └── profiles/
     ├── infra-ops/                           # Custom profile
     │   ├── CLAUDE.md                        # System prompt (at profile ROOT)
-    │   ├── profile.yml                      # name, description, mcp_categories, claude launch config
+    │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config
     │   └── .claude/
     │       ├── settings.overrides.json      # Per-profile settings overrides
     │       ├── .mcp.json                    # Profile MCP servers
@@ -90,14 +87,6 @@ When you run `agentihooks init --profile X`:
 3. Error if not found
 
 Built-in profiles always take precedence. Name your bundle profiles to avoid conflicts.
-
-## Per-Repo Config
-
-After linking a bundle and setting a global profile, you can configure per repo:
-
-```bash
-agentihooks init --repo ~/dev/my-project
-```
 
 ## Permission Tiers
 
