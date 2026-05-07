@@ -602,7 +602,10 @@ def _connector_scoped_profiles(name: str, state: dict) -> set[str] | None:
     info = (state.get("connectors") or {}).get(name)
     if not info:
         return None  # unknown connector — assume broadest scope
-    conn_dir = Path(info.get("path", ""))
+    raw_path = info.get("path") or ""
+    if not raw_path:
+        return None  # missing path — broadest scope (safer than guessing)
+    conn_dir = Path(raw_path)
     profiles_root = conn_dir / "profiles"
     if not profiles_root.is_dir():
         return None
@@ -1198,15 +1201,26 @@ DEFAULT_STEP_TIMEOUT_SEC = int(os.environ.get("AGENTIHOOKS_SYNC_STEP_TIMEOUT_SEC
 MAX_CRASH_LOOP = 2
 
 
-def _step(name: str, fn, timeout: float = DEFAULT_STEP_TIMEOUT_SEC, default=None):
+def _step(name: str, fn, timeout: float | None = DEFAULT_STEP_TIMEOUT_SEC, default=None):
     """M3: run *fn* with a soft timeout. If the worker thread is still alive
     past *timeout*, log a TIMEOUT line and return *default* — letting the
     cycle proceed instead of blocking forever on a stuck I/O step.
+
+    Pass ``timeout=None`` to skip the watchdog entirely (use for legit
+    long-running steps such as _execute_actions, where a 120s cap would
+    falsely flag a real install as a stuck step).
 
     Caveat: Python threads cannot be force-killed. The worker continues in
     the background; the next cycle gets a fresh thread. Acceptable for
     I/O-bound steps (the common case here).
     """
+    if timeout is None:
+        try:
+            return fn()
+        except Exception as exc:
+            _log(f"Step {name} raised: {exc}")
+            return default
+
     import threading
 
     result: list = [default]
@@ -1230,9 +1244,14 @@ def _step(name: str, fn, timeout: float = DEFAULT_STEP_TIMEOUT_SEC, default=None
     return result[0]
 
 
-def _write_heartbeat(*, last_success_iso: str | None, cycles: int) -> None:
+def _write_heartbeat(*, last_success_iso: str | None, cycles: int, failed_cycle_count: int = 0) -> None:
     """M4: persist a heartbeat so `agentihooks daemon status` can warn
-    when the daemon is alive but not making progress."""
+    when the daemon is alive but not making progress.
+
+    failed_cycle_count is persisted across restarts so the M6 crash-loop
+    bound (MAX_CRASH_LOOP) is actually enforced — without this, the counter
+    reset to 0 every restart and the guard never tripped.
+    """
     try:
         version = _resolve_version()
     except Exception:
@@ -1241,6 +1260,7 @@ def _write_heartbeat(*, last_success_iso: str | None, cycles: int) -> None:
         "last_cycle": datetime.now(timezone.utc).isoformat(),
         "last_success": last_success_iso,
         "cycles": cycles,
+        "failed_cycle_count": failed_cycle_count,
         "version": version,
         "pid": os.getpid(),
     }
@@ -1506,7 +1526,7 @@ def _run_daemon(poll_sec: int) -> None:
                             summary = _step(
                                 "execute_actions",
                                 lambda: _execute_actions(actions, state),
-                                timeout=DEFAULT_STEP_TIMEOUT_SEC * 4,  # installs are slower
+                                timeout=None,  # installs are legit long; no watchdog here
                                 default={"errors": ["timeout"]},
                             ) or {"errors": ["timeout"]}
                             errors = summary.get("errors") or []
@@ -1592,7 +1612,11 @@ def _run_daemon(poll_sec: int) -> None:
             if not cycle_had_critical_error:
                 last_success_iso = datetime.now(timezone.utc).isoformat()
                 crash_loop_count = 0
-            _write_heartbeat(last_success_iso=last_success_iso, cycles=cycle_counter)
+            _write_heartbeat(
+                last_success_iso=last_success_iso,
+                cycles=cycle_counter,
+                failed_cycle_count=crash_loop_count,
+            )
 
     _log("Sync daemon stopped")
     try:
