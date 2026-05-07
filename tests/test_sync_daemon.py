@@ -796,3 +796,133 @@ class TestSafeStateUpdate:
 
         assert sync_daemon._safe_state_update(mutate) is True
         assert json.loads(sj.read_text())["claude_json_snapshot"]["first"] is True
+
+
+class TestExecuteActionsChainPreservation:
+    """Regression tests for the chain-demotion bug.
+
+    Bug: a transient git operation in the bundle/linked-profile repo
+    (checkout, stash, branch switch) briefly removes profile files. The
+    daemon's file-watcher fires _execute_actions, which used to call
+    install._install_global_inner unconditionally. _install_global_inner
+    then dropped the unresolvable entries from the chain and persisted
+    the SHRUNK chain to state. Repeated cycles eventually demoted the
+    chain to "default" — the only profile that cannot be removed by any
+    external git op (it ships inside the agentihooks repo itself).
+
+    Fix has two parts:
+    - sync_daemon._execute_actions: pre-flight resolves every chain
+      entry on disk before calling install. If any are missing, skip
+      the cycle with a WARN, leaving state untouched.
+    - install._install_global_inner: persist profile_input (operator
+      intent) instead of the runtime-shrunk chain.
+
+    Tests below pin the daemon-side guarantee.
+    """
+
+    def _make_state(self, chain: str) -> dict:
+        return {"targets": {"global": {"profile": chain, "settings_profile": ""}}}
+
+    def test_skips_reinstall_when_chain_entry_unresolvable(self, tmp_path, monkeypatch, capsys):
+        actions = {"reinstall_global": True, "reinstall_projects": [], "sync_mcp": False}
+        state = self._make_state("anton,brain")
+
+        called = {"hit": False}
+
+        class FakeInstall:
+            @staticmethod
+            def _resolve_profile_dir(name):
+                # 'anton' resolves; 'brain' is the transient miss.
+                return Path("/fake/anton") if name == "anton" else None
+
+            @staticmethod
+            def _install_global_inner(ns):
+                called["hit"] = True
+
+        monkeypatch.setattr(sync_daemon, "_ensure_install_importable", lambda: None)
+        monkeypatch.setitem(sys.modules, "install", FakeInstall)
+        monkeypatch.setattr(sync_daemon, "LOCK_FILE", tmp_path / "lock")
+
+        summary = sync_daemon._execute_actions(actions, state)
+
+        assert called["hit"] is False, "install._install_global_inner must NOT run when chain has unresolvable entries"
+        assert summary["global_reinstalled"] is False
+        assert any("missing: brain" in e for e in summary["errors"])
+        # State must not be mentioned as rewritten
+        out = capsys.readouterr().out
+        assert "Chain in state preserved: 'anton,brain'" in out
+
+    def test_proceeds_when_all_chain_entries_resolve(self, tmp_path, monkeypatch):
+        actions = {"reinstall_global": True, "reinstall_projects": [], "sync_mcp": False}
+        state = self._make_state("anton,brain")
+        called = {"hit": False, "ns_profile": None}
+
+        class FakeInstall:
+            @staticmethod
+            def _resolve_profile_dir(name):
+                return Path(f"/fake/{name}")  # both resolve
+
+            @staticmethod
+            def _install_global_inner(ns):
+                called["hit"] = True
+                called["ns_profile"] = ns.profile
+
+        monkeypatch.setattr(sync_daemon, "_ensure_install_importable", lambda: None)
+        monkeypatch.setitem(sys.modules, "install", FakeInstall)
+        monkeypatch.setattr(sync_daemon, "LOCK_FILE", tmp_path / "lock")
+
+        summary = sync_daemon._execute_actions(actions, state)
+
+        assert called["hit"] is True
+        assert called["ns_profile"] == "anton,brain"
+        assert summary["global_reinstalled"] is True
+        assert summary["errors"] == []
+
+    def test_skips_when_all_chain_entries_unresolvable(self, tmp_path, monkeypatch):
+        actions = {"reinstall_global": True, "reinstall_projects": [], "sync_mcp": False}
+        state = self._make_state("anton,brain")
+        called = {"hit": False}
+
+        class FakeInstall:
+            @staticmethod
+            def _resolve_profile_dir(name):
+                return None
+
+            @staticmethod
+            def _install_global_inner(ns):
+                called["hit"] = True
+
+        monkeypatch.setattr(sync_daemon, "_ensure_install_importable", lambda: None)
+        monkeypatch.setitem(sys.modules, "install", FakeInstall)
+        monkeypatch.setattr(sync_daemon, "LOCK_FILE", tmp_path / "lock")
+
+        summary = sync_daemon._execute_actions(actions, state)
+
+        assert called["hit"] is False
+        assert summary["global_reinstalled"] is False
+        # Both names appear in the error
+        assert any("anton" in e and "brain" in e for e in summary["errors"])
+
+
+class TestInstallGlobalChainPersistence:
+    """Regression for install._install_global_inner persisting operator
+    intent (profile_input) instead of the runtime-shrunk chain.
+
+    Source-level assertion: read scripts/install.py and verify the
+    _register_target_global call uses the persisted_profile variable
+    (operator intent) and that persisted_profile is bound from
+    profile_input. This is stable across refactors of the install body
+    and avoids needing a fully bootstrapped install environment.
+    """
+
+    def test_register_target_global_uses_operator_intent(self):
+        install_py = (Path(__file__).resolve().parent.parent / "scripts" / "install.py").read_text()
+        assert "persisted_profile = profile_input" in install_py, (
+            "Expected `persisted_profile = profile_input` binding in _install_global_inner. "
+            "If this was renamed, ensure operator-intent chain is what gets persisted."
+        )
+        assert "_register_target_global(persisted_profile" in install_py, (
+            "_register_target_global must persist the operator-intent chain (persisted_profile), "
+            "not the shrunk runtime chain (profile_name). Otherwise a transient missing profile "
+            "source silently demotes state.targets.global.profile."
+        )
