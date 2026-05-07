@@ -16,7 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `allowedOverlays`, and the `claude:` block are gone (mcp_categories
   hardcoded to `"all"`; `cmd_claude` now passes only
   `--dangerously-skip-permissions`; the blacklist-by-default sweep is
-  dormant). The runtime overlay system (`scripts/overlay.py`,
+  removed and confirmed obsolete — Anthropic lazy-loads tool schemas, overhead
+  is ~20k with all MCPs active vs ~200k before the fix). The runtime overlay system (`scripts/overlay.py`,
   `hooks/context/overlay_injector.py`, `hooks/mcp/profiles.py`,
   `agentihooks overlay` CLI, `OVERLAY_INJECTION_ENABLED`,
   `AGENTIHOOKS_AUTO_OVERLAY`, `~/.agentihooks/active_overlays.json`,
