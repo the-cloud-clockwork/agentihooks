@@ -564,14 +564,15 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # --- Broadcast: deregister session ---
+    # --- Broadcast: deregister session + prune dead peers ---
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
         try:
-            from hooks.context.broadcast import mark_session_closed
+            from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
 
             mark_session_closed(session_id)
+            heartbeat_sessions()
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
 

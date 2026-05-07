@@ -88,30 +88,6 @@ class TestCheckPython:
             assert result["ok"] is False
 
 
-class TestCheckDaemons:
-    def test_running_daemons(self, tmp_path):
-        import os
-
-        from scripts.status_checker import check_daemons
-
-        pid = os.getpid()
-        (tmp_path / "sync-daemon.pid").write_text(str(pid))
-        with patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path):
-            result = check_daemons()
-            assert result["sync"]["alive"] is True
-            assert result["ok"] is True
-
-    def test_no_daemons(self, tmp_path):
-        from scripts.status_checker import check_daemons
-
-        with (
-            patch("scripts.status_checker.AGENTIHOOKS_HOME", tmp_path),
-            patch("scripts.status_checker._detect_process", return_value={"pid": None, "alive": False}),
-        ):
-            result = check_daemons()
-            assert result["sync"]["alive"] is False
-
-
 class TestCheckRedis:
     def test_no_redis(self):
         from scripts.status_checker import check_redis
@@ -220,7 +196,6 @@ class TestFormatters:
             "profile": {"name": "test", "bundle": "(none)", "ok": True},
             "hooks": {"total": 10, "expected": 10, "ok": True},
             "python": {"path": "/usr/bin/python3", "ok": True},
-            "daemons": {"sync": {"pid": None, "alive": False}, "quota": {"pid": None, "alive": False}, "ok": False},
             "redis": {"connected": False, "session_count": 0, "ok": False},
             "otel": {"enabled": False, "ok": True},
             "guardrails": {

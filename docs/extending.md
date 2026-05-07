@@ -194,7 +194,7 @@ my-bundle/
                 └── coding-rules.md
 ```
 
-After adding assets, run `agentihooks init` to re-symlink. The sync daemon will also pick up changes within 60s if running.
+After adding assets, run `agentihooks init` to re-symlink.
 
 ---
 

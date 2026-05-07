@@ -23,15 +23,15 @@ Commands:
         Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
         MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
 
-    agentihooks daemon [start|stop|status|logs]
-        Manage the sync daemon (auto-propagates source changes).
-
     agentihooks quota [auth|status|stop|logs]
         Manage the Claude.ai console quota watcher.
 
     agentihooks prune [-v]
         Remove stale MCP entries from disabledMcpServers, known-mcp-servers.json,
-        and settings.local.json. Also runs automatically on every daemon cycle.
+        and settings.local.json.
+
+    agentihooks memory tick
+        Run one memory-mirror tick (consume + authority push if applicable).
 
     agentihooks ignore [path] [--force]
         Create a .claudeignore in the current directory.
@@ -426,14 +426,14 @@ def _state_remove_mcp(mcp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Target registry (sync daemon)
+# Target registry (state.json)
 # ---------------------------------------------------------------------------
 
 _SYNC_LOCK_FILE = AGENTIHOOKS_STATE_DIR / "sync.lock"
 
 
 def _register_target_global(profile: str, settings_profile: str = "") -> None:
-    """Record the global install as a sync daemon target."""
+    """Record the global install in state.json."""
     state = _load_state()
     targets = state.setdefault("targets", {})
     entry = {
@@ -448,7 +448,7 @@ def _register_target_global(profile: str, settings_profile: str = "") -> None:
 
 
 def _register_target_project(project_path: Path, profile: str) -> None:
-    """Record a project install as a sync daemon target."""
+    """Record a project install in state.json."""
     state = _load_state()
     targets = state.setdefault("targets", {})
     projects = targets.setdefault("projects", {})
@@ -460,7 +460,7 @@ def _register_target_project(project_path: Path, profile: str) -> None:
 
 
 def _unregister_target_project(project_path: Path) -> None:
-    """Remove a project from the sync daemon targets."""
+    """Remove a project from state.json targets."""
     state = _load_state()
     targets = state.get("targets", {})
     projects = targets.get("projects", {})
@@ -470,10 +470,9 @@ def _unregister_target_project(project_path: Path) -> None:
 
 @contextlib.contextmanager
 def _sync_lock(*, blocking: bool = True):
-    """Advisory file lock for install/sync operations.
+    """Advisory file lock for install operations.
 
-    The sync daemon uses ``blocking=False`` and skips the cycle on contention.
-    Manual installs use the default ``blocking=True`` to wait for the lock.
+    Default ``blocking=True`` waits for any concurrent install to finish.
     """
     _SYNC_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     fd = open(_SYNC_LOCK_FILE, "w")  # noqa: SIM115
@@ -881,7 +880,7 @@ def _link_profile_link(
 
     if not run_init and append and chain_changed:
         # No follow-up install will refresh installed_at — bump it here so the
-        # sync daemon notices the chain change.
+        # next manual `agentihooks init` sees the chain change.
         global_target["installed_at"] = datetime.now(timezone.utc).isoformat()
 
     _save_state(state)
@@ -1487,6 +1486,9 @@ def _clean_state_dir() -> None:
         "state.json",
         "sync-hashes.json",
         "sync.lock",
+        "sync-daemon.pid",
+        "sync-daemon.heartbeat",
+        ".sync-daemon.singleton.lock",
         "active-sessions.json",
         "active_overlays.json",
         "mcp-tool-cache.json",
@@ -1676,40 +1678,6 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # Build args for _install_global_inner
     global_args = argparse.Namespace(profile=profile_name, settings_profile=settings_profile or "")
     install_global(global_args)
-
-    # --- Restart sync daemon (always restart on init to pick up code changes) ---
-    sync_pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
-    old_pid = None
-    if sync_pid_file.exists():
-        try:
-            old_pid = int(sync_pid_file.read_text().strip())
-            os.kill(old_pid, 0)  # check if alive
-        except (ProcessLookupError, ValueError, PermissionError):
-            old_pid = None
-            sync_pid_file.unlink(missing_ok=True)
-
-    sync_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
-    if sync_script.exists():
-        import subprocess as _sp2
-
-        # Kill old daemon so the new one picks up code changes
-        if old_pid is not None:
-            try:
-                os.kill(old_pid, signal.SIGTERM)
-                _cprint(f"{_DIM}[--] Stopped old sync daemon (PID {old_pid}).{_RESET}")
-            except (ProcessLookupError, PermissionError):
-                pass
-            sync_pid_file.unlink(missing_ok=True)
-
-        python = str(_detect_venv() or sys.executable)
-        proc = _sp2.Popen(
-            [python, str(sync_script)],
-            stdin=_sp2.DEVNULL,
-            stdout=_sp2.DEVNULL,
-            stderr=_sp2.DEVNULL,
-            start_new_session=True,
-        )
-        _cprint(f"[OK] Sync daemon started (PID {proc.pid}).")
 
     # --- Update bashrc block (agentienv + agenti alias + PATH) ---
     # Always write — the block is self-guarding (agentienv checks for the
@@ -2501,8 +2469,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # In-memory chain string — used for display only. STATE persistence below
     # uses ``profile_input`` (operator intent) so a transient missing profile
     # source (e.g. a git checkout in the bundle repo briefly removing files)
-    # cannot shrink the persisted chain. The daemon already validates source
-    # dirs before triggering reinstall; this is the second line of defense.
+    # cannot shrink the persisted chain.
     profile_name = ",".join(profile_chain)
     persisted_profile = profile_input.strip() or profile_name
 
@@ -2743,7 +2710,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     print()
     _seed_user_env_file()
 
-    # --- 12. Register as sync daemon target ---
+    # --- 12. Register install in state.json ---
     # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk
     # runtime chain. See note above: dropping unresolvable entries from
     # state lets a transient git operation in the bundle repo silently
@@ -3147,9 +3114,9 @@ def manage_user_mcp(mcp_path: Path, *, uninstall: bool = False) -> None:
 def _reseed_managed_mcp_sources() -> None:
     """Re-merge bundle + active-profile .mcp.json into ~/.claude.json mcpServers.
 
-    Idempotent. Used by `init` and the sync daemon so the source-of-truth
-    files (bundle .claude/.mcp.json, profile .claude/.mcp.json, and the
-    hooks-utils server) are always present in user scope after a tick.
+    Idempotent. Used by `init` so the source-of-truth files (bundle
+    .claude/.mcp.json, profile .claude/.mcp.json, and the hooks-utils
+    server) are always present in user scope.
     """
     state = _load_state()
     profile_name = state.get("targets", {}).get("global", {}).get("profile")
@@ -3558,7 +3525,7 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
 
     Writes a real file (not a symlink) so it resolves correctly across
     WSL/Windows boundaries and VS Code \\\\wsl.localhost paths.
-    The sync daemon detects source changes and re-copies automatically.
+    Re-run ``agentihooks init`` to refresh after editing the profile source.
     """
     src = profile_dir / _CLAUDE_MD_NAME
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
@@ -3778,25 +3745,11 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         _cprint(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
 
-    # --- 7. Stop sync daemon ---
-    print()
-    sync_pid = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
-    if sync_pid.exists():
-        import signal
-
-        try:
-            pid = int(sync_pid.read_text().strip())
-            os.kill(pid, signal.SIGTERM)
-            sync_pid.unlink(missing_ok=True)
-            _cprint(f"[OK] Sync daemon stopped (PID {pid}).")
-        except (ProcessLookupError, ValueError):
-            sync_pid.unlink(missing_ok=True)
-
-    # --- 8. Remove bashrc block ---
+    # --- 7. Remove bashrc block ---
     if _remove_bashrc_block():
         _cprint(f"[OK] Removed agentihooks block from {_BASHRC}")
 
-    # --- 9. Uninstall CLI ---
+    # --- 8. Uninstall CLI ---
     print()
     _uninstall_cli_tool()
 
@@ -3880,7 +3833,7 @@ def _install_project_inner(args: argparse.Namespace) -> None:
     print()
     print(f"Next: open Claude Code in '{project_path}' and run /mcp to verify.")
 
-    # Register as sync daemon target
+    # Register install in state.json
     _register_target_project(project_path, profile_name)
     _snapshot_claude_json()
 
@@ -3991,6 +3944,181 @@ def _prompt_server_selection(servers: dict, action: str = "install") -> dict | N
     except ValueError as exc:
         print(f"Invalid selection: {exc}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# MCP prune helpers (formerly in sync_daemon.py)
+# ---------------------------------------------------------------------------
+
+
+def _get_valid_mcp_names() -> set[str]:
+    """Return the set of MCP server names that actually exist right now.
+
+    Sources of truth:
+    1. ~/.claude.json top-level mcpServers (globally registered)
+    2. .mcp.json files in registered project directories
+
+    Excludes claude.ai web-session entries entirely.
+    """
+    if not _CLAUDE_JSON.exists():
+        return set()
+    data = load_json(_CLAUDE_JSON)
+    valid = {name for name in data.get("mcpServers", {}).keys() if not name.startswith("claude.ai ")}
+    for proj_path in data.get("projects", {}):
+        mcp_file = Path(proj_path) / ".mcp.json"
+        if mcp_file.exists():
+            try:
+                proj_mcp = load_json(mcp_file)
+                valid.update(proj_mcp.get("mcpServers", {}).keys())
+            except (json.JSONDecodeError, OSError):
+                continue
+    return valid
+
+
+def _get_managed_mcp_names() -> set[str]:
+    """Return server names that agentihooks sources currently define."""
+    try:
+        return set(_collect_all_managed_mcp_servers().keys())
+    except Exception:
+        return set()
+
+
+def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False) -> dict:
+    """Remove stale MCP entries from all tracking locations.
+
+    Prunes:
+    0. Orphaned mcpServers in ~/.claude.json (managed by agentihooks but
+       no longer defined in any source file)
+    1. disabledMcpServers in every project entry in ~/.claude.json
+    2. known-mcp-servers.json
+    3. settings.local.json files in project .claude/ dirs
+    4. enabled_mcps in state.json
+
+    Returns summary dict with counts.
+    """
+    valid = _get_valid_mcp_names()
+    summary = {
+        "pruned_disabled": 0,
+        "pruned_known": 0,
+        "pruned_settings": 0,
+        "projects_touched": 0,
+        "pruned_orphaned": 0,
+        "pruned_enabled": 0,
+    }
+
+    if not valid:
+        managed_fallback = _get_managed_mcp_names()
+        if managed_fallback:
+            valid = managed_fallback
+        else:
+            return summary
+
+    # 0. Remove orphaned mcpServers from ~/.claude.json
+    managed = _get_managed_mcp_names()
+    if managed and _CLAUDE_JSON.exists():
+        data = load_json(_CLAUDE_JSON)
+        current_servers = data.get("mcpServers", {})
+        orphaned = {name for name in current_servers if not name.startswith("claude.ai ") and name not in managed}
+        if orphaned:
+            for name in orphaned:
+                del current_servers[name]
+            save_json(_CLAUDE_JSON, data)
+            summary["pruned_orphaned"] = len(orphaned)
+            valid -= orphaned
+            if verbose:
+                for name in sorted(orphaned):
+                    print(f"  Removed orphaned server: {name}")
+
+    # 1. Prune disabledMcpServers in ~/.claude.json projects
+    if _CLAUDE_JSON.exists():
+        data = load_json(_CLAUDE_JSON)
+        projects = data.get("projects", {})
+        claude_json_dirty = False
+        for proj_path, proj_data in projects.items():
+            if not isinstance(proj_data, dict):
+                continue
+            disabled = proj_data.get("disabledMcpServers", [])
+            if not disabled:
+                continue
+            cleaned = [s for s in disabled if s in valid]
+            removed_count = len(disabled) - len(cleaned)
+            if removed_count > 0:
+                proj_data["disabledMcpServers"] = sorted(cleaned)
+                summary["pruned_disabled"] += removed_count
+                summary["projects_touched"] += 1
+                claude_json_dirty = True
+                if verbose:
+                    stale = set(disabled) - valid
+                    print(f"  Pruned {removed_count} stale entries from {proj_path}: {sorted(stale)}")
+        if claude_json_dirty:
+            save_json(_CLAUDE_JSON, data)
+    else:
+        projects = {}
+
+    # 2. Prune known-mcp-servers.json
+    if known_servers_file.exists():
+        known_data = load_json(known_servers_file)
+        known_list = set(known_data.get("knownMcpServers", []))
+        stale_known = known_list - valid
+        if stale_known:
+            known_data["knownMcpServers"] = sorted(known_list - stale_known)
+            save_json(known_servers_file, known_data)
+            summary["pruned_known"] = len(stale_known)
+            if verbose:
+                print(f"  Pruned {len(stale_known)} from known-mcp-servers.json: {sorted(stale_known)}")
+
+    # 3. Prune settings.local.json files in projects
+    for proj_path in projects:
+        settings_file = Path(proj_path) / ".claude" / "settings.local.json"
+        if not settings_file.exists():
+            continue
+        try:
+            settings = load_json(settings_file)
+        except (json.JSONDecodeError, OSError):
+            continue
+        dirty = False
+        for key in ("disabledMcpjsonServers", "enabledMcpjsonServers"):
+            entries = settings.get(key, [])
+            if not entries:
+                continue
+            proj_mcp_file = Path(proj_path) / ".mcp.json"
+            proj_mcp_names: set[str] = set()
+            if proj_mcp_file.exists():
+                try:
+                    proj_mcp_names = set(load_json(proj_mcp_file).get("mcpServers", {}).keys())
+                except (json.JSONDecodeError, OSError):
+                    pass
+            all_valid_for_project = valid | proj_mcp_names
+            cleaned = [s for s in entries if s in all_valid_for_project]
+            removed = len(entries) - len(cleaned)
+            if removed > 0:
+                settings[key] = sorted(cleaned)
+                dirty = True
+                summary["pruned_settings"] += removed
+                if verbose:
+                    stale_entries = set(entries) - all_valid_for_project
+                    print(f"  Pruned {removed} from {settings_file}: {sorted(stale_entries)}")
+        if dirty:
+            save_json(settings_file, settings)
+
+    # 4. Prune enabled_mcps in state.json
+    state = _load_state()
+    state_projects = state.get("targets", {}).get("projects", {})
+    state_dirty = False
+    for proj_path, proj_info in state_projects.items():
+        enabled = proj_info.get("enabled_mcps", [])
+        if not enabled:
+            continue
+        cleaned = [s for s in enabled if s in valid]
+        removed = len(enabled) - len(cleaned)
+        if removed > 0:
+            proj_info["enabled_mcps"] = cleaned
+            summary["pruned_enabled"] += removed
+            state_dirty = True
+    if state_dirty:
+        _save_state(state)
+
+    return summary
 
 
 def cmd_mcp_action(action: str, scan_dir: Path | None = None, *, mcp_path: Path | None = None) -> None:
@@ -4150,134 +4278,13 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
-def cmd_daemon(args: "argparse.Namespace") -> None:
-    """Launch or interact with the sync daemon."""
-    daemon_script = AGENTIHOOKS_ROOT / "scripts" / "sync_daemon.py"
-    if not daemon_script.exists():
-        print(f"ERROR: sync daemon not found at {daemon_script}", file=sys.stderr)
-        sys.exit(1)
+def cmd_memory_tick() -> None:
+    """Run one memory-mirror tick (consume + authority push if applicable)."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from scripts import memory_mirror_sync
 
-    python = str(_detect_venv() or sys.executable)
-    pid_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.pid"
-    log_file = AGENTIHOOKS_STATE_DIR / "logs" / "sync-daemon.log"
-    hash_file = AGENTIHOOKS_STATE_DIR / "sync-hashes.json"
-
-    if args.action == "logs":
-        if not log_file.exists():
-            print("No log file yet. Start the daemon first:  agentihooks daemon start")
-            sys.exit(0)
-        os.execlp("tail", "tail", "-f", str(log_file))
-
-    elif args.action == "stop":
-        stopped = []
-        # Kill PID from file
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, signal.SIGTERM)
-                stopped.append(pid)
-            except (ProcessLookupError, ValueError):
-                pass
-            pid_file.unlink(missing_ok=True)
-        # Kill any orphaned daemon processes
-        import subprocess as _sp
-
-        try:
-            result = _sp.run(
-                ["pgrep", "-f", "sync_daemon.py.*--foreground"],
-                capture_output=True,
-                text=True,
-            )
-            for line in result.stdout.strip().splitlines():
-                orphan_pid = int(line.strip())
-                if orphan_pid not in stopped:
-                    os.kill(orphan_pid, signal.SIGTERM)
-                    stopped.append(orphan_pid)
-        except (OSError, ValueError):
-            pass
-        if stopped:
-            print(f"[sync] Daemon stopped (PID(s): {', '.join(str(p) for p in stopped)}).")
-        else:
-            print("[sync] No daemon running.")
-
-    elif args.action == "status":
-        state = _load_state()
-        targets = state.get("targets", {})
-
-        # PID status
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                print(f"[sync] Daemon running (PID {pid})")
-            except (ProcessLookupError, ValueError):
-                pid_file.unlink(missing_ok=True)
-                print("[sync] Daemon not running (stale PID cleaned up)")
-        else:
-            print("[sync] Daemon not running")
-
-        # Targets
-        g = targets.get("global")
-        if g:
-            print(f"  Global target: {g['path']} (profile: {g['profile']})")
-        else:
-            print("  Global target: not registered (run 'agentihooks init' first)")
-        projects = targets.get("projects", {})
-        if projects:
-            print(f"  Project targets: {len(projects)}")
-            for p, info in projects.items():
-                exists = Path(p).exists()
-                marker = "" if exists else " [PATH MISSING]"
-                print(f"    {p} (profile: {info['profile']}){marker}")
-        else:
-            print("  Project targets: none")
-
-        # Hash file
-        if hash_file.exists():
-            try:
-                hdata = load_json(hash_file)
-                n = len(hdata.get("hashes", {}))
-                print(f"  Watching {n} source file(s)")
-                print(f"  Last scan: {hdata.get('_updated', 'unknown')}")
-            except (json.JSONDecodeError, OSError):
-                print("  Hash file: corrupt")
-        else:
-            print("  Hash file: not yet created")
-
-        # M4: heartbeat — warn when daemon is alive but not making progress.
-        heartbeat_file = AGENTIHOOKS_STATE_DIR / "sync-daemon.heartbeat"
-        if heartbeat_file.exists():
-            try:
-                from datetime import datetime, timezone
-
-                hb = load_json(heartbeat_file)
-                last_success = hb.get("last_success")
-                last_cycle = hb.get("last_cycle")
-                cycles = hb.get("cycles", "?")
-                version = hb.get("version", "?")
-                print(f"  Heartbeat: cycles={cycles} version={version}")
-                print(f"    last_cycle:   {last_cycle or 'never'}")
-                print(f"    last_success: {last_success or 'never'}")
-                if last_success:
-                    try:
-                        ls = datetime.fromisoformat(last_success)
-                        age = (datetime.now(timezone.utc) - ls).total_seconds()
-                        threshold = max(180, 3 * args.poll if hasattr(args, "poll") else 180)
-                        if age > threshold:
-                            print(f"    [WARN] last_success is {int(age)}s old — daemon may be stuck")
-                    except ValueError:
-                        pass
-            except (json.JSONDecodeError, OSError):
-                print("  Heartbeat: unreadable")
-        else:
-            print("  Heartbeat: not yet created")
-
-    else:  # start
-        cmd = [python, str(daemon_script)]
-        if args.foreground:
-            cmd.append("--foreground")
-        cmd += ["--poll", str(args.poll)]
-        os.execv(python, cmd)
+    memory_mirror_sync.tick()
+    print("[memory-tick] done")
 
 
 def cmd_claude(extra_args: list[str]) -> None:
@@ -5098,21 +5105,16 @@ def main() -> None:
         help="Overwrite an existing .claudeignore",
     )
 
-    daemon_p = sub.add_parser("daemon", help="Manage the sync daemon (auto-propagation)")
-    daemon_p.add_argument(
+    # --- Memory tick (manual) ---
+    memory_p = sub.add_parser(
+        "memory",
+        help="Memory-mirror operations (manual tick).",
+    )
+    memory_p.add_argument(
         "action",
-        nargs="?",
-        default="start",
-        choices=["start", "stop", "status", "logs"],
-        help="start (default) — start background sync daemon; stop — kill daemon; status — show daemon state; logs — tail daemon log",
+        choices=["tick"],
+        help="tick — run one memory_mirror_sync.tick() (consume + authority push if applicable)",
     )
-    daemon_p.add_argument(
-        "--poll",
-        type=int,
-        default=int(os.environ.get("AGENTIHOOKS_SYNC_POLL_SEC", "60")),
-        help="Poll interval in seconds (default: 60, env: AGENTIHOOKS_SYNC_POLL_SEC)",
-    )
-    daemon_p.add_argument("--foreground", action="store_true", help="Run in foreground (for debugging)")
 
     # --- Memory mirror subcommand ---
     memsync_p = sub.add_parser(
@@ -5485,6 +5487,9 @@ notes:
         _cmd_settings_profile(args)
     elif args.command == "ignore":
         cmd_ignore(Path(args.path).expanduser().resolve(), force=args.force)
+    elif args.command == "memory":
+        if args.action == "tick":
+            cmd_memory_tick()
     elif args.command == "claude":
         # Pass everything after "claude" as extra args
         try:
@@ -5493,8 +5498,6 @@ notes:
         except ValueError:
             extra = []
         cmd_claude(extra)
-    elif args.command == "daemon":
-        cmd_daemon(args)
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report
@@ -5554,9 +5557,6 @@ notes:
         else:
             print(format_cli(run_all_checks()))
     elif args.command == "prune":
-        sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-        from scripts.sync_daemon import _get_valid_mcp_names, _prune_stale_mcp_servers
-
         known_servers_file = AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json"
         valid = _get_valid_mcp_names()
         print(f"Valid MCP servers ({len(valid)}): {', '.join(sorted(valid))}")
@@ -5791,7 +5791,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         if not _cfg.MEMORY_MIRROR_ENABLED:
             print(
                 f"{_YELLOW}[WARN]{_RESET} MEMORY_MIRROR_ROLE=off — "
-                "the sync daemon tick will no-op until you set a role."
+                "memory-mirror operations will no-op until you set a role."
             )
         _role = (getattr(_cfg, "MEMORY_MIRROR_ROLE", "off") or "off").lower()
         # Probe the remote before doing anything else so "repo does not exist"
@@ -5855,7 +5855,7 @@ def _cmd_memory_sync(args: "argparse.Namespace") -> None:
         print(f"  Role:       {_role}")
         print(f"  Mode:       {_cfg.MEMORY_MIRROR_MODE}")
         print(f"  Branch:     {_cfg.MEMORY_MIRROR_BRANCH_PREFIX}/<hostname>/…")
-        print(f"  Pull cycle: every {_cfg.MEMORY_MIRROR_INTERVAL_SEC}s via sync daemon (origin/main)")
+        print("  Pull cycle: triggered by hooks on session events (origin/main)")
         print("  Promote:    agentihooks memory-sync propose [--auto-merge]")
         return
 

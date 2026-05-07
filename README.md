@@ -121,7 +121,7 @@ uv pip install --python ~/.agentihooks/.venv/bin/python -e ".[all]"
 agentihooks init
 ```
 
-`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, installs the CLI globally, and starts the sync daemon. Re-run any time — it is idempotent.
+`agentihooks init` wires hooks into `~/.claude/settings.json`, symlinks skills/agents/commands/rules, merges MCP servers into `~/.claude.json`, and installs the CLI globally. Re-run any time — it is idempotent.
 
 ## A CLI that keeps up with your fleet
 
@@ -210,9 +210,6 @@ agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
 agentihooks mcp report                       # MCP surface area
 
-# Daemon
-agentihooks daemon start|stop|status|logs    # sync daemon
-
 # Memory mirror (cross-machine auto-memory sync — opt-in, role-based, by-project layout)
 # Roles (v4): off / consumer / offline / contributor / authority.
 # Set MEMORY_MIRROR_ROLE in ~/.agentihooks/.env. One authority per fleet.
@@ -242,8 +239,7 @@ agentihooks uninstall [--yes]                # remove everything
 6. Applies hierarchy-aware MCP blacklist to all registered projects
 7. Prunes orphaned MCP servers
 8. Installs CLI globally via `uv tool`
-9. Restarts sync daemon
-10. Writes bashrc block (`agentienv` shell function + `agenti` alias)
+9. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
 ## Profiles
 

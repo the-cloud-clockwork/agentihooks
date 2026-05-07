@@ -200,31 +200,18 @@ Example:
 The parent's `disabledMcpServers` will automatically exclude `gateway-publish`, `gateway-core`, and `gateway-pm` because the child whitelists them. This is necessary because Claude Code resolves project settings by walking up the directory tree — without this, the parent's blanket blacklist would override the child's whitelist.
 
 {: .important }
-This hierarchy awareness applies to `agentihooks init` (global), `agentihooks init --local`, and the sync daemon. All three code paths respect child project whitelists.
+This hierarchy awareness applies to `agentihooks init` (global) and `agentihooks init --local`. Both code paths respect child project whitelists.
 
 ---
 
 ## Orphan pruning
 
-When MCP servers are removed from a bundle or profile `.mcp.json`, they can become orphaned in `~/.claude.json` — still registered but no longer defined anywhere. The sync daemon automatically detects and removes these orphaned entries on every poll cycle.
+When MCP servers are removed from a bundle or profile `.mcp.json`, they can become orphaned in `~/.claude.json` — still registered but no longer defined anywhere. Run `agentihooks prune` to remove them; `agentihooks init` also runs the same pruning step.
 
 The pruning compares the live `mcpServers` in `~/.claude.json` against the authoritative set from all source files (bundle, profile, hooks-utils, state-tracked `.mcp.json` files). Any server not in the authoritative set is removed.
 
 {: .note }
 Servers prefixed with `claude.ai ` (web-session managed) are never pruned — they are managed by Claude's web interface, not agentihooks.
-
----
-
-## Sync daemon behavior
-
-The sync daemon (`agentihooks daemon`) monitors source files and automatically re-applies per-project settings when changes are detected. For registered projects (added via `init --repo` or `init --local`), the daemon:
-
-1. Re-generates `settings.local.json` when profile files change
-2. Adds new MCP servers to disabled lists (respecting whitelists)
-3. Prunes orphaned MCP servers
-4. Backfills `disabledMcpServers` for newly discovered project entries
-
-The daemon is always restarted on `agentihooks init` to ensure it runs the latest code.
 
 ---
 

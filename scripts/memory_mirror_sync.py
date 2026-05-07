@@ -23,7 +23,9 @@ v3 topology — identity-keyed layout:
 Usage (standalone):
     python -m scripts.memory_mirror_sync
 
-The module is also driven every poll by ``sync_daemon._run_daemon``.
+Hooks call ``pull_only`` directly on session events. Wholesale ``tick()``
+(consume + authority push) is invoked manually via ``agentihooks memory
+tick`` — there is no background daemon driving it.
 """
 
 import os

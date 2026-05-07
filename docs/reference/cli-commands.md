@@ -37,8 +37,7 @@ agentihooks init [--bundle <path>] [--profile <name>] [--repo <path>]
 8. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
 9. Applies MCP blacklist across all projects (`disabledMcpServers`)
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
-11. Restarts sync daemon
-12. Writes managed bashrc block (`agentienv` function + `agenti` alias)
+11. Writes managed bashrc block (`agentienv` function + `agenti` alias)
 
 ### Flags
 
@@ -292,7 +291,6 @@ agentihooks uninstall [--yes]
 - Skills, agents, commands, and rules symlinks in `~/.claude/` -- if they target the agentihooks repo
 - `~/.claude/CLAUDE.md` -- if it points into `profiles/`
 - MCP servers in `~/.claude.json` -- from profile `.mcp.json` files and `state.json`
-- Running daemons -- sync daemon is stopped
 - Bashrc block -- the `agentienv` function and `agenti` alias are removed from `~/.bashrc`
 - `agentihooks` CLI -- via `uv tool uninstall agentihooks`
 
@@ -349,63 +347,17 @@ agenti --verbose
 
 ---
 
-## `agentihooks daemon`
+## `agentihooks memory tick`
 
-Manage the sync daemon that watches asset directories (skills, agents, commands, rules, MCP servers, `.env` files) and auto-propagates changes to all registered downstream consumers.
+Run one memory-mirror tick (consume + authority push if applicable).
 
 ```bash
-agentihooks daemon [action]
+agentihooks memory tick
 ```
 
-### Subcommands
-
-| Subcommand | Description |
-|------------|-------------|
-| `start` *(default)* | Start the background daemon. Auto-detaches, writes PID to `~/.agentihooks/sync-daemon.pid`, logs to `~/.agentihooks/logs/sync-daemon.log`. |
-| `stop` | Kill the running daemon using the PID file. |
-| `status` | Show daemon PID, registered targets, watched file count, and last scan timestamp. Flags `[PATH MISSING]` for project paths that no longer exist. |
-| `logs` | Runs `tail -f` on `~/.agentihooks/logs/sync-daemon.log`. |
-
-### How it works
-
-The sync daemon uses manifest hashing to detect changes. On each poll cycle:
-
-1. Hashes every source file (profiles, settings, bundles, MCP files, `.env` files) using SHA-256
-2. Compares against previous hashes
-3. If changes are detected, re-runs the install pipeline for affected targets
-4. Propagation is **additive only** -- new skills/agents/commands/rules are symlinked automatically
-
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--poll N` | `60` | Poll interval in seconds. Also configurable via `AGENTIHOOKS_SYNC_POLL_SEC` env var. |
-| `--foreground` | -- | Run in foreground instead of daemonizing. Useful for debugging. |
-
-### Target registration
-
-Targets are registered automatically:
-- `agentihooks init` registers `~/.claude/` as the global target with the chosen profile.
-- `agentihooks init --repo <path>` registers the project path with the chosen profile.
-
-Registered targets are stored in `~/.agentihooks/state.json` under the `targets` key.
-
-### Propagation rules
-
-| Source change | Affected targets |
-|---|---|
-| `settings.base.json` | Global + all projects + MCP sync |
-| Profile files (`profile.yml`, `settings.overrides.json`, `CLAUDE.md`) | Targets using that profile |
-| MCP files | MCP sync only (`~/.claude.json`) |
-| `.env` files in `~/.agentihooks/` | Global + all projects |
-| Bundle directory contents | Global + all projects |
-| Skills, agents, commands, rules | Re-symlinked via 3-layer merge |
-
-### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENTIHOOKS_SYNC_POLL_SEC` | `60` | Daemon poll interval in seconds. |
+Hooks call `pull_only()` on session events automatically. The `tick` subcommand
+is for manual / cron use on the authority node — it consumes peers and pushes
+`origin/main` if the local machine has authority role.
 
 ---
 
@@ -724,7 +676,6 @@ agentihooks status
 | **Profile** | Reads `state.json` for active profile and bundle path |
 | **Hooks** | Parses `~/.claude/settings.json`, counts hook event entries (expect 10/10) |
 | **Python** | Extracts the Python binary from hook commands and verifies it runs |
-| **Daemons** | Checks PID file for sync daemon, verifies process is alive |
 | **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
 | **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
 | **Guardrails** | Lists all 8 guardrails with descriptions and enabled/disabled state |

@@ -2,8 +2,9 @@
 
 Registry data lives in ~/.agentihooks/active-sessions.json, written by
 hooks/context/broadcast.py (register_session, mark_session_closed,
-heartbeat_sessions). The sync daemon ticks every 60s to update last_seen,
-flip crashed PIDs to status=dead, and prune entries older than 24h.
+heartbeat_sessions). On every clean SessionEnd the hook calls
+heartbeat_sessions() to update last_seen, flip crashed PIDs to
+status=dead, and prune entries older than 24h.
 
 This module reads the registry for `agentihooks sessions list` and shells
 out to Windows Terminal (wt.exe) for `agentihooks sessions reopen`.
