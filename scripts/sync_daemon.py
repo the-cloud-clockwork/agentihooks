@@ -694,22 +694,45 @@ def _execute_actions(actions: dict, state: dict) -> dict:
             global_target = targets.get("global", {})
             profile = global_target.get("profile", "default")
             settings_profile = global_target.get("settings_profile", "")
-            try:
-                _log(f"Re-installing global (profile={profile}, settings_profile={settings_profile or 'none'})")
-                ns = argparse.Namespace(profile=profile, settings_profile=settings_profile)
-                install._install_global_inner(ns)
-                summary["global_reinstalled"] = True
-                _log("Global re-install complete")
-            except SystemExit as e:
-                if e.code and e.code != 0:
-                    _log(f"ERROR re-installing global: exit code {e.code}")
-                    summary["errors"].append(f"global: exit {e.code}")
-                else:
+
+            # Pre-flight: validate every entry in the chain still resolves on
+            # disk. A transient git operation in the bundle (checkout, stash,
+            # branch switch) can briefly remove profile files; reacting to
+            # that by reinstalling would shrink the chain and clobber operator
+            # intent. Skip the cycle and let the next sync pick up the
+            # restored state.
+            chain_names = [p.strip() for p in profile.split(",") if p.strip()]
+            missing = []
+            for pname in chain_names:
+                try:
+                    if install._resolve_profile_dir(pname) is None:
+                        missing.append(pname)
+                except Exception:
+                    missing.append(pname)
+            if missing:
+                _log(
+                    f"WARN: skipping global reinstall — chain entr{'y' if len(missing) == 1 else 'ies'} "
+                    f"{missing} unresolvable on disk (likely transient — bundle git op?). "
+                    f"Chain in state preserved: '{profile}'."
+                )
+                summary["errors"].append(f"global: skipped (missing: {','.join(missing)})")
+            else:
+                try:
+                    _log(f"Re-installing global (profile={profile}, settings_profile={settings_profile or 'none'})")
+                    ns = argparse.Namespace(profile=profile, settings_profile=settings_profile)
+                    install._install_global_inner(ns)
                     summary["global_reinstalled"] = True
-                    _log("Global re-install complete (sys.exit caught)")
-            except Exception as e:
-                _log(f"ERROR re-installing global: {e}")
-                summary["errors"].append(f"global: {e}")
+                    _log("Global re-install complete")
+                except SystemExit as e:
+                    if e.code and e.code != 0:
+                        _log(f"ERROR re-installing global: exit code {e.code}")
+                        summary["errors"].append(f"global: exit {e.code}")
+                    else:
+                        summary["global_reinstalled"] = True
+                        _log("Global re-install complete (sys.exit caught)")
+                except Exception as e:
+                    _log(f"ERROR re-installing global: {e}")
+                    summary["errors"].append(f"global: {e}")
 
         for proj_path in actions["reinstall_projects"]:
             p = Path(proj_path)
