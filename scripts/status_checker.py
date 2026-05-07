@@ -79,11 +79,28 @@ def check_profile() -> dict[str, Any]:
     settings_profile = global_target.get("settings_profile", "")
     bundle = state.get("bundle", {}).get("path", "")
     bundle_ok = bool(bundle and Path(bundle).expanduser().exists())
+    raw_links = state.get("linked_profiles", []) or []
+    chain = [p.strip() for p in name.split(",") if p.strip()]
+    linked: list[dict[str, Any]] = []
+    for entry in raw_links:
+        if not isinstance(entry, dict):
+            continue
+        lname = entry.get("name", "")
+        lpath = entry.get("path", "")
+        linked.append(
+            {
+                "name": lname,
+                "path": lpath,
+                "in_chain": lname in chain,
+                "exists": bool(lpath and Path(lpath).expanduser().exists()),
+            }
+        )
     return {
         "name": name or "(not installed)",
         "settings_profile": settings_profile,
         "bundle": bundle or "(none)",
         "bundle_ok": bundle_ok,
+        "linked_profiles": linked,
         "ok": bool(name),
     }
 
@@ -600,6 +617,10 @@ def format_cli(results: dict[str, Any]) -> str:
     bundle_str = f" (bundle: {p['bundle']})" if p["bundle"] != "(none)" else ""
     sp_str = f" | settings: {p['settings_profile']}" if p.get("settings_profile") else ""
     lines.append(_cprint(f"{tag} Profile: {p['name']}{sp_str}{bundle_str}"))
+    for lp in p.get("linked_profiles", []) or []:
+        in_chain = "in chain" if lp["in_chain"] else "NOT in chain"
+        exists = "" if lp["exists"] else " [MISSING]"
+        lines.append(_cprint(f"     + linked: {lp['name']} -> {lp['path']} ({in_chain}){exists}"))
 
     # Hooks
     h = results["hooks"]
