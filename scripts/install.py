@@ -369,6 +369,7 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
         except Exception:
             pass
 
+
 def _state_add_mcp(mcp_path: Path) -> None:
     """Record *mcp_path* in state.json so --sync can restore it."""
     state = _load_state()
@@ -1704,7 +1705,6 @@ def _update_bashrc_block() -> None:
     _BASHRC.write_text(bashrc_text + sep + block, encoding="utf-8")
     _cprint(f"{_YELLOW}[OK] agentihooks block written to {_BASHRC}{_RESET}")
     print(f"{_DIM}     run: source ~/.bashrc{_RESET}")
-
 
 
 # User env file (~/.agentihooks/.env)
@@ -3961,6 +3961,7 @@ def _cmd_channel(args: argparse.Namespace) -> None:
             print("Error: empty message.", file=sys.stderr)
             sys.exit(1)
 
+
 def _cmd_brain(args: argparse.Namespace) -> None:
     """Handle the brain CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -4354,9 +4355,7 @@ def main() -> None:
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
-    init_p = sub.add_parser(
-        "init", help="Initialize agentihooks (global setup from bundle)"
-    )
+    init_p = sub.add_parser("init", help="Initialize agentihooks (global setup from bundle)")
     init_p.add_argument(
         "--bundle", default=None, help="Path to bundle directory (first-time setup: link bundle + global install)"
     )
