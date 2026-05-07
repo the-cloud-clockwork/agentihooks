@@ -1598,6 +1598,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # B1: process --link-profile NAME=PATH (repeatable) BEFORE profile resolution
     # so the new profile names are visible to the chain validation downstream.
     link_profile_args = list(getattr(args, "link_profile", []) or [])
+    just_linked_names: list[str] = []
     for spec in link_profile_args:
         if "=" not in spec:
             print(f"ERROR: --link-profile expects NAME=PATH, got {spec!r}", file=sys.stderr)
@@ -1615,6 +1616,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         # run_init=False — we're about to install_global below; don't trigger an
         # extra round-trip from inside link-profile.
         _link_profile_link(lp_dir, name=name, append=True, run_init=False)
+        just_linked_names.append(name)
 
     # Check bundle (optional — works without one using built-in profiles only)
     bundle = _get_bundle_path()
@@ -1651,6 +1653,18 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             profile_name = input("Profile [default]: ").strip() or "default"
         else:
             profile_name = "default"
+
+    # B1.1: profiles freshly linked in THIS invocation must end up in the
+    # install chain even when the operator also passed --profile <name>.
+    # Without this merge, --profile clobbers the chain that --link-profile
+    # just appended in state.json, and the linked profile is registered but
+    # not installed.
+    if just_linked_names:
+        existing_chain = [p.strip() for p in profile_name.split(",") if p.strip()]
+        for lname in just_linked_names:
+            if lname not in existing_chain:
+                existing_chain.append(lname)
+        profile_name = ",".join(existing_chain)
 
     # Resolve settings profile (optional overlay) — same precedence as profile
     settings_profile = getattr(args, "settings_profile", None)
