@@ -948,3 +948,121 @@ class TestLinkProfile:
         assert result[0][0] == "anton"
         captured = capsys.readouterr().out
         assert "link-profile unlink brain" in captured  # hint included
+
+
+# ---------------------------------------------------------------------------
+# B1 — init --link-profile NAME=PATH (CLI consolidation)
+# ---------------------------------------------------------------------------
+
+
+class TestInitLinkProfileFlag:
+    def _make_args(self, **overrides):
+        import argparse
+
+        ns = argparse.Namespace(
+            profile=None,
+            init_profile=None,
+            init_settings_profile=None,
+            settings_profile=None,
+            bundle=None,
+            repo=None,
+            local=False,
+            force=False,
+            dry_run=False,
+            query=False,
+            list_profiles=False,
+            link_profile=[],
+            no_discover=True,
+        )
+        for k, v in overrides.items():
+            setattr(ns, k, v)
+        return ns
+
+    def test_single_link_profile_invokes_helper(self, tmp_path):
+        external = tmp_path / "ext-profile"
+        external.mkdir()
+        (external / "profile.yml").write_text("name: ext-profile\n")
+        args = self._make_args(link_profile=[f"foo={external}"], profile="default")
+        with (
+            patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "default"}}}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.object(install, "_link_profile_link") as mock_link,
+        ):
+            install.cmd_init_unified(args)
+        # Helper was called with the resolved directory and the chosen alias.
+        assert mock_link.called
+        call = mock_link.call_args
+        assert call.args[0] == external.resolve()
+        assert call.kwargs["name"] == "foo"
+        assert call.kwargs["run_init"] is False
+        assert mock_install.called  # global install still runs
+
+    def test_multiple_link_profiles(self, tmp_path):
+        ext1 = tmp_path / "p1"
+        ext1.mkdir()
+        ext2 = tmp_path / "p2"
+        ext2.mkdir()
+        args = self._make_args(link_profile=[f"a={ext1}", f"b={ext2}"], profile="default")
+        with (
+            patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "default"}}}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global"),
+            patch.object(install, "_link_profile_link") as mock_link,
+        ):
+            install.cmd_init_unified(args)
+        assert mock_link.call_count == 2
+        names = [c.kwargs["name"] for c in mock_link.call_args_list]
+        assert names == ["a", "b"]
+
+    def test_invalid_format_exits(self, tmp_path):
+        args = self._make_args(link_profile=["malformed-no-equals"], profile="default")
+        with (
+            patch.object(install, "_load_state", return_value={}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global"),
+        ):
+            with pytest.raises(SystemExit):
+                install.cmd_init_unified(args)
+
+    def test_missing_directory_exits(self, tmp_path):
+        args = self._make_args(link_profile=[f"foo={tmp_path / 'does-not-exist'}"], profile="default")
+        with (
+            patch.object(install, "_load_state", return_value={}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global"),
+        ):
+            with pytest.raises(SystemExit):
+                install.cmd_init_unified(args)
+
+
+# ---------------------------------------------------------------------------
+# B2 — bundle auto-discover hint
+# ---------------------------------------------------------------------------
+
+
+class TestBundleDiscoverHint:
+    def test_prints_env_var_candidate_when_valid(self, tmp_path, monkeypatch, capsys):
+        bundle = tmp_path / "mybundle"
+        (bundle / "profiles").mkdir(parents=True)
+        monkeypatch.setenv("AGENTIHOOKS_BUNDLE_PATH", str(bundle))
+        install._print_bundle_discover_hint(profile_hint="anton")
+        out = capsys.readouterr().out
+        assert "AGENTIHOOKS_BUNDLE_PATH" in out
+        assert str(bundle.resolve()) in out
+        assert "agentihooks init --bundle" in out
+
+    def test_prints_generic_hint_when_no_env(self, monkeypatch, capsys):
+        monkeypatch.delenv("AGENTIHOOKS_BUNDLE_PATH", raising=False)
+        install._print_bundle_discover_hint(profile_hint="default")
+        out = capsys.readouterr().out
+        assert "agentihooks init --bundle" in out
+
+    def test_does_not_mutate_state(self, tmp_path, monkeypatch):
+        # Read-only: must NOT touch state.json.
+        sj = tmp_path / "state.json"
+        sj.write_text(json.dumps({"version": "1.0", "targets": {"global": {"profile": "anton"}}}))
+        monkeypatch.setattr(install, "STATE_JSON", sj)
+        before = sj.read_text()
+        install._print_bundle_discover_hint(profile_hint="anton")
+        assert sj.read_text() == before
