@@ -155,17 +155,6 @@ def _load_rules_files(rules_dir: str, include_project: bool, project_dir: str = 
         if project_rules.is_dir():
             dirs.append(project_rules)
 
-    # Include rules from active overlays (mid-session profile activation)
-    try:
-        from scripts.overlay import get_active_overlays
-
-        for overlay in get_active_overlays():
-            rules_dir_path = overlay.get("rules_dir")
-            if rules_dir_path and Path(rules_dir_path).is_dir():
-                dirs.append(Path(rules_dir_path))
-    except Exception:
-        pass
-
     for d in dirs:
         try:
             if not d.is_dir():
@@ -348,11 +337,7 @@ def maybe_refresh(session_id: str, project_dir: str = "") -> None:
 
 
 def force_rules_refresh(session_id: str, project_dir: str = "") -> None:
-    """Force immediate re-injection of all rules (including overlay rules).
-
-    Called when an overlay is activated/deactivated to ensure the session
-    gets the new rules immediately instead of waiting for the next interval.
-    """
+    """Force immediate re-injection of all rules."""
     from hooks.common import inject_context
     from hooks.config import (
         CONTEXT_REFRESH_INCLUDE_PROJECT,

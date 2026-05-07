@@ -409,26 +409,6 @@ def on_session_start(payload: dict) -> None:
     except Exception:
         pass
 
-    # Auto-overlay activation — profiles requested via AGENTIHOOKS_AUTO_OVERLAY env var
-    try:
-        auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
-        if auto_overlays:
-            from scripts.overlay import overlay_add
-
-            for name in auto_overlays.split(","):
-                name = name.strip()
-                if name:
-                    result = overlay_add(name, added_by="auto-session-start")
-                    if result.get("success"):
-                        log("auto_overlay: activated", {"name": name})
-                    else:
-                        log(
-                            "auto_overlay: skip",
-                            {"name": name, "reason": result.get("error", "")},
-                        )
-    except Exception as e:
-        log("auto_overlay session_start failed", {"error": str(e)})
-
     # MCP surface area warning
     try:
         import importlib.util
@@ -609,17 +589,6 @@ def on_user_prompt_submit(payload: dict) -> None:
                 )
     else:
         log("Secrets scanning skipped (mode=off)")
-
-    # --- Overlay injection: inject active overlay profiles every turn ---
-    try:
-        from hooks.config import OVERLAY_INJECTION_ENABLED
-
-        if OVERLAY_INJECTION_ENABLED:
-            from hooks.context.overlay_injector import inject_overlays
-
-            inject_overlays()
-    except Exception as e:
-        log("overlay_injector failed", {"error": str(e)})
 
     # --- Brain adapter: counter-gated refresh of brain content ---
     try:
@@ -1736,20 +1705,6 @@ def on_subagent_stop(payload: dict) -> None:
         clear_pr_signal(agent_id)
     except Exception:
         pass
-
-    # Auto-overlay cleanup — remove overlays activated at session start
-    try:
-        auto_overlays = os.environ.get("AGENTIHOOKS_AUTO_OVERLAY", "")
-        if auto_overlays:
-            from scripts.overlay import overlay_remove
-
-            for name in auto_overlays.split(","):
-                name = name.strip()
-                if name:
-                    overlay_remove(name)
-                    log("auto_overlay: deactivated", {"name": name})
-    except Exception as e:
-        log("auto_overlay subagent_stop failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log — forked (Redis GET/SETEX).
     if agent_id and transcript_path:

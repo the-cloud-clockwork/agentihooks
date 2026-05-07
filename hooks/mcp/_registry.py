@@ -9,7 +9,6 @@ CATEGORY_MODULES = {
     "observability": "hooks.mcp.observability",
     "channels": "hooks.mcp.channels",
     "enforcement": "hooks.mcp.enforcement",
-    "profiles": "hooks.mcp.profiles",
     "utilities": "hooks.mcp.utilities",
 }
 

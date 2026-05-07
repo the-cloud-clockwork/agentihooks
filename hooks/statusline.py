@@ -17,7 +17,6 @@ Native fields used from Claude Code's statusline JSON:
 """
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -262,58 +261,20 @@ def main() -> None:
                 _g_profile = _ah_state.get("targets", {}).get("global", {}).get("profile", "") or "none"
                 _g_sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "") or "none"
 
-            # --- Local: per-repo override from .agentihooks.json ---
-            # Base floor: every session is implicitly subscribed to brain + amygdala.
-            # Per-repo channels ADD to this — they can never drop the base floor.
+            # Channels — fleet-wide floor.
             _BASE_CHANNELS = ["brain", "amygdala"]
-            _l_profile = ""
             _l_channels: list[str] = list(_BASE_CHANNELS)
-            cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-            _cfg_path = Path(cwd) / ".agentihooks.json"
-            if _cfg_path.exists():
-                _cfg = _json_ah.loads(_cfg_path.read_text())
-                _l_profile = _cfg.get("profile", "")
-                _repo_ch = _cfg.get("channels", []) or []
-                for _c in _repo_ch:
-                    if _c not in _l_channels:
-                        _l_channels.append(_c)
-
-            # --- Overlay ---
-            _ovl_str = "none"
-            try:
-                # scripts/ is a sibling of hooks/ — ensure repo root is on path
-                _repo_root = str(Path(__file__).resolve().parent.parent)
-                if _repo_root not in sys.path:
-                    sys.path.insert(0, _repo_root)
-                from scripts.overlay import get_active_overlays
-
-                _overlays = get_active_overlays()
-                if _overlays:
-                    _ovl_str = ",".join(o.get("name", "?") for o in _overlays)
-            except Exception:
-                pass
 
             # --- Build the display ---
-            # Profile: show local override if different from global
-            if _l_profile and _l_profile != _g_profile:
-                _prof_display = f"{_MAGENTA}{_l_profile}{_RESET} {_DIM}({_g_profile}){_RESET}"
-            else:
-                _prof_display = f"{_MAGENTA}{_g_profile}{_RESET}"
+            _prof_display = f"{_MAGENTA}{_g_profile}{_RESET}"
 
             # Settings-profile — show profile name as default when no explicit override
             _sp_value = _g_sp if _g_sp != "none" else _g_profile
             _sp_color = _DIM if _g_sp == "none" else ""
             _sp_display = f"{_sp_color}{_sp_value}{_RESET}"
 
-            # Overlay
-            _ovl_color = _CYAN if _ovl_str != "none" else _DIM
-            _ovl_display = f"{_ovl_color}{_ovl_str}{_RESET}"
-
-            # Channels — floor is always brain,amygdala; extras shown in normal color.
             _ch_str = ",".join(_l_channels)
-            _is_base_only = set(_l_channels) == set(_BASE_CHANNELS)
-            _ch_color = _DIM if _is_base_only else ""
-            _ch_display = f"{_ch_color}{_ch_str}{_RESET}"
+            _ch_display = f"{_DIM}{_ch_str}{_RESET}"
 
             _voice_str = ""
             _voice_sid = payload.get("session_id", "")
@@ -327,7 +288,6 @@ def main() -> None:
             print(
                 f"  {_DIM}agentihooks:{_RESET} {_prof_display}"
                 f"  {_DIM}settings:{_RESET}{_sp_display}"
-                f"  {_DIM}overlay:{_RESET}{_ovl_display}"
                 f"  {_DIM}channels:{_RESET}{_ch_display}"
                 f"{_voice_str}"
             )
