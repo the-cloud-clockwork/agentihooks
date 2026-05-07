@@ -1,11 +1,13 @@
 name: SonarQube Scan
 
 on:
-  push:
-    branches: [main, dev]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sonar:
