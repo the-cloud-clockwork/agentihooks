@@ -4,7 +4,7 @@ Claude Code's native auto-memory lives at `~/.claude/projects/<project-key>/memo
 and is machine-local. The **memory mirror** feature syncs only those `memory/`
 subtrees across your fleet using [gitfoam](https://github.com/The-Cloud-Clockwork/gitfoam)
 for push (~500ms latency per machine) and a lightweight main-only consumer
-on the sync daemon tick for pull (~60s).
+that runs on session events via hooks (`pull_only()`).
 
 **Scope:** memory only. Transcripts, session JSONLs, `ctx_refresh_*.json`
 snapshots, and `todos/` are excluded by the rsync filter.
@@ -191,8 +191,8 @@ echo 'MEMORY_MIRROR_ROLE=consumer' >> ~/.agentihooks/.env
 agentihooks memory-sync install   # gitfoam build/install/start is skipped
 ```
 
-The consumer daemon only ever calls `git fetch origin main` and merges into
-local memory. It never pushes.
+The consumer hook path only ever calls `git fetch origin main` and merges
+into local memory. It never pushes.
 
 ## Housekeeping
 
@@ -226,7 +226,7 @@ agentihooks memory-sync uninstall --purge   # stop daemon AND delete mirror dir
 
 Logs:
 - gitfoam daemon: `~/.agentihooks/logs/gitfoam.log`
-- pull tick: `~/.agentihooks/logs/sync-daemon.log`
+- pull tick: triggered by hooks; logs go to `~/.agentihooks/logs/hooks.log` (`memory_sync_events`)
 
 ## Troubleshooting
 
@@ -274,7 +274,7 @@ layout from your current machine's snapshot, and deletes all old
 
 - Push delegated to gitfoam — handles per-host branch naming, secrets scanning,
   force-push throttling.
-- Pull runs inside `scripts/sync_daemon.py`'s existing poll loop. No new daemon.
+- Pull runs inside `hooks/context/memory_sync_events.py` on session events (`UserPromptSubmit`). No background daemon. Use `agentihooks memory tick` to run a tick manually (consume + authority push if applicable).
 - PR gate via `gh pr create` — no server-side component.
 - Seed step uses `git commit-tree` + `git update-ref` so it doesn't touch
   gitfoam's working branch, avoiding any race with the 500ms push loop.

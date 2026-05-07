@@ -9,7 +9,9 @@ Non-blocking model — uses the shared ``hooks._async.fork_and_call`` helper:
 - ``Stop`` → if session is dirty AND role=contributor, fork → grandchild
   runs ``propose_pr`` in-process. Hook returns <10ms.
 
-Authority role continues to use the 60s daemon in ``scripts/sync_daemon.py``.
+Authority role: hooks call ``pull_only`` like contributors. The wholesale
+``tick()`` (consume + push origin/main) is no longer auto-driven; run
+``agentihooks memory tick`` manually or from cron when needed.
 """
 
 from __future__ import annotations

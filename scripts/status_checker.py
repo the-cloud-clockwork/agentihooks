@@ -57,18 +57,6 @@ def _load_state() -> dict:
     return {}
 
 
-def _check_pid(pid_file: Path) -> dict:
-    """Check a PID file and return {pid, alive}."""
-    if not pid_file.exists():
-        return {"pid": None, "alive": False}
-    try:
-        pid = int(pid_file.read_text().strip())
-        os.kill(pid, 0)
-        return {"pid": pid, "alive": True}
-    except (ProcessLookupError, ValueError, OSError):
-        return {"pid": None, "alive": False}
-
-
 # ── Individual check functions ──────────────────────────────────────────
 
 
@@ -162,31 +150,6 @@ def _extract_hook_python() -> Optional[str]:
     except (json.JSONDecodeError, OSError):
         pass
     return None
-
-
-def check_daemons() -> dict[str, Any]:
-    sync = _check_pid(AGENTIHOOKS_HOME / "sync-daemon.pid")
-    # Fallback: detect sync daemon by process name if PID file missing (e.g. --foreground mode)
-    if not sync["alive"]:
-        sync = _detect_process("sync_daemon")
-    return {
-        "sync": sync,
-        "ok": sync["alive"],
-    }
-
-
-def _detect_process(name: str) -> dict:
-    """Detect a running process by name pattern."""
-    import subprocess
-
-    try:
-        result = subprocess.run(["pgrep", "-f", name], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            pid = int(result.stdout.strip().split("\n")[0])
-            return {"pid": pid, "alive": True}
-    except Exception:
-        pass
-    return {"pid": None, "alive": False}
 
 
 def check_redis() -> dict[str, Any]:
@@ -584,7 +547,6 @@ def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
         "profile": check_profile(),
         "hooks": check_hooks(),
         "python": check_python(),
-        "daemons": check_daemons(),
         "redis": check_redis(),
         "otel": check_otel(),
         "guardrails": check_guardrails(),
@@ -632,13 +594,6 @@ def format_cli(results: dict[str, Any]) -> str:
     tag = "[OK]" if py["ok"] else "[!!]"
     version = f" ({py['version']})" if py.get("version") else ""
     lines.append(_cprint(f"{tag} Python: {py['path']}{version}"))
-
-    # Daemons
-    d = results["daemons"]
-    if d["sync"]["alive"]:
-        lines.append(_cprint(f"[OK] Sync daemon: running (PID {d['sync']['pid']})"))
-    else:
-        lines.append(_cprint("[!!] Sync daemon: stopped"))
 
     # Redis
     r = results["redis"]

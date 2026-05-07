@@ -236,7 +236,7 @@ Both axes are persisted in `~/.agentihooks/state.json`:
 }
 ```
 
-The sync daemon watches both profile directories and re-applies the correct layers when source files change.
+Re-run `agentihooks init` after editing profile directories to re-apply the layered merge.
 
 ---
 
@@ -351,7 +351,7 @@ In chain mode, all profiles' `CLAUDE.md` files are concatenated into a single re
 Claude Code loads the entire file as its system prompt, so instructions from all chained profiles are active simultaneously.
 
 {: .note }
-In single-profile mode, `CLAUDE.md` is a direct copy of the source file. In chain mode, it's a rendered concatenation. Both are real files (not symlinks) for WSL/Windows compatibility. The sync daemon detects source changes and re-renders automatically.
+In single-profile mode, `CLAUDE.md` is a direct copy of the source file. In chain mode, it's a rendered concatenation. Both are real files (not symlinks) for WSL/Windows compatibility. Re-run `agentihooks init` to refresh after editing profile sources.
 
 ### Querying the active chain
 

@@ -83,43 +83,17 @@ agentibrain-kernel.)
 
 ---
 
-## 5. Debounce daemon "removed" detection during git operations
+## 5. ~~Debounce daemon "removed" detection during git operations~~ — RESOLVED
 
-**Bug.** `sync_daemon._diff_hashes` hashes bundle source files at every poll tick.
-Any transient git state — rebase, stash, checkout, worktree add — surfaces as
-"file removed" → daemon fires `mcp_sync` + `blacklist projects` actions. We saw 30+
-false removals during tonight's rebase, each triggering downstream `~/.claude.json`
-churn.
-
-**Fix.** Require N=2 consecutive ticks of "removed" before action fires. Persist
-removal candidates in `~/.agentihooks/removal-candidates.json`. Promote to
-real-removal only after second confirmation. Alternative: hash via
-`git show HEAD:<path>` so working-tree edits don't register.
-
-**Files.**
-- `scripts/sync_daemon.py` (_diff_hashes, _execute_actions)
-
-**Closes.** Caveat 5.
+**Closed by sync-daemon removal.** The daemon that hashed bundle source files
+at every tick is gone. There is no auto-react path left to debounce.
 
 ---
 
-## 6. Bundle-watcher healthcheck on daemon tick
+## 6. ~~Bundle-watcher healthcheck on daemon tick~~ — RESOLVED
 
-**Bug.** Every `~/.claude/skills/*`, `agents/*`, `commands/*`, `rules/*` is a symlink
-into the bundle dir. If bundle is moved/renamed, every skill breaks silently. No
-failsafe.
-
-**Fix.** On daemon tick, `os.path.exists(state.bundle.path)`. If False:
-- Log loud warning.
-- Refuse `_install_user_assets` mass-update (it would orphan symlinks).
-- Surface a banner via `inject_context` so the next claude session sees
-  "Bundle dir gone — run `agentihooks bundle link <path>` to recover".
-
-**Files.**
-- `scripts/sync_daemon.py` (poll loop)
-- `scripts/install.py` (_install_user_assets)
-
-**Closes.** Caveat 9.
+**Closed by sync-daemon removal.** No daemon tick exists. Operator-driven
+`agentihooks init` validates the bundle path before running.
 
 ---
 
@@ -188,11 +162,11 @@ Each pod gets its own state dir and its own lock-file inode. No code change.
 `~/.claude/backups/` on every internal write. They're never pruned. Slow disk-bloat.
 Not critical but lives forever.
 
-**Fix.** Add to `sync_daemon` periodic housekeeping (e.g., once per hour): delete
-backup files older than 24h. ~10 lines.
+**Fix.** Add a step to `agentihooks init` (or a small `agentihooks gc` CLI):
+delete backup files older than 24h. ~10 lines.
 
 **Files.**
-- `scripts/sync_daemon.py` (poll loop or hourly hook)
+- `scripts/install.py` (cmd_init or new cmd_gc)
 
 **Closes.** Tail of caveat 8.
 

@@ -79,8 +79,7 @@ This single command:
 8. Applies hierarchy-aware MCP blacklist across all projects (respects per-project `.agentihooks.json` whitelists)
 9. Prunes orphaned MCP servers from `~/.claude.json`
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
-11. Restarts sync daemon (always — picks up code changes)
-12. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
+11. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 
 The install is **idempotent** -- re-running is safe. Settings are only backed up on the first run.
 
@@ -243,7 +242,7 @@ agentihooks uninstall
 
 Add `--yes` to skip the confirmation prompt.
 
-This removes: settings, all symlinks, CLAUDE.md, MCP server registrations, stops the sync daemon, removes the bashrc block, and uninstalls the CLI. User data in `~/.agentihooks/state.json` is preserved.
+This removes: settings, all symlinks, CLAUDE.md, MCP server registrations, the bashrc block, and the CLI. User data in `~/.agentihooks/state.json` is preserved.
 
 {: .warning }
 To fully remove all user data, delete `~/.agentihooks` manually with `rm -rf ~/.agentihooks`.

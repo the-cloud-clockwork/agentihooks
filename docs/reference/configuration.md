@@ -162,14 +162,6 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ---
 
-## Sync Daemon
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENTIHOOKS_SYNC_POLL_SEC` | `60` | How often (seconds) the sync daemon polls for source file changes. |
-
----
-
 ## Tool Memory
 
 | Variable | Default | Description |

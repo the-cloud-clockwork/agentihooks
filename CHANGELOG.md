@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **Sync daemon (`scripts/sync_daemon.py`) — deleted entirely.** The auto-init loop (file-hash watcher → `_install_global_inner`) was the root cause of the chain-demotion bug class fixed across v1.11.2 → v1.11.3. `agentihooks init` is now the sole entry point that re-applies profile/bundle/MCP changes; it's idempotent and reads `state.json`. Also removed: `cmd_daemon` and the `agentihooks daemon` subcommand, daemon restart in `cmd_init`, daemon stop in `cmd_uninstall`, daemon liveness checks in `status_checker`, `tests/test_sync_daemon.py`, the `AGENTIHOOKS_SYNC_POLL_SEC` env var, and all heartbeat / hash-manifest / crash-sentinel state files. Old artifacts (`sync-daemon.pid`, `sync-daemon.heartbeat`, `.sync-daemon.singleton.lock`) are now scrubbed by `agentihooks uninstall`.
+
+### Changed
+
+- **MCP prune helpers** — `_get_valid_mcp_names` / `_prune_stale_mcp_servers` moved from `sync_daemon.py` into `scripts/install.py` near `cmd_mcp` (used by `agentihooks mcp prune`). No behavior change.
+- **`broadcast.heartbeat_sessions()` now runs on SessionEnd** — `hook_manager.on_session_end` calls it after deregister so dead session entries are pruned on every clean shutdown. Previously only the daemon called it.
+- **Memory-mirror `tick()` is now manual.** New CLI: `agentihooks memory tick` runs one consume + (if authority) push to `origin/main`. Hooks continue to call `pull_only()` automatically on session events via `hooks/context/memory_sync_events.py`.
+
 ### Added
 
 - **Controls toggle (bypass mode) — Guardrail 9** — operator phrase `disable controls` (also `turn off controls`, `deactivate controls`, `kill controls`) flips a session-wide bypass that short-circuits CI-manifesto signal gates: branch creation (§13), PR creation (§14, including the 3-PR session counter), `gh pr merge` to main (§4 release), `gh workflow run release.yml`, `:latest`/`:prod`/`:stable` image push (§5 hotfix), and force push to non-main branches. Spawned subagents inherit the unlock automatically via a single global flag (`~/.agentihooks/controls_flags/active.flag` + Redis key `controls_disabled:_global`). Restored by `enable controls` (also `turn on`, `activate`, `restore`) or by SessionEnd of the activating session. HARD FLOOR (push-to-main, force-push to main, commit-on-main, `--base main` PR requirement, `git tag`, `git reset main`, `git branch -D main`, secrets-in-files) stays enforced. New module `hooks/context/controls_toggle.py`, integrations in `branch_guard._has_branch_signal` / `_has_pr_signal` / PR-counter / force-push loop / `prod_lockdown.check_prod_lockdown`. Banner injected on every transition and on each turn while active. Feature flag: `CONTROLS_BYPASS_ENABLED` (default true).
