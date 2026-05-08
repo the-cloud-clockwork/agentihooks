@@ -177,7 +177,9 @@ agentihooks link-profile link ~/dev/brain --name br   # disambiguate name on col
 agentihooks link-profile list                         # show all linked external profiles
 agentihooks link-profile unlink brain-profile         # remove from chain + sweep symlinks
 
-# Broadcast channels (targeted messaging — subscribe/unsubscribe being reworked)
+# Broadcast channels — subscriptions are env-driven via AGENTIHOOKS_BASE_CHANNELS
+# (set in profile's settings.overrides.json env block; override per-repo via
+# .claude/settings.local.json env, or per-container via launch ENV)
 agentihooks channel publish brain "msg"      # publish to a channel
 agentihooks channel list                     # active channels + message counts
 

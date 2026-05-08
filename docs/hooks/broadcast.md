@@ -338,6 +338,51 @@ PreToolUse fires
 
 ---
 
+## Channel Subscriptions
+
+Channels split delivery: a message published to `channel="ops-alerts"` reaches only sessions subscribed to `ops-alerts`. Messages without a `channel` field are global — every session receives them regardless of subscription.
+
+**Subscriptions are env-driven.** No channel name lives in code. The subscription floor for a session resolves from the `AGENTIHOOKS_BASE_CHANNELS` env var (comma-separated), parsed once at hook subprocess startup.
+
+### Layering (lowest precedence → highest)
+
+Claude Code merges the `env` block across its native settings.json hierarchy and injects the result into every hook subprocess. Layers, in order:
+
+1. **Profile default** — `profiles/<name>/.claude/settings.overrides.json` env block. The agentihooks `default` profile and the bundle profiles (`anton`, `agenticore`, `smith`) all ship `"AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala"`. Rendered into `~/.claude/settings.json` by `agentihooks init`.
+2. **Per-repo** — `<repo>/.claude/settings.json` env block (committed). Use this when the entire team needs the same channel set in a given repo.
+3. **Per-repo local** — `<repo>/.claude/settings.local.json` env block (gitignored, operator-private). Use this for personal subscriptions that shouldn't leak into git history.
+4. **Container launch** — `docker run -e AGENTIHOOKS_BASE_CHANNELS=...` or K8s `env:` block. Wins over everything because it's set before the hook subprocess starts.
+
+```json
+// example: <repo>/.claude/settings.local.json
+{
+  "env": {
+    "AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala,deploy,ops-alerts"
+  }
+}
+```
+
+### Special values
+
+- empty / unset → session receives only global broadcasts (messages with no `channel` field)
+- `*` → wildcard, session receives everything on every channel
+- whitespace and duplicates are trimmed/deduped at parse time (`"brain, amygdala ,brain"` → `("brain", "amygdala")`)
+
+### Why env vars (not a per-repo JSON)
+
+The previous `.agentihooks.json` mechanism was removed 2026-05-07. Env vars via Claude Code's native `settings.json` `env` block beat a custom JSON file because:
+
+- **Three-layer override is automatic** — Claude Code already merges user/project/local settings.
+- **Container override "just works"** — K8s `env:` block trumps any in-repo file without code changes.
+- **Zero new file conventions** — no parser, no reader, no install-time render.
+- **Hook subprocess gets the env for free** — same mechanism as every other agentihooks env var.
+
+### Mid-session changes
+
+Mid-session subscription change requires a session restart — same constraint as `agentihooks refresh-rules`. The env var is read once at module import; restarting the session re-reads it. For the next-class operator workflow, `agentihooks refresh-rules` could be extended to push channel-list updates without a full restart.
+
+---
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -346,6 +391,7 @@ PreToolUse fires
 | `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Path to the broadcast file. Point to a shared mount for multi-node. |
 | `BROADCAST_MAX_MESSAGES` | `50` | Maximum concurrent active broadcasts (oldest expire first at the limit) |
 | `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on PreToolUse via additionalContext |
+| `AGENTIHOOKS_BASE_CHANNELS` | `""` (empty) | Comma-separated channel subscription floor. See [Channel Subscriptions](#channel-subscriptions) above for layering and resolution rules. |
 
 ---
 

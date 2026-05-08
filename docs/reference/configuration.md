@@ -157,6 +157,7 @@ Combats attention decay in long sessions by periodically re-injecting rules and 
 | `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Path to the broadcast file. Set to a shared mount for multi-node deployments. |
 | `BROADCAST_MAX_MESSAGES` | `50` | Maximum concurrent broadcasts. Oldest expire first when limit is reached. |
 | `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on `PreToolUse` via `additionalContext` JSON. |
+| `AGENTIHOOKS_BASE_CHANNELS` | `""` (empty) | Comma-separated channel subscription floor. Default ships in `profiles/default/.claude/settings.overrides.json` env block as `"brain,amygdala"`. Layered: profile env → repo `.claude/settings.json` env → repo `.claude/settings.local.json` env → container launch ENV (highest). Empty / unset → session only receives global broadcasts (no `channel` field). Wildcard `*` subscribes to everything. Whitespace and duplicates are trimmed/deduped at parse time. Mid-session change requires a session restart. |
 
 See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI documentation.
 
