@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Channel subscriptions are env-driven** — the `BASE_CHANNELS` constant in `hooks/context/broadcast.py` and its duplicate in `hooks/statusline.py` are gone. Subscriptions now come from the `AGENTIHOOKS_BASE_CHANNELS` env var (comma-separated), parsed once at `hooks.config` import time. Layered via Claude Code's native settings.json `env` block: profile default (ships `"brain,amygdala"` in `profiles/default/.claude/settings.overrides.json`) → repo `.claude/settings.json` → repo `.claude/settings.local.json` → container launch ENV. Empty / unset → session only receives global broadcasts. No code-level channel name fallback — channels are policy, not implementation.
 - **MCP prune helpers** — `_get_valid_mcp_names` / `_prune_stale_mcp_servers` moved from `sync_daemon.py` into `scripts/install.py` near `cmd_mcp` (used by `agentihooks mcp prune`). No behavior change.
 - **`broadcast.heartbeat_sessions()` now runs on SessionEnd** — `hook_manager.on_session_end` calls it after deregister so dead session entries are pruned on every clean shutdown. Previously only the daemon called it.
 - **Memory-mirror `tick()` is now manual.** New CLI: `agentihooks memory tick` runs one consume + (if authority) push to `origin/main`. Hooks continue to call `pull_only()` automatically on session events via `hooks/context/memory_sync_events.py`.

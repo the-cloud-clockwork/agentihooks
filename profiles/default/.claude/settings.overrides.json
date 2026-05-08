@@ -1,7 +1,8 @@
 {
   "env": {
     "AGENTIHOOKS_SECRETS_MODE": "standard",
-    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+    "AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala"
   },
   "permissions": {
     "defaultMode": "auto",
