@@ -135,8 +135,8 @@ Global broadcasts (no `channel` field) bypass the filter entirely — they reach
 |------|---------|
 | `channel_publish(channel, message, severity, ttl)` | Publish to a channel |
 | `channel_list()` | List active channels with message counts |
-| `channel_subscribe(channel)` | ~~Add channel to current project's `.agentihooks.json`~~ — removed, pending rebuild |
-| `channel_unsubscribe(channel)` | ~~Remove channel from `.agentihooks.json`~~ — removed, pending rebuild |
+| `channel_subscribe(channel)` | Removed — subscriptions are operator-configured via the `AGENTIHOOKS_BASE_CHANNELS` env var (see [Subscribing](#subscribing) above), not via runtime tool calls. |
+| `channel_unsubscribe(channel)` | Removed — same reason. Edit the env var in `settings.json` / `settings.local.json` and restart the session. |
 
 ---
 
@@ -263,16 +263,18 @@ The amygdala (emergency broadcast) publishes directly to a channel like `"amygda
 
 ### Example: antoncore as test bunny
 
-> **Note:** `.agentihooks.json` was removed 2026-05-07. The example below shows the intended future state once per-profile channel subscriptions are rebuilt.
+To subscribe a single repo to the `brain` channel beyond the operator's default subscription:
 
 ```json
-// profile-level channel config (future)
+// antoncore/.claude/settings.local.json
 {
-  "channels": ["brain"]
+  "env": {
+    "AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala,deploy"
+  }
 }
 ```
 
-Any agent running with a profile subscribed to `brain` will receive brain channel messages. Agents on profiles without the subscription won't see them.
+Any agent launched in the antoncore working directory inherits this list (Claude Code merges it on top of the user-global `~/.claude/settings.json`). Agents launched in repos without the override see only the profile-level default. The `settings.local.json` form is gitignored — use `settings.json` instead if the team should share the override.
 
 ---
 
