@@ -198,6 +198,41 @@ agentihooks broadcast --clear
 
 ---
 
+## `agentihooks channel`
+
+Channel-scoped broadcast publishing and inspection. A session only receives a channel-tagged message if its subscription list (from `AGENTIHOOKS_BASE_CHANNELS`) includes that channel. Global broadcasts (no channel) reach everyone.
+
+### Subcommands
+
+```bash
+agentihooks channel publish CHANNEL MESSAGE [-s SEVERITY] [-t TTL]
+agentihooks channel list
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `publish` | Publish a message to a named channel. Same severity tiers as `broadcast` (`info` / `alert` / `critical`). |
+| `list` | Show active channels in `~/.agentihooks/broadcast.json` with message counts per channel. |
+
+### Subscriptions live in `settings.json`, not in CLI
+
+There is intentionally no `channel subscribe` or `channel unsubscribe` subcommand. Subscriptions are operator-configured via the `AGENTIHOOKS_BASE_CHANNELS` env var, set in the profile's `settings.overrides.json` `env` block (or per-repo via `.claude/settings.local.json`, or per-container via launch ENV). See [Broadcast System → Channel Subscriptions](../hooks/broadcast.md#channel-subscriptions).
+
+### Examples
+
+```bash
+# Tagged broadcast — only sessions subscribed to "deploy" see it
+agentihooks channel publish deploy "Image roll-out paused on cluster-west" -s alert -t 1h
+
+# Knowledge / brain content (the brain adapter publishes here automatically)
+agentihooks channel publish brain "Hot arcs updated: 3 active" -s info -t 4h
+
+# Inspect what's flowing
+agentihooks channel list
+```
+
+---
+
 ## `agentihooks refresh-rules`
 
 Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.

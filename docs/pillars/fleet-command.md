@@ -63,7 +63,34 @@ flowchart TD
     style S3 fill:#1a2a1a,color:#7fff7e,stroke:#2aff2a
 ```
 
-The flow is pull-based, not push-based. Agents are not subscribed to a channel. Instead, every time a hook fires — on a user message, on a tool call, on session start — the hook reads the broadcast file. If there is a message waiting, it injects it into the session's context window as a banner. The message finds the agent on its next move, not via a separate notification channel.
+The flow is pull-based, not push-based. There is no notification channel — every time a hook fires (on a user message, on a tool call, on session start), the hook reads the broadcast file. If a message is waiting, it injects it into the session's context window as a banner. The message finds the agent on its next move.
+
+---
+
+## Channel Filtering
+
+Pull-based delivery applies to *every* broadcast, but messages can carry an optional `channel` tag for targeted delivery. A session only sees a tagged message if its subscription list includes that channel name. Global broadcasts (no `channel`) reach everyone regardless.
+
+Subscriptions are env-driven via the `AGENTIHOOKS_BASE_CHANNELS` env var (comma-separated). Layering follows Claude Code's native settings.json `env` block precedence:
+
+```
+profile settings.overrides.json env
+    → repo .claude/settings.json env
+    → repo .claude/settings.local.json env
+    → container launch ENV (highest)
+```
+
+Empty / unset → session only receives global broadcasts. Wildcard `*` → session receives every channel. See [Broadcast System → Channel Subscriptions](../hooks/broadcast.md#channel-subscriptions) for the full mechanism.
+
+```bash
+# Publish to a specific channel
+agentihooks channel publish ops-alerts "Disk pressure on node-7" -s alert -t 30m
+
+# List active channels and message counts
+agentihooks channel list
+```
+
+Channel filtering does not change the delivery semantics: the file is still read on every hook invocation, severity tiers still apply, the operator still has full visibility via `--list`. The filter only narrows *which* sessions a tagged message reaches.
 
 ---
 
@@ -266,6 +293,7 @@ In a Kubernetes deployment with hundreds of agent pods, Redis replaces the file 
 | `BROADCAST_FILE` | `~/.agentihooks/broadcast.json` | Broadcast file path |
 | `BROADCAST_MAX_MESSAGES` | `50` | Max concurrent broadcasts; oldest expire first |
 | `BROADCAST_CRITICAL_ON_PRETOOL` | `true` | Inject critical broadcasts on `PreToolUse` |
+| `AGENTIHOOKS_BASE_CHANNELS` | `""` (empty) | Comma-separated channel subscription floor for this session. See [Channel Filtering](#channel-filtering) above. |
 
 ---
 
