@@ -84,10 +84,6 @@ Sessions subscribe to channels via the **`AGENTIHOOKS_BASE_CHANNELS`** env var (
 
 Mid-session changes require a session restart — same constraint as `agentihooks refresh-rules`.
 
-**Special values:**
-- `[]` or absent → only receive global broadcasts (default, backward compatible)
-- `["*"]` → wildcard, receive everything on every channel
-
 ### Publishing
 
 Publish to a channel via CLI:
