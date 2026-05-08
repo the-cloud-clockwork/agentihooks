@@ -17,7 +17,7 @@ AgentiHooks is a lifecycle hook system and MCP tool server for [Claude Code](htt
 - **3-layer asset merge** -- agentihooks built-in, bundle global, and profile-specific skills/agents/commands/rules
 - **Sync daemon** -- auto-propagates new skills, agents, commands, and rules within 60s
 - **Cross-session memory** -- tool error patterns persist across sessions via NDJSON store
-- **[Broadcast system](../hooks/broadcast.md)** -- send operator messages to all active Claude Code sessions simultaneously; severities: `info` (once, 4h), `alert` (every turn, 1h), `critical` (every turn + every tool call, 30m); compose manually or use `agentihooks broadcast emit "natural language"` for AI-assisted severity selection
+- **[Broadcast system](../hooks/broadcast.md)** -- send operator messages to all active Claude Code sessions simultaneously; severities: `info` (once, 4h), `alert` (every turn, 1h), `critical` (every turn + every tool call, 30m); compose manually or use `agentihooks broadcast emit "natural language"` for AI-assisted severity selection. Optional channel tagging: messages published to a named channel only reach sessions subscribed via the `AGENTIHOOKS_BASE_CHANNELS` env var (configured per-profile / per-repo / per-container)
 
 ## Prerequisites
 
