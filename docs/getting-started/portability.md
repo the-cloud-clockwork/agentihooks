@@ -65,7 +65,7 @@ export AGENTIHOOKS_HOME=/shared/.agentihooks-${HOSTNAME}
 agentihooks init
 ```
 
-Or with the Downward API:
+Or with the Downward API. The same `env:` block is also where any other agentihooks runtime knob lands — feature flags, secrets-mode toggles, channel subscriptions. K8s/container ENV beats every settings.json layer (profile, repo, repo-local) because it's set before the hook subprocess starts:
 
 ```yaml
 env:
@@ -75,9 +75,13 @@ env:
         fieldPath: metadata.name
   - name: AGENTIHOOKS_HOME
     value: /shared/.agentihooks-$(POD_NAME)
+  - name: AGENTIHOOKS_BASE_CHANNELS
+    value: brain,amygdala,deploy            # per-pod channel subscriptions
+  - name: AGENTIHOOKS_SECRETS_MODE
+    value: strict
 ```
 
-Each pod now has an isolated state directory: `/shared/.agentihooks-diagram-agent-0/`, `/shared/.agentihooks-publisher-agent-0/`, etc. No races, no cross-pod state, `--force` is scoped to the calling pod only.
+Each pod now has an isolated state directory: `/shared/.agentihooks-diagram-agent-0/`, `/shared/.agentihooks-publisher-agent-0/`, etc. No races, no cross-pod state, `--force` is scoped to the calling pod only. Channel subscriptions and other policy knobs can vary per pod (e.g. give the deploy bot pod the `deploy` channel, leave it off everywhere else).
 
 ### Opt-in shared state
 
