@@ -160,6 +160,8 @@ UserPromptSubmit hook
 Agent sees brain content in context
 ```
 
+> **Receiving brain content requires subscription.** The brain channel is not implicit — a session only sees brain entries if `brain` is in its `AGENTIHOOKS_BASE_CHANNELS` env var (see [Subscribing](#subscribing) above). The default profile ships `"brain,amygdala"` so brain content lands by default; remove `brain` from the env list (per-repo or per-container) to opt out.
+
 ### Source interface
 
 The adapter uses a pluggable source interface:
