@@ -11,6 +11,7 @@ Some Claude Code sessions receive broadcast messages, others don't. In a test wi
 - 1 agent reported no message in recent context
 
 ### Possible causes
+- **Channel mismatch** — the broadcast was published to a channel name that's not in the session's `AGENTIHOOKS_BASE_CHANNELS` env var. Global broadcasts (no `channel` field) reach everyone; tagged broadcasts only reach subscribed sessions. Check the message's `channel` field in `broadcast.json` against the session's subscription list (visible on statusline Line 3 as `channels:...`).
 - Session registered after the broadcast was created (timing)
 - `info` severity is one-shot — if the session was already marked in `delivered_to` from a prior delivery, it won't show again
 - Hook not wired for that session (different profile, hooks disabled, `--bare` mode)
@@ -18,8 +19,9 @@ Some Claude Code sessions receive broadcast messages, others don't. In a test wi
 - Session started from a directory where agentihooks hooks aren't installed
 
 ### Investigation steps
-1. Check `~/.agentihooks/broadcast.json` — look at `delivered_to` array for the message
-2. Check `~/.agentihooks/active-sessions.json` — is the non-receiving session registered?
-3. Check the session's hook output — is broadcast injection firing on UserPromptSubmit?
-4. Verify the session's settings.json has the hook_manager wired
-5. Try `alert` severity (persistent, every turn) instead of `info` (one-shot) to rule out timing
+1. Check `~/.agentihooks/broadcast.json` — look at the message's `channel` field and the `delivered_to` array.
+2. If the message has a `channel`, check the receiving session's subscription list — either look at the statusline `channels:` row in that session, or `cat ~/.claude/settings.json | jq '.env.AGENTIHOOKS_BASE_CHANNELS'`. If the channel isn't there, that's the cause — re-publish to a channel the session subscribes to, or extend the env via `.claude/settings.local.json`.
+3. Check `~/.agentihooks/active-sessions.json` — is the non-receiving session registered?
+4. Check the session's hook output — is broadcast injection firing on UserPromptSubmit?
+5. Verify the session's settings.json has the hook_manager wired
+6. Try `alert` severity (persistent, every turn) instead of `info` (one-shot) to rule out timing
