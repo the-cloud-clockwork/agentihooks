@@ -366,6 +366,23 @@ Info severity delivers once per session — every active agent gets the heads-up
 
 ---
 
+### Targeted Channel Delivery
+
+When the message is only relevant to a subset of agents — the deploy bot, the on-call SRE pod, sessions in a specific repo. Subscribe the relevant sessions to a named channel via `AGENTIHOOKS_BASE_CHANNELS`, then publish with `agentihooks channel publish`. Untargeted sessions never see the message.
+
+```bash
+# Publish — only sessions subscribed to "deploy" receive this
+agentihooks channel publish deploy \
+  "Image roll-out paused on cluster-west until 14:30 UTC." -s alert -t 1h
+
+# Receive — set this in the deploy pod's K8s env or .claude/settings.local.json
+#   AGENTIHOOKS_BASE_CHANNELS=brain,amygdala,deploy
+```
+
+Use this when a fleet-wide broadcast would be noise for sessions that can't act on it. See [Channel Filtering](#channel-filtering) above for the full layering.
+
+---
+
 ### AI-Assisted Response
 
 Incident alert fires in your monitoring system at 2am. You are half asleep. You do not want to think about severity levels.
