@@ -306,6 +306,26 @@ def create_broadcast(
     persistent: bool | None = None,
     channel: str | None = None,
 ) -> str | None:
+    """Publish a broadcast to the shared file (and Redis if configured).
+
+    Args:
+        message: Body text. Empty / whitespace-only messages are dropped.
+        severity: ``info`` (one-shot), ``alert`` (every turn), ``critical``
+            (every turn + every tool call). Invalid values fall back to ``alert``.
+        ttl_seconds: Lifetime in seconds. ``0`` resolves to the per-severity
+            default (info=4h, alert=1h, critical=30m).
+        source: Origin label for ``--list`` / audit (operator | brain | amygdala | ...).
+        persistent: Override the persistence default for the severity. Persistent
+            messages re-deliver every turn (or every tool call for critical);
+            one-shot messages deliver once per session.
+        channel: Optional channel tag. When set, the message only reaches
+            sessions whose ``AGENTIHOOKS_BASE_CHANNELS`` env var includes this
+            channel name (or contains the wildcard ``*``). When ``None``, the
+            message is global and reaches every session regardless of subscription.
+
+    Returns:
+        The 12-char message ID on success, or ``None`` for empty input.
+    """
     if not message or not message.strip():
         return None
 
