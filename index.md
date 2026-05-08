@@ -50,7 +50,7 @@ flowchart LR
 
     subgraph P4["Pillar 4 — Fleet Command"]
         direction TB
-        F1["Broadcast system\nReal-time messaging\nAll sessions at once\nSeverity tiers"]
+        F1["Broadcast system\nReal-time messaging\nAll sessions at once\nSeverity tiers + channel filtering"]
     end
 
     CLAUDE["Claude Code\nAgent"] --> P1
@@ -111,7 +111,7 @@ No other tool does this. One command. Every active Claude Code session. Right no
 agentihooks broadcast -s critical "Production incident — do NOT deploy."
 ```
 
-The broadcast system delivers your message to every session on its next hook event — before the next turn for `alert`, before every tool call for `critical`. Three severity tiers. File-based at small scale (no server needed), Redis-backed at Kubernetes scale. AI-assisted `emit` subcommand lets Claude Haiku pick the right severity from natural language. The session registry tracks every active agent so you know exactly who is in your fleet.
+The broadcast system delivers your message to every session on its next hook event — before the next turn for `alert`, before every tool call for `critical`. Three severity tiers. File-based at small scale (no server needed), Redis-backed at Kubernetes scale. AI-assisted `emit` subcommand lets Claude Haiku pick the right severity from natural language. The session registry tracks every active agent so you know exactly who is in your fleet. Optional **channel-tagged** delivery for targeted messaging — subscribe a session to specific channels via the `AGENTIHOOKS_BASE_CHANNELS` env var (set per-profile, per-repo, or per-container) and only the right pods hear the right messages.
 
 [Read Pillar 4: Fleet Command →]({{ site.baseurl }}/docs/pillars/fleet-command/){: .btn .btn-blue }
 
