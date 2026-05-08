@@ -75,7 +75,7 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TOKEN_CONTROL_ENABLED` | `true` | Master switch. Set `false` to disable all token control features at once. |
-| `TOKEN_MONITOR_ENABLED` | `true` | Enable the `statusLine` script (`hooks/statusline.py`) context window monitor. Outputs a 2-line status bar (fill %, burn rate, cost, cache ratio, git branch) plus a conditional threshold warning line. `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` to avoid stale payload values. |
+| `TOKEN_MONITOR_ENABLED` | `true` | Enable the `statusLine` script (`hooks/statusline.py`) context window monitor. Outputs a 3-line status bar (line 1: fill %, model, cost; line 2: token counts, burn rate, cache ratio, git branch; line 3: active agentihooks profile, settings-profile, channels subscription list from `AGENTIHOOKS_BASE_CHANNELS`) plus a conditional 4th line for threshold warnings, native rate limits, or peak/off-peak indicator. `used_pct` is recomputed from `total_input_tokens / context_window_size * 100` to avoid stale payload values. |
 | `TOKEN_WARN_PCT` | `60` | Fill percentage at which a warning banner is injected into Claude's context. Edge-triggered: fires only once per session per threshold level. |
 | `TOKEN_CRITICAL_PCT` | `80` | Fill percentage at which a critical banner is injected. |
 | `TOKEN_REDIS_TTL` | `3600` | TTL (seconds) for Redis keys storing token metrics and warning state. |
