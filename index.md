@@ -240,7 +240,7 @@ All `${VAR}` placeholders in MCP server configs resolve automatically.
 
 ## Restrict which tools load
 
-By default all 26 tools across all 8 categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
+By default all tools across all 9 categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
 
 **Restrict by category** — only load the categories you need:
 
@@ -253,8 +253,8 @@ By default all 26 tools across all 8 categories are active. Use environment vari
 Valid category names (comma-separated, any order):
 
 ```
-aws  email  messaging  storage
-database  compute  observability  utilities
+aws  channels  compute  database
+email  enforcement  observability  storage  utilities
 ```
 
 **Restrict to specific tools** — allowlist exact tool names within the loaded categories:
@@ -304,7 +304,7 @@ Registered files are tracked in `~/.agentihooks/state.json` and re-applied autom
 AgentiHooks is a platform, not just a tool. Fork the repo and you immediately inherit:
 
 - The full hook lifecycle (SessionStart → Stop) wired into Claude Code
-- 26 MCP tools across 8 categories, ready to use or filter down
+- MCP tools across 9 categories, ready to use or filter down
 - Profile system — swap agent personality and permissions with one flag
 - Install scripts, settings management, and credential loading
 
@@ -351,7 +351,7 @@ rm -rf ~/.agentihooks
 | **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
 | **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, rate limit display |
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
-| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | All 26 tools across 8 categories |
+| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 9 categories |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
 | **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
 | **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |

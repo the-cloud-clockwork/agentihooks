@@ -144,7 +144,7 @@ Claude Code
   |     pipes JSON on every turn       --> 2-3 line status bar
   |
   +-- MCP Tools --> python -m hooks.mcp --> category modules
-        aws, email, messaging,               --> hooks/integrations/*
+        aws, email, storage,                  --> hooks/mcp/*
         database, compute, ...
 ```
 
@@ -201,18 +201,6 @@ agentihooks sessions backfill                # seed registry from JSONL transcri
 agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
 agentihooks mcp report                       # MCP surface area
-
-# Memory mirror (cross-machine auto-memory sync — opt-in, role-based, by-project layout)
-# Roles (v4): off / consumer / offline / contributor / authority.
-# Set MEMORY_MIRROR_ROLE in ~/.agentihooks/.env. One authority per fleet.
-agentihooks memory-sync install              # build gitfoam + seed main + init mirror + start daemon (skips gitfoam for consumer)
-agentihooks memory-sync status               # role, mode, config, binary path, PID
-agentihooks memory-sync sync-now             # one manual tick (snapshot + fetch main + merge)
-agentihooks memory-sync propose [--auto-merge]  # PR from gitfoam/<host>/main → main
-agentihooks memory-sync sweep-branches       # prune merged + idle branches (default 15d)
-agentihooks memory-sync migrate-layout [--confirm]  # one-off: rewrite main to v3 by-project/ layout
-agentihooks memory-sync start|stop           # gitfoam daemon lifecycle
-agentihooks memory-sync uninstall [--purge]  # stop daemon (+ optional mirror rm)
 
 # Utilities
 agentihooks ignore [path]                    # create .claudeignore
@@ -350,107 +338,6 @@ BRAIN_WRITER_ENABLED=true
 Restart your Claude Code session. The hook stack will fetch hot arcs +
 active signals on every prompt and inject them as broadcast banners. No
 profile install required — works alongside any profile (or none).
-
-## Memory Mirror — cross-machine auto-memory sync (PR-gated)
-
-Claude Code's auto-memory at `~/.claude/projects/<project>/memory/` is machine-local.
-This feature mirrors **only the `memory/` subtrees** across every machine in your
-fleet via a private GitHub repo. Transcripts, session JSONLs, and `ctx_refresh`
-snapshots are excluded by a unit-tested rsync filter.
-
-**How it works**
-
-```
-machine A                                         machine B
-─────────                                         ─────────
-~/.claude/projects/*/memory/                      ~/.claude/projects/*/memory/
-      │ rsync (memory-only)                             ▲ merge (.conflict sibling on divergence)
-      ▼                                                 │
-~/.agentihooks/memory-mirror/                     ~/.agentihooks/memory-mirror/
-      │ gitfoam force-push 500ms                        │ git fetch origin main every 60s
-      ▼                                                 │
-   origin/gitfoam/A/main                        origin/main  ←  merged by operator via PR
-                    │                                   ▲
-                    └── gh pr create --base main ───────┘
-                        (agentihooks memory-sync propose)
-```
-
-Every machine still writes to its **own** `gitfoam/<hostname>/main` branch via
-[gitfoam](https://github.com/The-Cloud-Clockwork/gitfoam) (Rust daemon, 500ms
-force-push, built-in secrets scanning). **Consumers read `origin/main` only.**
-Promotion from a machine branch to `main` is a PR — `agentihooks memory-sync
-propose` opens it via `gh pr create` and optionally auto-merges when clean.
-This gives you a review gate against bad or malicious memory without taking
-away each agent's ability to accumulate its own learnings.
-
-**Identity-keyed layout (v3).** The mirror stores memory under `by-project/<key>/memory/`
-where `<key>` is the repo or agent name — not the absolute path. An identity
-resolver reverse-walks each `~/.claude/projects/<encoded>/` dir to find the
-package or agent boundary (`agent.yml` > `pyproject.toml`/`Cargo.toml`/`package.json`/`go.mod`
-> `.git`) and uses its basename as the key. So:
-
-- Laptop `/home/iamroot/dev/tcc-ecosystem/agenticore` → key `agenticore`
-- Fleet pod `/app/agenticore` → key `agenticore` (same key, memory pools!)
-- Agent `.../agentihub/agents/finops/package` → key `finops` (skips past `package/`)
-- Hyphenated repos like `tcc-toolbelt` stay intact (the resolver reads the real FS, not the encoded name)
-- Unresolvable paths fall back to `_unmapped/<encoded>/` so nothing is lost.
-
-**Enable (three commands)**
-
-```bash
-cat >> ~/.agentihooks/.env <<'EOF'
-MEMORY_MIRROR_MODE=write
-MEMORY_MIRROR_REMOTE=git@github.com:YOU/claude-memory.git
-EOF
-agentihooks memory-sync install     # seeds origin/main on first run
-```
-
-**Promote a machine's learnings to main**
-
-```bash
-agentihooks memory-sync propose                # open a PR; review + merge on GitHub
-agentihooks memory-sync propose --auto-merge   # arm gh pr merge --auto --squash
-```
-
-**Verify**
-
-```bash
-agentihooks memory-sync status
-# mode:       write
-# remote:     git@github.com:YOU/claude-memory.git
-# mirror:     /home/you/.agentihooks/memory-mirror
-# prefix:     gitfoam
-# interval:   60s
-# sweep idle: 15d
-# gitfoam:    /home/you/.cargo/bin/gitfoam
-# daemon:     running (PID 12345)
-```
-
-**Conflict handling**
-
-When local state and `origin/main` diverge on the same file, the merge step
-writes the incoming version to `<name>.conflict-<host>-<epoch><ext>` next to
-the target — the local file is never overwritten. Resolve via `/memory`,
-delete the conflict file when done.
-
-**Modes**
-
-- `off` (default) — dormant
-- `write` — full participant (push + pull main)
-- `write-local-only` — air-gapped contributor (push only, never pulls)
-
-**Housekeeping**
-
-`agentihooks memory-sync sweep-branches` deletes remote branches already merged
-into `main` and idle longer than `MEMORY_MIRROR_SWEEP_IDLE_DAYS` (default 15).
-Unmerged branches are never touched. Cron-safe.
-
-**Opt-in, opt-out, purge**
-
-Nothing happens unless `MEMORY_MIRROR_MODE != off` and `MEMORY_MIRROR_REMOTE`
-is set. Rollback with `agentihooks memory-sync uninstall --purge`.
-
-Full guide: [docs/getting-started/memory-mirror.md](docs/getting-started/memory-mirror.md)
 
 ## Portability
 

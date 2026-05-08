@@ -314,7 +314,7 @@ anton/settings.overrides.json          ← merged on top (dicts merge, hooks app
 | **Rules/Skills/Agents/Commands** | Additive across all profiles. Same filename = later profile wins. |
 | **CLAUDE.md** | **Concatenated** into one file with `---` separators and `<!-- profile: name -->` markers. All profiles' system prompts are active. |
 | **MCP servers** | Additive — all profiles' servers accumulate. |
-| **Connectors / OTEL** | Last profile in chain provides these. |
+| **OTEL** | Last profile in chain provides these. |
 
 ### CLAUDE.md concatenation
 
