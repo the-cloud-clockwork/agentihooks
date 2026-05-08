@@ -136,7 +136,7 @@ Edge-triggered warnings fire exactly once per threshold crossing per session -- 
 | **Warning** | 60% | Yellow banner: *"CONTEXT 60% -- consider /compact soon"* |
 | **Critical** | 80% | Red banner: *"CONTEXT 80% -- /compact now or start new session"* |
 
-Warnings appear on statusline Line 3 so they're impossible to miss. Edge-triggering is tracked in Redis -- each level fires at most once.
+Warnings appear on the statusline's conditional Line 4 (the row that also carries native rate limits and the peak/off-peak indicator) so they're impossible to miss. Line 3 carries the agentihooks profile + settings-profile + channels list. Edge-triggering is tracked in Redis -- each level fires at most once.
 
 **Config:**
 
@@ -180,7 +180,7 @@ This lets you spot runaway token consumption in real time -- a `burn: 45K/turn` 
 
 ### 8. Native rate limit display
 
-Claude Code provides native rate limit data (`rate_limits.five_hour` and `rate_limits.seven_day`) in every statusline payload. AgentiHooks surfaces this on statusline Line 3:
+Claude Code provides native rate limit data (`rate_limits.five_hour` and `rate_limits.seven_day`) in every statusline payload. AgentiHooks surfaces this on statusline Line 4 (the conditional row that also shows context-threshold warnings and the peak/off-peak indicator; Line 3 above it carries the agentihooks profile + channels list):
 
 ```
 session:53% [1h35m] | weekly:35%
