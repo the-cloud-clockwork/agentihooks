@@ -228,6 +228,8 @@ BRAIN_CHANNEL=brain                     # which broadcast channel to publish to
 BRAIN_REFRESH_INTERVAL=30               # re-read source every N turns
 ```
 
+> **Producer ↔ subscriber pairing.** `BRAIN_CHANNEL` controls where the adapter *publishes* (the producer side). For sessions to *receive* what it publishes, that same channel name must appear in their `AGENTIHOOKS_BASE_CHANNELS` env var (the subscriber side, [Subscribing](#subscribing) above). The default `brain` works out of the box because the default profile ships `"brain,amygdala"` as the subscription floor — if you rename `BRAIN_CHANNEL`, also update the subscription list everywhere it matters.
+
 ### MCP tools
 
 | Tool | Purpose |
