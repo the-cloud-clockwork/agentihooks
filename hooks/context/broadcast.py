@@ -418,6 +418,14 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
 
 
 def get_pending_broadcasts(session_id: str) -> list[dict]:
+    """Return broadcasts the session has not yet seen.
+
+    Filters out: expired messages, messages already acknowledged by the
+    session, and messages whose ``channel`` is not in the session's
+    subscription list (resolved from ``AGENTIHOOKS_BASE_CHANNELS`` via
+    ``_get_session_channels``). Persistent messages return every call;
+    one-shot messages return only until they land in ``delivered_to``.
+    """
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
     pending = []
@@ -436,6 +444,12 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
 
 
 def get_critical_broadcasts(session_id: str) -> list[dict]:
+    """Return persistent ``critical`` broadcasts the session hasn't acknowledged.
+
+    Channel-filtered against the session's ``AGENTIHOOKS_BASE_CHANNELS``
+    subscription list, same as ``get_pending_broadcasts``. Used by
+    UserPromptSubmit to re-inject critical messages every turn.
+    """
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
     return [
@@ -452,7 +466,10 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
 def get_pretool_broadcasts(session_id: str) -> list[dict]:
     """Return persistent broadcasts at or above the configured severity threshold.
 
-    Used by PreToolUse to inject alerts mid-tool-chain. Respects acknowledgment.
+    Used by PreToolUse to inject alerts mid-tool-chain. Respects acknowledgment
+    and the session's channel subscription list (``AGENTIHOOKS_BASE_CHANNELS``):
+    tagged broadcasts only reach subscribed sessions; global broadcasts
+    (no ``channel`` field) reach everyone.
     """
     from hooks.config import BROADCAST_PRETOOL_MIN_SEVERITY
 
