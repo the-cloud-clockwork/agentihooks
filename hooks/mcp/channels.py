@@ -1,4 +1,10 @@
-"""Channel + brain MCP tools — publish, subscribe, and manage broadcast channels."""
+"""Channel + brain MCP tools — publish to and list broadcast channels.
+
+Subscriptions are not exposed as MCP tools — they are operator-configured via
+the `AGENTIHOOKS_BASE_CHANNELS` env var (settings.overrides.json env block,
+per-repo settings.local.json, or container launch ENV). See
+docs/hooks/broadcast.md#channel-subscriptions for the full layering.
+"""
 
 import json
 import re
