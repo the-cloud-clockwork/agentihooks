@@ -90,7 +90,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
    - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`)
    - Both combat attention decay in long sessions where early-loaded instructions lose influence
    - Content is compressed via the [Context Preprocessor](context-preprocessor.md) (default level: `standard`; set `CONTEXT_REFRESH_COMPRESSION=off` to disable)
-4. If `BROADCAST_ENABLED=true`: checks for undelivered [broadcasts](broadcast.md) and injects them as banners. Critical+persistent broadcasts are injected on every turn; info broadcasts are delivered once per session.
+4. If `BROADCAST_ENABLED=true`: checks for undelivered [broadcasts](broadcast.md) and injects them as banners. Delivery is channel-filtered against the session's `AGENTIHOOKS_BASE_CHANNELS` env list — global broadcasts (no `channel` field) reach everyone; channel-tagged broadcasts only reach subscribed sessions. Critical+persistent broadcasts are injected on every turn; info broadcasts are delivered once per session.
 
 ---
 
@@ -115,7 +115,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 4. **CLAUDE.md sanity check** -- if `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK=true` (default) and `tool_name` is `Write` or `Edit` targeting a `CLAUDE.md` or `CLAUDE.local.md` file: simulates the resulting file and exits with code `2` if it would exceed `AGENTIHOOKS_CLAUDE_MD_MAXLINES` (default `200`). Prevents agents from bloating critical config files
 5. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
 6. **Version guard** -- if `tool_name` is `Write` or `Edit` targeting a version-managed manifest (`pyproject.toml`, `package.json`, etc.): blocks version field modifications (version bumping must go through the release workflow)
-7. If `BROADCAST_ENABLED=true` and `BROADCAST_CRITICAL_ON_PRETOOL=true`: checks for critical+persistent [broadcasts](broadcast.md) and injects them via `additionalContext` JSON. This ensures the agent sees critical messages before every tool call, not just at the start of each turn.
+7. If `BROADCAST_ENABLED=true` and `BROADCAST_CRITICAL_ON_PRETOOL=true`: checks for critical+persistent [broadcasts](broadcast.md) and injects them via `additionalContext` JSON. Same channel-filter as UserPromptSubmit — channel-tagged broadcasts only reach sessions whose `AGENTIHOOKS_BASE_CHANNELS` includes that channel. This ensures the agent sees critical messages before every tool call, not just at the start of each turn.
 
 **Exit codes used:**
 
