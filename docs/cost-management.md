@@ -332,6 +332,6 @@ Verify everything is working:
 agentihooks status
 ```
 
-This shows your full system health: profile, hooks, Python, daemons, Redis, OTEL, all cost guardrails with descriptions, your entire MCP fleet with real tool counts (queried via MCP protocol, cached 1h), per-project enabled/disabled state, and rate limit summary with peak/off-peak indicator.
+This shows your full system health: profile, hooks, Python, Redis, OTEL, all cost guardrails with descriptions, your entire MCP fleet with real tool counts (queried via MCP protocol, cached 1h), per-project enabled/disabled state, and rate limit summary with peak/off-peak indicator.
 
 Inside a Claude session, use `/agentihooks` for the same diagnostics plus live session metrics (context fill, burn rate, per-tool consumption).

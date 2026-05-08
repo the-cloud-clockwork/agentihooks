@@ -564,14 +564,6 @@ def on_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
 
-    # --- Memory-mirror v5 event-driven pull (consumer / contributor / authority) ---
-    try:
-        from hooks.context.memory_sync_events import on_user_prompt as _mm_on_prompt
-
-        _mm_on_prompt(payload)
-    except Exception as e:
-        log("memory_sync_events.on_user_prompt failed", {"error": str(e)})
-
     # --- Secrets scanning ---
     if SECRETS_MODE != "off":
         prompt = payload.get("prompt", "")
@@ -1198,15 +1190,6 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
 
-    # --- Memory-mirror v5 dirty-marker (contributor / authority) ---
-    with _trace_phase("memory_sync_events", tool_name, _trace_session_id):
-        try:
-            from hooks.context.memory_sync_events import on_post_tool as _mm_on_post
-
-            _mm_on_post(payload)
-        except Exception as e:
-            log("memory_sync_events.on_post_tool failed", {"error": str(e)})
-
     # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
         _trace_mark("ask_user_question_signals", tool_name, _trace_session_id)
@@ -1454,14 +1437,6 @@ def on_stop(payload: dict) -> None:
             "duration_ms": str(metrics.get("duration_ms", 0)),
         },
     )
-
-    # --- Memory-mirror v5 propose PR on session end (contributor only) ---
-    try:
-        from hooks.context.memory_sync_events import on_stop as _mm_on_stop
-
-        _mm_on_stop(payload)
-    except Exception as e:
-        log("memory_sync_events.on_stop failed", {"error": str(e)})
 
     # Brain writer — scan transcript for agent-emitted markers + publish.
     # Forked: transcript scan + per-marker SSH/HTTP publish can take 10s+.
