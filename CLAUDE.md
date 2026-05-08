@@ -68,7 +68,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 
 File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/deregister via hooks. Three severity tiers (info/alert/critical). AI-assisted `emit` spawns sandboxed Haiku (Bash(agentihooks*) only).
 
-**Channels:** Messages can have an optional `channel` field. Every session is subscribed to `BASE_CHANNELS = ("brain", "amygdala")` — global messages (no channel) reach everyone; channel messages reach only base-channel subscribers. Per-repo channel subscription is being reworked (see project memory).
+**Channels:** Messages can have an optional `channel` field. Subscriptions are env-driven via `AGENTIHOOKS_BASE_CHANNELS` (comma-separated). Default ships in `profiles/default/.claude/settings.overrides.json` `env` block as `"brain,amygdala"`. Layering: profile env → repo `.claude/settings.json` → repo `.claude/settings.local.json` → container ENV at launch (highest). Empty / unset → session only receives global broadcasts (messages with no `channel` field).
 
 ### Brain adapter
 

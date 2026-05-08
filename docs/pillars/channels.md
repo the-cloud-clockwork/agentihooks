@@ -59,17 +59,30 @@ A channel is a named topic. Messages published to a channel only reach sessions 
 
 ### Subscribing
 
-> **Current state (post 2026-05-07):** Per-project channel subscriptions via `.agentihooks.json` were removed along with the per-repo config system. Every session is currently hard-coded to `BASE_CHANNELS = ("brain", "amygdala")`. Subscription rebuild is tracked in the channel overlay follow-up work — the mechanism below documents the intended future API.
+Sessions subscribe to channels via the **`AGENTIHOOKS_BASE_CHANNELS`** env var (comma-separated). The value is read once at `hooks.config` import time and shared between the broadcast filter and the statusline display.
 
-Sessions will subscribe to channels via profile-level config (exact mechanism TBD):
+**Layering** (lowest precedence → highest, Claude Code's native settings.json `env` block merge):
+
+1. **Profile default** — `profiles/<name>/.claude/settings.overrides.json` `env` block. The `default` profile ships `"AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala"`. Rendered into `~/.claude/settings.json` by `agentihooks init`.
+2. **Per-repo override** — `<repo>/.claude/settings.json` `env` block (committed).
+3. **Per-repo local override** — `<repo>/.claude/settings.local.json` `env` block (gitignored, operator-private).
+4. **Container launch ENV** — `docker run -e AGENTIHOOKS_BASE_CHANNELS=...` or K8s `env:` block. Wins over everything because it's set before the hook subprocess starts.
 
 ```json
+// example: <repo>/.claude/settings.local.json
 {
-  "channels": ["brain", "ops-alerts"]
+  "env": {
+    "AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala,deploy"
+  }
 }
 ```
 
-The `channels` field is read at delivery time (not install time), so changes take effect immediately — no reinstall, no restart.
+**Special values:**
+- empty / unset → only receive global broadcasts (messages with no `channel` field)
+- `*` → wildcard, receive everything on every channel
+- whitespace and duplicates are trimmed/deduped at parse time
+
+Mid-session changes require a session restart — same constraint as `agentihooks refresh-rules`.
 
 **Special values:**
 - `[]` or absent → only receive global broadcasts (default, backward compatible)

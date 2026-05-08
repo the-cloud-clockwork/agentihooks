@@ -22,9 +22,11 @@ def register(mcp):
     def channel_publish(channel: str, message: str, severity: str = "info", ttl_seconds: int = 3600) -> str:
         """Publish a message to a named broadcast channel.
 
-        Subscriptions are fleet-wide — every session is subscribed to BASE_CHANNELS
-        (brain, amygdala). Other channel names are accepted but only deliver if
-        a session has wildcard subscription.
+        Subscriptions are operator-configured via the `AGENTIHOOKS_BASE_CHANNELS`
+        env var (set in the profile's settings.overrides.json `env` block, or
+        per-repo via .claude/settings.local.json, or at container launch). Other
+        channel names are accepted but only deliver if a session has wildcard
+        subscription.
 
         Args:
             channel: Channel name (e.g. "brain", "ops-alerts", "deploy-status")

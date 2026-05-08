@@ -261,8 +261,10 @@ def main() -> None:
                 _g_profile = _ah_state.get("targets", {}).get("global", {}).get("profile", "") or "none"
                 _g_sp = _ah_state.get("targets", {}).get("global", {}).get("settings_profile", "") or "none"
 
-            # Channels — fleet-wide floor.
-            _BASE_CHANNELS = ["brain", "amygdala"]
+            # Channels — env-driven via AGENTIHOOKS_BASE_CHANNELS (single source
+            # of truth in hooks.config; broadcast.py re-exports the same value).
+            from hooks.config import BASE_CHANNELS as _BASE_CHANNELS
+
             _l_channels: list[str] = list(_BASE_CHANNELS)
 
             # --- Build the display ---

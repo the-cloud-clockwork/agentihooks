@@ -1,5 +1,6 @@
 """Tests for broadcast channels and brain adapter."""
 
+import importlib
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +16,39 @@ def _clean_broadcast(tmp_path):
         patch("hooks.context.broadcast._sessions_path", return_value=sessions_file),
     ):
         yield
+
+
+class TestBaseChannelsEnv:
+    """AGENTIHOOKS_BASE_CHANNELS env var → hooks.config.BASE_CHANNELS."""
+
+    def _reload_config(self):
+        import hooks.config as cfg
+        import hooks.context.broadcast as bcast
+
+        importlib.reload(cfg)
+        # broadcast.py imports BASE_CHANNELS at module load — reload it too
+        importlib.reload(bcast)
+        return cfg, bcast
+
+    def test_parses_comma_list_and_dedupes(self, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_BASE_CHANNELS", "alpha, beta ,alpha,gamma")
+        cfg, _ = self._reload_config()
+        assert cfg.BASE_CHANNELS == ("alpha", "beta", "gamma")
+
+    def test_empty_when_unset(self, monkeypatch):
+        monkeypatch.delenv("AGENTIHOOKS_BASE_CHANNELS", raising=False)
+        cfg, _ = self._reload_config()
+        assert cfg.BASE_CHANNELS == ()
+
+    def test_empty_string_yields_empty_tuple(self, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_BASE_CHANNELS", "")
+        cfg, _ = self._reload_config()
+        assert cfg.BASE_CHANNELS == ()
+
+    def test_broadcast_reexports_same_value(self, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_BASE_CHANNELS", "brain,amygdala")
+        cfg, bcast = self._reload_config()
+        assert bcast.BASE_CHANNELS == cfg.BASE_CHANNELS == ("brain", "amygdala")
 
 
 class TestChannelFiltering:

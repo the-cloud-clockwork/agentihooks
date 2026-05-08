@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hooks.config import (
+    BASE_CHANNELS,
     BROADCAST_CRITICAL_ON_PRETOOL,
     BROADCAST_DEDUP_BY_HASH,
     BROADCAST_DELIVERY_STATE_FILE,
@@ -172,10 +173,11 @@ _DEFAULT_PERSISTENT = {
 }
 _VALID_SEVERITIES = frozenset({"nuclear", "critical", "alert", "warning", "info", "resolved"})
 
-# Channels every session is subscribed to unconditionally.
-# Fleet-wide floor — no repo can drop them. There is no per-repo channel
-# override; subscriptions are global.
-BASE_CHANNELS = ("brain", "amygdala")
+# BASE_CHANNELS is imported from hooks.config (env-driven via
+# AGENTIHOOKS_BASE_CHANNELS). Layered: profile env → repo settings.json → repo
+# settings.local.json → container ENV. Empty / unset → session only receives
+# global broadcasts (no `channel` field). Re-exported here so callers can
+# `from hooks.context.broadcast import BASE_CHANNELS` without changes.
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +272,10 @@ def _load_sessions() -> dict:
 def _get_session_channels(session_id: str) -> list[str]:
     """Resolve channel subscriptions for a session.
 
-    Every session is implicitly subscribed to BASE_CHANNELS (brain, amygdala).
-    Subscriptions are global — there is no per-repo override.
+    Subscriptions come from the `AGENTIHOOKS_BASE_CHANNELS` env var (parsed
+    once at `hooks.config` import time). Layered via Claude Code settings.json
+    `env` block: profile default → repo override → repo-local override →
+    container launch env.
     """
     return list(BASE_CHANNELS)
 

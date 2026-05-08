@@ -178,6 +178,23 @@ BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / 
 BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
 BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
 
+
+def _parse_channel_list(raw: str) -> tuple[str, ...]:
+    """Parse comma-separated channel names. Trim whitespace, drop empties, dedupe."""
+    seen: list[str] = []
+    for part in (raw or "").split(","):
+        c = part.strip()
+        if c and c not in seen:
+            seen.append(c)
+    return tuple(seen)
+
+
+# Subscription floor — operator-configured per profile / per repo / per container.
+# No code-level default. Empty / unset → session gets only global broadcasts.
+# Layering (lowest → highest): profile env → repo settings.json → repo
+# settings.local.json → container ENV at launch.
+BASE_CHANNELS: tuple[str, ...] = _parse_channel_list(os.getenv("AGENTIHOOKS_BASE_CHANNELS", ""))
+
 # Amygdala — emergency signal propagation
 AMYGDALA_ENABLED = _env_bool("AMYGDALA_ENABLED", "false")
 AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
