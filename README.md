@@ -296,6 +296,7 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BROADCAST_PRETOOL_MIN_SEVERITY` | `critical` | Minimum severity for PreToolUse re-injection. `alert` widens it. |
 | `BROADCAST_MAX_BYTES_PRETOOL` | `0` | PreToolUse banner byte cap. `0` = no cap. Set >0 to opt in to truncation under Claude Code's 10K hook output limit. |
 | `BROADCAST_MAX_BYTES_PROMPT` | `0` | UserPromptSubmit banner byte cap. Same semantics. |
+| `AGENTIHOOKS_BASE_CHANNELS` | `""` (empty) | Comma-separated channel subscription floor for the session. Default ships in `profiles/default/.claude/settings.overrides.json` env block as `"brain,amygdala"`. Layered: profile env → repo `.claude/settings.json` → repo `.claude/settings.local.json` → container ENV (highest). Wildcard `*` subscribes to everything. |
 | `CI_MANIFESTO_MAX_BYTES` | `0` | CI manifesto inject byte cap. `0` = full doctrine ships through. Set >0 (e.g. `7500`) to truncate with a "Read full file at \<path\>" footer. |
 | `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
