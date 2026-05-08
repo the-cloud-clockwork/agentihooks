@@ -305,7 +305,7 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
 | `BRAIN_HTTP_TOKEN` | `""` | Bearer token for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Filesystem fallback when `BRAIN_URL` unset. |
-| `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content |
+| `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
 | `BRAIN_WRITER_ENABLED` | `false` | POST `/marker` on Stop / SubagentStop. |

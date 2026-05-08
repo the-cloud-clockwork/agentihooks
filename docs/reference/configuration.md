@@ -268,7 +268,7 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | `BRAIN_ENABLED` | `false` | Enable the brain adapter for knowledge injection via broadcast channels. |
 | `BRAIN_SOURCE_TYPE` | `file` | Brain source backend. Currently only `file` is shipped. |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory containing brain `.md` files (YAML frontmatter + markdown body). |
-| `BRAIN_CHANNEL` | `brain` | Broadcast channel for brain content delivery. |
+| `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to (producer side). Sessions only receive brain content if this channel name is in their `AGENTIHOOKS_BASE_CHANNELS` env. The default profile ships `"brain,amygdala"`, so the default `brain` value works out of the box; if you rename this, update subscriptions to match. |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-inject brain content every N turns (counter-gated). |
 
 ---
