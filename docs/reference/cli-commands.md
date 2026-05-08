@@ -707,6 +707,7 @@ agentihooks status
 | **Redis** | Pings Redis, categorizes all `agenticore:*` keys by type |
 | **OTEL** | Checks if OpenTelemetry hook telemetry is enabled |
 | **Guardrails** | Lists all 8 guardrails with descriptions and enabled/disabled state |
+| **Broadcast** | If `BROADCAST_ENABLED=true`, reports active session count and pending message count from `~/.agentihooks/broadcast.json`. Channel subscriptions aren't summarised here — they're visible per-session on statusline Line 3 (read from `AGENTIHOOKS_BASE_CHANNELS`). |
 | **MCP** | Reads `~/.claude.json` for all servers, resolves `${ENV_VAR}` auth, queries each HTTP server via MCP protocol for real tool counts, shows fleet total vs active in current project |
 
 ### MCP fleet introspection
