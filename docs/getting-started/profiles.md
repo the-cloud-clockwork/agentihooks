@@ -66,6 +66,23 @@ The agent's system prompt. This file lives at the **profile root** (not inside `
 
 Per-profile settings overrides that are merged on top of `_base/settings.base.json` during install. Lives inside the `.claude/` subdirectory.
 
+The `env` block is significant — values land in `~/.claude/settings.json` after `agentihooks init`, then Claude Code injects them into every hook subprocess. This is how feature flags and channel subscriptions reach the runtime without code changes:
+
+```json
+{
+  "env": {
+    "AGENTIHOOKS_SECRETS_MODE": "standard",
+    "AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+  },
+  "permissions": {
+    "defaultMode": "auto"
+  }
+}
+```
+
+Layering for the `env` block follows Claude Code's native settings hierarchy: profile default (this file) → repo `.claude/settings.json` → repo `.claude/settings.local.json` → container launch ENV (highest). See [Broadcast System → Channel Subscriptions](../hooks/broadcast.md#channel-subscriptions) for a worked example with `AGENTIHOOKS_BASE_CHANNELS`.
+
 > `profile.yml` was removed 2026-05-07. A profile is now its directory plus
 > `CLAUDE.md` and `.claude/`. The launcher `agentihooks claude` passes only
 > `--dangerously-skip-permissions`; everything else is set in
