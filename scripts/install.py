@@ -4790,6 +4790,7 @@ notes:
     elif args.command == "sessions":
         _cmd_sessions(args)
 
+
 def _cmd_sessions(args) -> None:
     from scripts.session_registry import cmd_list, cmd_reopen
 

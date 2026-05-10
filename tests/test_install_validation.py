@@ -99,11 +99,7 @@ def install_env(tmp_path):
     )
     # Profile.yml
     (profile / "profile.yml").write_text(
-        "name: test-profile\n"
-        "description: Test profile\n"
-        "mcp_categories: all\n"
-        "otel:\n"
-        "  enabled: false\n"
+        "name: test-profile\ndescription: Test profile\nmcp_categories: all\notel:\n  enabled: false\n"
     )
 
     # --- Base settings ---
