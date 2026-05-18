@@ -19,13 +19,13 @@ Claude Code agents are powerful. Without boundaries, they can push to production
 
 ## What's new (Unreleased)
 
-- **Controls toggle (bypass mode)** — operator phrase `disable controls` flips a session-wide bypass that lifts every CI-manifesto signal gate at once: branch creation, PR creation, release-merge, hotfix-category prod ops, and force-push to non-main branches. Spawned subagents inherit it. HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced. Restored by `enable controls` or SessionEnd. See [Guardrail 9](#guardrail-9-controls-toggle-bypass-mode).
+- **Controls toggle (bypass mode)** — operator phrase `disable controls` flips a session-wide bypass that lifts every CI-manifesto signal gate at once: branch creation, PR creation, and force-push to non-main branches. Spawned subagents inherit it. HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced. Restored by `enable controls` or SessionEnd. See [Guardrail 9](#guardrail-9-controls-toggle-bypass-mode).
 - **Two-tier secrets** — code-file writes still hard-block; inline Bash args (no file redirect) scan + log + note only. Lets agents pass a token to `curl -H` without breaking the workflow, while keeping durable storage locked.
-- **Session-scoped PR / release / hotfix signals** — one signal phrase from the operator unlocks an entire workflow until session end, instead of expiring per-turn. PR has a 3-per-session counter.
-- **Subagent signal isolation** — subagents cannot self-arm release or hotfix signals. Only top-level operator sessions can.
+- **Session-scoped PR signals** — one signal phrase from the operator unlocks PR creation for the full session instead of expiring per-turn. PR has a 3-per-session counter.
+- **Subagent signal isolation** — subagents cannot self-arm PR signals. Only top-level operator sessions can.
 - **`gh pr create --base main` required** — PRs to branches other than main are now blocked. Dev work pushes directly, no PR needed.
 - **Dependency banner** — every `pip/npm/cargo/...` install emits a visible banner. Never blocks — surfaces supply chain additions for operator audit.
-- **Negation-aware signals** — "don't merge to main" no longer arms the release gate. Matchers skip phrases preceded by `don't`, `not`, `never`, `shouldn't`, `won't`, `can't`.
+- **Negation-aware signals** — "don't merge to main" no longer arms the PR gate. Matchers skip phrases preceded by `don't`, `not`, `never`, `shouldn't`, `won't`, `can't`.
 - **Shared `_strip.py`** — strip heredocs (any delimiter), echo/printf/curl/python-c/jq quoted arguments before guards apply regex. Eliminates false-positive blocks on documentation text in command payloads.
 - **Guards fail-closed** — unexpected exceptions in branch_guard / prod_lockdown now emit a stderr warning and the outer main exits 1. Silent hook failures are no longer possible.
 
