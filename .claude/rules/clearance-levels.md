@@ -20,18 +20,16 @@ Full clearance is the default. Most operations proceed without asking.
 - git push to main/master (direct push)
 - git merge / git rebase targeting main/master
 - git push --force / -f / --force-with-lease (any branch)
-- git tag (use the release.yml workflow)
+- git tag
 - git commit while HEAD is on main/master
-- gh pr create without --base main
+- gh pr create --base main (unconditionally blocked)
 
 ### Signal-Gated Operations
 
 | Operation | Required Signal | Persistence |
 |---|---|---|
 | git checkout -b, git switch -c, git branch \<name\> | "new branch" / "create branch" / "feature branch" | Per-turn |
-| gh pr create --base main | "open a PR" / "create a PR" / "make a PR" / "pr please" | Session (max 3, then re-signal) |
-| gh pr merge to main, gh workflow run release.yml | "merge to main" / "ship it" / "release to prod" | Session |
-| Docker/image ops with :latest/:prod/:stable | "hotfix" / "prod is down" / "outage" | Session |
+| gh pr create --base dev | "open a PR" / "create a PR" / "make a PR" / "pr please" | Session (max 3, then re-signal) |
 
 ## Restricting Clearance
 
