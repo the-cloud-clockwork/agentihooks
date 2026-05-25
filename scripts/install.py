@@ -3475,7 +3475,7 @@ def _prompt_server_selection(servers: dict, action: str = "install") -> dict | N
 
 
 # ---------------------------------------------------------------------------
-# MCP prune helpers (formerly in sync_daemon.py)
+# MCP prune helpers
 # ---------------------------------------------------------------------------
 
 

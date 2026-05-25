@@ -29,7 +29,7 @@ ALLOWED_COMMANDS = [
     "kubectl describe deploy/foo",
     "kubectl top pods -n anton-prod",
     "kubectl explain deployment.spec",
-    "kubectl events -n anton-dev",
+    "kubectl events -n anton-prod",
     "kubectl auth can-i list pods",
     # kubectl exec read-only
     "kubectl exec mypod -- ls /tmp",
@@ -51,7 +51,7 @@ ALLOWED_COMMANDS = [
     "kubectl cp anton-prod/mypod:/var/log/app.log /tmp/app.log",
     # lifecycle / troubleshooting ops — allowed (these are operational
     # actions, not behavior changes encoded into the cluster)
-    "kubectl delete pod mypod -n anton-dev",
+    "kubectl delete pod mypod -n anton-prod",
     "kubectl port-forward svc/myservice 8080:80",
     "kubectl rollout restart deploy/foo",
     "kubectl rollout pause deploy/foo",
@@ -111,7 +111,7 @@ ALLOWED_COMMANDS = [
 BLOCKED_COMMANDS = [
     # kubectl edit / patch / set / autoscale (manifest/behavior mutation only)
     ("kubectl edit deploy/foo", "kubectl-edit"),
-    ("kubectl edit configmap myconfig -n anton-dev", "kubectl-edit"),
+    ("kubectl edit configmap myconfig -n anton-prod", "kubectl-edit"),
     ("kubectl patch deploy foo --type=strategic -p '{}'", "kubectl-patch"),
     ("kubectl set env deploy/foo FOO=bar", "kubectl-set"),
     ("kubectl set image deploy/foo container=img:tag", "kubectl-set"),
