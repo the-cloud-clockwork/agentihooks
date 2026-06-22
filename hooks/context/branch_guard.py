@@ -200,8 +200,12 @@ def _has_pr_signal(session_id: str) -> bool:
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
 _PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
 
-# PR base-branch enforcement — gh pr create must target main
-_PR_BASE_MAIN_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+main\b")
+# PR base-branch enforcement (CI Manifesto §4/§5). main is HARD-FLOOR closed —
+# there is no dev→main PR flow — so a PR targeting main/master is forbidden, and
+# a bare `gh pr create` (which defaults to the repo's default branch, main) must
+# be rejected. PRs must name an explicit non-main base (i.e. --base dev).
+_PR_BASE_MAIN_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+(?:main|master)\b")
+_PR_BASE_EXPLICIT_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+\S+")
 
 
 # Branch-creation patterns (blocked without branch signal).
@@ -220,7 +224,7 @@ _BLOCKED_PATTERNS = [
     # Push to main/master (direct push bypasses PR workflow)
     (
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
-        "Pushing directly to main/master is blocked. Use gh pr create --base main instead.",
+        "Pushing directly to main/master is blocked. Open a PR with gh pr create --base dev instead.",
     ),
     # Merge into main/master (direct merge bypasses PR workflow)
     (
@@ -357,15 +361,25 @@ def check_branch_guard(payload: dict) -> None:
                 f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
                 "Include a PR phrase in your next message to re-authorize and reset the counter."
             )
-        if not _PR_BASE_MAIN_PATTERN.search(check_text):
+        if _PR_BASE_MAIN_PATTERN.search(check_text):
             log(
-                "branch_guard: PR creation blocked (non-main base)",
+                "branch_guard: PR creation blocked (--base main/master is HARD FLOOR)",
                 {"command": command[:200], "session_id": session_id},
             )
             raise BlockAction(
-                "BLOCKED: PRs must target main only (--base main required).\n"
-                "For dev branch changes, push directly — no PR needed.\n"
-                "Correct form: gh pr create --base main ..."
+                "BLOCKED: gh pr create --base main/master is forbidden (HARD FLOOR).\n"
+                "main is vestigial — there is no dev→main PR flow.\n"
+                "Correct form: gh pr create --base dev ..."
+            )
+        if not _PR_BASE_EXPLICIT_PATTERN.search(check_text):
+            log(
+                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: gh pr create needs an explicit --base dev.\n"
+                "A bare `gh pr create` targets the default branch (main).\n"
+                "Correct form: gh pr create --base dev ..."
             )
         new_count = increment_pr_counter(session_id)
         log("branch_guard: PR creation allowed", {"count": new_count, "session_id": session_id})

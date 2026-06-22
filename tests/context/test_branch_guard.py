@@ -125,3 +125,56 @@ class TestBranchGuard:
     def test_echo_with_main_allowed(self):
         """Echo commands mentioning main should not trigger."""
         self._assert_allowed("echo 'do not push to main'")
+
+
+class TestPRBaseGuard:
+    """gh pr create must target dev explicitly; main/master and bare-default are
+    blocked (CI Manifesto §4/§5 — there is no dev→main PR flow)."""
+
+    def _check(self, command: str):
+        from hooks.context.branch_guard import check_branch_guard
+
+        payload = {"tool_input": {"command": command}, "session_id": "test-pr"}
+        check_branch_guard(payload)
+
+    def _signal_patches(self):
+        from unittest.mock import patch
+
+        return (
+            patch("hooks.context.branch_guard._has_pr_signal", return_value=True),
+            patch("hooks.context.branch_guard._get_pr_counter", return_value=0),
+            patch("hooks.context.branch_guard.increment_pr_counter", return_value=1),
+        )
+
+    def _assert_blocked_with_signal(self, command: str):
+        from hooks.hook_manager import BlockAction
+
+        s1, s2, s3 = self._signal_patches()
+        with s1, s2, s3, pytest.raises(BlockAction):
+            self._check(command)
+
+    def _assert_allowed_with_signal(self, command: str):
+        s1, s2, s3 = self._signal_patches()
+        with s1, s2, s3:
+            self._check(command)  # should not raise
+
+    def test_pr_base_main_blocked(self):
+        self._assert_blocked_with_signal("gh pr create --base main --fill")
+
+    def test_pr_base_master_blocked(self):
+        self._assert_blocked_with_signal("gh pr create --base master -t x")
+
+    def test_pr_bare_create_blocked(self):
+        # a bare create defaults to the repo default branch (main)
+        self._assert_blocked_with_signal("gh pr create --fill")
+
+    def test_pr_base_dev_allowed(self):
+        self._assert_allowed_with_signal("gh pr create --base dev --head feat --fill")
+
+    def test_pr_no_signal_blocked(self):
+        from hooks.hook_manager import BlockAction
+        from unittest.mock import patch
+
+        with patch("hooks.context.branch_guard._has_pr_signal", return_value=False):
+            with pytest.raises(BlockAction):
+                self._check("gh pr create --base dev")
