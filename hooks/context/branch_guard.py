@@ -228,15 +228,18 @@ _BLOCKED_PATTERNS = [
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
         "Pushing directly to main/master is blocked. Snapshot main via a PR: gh pr create --base main.",
     ),
-    # Merge into main/master (direct merge bypasses PR workflow)
+    # Merge into main/master (direct merge bypasses PR workflow). The `/`
+    # in the lookbehind exempts a remote-tracking ref used as the merge
+    # SOURCE (e.g. `git merge origin/main` while on dev to resolve a
+    # snapshot PR) — that merges main INTO the current branch and is allowed.
     (
-        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
-        "Direct merge into main/master is blocked. Create a PR instead.",
+        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
+        "Direct merge of bare main/master is blocked. Use a PR, or `git merge origin/main` to pull main into dev.",
     ),
-    # Rebase onto main/master
+    # Rebase onto main/master (same remote-source exemption)
     (
-        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
-        "Rebasing onto main/master is blocked. Create a PR instead.",
+        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
+        "Rebasing onto bare main/master is blocked. Use origin/main as the upstream if pulling main into dev.",
     ),
     # Delete main/master branch
     (
