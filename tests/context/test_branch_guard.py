@@ -172,8 +172,9 @@ class TestPRBaseGuard:
         self._assert_allowed_with_signal("gh pr create --base dev --head feat --fill")
 
     def test_pr_no_signal_blocked(self):
-        from hooks.hook_manager import BlockAction
         from unittest.mock import patch
+
+        from hooks.hook_manager import BlockAction
 
         with patch("hooks.context.branch_guard._has_pr_signal", return_value=False):
             with pytest.raises(BlockAction):
