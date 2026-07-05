@@ -76,7 +76,7 @@ This single command:
 5. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> profile-specific)
 6. Symlinks `~/.claude/CLAUDE.md` to the chosen profile's `CLAUDE.md` (at profile root)
 7. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
-8. Prunes orphaned MCP servers from `~/.claude.json`
+8. Reconciles the managed-MCP ledger in `~/.claude.json` — removes servers agentihooks installed on a prior run but that are no longer defined in any profile/bundle source (servers you added by hand are preserved; run `agentihooks prune` to sweep genuine cruft)
 10. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
 11. Writes a managed bashrc block (`agentienv` function + `agenti` alias)
 

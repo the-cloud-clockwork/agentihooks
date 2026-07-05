@@ -388,6 +388,87 @@ class TestMcpMerge:
         assert "profile-server" in result["mcpServers"]
 
 
+class TestManagedMcpChainCollection:
+    """Regression guard for Defect B: _collect_all_managed_mcp_servers must walk
+    the FULL comma-separated profile chain, not pass the joined string to
+    _resolve_profile_dir (which returns None and collapses the set to hooks-utils).
+    """
+
+    def test_collect_walks_full_chain(self, install_env):
+        bundle = install_env["bundle"]
+        # A second bundle profile with its own MCP server.
+        p2_mcp = bundle / "profiles" / "second-profile" / ".claude"
+        p2_mcp.mkdir(parents=True)
+        (p2_mcp / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"second-server": {"type": "sse", "url": "http://localhost:9/sse"}}})
+        )
+        fake_state = {
+            "targets": {"global": {"profile": "test-profile,second-profile"}},
+            "bundle": {"path": str(bundle)},
+            "mcpFiles": [],
+        }
+        with (
+            patch.object(install, "_load_state", return_value=fake_state),
+            patch.object(install, "_get_bundle_path", return_value=bundle),
+            patch.object(install, "_build_mcp_config", return_value={"mcpServers": {"hooks-utils": {"command": "x"}}}),
+        ):
+            managed = set(install._collect_all_managed_mcp_servers().keys())
+        # Both profiles' servers present — NOT collapsed to just hooks-utils.
+        assert managed == {"hooks-utils", "bundle-server", "profile-server", "second-server"}
+
+
+class TestManagedMcpLedger:
+    """Ledger reconcile (Defect A): remove servers agentihooks previously
+    installed and no longer manages, without touching hand-added servers."""
+
+    @staticmethod
+    def _env(tmp_path, *, ledger, claude_servers):
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({"mcpServers": {n: {"type": "sse", "url": "x"} for n in claude_servers}}))
+        state_json = tmp_path / ".agentihooks" / "state.json"
+        state_json.parent.mkdir(parents=True, exist_ok=True)
+        payload = {} if ledger is None else {"managed_mcp_servers": ledger}
+        state_json.write_text(json.dumps(payload))
+        return claude_json, state_json
+
+    def _patches(self, claude_json, state_json):
+        return (
+            patch.object(install, "_CLAUDE_JSON", claude_json),
+            patch.object(install, "STATE_JSON", state_json),
+            patch.object(install, "AGENTIHOOKS_STATE_DIR", state_json.parent),
+        )
+
+    def test_removes_dropped_keeps_handadded(self, tmp_path):
+        claude_json, state_json = self._env(
+            tmp_path, ledger=["managed-a", "dropped-b"], claude_servers=["managed-a", "dropped-b", "hand-c"]
+        )
+        p1, p2, p3 = self._patches(claude_json, state_json)
+        with p1, p2, p3:
+            removed = install._reconcile_managed_mcp_ledger({"managed-a"})
+        assert removed == ["dropped-b"]
+        servers = json.loads(claude_json.read_text())["mcpServers"]
+        assert set(servers) == {"managed-a", "hand-c"}  # dropped gone, hand-added preserved
+        assert json.loads(state_json.read_text())["managed_mcp_servers"] == ["managed-a"]
+
+    def test_idempotent_second_run_removes_nothing(self, tmp_path):
+        claude_json, state_json = self._env(tmp_path, ledger=["managed-a"], claude_servers=["managed-a", "hand-c"])
+        p1, p2, p3 = self._patches(claude_json, state_json)
+        with p1, p2, p3:
+            removed = install._reconcile_managed_mcp_ledger({"managed-a"})
+        assert removed == []
+        assert set(json.loads(claude_json.read_text())["mcpServers"]) == {"managed-a", "hand-c"}
+
+    def test_first_run_seeds_ledger_without_removal(self, tmp_path):
+        # No ledger key yet (fresh install) — nothing is pruned, ledger is seeded.
+        claude_json, state_json = self._env(tmp_path, ledger=None, claude_servers=["managed-a", "hand-c"])
+        p1, p2, p3 = self._patches(claude_json, state_json)
+        with p1, p2, p3:
+            removed = install._reconcile_managed_mcp_ledger({"managed-a"})
+        assert removed == []
+        assert set(json.loads(claude_json.read_text())["mcpServers"]) == {"managed-a", "hand-c"}
+        assert json.loads(state_json.read_text())["managed_mcp_servers"] == ["managed-a"]
+
+
 # ---------------------------------------------------------------------------
 # Active profile detection tests
 # ---------------------------------------------------------------------------

@@ -2401,6 +2401,32 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     # state lets a transient git operation in the bundle repo silently
     # demote the chain to "default".
     _register_target_global(persisted_profile, settings_profile=settings_profile_name)
+
+    # --- 12b. Reconcile the managed-MCP ledger ---
+    # Remove servers agentihooks installed on a previous run but that have since
+    # been dropped from every profile/bundle source. Runs AFTER
+    # _register_target_global so the collector reads the freshly-written chain.
+    #
+    # Guard: only prune when the FULL intended profile chain resolved this run.
+    # A transiently-missing profile source (e.g. a git checkout in the bundle
+    # repo briefly removing files) would otherwise shrink current_managed and
+    # falsely delete that profile's servers — the same footgun the persisted-
+    # intent chain above defends against.
+    intended_chain = [p.strip() for p in persisted_profile.split(",") if p.strip()]
+    if len(profile_chain) == len(intended_chain):
+        current_managed = set(_collect_all_managed_mcp_servers().keys())
+        removed_mcp = _reconcile_managed_mcp_ledger(current_managed)
+        if removed_mcp:
+            _cprint(
+                f"  [OK] Removed {len(removed_mcp)} MCP server(s) no longer in any "
+                f"profile/bundle: {', '.join(removed_mcp)}"
+            )
+    else:
+        _cprint(
+            "  [--] Skipping MCP ledger reconcile — not every profile in the chain "
+            "resolved this run (transient source loss); ledger left unchanged."
+        )
+
     _snapshot_claude_json()
 
     # --- Track version in state.json ---
@@ -2493,6 +2519,35 @@ def _snapshot_claude_json() -> None:
     state = _load_state()
     state["claude_json_snapshot"] = snapshot
     _save_state(state)
+
+
+def _reconcile_managed_mcp_ledger(current_managed: set[str]) -> list[str]:
+    """Remove MCP servers agentihooks installed before but no longer manages.
+
+    Diffs the persisted ledger (``state['managed_mcp_servers']`` — the server
+    names agentihooks wrote on the last install) against *current_managed* (what
+    the bundle/profile chain defines now). Any name in the ledger but absent from
+    *current_managed* was dropped from a source file, so it is removed from
+    ``~/.claude.json``. The ledger is then rewritten to *current_managed*.
+
+    Servers the operator added by hand (``claude mcp add`` or a manual edit) are
+    never in the ledger, so they are never touched — this is the conservative
+    counterpart to ``agentihooks prune``, which sweeps every unmanaged server
+    regardless of provenance.
+
+    Returns the sorted list of removed server names (may be empty).
+    """
+    state = _load_state()
+    old_ledger = set(state.get("managed_mcp_servers", []))
+    to_remove = old_ledger - current_managed
+    if to_remove:
+        _remove_mcp_from_user_scope({name: None for name in to_remove})
+    # Reload before rewriting: _remove_mcp_from_user_scope only touches
+    # ~/.claude.json, but reload keeps us robust to any state mutation.
+    state = _load_state()
+    state["managed_mcp_servers"] = sorted(current_managed)
+    _save_state(state)
+    return sorted(to_remove)
 
 
 def _merge_mcp_to_user_scope(servers: dict) -> None:
@@ -2670,10 +2725,9 @@ def _reseed_managed_mcp_sources() -> None:
                     _cprint(f"  [WARN] Could not reseed bundle .mcp.json: {exc}")
                 break
 
-    # Layer 3: active profile .mcp.json
+    # Layer 3: active profile .mcp.json (full chain — see collector note)
     if profile_name:
-        profile_dir = _resolve_profile_dir(profile_name)
-        if profile_dir:
+        for _pname, profile_dir in _resolve_profile_chain(profile_name):
             profile_mcp = profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
             if profile_mcp.exists():
                 try:
@@ -2682,6 +2736,20 @@ def _reseed_managed_mcp_sources() -> None:
                         _merge_mcp_to_user_scope(servers)
                 except (json.JSONDecodeError, OSError) as exc:
                     _cprint(f"  [WARN] Could not reseed profile .mcp.json: {exc}")
+
+    # Layer 3b: settings-profile overlay .mcp.json
+    settings_profile = state.get("targets", {}).get("global", {}).get("settings_profile")
+    if settings_profile:
+        sp_dir = _resolve_profile_dir(settings_profile)
+        if sp_dir:
+            sp_mcp = sp_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+            if sp_mcp.exists():
+                try:
+                    servers = load_json(sp_mcp).get("mcpServers", {})
+                    if servers:
+                        _merge_mcp_to_user_scope(servers)
+                except (json.JSONDecodeError, OSError) as exc:
+                    _cprint(f"  [WARN] Could not reseed settings-profile .mcp.json: {exc}")
 
 
 def sync_user_mcp() -> None:
@@ -3130,16 +3198,32 @@ def _collect_all_managed_mcp_servers() -> dict:
                     pass
                 break
 
-    # --- 3. Profile .mcp.json ---
+    # --- 3. Profile .mcp.json (full chain) ---
+    # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").
+    # Resolve every hop via _resolve_profile_chain — passing the joined string
+    # straight to _resolve_profile_dir returns None and silently drops every
+    # profile's MCP servers, collapsing the managed set to just hooks-utils.
     state = _load_state()
-    profile_name = state.get("targets", {}).get("global", {}).get("profile")
+    global_target = state.get("targets", {}).get("global", {})
+    profile_name = global_target.get("profile")
     if profile_name:
-        profile_dir = _resolve_profile_dir(profile_name)
-        if profile_dir:
+        for _pname, profile_dir in _resolve_profile_chain(profile_name):
             profile_mcp = profile_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
             if profile_mcp.exists():
                 try:
                     merged.update(load_json(profile_mcp).get("mcpServers", {}))
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+    # --- 3b. Settings-profile overlay .mcp.json ---
+    settings_profile = global_target.get("settings_profile")
+    if settings_profile:
+        sp_dir = _resolve_profile_dir(settings_profile)
+        if sp_dir:
+            sp_mcp = sp_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME
+            if sp_mcp.exists():
+                try:
+                    merged.update(load_json(sp_mcp).get("mcpServers", {}))
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -3195,8 +3279,12 @@ def uninstall_global(args: argparse.Namespace) -> None:
     # Remove CLAUDE.md if it's a symlink pointing into any profiles/ directory
     remove_claude_md = claude_md_dst.is_symlink() and "profiles/" in str(claude_md_dst.resolve())
 
-    # Only count servers that are both managed AND actually present in ~/.claude.json
+    # Servers to remove = current managed set UNION the persisted ledger (catches
+    # servers dropped from a profile before uninstall), restricted to what is
+    # actually present in ~/.claude.json.
     managed_servers = _collect_all_managed_mcp_servers()
+    for name in _load_state().get("managed_mcp_servers", []):
+        managed_servers.setdefault(name, None)
     installed_names = _get_user_scope_mcp_names()
     managed_servers = {k: v for k, v in managed_servers.items() if k in installed_names}
 
@@ -3273,6 +3361,12 @@ def uninstall_global(args: argparse.Namespace) -> None:
         _remove_mcp_from_user_scope(managed_servers)
     else:
         _cprint(f"  [--] No managed MCP servers to remove from {_CLAUDE_JSON}")
+
+    # Clear the managed-MCP ledger — agentihooks manages nothing after uninstall.
+    # (state.json itself is preserved below, so the key must be dropped explicitly.)
+    ledger_state = _load_state()
+    if ledger_state.pop("managed_mcp_servers", None) is not None:
+        _save_state(ledger_state)
 
     # --- 7. Remove bashrc block ---
     if _remove_bashrc_block():
@@ -4764,17 +4858,26 @@ notes:
         valid = _get_valid_mcp_names()
         print(f"Valid MCP servers ({len(valid)}): {', '.join(sorted(valid))}")
         summary = _prune_stale_mcp_servers(known_servers_file, verbose=True)
-        total = summary["pruned_disabled"] + summary["pruned_known"]
+        total = (
+            summary["pruned_orphaned"]
+            + summary["pruned_disabled"]
+            + summary["pruned_known"]
+            + summary["pruned_enabled"]
+        )
         if total == 0:
             print("No stale MCP entries found — everything is clean.")
         else:
             print(f"\nPruned {total} stale entries:")
+            if summary["pruned_orphaned"]:
+                print(f"  mcpServers (~/.claude.json): {summary['pruned_orphaned']} orphaned server(s)")
             if summary["pruned_disabled"]:
                 print(
                     f"  disabledMcpServers: {summary['pruned_disabled']} entries from {summary['projects_touched']} project(s)"
                 )
             if summary["pruned_known"]:
                 print(f"  known-mcp-servers.json: {summary['pruned_known']} entries")
+            if summary["pruned_enabled"]:
+                print(f"  enabled_mcps (state.json): {summary['pruned_enabled']} entries")
     elif args.command == "migrate":
         cmd_migrate(args)
     elif args.command == "broadcast":

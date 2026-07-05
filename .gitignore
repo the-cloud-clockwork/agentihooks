@@ -8,6 +8,10 @@ dist/
 build/
 *.egg
 
+# Lock file — not committed for this open-source library
+# (uv re-locks on every run; the published package pins via pyproject)
+uv.lock
+
 # Virtual environments
 .venv/
 venv/

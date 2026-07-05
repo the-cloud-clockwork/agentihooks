@@ -200,8 +200,14 @@ def _has_pr_signal(session_id: str) -> bool:
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
 _PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
 
-# PR base-branch enforcement — gh pr create must target main
-_PR_BASE_MAIN_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+main\b")
+# PR base-branch enforcement (CI Manifesto §4/§5). main is the SNAPSHOT branch:
+# dev is the stable working branch, and a dev→main PR is the mechanism for
+# stamping a known-good snapshot of main. PR creation is operator-initiated
+# (gated by a PR signal + per-session counter) and may target main or any
+# branch. Direct push / commit / merge to main remain HARD FLOOR — snapshots
+# reach main only through a PR. A bare `gh pr create` is still rejected so the
+# base is always explicit (no accidental default-branch PR).
+_PR_BASE_EXPLICIT_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+\S+")
 
 
 # Branch-creation patterns (blocked without branch signal).
@@ -220,17 +226,20 @@ _BLOCKED_PATTERNS = [
     # Push to main/master (direct push bypasses PR workflow)
     (
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
-        "Pushing directly to main/master is blocked. Use gh pr create --base main instead.",
+        "Pushing directly to main/master is blocked. Snapshot main via a PR: gh pr create --base main.",
     ),
-    # Merge into main/master (direct merge bypasses PR workflow)
+    # Merge into main/master (direct merge bypasses PR workflow). The `/`
+    # in the lookbehind exempts a remote-tracking ref used as the merge
+    # SOURCE (e.g. `git merge origin/main` while on dev to resolve a
+    # snapshot PR) — that merges main INTO the current branch and is allowed.
     (
-        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
-        "Direct merge into main/master is blocked. Create a PR instead.",
+        re.compile(r"git\s+merge\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
+        "Direct merge of bare main/master is blocked. Use a PR, or `git merge origin/main` to pull main into dev.",
     ),
-    # Rebase onto main/master
+    # Rebase onto main/master (same remote-source exemption)
     (
-        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w-])(main|master)(?![/\w-])"),
-        "Rebasing onto main/master is blocked. Create a PR instead.",
+        re.compile(r"git\s+rebase\s+[^|&;\n]*(?<![\w/-])(main|master)(?![/\w-])"),
+        "Rebasing onto bare main/master is blocked. Use origin/main as the upstream if pulling main into dev.",
     ),
     # Delete main/master branch
     (
@@ -357,15 +366,15 @@ def check_branch_guard(payload: dict) -> None:
                 f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
                 "Include a PR phrase in your next message to re-authorize and reset the counter."
             )
-        if not _PR_BASE_MAIN_PATTERN.search(check_text):
+        if not _PR_BASE_EXPLICIT_PATTERN.search(check_text):
             log(
-                "branch_guard: PR creation blocked (non-main base)",
+                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
                 {"command": command[:200], "session_id": session_id},
             )
             raise BlockAction(
-                "BLOCKED: PRs must target main only (--base main required).\n"
-                "For dev branch changes, push directly — no PR needed.\n"
-                "Correct form: gh pr create --base main ..."
+                "BLOCKED: gh pr create needs an explicit --base.\n"
+                "A bare `gh pr create` targets the default branch implicitly.\n"
+                "Use --base main for a snapshot PR, or --base dev for a feature PR."
             )
         new_count = increment_pr_counter(session_id)
         log("branch_guard: PR creation allowed", {"count": new_count, "session_id": session_id})

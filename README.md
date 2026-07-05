@@ -216,7 +216,7 @@ agentihooks uninstall [--yes]                # remove everything
 3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
 4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md`
 5. Installs MCP servers (hooks-utils + bundle + profile)
-6. Prunes orphaned MCP servers
+6. Reconciles MCP servers — removes ones agentihooks installed on a prior run but that are no longer in any profile/bundle source (servers you added by hand are preserved)
 7. Installs CLI globally via `uv tool`
 8. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
