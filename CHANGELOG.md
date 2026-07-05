@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`agentihooks init` again cleans up MCP servers dropped from a profile or
+  bundle.** Two regressions introduced when the sync daemon was deleted
+  (`8ea78ba`) are fixed:
+  - `_collect_all_managed_mcp_servers()` / `_reseed_managed_mcp_sources()`
+    resolved the active profile by passing the whole comma chain
+    (`"anton,brain"`) to `_resolve_profile_dir`, which returns `None` — so the
+    "managed" set silently collapsed to just `hooks-utils`. They now walk the
+    full chain via `_resolve_profile_chain()` (plus the settings-profile
+    overlay).
+  - The orphan-prune that used to run in the daemon reconcile loop was never
+    re-wired into `init`, so `init` had become additive-only. It now reconciles
+    a persisted ledger (`state.json['managed_mcp_servers']`): servers agentihooks
+    installed on a prior run but no longer present in any source are removed from
+    `~/.claude.json`. **Hand-added servers are never touched** (they are not in
+    the ledger) — `agentihooks prune` remains the explicit sweep for genuine
+    cruft. `uninstall` removes the full managed set ∪ ledger, and the `prune`
+    CLI summary now counts orphaned/enabled removals (previously it printed
+    "everything is clean" after removing orphaned `mcpServers`).
+
 ### Removed
 
 - **Per-repo `.agentihooks.json`, `profile.yml`, and the runtime overlay
