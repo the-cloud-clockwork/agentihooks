@@ -25,6 +25,14 @@ dependencies = [
     "httpx>=0.27.0",
     "playwright>=1.44.0",
     "pyyaml>=6.0",
+    # Span emission (hooks/telemetry.py) is a core capability, not an add-on:
+    # brain.marker_write / brain.delivery drive the Broadcast Cortex panel.
+    # Kept as an extra, these were never installed anywhere and every span was
+    # silently dropped. The `otel` extra below stays for backwards compat.
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 
 [project.optional-dependencies]
