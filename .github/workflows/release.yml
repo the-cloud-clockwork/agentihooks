@@ -18,6 +18,11 @@ jobs:
     uses: The-Cloud-Clockwork/.github/.github/workflows/release-reusable.yml@main
     with:
       bump: ${{ inputs.bump }}
+      # Release on dev — the working branch and deploy source. main is
+      # snapshot-only (dev→main PR), so the reusable workflow must not push
+      # the bump commit + tag to main (default branch input is "main", which
+      # fails with "src refspec main does not match any" on a dev checkout).
+      branch: dev
       downstream_workflows: "publish-pypi.yml"
     secrets:
       RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
