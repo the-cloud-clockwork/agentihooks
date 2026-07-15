@@ -144,8 +144,7 @@ Claude Code
   |     pipes JSON on every turn       --> 2-3 line status bar
   |
   +-- MCP Tools --> python -m hooks.mcp --> category modules
-        aws, email, storage,                  --> hooks/mcp/*
-        database, compute, ...
+        channels, enforcement                 --> hooks/mcp/*
 ```
 
 ## CLI Reference

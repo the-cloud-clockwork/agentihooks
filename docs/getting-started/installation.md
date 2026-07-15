@@ -188,7 +188,7 @@ Run the MCP server directly (useful for testing):
 ~/.agentihooks/.venv/bin/python -m hooks.mcp
 
 # Specific categories only
-MCP_CATEGORIES=aws,utilities ~/.agentihooks/.venv/bin/python -m hooks.mcp
+MCP_CATEGORIES=channels,enforcement ~/.agentihooks/.venv/bin/python -m hooks.mcp
 ```
 
 ---
