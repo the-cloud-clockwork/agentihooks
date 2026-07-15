@@ -16,12 +16,10 @@ class TestMCPRegistry:
         assert len(CATEGORY_MODULES) > 0
 
     def test_known_categories(self):
-        """Standard categories are registered."""
+        """Only the agentihooks-native categories are registered."""
         from hooks.mcp._registry import CATEGORY_MODULES
 
-        expected = ["aws", "email", "storage"]
-        for cat in expected:
-            assert cat in CATEGORY_MODULES, f"Missing category: {cat}"
+        assert set(CATEGORY_MODULES) == {"channels", "enforcement"}
 
     def test_build_server_callable(self):
         """build_server() is importable and callable."""
