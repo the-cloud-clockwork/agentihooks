@@ -108,7 +108,7 @@ Start a Claude Code session and verify by asking:
 What MCP tools do you have available?
 ```
 
-The agent should list tools from agentihooks (e.g., `hooks_list_tools`, `get_env`, etc.).
+The agent should list tools from agentihooks (e.g., `channel_list`, `brain_status`, `enforcement_list`).
 
 ---
 

@@ -5,16 +5,17 @@ Usage:
     python -m hooks.mcp
 
     # Specific categories via env var:
-    MCP_CATEGORIES=github,utilities python -m hooks.mcp
+    MCP_CATEGORIES=channels,enforcement python -m hooks.mcp
 
     # Programmatic:
     from hooks.mcp import build_server
-    mcp = build_server(categories=["github", "utilities"])
+    mcp = build_server(categories=["channels", "enforcement"])
     mcp.run()
 """
 
 import importlib
 import os
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
@@ -38,6 +39,7 @@ def build_server(categories=None, name="hooks-utils"):
     if categories is None:
         categories = _resolve_categories()
 
+    unknown = [c for c in categories if c not in CATEGORY_MODULES]
     for cat in categories:
         if cat not in CATEGORY_MODULES:
             log("MCP build_server unknown category", {"category": cat})
@@ -47,6 +49,23 @@ def build_server(categories=None, name="hooks-utils"):
 
     _apply_allowed_tools_filter(mcp)
     _strip_output_schema(mcp)
+
+    # Surface config drift loudly. A stale MCP_CATEGORIES referencing a
+    # removed category would otherwise yield a zero-tool server whose only
+    # trace is a log file the operator never opens. Warn on stderr, which
+    # Claude Code captures for the MCP process.
+    if unknown:
+        print(
+            f"[hooks-utils] WARNING: ignoring unknown MCP categories {unknown}; "
+            f"valid categories: {sorted(CATEGORY_MODULES)}",
+            file=sys.stderr,
+        )
+    if not mcp._tool_manager._tools:
+        print(
+            "[hooks-utils] WARNING: MCP server started with ZERO tools "
+            f"(requested categories: {list(categories)}). Check MCP_CATEGORIES.",
+            file=sys.stderr,
+        )
     return mcp
 
 
