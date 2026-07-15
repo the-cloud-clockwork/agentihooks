@@ -23,8 +23,7 @@ Thanks for your interest in contributing! agentihooks is a support repo designed
 
 1. Create `hooks/mcp/yourcat.py` with a `register(mcp)` function
 2. Add the entry to `hooks/mcp/_registry.py`
-3. Update the tool list in `hooks/mcp/utilities.py` (`hooks_list_tools`)
-4. Test with: `MCP_CATEGORIES=yourcat python -m hooks.mcp`
+3. Test with: `MCP_CATEGORIES=yourcat python -m hooks.mcp`
 
 ## Code Style
 

@@ -18,6 +18,11 @@ jobs:
     uses: The-Cloud-Clockwork/.github/.github/workflows/release-reusable.yml@main
     with:
       bump: ${{ inputs.bump }}
+      # Release on dev — the working branch and deploy source; main is
+      # snapshot-only (dev→main PR). release-reusable.yml now defaults this
+      # input to "dev", but we set it explicitly so a future change to the
+      # upstream default can't silently retarget releases at main.
+      branch: dev
       downstream_workflows: "publish-pypi.yml"
     secrets:
       RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}

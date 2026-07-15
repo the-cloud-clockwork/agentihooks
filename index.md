@@ -173,7 +173,7 @@ Then wire everything into Claude Code in one command:
 agentihooks init
 ```
 
-That's it. Hooks are active and 26 MCP tools are registered the next time you start `claude`.
+That's it. Hooks are active and the `hooks-utils` MCP server's 9 tools (channels + enforcement) are registered the next time you start `claude`.
 
 ---
 
@@ -240,29 +240,28 @@ All `${VAR}` placeholders in MCP server configs resolve automatically.
 
 ## Restrict which tools load
 
-By default all tools across all 9 categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
+By default all tools across both categories are active. Use environment variables in the MCP server's `env` block (inside `~/.claude.json`) to cut that down.
 
 **Restrict by category** — only load the categories you need:
 
 ```json
 "env": {
-  "MCP_CATEGORIES": "aws,utilities"
+  "MCP_CATEGORIES": "channels"
 }
 ```
 
 Valid category names (comma-separated, any order):
 
 ```
-aws  channels  compute  database
-email  enforcement  observability  storage  utilities
+channels  enforcement
 ```
 
 **Restrict to specific tools** — allowlist exact tool names within the loaded categories:
 
 ```json
 "env": {
-  "MCP_CATEGORIES": "aws,utilities",
-  "ALLOWED_TOOLS": "aws_get_profiles,aws_get_account_id,hooks_list_tools"
+  "MCP_CATEGORIES": "channels",
+  "ALLOWED_TOOLS": "channel_list,channel_publish,brain_status"
 }
 ```
 
@@ -270,7 +269,7 @@ email  enforcement  observability  storage  utilities
 
 **Where to edit:** open `~/.claude.json`, find the `hooks-utils` server under `mcpServers`, and update its `env` block. Restart Claude Code for the change to take effect.
 
-**Verify what's active:** ask Claude Code to call `hooks_list_tools()` — it returns the exact set of loaded categories and tool names.
+**Verify what's active:** ask Claude Code "what MCP tools do you have?" — the `hooks-utils` server lists its loaded channels/enforcement tools.
 
 ---
 
@@ -304,7 +303,7 @@ Registered files are tracked in `~/.agentihooks/state.json` and re-applied autom
 AgentiHooks is a platform, not just a tool. Fork the repo and you immediately inherit:
 
 - The full hook lifecycle (SessionStart → Stop) wired into Claude Code
-- MCP tools across 9 categories, ready to use or filter down
+- MCP tools across 2 categories (channels, enforcement), ready to use or filter down
 - Profile system — swap agent personality and permissions with one flag
 - Install scripts, settings management, and credential loading
 
@@ -351,7 +350,7 @@ rm -rf ~/.agentihooks
 | **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
 | **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, rate limit display |
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
-| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 9 categories |
+| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 2 categories (channels, enforcement) |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
 | **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
 | **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |

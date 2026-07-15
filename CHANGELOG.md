@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`hooks-utils` MCP server slimmed to two agentihooks-native categories.**
+  Removed the generic cloud-utility categories (`aws`, `compute`, `database`,
+  `email`, `observability`, `storage`, `utilities`) and their modules; the
+  server now ships only `channels` (fleet broadcast + brain) and
+  `enforcement` (doctrine banners) — 9 tools, down from ~22. `MCP_CATEGORIES=all`
+  expands to the trimmed registry, so existing installs pick up the smaller
+  surface on next MCP restart. Docs, README, SECURITY, and CONTRIBUTING updated
+  to match. `build_server()` now warns on stderr for unknown categories and for
+  a zero-tool server instead of failing silently. The removed categories'
+  underlying integrations (`hooks/integrations/`) are unchanged.
+
 ### Fixed
 
 - **`agentihooks init` again cleans up MCP servers dropped from a profile or
