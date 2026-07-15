@@ -1066,3 +1066,146 @@ class TestBundleDiscoverHint:
         before = sj.read_text()
         install._print_bundle_discover_hint(profile_hint="anton")
         assert sj.read_text() == before
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md ownership detection — uninstall must remove real files, not only
+# legacy symlinks (regression: install writes a real file for WSL path safety)
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeMdManagedDetection:
+    def _wire(self, tmp_path, monkeypatch):
+        state = tmp_path / "state.json"
+        monkeypatch.setattr(install, "STATE_JSON", state)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        return state
+
+    def test_real_file_recorded_in_state_is_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("hand-written, no marker\n")
+        install._record_managed_claude_md(cm)
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_real_file_with_manifesto_marker_is_managed(self, tmp_path, monkeypatch):
+        # state.json predates managed_claude_md → content marker is the fallback
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text(f"prompt\n<!-- {install._CLAUDE_MD_MANAGED_MARKER} -->\n")
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_unmanaged_real_file_is_not_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("the user's own CLAUDE.md, agentihooks never touched it\n")
+        assert install._claude_md_is_managed(cm) is False
+
+    def test_missing_file_is_not_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        assert install._claude_md_is_managed(tmp_path / "CLAUDE.md") is False
+
+    def test_legacy_symlink_into_profiles_is_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        target = tmp_path / "profiles" / "anton" / "CLAUDE.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("profile prompt\n")
+        cm = tmp_path / "CLAUDE.md"
+        cm.symlink_to(target)
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_record_is_idempotent(self, tmp_path, monkeypatch):
+        state = self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("x\n")
+        install._record_managed_claude_md(cm)
+        first = state.read_text()
+        install._record_managed_claude_md(cm)
+        assert state.read_text() == first
+        assert json.loads(first)["managed_claude_md"] == str(cm)
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md is additive (profile body + appended manifesto), never a symlink.
+# Uninstall must restore the pre-agentihooks original, or delete if none.
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeMdOriginalBackup:
+    def _wire(self, tmp_path, monkeypatch):
+        state = tmp_path / "state.json"
+        monkeypatch.setattr(install, "STATE_JSON", state)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(install, "CLAUDE_HOME", home)
+        return state, home
+
+    def test_first_install_records_user_original(self, tmp_path, monkeypatch):
+        state, home = self._wire(tmp_path, monkeypatch)
+        dst = home / "CLAUDE.md"
+        dst.write_text("the user's own prompt\n")  # pre-agentihooks
+        backup = install._backup_existing_claude_md(dst)
+        assert backup is not None and backup.exists()
+        assert json.loads(state.read_text())["claude_md_original_backup"] == str(backup)
+
+    def test_reinstall_does_not_clobber_original_record(self, tmp_path, monkeypatch):
+        state, home = self._wire(tmp_path, monkeypatch)
+        dst = home / "CLAUDE.md"
+        dst.write_text("user original\n")
+        first = install._backup_existing_claude_md(dst)
+        install._record_managed_claude_md(dst)  # now agentihooks-managed
+        dst.write_text("agentihooks content\n")
+        install._backup_existing_claude_md(dst)  # re-install backup
+        assert json.loads(state.read_text())["claude_md_original_backup"] == str(first)
+
+    def test_no_backup_when_absent_or_symlink(self, tmp_path, monkeypatch):
+        state, home = self._wire(tmp_path, monkeypatch)
+        dst = home / "CLAUDE.md"
+        assert install._backup_existing_claude_md(dst) is None  # absent
+        target = home / "src.md"
+        target.write_text("x\n")
+        dst.symlink_to(target)
+        assert install._backup_existing_claude_md(dst) is None  # symlink
+
+    def test_uninstall_restores_original(self, tmp_path, monkeypatch):
+        state, home = self._wire(tmp_path, monkeypatch)
+        dst = home / "CLAUDE.md"
+        dst.write_text("USER ORIGINAL\n")
+        install._backup_existing_claude_md(dst)
+        dst.unlink()
+        dst.write_text(f"profile body\n<!-- {install._CLAUDE_MD_MANAGED_MARKER} -->\n")
+        install._record_managed_claude_md(dst)
+
+        args = install.argparse.Namespace(yes=True)
+        with (
+            patch.object(install, "_collect_all_managed_mcp_servers", return_value={}),
+            patch.object(install, "_get_user_scope_mcp_names", return_value=set()),
+            patch.object(install, "_remove_agentihooks_symlinks", return_value=0),
+            patch.object(install, "_remove_bashrc_block", return_value=False),
+            patch.object(install, "_uninstall_cli_tool"),
+        ):
+            install.uninstall_global(args)
+
+        assert dst.exists() and dst.read_text() == "USER ORIGINAL\n"
+        st = json.loads(state.read_text())
+        assert "managed_claude_md" not in st
+        assert "claude_md_original_backup" not in st
+
+    def test_uninstall_deletes_when_no_original(self, tmp_path, monkeypatch):
+        state, home = self._wire(tmp_path, monkeypatch)
+        dst = home / "CLAUDE.md"
+        dst.write_text(f"pure agentihooks\n<!-- {install._CLAUDE_MD_MANAGED_MARKER} -->\n")
+        install._record_managed_claude_md(dst)
+
+        args = install.argparse.Namespace(yes=True)
+        with (
+            patch.object(install, "_collect_all_managed_mcp_servers", return_value={}),
+            patch.object(install, "_get_user_scope_mcp_names", return_value=set()),
+            patch.object(install, "_remove_agentihooks_symlinks", return_value=0),
+            patch.object(install, "_remove_bashrc_block", return_value=False),
+            patch.object(install, "_uninstall_cli_tool"),
+        ):
+            install.uninstall_global(args)
+
+        assert not dst.exists()

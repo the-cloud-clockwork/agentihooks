@@ -2313,10 +2313,16 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
         if claude_md_parts:
             dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-            # Remove stale symlink if present
+            # Remove stale symlink, or back up a pre-existing real file first
             if dst.is_symlink():
                 dst.unlink()
+            elif dst.exists():
+                backup = _backup_existing_claude_md(dst)
+                if backup:
+                    print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
+                dst.unlink()
             dst.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
+            _record_managed_claude_md(dst)
             sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
             _cprint(f"[OK] Wrote chained CLAUDE.md ({' + '.join(sources)})")
         else:
@@ -3143,13 +3149,13 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     if dst.is_symlink():
         dst.unlink()
     elif dst.exists():
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = dst.with_suffix(f".md.bak.{timestamp}")
-        shutil.copy2(dst, backup)
-        print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
+        backup = _backup_existing_claude_md(dst)
+        if backup:
+            print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
         dst.unlink()
 
     dst.write_text(new_content)
+    _record_managed_claude_md(dst)
     _cprint(f"  [OK] Wrote {_CLAUDE_MD_NAME} (from {profile_name})")
 
 
@@ -3163,6 +3169,67 @@ def _cleanup_stale_claude_md_symlink() -> None:
     if "profiles/" in target_str or "profiles\\" in target_str:
         claude_md.unlink()
         _cprint(f"  [OK] Removed stale {_CLAUDE_MD_NAME} symlink → {target_str}")
+
+
+# Marker embedded by _append_ci_manifesto_to_claude_md — also used as a
+# content-based ownership signal when state.json predates managed_claude_md.
+_CLAUDE_MD_MANAGED_MARKER = "auto-injected by agentihooks init"
+
+
+def _record_managed_claude_md(dst: Path) -> None:
+    """Record that agentihooks owns ~/.claude/CLAUDE.md.
+
+    install now writes CLAUDE.md as a real file (WSL/Windows path safety), so
+    uninstall can no longer rely on ``is_symlink()`` to recognise it. Persist
+    the path in state.json so uninstall removes exactly what install wrote.
+    """
+    state = _load_state()
+    if state.get("managed_claude_md") != str(dst):
+        state["managed_claude_md"] = str(dst)
+        _save_state(state)
+
+
+def _backup_existing_claude_md(dst: Path) -> Path | None:
+    """Back up a pre-existing real ~/.claude/CLAUDE.md before install overwrites it.
+
+    The profile CLAUDE.md is written into home and the CI manifesto is appended
+    additively on top, so the installed file is not a symlink and cannot be
+    recovered by unlinking. Capture the file agentihooks is about to replace and,
+    on the FIRST agentihooks install only, record it as the user's original so
+    uninstall can restore the machine to its pre-agentihooks state.
+    """
+    if not dst.exists() or dst.is_symlink():
+        return None
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = dst.with_suffix(f".md.bak.{timestamp}")
+    shutil.copy2(dst, backup)
+    state = _load_state()
+    # First install: nothing managed yet and no original recorded → this backup
+    # is the genuine user-authored original. Never overwrite it on re-installs.
+    if "managed_claude_md" not in state and "claude_md_original_backup" not in state:
+        state["claude_md_original_backup"] = str(backup)
+        _save_state(state)
+    return backup
+
+
+def _claude_md_is_managed(p: Path) -> bool:
+    """True if ~/.claude/CLAUDE.md was installed by agentihooks.
+
+    Handles three cases: legacy symlink into a profiles/ dir, a real file
+    recorded in state.json, or a real file carrying the manifesto marker
+    (fallback for installs whose state.json predates managed_claude_md).
+    """
+    if p.is_symlink():
+        target = str(p.resolve())
+        return "profiles/" in target or "profiles\\" in target
+    if not p.exists():
+        return False
+    if _load_state().get("managed_claude_md") == str(p):
+        return True
+    try:
+        return _CLAUDE_MD_MANAGED_MARKER in p.read_text()
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -3276,8 +3343,10 @@ def uninstall_global(args: argparse.Namespace) -> None:
     n_commands = _count_managed_symlinks(commands_dir)
     n_rules = _count_managed_symlinks(rules_dir)
 
-    # Remove CLAUDE.md if it's a symlink pointing into any profiles/ directory
-    remove_claude_md = claude_md_dst.is_symlink() and "profiles/" in str(claude_md_dst.resolve())
+    # Remove CLAUDE.md whether it's a legacy profiles/ symlink or a real file
+    # written by install (tracked in state.json / manifesto marker).
+    remove_claude_md = _claude_md_is_managed(claude_md_dst)
+    claude_md_is_symlink = claude_md_dst.is_symlink()
 
     # Servers to remove = current managed set UNION the persisted ledger (catches
     # servers dropped from a profile before uninstall), restricted to what is
@@ -3309,9 +3378,15 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print(f"  {commands_dir}/  → {n_commands} symlink(s)")
     print(f"  {rules_dir}/  → {n_rules} symlink(s)")
     if remove_claude_md:
-        print(f"  {claude_md_dst}  (stale symlink → profiles/)")
+        _orig = _load_state().get("claude_md_original_backup")
+        if _orig and Path(_orig).exists():
+            print(f"  {claude_md_dst}  (restore pre-agentihooks original ← {Path(_orig).name})")
+        elif claude_md_is_symlink:
+            print(f"  {claude_md_dst}  (remove symlink → profiles/)")
+        else:
+            print(f"  {claude_md_dst}  (remove managed file)")
     else:
-        print(f"  {claude_md_dst}  [SKIP — not a managed symlink]")
+        print(f"  {claude_md_dst}  [SKIP — not managed by agentihooks]")
     if managed_servers:
         print(f"  MCP servers from {_CLAUDE_JSON}: {', '.join(sorted(managed_servers.keys()))}")
     else:
@@ -3346,13 +3421,28 @@ def uninstall_global(args: argparse.Namespace) -> None:
         if n == 0:
             _cprint(f"  [--] No {label} symlinks found in {dst_dir}")
 
-    # --- 5. Remove CLAUDE.md symlink (stale) + active system prompt ---
+    # --- 5. Remove agentihooks CLAUDE.md; restore the pre-agentihooks original ---
+    # install writes the profile CLAUDE.md into home and appends the manifesto
+    # additively, so "removing what agentihooks added" means: restore the file
+    # agentihooks originally overwrote (if any), otherwise delete the managed file.
     print()
     if remove_claude_md:
-        claude_md_dst.unlink()
-        _cprint(f"[OK] Removed stale {claude_md_dst}")
+        cmd_state = _load_state()
+        original = cmd_state.get("claude_md_original_backup")
+        original_path = Path(original) if original else None
+        if original_path and original_path.exists():
+            if claude_md_dst.is_symlink() or claude_md_dst.exists():
+                claude_md_dst.unlink()
+            shutil.copy2(original_path, claude_md_dst)
+            _cprint(f"[OK] Restored pre-agentihooks {claude_md_dst} from {original_path.name}")
+        else:
+            claude_md_dst.unlink()
+            _cprint(f"[OK] Removed {claude_md_dst} (no pre-agentihooks original recorded)")
+        cmd_state.pop("managed_claude_md", None)
+        cmd_state.pop("claude_md_original_backup", None)
+        _save_state(cmd_state)
     else:
-        print(f"[--] Skipped {claude_md_dst} (not a managed symlink)")
+        print(f"[--] Skipped {claude_md_dst} (not managed by agentihooks)")
 
     # --- 6. Remove MCP servers from ~/.claude.json ---
     print()
