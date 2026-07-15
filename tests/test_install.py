@@ -1066,3 +1066,60 @@ class TestBundleDiscoverHint:
         before = sj.read_text()
         install._print_bundle_discover_hint(profile_hint="anton")
         assert sj.read_text() == before
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md ownership detection — uninstall must remove real files, not only
+# legacy symlinks (regression: install writes a real file for WSL path safety)
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeMdManagedDetection:
+    def _wire(self, tmp_path, monkeypatch):
+        state = tmp_path / "state.json"
+        monkeypatch.setattr(install, "STATE_JSON", state)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        return state
+
+    def test_real_file_recorded_in_state_is_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("hand-written, no marker\n")
+        install._record_managed_claude_md(cm)
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_real_file_with_manifesto_marker_is_managed(self, tmp_path, monkeypatch):
+        # state.json predates managed_claude_md → content marker is the fallback
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text(f"prompt\n<!-- {install._CLAUDE_MD_MANAGED_MARKER} -->\n")
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_unmanaged_real_file_is_not_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("the user's own CLAUDE.md, agentihooks never touched it\n")
+        assert install._claude_md_is_managed(cm) is False
+
+    def test_missing_file_is_not_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        assert install._claude_md_is_managed(tmp_path / "CLAUDE.md") is False
+
+    def test_legacy_symlink_into_profiles_is_managed(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        target = tmp_path / "profiles" / "anton" / "CLAUDE.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("profile prompt\n")
+        cm = tmp_path / "CLAUDE.md"
+        cm.symlink_to(target)
+        assert install._claude_md_is_managed(cm) is True
+
+    def test_record_is_idempotent(self, tmp_path, monkeypatch):
+        state = self._wire(tmp_path, monkeypatch)
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("x\n")
+        install._record_managed_claude_md(cm)
+        first = state.read_text()
+        install._record_managed_claude_md(cm)
+        assert state.read_text() == first
+        assert json.loads(first)["managed_claude_md"] == str(cm)
