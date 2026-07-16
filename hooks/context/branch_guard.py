@@ -104,6 +104,12 @@ def set_pr_signal(session_id: str) -> None:
         f.write_text("1")
     except Exception as e:
         log("branch_guard.set_pr_signal file failed", {"error": str(e)})
+    # Re-signal resets the counter (CI Manifesto §8: "max 3 per session,
+    # then re-signal"). The limit-reached error message already promises
+    # this reset — without it a session that legitimately needs a 4th PR
+    # is permanently locked out no matter how many times the operator
+    # re-authorizes.
+    clear_pr_counter(session_id)
 
 
 def clear_pr_signal(session_id: str) -> None:
