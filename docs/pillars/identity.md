@@ -105,7 +105,7 @@ flowchart LR
 |--------|---------------|
 | **Settings** | Sequential deep merge — dicts combine, hook arrays append, scalars last-wins |
 | **Rules / Skills / Agents / Commands** | Additive — all profiles contribute; same filename = later profile wins |
-| **CLAUDE.md** | Concatenated into one file with `---` separators and `<!-- profile: name -->` markers |
+| **CLAUDE.md** | Concatenated into one file with `---` separators and `<!-- profile: name -->` markers (single profile: same marker, just one section, no `---`) |
 | **MCP servers** | Additive — all profiles' servers accumulate |
 
 ### CLAUDE.md concatenation

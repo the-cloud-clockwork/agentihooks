@@ -1649,9 +1649,16 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         _md_path = Path(_prev_state.get("managed_claude_md") or (Path.home() / ".claude" / "CLAUDE.md"))
         _marker_profile = ""
         try:
-            _first = _md_path.read_text().splitlines()[0] if _md_path.exists() else ""
-            _m = re.match(r"<!--\s*profile:\s*([A-Za-z0-9_,-]+)\s*-->", _first)
-            _marker_profile = _m.group(1) if _m else ""
+            _text = _md_path.read_text() if _md_path.exists() else ""
+            # Scan the whole file, not just line 1 — a chained install writes
+            # one `<!-- profile: X -->` marker per chain member, and the
+            # re-run suggestion below must carry the full chain, not just the
+            # first entry. findall on "" (empty CLAUDE.md) returns [] rather
+            # than raising, so an existing-but-empty file is handled too.
+            _matches = re.findall(r"<!--\s*profile:\s*([A-Za-z0-9_,-]+)\s*-->", _text)
+            _seen: set[str] = set()
+            _chain: list[str] = [m for m in _matches if not (m in _seen or _seen.add(m))]
+            _marker_profile = ",".join(_chain)
         except OSError:
             pass
         if _marker_profile and _marker_profile != "default":
@@ -3176,7 +3183,11 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
         _cprint(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
-    new_content = src.read_text()
+    # Prepend the same `<!-- profile: name -->` marker the chain writer uses
+    # (see the claude_md_parts loop above) so the init guard can sniff the
+    # installed profile from single-profile installs too — the common shape.
+    # This only touches the rendered dst content; src on disk is never mutated.
+    new_content = f"<!-- profile: {profile_name} -->\n{src.read_text()}"
 
     # Check if content is already up to date
     if dst.exists() and not dst.is_symlink():

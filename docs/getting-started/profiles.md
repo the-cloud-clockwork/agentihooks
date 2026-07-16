@@ -173,7 +173,7 @@ agentihooks init
 This is especially useful in CI/Docker automation where the profile is set once in the container environment.
 
 Either way, the command atomically:
-1. Writes `~/.claude/CLAUDE.md` (copy for single profile, concatenation for chains)
+1. Writes `~/.claude/CLAUDE.md` (marked copy for single profile, marked concatenation for chains)
 2. Updates `MCP_CATEGORIES` in the hook environment
 3. Re-merges settings overrides (sequential deep merge across all chained profiles)
 4. Re-symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
@@ -335,7 +335,7 @@ In chain mode, all profiles' `CLAUDE.md` files are concatenated into a single re
 Claude Code loads the entire file as its system prompt, so instructions from all chained profiles are active simultaneously.
 
 {: .note }
-In single-profile mode, `CLAUDE.md` is a direct copy of the source file. In chain mode, it's a rendered concatenation. Both are real files (not symlinks) for WSL/Windows compatibility. Re-run `agentihooks init` to refresh after editing profile sources.
+In single-profile mode, `CLAUDE.md` is the source file prefixed with its own `<!-- profile: name -->` marker (no `---` separator, since there's nothing to concatenate). In chain mode, it's a rendered concatenation of every profile's marker + content. Both are real files (not symlinks) for WSL/Windows compatibility. Re-run `agentihooks init` to refresh after editing profile sources.
 
 ### Querying the active chain
 
