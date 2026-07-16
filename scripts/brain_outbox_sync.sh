@@ -43,7 +43,7 @@ print(c)
     ARC_FILE="$CLUSTER_DIR/${TODAY}-${SID}-writer.md"
 
     # Build the marker block locally, base64 encode, decode on remote
-    MARKER_BLOCK=$(printf '\n<!-- @%s -->\n%s\n<!-- @/%s -->\n' "$TYPE" "$CONTENT" "$TYPE" | base64 -w0)
+    MARKER_BLOCK=$(printf '\n<!-- @%s -->\n%s\n<!-- @/%s -->\n' "$TYPE" "$CONTENT" "$TYPE" | base64 | tr -d '\n')
 
     STUB_CONTENT=$(cat <<STUBEOF
 ---
@@ -60,10 +60,10 @@ created: ${TODAY}
 # Session Markers
 STUBEOF
 )
-    STUB_B64=$(echo "$STUB_CONTENT" | base64 -w0)
+    STUB_B64=$(echo "$STUB_CONTENT" | base64 | tr -d '\n')
 
     # Dedup: compute short hash of content, skip if already in arc
-    CONTENT_HASH=$(echo "$CONTENT" | md5sum | cut -c1-8)
+    CONTENT_HASH=$(echo "$CONTENT" | shasum -a 256 | cut -c1-8)
 
     $SSH_CMD "
         if [[ ! -f '$ARC_FILE' ]]; then

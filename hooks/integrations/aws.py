@@ -29,6 +29,9 @@ from hooks.common import log
 # =============================================================================
 
 # Default config file locations (in order of priority)
+# The /home/appuser entries are container-only fallbacks (ECS/Fargate task
+# role image runs as `appuser`); they simply don't exist on a bare-metal or
+# macOS host and are skipped by the existence check in get_parser() below.
 DEFAULT_CONFIG_PATHS = [
     Path.home() / ".aws" / "config",
     Path.home() / ".aws" / "config.fargate",
