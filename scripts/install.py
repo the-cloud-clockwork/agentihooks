@@ -58,6 +58,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -325,6 +326,14 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     AGENTIHOOKS_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Keep one generation of backup so a bad init can always be forensically
+    # reconstructed / restored (state.json used to be overwritten blind — a
+    # profile-losing init left no trace of what the previous install was).
+    if STATE_JSON.exists():
+        try:
+            shutil.copy2(STATE_JSON, STATE_JSON.with_suffix(".json.bak"))
+        except OSError:
+            pass  # backup is best-effort; never block the install on it
     save_json(STATE_JSON, state)
 
 
@@ -1625,6 +1634,43 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             if lname not in existing_chain:
                 existing_chain.append(lname)
         profile_name = ",".join(existing_chain)
+
+    # Guard: a bare `init` that resolved to 'default' while the managed
+    # CLAUDE.md on disk was installed from a different profile means state.json
+    # has lost (or never had) the profile record — silently stomping the live
+    # profile with 'default' is exactly the failure this blocks. Explicit
+    # --profile / AGENTIHOOKS_PROFILE / --force still win.
+    if (
+        profile_name == "default"
+        and not args.profile
+        and not os.environ.get("AGENTIHOOKS_PROFILE", "")
+        and not _is_force
+    ):
+        _md_path = Path(_prev_state.get("managed_claude_md") or (Path.home() / ".claude" / "CLAUDE.md"))
+        _marker_profile = ""
+        try:
+            _text = _md_path.read_text() if _md_path.exists() else ""
+            # Scan the whole file, not just line 1 — a chained install writes
+            # one `<!-- profile: X -->` marker per chain member, and the
+            # re-run suggestion below must carry the full chain, not just the
+            # first entry. findall on "" (empty CLAUDE.md) returns [] rather
+            # than raising, so an existing-but-empty file is handled too.
+            _matches = re.findall(r"<!--\s*profile:\s*([A-Za-z0-9_,-]+)\s*-->", _text)
+            _seen: set[str] = set()
+            _chain: list[str] = [m for m in _matches if not (m in _seen or _seen.add(m))]
+            _marker_profile = ",".join(_chain)
+        except OSError:
+            pass
+        if _marker_profile and _marker_profile != "default":
+            print(
+                f"ERROR: state.json has no stored profile, but the installed CLAUDE.md "
+                f"was built from profile '{_marker_profile}'.\n"
+                f"Refusing to overwrite it with 'default'. Re-run with the intended profile:\n"
+                f"  agentihooks init --profile {_marker_profile}\n"
+                f"or force a clean default install with: agentihooks init --force",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Resolve settings profile (optional overlay) — same precedence as profile
     settings_profile = getattr(args, "settings_profile", None)
@@ -3137,7 +3183,11 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
         _cprint(f"  [--] No {_CLAUDE_MD_NAME} in profile '{profile_name}' — skipping system prompt.")
         return
 
-    new_content = src.read_text()
+    # Prepend the same `<!-- profile: name -->` marker the chain writer uses
+    # (see the claude_md_parts loop above) so the init guard can sniff the
+    # installed profile from single-profile installs too — the common shape.
+    # This only touches the rendered dst content; src on disk is never mutated.
+    new_content = f"<!-- profile: {profile_name} -->\n{src.read_text()}"
 
     # Check if content is already up to date
     if dst.exists() and not dst.is_symlink():

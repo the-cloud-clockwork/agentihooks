@@ -1209,3 +1209,174 @@ class TestClaudeMdOriginalBackup:
             install.uninstall_global(args)
 
         assert not dst.exists()
+
+
+# ---------------------------------------------------------------------------
+# Single-profile installs must carry the `<!-- profile: name -->` marker too
+# (regression: the init-loss guard sniffs this marker, but only the chain
+# writer emitted it — single profile installs, the common shape, were a
+# guard no-op).
+# ---------------------------------------------------------------------------
+
+
+class TestInstallSystemPromptMarker:
+    def _wire(self, tmp_path, monkeypatch):
+        state = tmp_path / "state.json"
+        monkeypatch.setattr(install, "STATE_JSON", state)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(install, "CLAUDE_HOME", home)
+        return state, home
+
+    def test_single_profile_install_writes_marker(self, tmp_path, monkeypatch):
+        _, home = self._wire(tmp_path, monkeypatch)
+        profile_dir = tmp_path / "profiles" / "anton"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "CLAUDE.md").write_text("# Anton Profile\nbody\n")
+
+        install._install_system_prompt(profile_dir, "anton")
+
+        dst = home / "CLAUDE.md"
+        assert dst.read_text() == "<!-- profile: anton -->\n# Anton Profile\nbody\n"
+
+    def test_source_profile_file_never_mutated(self, tmp_path, monkeypatch):
+        self._wire(tmp_path, monkeypatch)
+        profile_dir = tmp_path / "profiles" / "anton"
+        profile_dir.mkdir(parents=True)
+        src = profile_dir / "CLAUDE.md"
+        src.write_text("# Anton Profile\nbody\n")
+
+        install._install_system_prompt(profile_dir, "anton")
+
+        assert src.read_text() == "# Anton Profile\nbody\n"
+
+    def test_rerun_is_idempotent_no_marker_stacking(self, tmp_path, monkeypatch, capsys):
+        _, home = self._wire(tmp_path, monkeypatch)
+        profile_dir = tmp_path / "profiles" / "anton"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "CLAUDE.md").write_text("# Anton Profile\nbody\n")
+
+        install._install_system_prompt(profile_dir, "anton")
+        first = (home / "CLAUDE.md").read_text()
+        install._install_system_prompt(profile_dir, "anton")
+        second = (home / "CLAUDE.md").read_text()
+
+        assert first == second
+        assert second.count("<!-- profile: anton -->") == 1
+        assert "already up to date" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Init-loss guard — a bare init that resolves to 'default' while the
+# installed CLAUDE.md carries a different profile marker must abort rather
+# than silently overwrite the live profile.
+# ---------------------------------------------------------------------------
+
+
+class TestInitLostStateGuard:
+    def _args(self):
+        import argparse
+
+        return argparse.Namespace(
+            profile=None,
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
+        )
+
+    def test_single_profile_marker_triggers_abort(self, tmp_path, monkeypatch):
+        import os
+
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("<!-- profile: anton -->\nAnton prompt body\n")
+        state = {"managed_claude_md": str(cm), "targets": {}}
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            with pytest.raises(SystemExit):
+                install.cmd_init_unified(self._args())
+
+    def test_empty_existing_file_does_not_crash(self, tmp_path, monkeypatch):
+        import os
+
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("")  # existing but empty — used to raise IndexError
+        state = {"managed_claude_md": str(cm), "targets": {}}
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(self._args())  # must not raise
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "default"
+
+    def test_missing_file_does_not_crash(self, tmp_path, monkeypatch):
+        import os
+
+        cm = tmp_path / "CLAUDE.md"  # never created
+        state = {"managed_claude_md": str(cm), "targets": {}}
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(self._args())  # must not raise
+            called_args = mock_install.call_args[0][0]
+            assert called_args.profile == "default"
+
+    def test_chained_marker_suggests_full_chain(self, tmp_path, monkeypatch, capsys):
+        import os
+
+        cm = tmp_path / "CLAUDE.md"
+        cm.write_text("<!-- profile: coding -->\nCoding body\n\n---\n\n<!-- profile: anton -->\nAnton body\n")
+        state = {"managed_claude_md": str(cm), "targets": {}}
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            with pytest.raises(SystemExit):
+                install.cmd_init_unified(self._args())
+        err = capsys.readouterr().err
+        assert "agentihooks init --profile coding,anton" in err
+
+
+# ---------------------------------------------------------------------------
+# _save_state keeps one generation of state.json.bak so a profile-losing
+# init is always forensically reconstructable.
+# ---------------------------------------------------------------------------
+
+
+class TestSaveStateBackup:
+    def _wire(self, tmp_path, monkeypatch):
+        state_json = tmp_path / "state.json"
+        monkeypatch.setattr(install, "STATE_JSON", state_json)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        return state_json
+
+    def test_creates_bak_with_prior_content(self, tmp_path, monkeypatch):
+        state_json = self._wire(tmp_path, monkeypatch)
+        install._save_state({"targets": {"global": {"profile": "anton"}}})
+        first_content = state_json.read_text()
+
+        install._save_state({"targets": {"global": {"profile": "coding"}}})
+
+        bak = state_json.with_suffix(".json.bak")
+        assert bak.exists()
+        assert bak.read_text() == first_content
+        assert json.loads(state_json.read_text())["targets"]["global"]["profile"] == "coding"
+
+    def test_no_bak_on_first_save(self, tmp_path, monkeypatch):
+        state_json = self._wire(tmp_path, monkeypatch)
+        install._save_state({"targets": {}})
+        assert not state_json.with_suffix(".json.bak").exists()

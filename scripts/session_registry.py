@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+_IS_DARWIN = platform.system() == "Darwin"
 
 from hooks.context.broadcast import (
     _load_sessions,
@@ -157,11 +160,16 @@ def _truncate(s: str, width: int) -> str:
 
 
 def _detect_terminal() -> str:
-    """Return one of: 'wt', 'bare'.
+    """Return one of: 'wt', 'osascript', 'bare'.
 
     'wt' = Windows Terminal available (via wt.exe on WSL or native Windows).
+    'osascript' = macOS Terminal.app launch via AppleScript.
     'bare' = fallback, prints commands for manual execution.
     """
+    if _IS_DARWIN:
+        if shutil.which("osascript"):
+            return "osascript"
+        return "bare"
     if os.environ.get("WT_SESSION"):
         return "wt"
     if shutil.which("wt.exe"):
@@ -213,6 +221,22 @@ def _build_wt_cmd(entry: dict) -> list[str]:
         "-Command",
         ps_cmd,
     ]
+
+
+def _build_osascript_cmd(entry: dict) -> list[str]:
+    """Build an `osascript` argv that opens macOS Terminal.app running
+    `cd CWD && agentihooks claude --resume ID`.
+    """
+    sid = entry["session_id"]
+    cwd = entry["cwd"]
+    inner_bash = f"cd {_shell_quote(cwd)} && agentihooks claude --resume {sid}"
+    script = f'tell application "Terminal" to do script {_applescript_quote(inner_bash)}'
+    return ["osascript", "-e", script]
+
+
+def _applescript_quote(s: str) -> str:
+    """Quote a string for safe embedding inside an AppleScript string literal."""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _powershell_quote(s: str) -> str:
@@ -293,10 +317,16 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
     launched = 0
 
     for r in rows:
-        cmd = _build_wt_cmd(r)
         sid_short = r["session_id"][:8]
         cwd_short = _shorten_cwd(r["cwd"], 35)
         if terminal == "wt":
+            cmd = _build_wt_cmd(r)
+        elif terminal == "osascript":
+            cmd = _build_osascript_cmd(r)
+        else:
+            cmd = None
+
+        if cmd is not None:
             try:
                 subprocess.Popen(
                     cmd,
@@ -313,8 +343,9 @@ def reopen_sessions(indices: list[int], include_alive: bool = False) -> int:
         else:
             print(f"{_YELLOW}manual:{_RESET} cd {_shell_quote(r['cwd'])} && agenti --resume {r['session_id']}")
 
-    if terminal != "wt":
-        print(f"\n{_DIM}wt.exe not found. Above commands listed for manual execution.{_RESET}")
+    if terminal not in ("wt", "osascript"):
+        reason = "osascript not found" if _IS_DARWIN else "wt.exe not found"
+        print(f"\n{_DIM}{reason}. Above commands listed for manual execution.{_RESET}")
     return launched
 
 
@@ -423,11 +454,72 @@ def backfill_from_transcripts(max_age_hours: int = 24) -> dict:
     return summary
 
 
+def _list_claude_pids() -> list[int]:
+    """Return PIDs of running processes whose comm is exactly `claude`.
+
+    Linux: scans /proc directly. macOS: shells out to `ps` (no /proc).
+    """
+    if _IS_DARWIN:
+        try:
+            result = subprocess.run(
+                ["ps", "-eo", "pid=,comm="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        pids = []
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2 or not parts[0].isdigit():
+                continue
+            pid_str, comm = parts
+            if os.path.basename(comm) == "claude":
+                pids.append(int(pid_str))
+        return pids
+    try:
+        return [
+            int(pid_file.name)
+            for pid_file in Path("/proc").iterdir()
+            if pid_file.name.isdigit()
+            and (pid_file / "comm").exists()
+            and (pid_file / "comm").read_text().strip() == "claude"
+        ]
+    except OSError:
+        return []
+
+
+def _pid_cwd(pid: int) -> str | None:
+    """Return the working directory of `pid`, or None if it can't be read.
+
+    Linux: readlink /proc/<pid>/cwd. macOS: `lsof -a -p <pid> -d cwd -Fn`.
+    """
+    if _IS_DARWIN:
+        try:
+            result = subprocess.run(
+                ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in result.stdout.splitlines():
+            if line.startswith("n"):
+                return line[1:]
+        return None
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
 def reconcile_live_sessions() -> dict:
     """Walk running `claude` processes and mark registry entries alive.
 
     Heuristic:
-      1. For each live claude PID, read /proc/<pid>/cwd.
+      1. For each live claude PID, find its cwd.
       2. Find all .jsonl transcripts in ~/.claude/projects/<encoded>/ whose
          mtime is within the last 30 minutes (actively being written).
       3. Claim the most-recently-modified unclaimed JSONL per PID.
@@ -439,7 +531,21 @@ def reconcile_live_sessions() -> dict:
     summary = {"live_claude_pids": 0, "matched": 0, "unmatched_pids": 0}
 
     def _pid_state(pid: int) -> str:
-        """Return the state char from /proc/<pid>/stat (R/S/D/T/t/Z/I/...)."""
+        """Return the process state char (R/S/D/T/t/Z/I/...).
+
+        Linux: parsed from /proc/<pid>/stat. macOS: `ps -o state=`.
+        """
+        if _IS_DARWIN:
+            try:
+                result = subprocess.run(
+                    ["ps", "-o", "state=", "-p", str(pid)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                return result.stdout.strip()[:1]
+            except (OSError, subprocess.SubprocessError):
+                return ""
         try:
             stat = (Path("/proc") / str(pid) / "stat").read_text()
             # format: pid (comm) state ppid ... — comm may contain ")" so split on last one
@@ -450,9 +556,28 @@ def reconcile_live_sessions() -> dict:
     def _pid_resume_sid(pid: int) -> str:
         """Return the session_id this claude PID is serving, from --resume flag.
 
-        Reads /proc/<pid>/cmdline and looks for `--resume <uuid>`. Returns empty
-        string if the PID has no --resume (fresh session with auto-generated ID).
+        Linux: reads /proc/<pid>/cmdline (NUL-separated argv). macOS: `ps -o
+        command=` (whitespace-separated; fine since a --resume argument is a
+        bare UUID with no internal spaces). Returns empty string if the PID
+        has no --resume (fresh session with auto-generated ID).
         """
+        if _IS_DARWIN:
+            try:
+                result = subprocess.run(
+                    ["ps", "-o", "command=", "-p", str(pid)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                parts = result.stdout.split()
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            for i, p in enumerate(parts):
+                if p == "--resume" and i + 1 < len(parts):
+                    candidate = parts[i + 1]
+                    if len(candidate) == 36 and candidate.count("-") == 4:
+                        return candidate
+            return ""
         try:
             cmdline = (Path("/proc") / str(pid) / "cmdline").read_text()
             parts = cmdline.split("\x00")
@@ -466,25 +591,18 @@ def reconcile_live_sessions() -> dict:
             pass
         return ""
 
-    try:
-        raw_pids = [
-            int(pid_file.name)
-            for pid_file in Path("/proc").iterdir()
-            if pid_file.name.isdigit()
-            and (pid_file / "comm").exists()
-            and (pid_file / "comm").read_text().strip() == "claude"
-        ]
-    except OSError:
+    raw_pids = _list_claude_pids()
+    if not raw_pids:
         return summary
 
     # Include any claude process that is NOT a zombie. State T (stopped via
     # Ctrl+Z or job-control), state D (uninterruptible sleep), and the
-    # typical S/R are all live processes with valid /proc state; only Z
-    # (zombie) means the process no longer has a live image. We do NOT
-    # filter by parent comm or dedupe by ppid — WSL2 can re-parent live
-    # claude processes to init/Relay when VSCode detaches a terminal,
-    # and multiple claude children can legitimately share a single
-    # interactive bash parent.
+    # typical S/R are all live processes with valid state; only Z (zombie)
+    # means the process no longer has a live image. We do NOT filter by
+    # parent comm or dedupe by ppid — WSL2 can re-parent live claude
+    # processes to init/Relay when VSCode detaches a terminal, and multiple
+    # claude children can legitimately share a single interactive bash
+    # parent.
     claude_pids = [pid for pid in raw_pids if _pid_state(pid) != "Z"]
 
     summary["live_claude_pids"] = len(claude_pids)
@@ -496,9 +614,8 @@ def reconcile_live_sessions() -> dict:
     # Group PIDs by their cwd.
     pids_by_cwd: dict[str, list[int]] = {}
     for pid in claude_pids:
-        try:
-            cwd = os.readlink(f"/proc/{pid}/cwd")
-        except OSError:
+        cwd = _pid_cwd(pid)
+        if not cwd:
             continue
         pids_by_cwd.setdefault(cwd, []).append(pid)
 

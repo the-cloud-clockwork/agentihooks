@@ -292,7 +292,10 @@ class TestClaudeMdLinking:
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._install_system_prompt(profile, "test-profile")
         assert dst.exists() and not dst.is_symlink()
-        assert dst.read_text() == (profile / "CLAUDE.md").read_text()
+        # Single-profile installs carry the same `<!-- profile: name -->`
+        # marker the chain writer uses, so the init-loss guard can sniff the
+        # installed profile regardless of chain length.
+        assert dst.read_text() == f"<!-- profile: test-profile -->\n{(profile / 'CLAUDE.md').read_text()}"
 
     def test_idempotent(self, install_env):
         profile = install_env["profile"]
