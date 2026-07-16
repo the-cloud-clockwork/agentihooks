@@ -179,3 +179,27 @@ class TestPRBaseGuard:
         with patch("hooks.context.branch_guard._has_pr_signal", return_value=False):
             with pytest.raises(BlockAction):
                 self._check("gh pr create --base dev")
+
+
+class TestPrSignalResetsCounter:
+    """Re-signaling PR authorization must reset the per-session PR counter
+    (CI Manifesto §8: max 3 per session, then re-signal). The limit-reached
+    error message promises this reset — set_pr_signal must deliver it."""
+
+    def test_set_pr_signal_clears_counter(self, tmp_path):
+        from unittest.mock import patch
+
+        from hooks.context import branch_guard
+
+        with (
+            patch("hooks.context.branch_guard.get_redis", return_value=None),
+            patch("hooks.context.branch_guard.AGENTIHOOKS_HOME", tmp_path),
+        ):
+            sid = "test-pr-reset"
+            # Exhaust the counter the same way real PR creations do
+            for _ in range(3):
+                branch_guard.increment_pr_counter(sid)
+            assert branch_guard._get_pr_counter(sid) == 3
+            # Operator re-signal must reset it
+            branch_guard.set_pr_signal(sid)
+            assert branch_guard._get_pr_counter(sid) == 0
