@@ -14,6 +14,13 @@ if [[ ! -d "$OUTBOX" ]] || [[ -z "$(ls -A "$OUTBOX" 2>/dev/null)" ]]; then
     exit 0
 fi
 
+# Single-flight: a slow run (large backlog, per-file SSH) must not overlap the
+# next 5-min cron fire — two instances racing the same glob leads to mid-loop
+# rm failures and (with set -e) a dead half-processed run.
+LOCK_FILE="${OUTBOX%/}.lock"
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
 SSH_CMD="ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=5 $VAULT_SSH"
 
 # Ensure today's cluster dir exists
@@ -76,7 +83,7 @@ STUBEOF
         fi
     " 2>/dev/null || { echo "WARN: failed to write $f" >&2; continue; }
 
-    rm "$f"
+    rm -f "$f"
     PROCESSED=$((PROCESSED + 1))
 done
 
