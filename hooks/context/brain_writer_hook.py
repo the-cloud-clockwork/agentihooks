@@ -106,7 +106,12 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
             "project": os.getenv("CLAUDE_PROJECT_DIR", ""),
             "ts": now.isoformat(),
         }
-        (outbox / filename).write_text(json.dumps(payload, indent=2))
+        # Atomic write: a killed hook process mid-write leaves a truncated
+        # JSON that the outbox drain must quarantine. temp + rename makes the
+        # file appear fully-formed or not at all.
+        tmp = outbox / f".{filename}.tmp"
+        tmp.write_text(json.dumps(payload, indent=2))
+        tmp.replace(outbox / filename)
         count += 1
     return count
 
