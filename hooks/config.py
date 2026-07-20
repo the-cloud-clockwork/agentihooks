@@ -273,7 +273,13 @@ CONTEXT_REFRESH_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_INTERVAL", "20"))
 CONTEXT_REFRESH_CLAUDE_MD_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", "40"))
 CONTEXT_REFRESH_RULES_DIR: str = os.getenv("CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules"))
 CONTEXT_REFRESH_INCLUDE_PROJECT = _env_bool("CONTEXT_REFRESH_INCLUDE_PROJECT", "true")
-CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "8000"))
+# Budget for a periodic re-injection. 8000 was set when CLAUDE.md held a single
+# profile; a chained profile plus the bundle's shared directives now exceed that
+# before the profile's own Response Style / CI sections are reached, so every
+# refresh dropped exactly the behavioural contract it exists to reinforce. The
+# CI manifesto block is stripped before this cap applies (already resident via
+# the memory channel), so the budget covers live directives only.
+CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "16000"))
 
 # Context Preprocessor — compression level for refresh injections
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
