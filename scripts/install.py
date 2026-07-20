@@ -3190,6 +3190,11 @@ def _append_ci_manifesto_to_claude_md() -> None:
             return
     else:
         new_content = current.rstrip() + block
+    # The block text contains _CLAUDE_MD_MANAGED_MARKER, so appending it is itself
+    # an ownership claim — uninstall will delete a file carrying it. Capture the
+    # operator's original first. Reached when no profile supplied a CLAUDE.md and
+    # no bundle block was prepended, so nothing earlier took a backup.
+    _claim_claude_md_ownership(dst)
     dst.write_text(new_content)
     _cprint(f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)")
 
