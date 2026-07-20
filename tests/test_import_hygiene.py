@@ -34,12 +34,25 @@ _ALLOWED_NOISY: frozenset[str] = frozenset()
 # Pre-imports that must run before the target so package-init side effects
 # (logger setup, env loading) execute under the captured stdout.
 _PROBE_TEMPLATE = """
-import io, sys, importlib
+import io, sys, importlib, traceback
+_real_out, _real_err = sys.__stdout__, sys.__stderr__
 sys.stdout = io.StringIO()
 sys.stderr = io.StringIO()
-mod = importlib.import_module({module!r})
+try:
+    importlib.import_module({module!r})
+except BaseException:
+    # Restore the real streams before reporting. Letting the exception escape
+    # under the redirect writes the traceback into the StringIO and discards
+    # it, leaving the parent with exit 1 and an empty stderr — a failure that
+    # states only that something broke, never what.
+    captured = sys.stderr.getvalue()
+    sys.stdout, sys.stderr = _real_out, _real_err
+    sys.stderr.write(captured)
+    traceback.print_exc()
+    raise SystemExit(1)
 out = sys.stdout.getvalue()
 err = sys.stderr.getvalue()
+sys.stdout, sys.stderr = _real_out, _real_err
 sys.__stdout__.write(out)
 sys.__stderr__.write(err)
 """
@@ -66,7 +79,18 @@ def test_module_import_does_not_write_to_stdout(module: str) -> None:
         pytest.skip(f"{module} is in _ALLOWED_NOISY quarantine")
 
     probe = _PROBE_TEMPLATE.format(module=module)
-    env = {**os.environ, "CLAUDE_HOOK_LOG_ENABLED": "false"}
+    env = {
+        **os.environ,
+        "CLAUDE_HOOK_LOG_ENABLED": "false",
+        # The suite-wide home-isolation fixture repoints $HOME. Where the
+        # interpreter installs into the user site (~/.local/lib/pythonX/
+        # site-packages — the layout on the self-hosted runner), that alone
+        # drops every dependency from the child's sys.path and the probe
+        # reports an import failure that says more about the fixture than the
+        # module. Hand the child the parent's resolved path so it imports
+        # exactly what pytest imported.
+        "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+    }
     proc = subprocess.run(
         [sys.executable, "-c", probe],
         cwd=REPO_ROOT,
@@ -79,3 +103,52 @@ def test_module_import_does_not_write_to_stdout(module: str) -> None:
         pytest.fail(f"{module}: import failed (exit {proc.returncode})\nstderr: {proc.stderr}\nstdout: {proc.stdout}")
     if proc.stdout:
         pytest.fail(f"{module}: writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{proc.stdout}")
+
+
+class TestProbeHarness:
+    """The probe itself is load-bearing: when it misreports, every module in
+    this file becomes undiagnosable. These guard the two ways it has failed.
+    """
+
+    def test_import_failure_reports_the_exception(self, tmp_path: Path) -> None:
+        """A failing import must surface its traceback on stderr.
+
+        Redirecting stderr to a StringIO and letting the exception escape sends
+        the traceback into the buffer and drops it — the parent then sees exit 1
+        with an empty stderr, which says only that something broke.
+        """
+        probe = _PROBE_TEMPLATE.format(module="hooks._definitely_not_a_real_module")
+        proc = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
+            timeout=30,
+        )
+        assert proc.returncode != 0
+        assert "ModuleNotFoundError" in proc.stderr, f"probe swallowed the traceback — stderr was {proc.stderr!r}"
+
+    def test_probe_resolves_imports_independently_of_home(self, tmp_path: Path) -> None:
+        """Dependencies must stay importable when $HOME is repointed.
+
+        The suite-wide isolation fixture rewrites $HOME. Where the interpreter
+        installs into the user site — the self-hosted runner's layout — that
+        alone strips every dependency from the child's path, and every module
+        importing one fails for a reason that has nothing to do with the module.
+        """
+        probe = _PROBE_TEMPLATE.format(module="hooks.mcp")
+        proc = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HOME": str(tmp_path / "elsewhere"),
+                "CLAUDE_HOOK_LOG_ENABLED": "false",
+                "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+            },
+            timeout=30,
+        )
+        assert proc.returncode == 0, f"import broke under a rewritten $HOME:\n{proc.stderr}"

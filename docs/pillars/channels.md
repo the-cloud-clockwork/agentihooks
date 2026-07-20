@@ -208,7 +208,7 @@ severity: info
 
 ### Refresh mechanism
 
-Brain content changes slowly — you don't need to re-read the filesystem every turn. The adapter uses a **turn counter** (same pattern as context refresh):
+Brain content changes slowly — you don't need to re-read the filesystem every turn. The adapter uses a **turn counter** (a counter-gated refresh):
 
 1. Counter increments on every `UserPromptSubmit`
 2. Every `BRAIN_REFRESH_INTERVAL` turns (default: 30), the adapter re-reads the source
@@ -290,7 +290,7 @@ Messages are written once, read many times. A session's subscriptions can change
 
 **Why a turn counter for brain refresh instead of file watchers?**
 
-Hooks run in a subprocess that exits after each event. There's no long-lived process to run `inotifywait`. The turn counter is the established pattern (context refresh, image persistence reminder) — it's simple, stateless across process boundaries, and good enough for content that changes on the order of minutes, not milliseconds.
+Hooks run in a subprocess that exits after each event. There's no long-lived process to run `inotifywait`. The turn counter is the established pattern (also used by the CI-manifesto and enforcement drumbeats) — it's simple, stateless across process boundaries, and good enough for content that changes on the order of minutes, not milliseconds.
 
 **Why is the brain adapter disabled by default?**
 

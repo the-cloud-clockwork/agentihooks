@@ -61,11 +61,15 @@ print(d['type'], d['session_id'][:8], date)
     fi
     read -r TYPE SID MDATE <<< "$META"
 
+    # NO shell escaping here. $CONTENT is consumed by a double-quoted printf
+    # below, which needs none. The old code escaped for a SINGLE-quoted context
+    # (`.replace("'", "'\\''")`), so every apostrophe was written into the vault
+    # as the literal 4-char sequence '\'' — 39 files corrupted between
+    # 2026-04-11 and 2026-07-20 before this was caught.
     if ! CONTENT=$(python3 -c "
 import json
 d = json.load(open('$f'))
-c = d['content'][:500].replace('\\\\', '\\\\\\\\').replace(\"'\", \"'\\\\''\")
-print(c)
+print(d['content'][:500])
 " 2>/dev/null); then
         mkdir -p "$QUARANTINE"
         mv "$f" "$QUARANTINE/" 2>/dev/null || true

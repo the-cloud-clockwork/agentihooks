@@ -61,11 +61,9 @@ agentihooks settings-profile admin          # swap permissions without touching 
 
 ### Pillar 3: Context Intelligence — *What keeps them sharp*
 
-LLMs lose focus on early instructions as conversations grow. AgentiHooks defeats attention decay.
+LLMs lose focus on early instructions as conversations grow. AgentiHooks keeps the highest-signal context live in the recent window.
 
-- **Context refresh** — re-injects rules every 20 turns and CLAUDE.md every 40 turns
-- **Priority frontmatter** — critical rules load first within the 8000-char budget
-- **Token compression** — 4 levels (off/light/standard/aggressive) with safety-preserving protection mask
+- **Token compression** — 4 levels (off/light/standard/aggressive) with safety-preserving protection mask, applied to injected banners and tool output
 - **Tool memory** — past errors injected so agents don't repeat mistakes
 - **Brain adapter** — pluggable source that pumps knowledge (hot arcs, operational memory) into agents via broadcast channels
 - **Context audit** — tracks what's being injected and how much budget is used
@@ -135,7 +133,7 @@ Claude Code
   |
   |-- Hook Events (stdin JSON) --> python -m hooks --> hook_manager.py
   |     SessionStart, PreToolUse,       |
-  |     PostToolUse, Stop, ...         |-- context refresh + compression
+  |     PostToolUse, Stop, ...         |-- brain + enforcement drumbeat
   |     (10 events total)              |-- guardrails pipeline
   |                                    |-- broadcast delivery
   |                                    |-- transcript logging
@@ -261,7 +259,7 @@ agentihooks settings-profile --clear         # revert
 | `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, brain refresh, context refresh, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -275,9 +273,8 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTEXT_REFRESH_COMPRESSION` | `standard` | Token compression level |
+| `CONTEXT_REFRESH_COMPRESSION` | `standard` | Token compression level for injected banners/tool output |
 | `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Scope: `refresh` or `all` |
-| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N turns |
 | `BROADCAST_ENABLED` | `true` | Fleet messaging master switch |
 | `BROADCAST_CRITICAL_ON_PRETOOL` | `false` | Re-inject critical broadcasts on every PreToolUse (default off — alerts still land on UserPromptSubmit) |
 | `BROADCAST_PRETOOL_MIN_SEVERITY` | `critical` | Minimum severity for PreToolUse re-injection. `alert` widens it. |

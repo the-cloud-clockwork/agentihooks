@@ -111,22 +111,34 @@ class TestCheckGuardrails:
     def test_all_enabled(self):
         from scripts.status_checker import check_guardrails
 
-        with patch.dict(
-            "os.environ",
-            {
-                "BASH_FILTER_ENABLED": "true",
-                "FILE_READ_CACHE_ENABLED": "true",
-                "CONTEXT_REFRESH_ENABLED": "true",
-                "CONTEXT_REFRESH_COMPRESSION": "standard",
-                "CONTEXT_AUDIT_ENABLED": "true",
-                "EFFORT_POLICY_ENABLED": "true",
-                "PEAK_HOURS_ENABLED": "true",
-                "COMPACT_SUGGEST_ENABLED": "true",
-            },
+        # config values are module constants read at import — patch the config
+        # attributes directly (patching os.environ would not reload them).
+        # context_compression is active only when scope == "all" (the default
+        # "refresh" is a no-op since the context-refresh path was removed).
+        with (
+            patch("hooks.config.BASH_FILTER_ENABLED", True),
+            patch("hooks.config.FILE_READ_CACHE_ENABLED", True),
+            patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"),
+            patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "all"),
+            patch("hooks.config.CONTEXT_AUDIT_ENABLED", True),
+            patch("hooks.config.EFFORT_POLICY_ENABLED", True),
+            patch("hooks.config.PEAK_HOURS_ENABLED", True),
+            patch("hooks.config.COMPACT_SUGGEST_ENABLED", True),
         ):
             result = check_guardrails()
-            assert result["active"] == 8
-            assert result["total"] == 8
+            assert result["active"] == 7
+            assert result["total"] == 7
+
+    def test_compression_inactive_when_scope_default(self):
+        """scope=refresh is a no-op post context-refresh removal — must not report active."""
+        from scripts.status_checker import check_guardrails
+
+        with (
+            patch("hooks.config.CONTEXT_REFRESH_COMPRESSION", "standard"),
+            patch("hooks.config.CONTEXT_COMPRESSION_SCOPE", "refresh"),
+        ):
+            result = check_guardrails()
+            assert result["details"]["context_compression"] is False
 
 
 class TestCheckMcp:

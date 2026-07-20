@@ -1,9 +1,13 @@
-"""Context Preprocessor — token compression for mid-session context refresh.
+"""Context Preprocessor — token compression for injected content.
 
-Compresses rule files and CLAUDE.md content before re-injection to fit more
-content within the CONTEXT_REFRESH_MAX_CHARS budget. Leverages the fact that
-LLMs predict over subword tokens — abbreviated forms activate the same
-semantic representations as full words.
+Compresses injected banners and captured tool output (gated by
+CONTEXT_COMPRESSION_SCOPE=all) before they land in the model's context window.
+Leverages the fact that LLMs predict over subword tokens — abbreviated forms
+activate the same semantic representations as full words.
+
+Periodic rules/CLAUDE.md re-injection, which this module was originally built to
+compress, was removed 2026-07-20; the compression logic is retained for the
+injections that remain.
 
 Four compression levels:
     0 (off)        — passthrough

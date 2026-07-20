@@ -85,11 +85,18 @@ _FRAMED_TITLES = frozenset({"Operator Intent", "Active Hot Arcs", "last-tick-dif
 
 
 def _wrap_with_framing(title: str, body: str) -> str:
-    """For long natural-language broadcasts, prefix with explicit informational
-    framing so the model does not pivot as if the operator gave a new directive.
+    """Mark provenance on long natural-language broadcasts so the model does not
+    pivot as if the operator gave a new directive.
+
+    This marks WHERE the content came from; it deliberately does not tell the
+    agent whether to act. The previous wording ("no action required") was an
+    explicit passivity instruction that suppressed the very follow-up the brain
+    wants — an agent drilling into an arc via the MCP tools. Any call-to-action
+    belongs to the producer (brain_keeper writes it into the feed file), since
+    only the brain knows its own tool surface; this layer is channel-generic.
     """
     if title in _FRAMED_TITLES:
-        return "STATUS BROADCAST (informational, no action required):\n\n" + body
+        return "BRAIN CONTEXT (recalled state, not an operator directive):\n\n" + body
     return body
 
 
@@ -431,7 +438,7 @@ def _compute_hash(entries: list[BrainEntry]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Turn counter (same pattern as context_refresh)
+# Turn counter (per-session, Redis + file fallback)
 # ---------------------------------------------------------------------------
 
 
