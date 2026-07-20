@@ -343,9 +343,16 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    # PR creation — default-deny unless operator signaled this session (§15)
+    # PR creation — default-deny unless operator signaled this session (§15),
+    # or bypass mode is active (it unlocks branch and PR creation by doctrine).
     if _PR_CREATE_PATTERN.search(check_text):
-        if not _has_pr_signal(session_id):
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+
+            _bypass_active = _ctl_off(session_id)
+        except Exception:
+            _bypass_active = False
+        if not _bypass_active and not _has_pr_signal(session_id):
             log(
                 "branch_guard: PR creation blocked (no signal)",
                 {"command": command[:200], "session_id": session_id},
