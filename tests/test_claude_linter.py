@@ -15,15 +15,45 @@ class TestClaudeLinter:
         assert estimate_tokens("") == 0
 
     def test_parse_sections(self, tmp_path):
-        from scripts.claude_linter import parse_sections
+        from scripts.claude_linter import PREAMBLE_HEADING, parse_sections
 
         md = tmp_path / "CLAUDE.md"
         md.write_text("# Title\n\n## Commands\nRun this.\n\n## Architecture\nDesign.\n")
 
         sections = parse_sections(md)
-        assert len(sections) == 2
-        assert sections[0].heading == "Commands"
-        assert sections[1].heading == "Architecture"
+        # The H1 title before the first H2 is reported as a preamble section so
+        # per-section tokens reconcile with the whole-file total.
+        assert [s.heading for s in sections] == [PREAMBLE_HEADING, "Commands", "Architecture"]
+
+    def test_section_tokens_reconcile_with_total(self, tmp_path):
+        """Per-section tokens must account for the whole file, preamble included."""
+        from scripts.claude_linter import lint_report
+
+        md = tmp_path / "CLAUDE.md"
+        md.write_text(
+            "# Title\n\nIntro prose before any heading.\n\n"
+            "<!-- BEGIN injected -->\nblock content\n<!-- END injected -->\n\n"
+            "## Commands\nRun this.\n"
+        )
+        report = lint_report(md)
+        joined = "\n".join(s.content for s in report.sections)
+        # Nothing before the first heading may be silently dropped.
+        assert "Intro prose before any heading." in joined
+        assert "block content" in joined
+        # Per-section tokens now account for the whole file (chars//4 rounds per
+        # section, so allow one token of slack per section).
+        assert abs(sum(s.tokens for s in report.sections) - report.total_tokens) <= len(report.sections)
+
+    def test_extract_refuses_duplicate_headings(self, tmp_path):
+        """A merged CLAUDE.md repeats headings; guessing would delete the wrong one."""
+        import pytest as _pytest
+
+        from scripts.claude_linter import extract_to_skill
+
+        md = tmp_path / "CLAUDE.md"
+        md.write_text("## Security\nfrom bundle\n\n## Other\nx\n\n## Security\nfrom profile\n")
+        with _pytest.raises(ValueError, match="appears 2 times"):
+            extract_to_skill(md, "Security", "sec", output_dir=tmp_path / "out")
 
     def test_classify_always_section(self):
         from scripts.claude_linter import Section, classify_section
@@ -71,7 +101,8 @@ class TestClaudeLinter:
 
         report = lint_report(md)
         assert report.total_tokens > 0
-        assert len(report.sections) == 2
+        # H1 title preamble + the two H2 sections
+        assert len(report.sections) == 3
 
     def test_format_report(self, tmp_path):
         from scripts.claude_linter import format_report, lint_report

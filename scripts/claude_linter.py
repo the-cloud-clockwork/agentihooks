@@ -69,6 +69,9 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+PREAMBLE_HEADING = "(document preamble)"
+
+
 def parse_sections(md_path: Path) -> list[Section]:
     """Split markdown into sections by H2/H3 headers."""
     text = md_path.read_text(encoding="utf-8")
@@ -84,6 +87,19 @@ def parse_sections(md_path: Path) -> list[Section]:
         m = re.match(r"^(#{2,3})\s+(.+)", line)
         if m:
             # Save previous section
+            if not current_heading and any(ln.strip() for ln in current_lines):
+                # Content before the first H2/H3 — title, intro prose, injected
+                # marker blocks. Reported so the per-section totals reconcile with
+                # the whole-file token count instead of silently disagreeing.
+                sections.append(
+                    Section(
+                        heading=PREAMBLE_HEADING,
+                        level=0,
+                        content="\n".join(current_lines),
+                        start_line=1,
+                        end_line=i,
+                    )
+                )
             if current_heading:
                 sections.append(
                     Section(
@@ -219,15 +235,24 @@ def extract_to_skill(
     """
     sections = parse_sections(md_path)
 
-    target = None
-    for s in sections:
-        if s.heading.strip().lower() == section_heading.strip().lower():
-            target = s
-            break
+    wanted = section_heading.strip().lower()
+    matches = [s for s in sections if s.heading.strip().lower() == wanted]
 
-    if target is None:
+    if not matches:
         available = [s.heading for s in sections]
         raise ValueError(f'Section "{section_heading}" not found. Available sections: {", ".join(available)}')
+
+    if len(matches) > 1:
+        # A merged CLAUDE.md carries the same heading from several sources (the
+        # bundle's shared block and a profile, say). Taking the first would
+        # silently extract and delete the wrong one.
+        where = ", ".join(f"line {s.start_line}" for s in matches)
+        raise ValueError(
+            f'Section "{section_heading}" appears {len(matches)} times ({where}). '
+            "Refusing to guess which one to extract — disambiguate the heading first."
+        )
+
+    target = matches[0]
 
     # Create skill directory
     if output_dir is None:
