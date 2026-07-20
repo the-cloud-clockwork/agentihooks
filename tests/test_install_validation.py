@@ -20,20 +20,7 @@ import install  # noqa: I001
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _isolate_agentihooks_state(tmp_path, monkeypatch):
-    """Keep every test in this module off the real ~/.agentihooks/state.json.
-
-    `_record_managed_claude_md` / `_backup_existing_claude_md` are reached
-    transitively via `_install_system_prompt`, and they persist through the
-    module-level STATE_JSON / AGENTIHOOKS_STATE_DIR globals. Unpatched, a test
-    run rewrites the developer's real install state (and its one-generation
-    backup) with tmp paths.
-    """
-    state_dir = tmp_path / "_agentihooks_state"
-    state_dir.mkdir()
-    monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", state_dir, raising=False)
-    monkeypatch.setattr(install, "STATE_JSON", state_dir / "state.json", raising=False)
+# Real-home isolation is suite-wide — see the autouse fixture in tests/conftest.py.
 
 
 @pytest.fixture
