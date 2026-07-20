@@ -2359,18 +2359,34 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
         if claude_md_parts:
             dst = CLAUDE_HOME / _CLAUDE_MD_NAME
-            # Remove stale symlink, or back up a pre-existing real file first
-            if dst.is_symlink():
-                dst.unlink()
-            elif dst.exists():
-                backup = _backup_existing_claude_md(dst)
-                if backup:
-                    print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
-                dst.unlink()
-            dst.write_text("\n\n---\n\n".join(claude_md_parts) + "\n")
-            _record_managed_claude_md(dst)
-            sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
-            _cprint(f"[OK] Wrote chained CLAUDE.md ({' + '.join(sources)})")
+            chained = "\n\n---\n\n".join(claude_md_parts) + "\n"
+            up_to_date = False
+            # Carry over any third-party fenced block (agentibridge et al) before
+            # this write replaces the file wholesale.
+            if dst.exists() and not dst.is_symlink():
+                chained = _preserve_foreign_blocks(chained, dst.read_text())
+                # Same up-to-date guard the single-profile writer uses: without it
+                # every chained init takes the backup+overwrite path below and
+                # drops another CLAUDE.md.bak.<timestamp> into ~/.claude.
+                # NB: skip only the write — steps 5a/5b and MCP install still run.
+                up_to_date = _strip_managed_blocks(dst.read_text()).strip() == chained.strip()
+
+            if up_to_date:
+                _record_managed_claude_md(dst)
+                _cprint(f"  [--] Chained {_CLAUDE_MD_NAME} already up to date")
+            else:
+                # Remove stale symlink, or back up a pre-existing real file first
+                if dst.is_symlink():
+                    dst.unlink()
+                elif dst.exists():
+                    backup = _backup_existing_claude_md(dst)
+                    if backup:
+                        print(f"  Backed up existing {_CLAUDE_MD_NAME} → {backup}")
+                    dst.unlink()
+                dst.write_text(chained)
+                _record_managed_claude_md(dst)
+                sources = [pn for pn, pd in profile_dirs if (pd / _CLAUDE_MD_NAME).exists()]
+                _cprint(f"[OK] Wrote chained CLAUDE.md ({' + '.join(sources)})")
         else:
             # No CLAUDE.md in any profile — try last profile as fallback
             _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
@@ -3200,6 +3216,39 @@ _MANAGED_BLOCK_MARKERS = (
 )
 
 
+# A fenced block owned by some *other* tool — `<!-- BEGIN name -->…<!-- END name -->`
+# with matching names. agentibridge writes one; anything else may too. The profile
+# writer overwrites CLAUDE.md wholesale, so without this these are collateral
+# damage on every `agentihooks init` and only return when their own installer
+# re-runs.
+_FOREIGN_BLOCK_RE = re.compile(
+    r"<!--\s*BEGIN\s+(?P<name>[A-Za-z0-9._-]+)\s*-->.*?<!--\s*END\s+(?P=name)\s*-->",
+    re.DOTALL,
+)
+
+
+def _extract_foreign_blocks(text: str) -> list[str]:
+    """Return fenced blocks in *text* that agentihooks does not own.
+
+    Owned blocks are stripped first, so only third-party fences remain. Returned
+    in document order, each including its own BEGIN/END markers.
+    """
+    remainder = _strip_managed_blocks(text)
+    return [m.group(0).strip() for m in _FOREIGN_BLOCK_RE.finditer(remainder)]
+
+
+def _preserve_foreign_blocks(body: str, current: str) -> str:
+    """Append third-party fenced blocks found in *current* to *body*.
+
+    Lets the profile writer replace the content it owns without destroying a
+    neighbour's block, so re-running init is non-destructive.
+    """
+    foreign = _extract_foreign_blocks(current)
+    if not foreign:
+        return body
+    return body.rstrip("\n") + "\n\n" + "\n\n".join(foreign) + "\n"
+
+
 def _strip_managed_blocks(text: str) -> str:
     """Return *text* with the bundle and CI-manifesto blocks removed.
 
@@ -3322,6 +3371,12 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     # installed profile from single-profile installs too — the common shape.
     # This only touches the rendered dst content; src on disk is never mutated.
     new_content = f"<!-- profile: {profile_name} -->\n{src.read_text()}"
+
+    # Carry over any third-party fenced block (agentibridge et al). This write
+    # replaces the whole file, so without this it silently destroys a neighbour's
+    # content that only its own installer can put back.
+    if dst.exists() and not dst.is_symlink():
+        new_content = _preserve_foreign_blocks(new_content, dst.read_text())
 
     # Check if content is already up to date. Compare against the file with the
     # managed blocks (bundle prepend, CI manifesto) stripped — they are appended

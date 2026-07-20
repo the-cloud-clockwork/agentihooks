@@ -639,6 +639,53 @@ class TestBundleClaudeMdPrepend:
         backups = list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))
         assert backups == [], f"backup churn on re-run: {[b.name for b in backups]}"
 
+    def test_third_party_block_survives_the_profile_write(self, install_env):
+        """A neighbour's fenced block must not be collateral damage.
+
+        The profile writer replaces CLAUDE.md wholesale; agentibridge and friends
+        append their own BEGIN/END block and only their own installer can put it
+        back.
+        """
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        foreign = "<!-- BEGIN agentibridge -->\nthird-party docs\n<!-- END agentibridge -->"
+        dst.write_text(f"<!-- profile: test-profile -->\n# old\n\n{foreign}\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._install_system_prompt(install_env["profile"], "test-profile")
+
+        text = dst.read_text()
+        assert "<!-- BEGIN agentibridge -->" in text
+        assert "third-party docs" in text
+        assert text.count("<!-- BEGIN agentibridge -->") == 1
+        # Profile content was still refreshed from source.
+        assert (install_env["profile"] / "CLAUDE.md").read_text().strip() in text
+
+    def test_foreign_block_extraction_ignores_owned_blocks(self, install_env, tmp_path):
+        """Owned blocks must never be mistaken for third-party ones."""
+        text = (
+            f"{install._BUNDLE_CLAUDE_MD_BEGIN}\nshared\n{install._BUNDLE_CLAUDE_MD_END}\n\n"
+            "<!-- profile: anton -->\n# Anton\n\n"
+            "<!-- BEGIN agentibridge -->\nkeep me\n<!-- END agentibridge -->\n\n"
+            "<!-- BEGIN CI MANIFESTO (auto-injected by agentihooks init) -->\n"
+            "doctrine\n<!-- END CI MANIFESTO -->\n"
+        )
+        found = install._extract_foreign_blocks(text)
+        assert len(found) == 1
+        assert "agentibridge" in found[0] and "keep me" in found[0]
+
+    def test_chain_up_to_date_does_not_abort_the_install(self):
+        """The chain guard must skip only the write, never return early.
+
+        A bare `return` there would silently skip the bundle prepend, the
+        manifesto append, and all MCP installation.
+        """
+        import inspect
+
+        src = inspect.getsource(install._install_global_inner)
+        chain = src.split("Chain mode", 1)[1].split("--- 5a.", 1)[0]
+        assert "already up to date" in chain
+        assert "\n                    return\n" not in chain
+        assert "up_to_date" in chain
+
     def test_manifesto_block_survives_a_bundle_refresh(self, install_env, tmp_path):
         """Full pipeline order: profile -> bundle prepend -> manifesto append.
 
