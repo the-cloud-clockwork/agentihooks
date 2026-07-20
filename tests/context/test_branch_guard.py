@@ -128,8 +128,11 @@ class TestBranchGuard:
 
 
 class TestPRBaseGuard:
-    """gh pr create must target dev explicitly; main/master and bare-default are
-    blocked (CI Manifesto §4/§5 — there is no dev→main PR flow)."""
+    """gh pr create must name an explicit --base.
+
+    A dev→main snapshot PR is the sanctioned way into main (CI Manifesto §4/§5),
+    so --base main is allowed under the PR signal. Only a bare create is blocked,
+    because it targets the default branch implicitly."""
 
     def _check(self, command: str):
         from hooks.context.branch_guard import check_branch_guard
@@ -158,11 +161,12 @@ class TestPRBaseGuard:
         with s1, s2, s3:
             self._check(command)  # should not raise
 
-    def test_pr_base_main_blocked(self):
-        self._assert_blocked_with_signal("gh pr create --base main --fill")
+    def test_pr_base_main_allowed(self):
+        # The dev→main snapshot PR is the only sanctioned path into main.
+        self._assert_allowed_with_signal("gh pr create --base main --fill")
 
-    def test_pr_base_master_blocked(self):
-        self._assert_blocked_with_signal("gh pr create --base master -t x")
+    def test_pr_base_master_allowed(self):
+        self._assert_allowed_with_signal("gh pr create --base master -t x")
 
     def test_pr_bare_create_blocked(self):
         # a bare create defaults to the repo default branch (main)

@@ -133,13 +133,21 @@ class TestBranchGuardIntegration:
         set_controls_disabled("test")
         self._check("gh pr create --base main --title t --body b")
 
-    def test_pr_base_main_still_required_under_bypass(self):
+    def test_pr_creation_unlocked_under_bypass(self):
+        # Bypass mode unlocks branch and PR creation; the HARD FLOOR does not move.
+        from hooks.context.controls_toggle import set_controls_disabled
+
+        set_controls_disabled("test")
+        self._check("gh pr create --base dev --title t --body b")
+
+    def test_bare_pr_create_still_blocked_under_bypass(self):
+        # An implicit base is still refused — the target must be deliberate.
         from hooks.context.controls_toggle import set_controls_disabled
         from hooks.hook_manager import BlockAction
 
         set_controls_disabled("test")
         with pytest.raises(BlockAction):
-            self._check("gh pr create --base dev --title t --body b")
+            self._check("gh pr create --fill")
 
     def test_direct_push_main_still_blocked(self):
         from hooks.context.controls_toggle import set_controls_disabled
