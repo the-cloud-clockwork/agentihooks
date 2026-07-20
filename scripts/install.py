@@ -2373,7 +2373,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                 up_to_date = _same_content(_strip_managed_blocks(dst.read_text()), chained)
 
             if up_to_date:
-                _record_managed_claude_md(dst)
+                # Back up before claiming ownership: an operator file that merely
+                # happens to match would otherwise be deleted by uninstall with
+                # "no pre-agentihooks original recorded".
+                _claim_claude_md_ownership(dst)
                 _cprint(f"  [--] Chained {_CLAUDE_MD_NAME} already up to date")
             else:
                 # Remove stale symlink, or back up a pre-existing real file first
@@ -3330,6 +3333,20 @@ def _strip_managed_blocks(text: str) -> str:
     return text
 
 
+def _claim_claude_md_ownership(dst: Path) -> None:
+    """Record agentihooks as owner of *dst*, backing up an unowned file first.
+
+    Uninstall deletes a managed CLAUDE.md outright when no original is recorded,
+    so claiming ownership without first capturing the operator's file is silent
+    data loss. Every path that records ownership must go through here.
+    """
+    if dst.exists() and not dst.is_symlink() and not _claude_md_is_managed(dst):
+        backup = _backup_existing_claude_md(dst)
+        if backup:
+            _cprint(f"  [OK] Backed up pre-existing {_CLAUDE_MD_NAME} → {backup.name}")
+    _record_managed_claude_md(dst)
+
+
 def _force_backup_if_malformed(dst: Path) -> None:
     """Back up *dst* unconditionally when its fenced blocks don't pair cleanly.
 
@@ -3424,10 +3441,7 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
         # claimed ownership, capture the operator's original first — uninstall
         # deletes a managed file outright when no original was recorded.
         after = current
-        if not _claude_md_is_managed(dst):
-            backup = _backup_existing_claude_md(dst)
-            if backup:
-                _cprint(f"  [OK] Backed up pre-existing {_CLAUDE_MD_NAME} → {backup.name}")
+        _claim_claude_md_ownership(dst)
 
     new_content = block + after
 
@@ -3530,8 +3544,15 @@ def _backup_existing_claude_md(dst: Path) -> Path | None:
     """
     if not dst.exists() or dst.is_symlink():
         return None
+    # Second granularity collides on fast successive writes and shutil.copy2 would
+    # clobber the previous generation — including the one recorded as the user's
+    # original. Never overwrite an existing backup.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup = dst.with_suffix(f".md.bak.{timestamp}")
+    suffix = 1
+    while backup.exists():
+        backup = dst.with_suffix(f".md.bak.{timestamp}_{suffix}")
+        suffix += 1
     shutil.copy2(dst, backup)
     state = _load_state()
     # First install: nothing managed yet and no original recorded → this backup
@@ -3761,13 +3782,27 @@ def uninstall_global(args: argparse.Namespace) -> None:
         original = cmd_state.get("claude_md_original_backup")
         original_path = Path(original) if original else None
         if original_path and original_path.exists():
+            # The original predates any third-party block added since (agentibridge
+            # et al). Every init carried those forward; dropping them here would
+            # destroy live content at the one moment it matters most.
+            restored = original_path.read_text()
+            if claude_md_dst.exists() and not claude_md_dst.is_symlink():
+                restored = _preserve_foreign_blocks(restored, claude_md_dst.read_text())
             if claude_md_dst.is_symlink() or claude_md_dst.exists():
                 claude_md_dst.unlink()
-            shutil.copy2(original_path, claude_md_dst)
+            claude_md_dst.write_text(restored)
             _cprint(f"[OK] Restored pre-agentihooks {claude_md_dst} from {original_path.name}")
         else:
+            # Nothing to restore, but a neighbour's block must not go with it.
+            carried = ""
+            if claude_md_dst.exists() and not claude_md_dst.is_symlink():
+                carried = _preserve_foreign_blocks("", claude_md_dst.read_text()).strip()
             claude_md_dst.unlink()
-            _cprint(f"[OK] Removed {claude_md_dst} (no pre-agentihooks original recorded)")
+            if carried:
+                claude_md_dst.write_text(carried + "\n")
+                _cprint(f"[OK] Removed agentihooks content from {claude_md_dst}; kept third-party blocks")
+            else:
+                _cprint(f"[OK] Removed {claude_md_dst} (no pre-agentihooks original recorded)")
         cmd_state.pop("managed_claude_md", None)
         cmd_state.pop("claude_md_original_backup", None)
         _save_state(cmd_state)
