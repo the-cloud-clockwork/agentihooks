@@ -1543,6 +1543,24 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     agentihooks init                    → re-run global install (bundle must be linked)
     agentihooks init --force            → clean install (wipe state, re-init from scratch)
     """
+    if getattr(args, "dry_run", False):
+        # The flag was accepted by argparse and read nowhere, so `init --dry-run`
+        # performed a full destructive install — rewriting CLAUDE.md, MCP config,
+        # ~/.bashrc and reinstalling the CLI — while its help promised a preview.
+        # Refusing loudly beats silently doing the opposite of what was asked.
+        print(
+            "ERROR: `init --dry-run` is not implemented — init writes CLAUDE.md, MCP\n"
+            "config, ~/.bashrc and the CLI, and none of that is previewable today.\n"
+            "Refusing rather than performing a real install under a --dry-run flag.\n"
+            "\n"
+            "To inspect without installing:\n"
+            "  agentihooks status          # current install state\n"
+            "  agentihooks doctor          # hook health\n"
+            "  agentihooks --list-profiles # resolvable profiles",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     if getattr(args, "force", False):
         _clean_state_dir()
     bundle_path = getattr(args, "bundle", None)
@@ -4906,7 +4924,11 @@ def main() -> None:
         default=None,
         help="Settings-only overlay profile (applies settings.json/MCP on top, keeps persona from --profile)",
     )
-    init_p.add_argument("--dry-run", action="store_true", help="Print settings without writing")
+    init_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Not implemented for init — refuses rather than performing a real install",
+    )
     init_p.add_argument(
         "--link-profile",
         action="append",

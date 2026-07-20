@@ -953,3 +953,16 @@ class TestProfileListing:
 
         output = capsys.readouterr().out
         assert "[no CLAUDE.md]" in output
+
+
+class TestInitDryRunRefuses:
+    """`init --dry-run` must never perform a real install."""
+
+    def test_dry_run_exits_without_installing(self, tmp_path, capsys):
+        import argparse
+
+        args = argparse.Namespace(dry_run=True, force=False, bundle=None, init_profile=None)
+        with pytest.raises(SystemExit) as exc:
+            install.cmd_init_unified(args)
+        assert exc.value.code == 2
+        assert "not implemented" in capsys.readouterr().err
