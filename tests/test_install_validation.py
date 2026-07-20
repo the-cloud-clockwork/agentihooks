@@ -669,8 +669,68 @@ class TestBundleClaudeMdPrepend:
             "doctrine\n<!-- END CI MANIFESTO -->\n"
         )
         found = install._extract_foreign_blocks(text)
+        assert [name for name, _ in found] == ["agentibridge"]
+        assert "keep me" in found[0][1]
+
+    def test_documented_example_block_does_not_grow(self, install_env):
+        """A profile that documents the marker format must not duplicate it.
+
+        The example is a well-formed block, so without dedup-by-name it is
+        re-appended on every init and the file grows without bound.
+        """
+        profile = install_env["profile"]
+        (profile / "CLAUDE.md").write_text(
+            "# Anton\nFormat:\n\n<!-- BEGIN sample -->\nexample\n<!-- END sample -->\n"
+        )
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        dst.write_text(
+            "<!-- profile: test-profile -->\n# old\n\n"
+            "<!-- BEGIN agentibridge -->\nab\n<!-- END agentibridge -->\n"
+        )
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            for _ in range(4):
+                install._install_system_prompt(profile, "test-profile")
+
+        text = dst.read_text()
+        assert text.count("<!-- BEGIN sample -->") == 1
+        assert text.count("<!-- BEGIN agentibridge -->") == 1
+        assert len(list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))) == 1
+
+    def test_nested_block_preserves_outer_content(self):
+        """Depth tracking, not first-END matching."""
+        text = (
+            "<!-- BEGIN foo -->\nouter-before\n"
+            "<!-- BEGIN foo -->\ninner\n<!-- END foo -->\n"
+            "outer-after-must-survive\n<!-- END foo -->\n"
+        )
+        found = install._extract_foreign_blocks(text)
         assert len(found) == 1
-        assert "agentibridge" in found[0] and "keep me" in found[0]
+        assert "outer-after-must-survive" in found[0][1]
+
+    def test_owned_markers_inside_a_foreign_block_are_not_stripped(self):
+        """Owned-block removal is scoped to depth 0."""
+        text = (
+            "<!-- BEGIN evil -->\nbefore\n"
+            f"{install._BUNDLE_CLAUDE_MD_BEGIN}\npayload-must-survive\n"
+            f"{install._BUNDLE_CLAUDE_MD_END}\nafter\n<!-- END evil -->\n"
+        )
+        assert "payload-must-survive" in install._strip_managed_blocks(text)
+        found = install._extract_foreign_blocks(text)
+        assert "payload-must-survive" in found[0][1]
+
+    def test_malformed_markers_force_a_backup(self, install_env):
+        """Ambiguous markup is unrecoverable by rewrite — guarantee a backup."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        dst.write_text(
+            "<!-- profile: test-profile -->\n# old\n\n"
+            "<!-- BEGIN agentibridge -->\nin-flight, never closed\n"
+        )
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._install_system_prompt(install_env["profile"], "test-profile")
+
+        backups = list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))
+        assert backups, "malformed markers must force a backup"
+        assert "in-flight, never closed" in backups[0].read_text()
 
     def test_chain_up_to_date_does_not_abort_the_install(self):
         """The chain guard must skip only the write, never return early.
