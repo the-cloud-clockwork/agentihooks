@@ -34,6 +34,7 @@ agentihooks bundle pull
 my-tools/                                   <- the bundle directory
 ├── .claude/                                # Bundle-global assets (layer 2 of 3-layer merge)
 │   ├── .mcp.json                           # Bundle MCP servers
+│   ├── CLAUDE.md                           # OPTIONAL — shared directives prepended ahead of every profile
 │   ├── skills/                             # Bundle-global skills
 │   ├── agents/                             # Bundle-global agents
 │   ├── commands/                           # Bundle-global commands
@@ -77,6 +78,33 @@ Later layers override earlier ones. This lets you start with the agentihooks bas
 For settings, the merge order is: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL.
 
 For MCP servers: hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
+
+## Shared `CLAUDE.md`
+
+`~/.claude/CLAUDE.md` is assembled from up to three sources, in this order:
+
+```
+[ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ CI manifesto ]
+```
+
+An **optional** `<bundle>/.claude/CLAUDE.md` holds directives every profile should
+share, so they are written once instead of duplicated into each profile. It is
+prepended exactly once per install — including for a chained
+`--profile a,b` — inside these markers:
+
+```
+<!-- BEGIN BUNDLE CLAUDE.md (auto-injected by agentihooks init) -->
+...
+<!-- END BUNDLE CLAUDE.md -->
+```
+
+Because profile content is written *after* the shared block, a profile can still
+override shared guidance by restating it. Keep profile `CLAUDE.md` files to what
+is genuinely profile-specific.
+
+Re-running `agentihooks init` replaces the block in place — it never stacks. If the
+bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
+prepend onto, the step is a no-op.
 
 ## Profile Resolution Order
 
