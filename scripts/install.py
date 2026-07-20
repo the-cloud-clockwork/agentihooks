@@ -2364,12 +2364,13 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             # Carry over any third-party fenced block (agentibridge et al) before
             # this write replaces the file wholesale.
             if dst.exists() and not dst.is_symlink():
+                _force_backup_if_malformed(dst)
                 chained = _preserve_foreign_blocks(chained, dst.read_text())
                 # Same up-to-date guard the single-profile writer uses: without it
                 # every chained init takes the backup+overwrite path below and
                 # drops another CLAUDE.md.bak.<timestamp> into ~/.claude.
                 # NB: skip only the write — steps 5a/5b and MCP install still run.
-                up_to_date = _strip_managed_blocks(dst.read_text()).strip() == chained.strip()
+                up_to_date = _same_content(_strip_managed_blocks(dst.read_text()), chained)
 
             if up_to_date:
                 _record_managed_claude_md(dst)
@@ -3216,57 +3217,143 @@ _MANAGED_BLOCK_MARKERS = (
 )
 
 
-# A fenced block owned by some *other* tool — `<!-- BEGIN name -->…<!-- END name -->`
-# with matching names. agentibridge writes one; anything else may too. The profile
-# writer overwrites CLAUDE.md wholesale, so without this these are collateral
-# damage on every `agentihooks init` and only return when their own installer
-# re-runs.
-_FOREIGN_BLOCK_RE = re.compile(
-    r"<!--\s*BEGIN\s+(?P<name>[A-Za-z0-9._-]+)\s*-->.*?<!--\s*END\s+(?P=name)\s*-->",
-    re.DOTALL,
-)
+# Fenced blocks in CLAUDE.md — `<!-- BEGIN name -->…<!-- END name -->`. agentihooks
+# owns two of them; agentibridge and anything else may own others. The profile
+# writer replaces the file wholesale, so foreign blocks must be carried across or
+# they are collateral damage on every init.
+#
+# This is scanned with a depth-tracking walk rather than a regex splice. Flat
+# "find first BEGIN, cut to nearest END" surgery silently loses content on nested
+# blocks, interleaved blocks, and owned-looking markers embedded inside a foreign
+# block — all of which are one documentation example away from happening.
+_BLOCK_MARKER_RE = re.compile(r"<!--\s*(?P<kind>BEGIN|END)\s+(?P<rest>[^\n]*?)\s*-->")
+
+_OWNED_BLOCK_NAMES = frozenset({"CI MANIFESTO", "BUNDLE CLAUDE.md"})
 
 
-def _extract_foreign_blocks(text: str) -> list[str]:
-    """Return fenced blocks in *text* that agentihooks does not own.
+def _marker_name(rest: str) -> str:
+    """Normalise a marker's trailing text to a block name.
 
-    Owned blocks are stripped first, so only third-party fences remain. Returned
-    in document order, each including its own BEGIN/END markers.
+    Owned BEGIN markers carry a parenthetical the matching END does not, so they
+    are folded to a bare name before pairing.
     """
-    remainder = _strip_managed_blocks(text)
-    return [m.group(0).strip() for m in _FOREIGN_BLOCK_RE.finditer(remainder)]
+    for owned in _OWNED_BLOCK_NAMES:
+        if rest.startswith(owned):
+            return owned
+    return rest
+
+
+def _scan_top_level_blocks(text: str) -> tuple[list[tuple[str, int, int]], bool]:
+    """Return ``([(name, start, end)], unbalanced)`` for depth-0 fenced blocks.
+
+    Only blocks that open and close at the top level are reported, so markers
+    nested inside another block are left alone. ``unbalanced`` is True when a
+    BEGIN never closes or an END has no opener — the caller warns rather than
+    silently dropping the region.
+    """
+    stack: list[tuple[str, int]] = []
+    blocks: list[tuple[str, int, int]] = []
+    unbalanced = False
+
+    for m in _BLOCK_MARKER_RE.finditer(text):
+        name = _marker_name(m.group("rest"))
+        if m.group("kind") == "BEGIN":
+            stack.append((name, m.start()))
+            continue
+        for i in range(len(stack) - 1, -1, -1):
+            if stack[i][0] == name:
+                open_name, open_at = stack[i]
+                if i != len(stack) - 1:
+                    unbalanced = True  # inner blocks left unclosed
+                del stack[i:]
+                if not stack:
+                    blocks.append((open_name, open_at, m.end()))
+                break
+        else:
+            unbalanced = True  # END with no matching BEGIN
+
+    if stack:
+        unbalanced = True
+    return blocks, unbalanced
+
+
+def _extract_foreign_blocks(text: str) -> list[tuple[str, str]]:
+    """Return ``[(name, block_text)]`` for top-level blocks agentihooks does not own.
+
+    Document order, first occurrence per name, markers included.
+    """
+    blocks, unbalanced = _scan_top_level_blocks(text)
+    if unbalanced:
+        _cprint(
+            f"  [!!] Unbalanced BEGIN/END markers in {_CLAUDE_MD_NAME} — "
+            "a third-party block may be malformed; preserving what pairs cleanly."
+        )
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for name, start, end in blocks:
+        if name in _OWNED_BLOCK_NAMES or name in seen:
+            continue
+        seen.add(name)
+        out.append((name, text[start:end].strip()))
+    return out
 
 
 def _preserve_foreign_blocks(body: str, current: str) -> str:
-    """Append third-party fenced blocks found in *current* to *body*.
+    """Append third-party fenced blocks from *current* that *body* lacks.
 
-    Lets the profile writer replace the content it owns without destroying a
-    neighbour's block, so re-running init is non-destructive.
+    Deduplicated by block name against the incoming body. Without that check a
+    profile or bundle file that merely *documents* the marker convention would
+    have its example re-appended on every init, growing the file without bound.
     """
-    foreign = _extract_foreign_blocks(current)
-    if not foreign:
+    incoming = {name for name, _ in _extract_foreign_blocks(body)}
+    carried = [text for name, text in _extract_foreign_blocks(current) if name not in incoming]
+    if not carried:
         return body
-    return body.rstrip("\n") + "\n\n" + "\n\n".join(foreign) + "\n"
+    return body.rstrip("\n") + "\n\n" + "\n\n".join(carried) + "\n"
 
 
 def _strip_managed_blocks(text: str) -> str:
-    """Return *text* with the bundle and CI-manifesto blocks removed.
+    """Return *text* with agentihooks' own top-level blocks removed.
 
-    Lets the profile writer compare like with like. Without this its
-    "already up to date" check compares profile-only content against a file
-    that also carries the managed blocks, never matches, and so takes the
-    backup+overwrite path on every single run — littering ~/.claude with a
-    new CLAUDE.md.bak.<timestamp> each time.
+    Lets the profile writer compare like with like: without it the "already up to
+    date" check compares profile-only content against a file that also carries the
+    managed blocks, never matches, and takes the backup+overwrite path on every
+    run — littering ~/.claude with a CLAUDE.md.bak.<timestamp> each time.
+
+    Scoped to depth 0, so an owned-looking marker inside somebody else's block is
+    left untouched.
     """
-    if _BUNDLE_CLAUDE_MD_BEGIN in text and _BUNDLE_CLAUDE_MD_END in text:
-        head, _, rest = text.partition(_BUNDLE_CLAUDE_MD_BEGIN)
-        _, _, tail = rest.partition(_BUNDLE_CLAUDE_MD_END)
-        text = head + tail.lstrip("\n")
-    if _CI_MANIFESTO_BEGIN_PREFIX in text and _CI_MANIFESTO_END in text:
-        head, _, rest = text.partition(_CI_MANIFESTO_BEGIN_PREFIX)
-        _, _, tail = rest.partition(_CI_MANIFESTO_END)
-        text = head.rstrip("\n") + ("\n" if head.strip() else "") + tail.lstrip("\n")
+    blocks, _ = _scan_top_level_blocks(text)
+    owned = [(s, e) for name, s, e in blocks if name in _OWNED_BLOCK_NAMES]
+    for start, end in reversed(owned):
+        text = text[:start] + text[end:]
     return text
+
+
+def _force_backup_if_malformed(dst: Path) -> None:
+    """Back up *dst* unconditionally when its fenced blocks don't pair cleanly.
+
+    Interleaved or never-closed markers are ambiguous — there is no correct way
+    to carry them across a rewrite. Rather than guess, guarantee the operator can
+    get the content back.
+    """
+    if not dst.exists() or dst.is_symlink():
+        return
+    if not _scan_top_level_blocks(dst.read_text())[1]:
+        return
+    backup = _backup_existing_claude_md(dst)
+    if backup:
+        _cprint(f"  [!!] Malformed block markers — backed up {_CLAUDE_MD_NAME} → {backup.name}")
+
+
+def _same_content(a: str, b: str) -> bool:
+    """Compare two CLAUDE.md bodies ignoring incidental whitespace.
+
+    Removing a block leaves blank lines behind that the freshly-composed body
+    does not have; comparing raw would report "changed" on every run.
+    """
+    norm = lambda s: "\n".join(ln.rstrip() for ln in s.split("\n") if ln.strip())  # noqa: E731
+    return norm(a) == norm(b)
 
 
 def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
@@ -3376,6 +3463,7 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     # replaces the whole file, so without this it silently destroys a neighbour's
     # content that only its own installer can put back.
     if dst.exists() and not dst.is_symlink():
+        _force_backup_if_malformed(dst)
         new_content = _preserve_foreign_blocks(new_content, dst.read_text())
 
     # Check if content is already up to date. Compare against the file with the
@@ -3383,7 +3471,7 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     # by later steps, so comparing raw would never match once either exists and
     # every re-run would take the backup+overwrite path below.
     if dst.exists() and not dst.is_symlink():
-        if _strip_managed_blocks(dst.read_text()).strip() == new_content.strip():
+        if _same_content(_strip_managed_blocks(dst.read_text()), new_content):
             _cprint(f"  [--] {_CLAUDE_MD_NAME} already up to date (from {profile_name})")
             return
 
