@@ -20,6 +20,22 @@ import install  # noqa: I001
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _isolate_agentihooks_state(tmp_path, monkeypatch):
+    """Keep every test in this module off the real ~/.agentihooks/state.json.
+
+    `_record_managed_claude_md` / `_backup_existing_claude_md` are reached
+    transitively via `_install_system_prompt`, and they persist through the
+    module-level STATE_JSON / AGENTIHOOKS_STATE_DIR globals. Unpatched, a test
+    run rewrites the developer's real install state (and its one-generation
+    backup) with tmp paths.
+    """
+    state_dir = tmp_path / "_agentihooks_state"
+    state_dir.mkdir()
+    monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", state_dir, raising=False)
+    monkeypatch.setattr(install, "STATE_JSON", state_dir / "state.json", raising=False)
+
+
 @pytest.fixture
 def install_env(tmp_path):
     """Build a complete fake install environment with all 3 layers."""
@@ -325,6 +341,336 @@ class TestClaudeMdLinking:
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._cleanup_stale_claude_md_symlink()
         assert not dst.exists()
+
+
+# ---------------------------------------------------------------------------
+# Bundle-level shared CLAUDE.md tests
+# ---------------------------------------------------------------------------
+
+
+class TestBundleClaudeMdPrepend:
+    """Test <bundle>/.claude/CLAUDE.md is prepended ahead of all profile content."""
+
+    @staticmethod
+    def _write_bundle_md(install_env, text: str) -> Path:
+        bundle_md = install_env["bundle"] / ".claude" / "CLAUDE.md"
+        bundle_md.write_text(text)
+        return bundle_md
+
+    @staticmethod
+    def _install_profile(install_env) -> Path:
+        """Write the profile-only CLAUDE.md, as step 5 does, and return dst."""
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._install_system_prompt(install_env["profile"], "test-profile")
+        return install_env["claude_home"] / "CLAUDE.md"
+
+    def test_prepends_ahead_of_profile_content(self, install_env):
+        dst = self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert text.startswith(install._BUNDLE_CLAUDE_MD_BEGIN)
+        assert "shared directive" in text
+        # Profile content must come AFTER the bundle block so it still wins.
+        assert text.index(install._BUNDLE_CLAUDE_MD_END) < text.index("<!-- profile: test-profile -->")
+
+    def test_idempotent_no_marker_stacking(self, install_env):
+        dst = self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            first = dst.read_text()
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert text == first
+        assert text.count(install._BUNDLE_CLAUDE_MD_BEGIN) == 1
+        assert text.count(install._BUNDLE_CLAUDE_MD_END) == 1
+
+    def test_updates_in_place_when_bundle_content_changes(self, install_env):
+        dst = self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nversion one\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            self._write_bundle_md(install_env, "# Shared\nversion two\n")
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert "version two" in text
+        assert "version one" not in text
+        assert text.count(install._BUNDLE_CLAUDE_MD_BEGIN) == 1
+        assert "<!-- profile: test-profile -->" in text
+
+    def test_absent_bundle_claude_md_is_noop(self, install_env):
+        dst = self._install_profile(install_env)
+        before = dst.read_text()
+        # Bundle exists (fixture builds it) but has no .claude/CLAUDE.md
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+        assert dst.read_text() == before
+
+    def test_empty_bundle_claude_md_is_noop(self, install_env):
+        dst = self._install_profile(install_env)
+        before = dst.read_text()
+        self._write_bundle_md(install_env, "   \n\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+        assert dst.read_text() == before
+
+    def test_no_bundle_linked_is_noop(self, install_env):
+        dst = self._install_profile(install_env)
+        before = dst.read_text()
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(None)
+        assert dst.read_text() == before
+
+    def test_noop_when_claude_md_missing(self, install_env):
+        """No profile CLAUDE.md means nothing to prepend onto — don't create one."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+        assert not dst.exists()
+
+    def test_survives_install_system_prompt_early_return(self, install_env):
+        """A bundle file added after the first install still lands.
+
+        The second _install_system_prompt call takes its 'already up to date'
+        early return, so the bundle block must not depend on that write happening.
+        """
+        dst = self._install_profile(install_env)
+        # Second call: content identical -> early return, dst untouched
+        unchanged = dst.read_text()
+        dst2 = self._install_profile(install_env)
+        assert dst2.read_text() == unchanged
+
+        # Bundle file appears only now
+        self._write_bundle_md(install_env, "# Shared\nlate arrival\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+        assert "late arrival" in dst.read_text()
+
+    def test_marker_does_not_match_profile_detection_regex(self, install_env):
+        """The bundle markers must not register as a phantom chain member."""
+        import re
+
+        dst = self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        matches = re.findall(r"<!--\s*profile:\s*([A-Za-z0-9_,-]+)\s*-->", dst.read_text())
+        assert matches == ["test-profile"]
+
+    def test_chain_mode_gets_bundle_prefix_exactly_once(self, install_env):
+        """Chained install: one bundle block at the top, ahead of every profile."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        # Reproduce the chain writer's output (install_global is not unit-tested)
+        parts = [
+            "<!-- profile: alpha -->\n# Alpha\n",
+            "<!-- profile: beta -->\n# Beta\n",
+        ]
+        dst.write_text("\n\n---\n\n".join(parts) + "\n")
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert text.count(install._BUNDLE_CLAUDE_MD_BEGIN) == 1
+        end = text.index(install._BUNDLE_CLAUDE_MD_END)
+        assert end < text.index("<!-- profile: alpha -->")
+        assert end < text.index("<!-- profile: beta -->")
+
+    def test_install_system_prompt_unaware_of_bundle(self, install_env):
+        """The seam holds: _install_system_prompt never sees bundle content."""
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        profile = install_env["profile"]
+        dst = self._install_profile(install_env)
+        assert dst.read_text() == (
+            f"<!-- profile: test-profile -->\n{(profile / 'CLAUDE.md').read_text()}"
+        )
+
+    def test_does_not_write_through_symlink(self, install_env):
+        """Never write into a profile source via a leftover symlink."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        source = install_env["profile"] / "CLAUDE.md"
+        original = source.read_text()
+        dst.symlink_to(source)
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+        assert source.read_text() == original
+
+    def test_unchanged_content_avoids_a_write(self, install_env):
+        """The up-to-date short-circuit must actually skip the write.
+
+        Byte-identical output makes this invisible to content assertions, so
+        assert on the write itself.
+        """
+        self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            # Second call with nothing changed must not touch the file at all.
+            with patch.object(Path, "write_text", autospec=True) as spy:
+                install._prepend_bundle_claude_md(install_env["bundle"])
+            assert spy.call_count == 0
+
+    def test_markers_never_contain_the_profile_keyword(self):
+        """Guard the documented invariant, not just today's regex shape.
+
+        The phantom-chain regex currently requires `<!-- profile: NAME -->` to
+        close cleanly, so a marker merely *containing* "profile:" would slip
+        through. Pin the broader contract the docstring states, so loosening
+        that regex later cannot silently introduce a phantom chain member.
+        """
+        for marker in (install._BUNDLE_CLAUDE_MD_BEGIN, install._BUNDLE_CLAUDE_MD_END):
+            assert "profile:" not in marker
+
+    def test_seam_is_structural_not_incidental(self):
+        """_install_system_prompt must not grow a bundle-aware parameter.
+
+        Passing bundle content in through a new default argument would keep the
+        unit tests green while changing what real installs write.
+        """
+        import inspect
+
+        params = inspect.signature(install._install_system_prompt).parameters
+        assert list(params) == ["profile_dir", "profile_name"]
+        # It may *mention* the bundle in prose, but must never read from it.
+        src = inspect.getsource(install._install_system_prompt)
+        assert "bundle_dir" not in src
+        assert "_BUNDLE_CLAUDE_MD_BEGIN" not in src
+
+    def test_install_global_wires_the_call_in_order(self):
+        """install_global is never executed by any test, so pin the wiring.
+
+        Catches a dropped call, a call placed inside the per-profile chain loop
+        (which would duplicate the block), or the wrong argument being threaded.
+        """
+        import inspect
+
+        # install_global is a thin lock wrapper; the body lives in the inner fn.
+        src = inspect.getsource(install._install_global_inner)
+        assert "_prepend_bundle_claude_md(bundle_dir)" in src
+        # Must sit between the profile writer and the manifesto appender.
+        assert src.index("_install_system_prompt") < src.index("_prepend_bundle_claude_md(bundle_dir)")
+        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index(
+            "_append_ci_manifesto_to_claude_md()"
+        )
+        # Exactly one call site — never inside the chain loop.
+        assert src.count("_prepend_bundle_claude_md(") == 1
+
+    def test_marker_does_not_claim_agentihooks_ownership(self):
+        """A bundle block alone must not make a file look agentihooks-managed.
+
+        `_claude_md_is_managed` treats `_CLAUDE_MD_MANAGED_MARKER` as proof of
+        ownership, and uninstall deletes a managed file outright when no original
+        was recorded. A marker carrying that phrase would get an operator's
+        hand-authored CLAUDE.md deleted.
+        """
+        for marker in (install._BUNDLE_CLAUDE_MD_BEGIN, install._BUNDLE_CLAUDE_MD_END):
+            assert install._CLAUDE_MD_MANAGED_MARKER not in marker
+
+    def test_hand_authored_file_is_backed_up_before_prepend(self, install_env):
+        """Never mutate an unmanaged file without capturing the original."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        dst.write_text("# My own hand-written CLAUDE.md\nDo not touch this.\n")
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            # An original must now be recorded, so uninstall restores rather
+            # than deletes.
+            assert install._load_state().get("claude_md_original_backup")
+            backups = list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))
+            assert backups, "no backup taken before mutating an unmanaged file"
+            assert "Do not touch this." in backups[0].read_text()
+
+    def test_bundle_body_with_managed_marker_is_refused(self, install_env):
+        """Embedded markers would corrupt the first-occurrence splices."""
+        dst = self._install_profile(install_env)
+        before = dst.read_text()
+        for marker in install._MANAGED_BLOCK_MARKERS:
+            self._write_bundle_md(install_env, f"# Shared\ndocs quoting {marker} inline\n")
+            with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+                install._prepend_bundle_claude_md(install_env["bundle"])
+            assert dst.read_text() == before, f"not refused for {marker!r}"
+
+    def test_stale_block_removed_when_bundle_goes_away(self, install_env):
+        """Unlinking the bundle must retract its directives, not strand them."""
+        dst = self._install_profile(install_env)
+        profile_only = dst.read_text()
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            assert install._BUNDLE_CLAUDE_MD_BEGIN in dst.read_text()
+            # Bundle unlinked
+            install._prepend_bundle_claude_md(None)
+
+        text = dst.read_text()
+        assert install._BUNDLE_CLAUDE_MD_BEGIN not in text
+        assert "shared directive" not in text
+        assert text == profile_only
+
+    def test_reinstall_does_not_churn_backups(self, install_env, tmp_path):
+        """The profile writer's up-to-date check must survive the managed blocks.
+
+        Otherwise every `agentihooks init` takes the backup+overwrite path and
+        drops another CLAUDE.md.bak.<timestamp> into ~/.claude, forever.
+        """
+        import hooks.config as cfg
+
+        manifesto = tmp_path / "MANIFESTO.md"
+        manifesto.write_text("# Manifesto\ndoctrine body\n")
+        self._write_bundle_md(install_env, "# Shared\nshared directive\n")
+
+        with (
+            patch.object(install, "CLAUDE_HOME", install_env["claude_home"]),
+            patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
+            patch.object(cfg, "CI_MANIFESTO_PATH", str(manifesto)),
+        ):
+            for _ in range(4):  # simulate four `agentihooks init` runs
+                install._install_system_prompt(install_env["profile"], "test-profile")
+                install._prepend_bundle_claude_md(install_env["bundle"])
+                install._append_ci_manifesto_to_claude_md()
+
+        backups = list(install_env["claude_home"].glob("CLAUDE.md.bak.*"))
+        assert backups == [], f"backup churn on re-run: {[b.name for b in backups]}"
+
+    def test_manifesto_block_survives_a_bundle_refresh(self, install_env, tmp_path):
+        """Full pipeline order: profile -> bundle prepend -> manifesto append.
+
+        Then change the bundle and re-prepend; the manifesto block at the tail
+        must survive intact and unduplicated.
+        """
+        import hooks.config as cfg
+
+        manifesto = tmp_path / "MANIFESTO.md"
+        manifesto.write_text("# Manifesto\ndoctrine body\n")
+        dst = self._install_profile(install_env)
+        self._write_bundle_md(install_env, "# Shared\nversion one\n")
+
+        with (
+            patch.object(install, "CLAUDE_HOME", install_env["claude_home"]),
+            patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
+            patch.object(cfg, "CI_MANIFESTO_PATH", str(manifesto)),
+        ):
+            install._prepend_bundle_claude_md(install_env["bundle"])
+            install._append_ci_manifesto_to_claude_md()
+            # Bundle content changes; re-run the prepend as a re-install would.
+            self._write_bundle_md(install_env, "# Shared\nversion two\n")
+            install._prepend_bundle_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert text.count("<!-- BEGIN CI MANIFESTO") == 1
+        assert text.count("<!-- END CI MANIFESTO -->") == 1
+        assert "doctrine body" in text
+        assert "version two" in text and "version one" not in text
+        # Order: bundle block -> profile -> manifesto
+        assert text.index(install._BUNDLE_CLAUDE_MD_END) < text.index("<!-- profile: test-profile -->")
+        assert text.index("<!-- profile: test-profile -->") < text.index("<!-- BEGIN CI MANIFESTO")
 
 
 # ---------------------------------------------------------------------------

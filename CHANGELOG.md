@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Optional bundle-level `CLAUDE.md` shared by every profile.** A file at
+  `<bundle>/.claude/CLAUDE.md` is now prepended to `~/.claude/CLAUDE.md` ahead of
+  all profile content, so cross-profile directives are written once instead of
+  duplicated into each profile's `CLAUDE.md`. The assembled order is
+  `bundle shared -> profile(s) -> CI manifesto`; because profile content comes
+  later, a profile can still override shared guidance. The block is delimited by
+  `<!-- BEGIN BUNDLE CLAUDE.md ... -->` / `<!-- END BUNDLE CLAUDE.md -->` and is
+  replaced in place on re-install rather than stacked. It is prepended exactly
+  once per install, including for chained `--profile a,b` installs. No-op when
+  the bundle has no such file, the file is empty, no bundle is linked, or no
+  profile in the chain supplied a `CLAUDE.md` to prepend onto. Markers
+  deliberately avoid the `profile:` keyword so the init lost-state guard does not
+  read them as a phantom chain member, and avoid the managed-file ownership
+  phrase so a bundle block alone never makes a hand-authored `CLAUDE.md` look
+  agentihooks-owned. Before mutating a `CLAUDE.md` it does not already own, the
+  step backs it up and records the original, so uninstall restores rather than
+  deletes. Bundle content carrying any managed marker is refused with a warning
+  instead of corrupting the first-occurrence splices. Unlinking the bundle (or
+  emptying the file) retracts a previously-prepended block rather than stranding
+  it. See `docs/bundles.md`.
+
+### Fixed
+
+- **`~/.claude/CLAUDE.md` backup churn on every `agentihooks init`.** The profile
+  writer's "already up to date" check compared profile-only content against a
+  file that also carries the appended CI-manifesto block, so it could never match
+  once the manifesto existed — every re-run took the backup+overwrite path and
+  dropped another `CLAUDE.md.bak.<timestamp>` into `~/.claude`. The check now
+  strips managed blocks before comparing. Pre-existing since the manifesto append
+  landed; surfaced while adding the bundle-level block.
+
 ### Changed
 
 - **`hooks-utils` MCP server slimmed to two agentihooks-native categories.**

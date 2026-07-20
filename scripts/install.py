@@ -2335,7 +2335,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 _symlink_dir_contents(pdir / _CLAUDE_SUBDIR / subdir, dst, label=chain_label, filter_fn=filter_fn)
 
-    # --- 5. Install CLAUDE.md (first profile = symlink, rest = rules) ---
+    # --- 5. Install CLAUDE.md (single profile = copy; chain = concatenated copy) ---
     _cleanup_stale_claude_md_symlink()
     # Remove any previous chain-injected CLAUDE.md rules
     rules_dir = CLAUDE_HOME / "rules"
@@ -2345,7 +2345,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
                 f.unlink()
 
     if len(profile_chain) == 1:
-        # Single profile: symlink as before
+        # Single profile: copy the profile's CLAUDE.md (real file, not a symlink)
         _install_system_prompt(profile_dirs[0][1], profile_dirs[0][0])
     else:
         # Chain mode: concatenate all CLAUDE.md files into one rendered file
@@ -2374,6 +2374,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         else:
             # No CLAUDE.md in any profile — try last profile as fallback
             _install_system_prompt(profile_dirs[-1][1], profile_dirs[-1][0])
+
+    # --- 5a. Prepend bundle shared CLAUDE.md (cross-profile directives) ---
+    # Runs once, outside the single-profile/chain branch, so a chained install gets
+    # the shared block exactly once at the top rather than once per profile.
+    _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
     _append_ci_manifesto_to_claude_md()
@@ -3169,6 +3174,135 @@ def _append_ci_manifesto_to_claude_md() -> None:
     _cprint(f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)")
 
 
+# Markers for the optional bundle-wide CLAUDE.md, prepended ahead of all profile
+# content. Two constraints on the wording:
+#   1. Avoid the substring "profile:" — the init lost-state guard regex-scans the
+#      whole file for `<!-- profile: NAME -->` and would read it as a phantom
+#      chain member.
+#   2. Avoid _CLAUDE_MD_MANAGED_MARKER ("auto-injected by agentihooks init").
+#      _claude_md_is_managed() treats that substring as proof agentihooks owns the
+#      file. A bundle block alone must never make an operator's hand-authored
+#      CLAUDE.md look managed — uninstall deletes managed files, and a file we
+#      merely prepended to has no recorded original to restore from.
+_BUNDLE_CLAUDE_MD_BEGIN = "<!-- BEGIN BUNDLE CLAUDE.md (managed block — edit the bundle, not here) -->"
+_BUNDLE_CLAUDE_MD_END = "<!-- END BUNDLE CLAUDE.md -->"
+
+# Every marker that delimits a block install writes into ~/.claude/CLAUDE.md.
+# Bundle content may not contain any of them: the splices below are
+# first-occurrence based, so an embedded copy silently eats real content.
+_CI_MANIFESTO_BEGIN_PREFIX = "<!-- BEGIN CI MANIFESTO"
+_CI_MANIFESTO_END = "<!-- END CI MANIFESTO -->"
+_MANAGED_BLOCK_MARKERS = (
+    _BUNDLE_CLAUDE_MD_BEGIN,
+    _BUNDLE_CLAUDE_MD_END,
+    _CI_MANIFESTO_BEGIN_PREFIX,
+    _CI_MANIFESTO_END,
+)
+
+
+def _strip_managed_blocks(text: str) -> str:
+    """Return *text* with the bundle and CI-manifesto blocks removed.
+
+    Lets the profile writer compare like with like. Without this its
+    "already up to date" check compares profile-only content against a file
+    that also carries the managed blocks, never matches, and so takes the
+    backup+overwrite path on every single run — littering ~/.claude with a
+    new CLAUDE.md.bak.<timestamp> each time.
+    """
+    if _BUNDLE_CLAUDE_MD_BEGIN in text and _BUNDLE_CLAUDE_MD_END in text:
+        head, _, rest = text.partition(_BUNDLE_CLAUDE_MD_BEGIN)
+        _, _, tail = rest.partition(_BUNDLE_CLAUDE_MD_END)
+        text = head + tail.lstrip("\n")
+    if _CI_MANIFESTO_BEGIN_PREFIX in text and _CI_MANIFESTO_END in text:
+        head, _, rest = text.partition(_CI_MANIFESTO_BEGIN_PREFIX)
+        _, _, tail = rest.partition(_CI_MANIFESTO_END)
+        text = head.rstrip("\n") + ("\n" if head.strip() else "") + tail.lstrip("\n")
+    return text
+
+
+def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
+    """Prepend the bundle's optional ``<bundle>/.claude/CLAUDE.md`` to ~/.claude/CLAUDE.md.
+
+    Lets an operator write cross-profile directives once in the bundle instead of
+    duplicating them into every profile's CLAUDE.md. The block lands ahead of all
+    profile content, so a profile can still override shared guidance simply by
+    coming later in the file.
+
+    No-op when: no bundle is linked, the bundle has no ``.claude/CLAUDE.md``, that
+    file is empty, or ~/.claude/CLAUDE.md does not exist yet (the profile writer
+    owns creating the base file — there is nothing to prepend onto).
+
+    Idempotent: replaces a previously-prepended block in place rather than stacking.
+    Called unconditionally after both the single-profile and chain branches, and
+    re-derives its content from ``(bundle_md on disk, current dst)`` every run — so
+    a newly added or changed bundle file lands even when ``_install_system_prompt``
+    took its "already up to date" early return.
+    """
+    dst = CLAUDE_HOME / _CLAUDE_MD_NAME
+    # Defensive: step 5 always leaves a real file, but never write through a symlink
+    # into a profile source in the repo.
+    if not dst.exists() or dst.is_symlink():
+        return
+
+    current = dst.read_text()
+    had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
+
+    bundle_md = (bundle_dir / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if bundle_dir else None
+    body = ""
+    if bundle_md and bundle_md.exists():
+        body = bundle_md.read_text().strip()
+
+    if not body:
+        # Bundle unlinked, file removed, or emptied. Drop a previously-prepended
+        # block so the shared directives stop applying instead of being stranded
+        # in the file with no way to remove them.
+        if had_block:
+            head, _, rest = current.partition(_BUNDLE_CLAUDE_MD_BEGIN)
+            _, _, tail = rest.partition(_BUNDLE_CLAUDE_MD_END)
+            dst.write_text(head + tail.lstrip("\n"))
+            _cprint(f"  [OK] Removed stale bundle {_CLAUDE_MD_NAME} block (no bundle content)")
+        return
+
+    # First-occurrence splices are used both here and by the manifesto appender,
+    # so an embedded marker inside bundle prose would silently eat real content
+    # or duplicate on every run. Refuse rather than corrupt.
+    for marker in _MANAGED_BLOCK_MARKERS:
+        if marker in body:
+            _cprint(
+                f"  [!!] Bundle {_CLAUDE_MD_NAME} contains the managed marker {marker!r} — "
+                f"skipping prepend. Remove it from {bundle_md} (quote it differently)."
+            )
+            return
+
+    block = (
+        f"{_BUNDLE_CLAUDE_MD_BEGIN}\n"
+        f"<!-- Source: {bundle_md} -->\n\n"
+        f"{body}\n\n"
+        f"{_BUNDLE_CLAUDE_MD_END}\n\n"
+    )
+
+    if had_block:
+        after = current.split(_BUNDLE_CLAUDE_MD_END, 1)[1].lstrip("\n")
+    else:
+        # About to mutate a file this function did not create. If nothing else has
+        # claimed ownership, capture the operator's original first — uninstall
+        # deletes a managed file outright when no original was recorded.
+        after = current
+        if not _claude_md_is_managed(dst):
+            backup = _backup_existing_claude_md(dst)
+            if backup:
+                _cprint(f"  [OK] Backed up pre-existing {_CLAUDE_MD_NAME} → {backup.name}")
+
+    new_content = block + after
+
+    if new_content == current:
+        _cprint("  [--] Bundle CLAUDE.md block already up to date")
+        return
+
+    dst.write_text(new_content)
+    _cprint(f"  [OK] Prepended bundle {_CLAUDE_MD_NAME} ({len(body):,} bytes) from {bundle_md}")
+
+
 def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     """Copy profile's CLAUDE.md to ~/.claude/CLAUDE.md.
 
@@ -3189,9 +3323,12 @@ def _install_system_prompt(profile_dir: Path, profile_name: str) -> None:
     # This only touches the rendered dst content; src on disk is never mutated.
     new_content = f"<!-- profile: {profile_name} -->\n{src.read_text()}"
 
-    # Check if content is already up to date
+    # Check if content is already up to date. Compare against the file with the
+    # managed blocks (bundle prepend, CI manifesto) stripped — they are appended
+    # by later steps, so comparing raw would never match once either exists and
+    # every re-run would take the backup+overwrite path below.
     if dst.exists() and not dst.is_symlink():
-        if dst.read_text() == new_content:
+        if _strip_managed_blocks(dst.read_text()).strip() == new_content.strip():
             _cprint(f"  [--] {_CLAUDE_MD_NAME} already up to date (from {profile_name})")
             return
 
