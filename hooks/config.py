@@ -266,22 +266,16 @@ CLAUDE_MD_SANITY_CHECK = _env_bool("AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK", "true")
 CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 
 # =============================================================================
-# CONTEXT REFRESH — periodic rules re-injection for long sessions
+# CONTEXT PREPROCESSOR — token compression for injected content
 # =============================================================================
-CONTEXT_REFRESH_ENABLED = _env_bool("CONTEXT_REFRESH_ENABLED", "true")
-CONTEXT_REFRESH_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_INTERVAL", "20"))
-CONTEXT_REFRESH_CLAUDE_MD_INTERVAL: int = int(os.getenv("CONTEXT_REFRESH_CLAUDE_MD_INTERVAL", "40"))
-CONTEXT_REFRESH_RULES_DIR: str = os.getenv("CONTEXT_REFRESH_RULES_DIR", str(Path.home() / ".claude" / "rules"))
-CONTEXT_REFRESH_INCLUDE_PROJECT = _env_bool("CONTEXT_REFRESH_INCLUDE_PROJECT", "true")
-# Budget for a periodic re-injection. 8000 was set when CLAUDE.md held a single
-# profile; a chained profile plus the bundle's shared directives now exceed that
-# before the profile's own Response Style / CI sections are reached, so every
-# refresh dropped exactly the behavioural contract it exists to reinforce. The
-# CI manifesto block is stripped before this cap applies (already resident via
-# the memory channel), so the budget covers live directives only.
-CONTEXT_REFRESH_MAX_CHARS: int = int(os.getenv("CONTEXT_REFRESH_MAX_CHARS", "16000"))
+# Periodic rules / CLAUDE.md re-injection was removed 2026-07-20: Claude Code
+# already loads CLAUDE.md and rules/*.md at position 0 for the whole session, so
+# re-emitting them verbatim every N turns was pure duplicate token spend. The
+# compression settings below survive because the preprocessor still serves other
+# injectors (broadcast banners, bash-output filtering). The CONTEXT_REFRESH_*
+# names are kept for config back-compat; they no longer gate any re-injection.
 
-# Context Preprocessor — compression level for refresh injections
+# Context Preprocessor — compression level for injected content
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
 _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().strip()
 CONTEXT_REFRESH_COMPRESSION: str = _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"

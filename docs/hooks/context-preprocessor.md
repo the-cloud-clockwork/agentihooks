@@ -18,11 +18,13 @@ permalink: /docs/hooks/context-preprocessor/
 
 ## Overview
 
-The Context Preprocessor compresses rule files and CLAUDE.md content before mid-session re-injection by the [context refresh](events.md#userpromptsubmit) system.
+The Context Preprocessor compresses injected content — broadcast banners and verbose tool output — before it lands in the model's context window.
+
+> **History:** the preprocessor was originally built to fit periodic rules/CLAUDE.md re-injection inside an 8,000-character budget. That periodic re-injection was **removed 2026-07-20** (the harness already loads rules and CLAUDE.md at position zero). The preprocessor survived because the same token-compression logic still pays off on the injections that remain. Its config keeps the historical `CONTEXT_REFRESH_*` names for back-compat.
 
 ### The problem
 
-Context refresh injects rules every N turns to combat attention decay. The injection budget (`CONTEXT_REFRESH_MAX_CHARS`) defaults to 8,000 characters (~2,000 tokens). A typical operator profile with 10-13 rule files totals 12,000-16,000 characters — nearly 2x over budget. Rules that exceed the cap are silently dropped.
+Injected banners (fleet broadcasts, brain drumbeat) and captured tool output add up across a long session. Every character re-emitted is a token spent. Left raw, a chatty broadcast stream or a wall of `git log` output burns budget that could hold real work.
 
 ### The insight
 
@@ -32,9 +34,12 @@ This property means we can compress injected content by 30-55% while preserving 
 
 ### Scope
 
-By default (`CONTEXT_COMPRESSION_SCOPE=refresh`), compression applies to context refresh injections only. Set `CONTEXT_COMPRESSION_SCOPE=all` to extend compression to all `inject_context()` / `inject_banner()` calls (session start banners, secrets warnings, tool memory, circuit breaker messages, context threshold warnings) and bash output filter `additionalContext` results.
+`CONTEXT_COMPRESSION_SCOPE` has two values:
 
-Rules are sorted by frontmatter `priority: N` (lower = higher priority, default 5) before the size cap is applied, so high-priority rules are always compressed and injected first.
+- `all` — compression is applied to every `inject_context()` / `inject_banner()` call (session-start banners, secrets warnings, tool memory, circuit breaker messages, context threshold warnings) and bash output filter `additionalContext` results.
+- `refresh` (default) — historically the value that let the removed context-refresh path compress its own rules/CLAUDE.md payload. **With that path removed 2026-07-20, `refresh` no longer triggers compression anywhere** — it is effectively `off`. Set `CONTEXT_COMPRESSION_SCOPE=all` to get any compression on the injections that remain.
+
+> The default is left at `refresh` for config back-compat; flipping the fleet default to `all` is a separate decision. Until then, opt in explicitly per profile.
 
 ---
 
@@ -48,9 +53,9 @@ Rules are sorted by frontmatter `priority: N` (lower = higher priority, default 
 | 3 | `aggressive` | Level 2 + internal vowel removal on long common words | ~20-35% | ~4,000-8,000 tokens |
 
 {: .highlight }
-**Default is `standard`.** Set `CONTEXT_COMPRESSION_SCOPE=all` in `~/.agentihooks/.env` to extend compression beyond refresh to all hook injections and tool output.
+**Level default is `standard`, but nothing is compressed until `CONTEXT_COMPRESSION_SCOPE=all`.** Set it in `~/.agentihooks/.env` to apply compression to all hook injections and tool output.
 
-Session savings scale with: number of rules, CLAUDE.md size, session length, and how many injections fire. With `scope=all`, savings compound across every `inject_context`, `inject_banner`, and `additionalContext` call in the hook system.
+Session savings scale with session length and how many injections fire. With `scope=all`, savings compound across every `inject_context`, `inject_banner`, and `additionalContext` call in the hook system.
 
 ---
 
@@ -146,7 +151,7 @@ Compressing a negation risks flipping the meaning of a rule.
 
 **5. ALL_CAPS identifiers** — env var names:
 
-`CONTEXT_REFRESH_MAX_CHARS`, `KUBECTL_NAMESPACE`, `AWS_REGION`, etc. Pattern: `[A-Z][A-Z0-9_]{2,}`
+`CONTEXT_COMPRESSION_SCOPE`, `KUBECTL_NAMESPACE`, `AWS_REGION`, etc. Pattern: `[A-Z][A-Z0-9_]{2,}`
 
 **6. Numbers and thresholds**:
 

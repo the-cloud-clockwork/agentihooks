@@ -438,7 +438,7 @@ def _compute_hash(entries: list[BrainEntry]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Turn counter (same pattern as context_refresh)
+# Turn counter (per-session, Redis + file fallback)
 # ---------------------------------------------------------------------------
 
 

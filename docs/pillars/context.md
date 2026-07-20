@@ -10,7 +10,9 @@ permalink: /docs/pillars/context/
 
 **Your agents never forget their instructions, even 200 turns deep.**
 
-> "Your protection window will stop being effective when Claude's context window pushes your rules to token position 50,000. Context Intelligence re-injects them before that ever happens."
+> "Your protection window stops being effective when Claude's context window pushes your rules toward the attention horizon. Context Intelligence keeps the highest-signal directives live in the recent window — without paying to re-emit what the harness already holds at position zero."
+
+> **Note (2026-07-20):** The periodic re-injection of `rules/*.md` and `CLAUDE.md` every N turns was **removed**. Claude Code loads both at position zero for the whole session, so re-emitting them verbatim was duplicate token spend that also broke the prompt cache. This page describes the layers that remain — token compression, tool memory, context audit, thinking policy — plus the brain drumbeat and the one-shot `agentihooks refresh-rules` path that together cover live re-emphasis. Historical descriptions of the removed timer are kept below only where marked.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -31,7 +33,7 @@ This is the **number-one reliability killer for long agent sessions**:
 - Tool calling patterns revert to defaults
 - Security rules erode silently
 
-Context Intelligence is agentihooks' answer: a multi-layer system that actively fights attention decay by keeping critical context fresh in the model's recent window at all times.
+Context Intelligence is agentihooks' answer: a multi-layer system that keeps the highest-signal context live in the model's recent window — the compact, curated drumbeat (brain arcs, enforcement one-liners, tool memory) rather than a verbatim re-dump of files the harness already loaded at position zero.
 
 ---
 
@@ -42,12 +44,12 @@ Context Intelligence is agentihooks' answer: a multi-layer system that actively 
 │                     Context Intelligence Stack                      │
 │                                                                     │
 │  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────────┐   │
-│  │   Context    │  │    Priority     │  │   Token              │   │
-│  │   Refresh    │  │   Frontmatter   │  │   Compression        │   │
+│  │    Brain     │  │   Enforcement   │  │   Token              │   │
+│  │   Drumbeat   │  │    Drumbeat     │  │   Compression        │   │
 │  │              │  │                 │  │                      │   │
-│  │ rules / 20t  │  │ priority: 1 → N │  │ 4 levels: off→aggr   │   │
-│  │ CLAUDE.md    │  │ loaded first    │  │ 30–55% savings       │   │
-│  │ / 40 turns   │  │ within budget   │  │ with mask safety     │   │
+│  │ hot arcs +   │  │ operator one-   │  │ 4 levels: off→aggr   │   │
+│  │ signals,     │  │ liners, every   │  │ 30–55% savings       │   │
+│  │ hash-deduped │  │ N tool calls    │  │ with mask safety     │   │
 │  └──────────────┘  └─────────────────┘  └──────────────────────┘   │
 │                                                                     │
 │  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────────┐   │
@@ -62,120 +64,33 @@ Context Intelligence is agentihooks' answer: a multi-layer system that actively 
 
 ---
 
-## Context Refresh
+## Context Refresh — removed 2026-07-20
 
-### How it works
+> The layer that once occupied this slot re-injected `rules/*.md` every 20 turns
+> and `CLAUDE.md` every 40 turns, sorted by `priority:` frontmatter and trimmed
+> to an 8,000-character budget. It was **removed** because Claude Code already
+> loads `~/.claude/CLAUDE.md`, the project `CLAUDE.md`, and every
+> `~/.claude/rules/*.md` at position zero for the entire session. Re-emitting
+> those same bytes on a timer spent thousands of duplicate tokens per long
+> session and broke the prompt-cache prefix on every refresh — paying full price
+> to restate content the model already held.
+>
+> The `priority:` frontmatter budget-ordering it depended on went with it: there
+> is no longer an injection budget to rank rule files against.
 
-On every `UserPromptSubmit` event, agentihooks increments a per-session turn counter. Two independent timers govern re-injection:
+What covers live re-emphasis now, at a fraction of the token cost:
 
-| Timer | Default | Target |
-|-------|---------|--------|
-| Rules refresh | every 20 turns | `~/.claude/rules/*.md` + project `.claude/rules/*.md` |
-| CLAUDE.md refresh | every 40 turns | `~/.claude/CLAUDE.md` + project `CLAUDE.md` |
-
-Turn state is persisted in **Redis** with a 24-hour TTL and falls back to a per-session JSON file at `~/.agentihooks/ctx_refresh_{session_id}.json`. Because each hook invocation is a separate subprocess, in-memory state is not an option — persistence is mandatory.
-
-### Refresh lifecycle
-
-```mermaid
-flowchart TD
-    A[UserPromptSubmit] --> B[Increment turn counter]
-    B --> C{turn % 20 == 0?}
-    C -- No --> E{turn % 40 == 0?}
-    C -- Yes --> D[Load rules/*.md\nfrom global + project dirs]
-    D --> F[Parse priority frontmatter\nfrom each file]
-    F --> G[Sort ascending by priority,\nthen alphabetically]
-    G --> H[Apply token compression\nat configured level]
-    H --> I{Total within\n8000-char budget?}
-    I -- Yes --> J[Inject all rules\nas system-reminder banner]
-    I -- No --> K[Inject until budget full\nappend omitted count]
-    J --> L[Persist turn state]
-    K --> L
-    E -- No --> L
-    E -- Yes --> M[Load CLAUDE.md\nglobal + project]
-    M --> N[Compress CLAUDE.md]
-    N --> O[Inject as separate\nsystem-reminder banner]
-    O --> L
-    L --> P[Session continues]
-```
-
-### Separate cadences by design
-
-Rules and CLAUDE.md refresh on different timers intentionally. CLAUDE.md can be large (operator profiles often exceed 3,000 characters). Injecting it every 20 turns alongside rules would double the injection payload and exhaust the 8,000-character budget. By decoupling the cadences, each injection type gets its own full budget slice.
-
-### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTEXT_REFRESH_ENABLED` | `true` | Enable/disable periodic re-injection |
-| `CONTEXT_REFRESH_INTERVAL` | `20` | Re-inject rules every N user messages |
-| `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` | `40` | Re-inject CLAUDE.md every N user messages. `0` disables it. |
-| `CONTEXT_REFRESH_MAX_CHARS` | `8000` | Max characters per injection (~2,000 tokens) |
-| `CONTEXT_REFRESH_RULES_DIR` | `~/.claude/rules` | Global rules directory |
-| `CONTEXT_REFRESH_INCLUDE_PROJECT` | `true` | Also inject project-level rules from active working directory |
-
----
-
-## Priority Frontmatter
-
-When context is tight — and it always is in long sessions — not all rules can fit within the 8,000-character budget. Priority frontmatter lets you declare which rules are load-critical.
-
-### Syntax
-
-Add a YAML frontmatter block to any rule file:
-
-```yaml
----
-priority: 1
----
-
-# My Critical Rule
-
-Never commit credentials. Reference secrets via environment variables only.
-```
-
-**Priority scale:** Lower number = higher priority = loaded first.
-
-| Priority | Meaning |
-|----------|---------|
-| `1` | Always load. Mission-critical. Security constraints. |
-| `2` | Load before most rules. Core behavioral contracts. |
-| `3` | Standard importance. |
-| `5` | Default. Applied when no frontmatter present. |
-| `8–10` | Nice-to-have. First to be dropped under budget pressure. |
-
-### Budget enforcement
-
-Rules are sorted by `(priority, filename)` — ascending priority, then alphabetically within the same priority level. The injection loop fills from the top until the budget is exhausted. Any rules that don't fit are dropped and replaced with a count line:
-
-```
-[3 rule(s) omitted — size limit reached]
-```
-
-If you see this in your logs, either raise `CONTEXT_REFRESH_MAX_CHARS` or move your lowest-priority rules to higher priority numbers.
-
-### Tip: audit your rule sizes
-
-```bash
-# See which rules are largest
-wc -c ~/.claude/rules/*.md | sort -rn
-
-# Check which would be dropped at 8000-char budget
-python3 -c "
-import os, re
-rules_dir = os.path.expanduser('~/.claude/rules')
-files = sorted(os.listdir(rules_dir))
-total = 0
-for f in files:
-    path = os.path.join(rules_dir, f)
-    size = os.path.getsize(path)
-    total += size
-    status = 'OK' if total <= 8000 else 'DROPPED'
-    print(f'{status:8s} {total:6d}  {f}')
-"
-```
-
----
+- **Brain drumbeat** — `brain_adapter` re-publishes hot arcs, active signals, and
+  operator intent into the recent window on a counter-gated cadence
+  (`BRAIN_REFRESH_INTERVAL`, default 30 turns), deduped by content hash so an
+  unchanged brain re-publishes nothing.
+- **Enforcement drumbeat** — operator-curated one-liners re-injected every N
+  **tool calls** (see [Guardrails](guardrails.md)). Compact by design: the whole
+  point is a token or two of reminder, not a file dump.
+- **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
+  mid-session, this pushes the new content to already-running sessions exactly
+  once. This is the only case where re-sending a rule file earns its tokens: the
+  copy at position zero is now stale.
 
 ## Token Compression Preprocessor
 
@@ -225,7 +140,7 @@ Before any compression runs, a protection mask identifies spans that must **neve
 | Negation words | `never`, `don't`, `not`, `cannot`, `won't` | Meaning is in the negation |
 | Assertion words | `always`, `must`, `required`, `mandatory`, `only`, `exactly` | Constraint strength lives here |
 | Action verbs | `push`, `delete`, `commit`, `deploy`, `force`, `reset`, `purge` | Operational semantics — compressing `delete` is dangerous |
-| ALL_CAPS identifiers | `CONTEXT_REFRESH_MAX_CHARS`, `MY_API_KEY` | Env var names must be exact |
+| ALL_CAPS identifiers | `CONTEXT_COMPRESSION_SCOPE`, `MY_API_KEY` | Env var names must be exact |
 | Code blocks | `` `command` ``, ```` ```block``` ```` | Already minimal; compressing code breaks it |
 | File paths | `~/.claude/rules`, `./hooks/context` | Identifiers must be exact |
 | Numbers | `8000`, `20`, `40`, `100%` | Thresholds must survive intact |
@@ -380,15 +295,14 @@ A 200-turn session with a 10-file rule profile might look like this:
 
 | Turn | Context Intelligence activity |
 |------|-------------------------------|
-| 1 | Session start: thinking policy injected, tool memory injected |
-| 20 | Rules refresh: 10 files sorted by priority, compressed (standard), injected (8K budget) |
-| 40 | Rules refresh (turn 40) + CLAUDE.md refresh — both fire at turn 40 |
-| 60 | Rules refresh |
-| 80 | Rules refresh + CLAUDE.md refresh |
-| ... | Pattern continues every 20/40 turns |
+| 1 | Session start: rules + CLAUDE.md loaded at position zero by the harness; thinking policy injected, tool memory injected |
+| 8, 16, 24… | Enforcement drumbeat: operator one-liners re-injected every N tool calls |
+| 30 | Brain drumbeat: hot arcs + signals re-published (hash-deduped — silent if unchanged) |
+| any | Rule file edited → `agentihooks refresh-rules` pushes the new content once to running sessions |
+| 60, 90… | Brain drumbeat re-fires on its counter-gated cadence |
 | 200 | Stop: context audit report emitted (78% fill), top consumers named |
 
-At each refresh, the rules land in the model's **recent** context window — not at position zero. Attention weights are high. Instructions are fresh. The agent behaves as if the session just started.
+The compact drumbeat lands in the model's **recent** context window — not at position zero. Attention weights are high, and the tokens spent are curated reminders, not a verbatim re-dump of files the harness already holds.
 
 That's Context Intelligence.
 
@@ -398,12 +312,12 @@ That's Context Intelligence.
 
 ```bash
 # Key env vars for ~/.agentihooks/.env
-CONTEXT_REFRESH_ENABLED=true
-CONTEXT_REFRESH_INTERVAL=20
-CONTEXT_REFRESH_CLAUDE_MD_INTERVAL=40
-CONTEXT_REFRESH_MAX_CHARS=8000
+# Token compression for injected banners / tool output (periodic rules/CLAUDE.md
+# re-injection was removed 2026-07-20 — the harness loads them at position zero).
 CONTEXT_REFRESH_COMPRESSION=standard      # off | light | standard | aggressive
 CONTEXT_COMPRESSION_SCOPE=refresh         # refresh | all
+
+BRAIN_REFRESH_INTERVAL=30                 # brain drumbeat cadence (turns)
 
 CONTEXT_AUDIT_ENABLED=true
 CONTEXT_AUDIT_THRESHOLD_PCT=70

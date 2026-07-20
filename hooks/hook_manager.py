@@ -487,19 +487,6 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
-    # Clear context refresh turn counter for this session
-    from hooks.config import CONTEXT_REFRESH_ENABLED
-
-    if CONTEXT_REFRESH_ENABLED:
-        try:
-            from hooks.context.context_refresh import (
-                clear_session_state as clear_refresh,
-            )
-
-            clear_refresh(session_id)
-        except Exception:
-            pass
-
     # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -622,17 +609,6 @@ def on_user_prompt_submit(payload: dict) -> None:
             check_amygdala(session_id)
     except Exception as e:
         log("amygdala_hook failed", {"error": str(e)})
-
-    # --- Context refresh: re-inject rules every N turns ---
-    from hooks.config import CONTEXT_REFRESH_ENABLED
-
-    if CONTEXT_REFRESH_ENABLED:
-        try:
-            from hooks.context.context_refresh import maybe_refresh
-
-            maybe_refresh(session_id, project_dir=payload.get("cwd", ""))
-        except Exception as e:
-            log("context_refresh failed", {"error": str(e)})
 
     # --- Prod lockdown bypass: detect operator override phrase ---
     try:

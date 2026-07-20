@@ -116,7 +116,6 @@ class TestCheckGuardrails:
             {
                 "BASH_FILTER_ENABLED": "true",
                 "FILE_READ_CACHE_ENABLED": "true",
-                "CONTEXT_REFRESH_ENABLED": "true",
                 "CONTEXT_REFRESH_COMPRESSION": "standard",
                 "CONTEXT_AUDIT_ENABLED": "true",
                 "EFFORT_POLICY_ENABLED": "true",
@@ -125,8 +124,8 @@ class TestCheckGuardrails:
             },
         ):
             result = check_guardrails()
-            assert result["active"] == 8
-            assert result["total"] == 8
+            assert result["active"] == 7
+            assert result["total"] == 7
 
 
 class TestCheckMcp:

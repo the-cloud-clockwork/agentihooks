@@ -64,9 +64,8 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 1. Parses the transcript to extract metrics (`num_turns`, `duration_ms`)
 2. Logs all transcript entries to the hooks log
 3. If `FILE_READ_CACHE_ENABLED=true`: clears the file read cache for this session from Redis
-4. If `CONTEXT_REFRESH_ENABLED=true`: clears the turn counter state (Redis key + file)
-5. If `BROADCAST_ENABLED=true`: deregisters session from active-sessions.json
-6. Cleans up the `/tmp/<session_id>/` directory
+4. If `BROADCAST_ENABLED=true`: deregisters session from active-sessions.json
+5. Cleans up the `/tmp/<session_id>/` directory
 
 ---
 
@@ -85,12 +84,10 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 
 1. Scans the prompt for secrets and credentials using regex patterns
 2. If secrets are detected: injects a warning into the context (does **not** block -- warnings only at this stage)
-3. If `CONTEXT_REFRESH_ENABLED=true`: increments a per-session turn counter and:
-   - Every `CONTEXT_REFRESH_INTERVAL` turns (default 20): re-injects rules files sorted by frontmatter `priority: N` (lower = higher priority). Project rules dir resolved from the hook payload's `cwd` field (the session's active directory)
-   - Every `CONTEXT_REFRESH_CLAUDE_MD_INTERVAL` turns (default 40): re-injects `~/.claude/CLAUDE.md` (and optionally project `CLAUDE.md`)
-   - Both combat attention decay in long sessions where early-loaded instructions lose influence
-   - Content is compressed via the [Context Preprocessor](context-preprocessor.md) (default level: `standard`; set `CONTEXT_REFRESH_COMPRESSION=off` to disable)
+3. If `BRAIN_ENABLED=true`: counter-gated refresh of brain content (hot arcs, signals, operator intent) into the recent window, deduped by content hash
 4. If `BROADCAST_ENABLED=true`: checks for undelivered [broadcasts](broadcast.md) and injects them as banners. Delivery is channel-filtered against the session's `AGENTIHOOKS_BASE_CHANNELS` env list — global broadcasts (no `channel` field) reach everyone; channel-tagged broadcasts only reach subscribed sessions. Critical+persistent broadcasts are injected on every turn; info broadcasts are delivered once per session.
+
+> **Removed 2026-07-20:** periodic re-injection of `rules/*.md` and `CLAUDE.md` every N turns. Claude Code already loads both at position 0 for the whole session, so re-emitting them verbatim was duplicate token spend. Live re-emphasis now comes from the brain drumbeat (above) and the [enforcement](../pillars/guardrails.md) cadence; the one-shot `agentihooks refresh-rules` path still pushes edited rules to running sessions on demand.
 
 ---
 
