@@ -32,6 +32,43 @@ Thanks for your interest in contributing! agentihooks is a support repo designed
 - Follow the existing JSON response pattern: `{"success": True/False, ...}`
 - Log errors with `from hooks.common import log`
 
+## Testing `scripts/install.py` — read before writing a harness
+
+`install.py` writes to the developer's real machine. Several module-level
+constants are bound to real paths **at import time**, so setting an environment
+variable after import does nothing — the constant is already pinned. The only
+override that works is attribute-patching the already-imported module.
+
+The full list, all of which a harness must redirect before calling
+`install_global`, `_install_global_inner`, `cmd_init_unified`, or
+`uninstall_global`:
+
+| Attribute | Real target |
+|---|---|
+| `CLAUDE_HOME` | `~/.claude` |
+| `AGENTIHOOKS_STATE_DIR` | `~/.agentihooks` |
+| `STATE_JSON` | `~/.agentihooks/state.json` |
+| `_CLAUDE_JSON` | `~/.claude.json` |
+| `_BASHRC` | `~/.bashrc` |
+| `BASE_SETTINGS` | repo `profiles/_base/settings.base.json` |
+| `PROFILES_DIR` | repo `profiles/` (needed for synthetic profiles) |
+| `AGENTIHOOKS_ROOT` | the repo itself — used as `cwd` for `uv tool install/uninstall` |
+
+`AGENTIHOOKS_ROOT` is the sharp one: **every** `init` shells a real
+`uv tool install --editable --force .` gated only by it, and `uninstall_global`
+shells a real `uv tool uninstall`. Neither is gated by `CLAUDE_HOME`, so a
+harness that redirects only the CLAUDE paths still uninstalls the developer's
+CLI for real.
+
+Some call sites cannot be neutralised by attribute-patching at all —
+`_migrate_profile_rename` builds `Path.home() / ".claude.json"` as a raw literal
+inside the function body, and `cmd_init_unified` calls it unconditionally. Patch
+`pathlib.Path.home` itself to cover those.
+
+The suite-wide autouse fixture in `tests/conftest.py` already does all of this and
+asserts nothing still resolves under the real home. Use it; don't hand-roll
+per-file isolation — that is exactly how the gap reopened twice.
+
 ## Pull Request Process
 
 1. Keep PRs focused -- one feature or fix per PR
