@@ -224,11 +224,43 @@ def _load_claude_md(project_dir: str = "") -> str | None:
     except Exception:
         pass
 
-    # Apply size cap — CLAUDE.md can be large
-    if len(combined) > CONTEXT_REFRESH_MAX_CHARS:
-        combined = combined[:CONTEXT_REFRESH_MAX_CHARS] + "\n[... truncated at size limit]"
+    return _trim_for_injection(combined, CONTEXT_REFRESH_MAX_CHARS)
 
-    return combined
+
+# Blocks that are already permanently resident in ~/.claude/CLAUDE.md via the
+# memory channel. Re-injecting them periodically spends the whole budget on
+# content the model already has, pushing the profile's own directives past the cut.
+_REDUNDANT_INJECTION_BLOCKS = (
+    ("<!-- BEGIN CI MANIFESTO", "<!-- END CI MANIFESTO -->"),
+)
+
+
+def _trim_for_injection(text: str, limit: int) -> str:
+    """Fit *text* into *limit* without slicing mid-directive.
+
+    Drops already-resident blocks first, then cuts at the last section or block
+    boundary that fits rather than at an arbitrary character offset — a heading
+    sliced in half re-injects a fragment the model has to guess at.
+    """
+    for begin, end in _REDUNDANT_INJECTION_BLOCKS:
+        while begin in text and end in text:
+            head, _, rest = text.partition(begin)
+            _, _, tail = rest.partition(end)
+            text = head.rstrip("\n") + "\n" + tail.lstrip("\n")
+
+    if len(text) <= limit:
+        return text
+
+    window = text[:limit]
+    # Take the LATEST usable boundary, not the first kind that matches — picking
+    # by marker precedence can cut thousands of characters early for no reason.
+    cut = max(window.rfind(b) for b in ("\n<!-- ", "\n## ", "\n### ", "\n\n"))
+    if cut <= limit // 2:  # refuse a cut so early it drops most of the payload
+        cut = limit
+    return text[:cut].rstrip() + f"\n\n[... trimmed to fit; full text in {_CLAUDE_MD_LABEL}]"
+
+
+_CLAUDE_MD_LABEL = "~/.claude/CLAUDE.md"
 
 
 def _build_injection_text(rules: list[tuple[str, str]], turn: int, interval: int) -> str:
