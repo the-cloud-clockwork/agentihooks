@@ -186,10 +186,10 @@ CONTEXT_REFRESH_ABBREV_FILE=~/.claude/my-abbreviations.json
 
 | `CONTEXT_COMPRESSION_SCOPE` | Applies to |
 |----------------------------|-|
-| `refresh` (default) | Context refresh injections only |
+| `refresh` (default) | **Nothing** — this value once scoped compression to the removed context-refresh payload; post-removal it is effectively `off` |
 | `all` | All `inject_context()` / `inject_banner()` calls + bash output filter `additionalContext` — session start banners, secrets warnings, tool memory, circuit breaker messages, threshold warnings |
 
-Setting `scope=all` compounds savings across every injection point in the hook system.
+Compression only fires under `scope=all`; the default is inert. Set `all` to compound savings across every injection point in the hook system.
 
 ---
 
@@ -330,12 +330,7 @@ AGENTICORE_TOOL_MEMORY_MAX=100
 AGENTICORE_TOOL_MEMORY_SHOW=15
 ```
 
-```yaml
-# Add priority frontmatter to critical rule files
-# ~/.claude/rules/operator-clearance.md
----
-priority: 1
----
-# Clearance Rules
-...
-```
+> **Note:** `priority:` frontmatter on rule files no longer affects anything.
+> It ordered rules against the context-refresh injection budget, which was
+> removed 2026-07-20. Rule files are now loaded in full at position zero by the
+> harness; there is no budget to rank them against.

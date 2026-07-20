@@ -133,7 +133,7 @@ Claude Code
   |
   |-- Hook Events (stdin JSON) --> python -m hooks --> hook_manager.py
   |     SessionStart, PreToolUse,       |
-  |     PostToolUse, Stop, ...         |-- context refresh + compression
+  |     PostToolUse, Stop, ...         |-- brain + enforcement drumbeat
   |     (10 events total)              |-- guardrails pipeline
   |                                    |-- broadcast delivery
   |                                    |-- transcript logging
@@ -259,7 +259,7 @@ agentihooks settings-profile --clear         # revert
 | `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, brain refresh, context refresh, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |

@@ -45,7 +45,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 |---|---|---|
 | `SessionStart` | `on_session_start` | Register broadcast session, inject context, brain injection, MCP warning |
 | `SessionEnd` | `on_session_end` | Deregister session, clear caches, log summary |
-| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, brain refresh, context refresh, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
 | `PreToolUse` | `on_pre_tool_use` | Secrets scan, guardrails pipeline, critical broadcast via additionalContext |
 | `PostToolUse` | `on_post_tool_use` | Bash filter, file dedup, tool error recording |
 | `Stop` / `SubagentStop` | `on_stop` | Memory auto-save, cost logging |

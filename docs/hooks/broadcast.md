@@ -343,7 +343,7 @@ UserPromptSubmit fires
   │     │     ├── inject_banner(severity_title, message + metadata)
   │     │     └── mark as delivered (if one-shot)
   │     └── lazy cleanup: remove expired, rewrite file
-  └── (existing hooks continue: secrets scan, context refresh, etc.)
+  └── (existing hooks continue: secrets scan, brain refresh, etc.)
 
 PreToolUse fires
   ├── broadcast.py: get_critical_context(session_id)

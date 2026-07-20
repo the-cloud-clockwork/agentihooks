@@ -188,7 +188,7 @@ def check_otel() -> dict[str, Any]:
 _GUARDRAIL_DESCRIPTIONS = {
     "bash_filter": "Truncates verbose bash output (docker, git log, test runners)",
     "file_dedup": "Blocks re-reading unchanged files already in context",
-    "context_compression": "Token compression on injected content (standard level)",
+    "context_compression": "Token compression on injected content (only when CONTEXT_COMPRESSION_SCOPE=all)",
     "context_audit": "Tracks per-tool token consumption across the session",
     "effort_policy": "Injects thinking/effort guidance, warns on expensive subagents",
     "peak_hours": "Shows peak billing indicator on statusline",
@@ -203,6 +203,7 @@ def check_guardrails() -> dict[str, Any]:
             BASH_FILTER_ENABLED,
             COMPACT_SUGGEST_ENABLED,
             CONTEXT_AUDIT_ENABLED,
+            CONTEXT_COMPRESSION_SCOPE,
             CONTEXT_REFRESH_COMPRESSION,
             EFFORT_POLICY_ENABLED,
             FILE_READ_CACHE_ENABLED,
@@ -212,7 +213,11 @@ def check_guardrails() -> dict[str, Any]:
         flags = {
             "bash_filter": BASH_FILTER_ENABLED,
             "file_dedup": FILE_READ_CACHE_ENABLED,
-            "context_compression": CONTEXT_REFRESH_COMPRESSION != "off",
+            # Compression only actually fires when scope is "all" — see
+            # hooks/common.py / hook_manager.py. With scope "refresh" (default,
+            # a no-op since the context-refresh path was removed) nothing is
+            # compressed, so reporting "active" on level alone would mislead.
+            "context_compression": CONTEXT_REFRESH_COMPRESSION != "off" and CONTEXT_COMPRESSION_SCOPE == "all",
             "context_audit": CONTEXT_AUDIT_ENABLED,
             "effort_policy": EFFORT_POLICY_ENABLED,
             "peak_hours": PEAK_HOURS_ENABLED,

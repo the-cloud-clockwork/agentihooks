@@ -135,7 +135,7 @@ periodic re-injection.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTEXT_REFRESH_COMPRESSION` | `standard` | Compression level: `off`, `light`, `standard`, `aggressive`. See [Context Preprocessor](../hooks/context-preprocessor.md). |
-| `CONTEXT_COMPRESSION_SCOPE` | `refresh` | Where compression applies: `refresh` (injected banners only) or `all` (all injections + tool output). |
+| `CONTEXT_COMPRESSION_SCOPE` | `refresh` | `all` compresses all injections + tool output. `refresh` (default) is a **no-op** — it once scoped compression to the removed context-refresh payload; set `all` to get any compression. |
 | `CONTEXT_REFRESH_ABBREV_FILE` | *(empty)* | Path to user-supplied abbreviation dictionary (JSON). Merged on top of built-in. |
 
 ---

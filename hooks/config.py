@@ -281,7 +281,10 @@ _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().
 CONTEXT_REFRESH_COMPRESSION: str = _raw_compression if _raw_compression in _VALID_COMPRESSION_MODES else "off"
 CONTEXT_REFRESH_ABBREV_FILE: str = os.getenv("CONTEXT_REFRESH_ABBREV_FILE", "")
 
-# Scope of token compression: "refresh" = only context refresh, "all" = all injections
+# Scope of token compression. "all" = compress every injection + tool output.
+# "refresh" (default) once scoped compression to the context-refresh payload;
+# that path was removed 2026-07-20, so "refresh" is now effectively "off" — set
+# "all" to get any compression. Default kept for config back-compat.
 _VALID_COMPRESSION_SCOPES = frozenset({"refresh", "all"})
 _raw_scope = os.getenv("CONTEXT_COMPRESSION_SCOPE", "refresh").lower().strip()
 CONTEXT_COMPRESSION_SCOPE: str = _raw_scope if _raw_scope in _VALID_COMPRESSION_SCOPES else "refresh"
