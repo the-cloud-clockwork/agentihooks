@@ -230,9 +230,7 @@ def _load_claude_md(project_dir: str = "") -> str | None:
 # Blocks that are already permanently resident in ~/.claude/CLAUDE.md via the
 # memory channel. Re-injecting them periodically spends the whole budget on
 # content the model already has, pushing the profile's own directives past the cut.
-_REDUNDANT_INJECTION_BLOCKS = (
-    ("<!-- BEGIN CI MANIFESTO", "<!-- END CI MANIFESTO -->"),
-)
+_REDUNDANT_INJECTION_BLOCKS = (("<!-- BEGIN CI MANIFESTO", "<!-- END CI MANIFESTO -->"),)
 
 
 def _trim_for_injection(text: str, limit: int) -> str:

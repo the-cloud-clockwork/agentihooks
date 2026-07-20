@@ -3450,12 +3450,7 @@ def _prepend_bundle_claude_md(bundle_dir: Path | None) -> None:
             )
             return
 
-    block = (
-        f"{_BUNDLE_CLAUDE_MD_BEGIN}\n"
-        f"<!-- Source: {bundle_md} -->\n\n"
-        f"{body}\n\n"
-        f"{_BUNDLE_CLAUDE_MD_END}\n\n"
-    )
+    block = f"{_BUNDLE_CLAUDE_MD_BEGIN}\n<!-- Source: {bundle_md} -->\n\n{body}\n\n{_BUNDLE_CLAUDE_MD_END}\n\n"
 
     if had_block:
         after = current.split(_BUNDLE_CLAUDE_MD_END, 1)[1].lstrip("\n")
