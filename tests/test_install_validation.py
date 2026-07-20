@@ -475,9 +475,7 @@ class TestBundleClaudeMdPrepend:
         self._write_bundle_md(install_env, "# Shared\nshared directive\n")
         profile = install_env["profile"]
         dst = self._install_profile(install_env)
-        assert dst.read_text() == (
-            f"<!-- profile: test-profile -->\n{(profile / 'CLAUDE.md').read_text()}"
-        )
+        assert dst.read_text() == (f"<!-- profile: test-profile -->\n{(profile / 'CLAUDE.md').read_text()}")
 
     def test_does_not_write_through_symlink(self, install_env):
         """Never write into a profile source via a leftover symlink."""
@@ -544,9 +542,7 @@ class TestBundleClaudeMdPrepend:
         assert "_prepend_bundle_claude_md(bundle_dir)" in src
         # Must sit between the profile writer and the manifesto appender.
         assert src.index("_install_system_prompt") < src.index("_prepend_bundle_claude_md(bundle_dir)")
-        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index(
-            "_append_ci_manifesto_to_claude_md()"
-        )
+        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index("_append_ci_manifesto_to_claude_md()")
         # Exactly one call site — never inside the chain loop.
         assert src.count("_prepend_bundle_claude_md(") == 1
 
@@ -666,13 +662,10 @@ class TestBundleClaudeMdPrepend:
         re-appended on every init and the file grows without bound.
         """
         profile = install_env["profile"]
-        (profile / "CLAUDE.md").write_text(
-            "# Anton\nFormat:\n\n<!-- BEGIN sample -->\nexample\n<!-- END sample -->\n"
-        )
+        (profile / "CLAUDE.md").write_text("# Anton\nFormat:\n\n<!-- BEGIN sample -->\nexample\n<!-- END sample -->\n")
         dst = install_env["claude_home"] / "CLAUDE.md"
         dst.write_text(
-            "<!-- profile: test-profile -->\n# old\n\n"
-            "<!-- BEGIN agentibridge -->\nab\n<!-- END agentibridge -->\n"
+            "<!-- profile: test-profile -->\n# old\n\n<!-- BEGIN agentibridge -->\nab\n<!-- END agentibridge -->\n"
         )
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             for _ in range(4):
@@ -709,8 +702,7 @@ class TestBundleClaudeMdPrepend:
         """Ambiguous markup is unrecoverable by rewrite — guarantee a backup."""
         dst = install_env["claude_home"] / "CLAUDE.md"
         dst.write_text(
-            "<!-- profile: test-profile -->\n# old\n\n"
-            "<!-- BEGIN agentibridge -->\nin-flight, never closed\n"
+            "<!-- profile: test-profile -->\n# old\n\n<!-- BEGIN agentibridge -->\nin-flight, never closed\n"
         )
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._install_system_prompt(install_env["profile"], "test-profile")
