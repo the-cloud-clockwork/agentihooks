@@ -17,6 +17,26 @@ uv run ruff format .                                                   # format
 agentihooks init --profile anton                                       # global install
 ```
 
+`ruff check` and `ruff format --check` fail independently — CI runs both, so run
+both. CI also runs the whole suite, not `-m unit`, which collects under half of it.
+
+## Release & snapshot ritual
+
+The CI manifesto covers the merge method into `main`. These three are specific to
+this repo and each one has already cost a broken snapshot:
+
+1. **Release before cutting the snapshot PR.** `release.yml` bumps the version on
+   `dev`, so a PR cut first leaves `main` declaring the previous version while
+   shipping the new code.
+2. **After a squash-merge into `main`, merge `origin/main` back into `dev`
+   immediately.** The squash gives the two branches identical trees but no shared
+   recent history, so the *next* snapshot PR diffs from the previous merge base and
+   replays every file as a phantom conflict. The merge-back changes history only —
+   verify with `git rev-parse HEAD^{tree}` before and after, which must match.
+3. **`git fetch` updates `origin/dev`, not your local branch.** Releases land on
+   `dev` via CI, so a local branch that looks current is usually behind. Merging
+   from a stale local `dev` silently reverts whatever CI committed.
+
 ## The Four Pillars
 
 AgentiHooks is organized around four pillars. When working on this codebase, understand which pillar a change affects:
