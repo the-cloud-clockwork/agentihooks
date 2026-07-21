@@ -28,15 +28,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # `python -m ruff`, not bare `ruff`: pip on the self-hosted runner installs
+      # into the user site, whose bin dir is not on PATH.
       - name: Install dependencies
         run: |
-          pip install ruff
+          python -m pip install ruff
 
       - name: Ruff check
-        run: ruff check hooks/ scripts/
+        run: python -m ruff check hooks/ scripts/
 
       - name: Ruff format check
-        run: ruff format --check hooks/ scripts/
+        run: python -m ruff format --check hooks/ scripts/
 
   syntax:
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}

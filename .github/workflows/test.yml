@@ -30,15 +30,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Everything below runs as `python -m <tool>`, never the bare console
+      # script. pip on the self-hosted runner installs into the user site
+      # (~/.local), whose bin dir is not on PATH, so `pytest` and `ruff`
+      # resolved to "command not found" while the packages were installed fine.
       - name: Install dependencies
         run: |
-          pip install -e ".[dev,all]"
+          python -m pip install -e ".[dev,all]"
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
-        run: pytest tests/ -v --cov=hooks --cov-report=term-missing --tb=short
+        run: python -m pytest tests/ -v --cov=hooks --cov-report=term-missing --tb=short
 
   lint:
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
@@ -51,10 +55,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install ruff
-        run: pip install ruff>=0.4
+        run: python -m pip install ruff>=0.4
 
       - name: Lint check
-        run: ruff check hooks/ scripts/ tests/
+        run: python -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
-        run: ruff format --check hooks/ scripts/ tests/
+        run: python -m ruff format --check hooks/ scripts/ tests/
