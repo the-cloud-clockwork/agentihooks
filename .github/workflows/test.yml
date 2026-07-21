@@ -3,6 +3,11 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  # dev is the deploy source and the only branch agents commit to, so it is the
+  # branch that most needs gating. Without this every dev commit shipped
+  # untested and only a snapshot PR to main ever ran the suite.
+  push:
+    branches: [dev]
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -29,8 +34,11 @@ jobs:
         run: |
           pip install -e ".[dev,all]"
 
-      - name: Run unit tests
-        run: pytest tests/ -v -m unit --cov=hooks --cov-report=term-missing --tb=short
+      # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
+      # including every ownership-scope test guarding what uninstall and prune
+      # are allowed to delete — never ran in CI at all.
+      - name: Run tests
+        run: pytest tests/ -v --cov=hooks --cov-report=term-missing --tb=short
 
   lint:
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}

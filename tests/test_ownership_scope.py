@@ -100,9 +100,7 @@ class TestManagedRootScope:
         workspace = home / "dev" / "workspace"
         (workspace / "some-other-repo").mkdir(parents=True)
         monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", home / "repos" / "agentihooks")
-        install._save_state(
-            {"linked_profiles": [{"name": "anton", "path": str(workspace)}], "managed_links": []}
-        )
+        install._save_state({"linked_profiles": [{"name": "anton", "path": str(workspace)}], "managed_links": []})
         return workspace
 
     def test_shallow_root_does_not_claim_unrelated_symlink(self, home, monkeypatch):
@@ -310,9 +308,7 @@ class TestPruneUnderUncertainty:
         _write_claude_json({"hooks-utils": {"command": "python"}, "gateway": {"command": "x"}})
         install._save_state({"managed_mcp_servers": ["hooks-utils", "gateway"]})
         # A moved venv makes _build_mcp_config sys.exit(1) deep inside the collector.
-        monkeypatch.setattr(
-            install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1))
-        )
+        monkeypatch.setattr(install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1)))
 
         install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
 
@@ -321,9 +317,7 @@ class TestPruneUnderUncertainty:
         )
 
     def test_systemexit_does_not_escape(self, home, monkeypatch):
-        monkeypatch.setattr(
-            install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1))
-        )
+        monkeypatch.setattr(install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1)))
         assert install._get_managed_mcp_names() is None
 
 
