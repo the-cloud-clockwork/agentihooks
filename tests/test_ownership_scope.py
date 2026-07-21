@@ -92,6 +92,23 @@ class TestStaleLinkScope:
         assert (skills / "foreign").is_symlink(), "cleanup reaped a foreign dangling symlink"
 
 
+class TestPreLedgerLinks:
+    def test_link_into_managed_root_is_ours_without_a_ledger_entry(self, home, monkeypatch):
+        """Links from installs predating the ledger stay reapable."""
+        root = home / "repos" / "agentihooks"
+        dead_source = root / ".claude" / "rules" / "gone.md"
+        dead_source.parent.mkdir(parents=True)
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
+        rules = install.CLAUDE_HOME / "rules"
+        rules.mkdir(parents=True, exist_ok=True)
+        (rules / "gone.md").symlink_to(dead_source)  # source already deleted
+        install._save_state({"managed_links": []})
+
+        assert install._link_is_managed(rules / "gone.md") is True
+        install._remove_agentihooks_symlinks(rules, "rule")
+        assert not (rules / "gone.md").is_symlink()
+
+
 class TestUninstallScope:
     def test_uninstall_only_removes_recorded_links(self, home, monkeypatch):
         """Prefix matching must not claim a neighbour repo that shares a name prefix."""

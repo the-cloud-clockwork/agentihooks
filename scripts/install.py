@@ -453,11 +453,6 @@ def _state_links() -> dict[str, dict]:
     return {e["link"]: e for e in raw if isinstance(e, dict) and e.get("link")}
 
 
-def _has_link_ledger() -> bool:
-    """True once this install has written a ledger (even an empty one)."""
-    return _LINKS_KEY in _load_state()
-
-
 def _state_record_link(link: Path, target: Path, kind: str) -> None:
     """Record a symlink agentihooks created, so removal can be exact."""
     state = _load_state()
@@ -513,26 +508,28 @@ def _state_forget_links(links: list[Path]) -> None:
 def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
     """True when agentihooks installed *link*.
 
-    The ledger is authoritative. Legacy installs carry no ledger at all, so
-    they fall back to a separator-guarded managed-root match on the raw symlink
-    target — dangling links included, since a deleted bundle is exactly when a
-    stale link needs reaping.
+    Two independent signals, either sufficient:
+
+    1. The ledger names the link and it still points where it was recorded to.
+    2. The link points into a root agentihooks owns — its own repo, the linked
+       bundle, or a linked profile. Nothing outside agentihooks links into
+       those, and this is what claims links from installs that predate the
+       ledger, including dangling ones (a deleted source is precisely when a
+       stale link needs reaping).
+
+    The root match is separator-guarded: a neighbour repo sharing a name prefix
+    (``agentihooks-extras`` beside ``agentihooks``) is not a match.
     """
     if ledger is None:
         ledger = _state_links()
-    entry = ledger.get(str(link))
-    if entry:
-        try:
-            raw = os.readlink(link)
-        except OSError:
-            return True  # recorded but unreadable — still ours to clean up
-        return raw.rstrip("/") == str(entry.get("target", "")).rstrip("/")
-    if _has_link_ledger():
-        return False  # ledger exists and does not name this link — not ours
     try:
         raw = os.readlink(link)
     except OSError:
-        return False
+        # Recorded but unreadable is still ours; unrecorded and unreadable is not.
+        return str(link) in ledger
+    entry = ledger.get(str(link))
+    if entry and raw.rstrip("/") == str(entry.get("target", "")).rstrip("/"):
+        return True
     roots = _managed_roots()
     if any(_under_root(raw, root) for root in roots):
         return True
