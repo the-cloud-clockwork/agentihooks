@@ -48,8 +48,16 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(install, "STATE_JSON", fake_home / ".agentihooks" / "state.json", raising=False)
     monkeypatch.setattr(install, "_CLAUDE_JSON", fake_home / ".claude.json", raising=False)
     monkeypatch.setattr(install, "_BASHRC", fake_home / ".bashrc", raising=False)
+    # AGENTIHOOKS_ROOT is `Path(__file__).parent.parent` — the real checkout. It
+    # feeds `_managed_roots()`, so leaving it real means every ownership test runs
+    # with the developer's own repo silently trusted as a source. Nothing collides
+    # with it today, which is luck, not isolation.
+    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", tmp_path / "_repo", raising=False)
+    # Same reasoning for the env-var bundle: `_managed_roots()` takes it verbatim,
+    # so a developer with it exported would run a different suite than CI.
+    monkeypatch.delenv("AGENTIHOOKS_BUNDLE_PATH", raising=False)
 
-    for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC"):
+    for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC", "AGENTIHOOKS_ROOT"):
         if not hasattr(install, name):
             continue
         value = Path(getattr(install, name))

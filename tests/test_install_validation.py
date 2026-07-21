@@ -316,11 +316,12 @@ class TestClaudeMdLinking:
             install._install_system_prompt(profile, "test-profile")
         assert not dst.exists()
 
-    def test_stale_symlink_cleaned(self, install_env):
-        """Old symlink pointing into profiles/ is removed."""
+    def test_stale_symlink_cleaned(self, install_env, monkeypatch):
+        """Old symlink into OUR profiles/ dir is removed."""
         dst = install_env["claude_home"] / "CLAUDE.md"
-        # Create a stale symlink pointing into a profiles/ path
-        fake_target = install_env["tmp"] / "profiles" / "old" / ".claude" / "CLAUDE.md"
+        root = install_env["tmp"] / "agentihooks"
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
+        fake_target = root / "profiles" / "old" / ".claude" / "CLAUDE.md"
         fake_target.parent.mkdir(parents=True, exist_ok=True)
         fake_target.write_text("old")
         dst.symlink_to(fake_target)
@@ -328,6 +329,19 @@ class TestClaudeMdLinking:
         with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
             install._cleanup_stale_claude_md_symlink()
         assert not dst.exists()
+
+    def test_foreign_claude_md_symlink_survives(self, install_env, monkeypatch):
+        """A CLAUDE.md symlink into the operator's own tree is left alone."""
+        dst = install_env["claude_home"] / "CLAUDE.md"
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", install_env["tmp"] / "agentihooks")
+        foreign = install_env["tmp"] / "dotfiles" / "profiles" / "work" / "CLAUDE.md"
+        foreign.parent.mkdir(parents=True, exist_ok=True)
+        foreign.write_text("operator's own")
+        dst.symlink_to(foreign)
+
+        with patch.object(install, "CLAUDE_HOME", install_env["claude_home"]):
+            install._cleanup_stale_claude_md_symlink()
+        assert dst.is_symlink(), "cleanup removed a CLAUDE.md symlink agentihooks never created"
 
 
 # ---------------------------------------------------------------------------

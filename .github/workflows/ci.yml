@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [dev]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,27 +16,29 @@ permissions:
 jobs:
   lint:
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      # No Python matrix: ruff's verdict is fixed by `target-version` in
+      # pyproject, not by the interpreter running it, so a second version was
+      # duplicate work for identical output.
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
+      # `python -m ruff`, not bare `ruff`: pip on the self-hosted runner installs
+      # into the user site, whose bin dir is not on PATH.
       - name: Install dependencies
         run: |
-          pip install ruff
+          python -m pip install ruff
 
       - name: Ruff check
-        run: ruff check hooks/ scripts/
+        run: python -m ruff check hooks/ scripts/
 
       - name: Ruff format check
-        run: ruff format --check hooks/ scripts/
+        run: python -m ruff format --check hooks/ scripts/
 
   syntax:
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}

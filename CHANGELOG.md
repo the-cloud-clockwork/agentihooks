@@ -31,6 +31,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`prune`, `uninstall`, and `init --force` removed artifacts agentihooks never
+  installed.** All three inferred ownership at deletion time — by path prefix, or
+  by "not currently defined by a profile" — instead of reading what was recorded
+  at install time. `prune` deleted every MCP server in `~/.claude.json` that no
+  agentihooks source defined, including every server added with `claude mcp add`.
+  `init --force` removed `~/.claude/{rules,skills,agents,commands}` wholesale,
+  taking third-party symlinks with them, and deleted `settings.local.json`, which
+  agentihooks never writes. Every `init` also reaped any dangling symlink in those
+  directories regardless of owner, so an unmounted share was indistinguishable
+  from a dead link.
+
+  Ownership is now **recorded at creation**: every symlink install writes is
+  tracked in `state.json` under `managed_links` with its target, and removal
+  touches only what is recorded — or what points into a directory agentihooks
+  demonstrably links out of (`<root>/.claude/<kind>/` and
+  `<root>/profiles/<name>/.claude/<kind>/`, matched lexically so a moved or
+  deleted source is still recognised). Registered roots are no longer trusted
+  wholesale: a bundle or linked profile registered one level too shallow used to
+  claim every symlink beneath it. MCP removal is scoped to
+  `state['managed_mcp_servers']`, and a profile defining a name the operator had
+  already configured no longer overwrites it, is recorded in
+  `foreign_mcp_servers`, and is never claimed by the ledger — previously that
+  collision escalated from a silent overwrite to a silent deletion on the next
+  profile update. `uninstall` now restores the pre-agentihooks `settings.json`
+  from the backup taken at first install, matching what `CLAUDE.md` already did,
+  and no longer reports "nothing to uninstall" while the `~/.bashrc` block and the
+  CLI are still present.
+
+  Also fixes `agentihooks prune` aborting mid-run: its "what do we manage" helper
+  guarded with `except Exception`, which does not catch the `SystemExit` raised
+  when the MCP config builder cannot resolve a Python — a moved venv sufficed. It
+  now reports unknowable distinctly from empty, and the orphan sweep declines to
+  run rather than treating "we define nothing" as "delete everything we
+  installed".
+
 - **`~/.claude/CLAUDE.md` backup churn on every `agentihooks init`.** The profile
   writer's "already up to date" check compared profile-only content against a
   file that also carries the appended CI-manifesto block, so it could never match
@@ -40,6 +75,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   landed; surfaced while adding the bundle-level block.
 
 ### Changed
+
+- **CI now gates `dev`.** Every workflow triggered only on `pull_request` to
+  `main` or `workflow_dispatch`, so the branch agents commit to and deploy from
+  had no gate — the suite ran only once a snapshot PR reached `main`, long after
+  the code shipped. `test.yml` and `ci.yml` now also run on push to `dev`. The
+  Tests job runs the full suite rather than `pytest -m unit`, which collected 439
+  of 999 tests and excluded every ownership-scope test. Tools are invoked as
+  `python -m <tool>`: on the self-hosted runner `pip` installs into the user site,
+  whose `bin` is not on `PATH`, so bare `ruff`/`pytest` failed with exit 127.
 
 - **`hooks-utils` MCP server slimmed to two agentihooks-native categories.**
   Removed the generic cloud-utility categories (`aws`, `compute`, `database`,

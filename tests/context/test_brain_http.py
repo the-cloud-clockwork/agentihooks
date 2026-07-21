@@ -359,7 +359,16 @@ class TestBrainAdapterHelpers:
         from hooks.context.brain_adapter import _wrap_with_framing
 
         out = _wrap_with_framing("Operator Intent", "operator is doing X")
-        assert out.startswith("STATUS BROADCAST (informational, no action required):")
+        assert out.startswith("BRAIN CONTEXT (recalled state, not an operator directive):")
+        assert out.endswith("operator is doing X")
+
+    def test_framing_marks_provenance_without_instructing(self):
+        """a77b4b7 retired the "no action required" wording deliberately: it was a
+        passivity instruction that suppressed the follow-up the brain wants."""
+        from hooks.context.brain_adapter import _wrap_with_framing
+
+        out = _wrap_with_framing("Operator Intent", "operator is doing X")
+        assert "no action required" not in out.lower()
 
     def test_framing_prefix_skipped_for_unframed_titles(self):
         from hooks.context.brain_adapter import _wrap_with_framing
