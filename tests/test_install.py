@@ -1107,12 +1107,25 @@ class TestClaudeMdManagedDetection:
 
     def test_legacy_symlink_into_profiles_is_managed(self, tmp_path, monkeypatch):
         self._wire(tmp_path, monkeypatch)
-        target = tmp_path / "profiles" / "anton" / "CLAUDE.md"
+        root = tmp_path / "agentihooks"
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
+        target = root / "profiles" / "anton" / "CLAUDE.md"
         target.parent.mkdir(parents=True)
         target.write_text("profile prompt\n")
         cm = tmp_path / "CLAUDE.md"
         cm.symlink_to(target)
         assert install._claude_md_is_managed(cm) is True
+
+    def test_foreign_symlink_into_profiles_is_not_managed(self, tmp_path, monkeypatch):
+        """A profiles/ path in someone else's tree is not proof of ownership."""
+        self._wire(tmp_path, monkeypatch)
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", tmp_path / "agentihooks")
+        target = tmp_path / "dotfiles" / "profiles" / "work" / "CLAUDE.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("the operator's own prompt\n")
+        cm = tmp_path / "CLAUDE.md"
+        cm.symlink_to(target)
+        assert install._claude_md_is_managed(cm) is False
 
     def test_record_is_idempotent(self, tmp_path, monkeypatch):
         state = self._wire(tmp_path, monkeypatch)
