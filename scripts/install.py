@@ -434,11 +434,21 @@ def _under_root(path: str, root: str) -> bool:
 
 
 def _managed_roots() -> list[Path]:
-    """Repos and directories registered as agentihooks sources."""
+    """Repos and directories REGISTERED as agentihooks sources.
+
+    Registration, not presence on disk. ``_get_bundle_path`` gates on
+    ``is_dir()``, so a bundle the operator merely renamed would drop out of
+    this list and strand every artifact installed from it as unrecognised —
+    a moved source is exactly when ownership still needs to be recognised.
+    """
     roots = [AGENTIHOOKS_ROOT]
-    bundle = _get_bundle_path()
-    if bundle:
-        roots.append(Path(bundle))
+    state = _load_state()
+    bundle = state.get("bundle")
+    if isinstance(bundle, dict) and bundle.get("path"):
+        roots.append(Path(bundle["path"]))
+    env_bundle = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
+    if env_bundle:
+        roots.append(Path(env_bundle).expanduser())
     for entry in _get_linked_profiles():
         p = entry.get("path")
         if p:
@@ -446,28 +456,32 @@ def _managed_roots() -> list[Path]:
     return roots
 
 
-def _managed_link_sources() -> list[str]:
-    """The directories agentihooks links OUT of.
+def _under_managed_source(target: str) -> bool:
+    """True when *target* sits in a directory agentihooks links OUT of.
 
-    Not the registered roots themselves — a root is only ever read through
+    A registered root is not trusted wholesale — it is only ever read through
     ``<root>/.claude/<kind>/`` and ``<root>/profiles/<name>/.claude/<kind>/``
-    (see :func:`_symlink_dir_contents` call sites). Trusting the whole tree
-    would let a root registered one level too shallow — ``link-profile
-    ~/dev/workspace`` instead of ``~/dev/workspace/repo/profiles/anton`` —
-    claim every symlink anywhere beneath it, including the operator's own.
+    (the two shapes :func:`_symlink_dir_contents` is called with). Trusting the
+    whole tree would let a root registered one level too shallow —
+    ``link-profile ~/dev/workspace`` instead of
+    ``~/dev/workspace/repo/profiles/anton`` — claim every symlink beneath it,
+    including the operator's own.
+
+    The match is lexical, so it still recognises sources that have since been
+    moved or deleted, and ``relative_to`` gives the separator guard for free:
+    ``agentihooks-extras`` is not under ``agentihooks``.
     """
-    sources: list[str] = []
+    tp = Path(target.rstrip("/"))
     for root in _managed_roots():
-        sources.append(str(root / _CLAUDE_SUBDIR))
-        profiles_dir = root / "profiles"
         try:
-            children = sorted(profiles_dir.iterdir()) if profiles_dir.is_dir() else []
-        except OSError:
-            children = []
-        for child in children:
-            if child.is_dir():
-                sources.append(str(child / _CLAUDE_SUBDIR))
-    return sources
+            parts = tp.relative_to(root).parts
+        except ValueError:
+            continue
+        if parts[:1] == (_CLAUDE_SUBDIR,):
+            return True
+        if len(parts) >= 3 and parts[0] == "profiles" and parts[2] == _CLAUDE_SUBDIR:
+            return True
+    return False
 
 
 def _state_links() -> dict[str, dict]:
@@ -555,14 +569,13 @@ def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
     entry = ledger.get(str(link))
     if entry and raw.rstrip("/") == str(entry.get("target", "")).rstrip("/"):
         return True
-    sources = _managed_link_sources()
-    if any(_under_root(raw, src) for src in sources):
+    if _under_managed_source(raw):
         return True
     try:
         resolved = str(link.resolve())
     except OSError:
         return False
-    return any(_under_root(resolved, src) for src in sources)
+    return _under_managed_source(resolved)
 
 
 # ---------------------------------------------------------------------------
@@ -1618,8 +1631,17 @@ def _clean_state_dir() -> None:
     """Reset install state + session caches for a fresh install. Preserves persistent data."""
     import shutil
 
+    # ~/.claude first, and before the state-dir guard: the two directories fail
+    # independently. A missing ~/.agentihooks (deleted by hand, or a fresh
+    # AGENTIHOOKS_HOME) must not leave managed artifacts stranded in ~/.claude.
+    # It also has to precede the state.json delete below, which drops the ledger
+    # every removal here reads.
+    removed = _clean_claude_home()
+
     state_dir = AGENTIHOOKS_STATE_DIR
     if not state_dir.exists():
+        if removed:
+            _cprint(f"  [OK] Clean install: reset {removed} item(s) from {CLAUDE_HOME}")
         return
 
     # Whitelist: only these are deleted. Everything else survives.
@@ -1643,10 +1665,6 @@ def _clean_state_dir() -> None:
     }
     _DELETE_GLOBS = ["ctx_refresh_*.json", "*.pid"]
 
-    removed = 0
-    # ~/.claude first: every removal below is ledger-driven, and state.json —
-    # which holds the ledger — is one of the files this function deletes.
-    removed += _clean_claude_home()
     for name in _DELETE_FILES:
         target = state_dir / name
         if target.exists():
@@ -2829,6 +2847,10 @@ def _reconcile_managed_mcp_ledger(current_managed: set[str]) -> list[str]:
     """
     state = _load_state()
     old_ledger = set(state.get("managed_mcp_servers", []))
+    # A name a profile defines but the operator already occupied is theirs, not
+    # ours (see _merge_mcp_to_user_scope). Claiming it here is what turns a
+    # collision into a deletion one profile-update later.
+    current_managed = current_managed - _state_foreign_mcp()
     to_remove = old_ledger - current_managed
     if to_remove:
         _remove_mcp_from_user_scope({name: None for name in to_remove})
@@ -2840,13 +2862,41 @@ def _reconcile_managed_mcp_ledger(current_managed: set[str]) -> list[str]:
     return sorted(to_remove)
 
 
+def _state_foreign_mcp() -> set[str]:
+    """Server names in ~/.claude.json that agentihooks did not put there."""
+    raw = _load_state().get("foreign_mcp_servers", [])
+    return set(raw) if isinstance(raw, list) else set()
+
+
+def _state_mark_foreign_mcp(names: set[str]) -> None:
+    """Record names agentihooks declined to claim, so it never claims them later."""
+    if not names:
+        return
+    state = _load_state()
+    current = set(state.get("foreign_mcp_servers", []) or [])
+    if names - current:
+        state["foreign_mcp_servers"] = sorted(current | names)
+        _save_state(state)
+
+
 def _merge_mcp_to_user_scope(servers: dict) -> None:
-    """Merge *servers* into the top-level mcpServers of ~/.claude.json."""
+    """Merge *servers* into the top-level mcpServers of ~/.claude.json.
+
+    A name already present that agentihooks never installed belongs to the
+    operator. Overwriting it destroys their config with no backup, and — worse —
+    the reconcile that follows would then record the name in the managed ledger,
+    so the next profile that drops the name deletes the operator's server
+    outright. Such names are left alone and remembered as foreign.
+    """
     existing: dict = load_json(_CLAUDE_JSON) if _CLAUDE_JSON.exists() else {}
     existing_servers: dict = existing.get("mcpServers", {})
-    added, updated = [], []
+    ours = set(_load_state().get("managed_mcp_servers", []))
+    added, updated, skipped = [], [], []
     for name, config in servers.items():
         if name in existing_servers:
+            if name not in ours:
+                skipped.append(name)
+                continue
             if existing_servers[name] != config:
                 updated.append(name)
         else:
@@ -2854,11 +2904,17 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
         existing_servers[name] = config
     existing["mcpServers"] = existing_servers
     save_json(_CLAUDE_JSON, existing)
+    _state_mark_foreign_mcp(set(skipped))
     if added:
         _cprint(f"  [OK] Added user-scope MCP servers  : {', '.join(added)}")
     if updated:
         _cprint(f"  [OK] Updated user-scope MCP servers: {', '.join(updated)}")
-    if not added and not updated:
+    if skipped:
+        _cprint(
+            f"  [!!] Kept your existing MCP server(s), not overwritten: {', '.join(sorted(skipped))}\n"
+            f"       A profile defines the same name. Rename one to let the profile's version apply."
+        )
+    if not added and not updated and not skipped:
         _cprint(f"  [--] User-scope MCP servers unchanged: {', '.join(servers.keys())}")
 
 
@@ -3235,6 +3291,26 @@ def _install_cli_tool() -> None:
         _cprint(f"  [OK] CLI installed via: {label}")
     else:
         _cprint(f"  [!!] uv tool install failed: {result.stderr.strip()}")
+
+
+def _cli_tool_is_installed() -> bool:
+    """True when the agentihooks CLI is present as a uv tool.
+
+    Used by uninstall's early exit, which must not report "nothing to
+    uninstall" while the CLI itself is still on PATH.
+    """
+    import subprocess
+
+    uv = shutil.which("uv")
+    if not uv:
+        return False
+    try:
+        result = subprocess.run([uv, "tool", "list"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    return any(line.split(" ")[0] == _CLI_NAME for line in result.stdout.splitlines())
 
 
 def _uninstall_cli_tool() -> None:
@@ -3803,9 +3879,16 @@ def _claude_md_is_managed(p: Path) -> bool:
     if p.is_symlink():
         # A "profiles/" substring alone is not proof — another tool's profiles
         # dir would qualify. The target must sit under the profiles/ directory
-        # of a source we registered, which is the only shape install ever wrote.
-        target = str(p.resolve())
-        return any(_under_root(target, str(root / "profiles")) for root in _managed_roots())
+        # of a source we REGISTERED, which is the only shape install ever wrote.
+        # Registration is checked lexically, so a source since moved or deleted
+        # still resolves as ours — the case that most needs reaping.
+        candidates = {str(p.resolve())}
+        try:
+            candidates.add(os.readlink(p))
+        except OSError:
+            pass
+        roots = [str(root / "profiles") for root in _managed_roots()]
+        return any(_under_root(t, r) for t in candidates for r in roots)
     if not p.exists():
         return False
     if _load_state().get("managed_claude_md") == str(p):
@@ -3926,18 +4009,34 @@ def uninstall_global(args: argparse.Namespace) -> None:
     remove_claude_md = _claude_md_is_managed(claude_md_dst)
     claude_md_is_symlink = claude_md_dst.is_symlink()
 
-    # Servers to remove = current managed set UNION the persisted ledger (catches
-    # servers dropped from a profile before uninstall), restricted to what is
-    # actually present in ~/.claude.json.
-    managed_servers = _collect_all_managed_mcp_servers()
-    for name in _load_state().get("managed_mcp_servers", []):
-        managed_servers.setdefault(name, None)
+    # Servers to remove = the persisted ledger, restricted to what is actually
+    # present in ~/.claude.json.
+    #
+    # NOT unioned with _collect_all_managed_mcp_servers(): that collector matches
+    # by NAME against whatever the profile chain defines right now, so a server
+    # the operator configured themselves would be deleted the moment a profile
+    # happened to define the same name — even on a machine where init never ran.
+    # The union was there to catch servers dropped from a profile before
+    # uninstall, but the ledger already records those: it is written as the full
+    # installed set on every init, so anything installed is in it.
     installed_names = _get_user_scope_mcp_names()
-    managed_servers = {k: v for k, v in managed_servers.items() if k in installed_names}
+    ledger_names = _load_state().get("managed_mcp_servers", [])
+    managed_servers: dict = {name: None for name in ledger_names if name in installed_names}
 
-    # Early exit if nothing to do
+    # Early exit if nothing to do. Counts every step below, including the ones
+    # that run unconditionally — a bashrc block or an installed CLI on its own
+    # is still an install, and returning here would silently skip both.
+    bashrc_block_present = _BASHRC.exists() and _BLOCK_START in _BASHRC.read_text(encoding="utf-8")
     total_work = (
-        int(remove_settings) + n_skills + n_agents + n_commands + n_rules + int(remove_claude_md) + len(managed_servers)
+        int(remove_settings)
+        + n_skills
+        + n_agents
+        + n_commands
+        + n_rules
+        + int(remove_claude_md)
+        + len(managed_servers)
+        + int(bashrc_block_present)
+        + int(_cli_tool_is_installed())
     )
     if total_work == 0:
         print("Nothing to uninstall — agentihooks is not installed.")
@@ -4334,7 +4433,7 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
     #    The candidate set is what agentihooks recorded installing, not
     #    "everything present that we do not currently define".
     managed = _get_managed_mcp_names()
-    state_ledger = set(_load_state().get("managed_mcp_servers", []))
+    state_ledger = set(_load_state().get("managed_mcp_servers", [])) - _state_foreign_mcp()
     if state_ledger and _CLAUDE_JSON.exists():
         data = load_json(_CLAUDE_JSON)
         current_servers = data.get("mcpServers", {})

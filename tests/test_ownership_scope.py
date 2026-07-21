@@ -186,3 +186,106 @@ class TestUninstallScope:
         install._remove_agentihooks_symlinks(skills, "skill")
 
         assert (skills / "nb").is_symlink(), "uninstall claimed a link from a prefix-matching neighbour repo"
+
+    def test_early_exit_accounts_for_bashrc_block(self, home, monkeypatch):
+        """A bashrc block alone is still an install — do not report false-clean."""
+        import argparse
+
+        install._BASHRC.write_text(f"export FOO=1\n{install._BLOCK_START}\nexport BAR=2\n{install._BLOCK_END}\n")
+        monkeypatch.setattr(install, "_cli_tool_is_installed", lambda: False)
+        monkeypatch.setattr(install, "_uninstall_cli_tool", lambda: None)
+
+        install.uninstall_global(argparse.Namespace(yes=True))
+
+        assert install._BLOCK_START not in install._BASHRC.read_text(), (
+            "uninstall returned early and left the bashrc block behind"
+        )
+
+
+class TestMovedSourceOwnership:
+    """A source that moved is still a source — ownership must not evaporate."""
+
+    def test_claude_md_symlink_survives_a_renamed_bundle(self, home, monkeypatch):
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", home / "repos" / "agentihooks")
+        bundle = home / "bundle"
+        src = bundle / "profiles" / "anton" / "CLAUDE.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("profile prompt\n")
+        install._save_state({"bundle": {"path": str(bundle)}})
+        cm = install.CLAUDE_HOME / "CLAUDE.md"
+        cm.symlink_to(src)
+        assert install._claude_md_is_managed(cm) is True
+
+        bundle.rename(home / "bundle-renamed")  # operator moves the checkout
+
+        assert install._claude_md_is_managed(cm) is True, (
+            "a renamed bundle stranded agentihooks' own CLAUDE.md as unowned"
+        )
+
+    def test_link_into_renamed_bundle_is_still_ours(self, home, monkeypatch):
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", home / "repos" / "agentihooks")
+        bundle = home / "bundle"
+        src = bundle / ".claude" / "skills" / "s"
+        src.mkdir(parents=True)
+        install._save_state({"bundle": {"path": str(bundle)}, "managed_links": []})
+        skills = install.CLAUDE_HOME / "skills"
+        skills.mkdir(parents=True, exist_ok=True)
+        (skills / "s").symlink_to(src)
+
+        bundle.rename(home / "bundle-renamed")
+
+        assert install._link_is_managed(skills / "s") is True
+
+
+class TestCleanWithoutStateDir:
+    def test_claude_home_cleaned_when_state_dir_is_absent(self, home):
+        """~/.agentihooks and ~/.claude fail independently."""
+        settings = install.CLAUDE_HOME / "settings.json"
+        settings.write_text(json.dumps({install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE}))
+        import shutil
+
+        shutil.rmtree(install.AGENTIHOOKS_STATE_DIR)
+
+        install._clean_state_dir()
+
+        assert not settings.exists(), "a missing state dir stranded a managed settings.json"
+
+
+class TestMcpNameCollision:
+    """A profile defining a name the operator already uses must not take it over."""
+
+    def _collide(self):
+        _write_claude_json({"shared": {"command": "operator-binary"}})
+        install._save_state({"managed_mcp_servers": []})
+        install._merge_mcp_to_user_scope({"shared": {"command": "profile-binary"}})
+
+    def test_operator_config_is_not_overwritten(self, home):
+        self._collide()
+        assert _read_claude_json()["shared"] == {"command": "operator-binary"}
+
+    def test_collided_name_is_never_claimed(self, home):
+        self._collide()
+        install._reconcile_managed_mcp_ledger({"shared", "hooks-utils"})
+        assert "shared" not in install._load_state()["managed_mcp_servers"]
+
+    def test_dropping_the_profile_does_not_delete_operator_server(self, home):
+        self._collide()
+        install._reconcile_managed_mcp_ledger({"shared", "hooks-utils"})
+        install._reconcile_managed_mcp_ledger({"hooks-utils"})  # profile drops it
+        assert "shared" in _read_claude_json(), "the operator's MCP server was deleted by a profile update"
+
+    def test_uninstall_does_not_claim_by_name_match(self, home, monkeypatch):
+        """The ledger decides, not what a profile happens to define right now."""
+        import argparse
+
+        _write_claude_json({"operator-own": {"command": "theirs"}})
+        install._save_state({"managed_mcp_servers": []})
+        monkeypatch.setattr(
+            install, "_collect_all_managed_mcp_servers", lambda: {"operator-own": {"command": "profile"}}
+        )
+        monkeypatch.setattr(install, "_cli_tool_is_installed", lambda: False)
+        monkeypatch.setattr(install, "_uninstall_cli_tool", lambda: None)
+
+        install.uninstall_global(argparse.Namespace(yes=True))
+
+        assert "operator-own" in _read_claude_json(), "uninstall deleted a server it never installed"
