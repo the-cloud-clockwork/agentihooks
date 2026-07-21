@@ -4391,12 +4391,23 @@ def _get_valid_mcp_names() -> set[str]:
     return valid
 
 
-def _get_managed_mcp_names() -> set[str]:
-    """Return server names that agentihooks sources currently define."""
+def _get_managed_mcp_names() -> set[str] | None:
+    """Server names agentihooks sources currently define, or None if unknowable.
+
+    None and the empty set are NOT interchangeable here. Callers subtract this
+    from the installed ledger to find orphans, so an empty set on failure would
+    mean "we define nothing, therefore everything we installed is stale" — and
+    delete the lot. Failure has to be distinguishable so the caller can decline.
+
+    `_collect_all_managed_mcp_servers` reaches `_build_mcp_config`, which calls
+    `sys.exit(1)` when it cannot resolve a python that imports `hooks` — a moved
+    venv is enough. `SystemExit` derives from BaseException, so the old
+    `except Exception` never caught it and prune died mid-run.
+    """
     try:
         return set(_collect_all_managed_mcp_servers().keys())
-    except Exception:
-        return set()
+    except (Exception, SystemExit):
+        return None
 
 
 def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False) -> dict:
@@ -4424,16 +4435,21 @@ def _prune_stale_mcp_servers(known_servers_file: Path, *, verbose: bool = False)
 
     if not valid:
         managed_fallback = _get_managed_mcp_names()
-        if managed_fallback:
-            valid = managed_fallback
-        else:
+        if not managed_fallback:
             return summary
+        valid = managed_fallback
 
     # 0. Remove orphaned mcpServers from ~/.claude.json — ledger-scoped.
     #    The candidate set is what agentihooks recorded installing, not
     #    "everything present that we do not currently define".
+    #    Skipped entirely when the managed set is unknowable: every name in the
+    #    ledger would then look orphaned, and prune would delete all of them.
     managed = _get_managed_mcp_names()
     state_ledger = set(_load_state().get("managed_mcp_servers", [])) - _state_foreign_mcp()
+    if managed is None:
+        if verbose:
+            print("  Skipping orphan sweep — cannot determine what the profile chain defines.")
+        state_ledger = set()
     if state_ledger and _CLAUDE_JSON.exists():
         data = load_json(_CLAUDE_JSON)
         current_servers = data.get("mcpServers", {})

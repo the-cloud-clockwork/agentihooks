@@ -202,6 +202,170 @@ class TestUninstallScope:
         )
 
 
+class TestLedgerWriteSide:
+    """The removal tests all seed the ledger by hand; this exercises the writer."""
+
+    def test_linking_records_the_link(self, home, monkeypatch):
+        src_dir = home / "src" / "skills"
+        (src_dir / "alpha").mkdir(parents=True)
+        (src_dir / "beta").mkdir()
+        dst = install.CLAUDE_HOME / "skills"
+
+        install._symlink_dir_contents(src_dir, dst, label="skill")
+
+        ledger = install._state_links()
+        assert set(ledger) == {str(dst / "alpha"), str(dst / "beta")}
+        entry = ledger[str(dst / "alpha")]
+        assert entry["target"] == str(src_dir / "alpha")
+        assert entry["kind"] == "skills"
+
+    def test_removal_forgets_the_entry(self, home, monkeypatch):
+        src_dir = home / "src" / "skills"
+        (src_dir / "alpha").mkdir(parents=True)
+        dst = install.CLAUDE_HOME / "skills"
+        install._symlink_dir_contents(src_dir, dst, label="skill")
+
+        install._remove_agentihooks_symlinks(dst, "skill")
+
+        assert install._state_links() == {}, "ledger kept an entry for a link it removed"
+
+
+class TestSeparatorGuard:
+    """`_under_root` is what stops a sibling segment reading as a child."""
+
+    def test_profiles_sibling_is_not_claimed(self, home, monkeypatch):
+        root = home / "repos" / "agentihooks"
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
+        # `profiles-backup` shares a prefix with `profiles` but is not under it.
+        foreign = root / "profiles-backup" / "anton" / "CLAUDE.md"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("a copy the operator keeps\n")
+        cm = install.CLAUDE_HOME / "CLAUDE.md"
+        cm.symlink_to(foreign)
+
+        assert install._claude_md_is_managed(cm) is False
+
+    def test_real_profiles_dir_is_claimed(self, home, monkeypatch):
+        root = home / "repos" / "agentihooks"
+        monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", root)
+        src = root / "profiles" / "anton" / "CLAUDE.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("ours\n")
+        cm = install.CLAUDE_HOME / "CLAUDE.md"
+        cm.symlink_to(src)
+
+        assert install._claude_md_is_managed(cm) is True
+
+
+class TestSettingsRestore:
+    def test_uninstall_restores_the_pre_agentihooks_settings(self, home, monkeypatch):
+        import argparse
+
+        original = '{"permissions": {"allow": ["Bash(ls:*)"]}}'
+        backup = install.CLAUDE_HOME / "settings.json.bak.20260101_000000"
+        backup.write_text(original)
+        settings = install.CLAUDE_HOME / "settings.json"
+        settings.write_text(json.dumps({install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE, "model": "opus"}))
+        install._save_state({"settings_original_backup": str(backup)})
+        monkeypatch.setattr(install, "_cli_tool_is_installed", lambda: False)
+        monkeypatch.setattr(install, "_uninstall_cli_tool", lambda: None)
+
+        install.uninstall_global(argparse.Namespace(yes=True))
+
+        assert settings.read_text() == original, "uninstall did not restore the operator's settings.json"
+        assert "settings_original_backup" not in install._load_state()
+
+    def test_backup_records_only_the_first_unmanaged_file(self, home, monkeypatch):
+        """Later unmanaged files are not the pre-agentihooks original."""
+        import datetime as _dt
+
+        class _Clock(_dt.datetime):
+            _n = 0
+
+            @classmethod
+            def now(cls, tz=None):
+                cls._n += 1  # distinct second per call, so backups get distinct names
+                return _dt.datetime(2026, 1, 1, 0, 0, cls._n, tzinfo=tz)
+
+        monkeypatch.setattr(install, "datetime", _Clock)
+        settings = install.CLAUDE_HOME / "settings.json"
+
+        settings.write_text('{"model": "the-original"}')
+        install._backup_settings(settings)
+        first = install._load_state()["settings_original_backup"]
+
+        # A later init sees an unmanaged file again — the operator overwrote
+        # settings.json by hand since. That is not the pre-agentihooks original.
+        settings.write_text('{"model": "written-later"}')
+        install._backup_settings(settings)
+
+        assert install._load_state()["settings_original_backup"] == first
+        assert json.loads(Path(first).read_text()) == {"model": "the-original"}
+
+
+class TestPruneUnderUncertainty:
+    """Deleting on incomplete information is the bug class, not a fallback."""
+
+    def test_orphan_sweep_skipped_when_sources_are_unresolvable(self, home, monkeypatch):
+        _write_claude_json({"hooks-utils": {"command": "python"}, "gateway": {"command": "x"}})
+        install._save_state({"managed_mcp_servers": ["hooks-utils", "gateway"]})
+        # A moved venv makes _build_mcp_config sys.exit(1) deep inside the collector.
+        monkeypatch.setattr(
+            install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1))
+        )
+
+        install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
+
+        assert set(_read_claude_json()) == {"hooks-utils", "gateway"}, (
+            "prune deleted the whole ledger because it could not resolve what the chain defines"
+        )
+
+    def test_systemexit_does_not_escape(self, home, monkeypatch):
+        monkeypatch.setattr(
+            install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1))
+        )
+        assert install._get_managed_mcp_names() is None
+
+
+class TestDisabledListPreservation:
+    def test_disable_preference_survives_for_a_known_server(self, home, monkeypatch):
+        """A server Claude Code still knows about must keep its disable entry."""
+        install._CLAUDE_JSON.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"live": {"command": "x"}},
+                    "claudeAiMcpEverConnected": ["parked"],
+                    "projects": {"/p": {"disabledMcpServers": ["parked", "live"]}},
+                }
+            )
+        )
+        install._save_state({"managed_mcp_servers": []})
+        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: set())
+
+        install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
+
+        disabled = json.loads(install._CLAUDE_JSON.read_text())["projects"]["/p"]["disabledMcpServers"]
+        assert "parked" in disabled, "prune destroyed a disable preference for a server Claude Code knows"
+
+    def test_wholly_unknown_disable_entry_is_still_pruned(self, home, monkeypatch):
+        """The widening must not make step 1 inert."""
+        install._CLAUDE_JSON.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"live": {"command": "x"}},
+                    "projects": {"/p": {"disabledMcpServers": ["ghost", "live"]}},
+                }
+            )
+        )
+        install._save_state({"managed_mcp_servers": []})
+        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: set())
+
+        install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
+
+        disabled = json.loads(install._CLAUDE_JSON.read_text())["projects"]["/p"]["disabledMcpServers"]
+        assert disabled == ["live"]
+
+
 class TestMovedSourceOwnership:
     """A source that moved is still a source — ownership must not evaporate."""
 
