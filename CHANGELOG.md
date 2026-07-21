@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Built-in features now ship in the wheel and install from `profiles/package/`.**
+  `profiles/package/` is the packaged emulation of a `.claude/` tree and the
+  Layer 1 (agentihooks built-in) source for the install symlink merge
+  (built-in -> bundle -> profile). `agentihooks init` symlinks its
+  `rules/` (and, when present, `skills/agents/commands/`) into
+  `~/.claude/<kind>/` exactly like the other feature kinds, and records each link
+  in the `managed_links` ledger so uninstall reclaims it. Because the directory
+  lives under `profiles/`, it is packaged in the wheel — the previous Layer 1
+  source, the repo-root `.claude/`, was never packaged, so PyPI installs received
+  no built-in features at all. The repo-root `.claude/` is now operator-local:
+  untracked and gitignored (root-anchored `/.claude/`, leaving `profiles/*/.claude/`
+  tracked), so nothing under it ships or reaches the remote. The only built-in
+  feature at present is `rules/agentihooks-toolbelt.md`.
+
 - **Optional bundle-level `CLAUDE.md` shared by every profile.** A file at
   `<bundle>/.claude/CLAUDE.md` is now prepended to `~/.claude/CLAUDE.md` ahead of
   all profile content, so cross-profile directives are written once instead of
@@ -31,6 +45,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Wheel packaging dropped every markdown and most profile data.** The
+  `package-data` globs shipped only a couple of JSON/YAML files and no `.md` at
+  all, so profile personas (`CLAUDE.md`) and rules (`rules/*.md`) never made it
+  into the wheel; the `profiles.default` `.claude/CLAUDE.md` glob pointed at a
+  path that did not exist, and `profiles.admin` / `profiles.coding` entries named
+  directories that were already gone. Packaging now ships every `.json`, `.yml`,
+  `.yaml`, and `.md` anywhere under `profiles/` (personas, rules, settings,
+  manifests) via recursive globs, and nothing else; the stale and broken entries
+  are removed.
 - **`prune`, `uninstall`, and `init --force` removed artifacts agentihooks never
   installed.** All three inferred ownership at deletion time — by path prefix, or
   by "not currently defined by a profile" — instead of reading what was recorded
