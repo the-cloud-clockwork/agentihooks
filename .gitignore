@@ -47,7 +47,7 @@ logs/
 # Generated profile build artifacts
 profiles/*/.claude/settings.json
 
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-
-.claude/CLAUDE.local.md
+# Repo-root .claude/ is operator-local — never tracked, never shipped to GitHub.
+# Built-in installable features live under profiles/package/ instead.
+# Root-anchored so profiles/*/.claude/ (profile sources) stay tracked.
+/.claude/
