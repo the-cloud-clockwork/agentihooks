@@ -50,6 +50,8 @@ Profile layout (mirrors Claude Code project structure):
         └── rules/                   # → ~/.claude/rules/
 
 3-layer merge: agentihooks built-in → bundle global → profile-specific.
+The built-in layer (skills/agents/commands/rules) lives under profiles/package/
+— the packaged emulation of a .claude/ tree, shipped in the wheel.
 All commands are idempotent. Data directory: ~/.agentihooks/
 """
 
@@ -102,6 +104,14 @@ def _is_source_checkout() -> bool:
 
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
 BASE_SETTINGS = PROFILES_DIR / "_base" / "settings.base.json"
+
+# agentihooks built-in features (Layer 1 of the symlink merge) live here. This
+# directory is the packaged emulation of a `.claude/` tree — it holds
+# skills/agents/commands/rules/ and IS shipped in the wheel (package-data globs
+# every json/yaml/md under profiles/). The old source, the repo-root `.claude/`,
+# was never packaged, so PyPI installs got no built-in features; sourcing from
+# under profiles/ fixes that and lets the repo-root `.claude/` be untracked.
+PACKAGE_FEATURES_DIR = PROFILES_DIR / "package"
 
 
 def _resolve_claude_home() -> Path:
@@ -480,6 +490,10 @@ def _under_managed_source(target: str) -> bool:
         if parts[:1] == (_CLAUDE_SUBDIR,):
             return True
         if len(parts) >= 3 and parts[0] == "profiles" and parts[2] == _CLAUDE_SUBDIR:
+            return True
+        # profiles/package/<kind>/ — the packaged emulation of .claude that
+        # supplies Layer 1 built-in features (skills/agents/commands/rules).
+        if len(parts) >= 2 and parts[:2] == ("profiles", "package"):
             return True
     return False
 
@@ -2553,8 +2567,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
         dst = CLAUDE_HOME / subdir
-        # Layer 1: agentihooks built-in
-        _symlink_dir_contents(AGENTIHOOKS_ROOT / _CLAUDE_SUBDIR / subdir, dst, label=label, filter_fn=filter_fn)
+        # Layer 1: agentihooks built-in (packaged under profiles/package/, the
+        # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
+        _symlink_dir_contents(PACKAGE_FEATURES_DIR / subdir, dst, label=label, filter_fn=filter_fn)
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
         if bundle_dir and (bundle_dir / _CLAUDE_SUBDIR / subdir).is_dir():
             _symlink_dir_contents(

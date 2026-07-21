@@ -1,6 +1,6 @@
 [project]
 name = "agentihooks"
-version = "1.17.1"
+version = "1.18.0"
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -69,10 +69,14 @@ include = ["hooks*", "scripts*", "profiles*"]
 
 [tool.setuptools.package-data]
 "hooks.context" = ["data/*.json"]
-"profiles._base" = ["*.json"]
-"profiles.default" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
-"profiles.admin" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
-"profiles.coding" = ["*.yml", "*.json", ".claude/*.json", ".claude/CLAUDE.md"]
+# Ship every json / yaml / md anywhere under profiles/ — personas (CLAUDE.md),
+# rules (rules/*.md), settings (*.json), profile manifests (*.yml) — and nothing
+# else. Recursive ** globs cover .claude/ and rules/ subdirs at any depth.
+# One entry per discovered profiles package; the bare "profiles" key also
+# captures files under non-package subdirs like profiles/package/rules/.
+"profiles" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles._base" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles.default" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
 
 [project.urls]
 Homepage = "https://github.com/The-Cloud-Clockwork/agentihooks"
