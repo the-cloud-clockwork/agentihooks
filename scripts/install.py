@@ -433,16 +433,41 @@ def _under_root(path: str, root: str) -> bool:
     return p == r or p.startswith(r + "/")
 
 
-def _managed_roots() -> list[str]:
-    roots = [str(AGENTIHOOKS_ROOT)]
+def _managed_roots() -> list[Path]:
+    """Repos and directories registered as agentihooks sources."""
+    roots = [AGENTIHOOKS_ROOT]
     bundle = _get_bundle_path()
     if bundle:
-        roots.append(str(bundle))
+        roots.append(Path(bundle))
     for entry in _get_linked_profiles():
         p = entry.get("path")
         if p:
-            roots.append(str(p))
+            roots.append(Path(p))
     return roots
+
+
+def _managed_link_sources() -> list[str]:
+    """The directories agentihooks links OUT of.
+
+    Not the registered roots themselves — a root is only ever read through
+    ``<root>/.claude/<kind>/`` and ``<root>/profiles/<name>/.claude/<kind>/``
+    (see :func:`_symlink_dir_contents` call sites). Trusting the whole tree
+    would let a root registered one level too shallow — ``link-profile
+    ~/dev/workspace`` instead of ``~/dev/workspace/repo/profiles/anton`` —
+    claim every symlink anywhere beneath it, including the operator's own.
+    """
+    sources: list[str] = []
+    for root in _managed_roots():
+        sources.append(str(root / _CLAUDE_SUBDIR))
+        profiles_dir = root / "profiles"
+        try:
+            children = sorted(profiles_dir.iterdir()) if profiles_dir.is_dir() else []
+        except OSError:
+            children = []
+        for child in children:
+            if child.is_dir():
+                sources.append(str(child / _CLAUDE_SUBDIR))
+    return sources
 
 
 def _state_links() -> dict[str, dict]:
@@ -511,13 +536,13 @@ def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
     Two independent signals, either sufficient:
 
     1. The ledger names the link and it still points where it was recorded to.
-    2. The link points into a root agentihooks owns — its own repo, the linked
-       bundle, or a linked profile. Nothing outside agentihooks links into
+    2. The link points into a directory agentihooks links out of (see
+       :func:`_managed_link_sources`). Nothing outside agentihooks links into
        those, and this is what claims links from installs that predate the
        ledger, including dangling ones (a deleted source is precisely when a
        stale link needs reaping).
 
-    The root match is separator-guarded: a neighbour repo sharing a name prefix
+    Both are separator-guarded: a neighbour repo sharing a name prefix
     (``agentihooks-extras`` beside ``agentihooks``) is not a match.
     """
     if ledger is None:
@@ -530,14 +555,14 @@ def _link_is_managed(link: Path, ledger: dict[str, dict] | None = None) -> bool:
     entry = ledger.get(str(link))
     if entry and raw.rstrip("/") == str(entry.get("target", "")).rstrip("/"):
         return True
-    roots = _managed_roots()
-    if any(_under_root(raw, root) for root in roots):
+    sources = _managed_link_sources()
+    if any(_under_root(raw, src) for src in sources):
         return True
     try:
         resolved = str(link.resolve())
     except OSError:
         return False
-    return any(_under_root(resolved, root) for root in roots)
+    return any(_under_root(resolved, src) for src in sources)
 
 
 # ---------------------------------------------------------------------------
@@ -3776,11 +3801,11 @@ def _claude_md_is_managed(p: Path) -> bool:
     (fallback for installs whose state.json predates managed_claude_md).
     """
     if p.is_symlink():
-        # A profiles/ path alone is not proof — another tool's profiles dir
-        # would qualify. The link must also sit under a root we manage.
+        # A "profiles/" substring alone is not proof — another tool's profiles
+        # dir would qualify. The target must sit under the profiles/ directory
+        # of a source we registered, which is the only shape install ever wrote.
         target = str(p.resolve())
-        looks_like_profile = "profiles/" in target or "profiles\\" in target
-        return looks_like_profile and any(_under_root(target, root) for root in _managed_roots())
+        return any(_under_root(target, str(root / "profiles")) for root in _managed_roots())
     if not p.exists():
         return False
     if _load_state().get("managed_claude_md") == str(p):
