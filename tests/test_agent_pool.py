@@ -277,7 +277,10 @@ class TestRunClaude:
             seen["cmd"] = cmd
             return self._fake_completed('{"result": "hi", "session_id": "NEWFORK"}')
 
-        with patch.object(agent_pool.subprocess, "run", side_effect=fake_run):
+        with (
+            patch.object(agent_pool.shutil, "which", return_value="/usr/bin/claude"),
+            patch.object(agent_pool.subprocess, "run", side_effect=fake_run),
+        ):
             rc, text, sid = agent_pool._run_claude(["--resume", "SID", "--fork-session"], "prompt", "/w")
 
         cmd = seen["cmd"]
@@ -292,7 +295,10 @@ class TestRunClaude:
     def test_parses_non_json_stdout_as_raw(self):
         from hooks.context import agent_pool
 
-        with patch.object(agent_pool.subprocess, "run", return_value=self._fake_completed("plain text reply")):
+        with (
+            patch.object(agent_pool.shutil, "which", return_value="/usr/bin/claude"),
+            patch.object(agent_pool.subprocess, "run", return_value=self._fake_completed("plain text reply")),
+        ):
             rc, text, sid = agent_pool._run_claude(["--resume", "SID", "--fork-session"], "p", "/w")
         assert text == "plain text reply"
         assert sid == ""
