@@ -1,5 +1,12 @@
 name: Release
 
+# Inlined (was: The-Cloud-Clockwork/.github release-reusable.yml) because the
+# reusable workflow hardcodes `runs-on: anton`. agentihooks is a PUBLIC repo and
+# must not execute on the self-hosted fleet runner; this job runs on
+# GitHub-hosted ubuntu-latest, matching the ci/test/pages move. Behaviour mirrors
+# the reusable workflow: compute next version, bump the version file, commit +
+# tag + push to the release branch, cut a GitHub release, then dispatch
+# publish-pypi.yml at the new tag.
 on:
   workflow_dispatch:
     inputs:
@@ -15,14 +22,63 @@ permissions:
 
 jobs:
   release:
-    uses: The-Cloud-Clockwork/.github/.github/workflows/release-reusable.yml@main
-    with:
-      bump: ${{ inputs.bump }}
-      # Release on dev — the working branch and deploy source; main is
-      # snapshot-only (dev→main PR). release-reusable.yml now defaults this
-      # input to "dev", but we set it explicitly so a future change to the
-      # upstream default can't silently retarget releases at main.
-      branch: dev
-      downstream_workflows: "publish-pypi.yml"
-    secrets:
-      RELEASE_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.ORG_GITHUB_TOKEN || github.token }}
+
+      - name: Compute next version
+        id: version
+        run: |
+          CURRENT=$(python3 - <<'EOF'
+          import tomllib
+          with open("pyproject.toml", "rb") as f:
+              print(tomllib.load(f)["project"]["version"])
+          EOF
+          )
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Releasing $CURRENT -> $NEXT"
+
+      - name: Bump version in pyproject.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.next }}"/' pyproject.toml
+
+      - name: Commit, tag, and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: release v${{ steps.version.outputs.next }}"
+          git tag "v${{ steps.version.outputs.next }}"
+          git push origin dev
+          git push origin "v${{ steps.version.outputs.next }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.next }}" \
+            --repo "${{ github.repository }}" \
+            --title "v${{ steps.version.outputs.next }}" \
+            --generate-notes \
+            --latest
+
+      - name: Dispatch publish-pypi at the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.next }}"
+          gh workflow run publish-pypi.yml --repo "${{ github.repository }}" --ref "$TAG"
+          echo "Dispatched publish-pypi.yml at $TAG"
