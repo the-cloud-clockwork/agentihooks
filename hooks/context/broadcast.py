@@ -280,8 +280,17 @@ def _get_session_channels(session_id: str) -> list[str]:
     return list(BASE_CHANNELS)
 
 
-def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
-    """Check if a message should be delivered to a session based on channels."""
+def _message_matches_channel(msg: dict, session_channels: list[str], session_id: str = "") -> bool:
+    """Check if a message should be delivered to a session.
+
+    Directed messages (``target_session`` set) are private: they reach ONLY the
+    addressed session and bypass channel subscription entirely — a wildcard
+    subscriber must NOT receive another agent's directed message. This check
+    runs first and short-circuits.
+    """
+    target = msg.get("target_session")
+    if target:
+        return session_id == target
     msg_channel = msg.get("channel")
     # Global messages (no channel) → always deliver
     if not msg_channel:
@@ -305,6 +314,7 @@ def create_broadcast(
     source: str = "operator",
     persistent: bool | None = None,
     channel: str | None = None,
+    target_session: str | None = None,
 ) -> str | None:
     """Publish a broadcast to the shared file (and Redis if configured).
 
@@ -322,6 +332,11 @@ def create_broadcast(
             sessions whose ``AGENTIHOOKS_BASE_CHANNELS`` env var includes this
             channel name (or contains the wildcard ``*``). When ``None``, the
             message is global and reaches every session regardless of subscription.
+        target_session: Optional directed delivery. When set, the message is
+            PRIVATE to that one session id — it reaches only that session (on its
+            next turn / tool call) and bypasses channel subscription; no other
+            session, wildcard-subscribed or not, receives it. This is the
+            substrate for agent-to-agent (``call_agent``) inbox delivery.
 
     Returns:
         The 12-char message ID on success, or ``None`` for empty input.
@@ -355,6 +370,8 @@ def create_broadcast(
     }
     if channel:
         entry["channel"] = channel
+    if target_session:
+        entry["target_session"] = target_session
     # Stable content hash decouples dedup from the random uuid above so the
     # brain adapter (which republishes the same content with fresh ids each
     # tick) does not generate false-novelty injections.
@@ -432,7 +449,7 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
     for m in msgs:
         if _is_expired(m):
             continue
-        if not _message_matches_channel(m, channels):
+        if not _message_matches_channel(m, channels, session_id):
             continue
         if session_id in m.get("acknowledged_by", []):
             continue
@@ -458,7 +475,7 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
         if m.get("severity") == "critical"
         and m.get("persistent")
         and not _is_expired(m)
-        and _message_matches_channel(m, channels)
+        and _message_matches_channel(m, channels, session_id)
         and session_id not in m.get("acknowledged_by", [])
     ]
 
@@ -482,7 +499,7 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
         if _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank
         and m.get("persistent")
         and not _is_expired(m)
-        and _message_matches_channel(m, channels)
+        and _message_matches_channel(m, channels, session_id)
         and session_id not in m.get("acknowledged_by", [])
     ]
 

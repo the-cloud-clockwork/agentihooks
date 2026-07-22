@@ -30,6 +30,9 @@ one isn't in your tool list, its category is off for this profile.
 | `enforcement_set` | A discipline must survive context drift — a drumbeat that re-injects every N tool calls (global, permanent until cleared). Cheap: context tokens only, no API call. |
 | `enforcement_list` | Check active drumbeats before adding or clearing one. |
 | `enforcement_clear` | A drumbeat's job is done — clear by `enforcement_id`, by `tag`, or all. |
+| `pool_list` | See which fleet agents are live and what each is working on — read this before `call_agent` to spot who might collide with your work. |
+| `call_agent` | Contact one specific peer by session id (from `pool_list`) — directed, not broadcast. See *Directed messaging* below. |
+| `pool_status` | Declare what you're working on (`pool_status("rolling out litellm :dev")`) so peers scanning `pool_list` can tell whether they'd collide with you. |
 
 ## Broadcasts — how a message reaches other agents
 
@@ -74,3 +77,30 @@ Every subscribed peer now carries that context on every turn and steers around
 you. When you're done, retract it with `channel_clear` (or downgrade to a resolved
 `info`) so the lane reopens. This is the whole point of Fleet Command: agents that
 would otherwise clobber each other coordinate through the channel instead.
+
+## Directed messaging — `call_agent` (one specific peer)
+
+`channel_publish` is one-to-many; `call_agent` is one-to-one. Use it when you know
+*which* peer you need — you ran `pool_list`, saw a session working your exact lane,
+and want to reach that agent specifically. It routes by whether the peer is live,
+and the return value always tells you what happened:
+
+- **The peer is live** → it is **not** interrupted (resuming a running session
+  would corrupt its transcript). Your message lands in that peer's private inbox —
+  it sees it on its next turn — and a throwaway fork of the peer's context answers
+  you *now* with what it's doing. Returns `mode:"forked+notified"`, `their_state`.
+- **The peer is stopped** → its real session is resumed, your message delivered,
+  and its reply returned. Returns `mode:"resumed"`, `reply`.
+
+The peer answers from its loaded context only — `call_agent` cannot make another
+agent run tools or change anything. It is communication, not remote control.
+
+```
+pool_list()                       # find who's live and on what
+call_agent(
+  target_session_id="<peer sid>",
+  message="Are you touching the litellm values? I'm about to push :dev.",
+)
+# live  → {mode:"forked+notified", delivered:true, their_state:"mid-rollout on litellm"}
+# stopped → {mode:"resumed", delivered:true, reply:"finished, safe to push"}
+```

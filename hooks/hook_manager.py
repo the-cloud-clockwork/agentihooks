@@ -543,6 +543,17 @@ def on_session_end(payload: dict) -> None:
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
 
+    # --- Agent pool: drop the per-session summary refresh counter ---
+    try:
+        from hooks.config import AGENT_POOL_ENABLED
+
+        if AGENT_POOL_ENABLED:
+            from hooks.context.agent_pool import clear_pool_session
+
+            clear_pool_session(session_id)
+    except Exception:
+        pass
+
 
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
@@ -1343,6 +1354,17 @@ def on_post_tool_use(payload: dict) -> None:
                 "tool_name": payload.get("tool_name", "unknown"),
             },
         )
+
+    # Agent pool — refresh this session's "what I'm doing" summary every N calls
+    try:
+        from hooks.config import AGENT_POOL_ENABLED
+
+        if AGENT_POOL_ENABLED and payload.get("session_id"):
+            from hooks.context.agent_pool import maybe_refresh_summary
+
+            maybe_refresh_summary(payload["session_id"])
+    except Exception as e:
+        log("agent_pool refresh failed", {"error": str(e)})
 
     # Retry circuit breaker — track failures and inject research instructions
     from hooks.config import RETRY_BREAKER_ENABLED
