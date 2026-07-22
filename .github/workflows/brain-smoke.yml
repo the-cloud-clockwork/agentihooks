@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
+    runs-on: ubuntu-latest
     services:
       otel-collector:
         image: otel/opentelemetry-collector-contrib:0.96.0

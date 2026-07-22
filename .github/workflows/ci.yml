@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
         run: python -m ruff format --check hooks/ scripts/
 
   syntax:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 

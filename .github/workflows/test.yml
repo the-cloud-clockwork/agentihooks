@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   unit:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -45,7 +45,7 @@ jobs:
         run: python -m pytest tests/ -v --cov=hooks --cov-report=term-missing --tb=short
 
   lint:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'anton' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
