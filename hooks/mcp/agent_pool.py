@@ -24,29 +24,26 @@ def register(mcp):
         ``pool_list``) that another agent is working the same pipeline and you
         need to warn it off or ask what it's doing.
 
-        Delivery is routed by the peer's liveness, and the SAME call has a
-        different effect depending on that (the return value always tells you
-        which happened):
+        For every peer it does the same two safe things: (1) drops your message
+        in the peer's private inbox — the peer reads it itself on its next turn,
+        or before its next tool call if it's mid-work — and (2) forks a throwaway
+        copy of the peer's context to answer you now with what it's doing. The
+        peer's real session is never written to, so it can never be corrupted.
+        ``mode`` reports whether the peer is ``live`` (will see your message
+        soon) or ``dormant`` (sees it only if reopened before the message
+        expires). ``delivered`` means "enqueued to the peer's inbox".
 
-        - **Live peer** → the peer is NOT interrupted (resuming a running
-          session would corrupt its transcript). Your message is placed in the
-          peer's directed inbox — it sees it on its next turn — AND a throwaway
-          fork of the peer's context answers you now with what it's working on.
-          Returns ``mode="forked+notified"``, ``delivered=true``, ``their_state``.
-        - **Dormant peer** (stopped, transcript idle) → the peer's real session
-          is resumed, your message delivered, and its reply returned.
-          Returns ``mode="resumed"``, ``delivered=true``, ``reply``.
-
-        The peer answers from its loaded context only — call_agent cannot make
-        another agent run tools or change anything. It is communication, not
-        remote execution.
+        The forked reader runs with NO tools (``--bare``) — call_agent cannot
+        make another agent run tools or change anything. It is communication,
+        not remote execution. Call once and read ``their_state``; do not poll in
+        a loop (each call spawns a subprocess).
 
         Args:
             target_session_id: The peer's session id (from ``pool_list``).
             message: What to say/ask. Coordination and status questions.
 
         Returns:
-            JSON: success, mode, delivered, and their_state (live) or reply (dormant).
+            JSON: success, mode (live|dormant), delivered, their_state, and note.
         """
         try:
             from hooks.context.agent_pool import call_agent as _call_agent
@@ -84,11 +81,13 @@ def register(mcp):
 
         A peer scanning ``pool_list`` sees this line. Set it when you start a
         distinctive piece of work (e.g. "rolling out litellm :dev") so others
-        can tell whether they'd collide with you. Otherwise a summary is derived
-        automatically from your transcript.
+        can tell whether they'd collide with you. A self-declared summary is
+        PINNED — the automatic transcript-derived refresh will not overwrite it —
+        so it persists for the duration of your work. Pass an empty string to
+        clear the pin and hand the summary back to auto-derive.
 
         Args:
-            summary: Short description of your current task (one line).
+            summary: Short description of your current task (one line). Empty to clear.
 
         Returns:
             JSON with success status.
@@ -99,7 +98,8 @@ def register(mcp):
             caller = os.getenv("CLAUDE_SESSION_ID", "")
             if not caller:
                 return json.dumps({"success": False, "error": "no session id in environment"})
-            ok = set_summary(caller, summary)
+            # A non-empty self-declare pins the summary; empty clears the pin.
+            ok = set_summary(caller, summary, sticky=bool(summary.strip()))
             if not ok:
                 return json.dumps({"success": False, "error": "this session is not registered in the pool yet"})
             return json.dumps({"success": True, "session_id": caller, "summary": summary})

@@ -1082,11 +1082,14 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Combined PreToolUse context injection: broadcast + enforcement ---
     # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
     # two separate JSON lines makes Claude Code drop the second.
-    from hooks.config import BROADCAST_CRITICAL_ON_PRETOOL, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+    from hooks.config import BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
 
     _pretool_blocks: list[str] = []
 
-    if BROADCAST_ENABLED and BROADCAST_CRITICAL_ON_PRETOOL:
+    # Gate is BROADCAST_ENABLED only (not BROADCAST_CRITICAL_ON_PRETOOL): directed
+    # agent-to-agent messages always inject here; get_pretool_context/broadcasts
+    # apply the critical-on-pretool opt-in to non-directed broadcasts internally.
+    if BROADCAST_ENABLED:
         try:
             from hooks.context.broadcast import get_pretool_context
 

@@ -82,18 +82,19 @@ would otherwise clobber each other coordinate through the channel instead.
 
 `channel_publish` is one-to-many; `call_agent` is one-to-one. Use it when you know
 *which* peer you need — you ran `pool_list`, saw a session working your exact lane,
-and want to reach that agent specifically. It routes by whether the peer is live,
-and the return value always tells you what happened:
+and want to reach that agent specifically.
 
-- **The peer is live** → it is **not** interrupted (resuming a running session
-  would corrupt its transcript). Your message lands in that peer's private inbox —
-  it sees it on its next turn — and a throwaway fork of the peer's context answers
-  you *now* with what it's doing. Returns `mode:"forked+notified"`, `their_state`.
-- **The peer is stopped** → its real session is resumed, your message delivered,
-  and its reply returned. Returns `mode:"resumed"`, `reply`.
+It does the same two safe things for every peer: (1) drops your message in the
+peer's **private inbox** — the peer reads it itself on its next turn, or before its
+next tool call if it's mid-work — and (2) **forks** a throwaway copy of the peer's
+context to answer you *now* with what it's doing. It never writes the peer's real
+session, so it can't corrupt it, and the forked reader has **no tools** — it can't
+make another agent act. Communication, not remote control. `mode` tells you whether
+the peer is `live` (will see your message soon) or `dormant` (sees it only if
+reopened before it expires); `delivered` means "queued to the peer's inbox".
 
-The peer answers from its loaded context only — `call_agent` cannot make another
-agent run tools or change anything. It is communication, not remote control.
+**Call once and read `their_state` — do not poll in a loop** (each call spawns a
+subprocess). To quiet a directed message you've handled, `channel_acknowledge` it.
 
 ```
 pool_list()                       # find who's live and on what
@@ -101,6 +102,5 @@ call_agent(
   target_session_id="<peer sid>",
   message="Are you touching the litellm values? I'm about to push :dev.",
 )
-# live  → {mode:"forked+notified", delivered:true, their_state:"mid-rollout on litellm"}
-# stopped → {mode:"resumed", delivered:true, reply:"finished, safe to push"}
+# → {mode:"live", delivered:true, their_state:"mid-rollout on litellm, hold off"}
 ```
