@@ -82,6 +82,65 @@ def _parse_env_file(
             this_file.add(_key)
 
 
+# Connection settings adopted from the brain's own directory. Deliberately not
+# the whole file: it also holds POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD and
+# provider keys, and sourcing those would put database credentials into the
+# environment of every agent session.
+_BRAIN_KEYS_FROM_KERNEL = ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN")
+
+# Keys this loader owns, tracked apart from _FILE_OWNED_KEYS so a reload cannot
+# let the brain's file start beating an agentihooks .env that also defines them.
+_BRAIN_FILE_OWNED: set[str] = set()
+
+
+def _agentibrain_home() -> Path:
+    """The brain's config directory. Mirrors AGENTIHOOKS_HOME's convention."""
+    return Path(os.environ.get("AGENTIBRAIN_HOME", str(Path.home() / ".agentibrain")))
+
+
+def _brain_env_file() -> Path:
+    return _agentibrain_home() / ".env"
+
+
+def _load_brain_env(*, override_file_owned: bool = False) -> None:
+    """Discover how to reach the brain from the brain's own .env.
+
+    The brain is an adapter and owns its configuration, credentials included.
+    Copying those into agentihooks' chain means the same bearer lives in two
+    files and goes stale in one of them on the next rotation. Reading the
+    kernel's file directly keeps one copy, and makes a remote brain a matter of
+    editing that file rather than re-running an installer.
+
+    Lowest precedence by construction: a key the process or an agentihooks
+    .env already set is left alone, so this is a default, not an override.
+    """
+    env_file = _brain_env_file()
+    if not env_file.is_file():
+        return
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for _raw in lines:
+        _line = _raw.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        if _line.startswith("export "):
+            _line = _line[7:].lstrip()
+        _key, _, _val = _line.partition("=")
+        _key, _val = _key.strip(), _val.strip()
+        if _key not in _BRAIN_KEYS_FROM_KERNEL or not _val:
+            continue
+        if len(_val) >= 2 and _val[0] in "\"'" and _val[-1] == _val[0]:
+            _val = _val[1:-1]
+        if _key not in os.environ:
+            os.environ[_key] = _val
+            _FILE_OWNED_KEYS.add(_key)
+            _BRAIN_FILE_OWNED.add(_key)
+        elif override_file_owned and _key in _BRAIN_FILE_OWNED:
+            os.environ[_key] = _val
+
+
 def _load_user_env(*, override_file_owned: bool = False) -> None:
     """Load all .env files from ~/.agentihooks/ into os.environ.
 
@@ -141,10 +200,15 @@ def _env_files_fingerprint() -> tuple:
         stamps.append((".env", main.stat().st_mtime))
     except OSError:
         pass
+    try:
+        stamps.append(("agentibrain/.env", _brain_env_file().stat().st_mtime))
+    except OSError:
+        pass
     return tuple(sorted(stamps))
 
 
 _load_user_env()
+_load_brain_env()
 _ENV_FINGERPRINT = _env_files_fingerprint()
 
 
@@ -186,6 +250,7 @@ def reload_brain_env(force: bool = False) -> dict:
     _ENV_FINGERPRINT = current
 
     _load_user_env(override_file_owned=True)
+    _load_brain_env(override_file_owned=True)
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
