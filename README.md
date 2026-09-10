@@ -206,7 +206,16 @@ agentihooks ignore [path]                    # create .claudeignore
 agentihooks --list-profiles                  # available profiles
 agentihooks --query                          # active profile name
 agentihooks uninstall [--yes]                # remove everything
+
+# Self-update — upgrades the install this command runs from
+agentihooks update                           # compare against PyPI, upgrade if newer
+agentihooks update --check                   # report only, install nothing
+agentihooks update --source <index-url>      # upgrade from a custom package index
 ```
+
+`update` resolves how this copy was installed — venv/pip, `uv tool`, pipx, or an
+editable checkout — and upgrades that one. An editable install is left alone;
+update it with `git pull` in the checkout.
 
 ## What `init` Does
 
