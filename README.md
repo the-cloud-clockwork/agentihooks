@@ -344,10 +344,10 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `BRAIN_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | Brain adapter master switch. An explicit value always wins. |
-| `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
+| `BRAIN_URL` | discovered from `$AGENTIBRAIN_HOME/.env` | Brain HTTP endpoint. When it resolves, hooks fetch `/feed`, `/signal` and post `/marker` instead of reading the filesystem — and the reader and writer default on. |
 | `BRAIN_HTTP_TOKEN` | discovered from `$AGENTIBRAIN_HOME/.env` | Bearer for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
 | `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN` — only those keys; the file's database and provider credentials are ignored. |
-| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Filesystem fallback when `BRAIN_URL` unset. |
+| `BRAIN_SOURCE_PATH` | `$AGENTIHOOKS_HOME/brain-feed` | Filesystem fallback, used only when no `BRAIN_URL` resolves. |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
