@@ -53,6 +53,16 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # no-directives branch DELETES, the operator's real ~/.agentihooks/copilot.env.
     # That has already happened once.
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
+    # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
+    # file, and it does so at IMPORT, which happens at collection before any fixture
+    # runs. An unisolated suite therefore reads the operator's live bearer into
+    # os.environ once and keeps it for the whole session, where a single mismatched
+    # assertion renders it into the diff. Patching Path.home afterwards is too late,
+    # so the keys are cleared per test as well.
+    monkeypatch.setenv("AGENTIBRAIN_HOME", str(fake_home / ".agentibrain"))
+    for _adopted in ("KB_ROUTER_TOKEN", "BRAIN_URL", "BRAIN_HTTP_TOKEN"):
+        monkeypatch.delenv(_adopted, raising=False)
 
     try:
         import install

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The recursive-search rewrite no longer reintroduces the prompt it exists
+  to remove.** It injected `--exclude=.bashrc` and the other shell-rc
+  basenames; Claude Code 2.1.259 parses a Bash option value as a file operand,
+  so each one matched a `Read(~/.bashrc)`-style deny rule and asked. The
+  injected set is dotenv and credential-file basenames only. Shell rc files
+  keep full coverage through `sensitive_kind` (explicit reads, tree-scan
+  blocks) and home-wide recursion is blocked rather than rewritten.
+
 ### Changed
 
 - **The credential-read guard is operand-aware and fails closed near a

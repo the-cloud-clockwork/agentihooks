@@ -221,9 +221,12 @@ On `SessionStart`, the adapter does an immediate one-shot publish so fresh sessi
 
 ```bash
 # ~/.agentihooks/.env
-BRAIN_ENABLED=true                      # master switch (default: false)
-BRAIN_SOURCE_TYPE=file                  # "file" (future: "mcp")
-BRAIN_SOURCE_PATH=~/.agentihooks/brain  # directory to read from
+BRAIN_URL=http://127.0.0.1:8103          # brain-api; setting it defaults the next two on
+BRAIN_HTTP_TOKEN=                        # falls back to KB_ROUTER_TOKEN
+BRAIN_ENABLED=true                       # master switch (default: true with BRAIN_URL, else false)
+BRAIN_WRITER_ENABLED=true                # marker write-back (same default rule)
+BRAIN_SOURCE_TYPE=file                   # filesystem fallback, ignored while BRAIN_URL is set
+BRAIN_SOURCE_PATH=~/.agentihooks/brain   # directory to read from
 BRAIN_CHANNEL=brain                     # which broadcast channel to publish to
 BRAIN_REFRESH_INTERVAL=30               # re-read source every N turns
 ```

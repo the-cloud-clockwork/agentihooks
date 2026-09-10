@@ -343,14 +343,15 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `TOKEN_CONTROL_ENABLED` | `true` | Token control layer master switch |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
-| `BRAIN_ENABLED` | `false` | Brain adapter master switch |
+| `BRAIN_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | Brain adapter master switch. An explicit value always wins. |
 | `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
-| `BRAIN_HTTP_TOKEN` | `""` | Bearer token for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
+| `BRAIN_HTTP_TOKEN` | discovered from `$AGENTIBRAIN_HOME/.env` | Bearer for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
+| `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN` — only those keys; the file's database and provider credentials are ignored. |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Filesystem fallback when `BRAIN_URL` unset. |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
-| `BRAIN_WRITER_ENABLED` | `false` | POST `/marker` on Stop / SubagentStop. |
+| `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | POST `/marker` on Stop / SubagentStop. |
 
 Complete table: [Configuration Reference](https://the-cloud-clockwork.github.io/agentihooks/docs/reference/configuration/)
 
@@ -376,22 +377,31 @@ biggest contributors and leave headroom for the rest.
 
 ### Remote brain quickstart
 
-To wire a Claude Code session into a brain stack you already deployed
-(e.g. via `agentibrain-kernel`'s docker compose or helm charts), drop the
-following four lines into `~/.agentihooks/.env`:
+Nothing to copy by hand. agentihooks reads the brain's own config file —
+`$AGENTIBRAIN_HOME/.env`, default `~/.agentibrain/.env`, the same file that
+feeds the kernel's docker compose — and adopts `BRAIN_URL` and `KB_ROUTER_TOKEN`
+from it. One bearer, one home, so a rotation cannot go stale in a copy. Only
+those connection keys are adopted; that file's database, object-store and
+provider credentials never enter a session's environment.
+
+On the machine hosting the brain, `agentibrain install` writes that file. On a
+machine that only talks to one:
 
 ```bash
-BRAIN_URL=http://<your-brain-api-host>:<port>   # local compose: http://127.0.0.1:8103
-BRAIN_HTTP_TOKEN=<KB_ROUTER_TOKEN from your bootstrap>
-BRAIN_ENABLED=true
-AMYGDALA_ENABLED=true
-# optional — write back markers from this session
-BRAIN_WRITER_ENABLED=true
+agentibrain install --brain-url http://<your-brain-api-host>:8103 --token <bearer>
 ```
 
-Restart your Claude Code session. The hook stack will fetch hot arcs +
-active signals on every prompt and inject them as broadcast banners. No
-profile install required — works alongside any profile (or none).
+That writes the same file locally and skips the stack and the vault, since both
+belong to the brain's own machine. To repoint it later, edit
+`~/.agentibrain/.env` — there is nothing to reinstall.
+
+Restart your Claude Code session. The hook stack fetches hot arcs and active
+signals on every prompt and injects them as broadcast banners. No profile
+install required — works alongside any profile, or none.
+
+Overriding still works the way it always did: a value set in
+`~/.agentihooks/*.env` outranks the discovery, and the process environment
+outranks both. `AMYGDALA_ENABLED` remains an opt-in you set yourself.
 
 ## Portability
 
