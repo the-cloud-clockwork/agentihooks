@@ -108,9 +108,7 @@ def version_after_upgrade() -> str:
     """
     code = f"import importlib.metadata as m; print(m.version({PACKAGE!r}))"
     try:
-        done = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
-        )
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return "unknown"
     return done.stdout.strip() if done.returncode == 0 else "unknown"

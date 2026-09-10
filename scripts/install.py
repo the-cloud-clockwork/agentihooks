@@ -5797,9 +5797,7 @@ def main() -> None:
     sub.add_parser("version", help="Print version")
     update_p = sub.add_parser("update", help="Self-update agentihooks")
     update_p.add_argument("--source", default="", help="Custom package index URL to upgrade from")
-    update_p.add_argument(
-        "--check", action="store_true", help="Report whether an update exists; install nothing"
-    )
+    update_p.add_argument("--check", action="store_true", help="Report whether an update exists; install nothing")
 
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
