@@ -588,6 +588,7 @@ def get_status() -> dict:
         from hooks.config import (
             BRAIN_CHANNEL,
             BRAIN_ENABLED,
+            BRAIN_HTTP_TOKEN,
             BRAIN_REFRESH_INTERVAL,
             BRAIN_SOURCE_PATH,
             BRAIN_SOURCE_TYPE,
@@ -607,6 +608,20 @@ def get_status() -> dict:
     # source_type/source_path describe the file fallback; when BRAIN_URL is set
     # the adapter is on HTTP and those two are not what it reads. Report the
     # class actually in use so the two can never silently disagree.
+    # A resolved source and a disabled adapter is the failure that looks like
+    # health: every field below reads correct while nothing is ever injected.
+    warnings: list[str] = []
+    if source and not BRAIN_ENABLED:
+        warnings.append(
+            f"{type(source).__name__} resolved and readable, but BRAIN_ENABLED is false — "
+            "no brain content reaches any session"
+        )
+    if BRAIN_URL and not BRAIN_HTTP_TOKEN:
+        warnings.append(
+            "BRAIN_URL is set with no BRAIN_HTTP_TOKEN or KB_ROUTER_TOKEN — "
+            "every read and every marker POST answers 401"
+        )
+
     return {
         "enabled": BRAIN_ENABLED,
         "active_source": type(source).__name__ if source else None,
@@ -617,4 +632,5 @@ def get_status() -> dict:
         "refresh_interval": BRAIN_REFRESH_INTERVAL,
         "entry_count": entry_count,
         "content_hash": _content_hash,
+        "warnings": warnings,
     }

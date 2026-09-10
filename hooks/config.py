@@ -111,6 +111,17 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
             _parse_env_file(_extra, override_file_owned=override_file_owned, pass_keys=_pass_keys)
 
 
+def _brain_http_configured() -> bool:
+    """True when BRAIN_URL names a kernel to talk to.
+
+    The brain defaults below key off this. In an HTTP deployment the feed is
+    served by brain-api out of the vault and nothing ever creates a local
+    brain-feed directory, so a default derived only from that directory
+    resolves false on exactly the installs that are correctly configured.
+    """
+    return bool(os.environ.get("BRAIN_URL", "").strip())
+
+
 def _env_files_fingerprint() -> tuple:
     """Modification stamps of every .env file the loader reads, sorted.
 
@@ -158,6 +169,7 @@ def reload_brain_env(force: bool = False) -> dict:
     """
     global BRAIN_ENABLED, BRAIN_SOURCE_TYPE, BRAIN_SOURCE_PATH, BRAIN_CHANNEL
     global BRAIN_REFRESH_INTERVAL, BRAIN_URL, BRAIN_HTTP_TOKEN, BRAIN_HTTP_TIMEOUT
+    global BRAIN_WRITER_ENABLED
     global AMYGDALA_ENABLED, AMYGDALA_SIGNAL_PATH, _ENV_FINGERPRINT
 
     current = _env_files_fingerprint()
@@ -176,7 +188,7 @@ def reload_brain_env(force: bool = False) -> dict:
     _load_user_env(override_file_owned=True)
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
-    _default = "true" if (_feed_dir.is_dir() and any(_feed_dir.glob("*.md"))) else "false"
+    _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
     BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", _default)
     BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
     BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(_feed_dir))
@@ -185,6 +197,7 @@ def reload_brain_env(force: bool = False) -> dict:
     BRAIN_URL = os.getenv("BRAIN_URL", "").rstrip("/")
     BRAIN_HTTP_TOKEN = os.getenv("BRAIN_HTTP_TOKEN", "") or os.getenv("KB_ROUTER_TOKEN", "")
     BRAIN_HTTP_TIMEOUT = float(os.getenv("BRAIN_HTTP_TIMEOUT", "3"))
+    BRAIN_WRITER_ENABLED = _env_bool("BRAIN_WRITER_ENABLED", "true" if _brain_http_configured() else "false")
     AMYGDALA_ENABLED = _env_bool("AMYGDALA_ENABLED", "false")
     AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
 
@@ -193,6 +206,7 @@ def reload_brain_env(force: bool = False) -> dict:
         "brain_url": BRAIN_URL,
         "brain_source_type": BRAIN_SOURCE_TYPE,
         "brain_source_path": BRAIN_SOURCE_PATH,
+        "brain_writer_enabled": BRAIN_WRITER_ENABLED,
         "amygdala_enabled": AMYGDALA_ENABLED,
         "amygdala_signal_path": AMYGDALA_SIGNAL_PATH,
         "reloaded": True,
@@ -314,9 +328,14 @@ KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "tr
 # BRAIN ADAPTER
 # =============================================================================
 # Pluggable brain content injection into broadcast channels.
-# Auto-detect brain: enabled if brain-feed dir has .md files, unless explicitly disabled
+# Auto-detect brain: enabled when a kernel URL is configured, or when the
+# legacy brain-feed dir has .md files. Either way an explicit BRAIN_ENABLED wins.
 _brain_feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
-_brain_default = "true" if (_brain_feed_dir.is_dir() and any(_brain_feed_dir.glob("*.md"))) else "false"
+_brain_default = (
+    "true"
+    if (_brain_http_configured() or (_brain_feed_dir.is_dir() and any(_brain_feed_dir.glob("*.md"))))
+    else "false"
+)
 BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", _brain_default)
 BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
 BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / "brain-feed"))
@@ -347,7 +366,7 @@ AMYGDALA_SIGNAL_PATH = os.getenv("AMYGDALA_SIGNAL_PATH", "")
 # Brain Writer — write-back path from agent markers to brain-api. Markers POST
 # to {BRAIN_URL}/marker; the outbox is a local buffer that drains over HTTP
 # once brain-api is reachable again.
-BRAIN_WRITER_ENABLED = _env_bool("BRAIN_WRITER_ENABLED", "false")
+BRAIN_WRITER_ENABLED = _env_bool("BRAIN_WRITER_ENABLED", "true" if _brain_http_configured() else "false")
 BRAIN_WRITER_OUTBOX = os.getenv("BRAIN_WRITER_OUTBOX", str(Path(AGENTIHOOKS_HOME) / "brain-outbox"))
 BRAIN_WRITER_MAX_MARKERS = int(os.getenv("BRAIN_WRITER_MAX_MARKERS", "5"))
 

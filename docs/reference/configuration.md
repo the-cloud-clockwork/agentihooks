@@ -273,7 +273,11 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BRAIN_ENABLED` | `false` | Enable the brain adapter for knowledge injection via broadcast channels. |
+| `BRAIN_ENABLED` | `true` when `BRAIN_URL` is set, else `false` | Enable the brain adapter for knowledge injection via broadcast channels. The legacy default also flips to `true` when `~/.agentihooks/brain-feed/` holds `.md` files. An explicit value always wins. |
+| `BRAIN_URL` | *(empty)* | Base URL of brain-api. Setting it moves the adapter off the filesystem onto HTTP and turns the reader and writer on by default. |
+| `BRAIN_HTTP_TOKEN` | falls back to `KB_ROUTER_TOKEN` | Bearer token for brain-api. Without it every read and every marker POST answers 401. |
+| `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` is set, else `false` | POST `@lesson` / `@signal` / `@decision` / `@milestone` markers to `{BRAIN_URL}/marker` on session Stop. |
+| `BRAIN_WRITER_OUTBOX` | `~/.agentihooks/brain-outbox` | Local buffer for markers that could not be POSTed. Drains on the next session Stop after brain-api is reachable. |
 | `BRAIN_SOURCE_TYPE` | `file` | Brain source backend. Currently only `file` is shipped. |
 | `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory containing brain `.md` files (YAML frontmatter + markdown body). |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to (producer side). Sessions only receive brain content if this channel name is in their `AGENTIHOOKS_BASE_CHANNELS` env. The default profile ships `"brain,amygdala"`, so the default `brain` value works out of the box; if you rename this, update subscriptions to match. |
