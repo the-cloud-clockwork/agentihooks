@@ -14,6 +14,11 @@ sandbox_mode = "workspace-write"
 # actually has rather than forcing a window the backend will not serve.
 model_context_window = 1050000
 
+# Codex reads <repo>/AGENTS.md as the project doc. Claude-shaped repos carry
+# CLAUDE.md instead, and nothing writes an AGENTS.md into them, so the fallback
+# is what makes a repo's own instructions reach codex at all.
+project_doc_fallback_filenames = ["CLAUDE.md"]
+
 [features]
 # The whole hook layer is dead weight without this.
 hooks = true

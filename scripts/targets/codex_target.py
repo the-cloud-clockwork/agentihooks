@@ -63,6 +63,10 @@ CODEX_HOOK_EVENTS = (
     "PermissionRequest",
 )
 
+# Events codex refuses additionalContext on — it warns per handler when the key
+# is set on one of them ("this event cannot emit additionalContext").
+_NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
+
 
 def codex_home() -> Path:
     """Resolve CODEX_HOME (first entry when the env var is a comma list)."""
@@ -92,7 +96,7 @@ class CodexAdapter:
         current = target.get(key)
         if current is None or current == recorded.get(key):
             target[key] = value
-            recorded[key] = value
+            recorded[key] = list(value) if isinstance(value, list) else value
         else:
             _i._cprint(
                 f"  [!!] config.toml '{label}' hand-set to {current!r} (managed value would be "
@@ -172,8 +176,17 @@ class CodexAdapter:
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"
-        entry = {"hooks": [{"type": "command", "command": str(wrapper)}]}
-        desired = {e: [entry] for e in CODEX_HOOK_EVENTS}
+
+        # additionalContextLimit unset means codex spills any additionalContext
+        # over ~2500 tokens to disk and shows the model a preview; 0 disables
+        # spilling, which the project-context injection depends on.
+        def _entry(event: str) -> dict:
+            hook = {"type": "command", "command": str(wrapper)}
+            if event not in _NO_CONTEXT_EVENTS:
+                hook["additionalContextLimit"] = 0
+            return {"hooks": [hook]}
+
+        desired = {e: [_entry(e)] for e in CODEX_HOOK_EVENTS}
 
         existing: dict = {}
         if hooks_path.exists():

@@ -17,6 +17,31 @@ def adapter(monkeypatch, tmp_path):
 
 
 class TestConfigToml:
+    def test_list_value_is_managed_and_withdrawn(self, adapter):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        adapter.write_settings({"project_doc_fallback_filenames": ["CLAUDE.md"]})
+        text = (home / "config.toml").read_text()
+        assert 'project_doc_fallback_filenames = ["CLAUDE.md"]' in text
+        assert text.count("CLAUDE.md") == 2  # the key and its managed record
+        adapter.teardown()
+        assert "project_doc_fallback_filenames" not in (home / "config.toml").read_text()
+
+    def test_hand_edited_list_is_left_alone(self, adapter):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        adapter.write_settings({"project_doc_fallback_filenames": ["CLAUDE.md"]})
+        config = home / "config.toml"
+        config.write_text(
+            config.read_text().replace(
+                'project_doc_fallback_filenames = ["CLAUDE.md"]',
+                'project_doc_fallback_filenames = ["AGENTS.local.md"]',
+                1,
+            )
+        )
+        adapter.write_settings({"project_doc_fallback_filenames": ["CLAUDE.md"]})
+        assert 'project_doc_fallback_filenames = ["AGENTS.local.md"]' in config.read_text()
+
     def test_hand_edits_outside_managed_keys_survive(self, adapter):
         """The highest-value invariant: re-init must never eat operator config."""
         home = codex_home()
@@ -74,6 +99,19 @@ class TestConfigToml:
 
 
 class TestHooksJson:
+    def test_context_spilling_is_disabled_on_every_handler(self, adapter):
+        """Unset, codex spills any additionalContext over ~2500 tokens to disk and
+        shows the model a preview — the project-context injection would never land."""
+        adapter.write_settings({})
+        data = json.loads((codex_home() / "hooks.json").read_text())
+        for event, groups in data["hooks"].items():
+            for group in groups:
+                for hook in group["hooks"]:
+                    if event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"):
+                        assert "additionalContextLimit" not in hook
+                    else:
+                        assert hook["additionalContextLimit"] == 0
+
     def test_all_events_wired_to_wrapper(self, adapter):
         adapter.write_settings({})
         doc = json.loads((codex_home() / "hooks.json").read_text())

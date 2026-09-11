@@ -362,6 +362,12 @@ FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
 MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
 CODEX_CONTEXT_PIN_ENABLED = _env_bool("CODEX_CONTEXT_PIN_ENABLED", "true")
 
+# Project bridge: a repo's own .claude/rules bodies and project memory, for a
+# target with no rules directory of its own. 0 = inject whole, matching what
+# Claude Code itself loads.
+PROJECT_BRIDGE_ENABLED = _env_bool("PROJECT_BRIDGE_ENABLED", "true")
+PROJECT_BRIDGE_MAX_BYTES = int(os.getenv("PROJECT_BRIDGE_MAX_BYTES", "0"))
+
 # Tell the agent its own session id at SessionStart. The session-scoped
 # hooks-utils tools (channel_acknowledge) take it as an argument, which is the
 # only identity mechanism that works when hooks-utils runs as a network server
