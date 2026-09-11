@@ -82,6 +82,46 @@ class TestNormalizer:
         assert payload["tool_output"] == "old"
 
 
+class TestCodexToolNames:
+    """Codex 0.154 hands the hook boundary Claude's own names for the shell tool
+    (captured live: tool_name "Bash", tool_input {"command": "<string>"}) but keeps
+    its own for the patch tool, which reaches no Write/Edit branch unmapped."""
+
+    def test_shell_payload_passes_through(self, codex):
+        payload = normalize_payload({"tool_name": "Bash", "tool_input": {"command": "ls -la"}})
+        assert payload["tool_name"] == "Bash"
+        assert payload["tool_input"] == {"command": "ls -la"}
+
+    def test_apply_patch_reaches_the_edit_branch(self, codex):
+        body = "*** Begin Patch\n*** Update File: /repo/pyproject.toml\n@@\n+x\n*** End Patch"
+        payload = normalize_payload({"tool_name": "apply_patch", "tool_input": {"command": body}})
+        assert payload["tool_name"] == "Edit"
+        assert payload["tool_input"]["content"] == body
+        assert payload["tool_input"]["new_string"] == body
+        assert payload["tool_input"]["file_path"] == "/repo/pyproject.toml"
+
+    def test_model_facing_shell_names_map_to_bash(self, codex):
+        for name in ("exec", "shell", "local_shell", "unified_exec"):
+            assert normalize_payload({"tool_name": name, "tool_input": {}})["tool_name"] == "Bash"
+
+    def test_list_command_becomes_a_string(self, codex):
+        payload = normalize_payload({"tool_name": "shell", "tool_input": {"command": ["ls", "a b"]}})
+        assert payload["tool_input"]["command"] == "ls 'a b'"
+
+    def test_freeform_program_input_reaches_the_command_guards(self, codex):
+        program = 'const r = await tools.exec_command({cmd: "sudo rm -rf /srv"});'
+        payload = normalize_payload({"tool_name": "exec", "tool_input": {"input": program}})
+        assert payload["tool_input"]["command"] == program
+
+    def test_unmapped_name_passes_through(self, codex):
+        payload = normalize_payload({"tool_name": "update_plan", "tool_input": {"plan": []}})
+        assert payload["tool_name"] == "update_plan"
+
+    def test_claude_payload_still_untouched(self, claude):
+        payload = {"tool_name": "apply_patch", "tool_input": {"command": "x"}}
+        assert normalize_payload(dict(payload)) == payload
+
+
 class TestCapabilities:
     def test_codex_pretooluse_has_no_context_channel(self):
         assert can_inject_context("PreToolUse", target="codex") is False
