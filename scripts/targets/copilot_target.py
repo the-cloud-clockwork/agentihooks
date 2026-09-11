@@ -113,6 +113,35 @@ _TOOL_NAMES = {
 # Copilot caps a custom agent body at 30,000 characters.
 _AGENT_BODY_MAX = 30000
 
+# Copilot refuses a SKILL.md whose description exceeds this and drops the skill
+# with a load error; claude and codex have no equivalent limit, so an over-long
+# description is invisible until a copilot session reports it.
+_SKILL_DESCRIPTION_MAX = 1024
+
+
+def oversized_skill_descriptions(skills_dir: Path) -> list[tuple[str, int]]:
+    """(skill name, description length) for every skill copilot will refuse."""
+    import yaml
+
+    out: list[tuple[str, int]] = []
+    if not skills_dir.is_dir():
+        return out
+    for skill in sorted(skills_dir.iterdir()):
+        md = skill / "SKILL.md"
+        if not md.is_file():
+            continue
+        try:
+            text = md.read_text()
+            if not text.startswith("---"):
+                continue
+            front = yaml.safe_load(text.split("---", 2)[1]) or {}
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        description = " ".join(str(front.get("description", "")).split())
+        if len(description) > _SKILL_DESCRIPTION_MAX:
+            out.append((skill.name, len(description)))
+    return out
+
 
 def copilot_home() -> Path:
     """Resolve COPILOT_HOME (first entry when the env var is a comma list)."""
@@ -1076,6 +1105,17 @@ class CopilotAdapter:
         skills = agents_skills_home()
         n_skills = len(list(skills.iterdir())) if skills.is_dir() else 0
         checks.append((n_skills > 0, f"{n_skills} skill(s) in {skills}"))
+
+        oversize = oversized_skill_descriptions(skills)
+        checks.append(
+            (
+                not oversize,
+                f"skill descriptions within copilot's {_SKILL_DESCRIPTION_MAX}-char cap"
+                if not oversize
+                else f"{len(oversize)} skill(s) over the {_SKILL_DESCRIPTION_MAX}-char description cap "
+                f"— copilot drops them: {', '.join(f'{n} ({c})' for n, c in oversize)}",
+            )
+        )
 
         agents_dir = home / "agents"
         n_agents = len([f for f in agents_dir.glob("*.md")]) if agents_dir.is_dir() else 0
