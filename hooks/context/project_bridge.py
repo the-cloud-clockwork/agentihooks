@@ -161,11 +161,15 @@ def build_banner(root: Path, budget: int = 0) -> str:
 def inject_project_context(cwd: str) -> None:
     """Bridge the Claude-shaped repo at *cwd* into this session's context."""
     from hooks.config import PROJECT_BRIDGE_MAX_BYTES
+    from hooks.targets.capabilities import loads_claude_project_tree, needs_repo_skills_link
 
+    if loads_claude_project_tree():
+        return
     root = _repo_root(cwd)
     if root is None:
         return
-    ensure_skills_root(root)
+    if needs_repo_skills_link():
+        ensure_skills_root(root)
     banner = build_banner(root, PROJECT_BRIDGE_MAX_BYTES)
     if not banner:
         return

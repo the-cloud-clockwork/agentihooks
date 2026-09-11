@@ -82,6 +82,33 @@ class TestNormalizer:
         assert payload["tool_output"] == "old"
 
 
+class TestContextCaps:
+    def test_copilot_post_tool_use_is_capped(self, copilot, capsys):
+        from hooks.targets import emitter
+
+        emitter.buffer_context("x" * 20000)
+        emitter.flush("PostToolUse")
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["additionalContext"].encode()) == 10 * 1024
+        assert payload["additionalContext"].endswith("limit]")
+
+    def test_uncapped_events_pass_through(self, copilot, capsys):
+        from hooks.targets import emitter
+
+        emitter.buffer_context("x" * 20000)
+        emitter.flush("SessionStart")
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["additionalContext"]) == 20000
+
+    def test_codex_has_no_cap(self, codex, capsys):
+        from hooks.targets import emitter
+
+        emitter.buffer_context("x" * 20000)
+        emitter.flush("PostToolUse")
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["hookSpecificOutput"]["additionalContext"]) == 20000
+
+
 class TestCodexToolNames:
     """Codex 0.154 hands the hook boundary Claude's own names for the shell tool
     (captured live: tool_name "Bash", tool_input {"command": "<string>"}) but keeps

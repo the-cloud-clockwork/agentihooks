@@ -370,16 +370,15 @@ def on_session_start(payload: dict) -> None:
         except Exception:
             pass
 
-    if _is_codex():
-        try:
-            from hooks.config import PROJECT_BRIDGE_ENABLED
+    try:
+        from hooks.config import PROJECT_BRIDGE_ENABLED
 
-            if PROJECT_BRIDGE_ENABLED:
-                from hooks.context.project_bridge import inject_project_context
+        if PROJECT_BRIDGE_ENABLED:
+            from hooks.context.project_bridge import inject_project_context
 
-                inject_project_context(payload.get("cwd", ""))
-        except Exception as e:
-            log("project_bridge failed", {"error": str(e)})
+            inject_project_context(payload.get("cwd", ""))
+    except Exception as e:
+        log("project_bridge failed", {"error": str(e)})
 
     if _is_codex():
         try:

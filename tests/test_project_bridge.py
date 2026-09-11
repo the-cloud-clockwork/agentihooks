@@ -137,6 +137,7 @@ class TestBanner:
 
 class TestInjection:
     def test_injects_once_and_skips_compression(self, repo, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
         monkeypatch.setattr(project_bridge, "_memory_file", lambda _root: None)
         calls = []
         monkeypatch.setattr(
@@ -151,6 +152,7 @@ class TestInjection:
         assert "first body" in content
 
     def test_silent_outside_a_claude_repo(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
         calls = []
         monkeypatch.setattr(
             project_bridge,
@@ -161,6 +163,37 @@ class TestInjection:
         bare.mkdir()
         project_bridge.inject_project_context(str(bare))
         assert calls == []
+
+
+class TestTargetGates:
+    def test_claude_is_a_noop_it_loads_the_tree_itself(self, repo, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+        calls = []
+        monkeypatch.setattr(project_bridge, "inject_context", lambda *a, **k: calls.append(a))
+        project_bridge.inject_project_context(str(repo))
+        assert calls == []
+        assert not (repo / ".agents").exists()
+
+    def test_copilot_injects_without_the_skills_link(self, repo, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+        monkeypatch.setattr(project_bridge, "_memory_file", lambda _root: None)
+        calls = []
+        monkeypatch.setattr(
+            project_bridge,
+            "inject_context",
+            lambda content, also_log=True, skip_compression=False: calls.append(content),
+        )
+        project_bridge.inject_project_context(str(repo))
+        assert len(calls) == 1 and "first body" in calls[0]
+        # copilot scans .claude/skills itself — a second root would be noise.
+        assert not (repo / ".agents").exists()
+
+    def test_codex_injects_and_links(self, repo, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+        monkeypatch.setattr(project_bridge, "_memory_file", lambda _root: None)
+        monkeypatch.setattr(project_bridge, "inject_context", lambda *a, **k: None)
+        project_bridge.inject_project_context(str(repo))
+        assert (repo / ".agents" / "skills").is_symlink()
 
 
 class TestMemoryResolution:
