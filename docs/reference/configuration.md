@@ -274,7 +274,7 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BRAIN_ENABLED` | `true` when `BRAIN_URL` is set, else `false` | Enable the brain adapter for knowledge injection via broadcast channels. The legacy default also flips to `true` when `~/.agentihooks/brain-feed/` holds `.md` files. An explicit value always wins. |
-| `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN`, so neither has to be duplicated here. Only those connection keys are adopted — the file's database and provider credentials are ignored. |
+| `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL`, `KB_ROUTER_TOKEN` and the brain settings `agentibrain install` writes there (`BRAIN_ENABLED`, `BRAIN_SOURCE_PATH`, `AMYGDALA_ENABLED`, `AMYGDALA_SIGNAL_PATH`, `BRAIN_WRITER_ENABLED`, `BRAIN_WRITER_MAX_MARKERS`, `BRAIN_WRITER_OUTBOX`), so none has to be duplicated here. Only those keys are adopted — the file's database and provider credentials are ignored. |
 | `BRAIN_URL` | discovered from `$AGENTIBRAIN_HOME/.env` | Base URL of brain-api. Setting it moves the adapter off the filesystem onto HTTP and turns the reader and writer on by default. |
 | `BRAIN_HTTP_TOKEN` | falls back to `KB_ROUTER_TOKEN` | Bearer token for brain-api. Without it every read and every marker POST answers 401. |
 | `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` is set, else `false` | POST `@lesson` / `@signal` / `@decision` / `@milestone` markers to `{BRAIN_URL}/marker` on session Stop. |

@@ -6,8 +6,8 @@ put one value in two places, and a rotation left the copy stale. agentihooks
 now reads the brain's file directly, as a default beneath its own.
 
 That file also carries database, object-store and provider credentials. Those
-must never reach a session's environment, so only the connection keys are
-adopted.
+must never reach a session's environment, so only the connection keys and the
+brain client settings `agentibrain install` writes there are adopted.
 """
 
 import importlib
@@ -26,6 +26,11 @@ _SCRUB = (
     _TOKEN,
     "BRAIN_ENABLED",
     "BRAIN_WRITER_ENABLED",
+    "BRAIN_SOURCE_PATH",
+    "AMYGDALA_ENABLED",
+    "AMYGDALA_SIGNAL_PATH",
+    "BRAIN_WRITER_MAX_MARKERS",
+    "BRAIN_WRITER_OUTBOX",
     "POSTGRES_PASSWORD",
     "MINIO_ROOT_PASSWORD",
     "EMBEDDINGS_API_KEY",
@@ -87,6 +92,30 @@ def test_unrelated_credentials_are_never_adopted(homes):
     load()
     for unwanted in ("POSTGRES_PASSWORD", "MINIO_ROOT_PASSWORD", "EMBEDDINGS_API_KEY"):
         assert unwanted not in os.environ, f"{unwanted} reached the session environment"
+
+
+def test_brain_client_settings_come_from_the_brain_env(homes):
+    """agentibrain install writes these beside the bearer; agentihooks only reads them."""
+    _, brain, load = homes
+    _write_env(
+        brain / ".env",
+        {
+            _TOKEN: "t1",
+            _URL: "http://127.0.0.1:8103",
+            "BRAIN_SOURCE_PATH": "/vault/brain-feed",
+            "AMYGDALA_ENABLED": "true",
+            "AMYGDALA_SIGNAL_PATH": "/vault/brain-feed/amygdala-active.md",
+            "BRAIN_WRITER_MAX_MARKERS": "9",
+            "BRAIN_WRITER_OUTBOX": "/outbox",
+        },
+    )
+
+    config = load()
+    assert config.BRAIN_SOURCE_PATH == "/vault/brain-feed"
+    assert config.AMYGDALA_ENABLED is True
+    assert config.AMYGDALA_SIGNAL_PATH == "/vault/brain-feed/amygdala-active.md"
+    assert config.BRAIN_WRITER_MAX_MARKERS == 9
+    assert config.BRAIN_WRITER_OUTBOX == "/outbox"
 
 
 def test_an_agentihooks_env_still_wins(homes):

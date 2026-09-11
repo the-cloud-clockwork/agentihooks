@@ -388,10 +388,13 @@ biggest contributors and leave headroom for the rest.
 
 Nothing to copy by hand. agentihooks reads the brain's own config file —
 `$AGENTIBRAIN_HOME/.env`, default `~/.agentibrain/.env`, the same file that
-feeds the kernel's docker compose — and adopts `BRAIN_URL` and `KB_ROUTER_TOKEN`
-from it. One bearer, one home, so a rotation cannot go stale in a copy. Only
-those connection keys are adopted; that file's database, object-store and
-provider credentials never enter a session's environment.
+feeds the kernel's docker compose — and adopts `BRAIN_URL`, `KB_ROUTER_TOKEN`
+and the brain settings `agentibrain install` writes there (`BRAIN_ENABLED`,
+`BRAIN_SOURCE_PATH`, `AMYGDALA_ENABLED`, `AMYGDALA_SIGNAL_PATH`,
+`BRAIN_WRITER_ENABLED`, `BRAIN_WRITER_MAX_MARKERS`, `BRAIN_WRITER_OUTBOX`) from
+it. One home each, so nothing goes stale in a copy. Only those keys are adopted;
+that file's database, object-store and provider credentials never enter a
+session's environment.
 
 On the machine hosting the brain, `agentibrain install` writes that file. On a
 machine that only talks to one:
