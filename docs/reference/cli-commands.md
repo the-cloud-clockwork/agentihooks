@@ -242,6 +242,23 @@ agentihooks channel list
 
 ---
 
+## `agentihooks enforcement`
+
+Manage recurring reminders injected every N tool calls. Global runtime entries live in `~/.agentihooks/enforcements.json`; `--local` scopes the operation to `<git-root>/.agentihooks/enforcements.json`.
+
+```bash
+agentihooks enforcement set "run tests before committing" 5
+agentihooks enforcement set --local "read the operator directory" 10
+agentihooks enforcement list [--local]
+agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
+```
+
+`--local` requires a Git project. Local files use the same JSON schema and cadence behavior as the global store. AgentiHooks creates the resource directory on the first local `set`, never edits Git ignore configuration, and leaves the directory in place after `clear`.
+
+During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. MCP enforcement tools remain global.
+
+---
+
 ## `agentihooks refresh-rules`
 
 Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.

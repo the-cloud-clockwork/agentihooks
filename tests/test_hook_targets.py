@@ -470,6 +470,34 @@ class TestPreToolUseLogAttribution:
         assert pre[0].get("session_id") == "sid-attribution"
 
 
+class TestCodexEnforcementFallback:
+    def test_posttool_injects_due_enforcement_with_project_cwd(self, codex, monkeypatch):
+        import hooks.common as common
+        import hooks.context.enforcement as enforcement
+        import hooks.hook_manager as hm
+
+        captured = []
+        calls = []
+        monkeypatch.setattr(common, "inject_context", lambda message, **kwargs: captured.append(message))
+        monkeypatch.setattr(
+            enforcement,
+            "get_posttool_enforcements",
+            lambda session_id, cwd: calls.append((session_id, cwd)) or "local enforcement",
+        )
+        hm.on_post_tool_use(
+            {
+                "hook_event_name": "PostToolUse",
+                "session_id": "codex-local",
+                "tool_name": "Unknown",
+                "tool_input": {},
+                "tool_output": "ok",
+                "cwd": "/project",
+            }
+        )
+        assert calls == [("codex-local", "/project")]
+        assert captured == ["local enforcement"]
+
+
 class TestSplitGlobal:
     """The one shape rule shared by the installer's migration and the hook
     runtime, which never runs that migration."""

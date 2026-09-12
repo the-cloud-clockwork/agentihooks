@@ -77,6 +77,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Project-local enforcement resources.** `agentihooks enforcement set|list|clear
+  --local` manages `<git-root>/.agentihooks/enforcements.json`; the hook merges
+  those entries only for sessions in that project. Codex receives due reminders
+  through PostToolUse because its PreToolUse protocol cannot inject context.
 - **The credential-read guard now runs on every target.** It was wired through
   Claude's settings `hooks` array and paired with Claude-only `permissions.deny`
   rules, so codex and copilot had no credential-read protection whatsoever — and

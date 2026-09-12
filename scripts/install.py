@@ -5593,11 +5593,21 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
     )
 
     action = getattr(args, "action", None)
+    local = bool(getattr(args, "local", False))
+    cwd = Path.cwd() if local else None
+    if local:
+        from hooks.context.project_resources import ProjectResourceError, require_project_root
+
+        try:
+            require_project_root(cwd)
+        except ProjectResourceError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "list":
-        entries = list_enforcements()
+        entries = list_enforcements(local=local, cwd=cwd)
         if not entries:
-            print("No active enforcements.")
+            print("No active local enforcements." if local else "No active enforcements.")
             return
         print(f"{'SOURCE':<10} {'ID':<12} {'CADENCE':<8} {'TAG':<16} MESSAGE")
         for e in entries:
@@ -5613,13 +5623,13 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
         enf_id = getattr(args, "enf_id", "") or ""
         tag = getattr(args, "tag", "") or ""
         if enf_id:
-            count = clear_enforcement(enforcement_id=enf_id)
+            count = clear_enforcement(enforcement_id=enf_id, local=local, cwd=cwd)
             print(f"Cleared {count} enforcement(s) matching id={enf_id}.")
         elif tag:
-            count = clear_enforcement(tag=tag)
+            count = clear_enforcement(tag=tag, local=local, cwd=cwd)
             print(f"Cleared {count} enforcement(s) matching tag={tag}.")
         else:
-            count = clear_enforcement()
+            count = clear_enforcement(local=local, cwd=cwd)
             print(f"Cleared all {count} enforcement(s).")
         return
 
@@ -5643,9 +5653,10 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
             print("Error: message is required.", file=sys.stderr)
             sys.exit(1)
         tag = getattr(args, "tag", "") or None
-        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag)
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd)
         if enf_id:
-            print(f"Enforcement created: {enf_id} (every {cadence} tool calls)")
+            scope = "local, " if local else ""
+            print(f"Enforcement created: {enf_id} ({scope}every {cadence} tool calls)")
         else:
             print("Error: failed to create enforcement.", file=sys.stderr)
             sys.exit(1)
@@ -6058,9 +6069,12 @@ cadence:
 examples:
   agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
+  agentihooks enforcement set --local "project-only reminder" 10   # current Git project
   agentihooks enforcement list
+  agentihooks enforcement list --local
   agentihooks enforcement clear                                     # remove ALL
   agentihooks enforcement clear --id abc12345                       # remove one
+  agentihooks enforcement clear --local                             # remove project-local entries
 """,
     )
     enf_p.add_argument("action", choices=["set", "list", "clear"], help="Enforcement action")
@@ -6072,6 +6086,11 @@ examples:
     )
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
+    enf_p.add_argument(
+        "--local",
+        action="store_true",
+        help="Use <git-root>/.agentihooks/enforcements.json instead of the global runtime store",
+    )
 
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(

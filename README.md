@@ -185,6 +185,12 @@ agentihooks channel list                     # active channels + message counts
 agentihooks brain status                     # source type, entries, refresh state
 agentihooks brain refresh                    # force re-read + republish
 
+# Enforcement drumbeats
+agentihooks enforcement set "run tests before commit" 5
+agentihooks enforcement set --local "project-only reminder" 10
+agentihooks enforcement list --local
+agentihooks enforcement clear --local
+
 # Live rule refresh (push rule updates into running sessions)
 agentihooks refresh-rules --dry-run          # preview payload + target session IDs
 agentihooks refresh-rules                    # one-shot push to all alive sessions
@@ -324,9 +330,9 @@ CLI's hook contract and the evidence behind it:
 | Event | Key behavior |
 |-------|-------------|
 | `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
-| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
-| `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
+| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts, enforcement drumbeat |
+| `PostToolUse` | Bash output filtering, file dedup, tool error recording, Codex enforcement fallback |
+| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto drumbeat, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |

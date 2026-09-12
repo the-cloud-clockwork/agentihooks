@@ -1,9 +1,14 @@
 """Tests for the enforcement drumbeat injection system."""
 
 import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
+
+
+def _git(*args: str, cwd) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +39,14 @@ def bundle_dir(tmp_path):
         json.dumps({"enforcements": [{"id": "p-1", "message": "profile msg", "cadence": 4, "tag": "doctrine"}]})
     )
     return bundle
+
+
+@pytest.fixture
+def local_repo(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    _git("init", "-q", cwd=root)
+    return root
 
 
 class TestCRUD:
@@ -306,3 +319,88 @@ class TestThreeSourceMerge:
             assert len(bundle_profile) == 2
             assert len(runtime) == 0
             assert len(after) == before - 1
+
+
+class TestLocalEnforcement:
+    def test_set_creates_project_store(self, local_repo):
+        from hooks.context.enforcement import add_enforcement, list_enforcements
+
+        enforcement_id = add_enforcement("project rule", 10, tag="canary", local=True, cwd=local_repo)
+        store = local_repo / ".agentihooks" / "enforcements.json"
+        assert store.is_file()
+        entries = list_enforcements(local=True, cwd=local_repo)
+        assert entries == [
+            {
+                "id": enforcement_id,
+                "message": "project rule",
+                "cadence": 10,
+                "tag": "canary",
+                "created_at": entries[0]["created_at"],
+                "source": "local",
+            }
+        ]
+
+    def test_list_and_clear_missing_store_do_not_create_it(self, local_repo):
+        from hooks.context.enforcement import clear_enforcement, list_enforcements
+
+        assert list_enforcements(local=True, cwd=local_repo) == []
+        assert clear_enforcement(local=True, cwd=local_repo) == 0
+        assert not (local_repo / ".agentihooks").exists()
+
+    def test_local_clear_does_not_touch_runtime(self, local_repo):
+        from hooks.context.enforcement import add_enforcement, clear_enforcement, list_enforcements
+
+        add_enforcement("global", 5)
+        add_enforcement("local", 10, local=True, cwd=local_repo)
+        assert clear_enforcement(local=True, cwd=local_repo) == 1
+        assert [entry["message"] for entry in list_enforcements()] == ["global"]
+        assert list_enforcements(local=True, cwd=local_repo) == []
+
+    def test_local_wins_id_collision(self, local_repo):
+        from hooks.context.enforcement import _save_store, load_all_enforcements
+
+        _save_store([{"id": "same", "message": "runtime", "cadence": 5, "tag": ""}])
+        store = local_repo / ".agentihooks" / "enforcements.json"
+        store.parent.mkdir()
+        store.write_text(json.dumps({"enforcements": [{"id": "same", "message": "local", "cadence": 10, "tag": ""}]}))
+        entries = load_all_enforcements(local_repo)
+        assert len(entries) == 1
+        assert entries[0]["message"] == "local"
+        assert entries[0]["source"] == "local"
+
+    def test_local_isolated_by_project(self, local_repo, tmp_path):
+        from hooks.context.enforcement import add_enforcement, load_all_enforcements
+
+        other = tmp_path / "other"
+        other.mkdir()
+        _git("init", "-q", cwd=other)
+        add_enforcement("only here", 10, local=True, cwd=local_repo)
+        assert [entry["message"] for entry in load_all_enforcements(local_repo)] == ["only here"]
+        assert load_all_enforcements(other) == []
+
+    def test_pretool_fires_local_at_tenth_call(self, local_repo):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_posttool_enforcements,
+            get_pretool_enforcements,
+        )
+
+        add_enforcement("tenth-call canary", 10, local=True, cwd=local_repo)
+        with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
+            for _ in range(9):
+                assert get_pretool_enforcements("local-session", local_repo) is None
+            assert get_posttool_enforcements("local-session", local_repo) is None
+            banner = get_pretool_enforcements("local-session", local_repo)
+            assert banner is not None
+            assert "tenth-call canary" in banner
+            assert "tenth-call canary" in get_posttool_enforcements("local-session", local_repo)
+            for _ in range(9):
+                assert get_pretool_enforcements("local-session", local_repo) is None
+            assert "tenth-call canary" in get_pretool_enforcements("local-session", local_repo)
+
+    def test_local_requires_git_project(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement
+        from hooks.context.project_resources import ProjectResourceError
+
+        with pytest.raises(ProjectResourceError, match="not inside a Git project"):
+            add_enforcement("no project", 5, local=True, cwd=tmp_path)

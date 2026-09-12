@@ -1213,7 +1213,7 @@ def on_pre_tool_use(payload: dict) -> None:
         try:
             from hooks.context.enforcement import get_pretool_enforcements
 
-            _enf_ctx = get_pretool_enforcements(session_id)
+            _enf_ctx = get_pretool_enforcements(session_id, payload.get("cwd", ""))
             if _enf_ctx:
                 _pretool_blocks.append(_enf_ctx)
         except Exception as e:
@@ -1253,7 +1253,8 @@ def on_pre_tool_use(payload: dict) -> None:
             )
         else:
             # Codex PreToolUse has no context channel (deny-only output).
-            # These blocks re-inject at UserPromptSubmit; drop with a trace.
+            # Enforcement is recovered on PostToolUse; broadcasts use their
+            # UserPromptSubmit delivery path.
             log(
                 "pretool context dropped — no PreToolUse context channel on this target",
                 {"blocks": len(_pretool_blocks)},
@@ -1332,6 +1333,20 @@ def on_post_tool_use(payload: dict) -> None:
     tool_name = payload.get("tool_name", "unknown")
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
+
+    try:
+        from hooks.config import ENFORCEMENT_INJECTION_ENABLED
+        from hooks.targets.capabilities import can_inject_context
+
+        if ENFORCEMENT_INJECTION_ENABLED and not can_inject_context("PreToolUse"):
+            from hooks.common import inject_context
+            from hooks.context.enforcement import get_posttool_enforcements
+
+            enforcement_context = get_posttool_enforcements(_trace_session_id, payload.get("cwd", ""))
+            if enforcement_context:
+                inject_context(enforcement_context, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("enforcement posttool fallback failed", {"error": str(e)})
 
     # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
