@@ -5776,6 +5776,9 @@ def cmd_migrate(args) -> None:
 
 def main() -> None:
     _argv = sys.argv[1:]
+    if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
+        _argv.remove("--local")
+        _argv.insert(1, "--local")
 
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
