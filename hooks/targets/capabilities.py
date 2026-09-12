@@ -40,6 +40,17 @@ _ARG_MUTATION_FIELD = {"claude": "updatedInput", "copilot": "modifiedArgs"}
 # event, so a guardrail must also state its denial in the stdout envelope.
 _ENVELOPE_BLOCK_TARGETS = frozenset({"copilot"})
 
+# Targets that load a Claude-shaped repo's own .claude tree themselves. Claude
+# Code loads every <repo>/.claude/rules body and the project memory at
+# SessionStart (measured: 37 files, 252,291 bytes), so the project bridge would
+# only duplicate it there.
+_CLAUDE_PROJECT_TREE_TARGETS = frozenset({"claude"})
+
+# Targets whose repo-scope skill root is NOT .claude/skills, so the bridge has
+# to expose it under the name they do scan. Copilot scans .claude/skills
+# directly (`copilot skill --help`, 1.0.83); codex scans <repo>/.agents/skills.
+_REPO_SKILLS_LINK_TARGETS = frozenset({"codex"})
+
 
 def can_inject_context(event: str, target: str | None = None) -> bool:
     target = target or current_target()
@@ -71,6 +82,27 @@ _DECISION_EVENTS = frozenset({"PreToolUse", "PermissionRequest"})
 # The envelope is therefore emitted on both kinds of event: belt-and-braces
 # where exit 2 already denies, the ONLY block channel on UserPromptSubmit.
 _COPILOT_BLOCKABLE_EVENTS = _DECISION_EVENTS | {"UserPromptSubmit"}
+
+
+# Documented per-(target, event) ceilings on additionalContext, in bytes.
+# Copilot joins every postToolUse hook's context with a blank line and caps the
+# result at 10 KB, dropping the remainder without a notice — a filtered command
+# output past that point would vanish mid-sentence.
+_CONTEXT_CAPS = {("copilot", "PostToolUse"): 10 * 1024}
+
+
+def context_cap_bytes(event: str, target: str | None = None) -> int | None:
+    return _CONTEXT_CAPS.get(((target or current_target()), event))
+
+
+def loads_claude_project_tree(target: str | None = None) -> bool:
+    """Whether the host already loads <repo>/.claude itself."""
+    return (target or current_target()) in _CLAUDE_PROJECT_TREE_TARGETS
+
+
+def needs_repo_skills_link(target: str | None = None) -> bool:
+    """Whether <repo>/.claude/skills must be exposed under another name."""
+    return (target or current_target()) in _REPO_SKILLS_LINK_TARGETS
 
 
 def requires_envelope_block(event: str, target: str | None = None) -> bool:

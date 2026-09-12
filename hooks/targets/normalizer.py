@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -314,11 +315,65 @@ def _normalize_copilot(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+# Codex's hook boundary already speaks Claude's vocabulary for the shell tool
+# (verified live, 0.154.0: tool_name "Bash", tool_input {"command": "<string>"}),
+# even though the model-facing tool is named `exec` in the rollout. The patch
+# tool is the exception: it arrives as `apply_patch` with the whole patch body
+# in `command`, reaching neither the Bash branch nor the Write/Edit one, so a
+# secret written through a patch was never scanned. The shell aliases are
+# insurance against a version that stops translating.
+_CODEX_TOOL_NAMES = {
+    "apply_patch": "Edit",
+    "exec": "Bash",
+    "shell": "Bash",
+    "local_shell": "Bash",
+    "unified_exec": "Bash",
+    "read_file": "Read",
+}
+
+# `*** Add File: path` / `*** Update File: path` / `*** Delete File: path`
+_CODEX_PATCH_TARGET = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+
+
+def _codex_tool_call(name: str, args: Any) -> tuple[str, dict[str, Any]]:
+    """Map one codex tool call onto the (tool_name, tool_input) handlers read."""
+    if not isinstance(args, dict):
+        args = {}
+    mapped = _CODEX_TOOL_NAMES.get(name, name)
+
+    # 0.147 sent {"command": ["ls", "-la"]}; a list reaches every guard as an
+    # AttributeError, which hook_manager turns into "guard bypassed".
+    if isinstance(args.get("command"), list):
+        args["command"] = shlex.join(str(part) for part in args["command"])
+    # code-mode `exec` carries a freeform program in `input`; the shell command
+    # it runs is a literal substring, which is all the regex guards need.
+    if not args.get("command") and isinstance(args.get("input"), str):
+        args["command"] = args["input"]
+        args.setdefault("content", args["input"])
+
+    if name == "apply_patch":
+        body = args.get("command") or args.get("patch") or ""
+        # Both spellings: the secrets scan reads `content`, version_guard reads
+        # `new_string`.
+        args.setdefault("content", body)
+        args.setdefault("new_string", body)
+        target = _CODEX_PATCH_TARGET.search(body)
+        if target and not args.get("file_path"):
+            args["file_path"] = target.group(1).strip()
+    return mapped, args
+
+
 def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if is_copilot():
         return _normalize_copilot(payload)
     if not is_codex():
         return payload
+
+    if payload.get("tool_name"):
+        name, args = _codex_tool_call(str(payload["tool_name"]), payload.get("tool_input"))
+        payload["tool_name"] = name
+        if args:
+            payload["tool_input"] = args
 
     # Some handlers read the older ``tool_output`` / ``tool_result`` aliases.
     resp = payload.get("tool_response")

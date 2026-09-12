@@ -227,6 +227,17 @@ else
       || nb "instructions load not visible in the log at this level"
     printf '%s' "$OUT" | grep -q "ALPHA" && ok "live turn completed (model replied)" || no "live turn produced no reply"
 
+    # Project bridge: a repo rule body must reach the model, and copilot must
+    # NOT get the .agents/skills link (it scans .claude/skills itself).
+    mkdir -p "$WORK/repo/.claude/rules" "$WORK/repo/.claude/skills/demo"
+    echo "The SMOKE-RULE-CANARY for this project is PINEAPPLE." > "$WORK/repo/.claude/rules/canary.md"
+    B="$(cd "$WORK/repo" && timeout 150 copilot -p "Without using any tools, what is the SMOKE-RULE-CANARY? Answer with one word." \
+      --allow-all-tools --no-color 2>&1)"
+    printf '%s' "$B" | grep -qi "PINEAPPLE" && ok "project rule body reached the model" \
+      || no "project rule body absent from the model's context"
+    [ -e "$WORK/repo/.agents" ] && no "copilot got a .agents skills link it does not need" \
+      || ok "no .agents link created for copilot"
+
     # Exit-code semantics OUTSIDE preToolUse (settles [6] live): exit 2 on
     # userPromptSubmitted must NOT block; the {"decision":"block"} envelope must.
     printf '#!/bin/sh\necho PROBE >&2\nexit 2\n' > "$COPILOT_HOME/x2.sh" && chmod +x "$COPILOT_HOME/x2.sh"

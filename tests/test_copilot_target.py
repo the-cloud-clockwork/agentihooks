@@ -581,6 +581,41 @@ class TestMcp:
         assert "a" in doc["mcpServers"]
 
 
+class TestSkillDescriptionCap:
+    """Copilot drops a skill whose description exceeds 1024 chars; claude and
+    codex do not, so the failure is invisible until a copilot session says so."""
+
+    def _skill(self, root, name, description):
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n\nbody\n")
+
+    def test_flags_only_the_oversized_ones(self, tmp_path):
+        from scripts.targets.copilot_target import oversized_skill_descriptions
+
+        self._skill(tmp_path, "fine", "short and useful")
+        self._skill(tmp_path, "too-long", "x" * 1100)
+        assert oversized_skill_descriptions(tmp_path) == [("too-long", 1100)]
+
+    def test_folded_yaml_is_measured_as_rendered(self, tmp_path):
+        from scripts.targets.copilot_target import oversized_skill_descriptions
+
+        d = tmp_path / "folded"
+        d.mkdir()
+        wrapped = "\n".join("  " + "y" * 60 for _ in range(20))  # 1200 chars of content
+        (d / "SKILL.md").write_text(f"---\nname: folded\ndescription: >\n{wrapped}\n---\n\nbody\n")
+        assert [n for n, _ in oversized_skill_descriptions(tmp_path)] == ["folded"]
+
+    def test_missing_or_unparseable_skill_is_skipped(self, tmp_path):
+        from scripts.targets.copilot_target import oversized_skill_descriptions
+
+        (tmp_path / "nofile").mkdir()
+        bad = tmp_path / "badyaml"
+        bad.mkdir()
+        (bad / "SKILL.md").write_text("---\nname: [unclosed\n---\n")
+        assert oversized_skill_descriptions(tmp_path) == []
+
+
 class TestDoctor:
     def test_reports_failures_on_bare_home(self, adapter, capsys):
         assert adapter.doctor() > 0

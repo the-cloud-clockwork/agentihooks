@@ -86,7 +86,9 @@ What covers live re-emphasis now, at a fraction of the token cost:
   unchanged brain re-publishes nothing.
 - **Enforcement drumbeat** — operator-curated one-liners re-injected every N
   **tool calls** (see [Guardrails](guardrails.md)). Compact by design: the whole
-  point is a token or two of reminder, not a file dump.
+  point is a token or two of reminder, not a file dump. A project can add its
+  own entries at `<git-root>/.agentihooks/enforcements.json`; they apply only to
+  sessions running inside that repository.
 - **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
   mid-session, this pushes the new content to already-running sessions exactly
   once. This is the only case where re-sending a rule file earns its tokens: the

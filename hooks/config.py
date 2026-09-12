@@ -82,11 +82,22 @@ def _parse_env_file(
             this_file.add(_key)
 
 
-# Connection settings adopted from the brain's own directory. Deliberately not
-# the whole file: it also holds POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD and
-# provider keys, and sourcing those would put database credentials into the
-# environment of every agent session.
-_BRAIN_KEYS_FROM_KERNEL = ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN")
+# Connection and client settings adopted from the brain's own directory, where
+# `agentibrain install` writes them. Deliberately not the whole file: it also
+# holds POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD and provider keys, and sourcing
+# those would put database credentials into the environment of every agent session.
+_BRAIN_KEYS_FROM_KERNEL = (
+    "BRAIN_URL",
+    "BRAIN_HTTP_TOKEN",
+    "KB_ROUTER_TOKEN",
+    "BRAIN_ENABLED",
+    "BRAIN_SOURCE_PATH",
+    "AMYGDALA_ENABLED",
+    "AMYGDALA_SIGNAL_PATH",
+    "BRAIN_WRITER_ENABLED",
+    "BRAIN_WRITER_MAX_MARKERS",
+    "BRAIN_WRITER_OUTBOX",
+)
 
 # Keys this loader owns, tracked apart from _FILE_OWNED_KEYS so a reload cannot
 # let the brain's file start beating an agentihooks .env that also defines them.
@@ -361,6 +372,12 @@ FILE_READ_CACHE_TTL = int(os.getenv("FILE_READ_CACHE_TTL", "21600"))
 
 MCP_HYGIENE_ENABLED = _env_bool("MCP_HYGIENE_ENABLED", "true")
 CODEX_CONTEXT_PIN_ENABLED = _env_bool("CODEX_CONTEXT_PIN_ENABLED", "true")
+
+# Project bridge: a repo's own .claude/rules bodies and project memory, for a
+# target with no rules directory of its own. 0 = inject whole, matching what
+# Claude Code itself loads.
+PROJECT_BRIDGE_ENABLED = _env_bool("PROJECT_BRIDGE_ENABLED", "true")
+PROJECT_BRIDGE_MAX_BYTES = int(os.getenv("PROJECT_BRIDGE_MAX_BYTES", "0"))
 
 # Tell the agent its own session id at SessionStart. The session-scoped
 # hooks-utils tools (channel_acknowledge) take it as an argument, which is the

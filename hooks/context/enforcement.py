@@ -2,17 +2,19 @@
 
 Parallel to broadcast.py but semantically distinct:
 - No severity, no TTL, no per-session targeting.
-- Global: every session sees every enforcement.
+- Global entries reach every session; local entries reach only their project.
 - Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Three-source resolution (priority: runtime > profile > bundle):
+Four-source resolution (priority: local > runtime > profile > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
   2. <bundle_path>/profiles/<active_profile>/enforcements.json → source: "profile"
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
+  4. <project>/.agentihooks/enforcements.json                  → source: "local"
 
 Runtime store: ~/.agentihooks/enforcements.json (mutable via CLI/MCP).
 Bundle/profile stores: read-only at runtime, editable only in git.
+Local store: mutable through CLI commands carrying --local.
 Counter: per-session, persisted at ~/.agentihooks/enforcement_counters.json.
 """
 
@@ -33,8 +35,8 @@ def _counter_path() -> Path:
     return Path(ENFORCEMENT_COUNTER_FILE).expanduser()
 
 
-def _load_store() -> list[dict]:
-    p = _store_path()
+def _load_store(path: Path | None = None) -> list[dict]:
+    p = path or _store_path()
     if not p.exists() or p.stat().st_size == 0:
         return []
     try:
@@ -49,8 +51,8 @@ def _load_store() -> list[dict]:
         return []
 
 
-def _save_store(entries: list[dict]) -> None:
-    p = _store_path()
+def _save_store(entries: list[dict], path: Path | None = None) -> None:
+    p = path or _store_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps({"enforcements": entries}, indent=2))
@@ -144,8 +146,23 @@ def _load_profile_enforcements() -> list[dict]:
     return _load_json_enforcements(bp / "profiles" / profile / "enforcements.json", "profile")
 
 
-def load_all_enforcements() -> list[dict]:
-    """Merge bundle → profile → runtime. Runtime wins on ID collision."""
+def _local_store_path(cwd: str | Path | None, *, create_parent: bool = False) -> Path:
+    from hooks.context.project_resources import project_resource_path
+
+    return project_resource_path("enforcements.json", cwd, create_parent=create_parent)
+
+
+def _load_local_enforcements(cwd: str | Path | None) -> list[dict]:
+    if cwd is None:
+        return []
+    try:
+        return _load_json_enforcements(_local_store_path(cwd), "local")
+    except ValueError:
+        return []
+
+
+def load_all_enforcements(cwd: str | Path | None = None) -> list[dict]:
+    """Merge bundle → profile → runtime → local."""
     by_id: dict[str, dict] = {}
     for e in _load_bundle_enforcements():
         eid = e.get("id")
@@ -160,6 +177,10 @@ def load_all_enforcements() -> list[dict]:
         eid = e.get("id")
         if eid:
             by_id[eid] = e
+    for e in _load_local_enforcements(cwd):
+        eid = e.get("id")
+        if eid:
+            by_id[eid] = e
     return list(by_id.values())
 
 
@@ -168,7 +189,14 @@ def load_all_enforcements() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def add_enforcement(message: str, cadence: int, tag: str | None = None) -> str | None:
+def add_enforcement(
+    message: str,
+    cadence: int,
+    tag: str | None = None,
+    *,
+    local: bool = False,
+    cwd: str | Path | None = None,
+) -> str | None:
     if not message or not message.strip():
         return None
     if not isinstance(cadence, int) or cadence < 1:
@@ -181,28 +209,40 @@ def add_enforcement(message: str, cadence: int, tag: str | None = None) -> str |
         "tag": tag or "",
         "created_at": _now_iso(),
     }
-    entries = _load_store()
+    store = _local_store_path(cwd, create_parent=True) if local else _store_path()
+    entries = _load_store(store)
     entries.append(entry)
-    _save_store(entries)
+    _save_store(entries, store)
     return enforcement_id
 
 
-def list_enforcements() -> list[dict]:
+def list_enforcements(*, local: bool = False, cwd: str | Path | None = None) -> list[dict]:
+    if local:
+        return _load_json_enforcements(_local_store_path(cwd), "local")
     return load_all_enforcements()
 
 
-def clear_enforcement(enforcement_id: str | None = None, tag: str | None = None) -> int:
-    entries = _load_store()
+def clear_enforcement(
+    enforcement_id: str | None = None,
+    tag: str | None = None,
+    *,
+    local: bool = False,
+    cwd: str | Path | None = None,
+) -> int:
+    store = _local_store_path(cwd) if local else _store_path()
+    if local and not store.exists():
+        return 0
+    entries = _load_store(store)
     if enforcement_id is None and not tag:
         count = len(entries)
-        _save_store([])
+        _save_store([], store)
         return count
     if enforcement_id:
         remaining = [e for e in entries if e.get("id") != enforcement_id]
     else:
         remaining = [e for e in entries if e.get("tag") != tag]
     count = len(entries) - len(remaining)
-    _save_store(remaining)
+    _save_store(remaining, store)
     return count
 
 
@@ -220,11 +260,11 @@ def increment_and_get_count(session_id: str) -> int:
     return cur
 
 
-def get_due_enforcements(tool_call_count: int) -> list[dict]:
+def get_due_enforcements(tool_call_count: int, cwd: str | Path | None = None) -> list[dict]:
     """Return enforcements whose cadence divides the current count."""
     if tool_call_count <= 0:
         return []
-    entries = load_all_enforcements()
+    entries = load_all_enforcements(cwd)
     due: list[dict] = []
     for e in entries:
         cadence = int(e.get("cadence", 0) or 0)
@@ -267,13 +307,26 @@ def format_enforcement_context(msgs: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_pretool_enforcements(session_id: str) -> str | None:
+def get_pretool_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
     """Increment the counter and return formatted enforcement banners if any are due."""
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
         count = increment_and_get_count(session_id)
-        due = get_due_enforcements(count)
+        due = get_due_enforcements(count, cwd)
+        if not due:
+            return None
+        return format_enforcement_context(due)
+    except Exception:
+        return None
+
+
+def get_posttool_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
+    if not ENFORCEMENT_INJECTION_ENABLED:
+        return None
+    try:
+        count = int(_load_counters().get(session_id, 0))
+        due = get_due_enforcements(count, cwd)
         if not due:
             return None
         return format_enforcement_context(due)

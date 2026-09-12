@@ -20,6 +20,7 @@ import json
 
 from hooks.targets import buffers_single_envelope
 from hooks.targets.capabilities import can_inject_context
+from hooks.targets.capabilities import context_cap_bytes as capability_cap
 
 _buffer: list[str] = []
 _forced = False
@@ -87,6 +88,12 @@ def flush(event_name: str) -> None:
             {"event": event_name, "target": current_target(), "chars": len(content)},
         )
         return
+    cap = capability_cap(event_name)
+    if cap is not None and len(content.encode()) > cap:
+        marker = "\n[truncated at the host's additionalContext limit]"
+        room = max(0, cap - len(marker.encode()))
+        content = content.encode()[:room].decode("utf-8", errors="ignore") + marker
+
     from hooks.targets import current_target
 
     # Copilot reads TOP-LEVEL ``additionalContext`` only — the nested claude

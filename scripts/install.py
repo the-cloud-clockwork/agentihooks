@@ -5593,11 +5593,21 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
     )
 
     action = getattr(args, "action", None)
+    local = bool(getattr(args, "local", False))
+    cwd = Path.cwd() if local else None
+    if local:
+        from hooks.context.project_resources import ProjectResourceError, require_project_root
+
+        try:
+            require_project_root(cwd)
+        except ProjectResourceError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if action == "list":
-        entries = list_enforcements()
+        entries = list_enforcements(local=local, cwd=cwd)
         if not entries:
-            print("No active enforcements.")
+            print("No active local enforcements." if local else "No active enforcements.")
             return
         print(f"{'SOURCE':<10} {'ID':<12} {'CADENCE':<8} {'TAG':<16} MESSAGE")
         for e in entries:
@@ -5613,13 +5623,13 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
         enf_id = getattr(args, "enf_id", "") or ""
         tag = getattr(args, "tag", "") or ""
         if enf_id:
-            count = clear_enforcement(enforcement_id=enf_id)
+            count = clear_enforcement(enforcement_id=enf_id, local=local, cwd=cwd)
             print(f"Cleared {count} enforcement(s) matching id={enf_id}.")
         elif tag:
-            count = clear_enforcement(tag=tag)
+            count = clear_enforcement(tag=tag, local=local, cwd=cwd)
             print(f"Cleared {count} enforcement(s) matching tag={tag}.")
         else:
-            count = clear_enforcement()
+            count = clear_enforcement(local=local, cwd=cwd)
             print(f"Cleared all {count} enforcement(s).")
         return
 
@@ -5643,9 +5653,10 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
             print("Error: message is required.", file=sys.stderr)
             sys.exit(1)
         tag = getattr(args, "tag", "") or None
-        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag)
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd)
         if enf_id:
-            print(f"Enforcement created: {enf_id} (every {cadence} tool calls)")
+            scope = "local, " if local else ""
+            print(f"Enforcement created: {enf_id} ({scope}every {cadence} tool calls)")
         else:
             print("Error: failed to create enforcement.", file=sys.stderr)
             sys.exit(1)
@@ -5765,6 +5776,9 @@ def cmd_migrate(args) -> None:
 
 def main() -> None:
     _argv = sys.argv[1:]
+    if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
+        _argv.remove("--local")
+        _argv.insert(1, "--local")
 
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
@@ -5796,7 +5810,8 @@ def main() -> None:
 
     sub.add_parser("version", help="Print version")
     update_p = sub.add_parser("update", help="Self-update agentihooks")
-    update_p.add_argument("--source", default="", help="Custom pip source (default: editable reinstall)")
+    update_p.add_argument("--source", default="", help="Custom package index URL to upgrade from")
+    update_p.add_argument("--check", action="store_true", help="Report whether an update exists; install nothing")
 
     unsub = sub.add_parser("uninstall", help="Remove all agentihooks artifacts from the system")
     unsub.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
@@ -6057,9 +6072,12 @@ cadence:
 examples:
   agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
+  agentihooks enforcement set --local "project-only reminder" 10   # current Git project
   agentihooks enforcement list
+  agentihooks enforcement list --local
   agentihooks enforcement clear                                     # remove ALL
   agentihooks enforcement clear --id abc12345                       # remove one
+  agentihooks enforcement clear --local                             # remove project-local entries
 """,
     )
     enf_p.add_argument("action", choices=["set", "list", "clear"], help="Enforcement action")
@@ -6071,6 +6089,11 @@ examples:
     )
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
+    enf_p.add_argument(
+        "--local",
+        action="store_true",
+        help="Use <git-root>/.agentihooks/enforcements.json instead of the global runtime store",
+    )
 
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
@@ -6111,35 +6134,19 @@ notes:
     if args.command == "version":
         print(f"agentihooks {_get_version()}")
     elif args.command == "update":
-        import subprocess as _sp
+        from scripts.updater import run_update, version_after_upgrade
 
-        ver_before = _get_version()
-        print(f"Current version: {ver_before}")
-        if _is_source_checkout():
-            # Editable reinstall from the source tree
-            cmd = ["uv", "tool", "install", "--editable", "--force", str(AGENTIHOOKS_ROOT)]
-        else:
-            # Wheel install — pull latest from PyPI via uv tool, fall back to pip
-            if shutil.which("uv"):
-                cmd = ["uv", "tool", "install", "--force", "agentihooks"]
-            else:
-                cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "agentihooks"]
-        print(f"Running: {' '.join(cmd)}")
-        result = _sp.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            ver_after = _get_version()
-            if ver_after != ver_before:
-                print(f"Updated: {ver_before} -> {ver_after}")
-            else:
-                print("Already up to date.")
-            # Update state.json with new version
+        rc = run_update(
+            check_only=args.check,
+            index_url=args.source or None,
+            source_checkout=_is_source_checkout(),
+        )
+        if rc == 0 and not args.check:
             state = _load_state()
-            state["version"] = ver_after
+            state["version"] = version_after_upgrade()
             state["updated_at"] = datetime.now(timezone.utc).isoformat()
             _save_state(state)
-        else:
-            print(f"Update failed:\n{result.stderr}", file=sys.stderr)
-            sys.exit(1)
+        sys.exit(rc)
     elif args.command == "uninstall":
         uninstall_global(args)
     elif args.command == "bundle":

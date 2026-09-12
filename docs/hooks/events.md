@@ -113,6 +113,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 5. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
 6. **Version guard** -- if `tool_name` is `Write` or `Edit` targeting a version-managed manifest (`pyproject.toml`, `package.json`, etc.): blocks version field modifications (version bumping must go through the release workflow)
 7. If `BROADCAST_ENABLED=true` and `BROADCAST_CRITICAL_ON_PRETOOL=true`: checks for critical+persistent [broadcasts](broadcast.md) and injects them via `additionalContext` JSON. Same channel-filter as UserPromptSubmit — channel-tagged broadcasts only reach sessions whose `AGENTIHOOKS_BASE_CHANNELS` includes that channel. This ensures the agent sees critical messages before every tool call, not just at the start of each turn.
+8. If `ENFORCEMENT_INJECTION_ENABLED=true`: increments the session tool-call counter and injects due global and project-local enforcements. Codex receives the same due banner on PostToolUse because its PreToolUse protocol has no context channel.
 
 **Exit codes used:**
 
@@ -141,6 +142,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 2. If `BASH_FILTER_ENABLED=true` and `tool_name == "Bash"`: detects verbose output categories (docker logs, kubectl, git log, test runners, build tools) and truncates to configured limits before it accumulates in the context window. Filtered output is re-emitted via `additionalContext` so Claude still sees the relevant portion
 3. If `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: records the file path and its current mtime in the session cache (Redis or memory) so future re-reads can be detected
 4. If `tool_error` is non-empty: records the error pattern to the tool memory file (`~/.agenticore_tool_memory.ndjson`) for future injection
+5. On targets without PreToolUse context injection, emits any enforcement due for the completed tool call
 
 ---
 

@@ -185,6 +185,12 @@ agentihooks channel list                     # active channels + message counts
 agentihooks brain status                     # source type, entries, refresh state
 agentihooks brain refresh                    # force re-read + republish
 
+# Enforcement drumbeats
+agentihooks enforcement set "run tests before commit" 5
+agentihooks enforcement set --local "project-only reminder" 10
+agentihooks enforcement list --local
+agentihooks enforcement clear --local
+
 # Live rule refresh (push rule updates into running sessions)
 agentihooks refresh-rules --dry-run          # preview payload + target session IDs
 agentihooks refresh-rules                    # one-shot push to all alive sessions
@@ -206,7 +212,16 @@ agentihooks ignore [path]                    # create .claudeignore
 agentihooks --list-profiles                  # available profiles
 agentihooks --query                          # active profile name
 agentihooks uninstall [--yes]                # remove everything
+
+# Self-update — upgrades the install this command runs from
+agentihooks update                           # compare against PyPI, upgrade if newer
+agentihooks update --check                   # report only, install nothing
+agentihooks update --source <index-url>      # upgrade from a custom package index
 ```
+
+`update` resolves how this copy was installed — venv/pip, `uv tool`, pipx, or an
+editable checkout — and upgrades that one. An editable install is left alone;
+update it with `git pull` in the checkout.
 
 ## What `init` Does
 
@@ -315,9 +330,9 @@ CLI's hook contract and the evidence behind it:
 | Event | Key behavior |
 |-------|-------------|
 | `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
-| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts |
-| `PostToolUse` | Bash output filtering, file dedup, tool error recording |
-| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
+| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts, enforcement drumbeat |
+| `PostToolUse` | Bash output filtering, file dedup, tool error recording, Codex enforcement fallback |
+| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto drumbeat, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -344,10 +359,10 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash output |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant file re-reads |
 | `BRAIN_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | Brain adapter master switch. An explicit value always wins. |
-| `BRAIN_URL` | `""` | Remote brain HTTP endpoint (kb-router). When set, hooks fetch `/feed`, `/signal`, post `/marker` instead of reading the filesystem. |
+| `BRAIN_URL` | discovered from `$AGENTIBRAIN_HOME/.env` | Brain HTTP endpoint. When it resolves, hooks fetch `/feed`, `/signal` and post `/marker` instead of reading the filesystem — and the reader and writer default on. |
 | `BRAIN_HTTP_TOKEN` | discovered from `$AGENTIBRAIN_HOME/.env` | Bearer for `BRAIN_URL`. Falls back to `KB_ROUTER_TOKEN`. |
 | `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN` — only those keys; the file's database and provider credentials are ignored. |
-| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Filesystem fallback when `BRAIN_URL` unset. |
+| `BRAIN_SOURCE_PATH` | `$AGENTIHOOKS_HOME/brain-feed` | Filesystem fallback, used only when no `BRAIN_URL` resolves. |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
 | `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
@@ -379,10 +394,13 @@ biggest contributors and leave headroom for the rest.
 
 Nothing to copy by hand. agentihooks reads the brain's own config file —
 `$AGENTIBRAIN_HOME/.env`, default `~/.agentibrain/.env`, the same file that
-feeds the kernel's docker compose — and adopts `BRAIN_URL` and `KB_ROUTER_TOKEN`
-from it. One bearer, one home, so a rotation cannot go stale in a copy. Only
-those connection keys are adopted; that file's database, object-store and
-provider credentials never enter a session's environment.
+feeds the kernel's docker compose — and adopts `BRAIN_URL`, `KB_ROUTER_TOKEN`
+and the brain settings `agentibrain install` writes there (`BRAIN_ENABLED`,
+`BRAIN_SOURCE_PATH`, `AMYGDALA_ENABLED`, `AMYGDALA_SIGNAL_PATH`,
+`BRAIN_WRITER_ENABLED`, `BRAIN_WRITER_MAX_MARKERS`, `BRAIN_WRITER_OUTBOX`) from
+it. One home each, so nothing goes stale in a copy. Only those keys are adopted;
+that file's database, object-store and provider credentials never enter a
+session's environment.
 
 On the machine hosting the brain, `agentibrain install` writes that file. On a
 machine that only talks to one:

@@ -4,10 +4,13 @@ Reference for the `copilot` install target. Every claim carries how it was
 established, so a reader can re-derive it against a newer CLI rather than
 trusting this page.
 
-**Verified against `@github/copilot` 1.0.79-6.** Copilot ships several releases
-per week and has removed a flag pair (`--headless --stdio`) with no deprecation
-window, so treat the surface as fast-moving: re-run `agentihooks doctor --target
-copilot` after a CLI upgrade.
+**Verified against `@github/copilot` 1.0.79-6, re-verified in part against
+1.0.83 (2026-09-11).** Copilot ships several releases per week, has removed a
+flag pair (`--headless --stdio`) with no deprecation window, and `autoUpdate`
+defaults to true — it upgraded itself 1.0.80 → 1.0.83 mid-probe while this page
+was being written. Every claim here is true of a version, not of "copilot":
+re-run `agentihooks doctor --target copilot` and `scripts/copilot_smoke.sh`
+after an upgrade rather than trusting the prose.
 
 ## §1 What a target is
 
@@ -208,14 +211,32 @@ generously (30s) rather than tightly.
 | Settings | `~/.copilot/settings.json` | plus `settings.local.json`; repo scope `.github/copilot/settings.json` |
 | Machine config | `~/.copilot/config.json` | **never written** — CLI-managed, its own header says "User settings belong in settings.json" |
 | Hooks | `~/.copilot/hooks/*.json` | repo scope `.github/hooks/*.json` |
-| Persona | `~/.copilot/copilot-instructions.md` | also reads `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
+| Persona | `~/.copilot/copilot-instructions.md` | see the instruction list below |
+| Project doc | `<repo>/CLAUDE.md` | **native, no config needed** — unlike codex, which needs `project_doc_fallback_filenames` |
+| Project rules | — | no loader; `hooks/context/project_bridge.py` injects `<repo>/.claude/rules/*.md` + the project `MEMORY.md` at SessionStart |
 | Instructions | `~/.copilot/instructions/**/*.instructions.md` | path-scoped; not used by agentihooks |
 | MCP | `~/.copilot/mcp-config.json` | key `mcpServers`; repo scope `.mcp.json` / `.github/mcp.json` |
-| Skills | `~/.copilot/skills/`, `~/.agents/skills/` | agentihooks uses the open standard dir, shared with codex |
-| Agents | `~/.copilot/agents/*.md` | MD + YAML frontmatter |
+| Skills | `~/.copilot/skills/`, `~/.agents/skills/` | agentihooks uses the open standard dir, shared with codex. Repo scope: `.github/skills/`, `.agents/skills/`, **`.claude/skills/`** — so a Claude-shaped repo's skills load with no link, and `needs_repo_skills_link()` is False for copilot |
+| Agents | `~/.copilot/agents/*.md` | MD + YAML frontmatter. The loader filters on `endsWith(".md")`, so our `<name>.md` loads; the CLI's own create path writes `<name>.agent.md`, which is the same filter |
 | Commands | — | no prompt-file mechanism (github/copilot-cli#1113) |
 | Status line | `settings.json` `statusLine` | `type: "command"`, session JSON on stdin |
 | Session log | `~/.copilot/session-state/<id>/events.jsonl` | see §6 |
+
+### §3.1 Instruction files the CLI loads by itself
+
+From the `customInstructions` table in the shipped `app.js` (1.0.83), scope note
+"in git root & cwd":
+
+| Scope | Paths |
+|---|---|
+| Project | `CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, `.github/instructions/**/*.instructions.md`, `.github/copilot-instructions.md` |
+| Personal | `$HOME/.copilot/copilot-instructions.md`, `$HOME/.copilot/instructions/**/*.instructions.md` |
+| Extra | `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` — comma-separated additional **directories**, searched for those same filenames |
+
+`--no-custom-instructions` disables all of it. `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`
+is not a codex-style `project_doc_fallback_filenames`: it adds directories, not
+filenames, so it cannot make `.claude/rules/*.md` load — which is why the bridge
+injects them instead.
 
 ## §4 What the adapter writes
 
@@ -361,6 +382,16 @@ session id for the transcript-driven events only.
 - **`allow`/`ask`/`modifiedArgs` on preToolUse.** Documented upstream, not
   observed in the v1.0.80 binary (§2.4). If a later release ships them,
   `supports_arg_mutation()` and `allowed_permission_decisions()` are the seams.
+- **`sessionStart` `additionalContext` is contested upstream.** GitHub's hooks
+  reference calls the event fire-and-forget and three open issues
+  (github/copilot-cli#2142, #2585, #2980) report the field being ignored. On
+  1.0.83 it works: a `copilot -p` canary quoted three SessionStart-injected
+  banners back verbatim, which is what the project bridge relies on. The smoke
+  test's rule canary is the regression guard; the documented fallbacks are
+  `userPromptTransformed` and the first `userPromptSubmitted`.
+- **`postToolUse` `additionalContext` is capped at 10 KB** upstream (documented),
+  with no notice when it cuts. `context_cap_bytes()` in
+  `hooks/targets/capabilities.py` truncates with a visible marker instead.
 - **`postResult` / `prePRDescription` / `userPromptTransformed`** hook events
   exist upstream; the adapter does not register the first two (folding them
   onto Stop would re-run session-end work) and only maps the third.
