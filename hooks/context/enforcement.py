@@ -6,9 +6,9 @@ Parallel to broadcast.py but semantically distinct:
 - Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Four-source resolution (priority: local > runtime > profile > bundle):
+Four-source resolution (priority: local > runtime > profile chain > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
-  2. <bundle_path>/profiles/<active_profile>/enforcements.json → source: "profile"
+  2. each active built-in, bundle, or linked profile            → source: "profile"
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
   4. <project>/.agentihooks/enforcements.json                  → source: "local"
 
@@ -153,6 +153,17 @@ def _get_active_profile() -> str | None:
     return global_record(_read_state()).get("profile") or None
 
 
+def _get_linked_profiles() -> dict[str, Path]:
+    linked = {}
+    for entry in _read_state().get("linked_profiles", []) or []:
+        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("path"):
+            continue
+        path = Path(entry["path"]).expanduser()
+        if path.is_dir():
+            linked[str(entry["name"])] = path
+    return linked
+
+
 def _load_json_enforcements(path: Path, source: str) -> list[dict]:
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -183,9 +194,23 @@ def _load_bundle_enforcements() -> list[dict]:
 def _load_profile_enforcements() -> list[dict]:
     bp = _get_bundle_path()
     profile = _get_active_profile()
-    if not bp or not profile:
+    if not profile:
         return []
-    return _load_json_enforcements(bp / "profiles" / profile / "enforcements.json", "profile")
+    built_in = Path(__file__).resolve().parents[2] / "profiles"
+    linked = _get_linked_profiles()
+    entries = []
+    for name in (part.strip() for part in profile.split(",")):
+        if not name:
+            continue
+        candidates = [built_in / name]
+        if bp is not None:
+            candidates.append(bp / "profiles" / name)
+        if name in linked:
+            candidates.append(linked[name])
+        profile_dir = next((path for path in candidates if path.is_dir()), None)
+        if profile_dir is not None:
+            entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
+    return entries
 
 
 def _local_store_path(cwd: str | Path | None, *, create_parent: bool = False) -> Path:
@@ -411,12 +436,13 @@ def get_pretool_enforcements(
     cwd: str | Path | None = None,
     *,
     claim_unseen: bool = True,
+    tool_call_count: int | None = None,
 ) -> str | None:
     """Increment the counter and return formatted enforcement banners if any are due."""
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
-        count = increment_and_get_count(session_id)
+        count = tool_call_count if tool_call_count is not None else increment_and_get_count(session_id)
         entries = load_all_enforcements(cwd)
         unseen = _claim_unseen_enforcements(session_id, entries, claim=claim_unseen)
         due = _due_enforcements(entries, count)

@@ -159,7 +159,7 @@ def test_http_brain_source_parses_feed_payload(monkeypatch):
     assert entries[1].content == "body2"
 
 
-def test_http_brain_source_returns_empty_on_failure(monkeypatch):
+def test_http_brain_source_preserves_state_on_failure(monkeypatch):
     _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.brain_adapter as ba
@@ -168,7 +168,8 @@ def test_http_brain_source_returns_empty_on_failure(monkeypatch):
     importlib.reload(ba)
 
     with patch("hooks._brain_http.urlopen", side_effect=OSError("boom")):
-        assert ba.HttpBrainSource().fetch() == []
+        with pytest.raises(ba.BrainSourceUnavailable):
+            ba.HttpBrainSource().fetch()
 
 
 def test_brain_adapter_selects_http_when_enabled(monkeypatch):
@@ -212,22 +213,16 @@ def test_amygdala_http_publishes_broadcast_on_active_signal(monkeypatch):
         "hash": "h1",
         "last_updated": "2026-04-22T00:00:00Z",
     }
-    called: dict[str, Any] = {}
-
-    def fake_create(**kwargs):
-        called.update(kwargs)
-        return "msg-1"
-
     with (
         patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
-        patch("hooks.context.amygdala_hook.create_broadcast", side_effect=fake_create),
-        patch("hooks.context.amygdala_hook.clear_broadcasts"),
+        patch("hooks.context.amygdala_hook.reconcile_channel_broadcasts") as reconcile,
     ):
         assert ah._check_via_http() is True
 
-    assert called["severity"] == "critical"
-    assert "Prod broke" in called["message"]
-    assert called["channel"] == "amygdala"
+    channel, desired = reconcile.call_args.args
+    assert channel == "amygdala"
+    assert desired[0]["severity"] == "critical"
+    assert "Prod broke" in desired[0]["message"]
 
 
 def test_amygdala_http_clears_when_signal_absent(monkeypatch):
@@ -237,42 +232,46 @@ def test_amygdala_http_clears_when_signal_absent(monkeypatch):
 
     importlib.reload(bh)
     importlib.reload(ah)
-    ah._last_hash = "stale"
-
     payload = {"active": False, "severity": None, "title": None, "content": None, "hash": None}
-    cleared: dict[str, Any] = {}
-
-    def fake_clear(channel):
-        cleared["channel"] = channel
 
     with (
         patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
-        patch("hooks.context.amygdala_hook.clear_broadcasts", side_effect=fake_clear),
-        patch("hooks.context.amygdala_hook.create_broadcast"),
+        patch("hooks.context.amygdala_hook.reconcile_channel_broadcasts") as reconcile,
     ):
         assert ah._check_via_http() is True
 
-    assert cleared.get("channel") == "amygdala"
-    assert ah._last_hash == ""
+    reconcile.assert_called_once_with("amygdala", [])
 
 
-def test_amygdala_http_dedups_on_same_hash(monkeypatch):
+def test_amygdala_http_reconciles_same_signal_across_processes(monkeypatch):
     _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
     import hooks._brain_http as bh
     import hooks.context.amygdala_hook as ah
 
     importlib.reload(bh)
     importlib.reload(ah)
-    ah._last_hash = "h1"
-
     payload = {"active": True, "severity": "warning", "title": "t", "content": "b", "hash": "h1"}
     with (
         patch("hooks._brain_http.urlopen", return_value=_fake_http_response(payload)),
-        patch("hooks.context.amygdala_hook.create_broadcast") as create,
-        patch("hooks.context.amygdala_hook.clear_broadcasts"),
+        patch("hooks.context.amygdala_hook.reconcile_channel_broadcasts") as reconcile,
     ):
         ah._check_via_http()
-    assert create.called is False
+    assert reconcile.call_count == 1
+
+
+def test_amygdala_http_failure_preserves_existing_alert(monkeypatch):
+    _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t")
+    import hooks._brain_http as bh
+    import hooks.context.amygdala_hook as ah
+
+    importlib.reload(bh)
+    importlib.reload(ah)
+    with (
+        patch("hooks._brain_http.urlopen", side_effect=OSError("boom")),
+        patch("hooks.context.amygdala_hook.reconcile_channel_broadcasts") as reconcile,
+    ):
+        assert ah._check_via_http() is True
+    reconcile.assert_not_called()
 
 
 # ── brain_writer_hook._publish_to_http ────────────────────────────────

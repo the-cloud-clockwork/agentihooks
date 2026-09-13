@@ -299,10 +299,12 @@ duplicating them into its own environment file.
 | `BRAIN_HTTP_TOKEN` | falls back to `KB_ROUTER_TOKEN` | Bearer token for brain-api. Without it every read and every marker POST answers 401. |
 | `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` is set, else `false` | POST `@lesson` / `@signal` / `@decision` / `@milestone` markers to `{BRAIN_URL}/marker` on session Stop. |
 | `BRAIN_WRITER_OUTBOX` | `~/.agentihooks/brain-outbox` | Local buffer for markers that could not be POSTed. Drains on the next session Stop after brain-api is reachable. |
-| `BRAIN_SOURCE_TYPE` | `file` | Brain source backend. Currently only `file` is shipped. |
-| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain` | Directory containing brain `.md` files (YAML frontmatter + markdown body). |
+| `BRAIN_SOURCE_TYPE` | `file` | Legacy fallback backend used only when `BRAIN_URL` is unset. |
+| `BRAIN_SOURCE_PATH` | `~/.agentihooks/brain-feed` | Directory containing fallback brain `.md` files (YAML frontmatter + markdown body). |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to (producer side). Sessions only receive brain content if this channel name is in their `AGENTIHOOKS_BASE_CHANNELS` env. The default profile ships `"brain,amygdala"`, so the default `brain` value works out of the box; if you rename this, update subscriptions to match. |
-| `BRAIN_REFRESH_INTERVAL` | `30` | Re-inject brain content every N turns (counter-gated). |
+| `BRAIN_HOT_ARCS_TOP_N` | `10` | Maximum hot arcs included in the injected hot-arcs table. |
+| `BRAIN_PAYLOAD_MAX_BYTES` | `1536` | Maximum characters injected from each brain feed entry. |
+| `BRAIN_REFRESH_TOOL_CALLS` | `20` | Reconcile brain content every N tool calls (counter-gated). |
 
 ---
 

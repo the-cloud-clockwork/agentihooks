@@ -194,6 +194,18 @@ class TestPretoolEntry:
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", False):
             assert get_pretool_enforcements("sess-1") is None
 
+    def test_accepts_shared_tool_call_count_without_incrementing_twice(self):
+        from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
+
+        add_enforcement("shared counter", 10)
+        with (
+            patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True),
+            patch("hooks.context.enforcement.increment_and_get_count") as increment,
+        ):
+            context = get_pretool_enforcements("sess-1", tool_call_count=10)
+        increment.assert_not_called()
+        assert "shared counter" in context
+
 
 class TestSessionStartEntry:
     def test_injects_every_enforcement_without_advancing_counter(self):
@@ -392,6 +404,36 @@ class TestThreeSourceMerge:
             assert len(bundle_profile) == 2
             assert len(runtime) == 0
             assert len(after) == before - 1
+
+    def test_linked_profile_enforcement_loads_from_active_chain(self, bundle_dir, tmp_path):
+        from hooks.context.enforcement import load_all_enforcements
+
+        linked = tmp_path / "brain"
+        linked.mkdir()
+        (linked / "enforcements.json").write_text(
+            json.dumps(
+                {
+                    "enforcements": [
+                        {
+                            "id": "brain-usage",
+                            "message": "use brain tools",
+                            "cadence": 10,
+                            "tag": "brain-usage",
+                        }
+                    ]
+                }
+            )
+        )
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile,brain"),
+            patch("hooks.context.enforcement._get_linked_profiles", return_value={"brain": linked}),
+        ):
+            entries = load_all_enforcements()
+
+        brain = next(entry for entry in entries if entry["id"] == "brain-usage")
+        assert brain["source"] == "profile"
+        assert brain["cadence"] == 10
 
 
 class TestLocalEnforcement:
