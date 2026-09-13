@@ -176,6 +176,30 @@ def test_status_warns_when_a_source_resolved_but_the_adapter_is_off(brain_env, m
     assert any("BRAIN_ENABLED is false" in w for w in status["warnings"])
 
 
+def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, monkeypatch):
+    _, load = brain_env
+    load()
+    import hooks.context.brain_adapter as adapter
+
+    monkeypatch.setattr(
+        adapter,
+        "_get_source",
+        lambda: type("Source", (), {"fetch": lambda self: [adapter.BrainEntry("id", "title", "body")]})(),
+    )
+    monkeypatch.setattr(
+        "hooks.context.broadcast._load_broadcasts",
+        lambda cleanup=False: [
+            {"channel": "brain", "source": "brain-adapter"},
+            {"channel": "brain", "source": "mcp-channel"},
+        ],
+    )
+
+    status = adapter.get_status()
+
+    assert status["active_broadcasts"] == 1
+    assert not any("feed has" in warning for warning in status["warnings"])
+
+
 def test_status_warns_when_a_url_carries_no_token(brain_env, monkeypatch):
     _, load = brain_env
     monkeypatch.setenv("BRAIN_URL", "http://127.0.0.1:8103")

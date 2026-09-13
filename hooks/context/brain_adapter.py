@@ -592,7 +592,9 @@ def get_status() -> dict:
         from hooks.context.broadcast import _load_broadcasts
 
         active_broadcasts = sum(
-            1 for message in _load_broadcasts(cleanup=True) if message.get("channel") == BRAIN_CHANNEL
+            1
+            for message in _load_broadcasts(cleanup=True)
+            if message.get("channel") == BRAIN_CHANNEL and message.get("source") == "brain-adapter"
         )
     except Exception:
         pass
