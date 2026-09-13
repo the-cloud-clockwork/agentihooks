@@ -330,9 +330,9 @@ CLI's hook contract and the evidence behind it:
 | Event | Key behavior |
 |-------|-------------|
 | `SessionStart` | Register session, inject all enforcements, brain injection, deliver broadcasts, MCP warnings |
-| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts, enforcement drumbeat |
+| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, brain refresh cadence, critical broadcasts, enforcement drumbeat |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording, Codex enforcement fallback |
-| `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto drumbeat, channel-filtered broadcast delivery |
+| `UserPromptSubmit` | Secrets scan, CI-manifesto drumbeat, amygdala check, channel-filtered broadcast delivery |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |
@@ -364,7 +364,9 @@ All configuration in `.env` files in `~/.agentihooks/`. Key variables:
 | `AGENTIBRAIN_HOME` | `~/.agentibrain` | The brain's own config directory. Its `.env` is read as the default source for `BRAIN_URL` and `KB_ROUTER_TOKEN` — only those keys; the file's database and provider credentials are ignored. |
 | `BRAIN_SOURCE_PATH` | `$AGENTIHOOKS_HOME/brain-feed` | Filesystem fallback, used only when no `BRAIN_URL` resolves. |
 | `BRAIN_CHANNEL` | `brain` | Broadcast channel the brain adapter publishes to. Receivers must include this name in `AGENTIHOOKS_BASE_CHANNELS`. |
-| `BRAIN_REFRESH_INTERVAL` | `30` | Re-read brain source every N turns |
+| `BRAIN_HOT_ARCS_TOP_N` | `10` | Maximum hot arcs included in the injected hot-arcs table. |
+| `BRAIN_PAYLOAD_MAX_BYTES` | `1536` | Maximum characters injected from each brain feed entry. |
+| `BRAIN_REFRESH_TOOL_CALLS` | `20` | Reconcile the brain source every N tool calls |
 | `AMYGDALA_ENABLED` | `false` | Active-signal injection (uses `BRAIN_URL` `/signal`). |
 | `BRAIN_WRITER_ENABLED` | `true` when `BRAIN_URL` resolves, else `false` | POST `/marker` on Stop / SubagentStop. |
 

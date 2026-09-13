@@ -26,7 +26,7 @@ _BRAIN_KEYS = (
     "BRAIN_SOURCE_PATH",
     "BRAIN_SOURCE_TYPE",
     "BRAIN_CHANNEL",
-    "BRAIN_REFRESH_INTERVAL",
+    "BRAIN_REFRESH_TOOL_CALLS",
     "BRAIN_HTTP_TIMEOUT",
     "BRAIN_HOT_ARCS_TOP_N",
     "BRAIN_PAYLOAD_MAX_BYTES",
@@ -128,11 +128,11 @@ def test_brain_owned_client_policy_is_loaded_from_agentibrain(brain_env, monkeyp
     brain_home = tmp_path / ".agentibrain"
     brain_home.mkdir()
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(brain_home))
-    (hooks_home / ".env").write_text("BRAIN_CHANNEL=wrong-owner\nBRAIN_REFRESH_INTERVAL=99\n")
+    (hooks_home / ".env").write_text("BRAIN_CHANNEL=wrong-owner\nBRAIN_REFRESH_TOOL_CALLS=99\n")
     (brain_home / ".env").write_text(
         "BRAIN_SOURCE_TYPE=file\n"
         "BRAIN_CHANNEL=memory\n"
-        "BRAIN_REFRESH_INTERVAL=17\n"
+        "BRAIN_REFRESH_TOOL_CALLS=17\n"
         "BRAIN_HTTP_TIMEOUT=4\n"
         "BRAIN_HOT_ARCS_TOP_N=7\n"
         "BRAIN_PAYLOAD_MAX_BYTES=2048\n"
@@ -142,7 +142,7 @@ def test_brain_owned_client_policy_is_loaded_from_agentibrain(brain_env, monkeyp
 
     assert config.BRAIN_SOURCE_TYPE == "file"
     assert config.BRAIN_CHANNEL == "memory"
-    assert config.BRAIN_REFRESH_INTERVAL == 17
+    assert config.BRAIN_REFRESH_TOOL_CALLS == 17
     assert config.BRAIN_HTTP_TIMEOUT == 4
     assert config.BRAIN_HOT_ARCS_TOP_N == 7
     assert config.BRAIN_PAYLOAD_MAX_BYTES == 2048
@@ -158,6 +158,7 @@ def _adapter_with_stub_source(monkeypatch):
 
     importlib.reload(adapter)
     monkeypatch.setattr(adapter, "_get_source", lambda: _StubSource())
+    monkeypatch.setattr("hooks.context.broadcast._load_broadcasts", lambda cleanup=False: [])
     return adapter
 
 

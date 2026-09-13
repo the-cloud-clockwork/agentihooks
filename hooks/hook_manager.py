@@ -665,17 +665,6 @@ def on_user_prompt_submit(payload: dict) -> None:
     else:
         log("Secrets scanning skipped (mode=off)")
 
-    # --- Brain adapter: counter-gated refresh of brain content ---
-    try:
-        from hooks.config import BRAIN_ENABLED
-
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import maybe_refresh as brain_maybe_refresh
-
-            brain_maybe_refresh(session_id)
-    except Exception as e:
-        log("brain_adapter refresh failed", {"error": str(e)})
-
     # --- CI Manifesto: counter-gated re-injection of doctrine ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
@@ -1203,9 +1192,27 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Combined PreToolUse context injection: broadcast + enforcement ---
     # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
     # two separate JSON lines makes Claude Code drop the second.
-    from hooks.config import BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+    from hooks.config import BRAIN_ENABLED, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
 
     _pretool_blocks: list[str] = []
+    _tool_call_count = 0
+    if BRAIN_ENABLED or ENFORCEMENT_INJECTION_ENABLED:
+        try:
+            from hooks.context.enforcement import increment_and_get_count
+
+            _tool_call_count = increment_and_get_count(session_id)
+        except Exception as e:
+            log("tool-call counter failed", {"error": str(e)})
+
+    if BRAIN_ENABLED and _tool_call_count:
+        try:
+            from hooks.context.brain_adapter import maybe_refresh_on_tool_call
+
+            _brain_ctx = maybe_refresh_on_tool_call(session_id, _tool_call_count)
+            if _brain_ctx:
+                _pretool_blocks.append(_brain_ctx)
+        except Exception as e:
+            log("brain_adapter tool-call refresh failed", {"error": str(e)})
 
     # get_pretool_context/broadcasts own the critical-on-pretool opt-in
     # internally; this call site only checks whether broadcasts are enabled.
@@ -1223,7 +1230,11 @@ def on_pre_tool_use(payload: dict) -> None:
         try:
             from hooks.context.enforcement import get_pretool_enforcements
 
-            _enf_ctx = get_pretool_enforcements(session_id, payload.get("cwd", ""))
+            _enf_ctx = get_pretool_enforcements(
+                session_id,
+                payload.get("cwd", ""),
+                tool_call_count=_tool_call_count,
+            )
             if _enf_ctx:
                 _pretool_blocks.append(_enf_ctx)
         except Exception as e:

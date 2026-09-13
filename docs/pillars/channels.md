@@ -208,12 +208,12 @@ severity: info
 
 ### Refresh mechanism
 
-Brain content changes slowly — you don't need to re-read the filesystem every turn. The adapter uses a **turn counter** (a counter-gated refresh):
+Brain content changes slowly. The adapter uses the persistent tool-call counter shared with enforcement cadence:
 
-1. Counter increments on every `UserPromptSubmit`
-2. Every `BRAIN_REFRESH_INTERVAL` turns (default: 30), the adapter re-reads the source
-3. If the content hash changed → clears old brain messages, publishes new ones
-4. If unchanged → no-op (existing messages keep being delivered by the broadcast system)
+1. Counter increments on every `PreToolUse`
+2. Every `BRAIN_REFRESH_TOOL_CALLS` tool calls (default: 20), the adapter re-reads the source
+3. The complete desired brain channel is reconciled atomically; live message IDs are preserved and new, missing, or expired entries are restored and injected into that tool call
+4. An unavailable source preserves the last-known-good channel; an authoritative empty feed clears it
 
 On `SessionStart`, the adapter does an immediate one-shot publish so fresh sessions get brain content on their first turn.
 
@@ -226,9 +226,11 @@ BRAIN_HTTP_TOKEN=                        # falls back to KB_ROUTER_TOKEN
 BRAIN_ENABLED=true                       # master switch (default: true with BRAIN_URL, else false)
 BRAIN_WRITER_ENABLED=true                # marker write-back (same default rule)
 BRAIN_SOURCE_TYPE=file                   # filesystem fallback, ignored while BRAIN_URL is set
-BRAIN_SOURCE_PATH=~/.agentihooks/brain   # directory to read from
+BRAIN_SOURCE_PATH=~/.agentihooks/brain-feed # fallback directory to read from
 BRAIN_CHANNEL=brain                     # which broadcast channel to publish to
-BRAIN_REFRESH_INTERVAL=30               # re-read source every N turns
+BRAIN_HOT_ARCS_TOP_N=10                 # hot arcs included in the injected table
+BRAIN_PAYLOAD_MAX_BYTES=1536            # character cap per feed entry
+BRAIN_REFRESH_TOOL_CALLS=20             # re-read source every N tool calls
 ```
 
 > **Producer ↔ subscriber pairing.** `BRAIN_CHANNEL` controls where the adapter *publishes* (the producer side). For sessions to *receive* what it publishes, that same channel name must appear in their `AGENTIHOOKS_BASE_CHANNELS` env var (the subscriber side, [Subscribing](#subscribing) above). The default `brain` works out of the box because the default profile ships `"brain,amygdala"` as the subscription floor — if you rename `BRAIN_CHANNEL`, also update the subscription list everywhere it matters.
@@ -238,7 +240,7 @@ BRAIN_REFRESH_INTERVAL=30               # re-read source every N turns
 | Tool | Purpose |
 |------|---------|
 | `brain_refresh()` | Force re-read source and republish now |
-| `brain_status()` | Return source type, path, entry count, content hash, refresh interval |
+| `brain_status()` | Return source type, entry and broadcast counts, content hash, refresh cadence, and warnings |
 
 ---
 
@@ -247,20 +249,18 @@ BRAIN_REFRESH_INTERVAL=30               # re-read source every N turns
 The channel system and brain adapter are the plumbing layer for the Anton Brain MVP. Here's how the full system flows:
 
 ```
-Obsidian Vault (TurboVault)
-    ↓ NFS mount / symlink
-~/.agentihooks/brain/
-    ↓ FileBrainSource reads *.md
+brain-api /feed
+    ↓ HttpBrainSource (preferred)
 brain_adapter.py
-    ↓ publishes to channel "brain"
+    ↓ atomically reconciles channel "brain"
 broadcast.json
-    ↓ UserPromptSubmit hook filters by subscription
-Sessions with "channels": ["brain"]
+    ↓ SessionStart/UserPromptSubmit delivery filters by subscription
+Sessions subscribed through AGENTIHOOKS_BASE_CHANNELS
     ↓ inject_context()
 Agent sees hot arcs, active context, operational memory
 ```
 
-The brain-keeper daemon (separate agent, runs on cron) maintains the brain directory — computing heat scores, promoting/demoting arcs, generating `_hot-arcs.md`. The brain adapter doesn't care who writes the files; it just reads and publishes.
+The brain-keeper daemon maintains the vault and feed. `FileBrainSource` remains an offline fallback when `BRAIN_URL` is unset.
 
 The amygdala (emergency broadcast) publishes directly to a channel like `"amygdala"` at `critical` severity — every subscribed session gets the alarm on every tool call. Non-subscribed sessions are insulated.
 
@@ -291,13 +291,13 @@ The broadcast system already solves delivery: per-turn injection, severity tiers
 
 Messages are written once, read many times. A session's subscriptions can change without touching the message store. No session-specific message copies to manage. The tradeoff is that every session scans every message — but with a 50-message cap and JSON parsing, this is sub-millisecond.
 
-**Why a turn counter for brain refresh instead of file watchers?**
+**Why a tool-call counter for brain refresh instead of file watchers?**
 
-Hooks run in a subprocess that exits after each event. There's no long-lived process to run `inotifywait`. The turn counter is the established pattern (also used by the CI-manifesto and enforcement drumbeats) — it's simple, stateless across process boundaries, and good enough for content that changes on the order of minutes, not milliseconds.
+Hooks run in a subprocess that exits after each event. Autonomous runs may execute many tools without another user prompt, so the persistent tool-call counter keeps refreshes moving on the active path.
 
 **Why is the brain adapter disabled by default?**
 
-Not every agentihooks user has a brain. The adapter adds filesystem reads on the hot path (every N turns). Opt-in via `BRAIN_ENABLED=true` keeps the default install lean.
+Not every AgentiHooks user has a brain. The adapter defaults on when `BRAIN_URL` resolves or a legacy feed directory contains content; an explicit `BRAIN_ENABLED` value always wins.
 
 ---
 

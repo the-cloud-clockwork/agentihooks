@@ -98,7 +98,7 @@ _BRAIN_KEYS_FROM_KERNEL = (
     "BRAIN_HOT_ARCS_TOP_N",
     "BRAIN_HTTP_TIMEOUT",
     "BRAIN_PAYLOAD_MAX_BYTES",
-    "BRAIN_REFRESH_INTERVAL",
+    "BRAIN_REFRESH_TOOL_CALLS",
     "BRAIN_SOURCE_PATH",
     "BRAIN_SOURCE_TYPE",
     "AMYGDALA_ENABLED",
@@ -274,7 +274,7 @@ def reload_brain_env(force: bool = False) -> dict:
     stays authoritative. Returns the re-resolved brain values.
     """
     global BRAIN_ENABLED, BRAIN_SOURCE_TYPE, BRAIN_SOURCE_PATH, BRAIN_CHANNEL
-    global BRAIN_REFRESH_INTERVAL, BRAIN_URL, BRAIN_HTTP_TOKEN, BRAIN_HTTP_TIMEOUT
+    global BRAIN_REFRESH_TOOL_CALLS, BRAIN_URL, BRAIN_HTTP_TOKEN, BRAIN_HTTP_TIMEOUT
     global BRAIN_WRITER_ENABLED
     global AMYGDALA_ENABLED, AMYGDALA_SIGNAL_PATH, _ENV_FINGERPRINT
 
@@ -300,7 +300,7 @@ def reload_brain_env(force: bool = False) -> dict:
     BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
     BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(_feed_dir))
     BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
-    BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
+    BRAIN_REFRESH_TOOL_CALLS = int(os.getenv("BRAIN_REFRESH_TOOL_CALLS", "20"))
     BRAIN_URL = os.getenv("BRAIN_URL", "").rstrip("/")
     BRAIN_HTTP_TOKEN = os.getenv("BRAIN_HTTP_TOKEN", "") or os.getenv("KB_ROUTER_TOKEN", "")
     BRAIN_HTTP_TIMEOUT = float(os.getenv("BRAIN_HTTP_TIMEOUT", "3"))
@@ -453,7 +453,7 @@ BRAIN_ENABLED = _env_bool("BRAIN_ENABLED", _brain_default)
 BRAIN_SOURCE_TYPE = os.getenv("BRAIN_SOURCE_TYPE", "file")
 BRAIN_SOURCE_PATH = os.getenv("BRAIN_SOURCE_PATH", str(Path(AGENTIHOOKS_HOME) / "brain-feed"))
 BRAIN_CHANNEL = os.getenv("BRAIN_CHANNEL", "brain")
-BRAIN_REFRESH_INTERVAL = int(os.getenv("BRAIN_REFRESH_INTERVAL", "30"))
+BRAIN_REFRESH_TOOL_CALLS = int(os.getenv("BRAIN_REFRESH_TOOL_CALLS", "20"))
 
 
 def _parse_channel_list(raw: str) -> tuple[str, ...]:
@@ -583,7 +583,7 @@ BROADCAST_DEDUP_BY_HASH = _env_bool("BROADCAST_DEDUP_BY_HASH", "true")
 # brain-keeper Apr 13 audit. 120s lets a 2h tick land + ad-hoc markers
 # without re-injecting the same persistent banner every prompt.
 BROADCAST_MIN_INTERVAL_SEC: int = int(os.getenv("BROADCAST_MIN_INTERVAL_SEC", "120"))
-# Per-prompt cap. Raised 2→6→8 so brain feed (5 entries) + amygdala (1-2)
+# Per-prompt cap. Raised 2→6→8 so brain feed entries + amygdala (1-2)
 # + profile transitions all land in the same prompt without contention.
 BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 # Per-injection byte caps. Claude Code's additionalContext has a 10,000-char
@@ -609,7 +609,7 @@ ENFORCEMENT_COUNTER_FILE: str = os.getenv(
 )
 
 # Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
-BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "5"))
+BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "10"))
 BRAIN_PAYLOAD_MAX_BYTES: int = int(os.getenv("BRAIN_PAYLOAD_MAX_BYTES", "1536"))
 
 # =============================================================================

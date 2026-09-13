@@ -82,7 +82,7 @@ What covers live re-emphasis now, at a fraction of the token cost:
 
 - **Brain drumbeat** — `brain_adapter` re-publishes hot arcs, active signals, and
   operator intent into the recent window on a counter-gated cadence
-  (`BRAIN_REFRESH_INTERVAL`, default 30 turns), deduped by content hash so an
+  (`BRAIN_REFRESH_TOOL_CALLS`, default 20 tool calls), reconciled by content hash so an
   unchanged brain re-publishes nothing.
 - **Enforcement drumbeat** — operator-curated one-liners re-injected every N
   **tool calls** (see [Guardrails](guardrails.md)). Compact by design: the whole
@@ -320,7 +320,7 @@ That's Context Intelligence.
 CONTEXT_REFRESH_COMPRESSION=standard      # off | light | standard | aggressive
 CONTEXT_COMPRESSION_SCOPE=refresh         # refresh | all
 
-BRAIN_REFRESH_INTERVAL=30                 # brain drumbeat cadence (turns)
+BRAIN_REFRESH_TOOL_CALLS=20               # brain refresh cadence (tool calls)
 
 CONTEXT_AUDIT_ENABLED=true
 CONTEXT_AUDIT_THRESHOLD_PCT=70
