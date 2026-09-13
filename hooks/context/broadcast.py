@@ -590,6 +590,30 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
     ]
 
 
+def get_unseen_broadcasts(session_id: str, *, claim: bool = False) -> list[dict]:
+    def select(msgs: list[dict]) -> list[dict]:
+        channels = _get_session_channels(session_id)
+        return [
+            msg
+            for msg in msgs
+            if not _is_expired(msg)
+            and _message_matches_channel(msg, channels)
+            and session_id not in msg.get("acknowledged_by", [])
+            and session_id not in msg.get("delivered_to", [])
+        ]
+
+    if not claim:
+        return select(_load_broadcasts(cleanup=True))
+    with _file_lock(_broadcast_path()):
+        msgs = _load_broadcasts()
+        unseen = select(msgs)
+        for msg in unseen:
+            msg.setdefault("delivered_to", []).append(session_id)
+        if unseen:
+            _save_broadcasts(msgs)
+        return unseen
+
+
 def get_pretool_broadcasts(session_id: str) -> list[dict]:
     """Return persistent broadcasts at or above the configured severity threshold.
 
@@ -603,30 +627,37 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
     min_rank = _SEVERITY_RANK.get(BROADCAST_PRETOOL_MIN_SEVERITY, 2)
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
-    out = []
+    out = {msg["id"]: msg for msg in get_unseen_broadcasts(session_id)}
     for m in msgs:
-        if not m.get("persistent") or _is_expired(m) or session_id in m.get("acknowledged_by", []):
-            continue
         if (
-            BROADCAST_CRITICAL_ON_PRETOOL
-            and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank
-            and _message_matches_channel(m, channels)
+            not m.get("persistent")
+            or _is_expired(m)
+            or session_id in m.get("acknowledged_by", [])
+            or not _message_matches_channel(m, channels)
         ):
-            out.append(m)
-    return out
+            continue
+        if BROADCAST_CRITICAL_ON_PRETOOL and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank:
+            out[m["id"]] = m
+    return list(out.values())
+
+
+def claim_delivery(session_id: str, message_id: str) -> bool:
+    with _file_lock(_broadcast_path()):
+        msgs = _load_broadcasts()
+        for msg in msgs:
+            if msg.get("id") != message_id:
+                continue
+            delivered = msg.setdefault("delivered_to", [])
+            if session_id in delivered:
+                return False
+            delivered.append(session_id)
+            _save_broadcasts(msgs)
+            return True
+    return False
 
 
 def mark_delivered(session_id: str, message_id: str) -> None:
-    with _file_lock(_broadcast_path()):
-        msgs = _read_broadcasts()
-        for m in msgs:
-            if m.get("id") == message_id:
-                delivered = m.get("delivered_to", [])
-                if session_id not in delivered:
-                    delivered.append(session_id)
-                    m["delivered_to"] = delivered
-                break
-        _save_broadcasts(msgs)
+    claim_delivery(session_id, message_id)
 
 
 def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
@@ -916,30 +947,41 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 emit_span("brain.delivery", span_attrs)
                 continue
 
+            first_delivery = claim_delivery(session_id, msg["id"])
+            if not msg.get("persistent") and not first_delivery:
+                continue
+
             banner = format_broadcast_banner(msg)
             inject_banner("BROADCAST", banner)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
-            if not msg.get("persistent"):
-                mark_delivered(session_id, msg["id"])
     except Exception:
         pass
 
 
-def get_pretool_context(session_id: str) -> str | None:
+def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
     # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
     # layer only checks whether broadcasts are enabled at all.
     if not BROADCAST_ENABLED:
         return None
 
     try:
-        msgs = get_pretool_broadcasts(session_id)
+        unseen = get_unseen_broadcasts(session_id, claim=claim_unseen)
+        msgs = {msg["id"]: msg for msg in unseen}
+        for msg in get_pretool_broadcasts(session_id):
+            if session_id in msg.get("delivered_to", []) or claim_unseen:
+                msgs[msg["id"]] = msg
+        msgs = list(msgs.values())
         if not msgs:
             return None
         return format_critical_context(msgs)
     except Exception:
         return None
+
+
+def get_posttool_context(session_id: str) -> str | None:
+    return get_pretool_context(session_id, claim_unseen=True)
 
 
 def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None:
@@ -952,6 +994,8 @@ def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None
     banners = []
     for message in pending:
         if _body_is_empty(message) or len(banners) >= BROADCAST_MAX_PER_PROMPT:
+            continue
+        if not claim_delivery(session_id, message["id"]):
             continue
         banners.append(format_broadcast_banner(message))
         _record_delivery(session_id, message, now_ts)

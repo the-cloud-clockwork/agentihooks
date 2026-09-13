@@ -384,7 +384,7 @@ def on_session_start(payload: dict) -> None:
         from hooks.common import inject_context as _inject_enforcements
         from hooks.context.enforcement import get_session_start_enforcements
 
-        enforcement_context = get_session_start_enforcements(payload.get("cwd", ""))
+        enforcement_context = get_session_start_enforcements(session_id, payload.get("cwd", ""))
         if enforcement_context:
             _inject_enforcements(enforcement_context, also_log=False, skip_compression=True)
     except Exception as e:
@@ -583,6 +583,13 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    try:
+        from hooks.context.enforcement import reset_session_delivery
+
+        reset_session_delivery(session_id)
+    except Exception:
+        pass
+
     # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -665,6 +672,15 @@ def on_user_prompt_submit(payload: dict) -> None:
     else:
         log("Secrets scanning skipped (mode=off)")
 
+    try:
+        from hooks.common import inject_context as _inject_enforcements
+        from hooks.context.enforcement import get_user_prompt_enforcements
+
+        enforcement_context = get_user_prompt_enforcements(session_id, payload.get("cwd", ""))
+        if enforcement_context:
+            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("enforcement user prompt failed", {"error": str(e)})
     # --- CI Manifesto: counter-gated re-injection of doctrine ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
@@ -1193,8 +1209,10 @@ def on_pre_tool_use(payload: dict) -> None:
     # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
     # two separate JSON lines makes Claude Code drop the second.
     from hooks.config import BRAIN_ENABLED, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+    from hooks.targets.capabilities import can_inject_context
 
     _pretool_blocks: list[str] = []
+    _can_inject_pretool = can_inject_context("PreToolUse")
     _tool_call_count = 0
     if BRAIN_ENABLED or ENFORCEMENT_INJECTION_ENABLED:
         try:
@@ -1208,7 +1226,11 @@ def on_pre_tool_use(payload: dict) -> None:
         try:
             from hooks.context.brain_adapter import maybe_refresh_on_tool_call
 
-            _brain_ctx = maybe_refresh_on_tool_call(session_id, _tool_call_count)
+            _brain_ctx = maybe_refresh_on_tool_call(
+                session_id,
+                _tool_call_count,
+                claim_delivery=_can_inject_pretool,
+            )
             if _brain_ctx:
                 _pretool_blocks.append(_brain_ctx)
         except Exception as e:
@@ -1220,7 +1242,7 @@ def on_pre_tool_use(payload: dict) -> None:
         try:
             from hooks.context.broadcast import get_pretool_context
 
-            _broadcast_ctx = get_pretool_context(session_id)
+            _broadcast_ctx = get_pretool_context(session_id, claim_unseen=_can_inject_pretool)
             if _broadcast_ctx:
                 _pretool_blocks.append(_broadcast_ctx)
         except Exception as e:
@@ -1233,6 +1255,7 @@ def on_pre_tool_use(payload: dict) -> None:
             _enf_ctx = get_pretool_enforcements(
                 session_id,
                 payload.get("cwd", ""),
+                claim_unseen=_can_inject_pretool,
                 tool_call_count=_tool_call_count,
             )
             if _enf_ctx:
@@ -1257,9 +1280,7 @@ def on_pre_tool_use(payload: dict) -> None:
             additional_context="\n\n".join(_pretool_blocks) or None,
         )
     elif _pretool_blocks:
-        from hooks.targets.capabilities import can_inject_context
-
-        if can_inject_context("PreToolUse"):
+        if _can_inject_pretool:
             import json as _json
 
             print(
@@ -1359,13 +1380,22 @@ def on_post_tool_use(payload: dict) -> None:
         from hooks.config import ENFORCEMENT_INJECTION_ENABLED
         from hooks.targets.capabilities import can_inject_context
 
-        if ENFORCEMENT_INJECTION_ENABLED and not can_inject_context("PreToolUse"):
+        if not can_inject_context("PreToolUse"):
             from hooks.common import inject_context
-            from hooks.context.enforcement import get_posttool_enforcements
+            from hooks.config import BROADCAST_ENABLED
 
-            enforcement_context = get_posttool_enforcements(_trace_session_id, payload.get("cwd", ""))
-            if enforcement_context:
-                inject_context(enforcement_context, also_log=False, skip_compression=True)
+            if BROADCAST_ENABLED:
+                from hooks.context.broadcast import get_posttool_context
+
+                broadcast_context = get_posttool_context(_trace_session_id)
+                if broadcast_context:
+                    inject_context(broadcast_context, also_log=False, skip_compression=True)
+            if ENFORCEMENT_INJECTION_ENABLED:
+                from hooks.context.enforcement import get_posttool_enforcements
+
+                enforcement_context = get_posttool_enforcements(_trace_session_id, payload.get("cwd", ""))
+                if enforcement_context:
+                    inject_context(enforcement_context, also_log=False, skip_compression=True)
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 

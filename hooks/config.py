@@ -607,6 +607,10 @@ ENFORCEMENT_COUNTER_FILE: str = os.getenv(
     "ENFORCEMENT_COUNTER_FILE",
     str(AGENTIHOOKS_HOME / "enforcement_counters.json"),
 )
+ENFORCEMENT_DELIVERY_STATE_FILE: str = os.getenv(
+    "ENFORCEMENT_DELIVERY_STATE_FILE",
+    str(AGENTIHOOKS_HOME / "enforcement_delivery_state.json"),
+)
 
 # Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
 BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "10"))

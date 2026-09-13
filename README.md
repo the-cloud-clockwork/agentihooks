@@ -330,9 +330,9 @@ CLI's hook contract and the evidence behind it:
 | Event | Key behavior |
 |-------|-------------|
 | `SessionStart` | Register session, inject all enforcements, brain injection, deliver broadcasts, MCP warnings |
-| `PreToolUse` | Secrets scan, branch/version guard, retry breaker, brain refresh cadence, critical broadcasts, enforcement drumbeat |
-| `PostToolUse` | Bash output filtering, file dedup, tool error recording, Codex enforcement fallback |
-| `UserPromptSubmit` | Secrets scan, CI-manifesto drumbeat, amygdala check, channel-filtered broadcast delivery |
+| `PreToolUse` | Secrets and branch guards, brain cadence, immediate first delivery, critical broadcasts, enforcement cadence |
+| `PostToolUse` | Bash filtering, file dedup, errors, Codex first-delivery/cadence fallback |
+| `UserPromptSubmit` | Secrets scan, immediate new enforcements, CI doctrine, amygdala, broadcasts |
 | `Stop` | Transcript scan, auto-memory, cost metrics |
 | `SessionEnd` | Deregister session, clear caches, log summary |
 | `SubagentStop` | Subagent transcript logging |

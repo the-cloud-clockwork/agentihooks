@@ -219,6 +219,24 @@ class TestBrainAdapter:
         refresh.assert_called_once_with()
         context.assert_called_once_with("session", ["new-brain"])
 
+    def test_tool_call_refresh_does_not_claim_when_event_cannot_inject(self):
+        from hooks.context import brain_adapter
+
+        with (
+            patch(
+                "hooks.context.brain_adapter._refresh",
+                return_value={"created_ids": ["new-brain"]},
+            ) as refresh,
+            patch("hooks.context.broadcast.get_broadcast_context") as context,
+            patch.dict(
+                "hooks.config.__dict__",
+                {"BRAIN_ENABLED": True, "BRAIN_REFRESH_TOOL_CALLS": 20},
+            ),
+        ):
+            assert brain_adapter.maybe_refresh_on_tool_call("session", 20, claim_delivery=False) is None
+        refresh.assert_called_once_with()
+        context.assert_not_called()
+
     def test_source_failure_preserves_existing_broadcasts(self):
         from hooks.context import brain_adapter
 

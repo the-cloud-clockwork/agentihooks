@@ -1926,6 +1926,7 @@ def _clean_state_dir() -> None:
         "active-sessions.json",
         "mcp-tool-cache.json",
         "broadcast_delivery_state.json",
+        "enforcement_delivery_state.json",
     }
     _DELETE_DIRS = {
         "controls_flags",
@@ -2291,6 +2292,7 @@ def _discover_user_env_defaults() -> dict[str, str]:
             "BROADCAST_DELIVERY_STATE_FILE": str(AGENTIHOOKS_STATE_DIR / "broadcast_delivery_state.json"),
             "ENFORCEMENT_FILE": str(AGENTIHOOKS_STATE_DIR / "enforcements.json"),
             "ENFORCEMENT_COUNTER_FILE": str(AGENTIHOOKS_STATE_DIR / "enforcement_counters.json"),
+            "ENFORCEMENT_DELIVERY_STATE_FILE": str(AGENTIHOOKS_STATE_DIR / "enforcement_delivery_state.json"),
         }
     )
     return dict(sorted(defaults.items()))

@@ -45,7 +45,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 3. Logs output token limit awareness if `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is set
 4. If `MCP_HYGIENE_ENABLED=true`: injects a reminder to disable unused MCP servers via `/mcp` to reduce per-turn token overhead
 5. If `BROADCAST_ENABLED=true`: registers session in active-sessions.json and delivers any pending one-shot broadcasts
-6. If `ENFORCEMENT_INJECTION_ENABLED=true`: injects every effective bundle, profile, runtime, and project-local enforcement once without advancing the cadence counter
+6. If `ENFORCEMENT_INJECTION_ENABLED=true`: injects every effective bundle, profile, runtime, and project-local enforcement once, marks those IDs seen for the session, and leaves the cadence counter unchanged
 
 ---
 
@@ -87,6 +87,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 2. If secrets are detected: injects a warning into the context (does **not** block -- warnings only at this stage)
 3. If `BRAIN_ENABLED=true`: counter-gated refresh of brain content (hot arcs, signals, operator intent) into the recent window, deduped by content hash
 4. If `BROADCAST_ENABLED=true`: checks for undelivered [broadcasts](broadcast.md) and injects them as banners. Delivery is channel-filtered against the session's `AGENTIHOOKS_BASE_CHANNELS` env list — global broadcasts (no `channel` field) reach everyone; channel-tagged broadcasts only reach subscribed sessions. Critical+persistent broadcasts are injected on every turn; info broadcasts are delivered once per session.
+5. Injects any enforcement ID this running session has not seen, then marks it seen so the next tool call cannot duplicate the first delivery
 
 > **Removed 2026-07-20:** periodic re-injection of `rules/*.md` and `CLAUDE.md` every N turns. Claude Code already loads both at position 0 for the whole session, so re-emitting them verbatim was duplicate token spend. Live re-emphasis now comes from the brain drumbeat (above) and the [enforcement](../pillars/guardrails.md) cadence; the one-shot `agentihooks refresh-rules` path still pushes edited rules to running sessions on demand.
 
@@ -114,7 +115,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 5. **Tool memory injection** -- looks up past errors for this tool and injects them as context so the agent can avoid repeating mistakes
 6. **Version guard** -- if `tool_name` is `Write` or `Edit` targeting a version-managed manifest (`pyproject.toml`, `package.json`, etc.): blocks version field modifications (version bumping must go through the release workflow)
 7. If `BROADCAST_ENABLED=true` and `BROADCAST_CRITICAL_ON_PRETOOL=true`: checks for critical+persistent [broadcasts](broadcast.md) and injects them via `additionalContext` JSON. Same channel-filter as UserPromptSubmit — channel-tagged broadcasts only reach sessions whose `AGENTIHOOKS_BASE_CHANNELS` includes that channel. This ensures the agent sees critical messages before every tool call, not just at the start of each turn.
-8. If `ENFORCEMENT_INJECTION_ENABLED=true`: increments the session tool-call counter and injects due global and project-local enforcements. Codex receives the same due banner on PostToolUse because its PreToolUse protocol has no context channel.
+8. Injects every newly discovered broadcast and enforcement once regardless of normal cadence or severity, then applies normal critical-broadcast and enforcement cadence rules. Codex claims these on PostToolUse because its PreToolUse protocol has no context channel.
 
 **Exit codes used:**
 
@@ -144,6 +145,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 3. If `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: records the file path and its current mtime in the session cache (Redis or memory) so future re-reads can be detected
 4. If `tool_error` is non-empty: records the error pattern to the tool memory file (`~/.agenticore_tool_memory.ndjson`) for future injection
 5. On targets without PreToolUse context injection, emits any enforcement due for the completed tool call
+6. On Codex, emits and claims newly discovered broadcasts and enforcements that could not be injected before the tool call
 
 ---
 

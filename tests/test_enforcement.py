@@ -16,9 +16,11 @@ def _clean_enforcement(tmp_path):
     """Redirect enforcement state files to tmp dir; disable bundle/profile loading by default."""
     store = tmp_path / "enforcements.json"
     counters = tmp_path / "enforcement_counters.json"
+    delivery = tmp_path / "enforcement_delivery_state.json"
     with (
         patch("hooks.context.enforcement._store_path", return_value=store),
         patch("hooks.context.enforcement._counter_path", return_value=counters),
+        patch("hooks.context.enforcement._delivery_path", return_value=delivery),
         patch("hooks.context.enforcement._get_bundle_path", return_value=None),
         patch("hooks.context.enforcement._get_active_profile", return_value=None),
     ):
@@ -172,7 +174,9 @@ class TestPretoolEntry:
 
         add_enforcement("no patches — code only", 3)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
-            assert get_pretool_enforcements("sess-1") is None  # count=1
+            first = get_pretool_enforcements("sess-1")  # count=1
+            assert first is not None
+            assert "no patches — code only" in first
             assert get_pretool_enforcements("sess-1") is None  # count=2
             ctx = get_pretool_enforcements("sess-1")  # count=3
             assert ctx is not None
@@ -214,7 +218,7 @@ class TestSessionStartEntry:
         add_enforcement("first rule", 3)
         add_enforcement("second rule", 7)
         assert increment_and_get_count("session-start") == 1
-        context = get_session_start_enforcements()
+        context = get_session_start_enforcements("session-start")
         assert context is not None
         assert "first rule" in context
         assert "second rule" in context
@@ -225,7 +229,51 @@ class TestSessionStartEntry:
 
         add_enforcement("rule", 3)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", False):
-            assert get_session_start_enforcements() is None
+            assert get_session_start_enforcements("session-start") is None
+
+    def test_session_start_delivers_each_id_once(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("initial rule", 10)
+        first = get_session_start_enforcements("session-start")
+        assert first is not None
+        assert "initial rule" in first
+        assert get_session_start_enforcements("session-start") is None
+
+    def test_new_rule_uses_next_prompt_then_waits_for_cadence(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_pretool_enforcements,
+            get_session_start_enforcements,
+            get_user_prompt_enforcements,
+        )
+
+        add_enforcement("initial rule", 10)
+        assert get_session_start_enforcements("running") is not None
+        add_enforcement("new rule", 10)
+        prompt = get_user_prompt_enforcements("running")
+        assert prompt is not None
+        assert "new rule" in prompt
+        assert "initial rule" not in prompt
+        assert get_user_prompt_enforcements("running") is None
+        assert get_pretool_enforcements("running") is None
+
+    def test_codex_posttool_claims_first_delivery(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_posttool_enforcements,
+            get_pretool_enforcements,
+            get_user_prompt_enforcements,
+        )
+
+        add_enforcement("new rule", 10)
+        pretool = get_pretool_enforcements("codex-running", claim_unseen=False)
+        assert pretool is not None
+        assert "new rule" in pretool
+        posttool = get_posttool_enforcements("codex-running")
+        assert posttool is not None
+        assert "new rule" in posttool
+        assert get_user_prompt_enforcements("codex-running") is None
 
 
 class TestBannerFormat:
@@ -394,7 +442,7 @@ class TestLocalEnforcement:
 
         add_enforcement("global rule", 5)
         add_enforcement("local rule", 10, local=True, cwd=local_repo)
-        context = get_session_start_enforcements(local_repo)
+        context = get_session_start_enforcements("local-session", local_repo)
         assert context is not None
         assert "global rule" in context
         assert "local rule" in context
@@ -464,7 +512,8 @@ class TestLocalEnforcement:
 
         add_enforcement("tenth-call canary", 10, local=True, cwd=local_repo)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
-            for _ in range(9):
+            assert "tenth-call canary" in get_pretool_enforcements("local-session", local_repo)
+            for _ in range(8):
                 assert get_pretool_enforcements("local-session", local_repo) is None
             assert get_posttool_enforcements("local-session", local_repo) is None
             banner = get_pretool_enforcements("local-session", local_repo)

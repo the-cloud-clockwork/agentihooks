@@ -453,8 +453,7 @@ class TestHookIntegration:
         assert context is not None
         assert "ALERT" in context
 
-    def test_get_pretool_context_ignores_info(self, broadcast_file):
-        """Info severity is excluded from pretool context."""
+    def test_get_pretool_context_delivers_new_info_once(self, broadcast_file):
         from hooks.context.broadcast import create_broadcast, get_pretool_context
 
         with (
@@ -465,10 +464,13 @@ class TestHookIntegration:
         ):
             create_broadcast("Just info", severity="info")
             context = get_pretool_context("sess-test")
+            second = get_pretool_context("sess-test")
 
-        assert context is None
+        assert context is not None
+        assert "Just info" in context
+        assert second is None
 
-    def test_get_pretool_context_disabled(self, broadcast_file):
+    def test_new_broadcast_bypasses_normal_pretool_gate_once(self, broadcast_file):
         from hooks.context.broadcast import create_broadcast, get_pretool_context
 
         with (
@@ -478,8 +480,63 @@ class TestHookIntegration:
         ):
             create_broadcast("Critical", severity="critical")
             context = get_pretool_context("sess-test")
+            second = get_pretool_context("sess-test")
 
-        assert context is None
+        assert context is not None
+        assert "Critical" in context
+        assert second is None
+
+    def test_prompt_first_prevents_duplicate_first_tool_delivery(self, broadcast_file, capsys):
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Persistent alert", severity="alert")
+            check_and_inject_broadcasts("sess-test")
+            assert "Persistent alert" in capsys.readouterr().out
+            assert get_pretool_context("sess-test") is None
+
+    def test_tool_first_marks_info_delivered_before_prompt(self, broadcast_file, capsys):
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("One-shot info", severity="info")
+            assert "One-shot info" in get_pretool_context("sess-test")
+            check_and_inject_broadcasts("sess-test")
+            assert "One-shot info" not in capsys.readouterr().out
+
+    def test_unseen_broadcasts_are_per_session(self, broadcast_file):
+        from hooks.context.broadcast import create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Both sessions", severity="info")
+            assert "Both sessions" in get_pretool_context("sess-1")
+            assert get_pretool_context("sess-1") is None
+            assert "Both sessions" in get_pretool_context("sess-2")
+
+    def test_codex_posttool_claims_first_delivery(self, broadcast_file):
+        from hooks.context.broadcast import create_broadcast, get_posttool_context, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Codex first delivery", severity="info")
+            assert "Codex first delivery" in get_pretool_context("codex-session", claim_unseen=False)
+            assert "Codex first delivery" in get_posttool_context("codex-session")
+            assert get_posttool_context("codex-session") is None
 
 
 # ---------------------------------------------------------------------------
@@ -842,9 +899,11 @@ class TestChannelReconciliation:
         )
         with patch("hooks.context.broadcast._get_session_channels", return_value=["brain"]):
             context = get_broadcast_context("session", result["created_ids"])
+            repeated = get_broadcast_context("session", result["created_ids"])
 
         assert "Recent Lessons" in context
         assert "lesson" in context
+        assert repeated is None
 
 
 class TestLeftoverDirectedMessages:

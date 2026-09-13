@@ -455,7 +455,12 @@ def clear_session_state(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def maybe_refresh_on_tool_call(session_id: str, tool_call_count: int) -> str | None:
+def maybe_refresh_on_tool_call(
+    session_id: str,
+    tool_call_count: int,
+    *,
+    claim_delivery: bool = True,
+) -> str | None:
     try:
         from hooks.config import BRAIN_ENABLED, BRAIN_REFRESH_TOOL_CALLS
     except ImportError:
@@ -466,7 +471,7 @@ def maybe_refresh_on_tool_call(session_id: str, tool_call_count: int) -> str | N
     if tool_call_count % max(1, BRAIN_REFRESH_TOOL_CALLS) != 0:
         return None
     result = _refresh()
-    if not result:
+    if not result or not claim_delivery:
         return None
     from hooks.context.broadcast import get_broadcast_context
 

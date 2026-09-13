@@ -176,6 +176,17 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ---
 
+## Enforcement System
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENFORCEMENT_INJECTION_ENABLED` | `true` | Enable SessionStart, first-delivery, and cadence-driven enforcement injection. |
+| `ENFORCEMENT_FILE` | `~/.agentihooks/enforcements.json` | Mutable global runtime enforcement store. |
+| `ENFORCEMENT_COUNTER_FILE` | `~/.agentihooks/enforcement_counters.json` | Per-session tool-call counters used for cadence. |
+| `ENFORCEMENT_DELIVERY_STATE_FILE` | `~/.agentihooks/enforcement_delivery_state.json` | Per-session IDs already seen, shared across prompt and tool hooks. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
