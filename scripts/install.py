@@ -56,6 +56,7 @@ All commands are idempotent. Data directory: ~/.agentihooks/
 """
 
 import argparse
+import ast
 import contextlib
 import fcntl
 import json
@@ -1130,6 +1131,8 @@ def cmd_link_profile(
     if action == "link":
         with _sync_lock():
             targets = _chain_targets(for_target)
+            if not for_target and not no_init and not _installed_targets(_load_state(), default=()):
+                targets = SUPPORTED_TARGETS
             pending = _link_profile_link(
                 Path(path).expanduser().resolve() if path else None,
                 name=name,
@@ -2266,31 +2269,150 @@ def _update_bashrc_block() -> None:
 # ---------------------------------------------------------------------------
 
 _ENV_FILE_DST = AGENTIHOOKS_STATE_DIR / ".env"
-_ENV_EXAMPLE_SRC = AGENTIHOOKS_ROOT / ".env.example"
+
+_ENV_MANIFEST_EXCLUDED = {
+    "AWS_CONFIG_FILE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_HOOK_NAME",
+    "CLAUDE_PROJECT_DIR",
+    "CLAUDE_SESSION_ID",
+    "HOME",
+    "HOSTNAME",
+    "KUBERNETES_SERVICE_HOST",
+    "PIPX_HOME",
+    "USER",
+    "UV_TOOL_DIR",
+    "VIRTUAL_ENV",
+    "WSL_DISTRO_NAME",
+    "WSL_INTEROP",
+    "XDG_DATA_HOME",
+}
 
 
-def _seed_user_env_file() -> None:
-    """Create ~/.agentihooks/.env from .env.example if it doesn't already exist.
+def _literal_env_call(call: ast.Call) -> tuple[str, str] | None:
+    if not call.args or not isinstance(call.args[0], ast.Constant):
+        return None
+    key = call.args[0].value
+    if not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+        return None
+    func = call.func
+    env_bool = isinstance(func, ast.Name) and func.id in {"_env_bool", "_env_flag", "_env_int"}
+    getenv = (
+        isinstance(func, ast.Attribute)
+        and func.attr == "getenv"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    )
+    environ_get = (
+        isinstance(func, ast.Attribute)
+        and func.attr == "get"
+        and isinstance(func.value, ast.Attribute)
+        and func.value.attr == "environ"
+        and isinstance(func.value.value, ast.Name)
+        and func.value.value.id == "os"
+    )
+    if not (env_bool or getenv or environ_get):
+        return None
+    default = call.args[1] if len(call.args) > 1 else None
+    value = default.value if isinstance(default, ast.Constant) else ""
+    return key, "" if value is None else str(value)
 
-    Never overwrites — only creates on first install.
-    The user is the only one who should delete or modify this file.
-    """
+
+def _discover_user_env_defaults() -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    for package in (AGENTIHOOKS_ROOT / "hooks", AGENTIHOOKS_ROOT / "scripts"):
+        for source in sorted(package.rglob("*.py")):
+            try:
+                tree = ast.parse(source.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+                    if (
+                        isinstance(target, ast.Name)
+                        and target.id in {"REQUIRED_ENV_VARS", "OPTIONAL_ENV_VARS"}
+                        and isinstance(node.value, ast.Dict)
+                    ):
+                        for item in node.value.keys:
+                            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                                defaults.setdefault(item.value, "")
+                if not isinstance(node, ast.Call):
+                    continue
+                found = _literal_env_call(node)
+                if found is None:
+                    continue
+                key, value = found
+                if key in _ENV_MANIFEST_EXCLUDED:
+                    continue
+                if key not in defaults or not defaults[key]:
+                    defaults[key] = value
+
+    example = AGENTIHOOKS_ROOT / ".env.example"
+    if example.is_file():
+        for line in example.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"^\s*#?\s*([A-Z][A-Z0-9_]*)\s*=([^#]*)", line)
+            if match:
+                defaults[match.group(1)] = match.group(2).strip()
+    packaged_defaults = AGENTIHOOKS_ROOT / "profiles" / "_base" / "env.defaults.json"
+    if packaged_defaults.is_file():
+        defaults.update({key: str(value) for key, value in load_json(packaged_defaults).items()})
+    base_settings = AGENTIHOOKS_ROOT / "profiles" / "_base" / "settings.base.json"
+    if base_settings.is_file():
+        for key, value in load_json(base_settings).get("env", {}).items():
+            defaults.setdefault(key, str(value))
+
+    defaults.update(
+        {
+            "AGENTIHOOKS_HOME": str(AGENTIHOOKS_STATE_DIR),
+            "AGENTIBRAIN_HOME": str(Path.home() / ".agentibrain"),
+            "CLAUDE_HOOK_LOG_FILE": str(AGENTIHOOKS_STATE_DIR / "logs" / "hooks.log"),
+            "AGENT_LOG_FILE": str(AGENTIHOOKS_STATE_DIR / "logs" / "agent.log"),
+            "BRAIN_SOURCE_PATH": str(AGENTIHOOKS_STATE_DIR / "brain-feed"),
+            "BRAIN_WRITER_OUTBOX": str(AGENTIHOOKS_STATE_DIR / "brain-outbox"),
+            "BROADCAST_FILE": str(AGENTIHOOKS_STATE_DIR / "broadcast.json"),
+            "BROADCAST_DELIVERY_STATE_FILE": str(AGENTIHOOKS_STATE_DIR / "broadcast_delivery_state.json"),
+            "ENFORCEMENT_FILE": str(AGENTIHOOKS_STATE_DIR / "enforcements.json"),
+            "ENFORCEMENT_COUNTER_FILE": str(AGENTIHOOKS_STATE_DIR / "enforcement_counters.json"),
+            "MCP_STATELESS_HTTP": "false",
+            "POSTGRES_PORT": "5432",
+        }
+    )
+    return dict(sorted(defaults.items()))
+
+
+def _env_manifest_keys(body: str) -> set[str]:
+    keys = set()
+    for line in body.splitlines():
+        match = re.match(r"^\s*#?\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=", line)
+        if match:
+            keys.add(match.group(1))
+    return keys
+
+
+def _seed_user_env_file() -> list[str]:
+    """Append newly supported settings without changing existing assignments."""
     AGENTIHOOKS_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    if _ENV_FILE_DST.exists():
-        _cprint(f"  [--] {_ENV_FILE_DST} already exists — not overwritten (your file)")
-        return
-    if _ENV_EXAMPLE_SRC.exists():
-        shutil.copy2(_ENV_EXAMPLE_SRC, _ENV_FILE_DST)
-        _cprint(f"  [OK] Created {_ENV_FILE_DST}")
-        print(f"       Configure your integrations: {_ENV_FILE_DST}")
-    else:
-        # Wheel install — .env.example isn't packaged. Create an empty
-        # placeholder so the bashrc block has a valid source target.
-        _ENV_FILE_DST.write_text(
-            "# agentihooks user env file — add KEY=VALUE lines here\n",
-            encoding="utf-8",
-        )
-        _cprint(f"  [OK] Created empty {_ENV_FILE_DST} (no .env.example in wheel)")
+    body = _ENV_FILE_DST.read_text(encoding="utf-8") if _ENV_FILE_DST.exists() else ""
+    existing = _env_manifest_keys(body)
+    defaults = _discover_user_env_defaults()
+    added = [key for key in defaults if key not in existing]
+    if not added:
+        _cprint(f"  [--] {_ENV_FILE_DST} is current — existing values preserved")
+        return []
+
+    if body and not body.endswith("\n"):
+        body += "\n"
+    if not body:
+        body = "# AgentiHooks user environment\n# Uncomment a setting to override the displayed program default.\n"
+    elif "# --- settings added by agentihooks ---" not in body:
+        body += "\n# --- settings added by agentihooks ---\n"
+    body += "".join(f"# {key}={defaults[key]}\n" for key in added)
+    _ENV_FILE_DST.write_text(body, encoding="utf-8")
+    _ENV_FILE_DST.chmod(0o600)
+    _cprint(f"  [OK] Updated {_ENV_FILE_DST} — added {len(added)} settings")
+    print(f"       Existing values preserved; inspect defaults at {_ENV_FILE_DST}")
+    return added
 
 
 # ---------------------------------------------------------------------------
@@ -5847,10 +5969,7 @@ def main() -> None:
         dest="init_target",
         choices=list(SUPPORTED_TARGETS),
         default=None,
-        help=(
-            "Agent CLI to install for (claude | codex | copilot). Default: AGENTIHOOKS_TARGET env, "
-            "then the target stored in state.json, then an interactive prompt, then claude."
-        ),
+        help=("Install only one agent CLI (claude | codex | copilot). Without this flag, installs all supported CLIs."),
     )
     init_p.add_argument(
         "--force",
@@ -6163,6 +6282,7 @@ notes:
             source_checkout=_is_source_checkout(),
         )
         if rc == 0 and not args.check:
+            _seed_user_env_file()
             state = _load_state()
             state["version"] = version_after_upgrade()
             state["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -6196,7 +6316,16 @@ notes:
         args.settings_profile = getattr(args, "init_settings_profile", None) or ""
         # NB: attribute name avoids link-profile's positional `args.target`.
         args.install_target = getattr(args, "init_target", None)
-        cmd_init_unified(args)
+        env_target = os.environ.get("AGENTIHOOKS_TARGET", "").strip()
+        targets = (args.install_target or env_target,) if args.install_target or env_target else SUPPORTED_TARGETS
+        for index, target in enumerate(targets):
+            target_args = deepcopy(args)
+            target_args.install_target = target
+            if index:
+                target_args.force = False
+                target_args.bundle = None
+                target_args.link_profile = []
+            cmd_init_unified(target_args)
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
     elif args.command == "ignore":

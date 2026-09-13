@@ -80,14 +80,14 @@ include = ["hooks*", "scripts*", "profiles*"]
 # systemd unit template for the network-transport hooks-utils daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
-# Ship every json / yaml / md anywhere under profiles/ — personas (CLAUDE.md),
-# rules (rules/*.md), settings (*.json), profile manifests (*.yml) — and nothing
-# else. Recursive ** globs cover .claude/ and rules/ subdirs at any depth.
+# Ship every native config and Markdown artifact under profiles/ — personas,
+# rules, settings, and profile manifests. Recursive ** globs cover .claude/
+# and target-specific subdirectories at any depth.
 # One entry per discovered profiles package; the bare "profiles" key also
 # captures files under non-package subdirs like profiles/package/rules/.
-"profiles" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
-"profiles._base" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
-"profiles.default" = ["**/*.json", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
 
 [project.urls]
 Homepage = "https://github.com/The-Cloud-Clockwork/agentihooks"

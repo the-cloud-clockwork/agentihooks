@@ -13,6 +13,104 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
+class TestUserEnvManifest:
+    def test_install_adds_missing_defaults_without_touching_existing_values(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("# operator\nTOKEN_WARN_PCT=73\nCUSTOM=value\n")
+
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            before = env_file.read_text()
+            added = install._seed_user_env_file()
+
+        body = env_file.read_text()
+        assert body.startswith(before)
+        assert "TOKEN_WARN_PCT=73\n" in body
+        assert body.count("TOKEN_WARN_PCT=") == 1
+        assert "CUSTOM=value\n" in body
+        assert "# RETRY_BREAKER_HARD_MAX=10\n" in body
+        assert "# VOICE_API_KEY=\n" in body
+        assert "RETRY_BREAKER_HARD_MAX" in added
+
+    def test_second_sync_is_byte_identical(self, tmp_path):
+        env_file = tmp_path / ".env"
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            install._seed_user_env_file()
+            first = (env_file.read_bytes(), env_file.stat().st_mtime_ns)
+            assert install._seed_user_env_file() == []
+        assert (env_file.read_bytes(), env_file.stat().st_mtime_ns) == first
+
+    def test_manifest_covers_every_literal_runtime_setting(self):
+        with patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]):
+            defaults = install._discover_user_env_defaults()
+        assert "AGENTIHOOKS_HOME" in defaults
+        assert "MCP_TRANSPORT" in defaults
+        assert "CREDENTIAL_GUARD_ENABLED" in defaults
+        assert "OTEL_HOOKS_ENABLED" in defaults
+        assert "VOICE_SERVICE_URL" in defaults
+        assert defaults["AWS_REGION"] == "us-east-1"
+        assert defaults["MCP_STATELESS_HTTP"] == "false"
+        assert defaults["POSTGRES_PORT"] == "5432"
+        assert defaults["BRAIN_SOURCE_PATH"].endswith("/.agentihooks/brain-feed")
+        assert {"AWS_PROFILE", "CODEX_HOME", "COPILOT_HOME", "ENABLE_TOOL_SEARCH"} <= set(defaults)
+        assert not {"HOME", "USER", "VIRTUAL_ENV", "CLAUDE_CODE_SESSION_ID"} & set(defaults)
+
+    def test_update_refreshes_env_manifest(self, monkeypatch):
+        called = []
+
+        monkeypatch.setattr("scripts.updater.run_update", lambda **kwargs: 0)
+        monkeypatch.setattr(install, "_seed_user_env_file", lambda: called.append("env"))
+        monkeypatch.setattr(install, "_load_state", lambda: {})
+        monkeypatch.setattr(install, "_save_state", lambda state: None)
+        monkeypatch.setattr(install, "_is_source_checkout", lambda: False)
+        monkeypatch.setattr(sys, "argv", ["agentihooks", "update"])
+
+        with pytest.raises(SystemExit) as exc:
+            install.main()
+
+        assert exc.value.code == 0
+        assert called == ["env"]
+
+
+class TestInitTargets:
+    def test_bare_init_installs_all_supported_targets(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
+        monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default"])
+
+        install.main()
+
+        assert [args.install_target for args in calls] == list(install.SUPPORTED_TARGETS)
+
+    def test_target_flag_installs_only_that_target(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["agentihooks", "init", "--profile", "default", "--target", "codex"],
+        )
+
+        install.main()
+
+        assert [args.install_target for args in calls] == ["codex"]
+
+    def test_target_environment_installs_only_that_target(self, monkeypatch):
+        calls = []
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+        monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
+        monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default"])
+
+        install.main()
+
+        assert [args.install_target for args in calls] == ["copilot"]
+
+
 # ---------------------------------------------------------------------------
 # _cmd_loadenv / bashrc block management
 # ---------------------------------------------------------------------------
