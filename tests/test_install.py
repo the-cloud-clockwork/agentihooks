@@ -22,11 +22,12 @@ class TestUserEnvManifest:
             patch.object(install, "_ENV_FILE_DST", env_file),
             patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
         ):
-            before = env_file.read_text()
             added = install._seed_user_env_file()
 
         body = env_file.read_text()
-        assert body.startswith(before)
+        assert install._ENV_MANAGED_START in body
+        assert install._ENV_MANAGED_END in body
+        assert "# operator\nTOKEN_WARN_PCT=73\nCUSTOM=value\n" in body
         assert "TOKEN_WARN_PCT=73\n" in body
         assert body.count("TOKEN_WARN_PCT=") == 1
         assert "CUSTOM=value\n" in body
@@ -45,20 +46,90 @@ class TestUserEnvManifest:
             assert install._seed_user_env_file() == []
         assert (env_file.read_bytes(), env_file.stat().st_mtime_ns) == first
 
-    def test_manifest_covers_every_literal_runtime_setting(self):
+    def test_manifest_contains_only_agentihooks_owned_settings(self):
         with patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]):
             defaults = install._discover_user_env_defaults()
-        assert "AGENTIHOOKS_HOME" in defaults
         assert "MCP_TRANSPORT" in defaults
+        assert "ALLOWED_TOOLS" in defaults
+        assert defaults["BRAIN_SOURCE_TYPE"] == "file"
         assert "CREDENTIAL_GUARD_ENABLED" in defaults
         assert "OTEL_HOOKS_ENABLED" in defaults
         assert "VOICE_SERVICE_URL" in defaults
-        assert defaults["AWS_REGION"] == "us-east-1"
         assert defaults["MCP_STATELESS_HTTP"] == "false"
-        assert defaults["POSTGRES_PORT"] == "5432"
-        assert defaults["BRAIN_SOURCE_PATH"].endswith("/.agentihooks/brain-feed")
-        assert {"AWS_PROFILE", "CODEX_HOME", "COPILOT_HOME", "ENABLE_TOOL_SEARCH"} <= set(defaults)
-        assert not {"HOME", "USER", "VIRTUAL_ENV", "CLAUDE_CODE_SESSION_ID"} & set(defaults)
+        assert defaults["BROADCAST_CRITICAL_ON_PRETOOL"] == "false"
+        assert defaults["BROADCAST_PRETOOL_MIN_SEVERITY"] == "critical"
+        foreign = {
+            "AGENTIBRAIN_HOME",
+            "AWS_REGION",
+            "BRAIN_URL",
+            "CLAUDE_MODEL",
+            "CODEX_HOME",
+            "COPILOT_HOME",
+            "GITHUB_TOKEN",
+            "KB_ROUTER_TOKEN",
+            "POSTGRES_PASSWORD",
+            "SMTP_PASS",
+        }
+        assert not foreign & set(defaults)
+
+    def test_active_value_inside_managed_block_is_moved_to_user_overrides(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{install._ENV_MANAGED_START}\nTOKEN_WARN_PCT=71\n{install._ENV_MANAGED_END}\n")
+
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            install._seed_user_env_file()
+
+        body = env_file.read_text()
+        managed = body.split(install._ENV_MANAGED_START, 1)[1].split(install._ENV_MANAGED_END, 1)[0]
+        assert "TOKEN_WARN_PCT=" not in managed
+        assert body.endswith("# User overrides\nTOKEN_WARN_PCT=71\n")
+
+    def test_legacy_generated_catalog_is_pruned_but_active_values_survive(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "# AgentiHooks user environment\n"
+            "# Uncomment a setting to override the displayed program default.\n"
+            "# AWS_REGION=us-east-1\n"
+            "TOKEN_WARN_PCT=72\n"
+        )
+
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            install._seed_user_env_file()
+
+        body = env_file.read_text()
+        assert "AWS_REGION" not in body
+        assert body.endswith("# User overrides\nTOKEN_WARN_PCT=72\n")
+
+    def test_duplicate_order_stays_first_definition_wins(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{install._ENV_MANAGED_START}\nCUSTOM=first\n{install._ENV_MANAGED_END}\nCUSTOM=second\n")
+
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            install._seed_user_env_file()
+
+        body = env_file.read_text()
+        assert body.index("CUSTOM=first") < body.index("CUSTOM=second")
+
+    def test_idempotent_sync_restores_private_mode(self, tmp_path):
+        env_file = tmp_path / ".env"
+        with (
+            patch.object(install, "_ENV_FILE_DST", env_file),
+            patch.object(install, "AGENTIHOOKS_ROOT", Path(__file__).parents[1]),
+        ):
+            install._seed_user_env_file()
+            env_file.chmod(0o644)
+            assert install._seed_user_env_file() == []
+
+        assert env_file.stat().st_mode & 0o777 == 0o600
 
     def test_update_refreshes_env_manifest(self, monkeypatch):
         called = []

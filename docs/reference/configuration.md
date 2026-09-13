@@ -9,6 +9,11 @@ parent: Reference
 
 All environment variables recognized by AgentiHooks, grouped by integration. Variables with no default are required for their integration to function.
 
+The generated `~/.agentihooks/.env` contains only AgentiHooks-owned runtime
+settings. Harness settings stay in native client configuration, brain settings
+stay in `~/.agentibrain/.env`, and integration credentials use
+connector-specific companion environment files.
+
 ## Table of contents
 {: .no_toc .text-delta }
 
