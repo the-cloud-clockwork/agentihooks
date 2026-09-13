@@ -89,7 +89,9 @@ What covers live re-emphasis now, at a fraction of the token cost:
   point is a token or two of reminder, not a file dump. A project can add its
   own entries at `<git-root>/.agentihooks/enforcements.json`; they apply only to
   sessions running inside that repository. Every effective enforcement is also
-  injected once at SessionStart before cadence-driven reminders begin.
+  injected once at SessionStart before cadence-driven reminders begin. An
+  enforcement added later reaches each running session on its next tool call or
+  user message once, then returns to its configured cadence.
 - **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
   mid-session, this pushes the new content to already-running sessions exactly
   once. This is the only case where re-sending a rule file earns its tokens: the

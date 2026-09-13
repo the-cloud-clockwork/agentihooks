@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Newly created enforcements and broadcasts reach each running session on its
+  next tool call or user message exactly once before normal cadence resumes.
 - Every effective enforcement is injected once at SessionStart before its normal
   tool-call cadence begins.
 - **The credential-read guard is operand-aware and fails closed near a
