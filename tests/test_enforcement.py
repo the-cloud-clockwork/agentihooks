@@ -191,6 +191,31 @@ class TestPretoolEntry:
             assert get_pretool_enforcements("sess-1") is None
 
 
+class TestSessionStartEntry:
+    def test_injects_every_enforcement_without_advancing_counter(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_session_start_enforcements,
+            increment_and_get_count,
+        )
+
+        add_enforcement("first rule", 3)
+        add_enforcement("second rule", 7)
+        assert increment_and_get_count("session-start") == 1
+        context = get_session_start_enforcements()
+        assert context is not None
+        assert "first rule" in context
+        assert "second rule" in context
+        assert increment_and_get_count("session-start") == 2
+
+    def test_disabled_returns_none(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("rule", 3)
+        with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", False):
+            assert get_session_start_enforcements() is None
+
+
 class TestBannerFormat:
     def test_banner_contains_required_fields(self):
         from hooks.context.enforcement import format_enforcement_banner
@@ -322,6 +347,16 @@ class TestThreeSourceMerge:
 
 
 class TestLocalEnforcement:
+    def test_session_start_includes_global_and_project_local(self, local_repo):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("global rule", 5)
+        add_enforcement("local rule", 10, local=True, cwd=local_repo)
+        context = get_session_start_enforcements(local_repo)
+        assert context is not None
+        assert "global rule" in context
+        assert "local rule" in context
+
     def test_set_creates_project_store(self, local_repo):
         from hooks.context.enforcement import add_enforcement, list_enforcements
 

@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Every effective enforcement is injected once at SessionStart before its normal
+  tool-call cadence begins.
 - **The credential-read guard is operand-aware and fails closed near a
   credential path.** A sensitive path now blocks only when a reader actually
   consumes it — positional operand, `<` redirect, option value, `git` revision

@@ -329,7 +329,7 @@ CLI's hook contract and the evidence behind it:
 
 | Event | Key behavior |
 |-------|-------------|
-| `SessionStart` | Register session, inject context, brain injection, deliver broadcasts, MCP warnings |
+| `SessionStart` | Register session, inject all enforcements, brain injection, deliver broadcasts, MCP warnings |
 | `PreToolUse` | Secrets scan, branch/version guard, retry breaker, critical broadcasts, enforcement drumbeat |
 | `PostToolUse` | Bash output filtering, file dedup, tool error recording, Codex enforcement fallback |
 | `UserPromptSubmit` | Secrets scan, brain refresh, CI-manifesto drumbeat, channel-filtered broadcast delivery |

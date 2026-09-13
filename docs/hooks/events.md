@@ -45,6 +45,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 3. Logs output token limit awareness if `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is set
 4. If `MCP_HYGIENE_ENABLED=true`: injects a reminder to disable unused MCP servers via `/mcp` to reduce per-turn token overhead
 5. If `BROADCAST_ENABLED=true`: registers session in active-sessions.json and delivers any pending one-shot broadcasts
+6. If `ENFORCEMENT_INJECTION_ENABLED=true`: injects every effective bundle, profile, runtime, and project-local enforcement once without advancing the cadence counter
 
 ---
 

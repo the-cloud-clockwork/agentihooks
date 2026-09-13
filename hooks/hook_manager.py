@@ -380,6 +380,16 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("project_bridge failed", {"error": str(e)})
 
+    try:
+        from hooks.common import inject_context as _inject_enforcements
+        from hooks.context.enforcement import get_session_start_enforcements
+
+        enforcement_context = get_session_start_enforcements(payload.get("cwd", ""))
+        if enforcement_context:
+            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("enforcement session start failed", {"error": str(e)})
+
     if _is_codex():
         try:
             from hooks.config import CODEX_CONTEXT_PIN_ENABLED

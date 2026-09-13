@@ -444,6 +444,31 @@ class TestSessionIdBannerHost:
         assert "Your Claude Code session_id" in self._banner(monkeypatch, "claude")
 
 
+class TestSessionStartEnforcements:
+    def test_injects_all_enforcements_for_project_cwd(self, claude, monkeypatch):
+        import hooks.common as common
+        import hooks.context.enforcement as enforcement
+        import hooks.hook_manager as hm
+
+        captured = []
+        calls = []
+        monkeypatch.setattr(common, "inject_context", lambda message, *args, **kwargs: captured.append(message))
+        monkeypatch.setattr(
+            enforcement,
+            "get_session_start_enforcements",
+            lambda cwd: calls.append(cwd) or "all session enforcements",
+        )
+        hm.on_session_start(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-start-enforcement",
+                "cwd": "/project",
+            }
+        )
+        assert calls == ["/project"]
+        assert "all session enforcements" in captured
+
+
 class TestPreToolUseLogAttribution:
     """The hook log is machine-global; a line with no session_id cannot be
     attributed to the session that wrote it (PostToolUse already carries one)."""

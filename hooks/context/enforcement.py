@@ -307,6 +307,18 @@ def format_enforcement_context(msgs: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def get_session_start_enforcements(cwd: str | Path | None = None) -> str | None:
+    if not ENFORCEMENT_INJECTION_ENABLED:
+        return None
+    try:
+        entries = load_all_enforcements(cwd)
+        if not entries:
+            return None
+        return format_enforcement_context(entries)
+    except Exception:
+        return None
+
+
 def get_pretool_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
     """Increment the counter and return formatted enforcement banners if any are due."""
     if not ENFORCEMENT_INJECTION_ENABLED:
