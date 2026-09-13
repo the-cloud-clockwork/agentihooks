@@ -40,36 +40,40 @@ def env_home(tmp_path, monkeypatch):
 
 def test_later_file_beats_earlier_file(env_home):
     home, load = env_home
-    (home / ".env").write_text("BRAIN_URL=http://from-main\n")
-    (home / "zz-extra.env").write_text("BRAIN_URL=http://from-companion\n")
+    (home / ".env").write_text("SOME_KEY=from-main\n")
+    (home / "zz-extra.env").write_text("SOME_KEY=from-companion\n")
 
-    assert load().BRAIN_URL == "http://from-companion"
+    load()
+    assert os.environ["SOME_KEY"] == "from-companion"
 
 
 def test_process_env_beats_every_file(env_home, monkeypatch):
     home, load = env_home
-    (home / ".env").write_text("BRAIN_URL=http://from-main\n")
-    (home / "zz-extra.env").write_text("BRAIN_URL=http://from-companion\n")
-    monkeypatch.setenv("BRAIN_URL", "http://from-process")
+    (home / ".env").write_text("SOME_KEY=from-main\n")
+    (home / "zz-extra.env").write_text("SOME_KEY=from-companion\n")
+    monkeypatch.setenv("SOME_KEY", "from-process")
 
     config = load()
-    assert config.BRAIN_URL == "http://from-process"
+    assert os.environ["SOME_KEY"] == "from-process"
     # ...and a forced reload must not quietly hand the files a second chance.
-    assert config.reload_brain_env(force=True)["brain_url"] == "http://from-process"
+    config.reload_brain_env(force=True)
+    assert os.environ["SOME_KEY"] == "from-process"
 
 
 def test_reload_agrees_with_boot(env_home):
     """A reloaded process resolves the same value a fresh one would."""
     home, load = env_home
-    (home / ".env").write_text("BRAIN_URL=http://from-main\n")
-    (home / "zz-extra.env").write_text("BRAIN_URL=http://from-companion\n")
+    (home / ".env").write_text("SOME_KEY=from-main\n")
+    (home / "zz-extra.env").write_text("SOME_KEY=from-companion\n")
     config = load()
-    assert config.BRAIN_URL == "http://from-companion"
+    assert os.environ["SOME_KEY"] == "from-companion"
 
-    (home / "zz-extra.env").write_text("BRAIN_URL=http://edited\n")
+    (home / "zz-extra.env").write_text("SOME_KEY=edited\n")
     os.utime(home / "zz-extra.env", None)
-    assert config.reload_brain_env()["brain_url"] == "http://edited"
-    assert config.BRAIN_URL == load().BRAIN_URL
+    config.reload_brain_env()
+    assert os.environ["SOME_KEY"] == "edited"
+    load()
+    assert os.environ["SOME_KEY"] == "edited"
 
 
 def test_reload_is_a_noop_while_the_files_are_untouched(env_home):
