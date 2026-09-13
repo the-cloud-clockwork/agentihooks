@@ -453,8 +453,7 @@ class TestHookIntegration:
         assert context is not None
         assert "ALERT" in context
 
-    def test_get_pretool_context_ignores_info(self, broadcast_file):
-        """Info severity is excluded from pretool context."""
+    def test_get_pretool_context_delivers_new_info_once(self, broadcast_file):
         from hooks.context.broadcast import create_broadcast, get_pretool_context
 
         with (
@@ -465,10 +464,13 @@ class TestHookIntegration:
         ):
             create_broadcast("Just info", severity="info")
             context = get_pretool_context("sess-test")
+            second = get_pretool_context("sess-test")
 
-        assert context is None
+        assert context is not None
+        assert "Just info" in context
+        assert second is None
 
-    def test_get_pretool_context_disabled(self, broadcast_file):
+    def test_new_broadcast_bypasses_normal_pretool_gate_once(self, broadcast_file):
         from hooks.context.broadcast import create_broadcast, get_pretool_context
 
         with (
@@ -478,8 +480,63 @@ class TestHookIntegration:
         ):
             create_broadcast("Critical", severity="critical")
             context = get_pretool_context("sess-test")
+            second = get_pretool_context("sess-test")
 
-        assert context is None
+        assert context is not None
+        assert "Critical" in context
+        assert second is None
+
+    def test_prompt_first_prevents_duplicate_first_tool_delivery(self, broadcast_file, capsys):
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Persistent alert", severity="alert")
+            check_and_inject_broadcasts("sess-test")
+            assert "Persistent alert" in capsys.readouterr().out
+            assert get_pretool_context("sess-test") is None
+
+    def test_tool_first_marks_info_delivered_before_prompt(self, broadcast_file, capsys):
+        from hooks.context.broadcast import check_and_inject_broadcasts, create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("One-shot info", severity="info")
+            assert "One-shot info" in get_pretool_context("sess-test")
+            check_and_inject_broadcasts("sess-test")
+            assert "One-shot info" not in capsys.readouterr().out
+
+    def test_unseen_broadcasts_are_per_session(self, broadcast_file):
+        from hooks.context.broadcast import create_broadcast, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Both sessions", severity="info")
+            assert "Both sessions" in get_pretool_context("sess-1")
+            assert get_pretool_context("sess-1") is None
+            assert "Both sessions" in get_pretool_context("sess-2")
+
+    def test_codex_posttool_claims_first_delivery(self, broadcast_file):
+        from hooks.context.broadcast import create_broadcast, get_posttool_context, get_pretool_context
+
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch("hooks.context.broadcast.BROADCAST_ENABLED", True),
+            patch("hooks.context.broadcast.BROADCAST_CRITICAL_ON_PRETOOL", False),
+        ):
+            create_broadcast("Codex first delivery", severity="info")
+            assert "Codex first delivery" in get_pretool_context("codex-session", claim_unseen=False)
+            assert "Codex first delivery" in get_posttool_context("codex-session")
+            assert get_posttool_context("codex-session") is None
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +788,122 @@ class TestContentHashField:
         msg = {"channel": "brain", "severity": "alert", "message": "same body"}
         assert _msg_hash(msg) == _msg_hash({**msg, "target_session": ""})
         assert _msg_hash(msg) != _msg_hash({**msg, "target_session": "some-peer"})
+
+
+class TestChannelReconciliation:
+    @pytest.fixture(autouse=True)
+    def _isolate_broadcast(self, broadcast_file):
+        with (
+            patch("hooks.context.broadcast._broadcast_path", return_value=broadcast_file),
+            patch(
+                "hooks.context.broadcast._delivery_state_path",
+                return_value=broadcast_file.parent / "delivery.json",
+            ),
+        ):
+            yield
+
+    def test_preserves_live_ids_and_other_channels(self, broadcast_file):
+        from hooks.context.broadcast import (
+            _load_broadcasts,
+            create_broadcast,
+            reconcile_channel_broadcasts,
+        )
+
+        other_id = create_broadcast("other", channel="ops")
+        desired = [
+            {
+                "message": "[Hot Arcs]\nbody",
+                "severity": "info",
+                "ttl_seconds": 3600,
+                "source": "brain-adapter",
+                "persistent": True,
+            }
+        ]
+        first = reconcile_channel_broadcasts("brain", desired)
+        brain_id = next(m["id"] for m in _load_broadcasts() if m.get("channel") == "brain")
+        second = reconcile_channel_broadcasts("brain", desired)
+        messages = _load_broadcasts()
+
+        assert first == {
+            "changed": True,
+            "created": 1,
+            "created_ids": [brain_id],
+            "removed": 0,
+            "active": 1,
+        }
+        assert second == {
+            "changed": False,
+            "created": 0,
+            "created_ids": [],
+            "removed": 0,
+            "active": 1,
+        }
+        assert next(m["id"] for m in messages if m.get("channel") == "brain") == brain_id
+        assert next(m["id"] for m in messages if m.get("channel") == "ops") == other_id
+
+    def test_replaces_expired_entry_with_same_content(self, broadcast_file):
+        from hooks.context.broadcast import (
+            _load_broadcasts,
+            _save_broadcasts,
+            reconcile_channel_broadcasts,
+        )
+
+        desired = [
+            {
+                "message": "brain state",
+                "severity": "info",
+                "ttl_seconds": 3600,
+                "source": "brain-adapter",
+                "persistent": True,
+            }
+        ]
+        reconcile_channel_broadcasts("brain", desired)
+        messages = _load_broadcasts()
+        old_id = messages[0]["id"]
+        messages[0]["expires_at"] = "2000-01-01T00:00:00Z"
+        _save_broadcasts(messages)
+
+        result = reconcile_channel_broadcasts("brain", desired)
+        current = _load_broadcasts()
+
+        assert result["created"] == 1
+        assert current[0]["id"] != old_id
+
+    def test_authoritative_empty_removes_only_target_channel(self, broadcast_file):
+        from hooks.context.broadcast import (
+            _load_broadcasts,
+            create_broadcast,
+            reconcile_channel_broadcasts,
+        )
+
+        create_broadcast("brain", channel="brain")
+        other_id = create_broadcast("other", channel="ops")
+        result = reconcile_channel_broadcasts("brain", [])
+
+        assert result["removed"] == 1
+        assert [m["id"] for m in _load_broadcasts()] == [other_id]
+
+    def test_new_brain_messages_render_for_pretool_context(self, broadcast_file):
+        from hooks.context.broadcast import get_broadcast_context, reconcile_channel_broadcasts
+
+        result = reconcile_channel_broadcasts(
+            "brain",
+            [
+                {
+                    "message": "[Recent Lessons]\nlesson",
+                    "severity": "info",
+                    "source": "brain-adapter",
+                    "persistent": True,
+                }
+            ],
+        )
+        with patch("hooks.context.broadcast._get_session_channels", return_value=["brain"]):
+            context = get_broadcast_context("session", result["created_ids"])
+            repeated = get_broadcast_context("session", result["created_ids"])
+
+        assert "Recent Lessons" in context
+        assert "lesson" in context
+        assert repeated is None
 
 
 class TestLeftoverDirectedMessages:

@@ -6,7 +6,7 @@ subscribed sessions.
 
 Source types:
     file — reads markdown files from a directory (NFS mount, vault path, etc.)
-    mcp  — (future) fetches from an MCP tool or API endpoint
+    http — reads the kernel brain-api feed
 
 Brain files use YAML frontmatter:
     ---
@@ -23,10 +23,10 @@ Config (env vars via hooks.config):
     BRAIN_SOURCE_TYPE (str, default "file")
     BRAIN_SOURCE_PATH (str, default ~/.agentihooks/brain)
     BRAIN_CHANNEL (str, default "brain")
-    BRAIN_REFRESH_INTERVAL (int, default 30 turns)
+    BRAIN_REFRESH_TOOL_CALLS (int, default 20 tool calls)
 
 Public API:
-    maybe_refresh(session_id)  — called from on_user_prompt_submit, counter-gated
+    maybe_refresh_on_tool_call(session_id, tool_call_count) — called from PreToolUse
     force_refresh()            — force re-read and republish
     get_status()               — return current brain state dict
     inject_on_session_start()  — one-shot injection at session start
@@ -39,11 +39,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hooks._redis import get_redis, redis_key
 from hooks.common import log
 
-# In-memory state
-_memory_counter: dict[str, int] = {}
 _content_hash: str = ""
 from hooks.config import AGENTIHOOKS_HOME
 
@@ -156,6 +153,10 @@ class BrainSource:
         raise NotImplementedError
 
 
+class BrainSourceUnavailable(RuntimeError):
+    pass
+
+
 class FileBrainSource(BrainSource):
     """Reads brain content from a directory of markdown files with YAML frontmatter."""
 
@@ -164,7 +165,7 @@ class FileBrainSource(BrainSource):
 
     def fetch(self) -> list[BrainEntry]:
         if not self.brain_dir.is_dir():
-            return []
+            raise BrainSourceUnavailable(f"brain source directory unavailable: {self.brain_dir}")
 
         entries = []
         for md_file in sorted(self.brain_dir.glob("*.md")):
@@ -200,17 +201,15 @@ class HttpBrainSource(BrainSource):
     `feed_payload()` in kb-router: hot_arcs + inject_blocks + entries, each
     carrying the same frontmatter fields that FileBrainSource produces.
 
-    On any HTTP error the source returns an empty list; upstream logic
-    ("force_refresh") then clears the broadcast channel. Callers that want
-    to keep prior state on failure should layer that themselves.
+    HTTP failures raise so the adapter can preserve last-known-good context.
     """
 
     def fetch(self) -> list[BrainEntry]:
         from hooks._brain_http import get
 
         payload = get("/feed")
-        if not payload or not isinstance(payload, dict):
-            return []
+        if not isinstance(payload, dict) or not any(key in payload for key in ("hot_arcs", "inject_blocks", "entries")):
+            raise BrainSourceUnavailable("brain-api /feed unavailable or invalid")
 
         entries: list[BrainEntry] = []
         buckets = [
@@ -349,8 +348,8 @@ def _shrink_entry(entry: BrainEntry, top_n: int, max_bytes: int) -> BrainEntry:
     )
 
 
-def _publish_entries(entries: list[BrainEntry]) -> int:
-    """Publish brain entries to the broadcast channel. Returns count published."""
+def _publish_entries(entries: list[BrainEntry]) -> dict:
+    """Publish brain entries to the broadcast channel."""
     try:
         from hooks.config import (
             BRAIN_CHANNEL,
@@ -358,14 +357,9 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
             BRAIN_PAYLOAD_MAX_BYTES,
         )
     except ImportError:
-        return 0
+        return {"changed": False, "created": 0, "created_ids": [], "removed": 0, "active": 0}
 
-    from hooks.context.broadcast import (
-        _load_broadcasts,
-        _msg_hash,
-        _save_broadcasts,
-        create_broadcast,
-    )
+    from hooks.context.broadcast import _msg_hash, reconcile_channel_broadcasts
     from hooks.telemetry import span_ctx
 
     entries = [_shrink_entry(e, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES) for e in entries]
@@ -395,83 +389,65 @@ def _publish_entries(entries: list[BrainEntry]) -> int:
             }
             new_hashes[_msg_hash(probe)] = entry
 
-        existing = _load_broadcasts()
-        kept_hashes: set[str] = set()
-        rest: list[dict] = []
-        for m in existing:
-            if m.get("channel") == BRAIN_CHANNEL:
-                h = m.get("content_hash")
-                if h and h in new_hashes:
-                    rest.append(m)
-                    kept_hashes.add(h)
-                # else: drop — content no longer in batch
-            else:
-                rest.append(m)
-        _save_broadcasts(rest)
-
-        count = 0
-        for h, entry in new_hashes.items():
-            if h in kept_hashes:
-                continue  # content already live with a stable id, do not re-mint
-            msg_id = create_broadcast(
-                message=f"[{entry.title}]\n{entry.content}",
-                severity=entry.severity,
-                ttl_seconds=entry.ttl,
-                source="brain-adapter",
-                persistent=True,  # Brain content should be persistent (every turn)
-                channel=BRAIN_CHANNEL,
-            )
-            if msg_id:
-                count += 1
-
-        span.set_attrs({"published_count": count, "kept_count": len(kept_hashes)})
-        return count
+        result = reconcile_channel_broadcasts(
+            BRAIN_CHANNEL,
+            [
+                {
+                    "message": f"[{entry.title}]\n{entry.content}",
+                    "severity": entry.severity,
+                    "ttl_seconds": entry.ttl,
+                    "source": "brain-adapter",
+                    "persistent": True,
+                }
+                for entry in new_hashes.values()
+            ],
+        )
+        span.set_attrs(
+            {
+                "published_count": result["created"],
+                "removed_count": result["removed"],
+                "active_count": result["active"],
+            }
+        )
+        return result
 
 
 def _compute_hash(entries: list[BrainEntry]) -> str:
     """Compute a hash of entries to detect changes."""
+    try:
+        from hooks.config import BRAIN_CHANNEL, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES
+    except ImportError:
+        BRAIN_CHANNEL, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES = "brain", 10, 1536
     raw = json.dumps(
-        [{"id": e.id, "content": e.content, "priority": e.priority} for e in entries],
+        {
+            "channel": BRAIN_CHANNEL,
+            "hot_arcs_top_n": BRAIN_HOT_ARCS_TOP_N,
+            "payload_max_bytes": BRAIN_PAYLOAD_MAX_BYTES,
+            "entries": [
+                {
+                    "id": e.id,
+                    "title": e.title,
+                    "content": e.content,
+                    "priority": e.priority,
+                    "ttl": e.ttl,
+                    "severity": e.severity,
+                    "metadata": e.metadata,
+                }
+                for e in entries
+            ],
+        },
         sort_keys=True,
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
-# Turn counter (per-session, Redis + file fallback)
+# Tool-call refresh
 # ---------------------------------------------------------------------------
 
 
-def _get_counter(session_id: str) -> int:
-    r = get_redis()
-    if r is not None:
-        try:
-            val = r.get(redis_key("brain_adapter", session_id))
-            return int(val) if val else 0
-        except Exception:
-            pass
-    return _memory_counter.get(session_id, 0)
-
-
-def _set_counter(session_id: str, value: int) -> None:
-    r = get_redis()
-    if r is not None:
-        try:
-            r.set(redis_key("brain_adapter", session_id), value, ex=86400)
-            return
-        except Exception:
-            pass
-    _memory_counter[session_id] = value
-
-
 def clear_session_state(session_id: str) -> None:
-    r = get_redis()
-    if r is not None:
-        try:
-            r.delete(redis_key("brain_adapter", session_id))
-        except Exception:
-            pass
-    _memory_counter.pop(session_id, None)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -479,30 +455,30 @@ def clear_session_state(session_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def maybe_refresh(session_id: str) -> bool:
-    """Called on UserPromptSubmit. Counter-gated refresh. Returns True if refreshed."""
-    global _content_hash
-
+def maybe_refresh_on_tool_call(
+    session_id: str,
+    tool_call_count: int,
+    *,
+    claim_delivery: bool = True,
+) -> str | None:
     try:
-        from hooks.config import BRAIN_ENABLED, BRAIN_REFRESH_INTERVAL
+        from hooks.config import BRAIN_ENABLED, BRAIN_REFRESH_TOOL_CALLS
     except ImportError:
-        return False
+        return None
 
-    if not BRAIN_ENABLED:
-        return False
+    if not BRAIN_ENABLED or tool_call_count <= 0:
+        return None
+    if tool_call_count % max(1, BRAIN_REFRESH_TOOL_CALLS) != 0:
+        return None
+    result = _refresh()
+    if not result or not claim_delivery:
+        return None
+    from hooks.context.broadcast import get_broadcast_context
 
-    count = _get_counter(session_id) + 1
-    _set_counter(session_id, count)
-
-    interval = max(1, BRAIN_REFRESH_INTERVAL)
-    if count % interval != 0 and count != 1:
-        return False
-
-    return force_refresh()
+    return get_broadcast_context(session_id, result["created_ids"])
 
 
-def force_refresh() -> bool:
-    """Force re-read source and republish if changed. Returns True if published."""
+def _refresh() -> dict | None:
     global _content_hash
 
     # Same reason as get_status: a long-lived caller must not republish from a
@@ -514,45 +490,36 @@ def force_refresh() -> bool:
     except Exception:  # noqa: BLE001 - a reload hiccup must not block a refresh
         pass
 
-    # Hook runs in fresh Python process every prompt — module-level
-    # _content_hash starts empty. Hydrate it from persisted file so we can
-    # dedup across process boundaries. Without this, every prompt re-publishes
-    # identical content with a fresh expires_at timestamp, which defeats
-    # prompt caching (every broadcast block differs by one UUID + one Z-time).
-    if not _content_hash:
-        _content_hash = _load_persisted_hash()
-
     source = _get_source()
     if source is None:
-        return False
+        return None
 
     try:
         entries = source.fetch()
     except Exception as e:
         log("brain_adapter: source fetch failed", {"error": str(e)})
-        return False
-
-    if not entries:
-        # No brain content — clear channel
-        try:
-            from hooks.config import BRAIN_CHANNEL
-            from hooks.context.broadcast import clear_broadcasts
-
-            clear_broadcasts(channel=BRAIN_CHANNEL)
-        except Exception:
-            pass
-        _content_hash = ""
-        return False
+        return None
 
     new_hash = _compute_hash(entries)
-    if new_hash == _content_hash:
-        return False
-
-    count = _publish_entries(entries)
+    result = _publish_entries(entries)
     _content_hash = new_hash
     _save_persisted_hash(new_hash)
-    log("brain_adapter: published", {"count": count, "hash": new_hash})
-    return True
+    log(
+        "brain_adapter: published",
+        {
+            "created": result["created"],
+            "removed": result["removed"],
+            "active": result["active"],
+            "hash": new_hash,
+        },
+    )
+    return result
+
+
+def force_refresh() -> bool:
+    """Force re-read and atomically reconcile the source."""
+    result = _refresh()
+    return bool(result and result["changed"])
 
 
 def inject_on_session_start() -> bool:
@@ -589,7 +556,7 @@ def get_status() -> dict:
             BRAIN_CHANNEL,
             BRAIN_ENABLED,
             BRAIN_HTTP_TOKEN,
-            BRAIN_REFRESH_INTERVAL,
+            BRAIN_REFRESH_TOOL_CALLS,
             BRAIN_SOURCE_PATH,
             BRAIN_SOURCE_TYPE,
             BRAIN_URL,
@@ -599,11 +566,12 @@ def get_status() -> dict:
 
     source = _get_source()
     entry_count = 0
+    source_error = ""
     if source:
         try:
             entry_count = len(source.fetch())
-        except Exception:
-            pass
+        except Exception as exc:
+            source_error = str(exc)
 
     # source_type/source_path describe the file fallback; when BRAIN_URL is set
     # the adapter is on HTTP and those two are not what it reads. Report the
@@ -621,6 +589,22 @@ def get_status() -> dict:
             "BRAIN_URL is set with no BRAIN_HTTP_TOKEN or KB_ROUTER_TOKEN — "
             "every read and every marker POST answers 401"
         )
+    if source_error:
+        warnings.append(f"brain source unavailable — {source_error}")
+
+    active_broadcasts = 0
+    try:
+        from hooks.context.broadcast import _load_broadcasts
+
+        active_broadcasts = sum(
+            1
+            for message in _load_broadcasts(cleanup=True)
+            if message.get("channel") == BRAIN_CHANNEL and message.get("source") == "brain-adapter"
+        )
+    except Exception:
+        pass
+    if not source_error and entry_count != active_broadcasts:
+        warnings.append(f"brain feed has {entry_count} entries but channel has {active_broadcasts} active broadcasts")
 
     return {
         "enabled": BRAIN_ENABLED,
@@ -629,8 +613,9 @@ def get_status() -> dict:
         "source_type": BRAIN_SOURCE_TYPE,
         "source_path": str(BRAIN_SOURCE_PATH),
         "channel": BRAIN_CHANNEL,
-        "refresh_interval": BRAIN_REFRESH_INTERVAL,
+        "refresh_tool_calls": BRAIN_REFRESH_TOOL_CALLS,
         "entry_count": entry_count,
-        "content_hash": _content_hash,
+        "active_broadcasts": active_broadcasts,
+        "content_hash": _content_hash or _load_persisted_hash(),
         "warnings": warnings,
     }

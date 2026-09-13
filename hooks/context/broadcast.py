@@ -240,7 +240,7 @@ def _sessions_path() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _load_broadcasts(cleanup: bool = False) -> list[dict]:
+def _read_broadcasts() -> list[dict]:
     path = _broadcast_path()
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -252,13 +252,20 @@ def _load_broadcasts(cleanup: bool = False) -> list[dict]:
     if not isinstance(data, list):
         return []
 
-    if cleanup:
-        now = datetime.now(timezone.utc)
-        before = len(data)
-        data = [m for m in data if not _is_expired(m, now)]
-        if len(data) != before:
-            _save_broadcasts(data)
+    return data
 
+
+def _load_broadcasts(cleanup: bool = False) -> list[dict]:
+    data = _read_broadcasts()
+    if not cleanup:
+        return data
+    path = _broadcast_path()
+    now = datetime.now(timezone.utc)
+    if not any(_is_expired(m, now) for m in data):
+        return data
+    with _file_lock(path):
+        data = [m for m in _read_broadcasts() if not _is_expired(m, now)]
+        _save_broadcasts(data)
     return data
 
 
@@ -353,6 +360,44 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _build_broadcast(
+    message: str,
+    severity: str = "info",
+    ttl_seconds: int = 0,
+    source: str = "operator",
+    persistent: bool | None = None,
+    channel: str | None = None,
+) -> dict | None:
+    if not message or not message.strip():
+        return None
+
+    if severity not in _VALID_SEVERITIES:
+        severity = "alert"
+
+    if ttl_seconds <= 0:
+        ttl_seconds = _DEFAULT_TTL.get(severity, 3600)
+
+    if persistent is None:
+        persistent = _DEFAULT_PERSISTENT.get(severity, True)
+
+    now = datetime.now(timezone.utc)
+    entry = {
+        "id": str(uuid.uuid4())[:12],
+        "message": message.strip(),
+        "severity": severity,
+        "persistent": persistent,
+        "source": source,
+        "created_at": now.isoformat().replace("+00:00", "Z"),
+        "ttl_seconds": ttl_seconds,
+        "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z"),
+        "delivered_to": [],
+    }
+    if channel:
+        entry["channel"] = channel
+    entry["content_hash"] = _msg_hash(entry)
+    return entry
+
+
 def create_broadcast(
     message: str,
     severity: str = "info",
@@ -381,42 +426,12 @@ def create_broadcast(
     Returns:
         The 12-char message ID on success, or ``None`` for empty input.
     """
-    if not message or not message.strip():
+    entry = _build_broadcast(message, severity, ttl_seconds, source, persistent, channel)
+    if entry is None:
         return None
 
-    if severity not in _VALID_SEVERITIES:
-        severity = "alert"
-
-    if ttl_seconds <= 0:
-        ttl_seconds = _DEFAULT_TTL.get(severity, 3600)
-
-    if persistent is None:
-        persistent = _DEFAULT_PERSISTENT.get(severity, True)
-
-    now = datetime.now(timezone.utc)
-    msg_id = str(uuid.uuid4())[:12]
-    expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z")
-
-    entry = {
-        "id": msg_id,
-        "message": message.strip(),
-        "severity": severity,
-        "persistent": persistent,
-        "source": source,
-        "created_at": now.isoformat().replace("+00:00", "Z"),
-        "ttl_seconds": ttl_seconds,
-        "expires_at": expires_at,
-        "delivered_to": [],
-    }
-    if channel:
-        entry["channel"] = channel
-    # Stable content hash decouples dedup from the random uuid above so the
-    # brain adapter (which republishes the same content with fresh ids each
-    # tick) does not generate false-novelty injections.
-    entry["content_hash"] = _msg_hash(entry)
-
     with _file_lock(_broadcast_path()):
-        msgs = _load_broadcasts()
+        msgs = _read_broadcasts()
         msgs.append(entry)
 
         # Enforce max messages — keep newest
@@ -424,7 +439,64 @@ def create_broadcast(
             msgs = msgs[-BROADCAST_MAX_MESSAGES:]
 
         _save_broadcasts(msgs)
-    return msg_id
+    return entry["id"]
+
+
+def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
+    built = []
+    for item in desired:
+        entry = _build_broadcast(
+            item.get("message", ""),
+            item.get("severity", "info"),
+            int(item.get("ttl_seconds", 0) or 0),
+            item.get("source", "operator"),
+            item.get("persistent"),
+            channel,
+        )
+        if entry is not None:
+            built.append(entry)
+
+    path = _broadcast_path()
+    with _file_lock(path):
+        now = datetime.now(timezone.utc)
+        current = [m for m in _read_broadcasts() if not _is_expired(m, now)]
+        outside = [m for m in current if m.get("channel") != channel]
+        existing = [m for m in current if m.get("channel") == channel]
+        kept_ids: set[str] = set()
+        resolved = []
+        for entry in built:
+            match = next(
+                (
+                    m
+                    for m in existing
+                    if m.get("id") not in kept_ids
+                    and m.get("content_hash") == entry["content_hash"]
+                    and m.get("ttl_seconds") == entry["ttl_seconds"]
+                    and bool(m.get("persistent")) == bool(entry["persistent"])
+                    and m.get("source") == entry["source"]
+                ),
+                None,
+            )
+            if match is not None:
+                kept_ids.add(match["id"])
+                resolved.append(match)
+            else:
+                resolved.append(entry)
+
+        messages = outside + resolved
+        if len(messages) > BROADCAST_MAX_MESSAGES:
+            messages = messages[-BROADCAST_MAX_MESSAGES:]
+        changed = messages != current
+        if changed:
+            _save_broadcasts(messages)
+
+    return {
+        "changed": changed,
+        "created": sum(1 for m in resolved if m["id"] not in kept_ids),
+        "created_ids": [m["id"] for m in resolved if m["id"] not in kept_ids],
+        "removed": len(existing) - len(kept_ids),
+        "active": len(resolved),
+    }
 
 
 def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
@@ -452,20 +524,19 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
     If channel: clear all messages on that channel.
     If neither: clear everything.
     """
-    msgs = _load_broadcasts()
-    if message_id is None and channel is None:
-        count = len(msgs)
-        _save_broadcasts([])
-        return count
-    if channel:
-        remaining = [m for m in msgs if m.get("channel") != channel]
+    with _file_lock(_broadcast_path()):
+        msgs = _read_broadcasts()
+        if message_id is None and channel is None:
+            count = len(msgs)
+            _save_broadcasts([])
+            return count
+        if channel:
+            remaining = [m for m in msgs if m.get("channel") != channel]
+        else:
+            remaining = [m for m in msgs if m.get("id") != message_id]
         count = len(msgs) - len(remaining)
         _save_broadcasts(remaining)
         return count
-    remaining = [m for m in msgs if m.get("id") != message_id]
-    count = len(msgs) - len(remaining)
-    _save_broadcasts(remaining)
-    return count
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +590,30 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
     ]
 
 
+def get_unseen_broadcasts(session_id: str, *, claim: bool = False) -> list[dict]:
+    def select(msgs: list[dict]) -> list[dict]:
+        channels = _get_session_channels(session_id)
+        return [
+            msg
+            for msg in msgs
+            if not _is_expired(msg)
+            and _message_matches_channel(msg, channels)
+            and session_id not in msg.get("acknowledged_by", [])
+            and session_id not in msg.get("delivered_to", [])
+        ]
+
+    if not claim:
+        return select(_load_broadcasts(cleanup=True))
+    with _file_lock(_broadcast_path()):
+        msgs = _load_broadcasts()
+        unseen = select(msgs)
+        for msg in unseen:
+            msg.setdefault("delivered_to", []).append(session_id)
+        if unseen:
+            _save_broadcasts(msgs)
+        return unseen
+
+
 def get_pretool_broadcasts(session_id: str) -> list[dict]:
     """Return persistent broadcasts at or above the configured severity threshold.
 
@@ -532,29 +627,37 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
     min_rank = _SEVERITY_RANK.get(BROADCAST_PRETOOL_MIN_SEVERITY, 2)
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
-    out = []
+    out = {msg["id"]: msg for msg in get_unseen_broadcasts(session_id)}
     for m in msgs:
-        if not m.get("persistent") or _is_expired(m) or session_id in m.get("acknowledged_by", []):
-            continue
         if (
-            BROADCAST_CRITICAL_ON_PRETOOL
-            and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank
-            and _message_matches_channel(m, channels)
+            not m.get("persistent")
+            or _is_expired(m)
+            or session_id in m.get("acknowledged_by", [])
+            or not _message_matches_channel(m, channels)
         ):
-            out.append(m)
-    return out
+            continue
+        if BROADCAST_CRITICAL_ON_PRETOOL and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank:
+            out[m["id"]] = m
+    return list(out.values())
+
+
+def claim_delivery(session_id: str, message_id: str) -> bool:
+    with _file_lock(_broadcast_path()):
+        msgs = _load_broadcasts()
+        for msg in msgs:
+            if msg.get("id") != message_id:
+                continue
+            delivered = msg.setdefault("delivered_to", [])
+            if session_id in delivered:
+                return False
+            delivered.append(session_id)
+            _save_broadcasts(msgs)
+            return True
+    return False
 
 
 def mark_delivered(session_id: str, message_id: str) -> None:
-    msgs = _load_broadcasts()
-    for m in msgs:
-        if m.get("id") == message_id:
-            delivered = m.get("delivered_to", [])
-            if session_id not in delivered:
-                delivered.append(session_id)
-                m["delivered_to"] = delivered
-            break
-    _save_broadcasts(msgs)
+    claim_delivery(session_id, message_id)
 
 
 def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
@@ -563,15 +666,16 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
     Acknowledged messages stop re-injecting for this session but remain
     active for other sessions that haven't acknowledged.
     """
-    msgs = _load_broadcasts()
-    for m in msgs:
-        if m.get("id") == message_id:
-            acked = m.get("acknowledged_by", [])
-            if session_id not in acked:
-                acked.append(session_id)
-                m["acknowledged_by"] = acked
-            _save_broadcasts(msgs)
-            return True
+    with _file_lock(_broadcast_path()):
+        msgs = _read_broadcasts()
+        for m in msgs:
+            if m.get("id") == message_id:
+                acked = m.get("acknowledged_by", [])
+                if session_id not in acked:
+                    acked.append(session_id)
+                    m["acknowledged_by"] = acked
+                _save_broadcasts(msgs)
+                return True
     return False
 
 
@@ -843,27 +947,56 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 emit_span("brain.delivery", span_attrs)
                 continue
 
+            first_delivery = claim_delivery(session_id, msg["id"])
+            if not msg.get("persistent") and not first_delivery:
+                continue
+
             banner = format_broadcast_banner(msg)
             inject_banner("BROADCAST", banner)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
-            if not msg.get("persistent"):
-                mark_delivered(session_id, msg["id"])
     except Exception:
         pass
 
 
-def get_pretool_context(session_id: str) -> str | None:
+def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
     # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
     # layer only checks whether broadcasts are enabled at all.
     if not BROADCAST_ENABLED:
         return None
 
     try:
-        msgs = get_pretool_broadcasts(session_id)
+        unseen = get_unseen_broadcasts(session_id, claim=claim_unseen)
+        msgs = {msg["id"]: msg for msg in unseen}
+        for msg in get_pretool_broadcasts(session_id):
+            if session_id in msg.get("delivered_to", []) or claim_unseen:
+                msgs[msg["id"]] = msg
+        msgs = list(msgs.values())
         if not msgs:
             return None
         return format_critical_context(msgs)
     except Exception:
         return None
+
+
+def get_posttool_context(session_id: str) -> str | None:
+    return get_pretool_context(session_id, claim_unseen=True)
+
+
+def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None:
+    wanted = set(message_ids)
+    if not wanted:
+        return None
+    pending = [message for message in get_pending_broadcasts(session_id) if message.get("id") in wanted]
+    pending.sort(key=lambda message: _SEVERITY_RANK.get(message.get("severity", "info"), 9))
+    now_ts = time.time()
+    banners = []
+    for message in pending:
+        if _body_is_empty(message) or len(banners) >= BROADCAST_MAX_PER_PROMPT:
+            continue
+        if not claim_delivery(session_id, message["id"]):
+            continue
+        banners.append(format_broadcast_banner(message))
+        _record_delivery(session_id, message, now_ts)
+    return "\n\n".join(banners) or None

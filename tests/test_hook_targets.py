@@ -444,6 +444,55 @@ class TestSessionIdBannerHost:
         assert "Your Claude Code session_id" in self._banner(monkeypatch, "claude")
 
 
+class TestSessionStartEnforcements:
+    def test_injects_all_enforcements_for_project_cwd(self, claude, monkeypatch):
+        import hooks.common as common
+        import hooks.context.enforcement as enforcement
+        import hooks.hook_manager as hm
+
+        captured = []
+        calls = []
+        monkeypatch.setattr(common, "inject_context", lambda message, *args, **kwargs: captured.append(message))
+        monkeypatch.setattr(
+            enforcement,
+            "get_session_start_enforcements",
+            lambda session_id, cwd: calls.append((session_id, cwd)) or "all session enforcements",
+        )
+        hm.on_session_start(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": "session-start-enforcement",
+                "cwd": "/project",
+            }
+        )
+        assert calls == [("session-start-enforcement", "/project")]
+        assert "all session enforcements" in captured
+
+    def test_user_prompt_injects_new_enforcements(self, claude, monkeypatch):
+        import hooks.common as common
+        import hooks.context.enforcement as enforcement
+        import hooks.hook_manager as hm
+
+        captured = []
+        calls = []
+        monkeypatch.setattr(common, "inject_context", lambda message, *args, **kwargs: captured.append(message))
+        monkeypatch.setattr(
+            enforcement,
+            "get_user_prompt_enforcements",
+            lambda session_id, cwd: calls.append((session_id, cwd)) or "new enforcement",
+        )
+        hm.on_user_prompt_submit(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "running-session",
+                "prompt": "continue",
+                "cwd": "/project",
+            }
+        )
+        assert calls == [("running-session", "/project")]
+        assert "new enforcement" in captured
+
+
 class TestPreToolUseLogAttribution:
     """The hook log is machine-global; a line with no session_id cannot be
     attributed to the session that wrote it (PostToolUse already carries one)."""
@@ -473,12 +522,14 @@ class TestPreToolUseLogAttribution:
 class TestCodexEnforcementFallback:
     def test_posttool_injects_due_enforcement_with_project_cwd(self, codex, monkeypatch):
         import hooks.common as common
+        import hooks.context.broadcast as broadcast
         import hooks.context.enforcement as enforcement
         import hooks.hook_manager as hm
 
         captured = []
         calls = []
         monkeypatch.setattr(common, "inject_context", lambda message, **kwargs: captured.append(message))
+        monkeypatch.setattr(broadcast, "get_posttool_context", lambda session_id: None)
         monkeypatch.setattr(
             enforcement,
             "get_posttool_enforcements",

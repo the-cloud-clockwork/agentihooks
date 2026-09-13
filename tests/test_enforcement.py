@@ -16,9 +16,11 @@ def _clean_enforcement(tmp_path):
     """Redirect enforcement state files to tmp dir; disable bundle/profile loading by default."""
     store = tmp_path / "enforcements.json"
     counters = tmp_path / "enforcement_counters.json"
+    delivery = tmp_path / "enforcement_delivery_state.json"
     with (
         patch("hooks.context.enforcement._store_path", return_value=store),
         patch("hooks.context.enforcement._counter_path", return_value=counters),
+        patch("hooks.context.enforcement._delivery_path", return_value=delivery),
         patch("hooks.context.enforcement._get_bundle_path", return_value=None),
         patch("hooks.context.enforcement._get_active_profile", return_value=None),
     ):
@@ -172,7 +174,9 @@ class TestPretoolEntry:
 
         add_enforcement("no patches — code only", 3)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
-            assert get_pretool_enforcements("sess-1") is None  # count=1
+            first = get_pretool_enforcements("sess-1")  # count=1
+            assert first is not None
+            assert "no patches — code only" in first
             assert get_pretool_enforcements("sess-1") is None  # count=2
             ctx = get_pretool_enforcements("sess-1")  # count=3
             assert ctx is not None
@@ -189,6 +193,87 @@ class TestPretoolEntry:
         add_enforcement("msg", 1)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", False):
             assert get_pretool_enforcements("sess-1") is None
+
+    def test_accepts_shared_tool_call_count_without_incrementing_twice(self):
+        from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
+
+        add_enforcement("shared counter", 10)
+        with (
+            patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True),
+            patch("hooks.context.enforcement.increment_and_get_count") as increment,
+        ):
+            context = get_pretool_enforcements("sess-1", tool_call_count=10)
+        increment.assert_not_called()
+        assert "shared counter" in context
+
+
+class TestSessionStartEntry:
+    def test_injects_every_enforcement_without_advancing_counter(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_session_start_enforcements,
+            increment_and_get_count,
+        )
+
+        add_enforcement("first rule", 3)
+        add_enforcement("second rule", 7)
+        assert increment_and_get_count("session-start") == 1
+        context = get_session_start_enforcements("session-start")
+        assert context is not None
+        assert "first rule" in context
+        assert "second rule" in context
+        assert increment_and_get_count("session-start") == 2
+
+    def test_disabled_returns_none(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("rule", 3)
+        with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", False):
+            assert get_session_start_enforcements("session-start") is None
+
+    def test_session_start_delivers_each_id_once(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("initial rule", 10)
+        first = get_session_start_enforcements("session-start")
+        assert first is not None
+        assert "initial rule" in first
+        assert get_session_start_enforcements("session-start") is None
+
+    def test_new_rule_uses_next_prompt_then_waits_for_cadence(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_pretool_enforcements,
+            get_session_start_enforcements,
+            get_user_prompt_enforcements,
+        )
+
+        add_enforcement("initial rule", 10)
+        assert get_session_start_enforcements("running") is not None
+        add_enforcement("new rule", 10)
+        prompt = get_user_prompt_enforcements("running")
+        assert prompt is not None
+        assert "new rule" in prompt
+        assert "initial rule" not in prompt
+        assert get_user_prompt_enforcements("running") is None
+        assert get_pretool_enforcements("running") is None
+
+    def test_codex_posttool_claims_first_delivery(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_posttool_enforcements,
+            get_pretool_enforcements,
+            get_user_prompt_enforcements,
+        )
+
+        add_enforcement("new rule", 10)
+        pretool = get_pretool_enforcements("codex-running", claim_unseen=False)
+        assert pretool is not None
+        assert "new rule" in pretool
+        posttool = get_posttool_enforcements("codex-running")
+        assert posttool is not None
+        assert "new rule" in posttool
+        assert get_user_prompt_enforcements("codex-running") is None
 
 
 class TestBannerFormat:
@@ -320,8 +405,48 @@ class TestThreeSourceMerge:
             assert len(runtime) == 0
             assert len(after) == before - 1
 
+    def test_linked_profile_enforcement_loads_from_active_chain(self, bundle_dir, tmp_path):
+        from hooks.context.enforcement import load_all_enforcements
+
+        linked = tmp_path / "brain"
+        linked.mkdir()
+        (linked / "enforcements.json").write_text(
+            json.dumps(
+                {
+                    "enforcements": [
+                        {
+                            "id": "brain-usage",
+                            "message": "use brain tools",
+                            "cadence": 10,
+                            "tag": "brain-usage",
+                        }
+                    ]
+                }
+            )
+        )
+        with (
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+            patch("hooks.context.enforcement._get_active_profile", return_value="testprofile,brain"),
+            patch("hooks.context.enforcement._get_linked_profiles", return_value={"brain": linked}),
+        ):
+            entries = load_all_enforcements()
+
+        brain = next(entry for entry in entries if entry["id"] == "brain-usage")
+        assert brain["source"] == "profile"
+        assert brain["cadence"] == 10
+
 
 class TestLocalEnforcement:
+    def test_session_start_includes_global_and_project_local(self, local_repo):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        add_enforcement("global rule", 5)
+        add_enforcement("local rule", 10, local=True, cwd=local_repo)
+        context = get_session_start_enforcements("local-session", local_repo)
+        assert context is not None
+        assert "global rule" in context
+        assert "local rule" in context
+
     def test_set_creates_project_store(self, local_repo):
         from hooks.context.enforcement import add_enforcement, list_enforcements
 
@@ -387,7 +512,8 @@ class TestLocalEnforcement:
 
         add_enforcement("tenth-call canary", 10, local=True, cwd=local_repo)
         with patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True):
-            for _ in range(9):
+            assert "tenth-call canary" in get_pretool_enforcements("local-session", local_repo)
+            for _ in range(8):
                 assert get_pretool_enforcements("local-session", local_repo) is None
             assert get_posttool_enforcements("local-session", local_repo) is None
             banner = get_pretool_enforcements("local-session", local_repo)

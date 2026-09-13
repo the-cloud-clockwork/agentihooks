@@ -26,7 +26,7 @@ _BRAIN_KEYS = (
     "BRAIN_SOURCE_PATH",
     "BRAIN_SOURCE_TYPE",
     "BRAIN_CHANNEL",
-    "BRAIN_REFRESH_INTERVAL",
+    "BRAIN_REFRESH_TOOL_CALLS",
     "BRAIN_HTTP_TIMEOUT",
     "BRAIN_HOT_ARCS_TOP_N",
     "BRAIN_PAYLOAD_MAX_BYTES",
@@ -128,11 +128,11 @@ def test_brain_owned_client_policy_is_loaded_from_agentibrain(brain_env, monkeyp
     brain_home = tmp_path / ".agentibrain"
     brain_home.mkdir()
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(brain_home))
-    (hooks_home / ".env").write_text("BRAIN_CHANNEL=wrong-owner\nBRAIN_REFRESH_INTERVAL=99\n")
+    (hooks_home / ".env").write_text("BRAIN_CHANNEL=wrong-owner\nBRAIN_REFRESH_TOOL_CALLS=99\n")
     (brain_home / ".env").write_text(
         "BRAIN_SOURCE_TYPE=file\n"
         "BRAIN_CHANNEL=memory\n"
-        "BRAIN_REFRESH_INTERVAL=17\n"
+        "BRAIN_REFRESH_TOOL_CALLS=17\n"
         "BRAIN_HTTP_TIMEOUT=4\n"
         "BRAIN_HOT_ARCS_TOP_N=7\n"
         "BRAIN_PAYLOAD_MAX_BYTES=2048\n"
@@ -142,7 +142,7 @@ def test_brain_owned_client_policy_is_loaded_from_agentibrain(brain_env, monkeyp
 
     assert config.BRAIN_SOURCE_TYPE == "file"
     assert config.BRAIN_CHANNEL == "memory"
-    assert config.BRAIN_REFRESH_INTERVAL == 17
+    assert config.BRAIN_REFRESH_TOOL_CALLS == 17
     assert config.BRAIN_HTTP_TIMEOUT == 4
     assert config.BRAIN_HOT_ARCS_TOP_N == 7
     assert config.BRAIN_PAYLOAD_MAX_BYTES == 2048
@@ -158,6 +158,7 @@ def _adapter_with_stub_source(monkeypatch):
 
     importlib.reload(adapter)
     monkeypatch.setattr(adapter, "_get_source", lambda: _StubSource())
+    monkeypatch.setattr("hooks.context.broadcast._load_broadcasts", lambda cleanup=False: [])
     return adapter
 
 
@@ -173,6 +174,30 @@ def test_status_warns_when_a_source_resolved_but_the_adapter_is_off(brain_env, m
 
     assert status["enabled"] is False
     assert any("BRAIN_ENABLED is false" in w for w in status["warnings"])
+
+
+def test_status_ignores_coordination_messages_on_the_brain_channel(brain_env, monkeypatch):
+    _, load = brain_env
+    load()
+    import hooks.context.brain_adapter as adapter
+
+    monkeypatch.setattr(
+        adapter,
+        "_get_source",
+        lambda: type("Source", (), {"fetch": lambda self: [adapter.BrainEntry("id", "title", "body")]})(),
+    )
+    monkeypatch.setattr(
+        "hooks.context.broadcast._load_broadcasts",
+        lambda cleanup=False: [
+            {"channel": "brain", "source": "brain-adapter"},
+            {"channel": "brain", "source": "mcp-channel"},
+        ],
+    )
+
+    status = adapter.get_status()
+
+    assert status["active_broadcasts"] == 1
+    assert not any("feed has" in warning for warning in status["warnings"])
 
 
 def test_status_warns_when_a_url_carries_no_token(brain_env, monkeypatch):

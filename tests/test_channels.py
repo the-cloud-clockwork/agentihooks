@@ -155,10 +155,11 @@ class TestBrainAdapter:
         assert source.fetch() == []
 
     def test_file_brain_source_missing_dir(self, tmp_path):
-        from hooks.context.brain_adapter import FileBrainSource
+        from hooks.context.brain_adapter import BrainSourceUnavailable, FileBrainSource
 
         source = FileBrainSource(tmp_path / "nonexistent")
-        assert source.fetch() == []
+        with pytest.raises(BrainSourceUnavailable):
+            source.fetch()
 
     def test_frontmatter_parsing(self):
         from hooks.context.brain_adapter import _parse_frontmatter
@@ -189,13 +190,102 @@ class TestBrainAdapter:
         e1 = [BrainEntry(id="a", title="A", content="hello", priority=5)]
         assert _compute_hash(e1) == _compute_hash(e1)
 
+    def test_content_hash_covers_delivery_fields(self):
+        from hooks.context.brain_adapter import BrainEntry, _compute_hash
+
+        base = BrainEntry(id="a", title="A", content="hello", priority=5)
+        changed = BrainEntry(id="a", title="A", content="hello", priority=5, severity="critical")
+        assert _compute_hash([base]) != _compute_hash([changed])
+
+    def test_tool_call_refresh_uses_twenty_call_default(self):
+        from hooks.context import brain_adapter
+
+        with (
+            patch(
+                "hooks.context.brain_adapter._refresh",
+                return_value={"created_ids": ["new-brain"]},
+            ) as refresh,
+            patch(
+                "hooks.context.broadcast.get_broadcast_context",
+                return_value="brain context",
+            ) as context,
+            patch.dict(
+                "hooks.config.__dict__",
+                {"BRAIN_ENABLED": True, "BRAIN_REFRESH_TOOL_CALLS": 20},
+            ),
+        ):
+            assert brain_adapter.maybe_refresh_on_tool_call("session", 19) is None
+            assert brain_adapter.maybe_refresh_on_tool_call("session", 20) == "brain context"
+        refresh.assert_called_once_with()
+        context.assert_called_once_with("session", ["new-brain"])
+
+    def test_tool_call_refresh_does_not_claim_when_event_cannot_inject(self):
+        from hooks.context import brain_adapter
+
+        with (
+            patch(
+                "hooks.context.brain_adapter._refresh",
+                return_value={"created_ids": ["new-brain"]},
+            ) as refresh,
+            patch("hooks.context.broadcast.get_broadcast_context") as context,
+            patch.dict(
+                "hooks.config.__dict__",
+                {"BRAIN_ENABLED": True, "BRAIN_REFRESH_TOOL_CALLS": 20},
+            ),
+        ):
+            assert brain_adapter.maybe_refresh_on_tool_call("session", 20, claim_delivery=False) is None
+        refresh.assert_called_once_with()
+        context.assert_not_called()
+
+    def test_source_failure_preserves_existing_broadcasts(self):
+        from hooks.context import brain_adapter
+
+        class FailedSource:
+            def fetch(self):
+                raise brain_adapter.BrainSourceUnavailable("down")
+
+        with (
+            patch("hooks.context.brain_adapter._get_source", return_value=FailedSource()),
+            patch("hooks.context.brain_adapter._publish_entries") as publish,
+            patch("hooks.config.reload_brain_env"),
+        ):
+            assert brain_adapter.force_refresh() is False
+        publish.assert_not_called()
+
+    def test_unchanged_feed_still_reconciles_expired_broadcasts(self):
+        from hooks.context import brain_adapter
+
+        entries = [brain_adapter.BrainEntry(id="a", title="A", content="body")]
+
+        class Source:
+            def fetch(self):
+                return entries
+
+        brain_adapter._content_hash = brain_adapter._compute_hash(entries)
+        with (
+            patch("hooks.context.brain_adapter._get_source", return_value=Source()),
+            patch(
+                "hooks.context.brain_adapter._publish_entries",
+                return_value={
+                    "changed": True,
+                    "created": 1,
+                    "created_ids": ["replacement"],
+                    "removed": 0,
+                    "active": 1,
+                },
+            ) as publish,
+            patch("hooks.config.reload_brain_env"),
+        ):
+            assert brain_adapter.force_refresh() is True
+        publish.assert_called_once_with(entries)
+
     def test_get_status(self):
         with (
             patch("hooks.context.brain_adapter.BRAIN_ENABLED", True, create=True),
             patch("hooks.context.brain_adapter.BRAIN_SOURCE_TYPE", "file", create=True),
             patch("hooks.context.brain_adapter.BRAIN_SOURCE_PATH", "/tmp/brain", create=True),
             patch("hooks.context.brain_adapter.BRAIN_CHANNEL", "brain", create=True),
-            patch("hooks.context.brain_adapter.BRAIN_REFRESH_INTERVAL", 30, create=True),
+            patch("hooks.context.brain_adapter.BRAIN_REFRESH_TOOL_CALLS", 20, create=True),
         ):
             # Patch the config imports inside get_status
             with patch.dict(
@@ -205,7 +295,7 @@ class TestBrainAdapter:
                     "BRAIN_SOURCE_TYPE": "file",
                     "BRAIN_SOURCE_PATH": "/tmp/brain",
                     "BRAIN_CHANNEL": "brain",
-                    "BRAIN_REFRESH_INTERVAL": 30,
+                    "BRAIN_REFRESH_TOOL_CALLS": 20,
                 },
             ):
                 from hooks.context.brain_adapter import get_status

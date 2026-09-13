@@ -6,9 +6,9 @@ Parallel to broadcast.py but semantically distinct:
 - Permanent until operator clears (runtime) or removed in git (bundle/profile).
 - Cadence-driven: each enforcement re-injects every N tool calls.
 
-Four-source resolution (priority: local > runtime > profile > bundle):
+Four-source resolution (priority: local > runtime > profile chain > bundle):
   1. <bundle_path>/enforcements.json                          → source: "bundle"
-  2. <bundle_path>/profiles/<active_profile>/enforcements.json → source: "profile"
+  2. each active built-in, bundle, or linked profile            → source: "profile"
   3. ~/.agentihooks/enforcements.json                          → source: "runtime"
   4. <project>/.agentihooks/enforcements.json                  → source: "local"
 
@@ -18,13 +18,20 @@ Local store: mutable through CLI commands carrying --local.
 Counter: per-session, persisted at ~/.agentihooks/enforcement_counters.json.
 """
 
+import fcntl
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hooks.config import ENFORCEMENT_COUNTER_FILE, ENFORCEMENT_FILE, ENFORCEMENT_INJECTION_ENABLED
+from hooks.config import (
+    ENFORCEMENT_COUNTER_FILE,
+    ENFORCEMENT_DELIVERY_STATE_FILE,
+    ENFORCEMENT_FILE,
+    ENFORCEMENT_INJECTION_ENABLED,
+)
 
 
 def _store_path() -> Path:
@@ -33,6 +40,10 @@ def _store_path() -> Path:
 
 def _counter_path() -> Path:
     return Path(ENFORCEMENT_COUNTER_FILE).expanduser()
+
+
+def _delivery_path() -> Path:
+    return Path(ENFORCEMENT_DELIVERY_STATE_FILE).expanduser()
 
 
 def _load_store(path: Path | None = None) -> list[dict]:
@@ -78,6 +89,37 @@ def _save_counters(state: dict) -> None:
     os.replace(str(tmp), str(p))
 
 
+def _load_delivery_state() -> dict[str, list[str]]:
+    path = _delivery_path()
+    if not path.exists() or path.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_delivery_state(state: dict[str, list[str]]) -> None:
+    path = _delivery_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(state))
+    os.replace(str(tmp), str(path))
+
+
+@contextmanager
+def _delivery_lock():
+    path = _delivery_path().with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -111,6 +153,17 @@ def _get_active_profile() -> str | None:
     return global_record(_read_state()).get("profile") or None
 
 
+def _get_linked_profiles() -> dict[str, Path]:
+    linked = {}
+    for entry in _read_state().get("linked_profiles", []) or []:
+        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("path"):
+            continue
+        path = Path(entry["path"]).expanduser()
+        if path.is_dir():
+            linked[str(entry["name"])] = path
+    return linked
+
+
 def _load_json_enforcements(path: Path, source: str) -> list[dict]:
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -141,9 +194,23 @@ def _load_bundle_enforcements() -> list[dict]:
 def _load_profile_enforcements() -> list[dict]:
     bp = _get_bundle_path()
     profile = _get_active_profile()
-    if not bp or not profile:
+    if not profile:
         return []
-    return _load_json_enforcements(bp / "profiles" / profile / "enforcements.json", "profile")
+    built_in = Path(__file__).resolve().parents[2] / "profiles"
+    linked = _get_linked_profiles()
+    entries = []
+    for name in (part.strip() for part in profile.split(",")):
+        if not name:
+            continue
+        candidates = [built_in / name]
+        if bp is not None:
+            candidates.append(bp / "profiles" / name)
+        if name in linked:
+            candidates.append(linked[name])
+        profile_dir = next((path for path in candidates if path.is_dir()), None)
+        if profile_dir is not None:
+            entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
+    return entries
 
 
 def _local_store_path(cwd: str | Path | None, *, create_parent: bool = False) -> Path:
@@ -275,6 +342,39 @@ def get_due_enforcements(tool_call_count: int, cwd: str | Path | None = None) ->
     return due
 
 
+def _claim_unseen_enforcements(session_id: str, entries: list[dict], *, claim: bool = True) -> list[dict]:
+    if not session_id:
+        return entries
+    with _delivery_lock():
+        state = _load_delivery_state()
+        seen = set(state.get(session_id, []))
+        unseen = [entry for entry in entries if entry.get("id") and entry["id"] not in seen]
+        if claim and unseen:
+            state[session_id] = sorted(seen | {entry["id"] for entry in unseen})
+            _save_delivery_state(state)
+        return unseen
+
+
+def _merge_enforcements(*groups: list[dict]) -> list[dict]:
+    merged = {}
+    for group in groups:
+        for entry in group:
+            if entry.get("id"):
+                merged[entry["id"]] = entry
+    return list(merged.values())
+
+
+def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
+    if tool_call_count <= 0:
+        return []
+    due = []
+    for entry in entries:
+        cadence = int(entry.get("cadence", 0) or 0)
+        if cadence >= 1 and tool_call_count % cadence == 0:
+            due.append(entry)
+    return due
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
@@ -307,16 +407,49 @@ def format_enforcement_context(msgs: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_pretool_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
+def get_session_start_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
+    if not ENFORCEMENT_INJECTION_ENABLED:
+        return None
+    try:
+        entries = _claim_unseen_enforcements(session_id, load_all_enforcements(cwd))
+        if not entries:
+            return None
+        return format_enforcement_context(entries)
+    except Exception:
+        return None
+
+
+def get_user_prompt_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
+    if not ENFORCEMENT_INJECTION_ENABLED:
+        return None
+    try:
+        entries = _claim_unseen_enforcements(session_id, load_all_enforcements(cwd))
+        if not entries:
+            return None
+        return format_enforcement_context(entries)
+    except Exception:
+        return None
+
+
+def get_pretool_enforcements(
+    session_id: str,
+    cwd: str | Path | None = None,
+    *,
+    claim_unseen: bool = True,
+    tool_call_count: int | None = None,
+) -> str | None:
     """Increment the counter and return formatted enforcement banners if any are due."""
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
-        count = increment_and_get_count(session_id)
-        due = get_due_enforcements(count, cwd)
-        if not due:
+        count = tool_call_count if tool_call_count is not None else increment_and_get_count(session_id)
+        entries = load_all_enforcements(cwd)
+        unseen = _claim_unseen_enforcements(session_id, entries, claim=claim_unseen)
+        due = _due_enforcements(entries, count)
+        selected = _merge_enforcements(unseen, due)
+        if not selected:
             return None
-        return format_enforcement_context(due)
+        return format_enforcement_context(selected)
     except Exception:
         return None
 
@@ -326,10 +459,13 @@ def get_posttool_enforcements(session_id: str, cwd: str | Path | None = None) ->
         return None
     try:
         count = int(_load_counters().get(session_id, 0))
-        due = get_due_enforcements(count, cwd)
-        if not due:
+        entries = load_all_enforcements(cwd)
+        unseen = _claim_unseen_enforcements(session_id, entries)
+        due = _due_enforcements(entries, count)
+        selected = _merge_enforcements(unseen, due)
+        if not selected:
             return None
-        return format_enforcement_context(due)
+        return format_enforcement_context(selected)
     except Exception:
         return None
 
@@ -339,3 +475,11 @@ def reset_session_counter(session_id: str) -> None:
     if session_id in state:
         del state[session_id]
         _save_counters(state)
+
+
+def reset_session_delivery(session_id: str) -> None:
+    with _delivery_lock():
+        state = _load_delivery_state()
+        if session_id in state:
+            del state[session_id]
+            _save_delivery_state(state)

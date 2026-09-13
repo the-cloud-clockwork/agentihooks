@@ -89,8 +89,8 @@ Per-target reference: `docs/reference/CODEX-COMPAT.md`,
 |---|---|---|
 | `SessionStart` | `on_session_start` | Register broadcast session, inject context, brain injection, MCP warning |
 | `SessionEnd` | `on_session_end` | Deregister session, clear caches, log summary |
-| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, brain refresh, CI-manifesto/enforcement drumbeat, channel-filtered broadcast delivery |
-| `PreToolUse` | `on_pre_tool_use` | Secrets scan, guardrails pipeline, critical broadcast via additionalContext |
+| `UserPromptSubmit` | `on_user_prompt_submit` | Secrets scan, CI-manifesto refresh, amygdala check, channel-filtered broadcast delivery |
+| `PreToolUse` | `on_pre_tool_use` | Secrets scan, guardrails pipeline, brain refresh cadence, enforcement drumbeat, critical broadcast via additionalContext |
 | `PostToolUse` | `on_post_tool_use` | Bash filter, file dedup, tool error recording |
 | `Stop` / `SubagentStop` | `on_stop` | Memory auto-save, cost logging |
 
@@ -116,7 +116,7 @@ File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/de
 
 ### Brain adapter
 
-`hooks/context/brain_adapter.py` bridges an external knowledge source (file/vault/API) to the broadcast channel system. Pluggable `BrainSource` interface; ships with `FileBrainSource` reading `~/.agentihooks/brain/*.md` (YAML frontmatter + markdown body). Counter-gated refresh every N turns. Publishes to the `brain` broadcast channel. Config: `BRAIN_ENABLED`, `BRAIN_SOURCE_PATH`, `BRAIN_CHANNEL`, `BRAIN_REFRESH_INTERVAL`.
+`hooks/context/brain_adapter.py` bridges brain-api `/feed` or the legacy file source to the broadcast channel system. SessionStart always reconciles the feed; PreToolUse refreshes it every `BRAIN_REFRESH_TOOL_CALLS` tool calls (default 20) and injects new or restored entries into that tool call. Hot arcs default to 10 and each entry remains capped by `BRAIN_PAYLOAD_MAX_BYTES` (default 1536). Source failures preserve the last-known-good channel.
 
 ### Testing patterns
 
