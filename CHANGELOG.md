@@ -96,6 +96,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `channel_list` / `channel_acknowledge` instead. `channel_acknowledge` is
   unaffected and keeps its explicit `session_id` argument.
 
+## [2.9.1] - 2026-09-13
+
+### Changed
+
+- **Enforcement listings are readable at terminal width.** Each enforcement now
+  renders as a numbered block with labeled metadata and a wrapped message instead
+  of one unbounded table row.
+
 ## [2.9.0] - 2026-09-13
 
 ### Added
