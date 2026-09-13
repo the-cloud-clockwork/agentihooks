@@ -51,7 +51,6 @@ class TestUserEnvManifest:
             defaults = install._discover_user_env_defaults()
         assert "MCP_TRANSPORT" in defaults
         assert "ALLOWED_TOOLS" in defaults
-        assert defaults["BRAIN_SOURCE_TYPE"] == "file"
         assert "CREDENTIAL_GUARD_ENABLED" in defaults
         assert "OTEL_HOOKS_ENABLED" in defaults
         assert "VOICE_SERVICE_URL" in defaults
@@ -71,6 +70,7 @@ class TestUserEnvManifest:
             "SMTP_PASS",
         }
         assert not foreign & set(defaults)
+        assert not any(key.startswith(("BRAIN_", "AMYGDALA_", "KB_")) for key in defaults)
 
     def test_active_value_inside_managed_block_is_moved_to_user_overrides(self, tmp_path):
         env_file = tmp_path / ".env"

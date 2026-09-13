@@ -24,6 +24,12 @@ _BRAIN_KEYS = (
     "BRAIN_HTTP_TOKEN",
     "KB_ROUTER_TOKEN",
     "BRAIN_SOURCE_PATH",
+    "BRAIN_SOURCE_TYPE",
+    "BRAIN_CHANNEL",
+    "BRAIN_REFRESH_INTERVAL",
+    "BRAIN_HTTP_TIMEOUT",
+    "BRAIN_HOT_ARCS_TOP_N",
+    "BRAIN_PAYLOAD_MAX_BYTES",
 )
 
 
@@ -92,14 +98,54 @@ def test_reload_agrees_with_boot(brain_env, monkeypatch):
     assert reloaded["brain_writer_enabled"] is True
 
 
-def test_env_file_url_turns_them_on_too(brain_env):
+def test_env_file_url_turns_them_on_too(brain_env, monkeypatch, tmp_path):
     """The token and URL usually arrive as a file, not as shell env."""
-    home, load = brain_env
-    (home / "agentibrain.env").write_text("BRAIN_URL=http://127.0.0.1:8103\nBRAIN_HTTP_TOKEN=t0ken\n")
+    _, load = brain_env
+    brain_home = tmp_path / ".agentibrain"
+    brain_home.mkdir()
+    monkeypatch.setenv("AGENTIBRAIN_HOME", str(brain_home))
+    (brain_home / ".env").write_text("BRAIN_URL=http://127.0.0.1:8103\nBRAIN_HTTP_TOKEN=t0ken\n")
 
     config = load()
     assert config.BRAIN_ENABLED is True
     assert config.BRAIN_WRITER_ENABLED is True
+
+
+def test_managed_legacy_projection_is_a_temporary_fallback(brain_env, monkeypatch, tmp_path):
+    home, load = brain_env
+    monkeypatch.setenv("AGENTIBRAIN_HOME", str(tmp_path / "missing-brain-home"))
+    (home / "agentibrain.env").write_text(
+        "# Managed by `agentibrain install` — legacy compatibility\n"
+        "BRAIN_URL=http://127.0.0.1:8103\n"
+        "BRAIN_HTTP_TOKEN=t0ken\n"
+    )
+
+    assert load().BRAIN_URL == "http://127.0.0.1:8103"
+
+
+def test_brain_owned_client_policy_is_loaded_from_agentibrain(brain_env, monkeypatch, tmp_path):
+    hooks_home, load = brain_env
+    brain_home = tmp_path / ".agentibrain"
+    brain_home.mkdir()
+    monkeypatch.setenv("AGENTIBRAIN_HOME", str(brain_home))
+    (hooks_home / ".env").write_text("BRAIN_CHANNEL=wrong-owner\nBRAIN_REFRESH_INTERVAL=99\n")
+    (brain_home / ".env").write_text(
+        "BRAIN_SOURCE_TYPE=file\n"
+        "BRAIN_CHANNEL=memory\n"
+        "BRAIN_REFRESH_INTERVAL=17\n"
+        "BRAIN_HTTP_TIMEOUT=4\n"
+        "BRAIN_HOT_ARCS_TOP_N=7\n"
+        "BRAIN_PAYLOAD_MAX_BYTES=2048\n"
+    )
+
+    config = load()
+
+    assert config.BRAIN_SOURCE_TYPE == "file"
+    assert config.BRAIN_CHANNEL == "memory"
+    assert config.BRAIN_REFRESH_INTERVAL == 17
+    assert config.BRAIN_HTTP_TIMEOUT == 4
+    assert config.BRAIN_HOT_ARCS_TOP_N == 7
+    assert config.BRAIN_PAYLOAD_MAX_BYTES == 2048
 
 
 class _StubSource:

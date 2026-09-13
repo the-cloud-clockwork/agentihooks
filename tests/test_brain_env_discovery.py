@@ -118,13 +118,12 @@ def test_brain_client_settings_come_from_the_brain_env(homes):
     assert config.BRAIN_WRITER_OUTBOX == "/outbox"
 
 
-def test_an_agentihooks_env_still_wins(homes):
-    """Discovery is a default. An explicit agentihooks setting outranks it."""
+def test_agentihooks_env_cannot_override_brain_owned_settings(homes):
     hooks_home, brain, load = homes
     _write_env(brain / ".env", {_URL: "http://from-kernel", _TOKEN: "t1"})
     _write_env(hooks_home / ".env", {_URL: "http://from-agentihooks"})
 
-    assert load().BRAIN_URL == "http://from-agentihooks"
+    assert load().BRAIN_URL == "http://from-kernel"
 
 
 def test_process_env_still_beats_both(homes, monkeypatch):

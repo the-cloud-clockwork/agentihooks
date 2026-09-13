@@ -15,6 +15,7 @@ def _parse_env_file(
     *,
     override_file_owned: bool = False,
     pass_keys: set[str] | None = None,
+    blocked_keys: set[str] | None = None,
 ) -> None:
     """Parse a single .env file and set variables in os.environ.
 
@@ -54,6 +55,8 @@ def _parse_env_file(
             continue
         _key, _, _val = _line.partition("=")
         _key = _key.strip()
+        if blocked_keys and _key in blocked_keys:
+            continue
         _val = _val.strip()
         # Handle quoted values: KEY="value" or KEY='value'
         if _val and _val[0] in ('"', "'"):
@@ -91,7 +94,13 @@ _BRAIN_KEYS_FROM_KERNEL = (
     "BRAIN_HTTP_TOKEN",
     "KB_ROUTER_TOKEN",
     "BRAIN_ENABLED",
+    "BRAIN_CHANNEL",
+    "BRAIN_HOT_ARCS_TOP_N",
+    "BRAIN_HTTP_TIMEOUT",
+    "BRAIN_PAYLOAD_MAX_BYTES",
+    "BRAIN_REFRESH_INTERVAL",
     "BRAIN_SOURCE_PATH",
+    "BRAIN_SOURCE_TYPE",
     "AMYGDALA_ENABLED",
     "AMYGDALA_SIGNAL_PATH",
     "BRAIN_WRITER_ENABLED",
@@ -110,7 +119,18 @@ def _agentibrain_home() -> Path:
 
 
 def _brain_env_file() -> Path:
-    return _agentibrain_home() / ".env"
+    canonical = _agentibrain_home() / ".env"
+    if canonical.is_file():
+        return canonical
+    legacy = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks"))) / "agentibrain.env"
+    try:
+        if legacy.is_file():
+            header = legacy.read_text(encoding="utf-8", errors="ignore")[:256]
+            if "Managed by `agentibrain install`" in header:
+                return legacy
+    except OSError:
+        pass
+    return canonical
 
 
 def _load_brain_env(*, override_file_owned: bool = False) -> None:
@@ -171,14 +191,25 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
     _pass_keys: set[str] = set()
 
     # 1. Main .env first
-    _parse_env_file(_home / ".env", override_file_owned=override_file_owned, pass_keys=_pass_keys)
+    blocked = set(_BRAIN_KEYS_FROM_KERNEL)
+    _parse_env_file(
+        _home / ".env",
+        override_file_owned=override_file_owned,
+        pass_keys=_pass_keys,
+        blocked_keys=blocked,
+    )
 
     # 2. Additional *.env files (sorted, skip the main .env to avoid double-load)
     if _home.is_dir():
         for _extra in sorted(_home.glob("*.env")):
             if _extra.name == ".env":
                 continue
-            _parse_env_file(_extra, override_file_owned=override_file_owned, pass_keys=_pass_keys)
+            _parse_env_file(
+                _extra,
+                override_file_owned=override_file_owned,
+                pass_keys=_pass_keys,
+                blocked_keys=blocked,
+            )
 
 
 def _brain_http_configured() -> bool:
