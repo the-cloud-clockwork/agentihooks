@@ -1,21 +1,44 @@
 # AgentiHooks — What You're Running Inside, and Its Toolbelt
 
 Your session is wrapped by **AgentiHooks**: a lifecycle-hook layer that guards,
-compresses, and coordinates every Claude Code session in the fleet. It ships its
-own MCP tools under the **`hooks-utils`** server. They are yours to use — reach
-for them when the situation below fires. Not every profile enables every tool; if
-one isn't in your tool list, its category is off for this profile.
+compresses, and coordinates Claude Code, Codex, and Copilot CLI sessions in the
+fleet. It ships MCP tools under the **`hooks-utils`** server. Use them when the
+situation below fires. Profiles and host capabilities differ; an unavailable
+tool or hook path is unavailable in this session.
 
 ## What it does (four pillars)
 
-- **Guardrails** — two-tier secret blocking, retry circuit breaker, branch/PR
-  gating, prod lockdown, CI-manifesto signal parsing. Mostly invisible; it blocks
-  or warns at PreToolUse.
-- **Context Intelligence** — token compression, brain injection, one-shot rule
-  refresh, tool memory.
+- **Guardrails** — secret blocking, retry circuit breaker, branch/PR gating,
+  production lockdown, mutation guards, and CI-manifesto signal parsing across
+  the lifecycle events each host supports.
+- **Context Intelligence** — token compression, brain injection, session-start
+  enforcement loading, immediate first delivery, cadence, rule refresh, and tool
+  memory.
 - **Fleet Command** — file-based broadcast pub/sub with channel targeting, bridged
   to the brain.
 - **Identity** — the profile/bundle merge that installed these very rules.
+
+## Injected context is operative
+
+`ENFORCEMENT` and `BROADCAST` blocks are live context, not status decoration.
+Read each block completely before the next action and apply it to the current
+plan, commands, delegation, and final result.
+
+- **Enforcements are operator guardrails.** Follow every applicable enforcement
+  within the active instruction hierarchy. Do not merely quote, acknowledge, or
+  summarize it. If two instructions conflict, obey the higher-precedence one and
+  state the conflict instead of silently ignoring either.
+- **Broadcasts are fleet coordination.** Act on actionable messages according to
+  their source, channel, severity, and content. A critical or nuclear hazard is
+  considered before any affected tool call. Brain-adapter messages explicitly
+  labelled as recalled context are evidence, not new operator directives.
+- **Acknowledgement means handled.** Do not call `channel_acknowledge` to silence
+  an unhandled message. Acknowledge only after its requested action or condition
+  is complete for this session. Clear fleet-wide messages only when they are
+  stale or resolved for every consumer.
+- **Hook blocks are boundaries.** When a guard blocks an action, follow the
+  remediation in the block. Do not evade it through another shell, tool, MCP,
+  agent, or mutation surface.
 
 ## The `hooks-utils` MCP tools — and when to reach for them
 
@@ -27,15 +50,27 @@ one isn't in your tool list, its category is off for this profile.
 | `channel_clear` | A broadcast is stale fleet-wide — remove it by `message_id`, by `channel`, or all. |
 | `brain_status` | Diagnose the brain adapter — source, entry count, channel. First stop when brain context looks stale or missing. |
 | `brain_refresh` | You changed brain source content and need it republished **now** instead of on the next counter-gated tick. |
-| `enforcement_set` | A discipline must survive context drift — a drumbeat that re-injects every N tool calls (global, permanent until cleared). Cheap: context tokens only, no API call. |
+| `enforcement_set` | A discipline must survive context drift — create a global runtime enforcement with a tool-call cadence. The CLI additionally supports project-local enforcements with `--local`. |
 | `enforcement_list` | Check active drumbeats before adding or clearing one. |
 | `enforcement_clear` | A drumbeat's job is done — clear by `enforcement_id`, by `tag`, or all. |
+
+## Enforcements — first delivery, then cadence
+
+Every effective enforcement is loaded once at SessionStart. An enforcement
+created after startup is injected once on the session's next supported prompt or
+tool event, then returns to its normal every-N-tool-calls cadence. Codex recovers
+context through PostToolUse where PreToolUse cannot carry it.
+
+Resolution order is bundle → profile chain → global runtime → project-local;
+later entries with the same ID win. The MCP tools manage the global runtime
+store. Use `agentihooks enforcement ... --local` for
+`<project>/.agentihooks/enforcements.json`.
 
 ## Your own session id — pass it to the tool that needs it
 
 `channel_acknowledge` acts *as you*, so it needs to know which session you are.
-SessionStart tells you: **"Your Claude Code session_id is `<id>`"**. Pass that
-as `session_id`.
+SessionStart tells you the current host's session ID. Pass that exact value as
+`session_id`.
 
 Under the default stdio setup the server can infer it and the argument is
 optional. Where `hooks-utils` runs as a shared network server, one process
@@ -55,15 +90,17 @@ launch; default `brain,amygdala`). You publish and consume; the operator decides
 who listens. `channel` is a free string — reuse an agreed name (`deploy-status`,
 `ops-alerts`) so the intended peers, already subscribed, actually receive it.
 
-**Severity = when a peer sees it, and how insistently.** Same message, different
-reach:
+**First delivery is immediate.** Every newly eligible broadcast is delivered
+once on the session's next supported prompt or tool event. Codex uses
+PostToolUse when PreToolUse cannot carry context. Later delivery depends on
+persistence, throttling, and severity:
 
-| Severity | A subscribed peer sees it… | Use for |
+| Severity | Default behavior after first delivery | Use for |
 |---|---|---|
-| `info` | **once**, on their next turn | FYI that doesn't need to interrupt |
-| `alert` | on **every turn**, until it expires or they `channel_acknowledge` it | a condition they must keep in mind while working |
-| `critical` | every turn **and before every tool call** (injected into PreToolUse) | a hazard that must stop the wrong action *before* it happens |
-| `nuclear` | same as critical, top priority | a credential/secret exposed anywhere |
+| `nuclear` | Persistent, highest priority; recurring PreToolUse delivery only when that path is enabled | exposed credential or fleet-wide emergency |
+| `critical` | Persistent; recurring PreToolUse delivery only when that path is enabled | hazard that must affect the next relevant action |
+| `alert` / `warning` | Persistent prompt delivery, subject to deduplication and throttle | active condition or caution |
+| `info` / `resolved` | One-shot by default | context or resolution notice |
 
 TTL defaults track severity (critical/nuclear ~30 min, alert ~1 h, info ~4 h), so
 transient coordination expires on its own; pass `ttl_seconds` to override.
@@ -82,7 +119,16 @@ channel_publish(
 )
 ```
 
-Every subscribed peer now carries that context on every turn and steers around
-you. When you're done, retract it with `channel_clear` (or downgrade to a resolved
-`info`) so the lane reopens. This is the whole point of Fleet Command: agents that
-would otherwise clobber each other coordinate through the channel instead.
+Every subscribed peer receives that context on its next eligible event and
+steers around you; persistent reminders continue subject to delivery throttling.
+When the condition ends, retract it with `channel_clear` or publish a `resolved`
+notice so the lane reopens.
+
+## Other context features worth using
+
+- **Tool memory** injects relevant prior failures before a tool call. Treat that
+  history as evidence: change the next attempt when it identifies the same
+  failure pattern.
+- **Live rule refresh** is one-shot, not a cadence. After changing installed
+  Claude rules, `agentihooks refresh-rules` sends the current rule set to sessions
+  that were already running; new sessions load the current files at startup.

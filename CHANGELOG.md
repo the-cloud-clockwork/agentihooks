@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-09-13
+
 ### Fixed
 
 - **The recursive-search rewrite no longer reintroduces the prompt it exists
@@ -18,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The packaged AgentiHooks toolbelt rule now matches Claude Code, Codex, and
+  Copilot behavior; makes enforcement, broadcast, acknowledgement, and hook-block
+  handling explicit; and documents immediate first delivery, local enforcement
+  resources, tool memory, and live rule refresh.
 - Newly created enforcements and broadcasts reach each running session on its
   next tool call or user message exactly once before normal cadence resumes.
 - Every effective enforcement is injected once at SessionStart before its normal
