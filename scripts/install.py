@@ -63,6 +63,7 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -5583,6 +5584,33 @@ def _cmd_broadcast(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _print_enforcements(entries: list[dict]) -> None:
+    width = max(40, min(shutil.get_terminal_size(fallback=(100, 24)).columns, 120))
+    message_width = max(20, width - 4)
+    print(f"Active enforcements: {len(entries)}")
+    for index, entry in enumerate(entries, start=1):
+        source = str(entry.get("source", "runtime")).upper()
+        enforcement_id = entry.get("id", "?")
+        cadence = entry.get("cadence", "?")
+        tag = entry.get("tag", "") or "-"
+        created_at = entry.get("created_at", "")
+        message = str(entry.get("message", ""))
+        print(f"\n[{index}/{len(entries)}] {source}")
+        print(f"  ID: {enforcement_id}")
+        print(f"  Cadence: every {cadence} tool calls")
+        print(f"  Tag: {tag}")
+        if created_at:
+            print(f"  Created: {created_at}")
+        print("  Message:")
+        for line in textwrap.wrap(
+            message,
+            width=message_width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""]:
+            print(f"    {line}")
+
+
 def _cmd_enforcement(args: argparse.Namespace) -> None:
     """Handle the enforcement CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
@@ -5609,14 +5637,7 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
         if not entries:
             print("No active local enforcements." if local else "No active enforcements.")
             return
-        print(f"{'SOURCE':<10} {'ID':<12} {'CADENCE':<8} {'TAG':<16} MESSAGE")
-        for e in entries:
-            src = e.get("source", "runtime")
-            eid = e.get("id", "?")
-            cad = e.get("cadence", "?")
-            tag = e.get("tag", "") or "-"
-            msg = e.get("message", "")
-            print(f"[{src}]".ljust(10) + f"{eid:<12} {cad:<8} {tag:<16} {msg}")
+        _print_enforcements(entries)
         return
 
     if action == "clear":
