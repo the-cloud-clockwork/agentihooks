@@ -13,6 +13,98 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import install  # noqa: I001
 
 
+class TestClaudeRouting:
+    def test_cmd_claude_exports_winner_for_process_tree(self, monkeypatch):
+        from scripts import claude_quota_balancer as balancer
+
+        result = balancer.ProbeResult(
+            account="WINNER",
+            provider_status="allowed",
+            state="NORMAL",
+            margin=70,
+            five_hour=balancer.QuotaWindow(used=20),
+            seven_day=balancer.QuotaWindow(used=30),
+        )
+        decision = balancer.RouteDecision(
+            balancer.Credential("AH_CC_TOKEN_WINNER", "winner-secret"),
+            result,
+            "cached",
+        )
+        observed = {}
+
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "select_credential", lambda *args, **kwargs: decision)
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "api-secret")
+        monkeypatch.setenv("AH_CC_TOKEN_WINNER", "winner-secret")
+        monkeypatch.setenv("AH_CC_TOKEN_PEER", "peer-secret")
+
+        def execvpe(executable, command, environ):
+            observed.update(executable=executable, command=command, environ=dict(environ))
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(["--model", "sonnet", "--resume", "session-id"])
+
+        assert observed["executable"] == "/usr/bin/claude"
+        assert observed["command"] == [
+            "/usr/bin/claude",
+            "--dangerously-skip-permissions",
+            "--model",
+            "sonnet",
+            "--resume",
+            "session-id",
+        ]
+        assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "winner-secret"
+        assert observed["environ"]["AH_CC_TOKEN_WINNER"] == "winner-secret"
+        assert "AH_CC_TOKEN_PEER" not in observed["environ"]
+        assert "ANTHROPIC_API_KEY" not in observed["environ"]
+
+    def test_cmd_claude_fails_closed_without_capacity(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: False)
+        monkeypatch.setattr(
+            balancer,
+            "select_credential",
+            lambda *args, **kwargs: (_ for _ in ()).throw(balancer.RoutingError("no capacity")),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            install.cmd_claude([])
+
+        assert exc.value.code == 3
+        assert "no capacity" in capsys.readouterr().err
+
+    def test_cmd_balance_prints_ranked_capacity(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+        result = balancer.ProbeResult(
+            account="ALPHA",
+            provider_status="allowed",
+            state="NORMAL",
+            margin=70,
+            five_hour=balancer.QuotaWindow(used=20),
+            seven_day=balancer.QuotaWindow(used=30),
+        )
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
+        monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([result], "cached"))
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        output = capsys.readouterr().out
+        assert "ROUTING LEFT" in output
+        assert "70%" in output
+        assert "source=cached" in output
+
+
 class TestUserEnvManifest:
     def test_install_adds_missing_defaults_without_touching_existing_values(self, tmp_path):
         env_file = tmp_path / ".env"

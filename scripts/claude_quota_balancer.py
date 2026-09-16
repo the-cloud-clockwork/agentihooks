@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 MAX_PROBE_WORKERS = 3
+CACHE_TTL_SECONDS = 60
+ELIGIBLE_STATES = {"NORMAL", "REDUCE", "DRAIN_SOON"}
 
 
 @dataclass(frozen=True)
@@ -45,11 +51,29 @@ class ProbeResult:
     margin: float | None
     five_hour: QuotaWindow
     seven_day: QuotaWindow
+    fable: QuotaWindow = field(default_factory=QuotaWindow)
     model: str = "?"
     context_used: int | None = None
     context_capacity: int | None = None
     latency_ms: int | None = None
     error: str = ""
+
+    @property
+    def routing_left(self) -> float | None:
+        return self.margin
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    credential: Credential
+    result: ProbeResult
+    source: str
+
+
+class RoutingError(RuntimeError):
+    def __init__(self, message: str, results: list[ProbeResult] | None = None):
+        super().__init__(message)
+        self.results = results or []
 
 
 def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
@@ -60,9 +84,105 @@ def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
     ]
 
 
-def _probe_command(model: str) -> list[str]:
+def _cache_path(environ: Mapping[str, str]) -> Path:
+    root = Path(environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
+    return root / "claude-router-cache.json"
+
+
+def _window_data(window: QuotaWindow) -> dict:
+    return {"used": window.used, "resets_at": window.resets_at}
+
+
+def _window_from_data(data: object) -> QuotaWindow:
+    if not isinstance(data, dict):
+        return QuotaWindow()
+    used = data.get("used")
+    resets_at = data.get("resets_at")
+    return QuotaWindow(
+        used=float(used) if isinstance(used, (int, float)) else None,
+        resets_at=int(resets_at) if isinstance(resets_at, (int, float)) else None,
+    )
+
+
+def _result_data(result: ProbeResult) -> dict:
+    return {
+        "account": result.account,
+        "provider_status": result.provider_status,
+        "state": result.state,
+        "margin": result.margin,
+        "five_hour": _window_data(result.five_hour),
+        "seven_day": _window_data(result.seven_day),
+        "fable": _window_data(result.fable),
+        "model": result.model,
+        "context_used": result.context_used,
+        "context_capacity": result.context_capacity,
+        "latency_ms": result.latency_ms,
+    }
+
+
+def _result_from_data(data: object) -> ProbeResult | None:
+    if not isinstance(data, dict) or not isinstance(data.get("account"), str):
+        return None
+    margin = data.get("margin")
+    return ProbeResult(
+        account=data["account"],
+        provider_status=str(data.get("provider_status") or "unknown"),
+        state=str(data.get("state") or "UNKNOWN"),
+        margin=float(margin) if isinstance(margin, (int, float)) else None,
+        five_hour=_window_from_data(data.get("five_hour")),
+        seven_day=_window_from_data(data.get("seven_day")),
+        fable=_window_from_data(data.get("fable")),
+        model=str(data.get("model") or "?"),
+        context_used=int(data["context_used"]) if isinstance(data.get("context_used"), (int, float)) else None,
+        context_capacity=(
+            int(data["context_capacity"]) if isinstance(data.get("context_capacity"), (int, float)) else None
+        ),
+        latency_ms=int(data["latency_ms"]) if isinstance(data.get("latency_ms"), (int, float)) else None,
+    )
+
+
+def _read_cache(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) and data.get("version") == 1 else {"version": 1, "modes": {}}
+    except (OSError, json.JSONDecodeError):
+        return {"version": 1, "modes": {}}
+
+
+def _write_cache(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary_name)
+        raise
+
+
+@contextlib.contextmanager
+def _cache_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _probe_command(model: str, claude_bin: str = "claude") -> list[str]:
     return [
-        "claude",
+        claude_bin,
         "-p",
         "Reply with exactly OK.",
         "--model",
@@ -79,7 +199,7 @@ def _probe_command(model: str) -> list[str]:
         "--system-prompt",
         "Reply with exactly OK.",
         "--max-budget-usd",
-        "0.10",
+        "0.25" if model == "fable" else "0.10",
     ]
 
 
@@ -100,11 +220,17 @@ def _window(info: dict, name: str) -> QuotaWindow:
     )
 
 
-def _state(provider_status: str, five_hour: QuotaWindow, seven_day: QuotaWindow) -> tuple[str, float | None]:
+def _state(
+    provider_status: str,
+    five_hour: QuotaWindow,
+    seven_day: QuotaWindow,
+    fable: QuotaWindow | None = None,
+) -> tuple[str, float | None]:
     if provider_status == "rejected":
         return "BLOCKED", 0.0
-    usages = [window.used for window in (five_hour, seven_day) if window.used is not None]
-    if len(usages) != 2:
+    windows = [five_hour, seven_day, *([fable] if fable is not None else [])]
+    usages = [window.used for window in windows if window.used is not None]
+    if len(usages) != len(windows):
         return "UNKNOWN", None
     highest = max(usages)
     margin = max(0.0, 100.0 - highest)
@@ -117,7 +243,7 @@ def _state(provider_status: str, five_hour: QuotaWindow, seven_day: QuotaWindow)
     return "NORMAL", margin
 
 
-def parse_probe(account: str, output: str, elapsed_ms: int) -> ProbeResult:
+def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool = False) -> ProbeResult:
     rate_info: dict = {}
     model = "?"
     usage: dict = {}
@@ -147,8 +273,10 @@ def parse_probe(account: str, output: str, elapsed_ms: int) -> ProbeResult:
 
     five_hour = _window(rate_info, "five_hour")
     seven_day = _window(rate_info, "seven_day")
+    fable = _window(rate_info, "seven_day_overage_included")
     provider_status = str(rate_info.get("status") or "unknown")
-    state, margin = _state(provider_status, five_hour, seven_day)
+    state, margin = _state(provider_status, five_hour, seven_day, fable if include_fable else None)
+    # Keep probe context telemetry for future session retirement when a reused session nears its context limit.
     context_used = None
     if usage:
         context_used = sum(
@@ -169,6 +297,7 @@ def parse_probe(account: str, output: str, elapsed_ms: int) -> ProbeResult:
         margin=margin,
         five_hour=five_hour,
         seven_day=seven_day,
+        fable=fable,
         model=model,
         context_used=context_used,
         context_capacity=context_capacity,
@@ -181,11 +310,13 @@ def probe_credential(
     model: str,
     timeout: float,
     environ: Mapping[str, str],
+    include_fable: bool = False,
+    claude_bin: str = "claude",
 ) -> ProbeResult:
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            _probe_command(model),
+            _probe_command(model, claude_bin),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -199,7 +330,7 @@ def probe_credential(
     elapsed_ms = round((time.monotonic() - started) * 1000)
     if completed.returncode != 0:
         return _error_result(credential.account, f"claude exited {completed.returncode}", elapsed_ms)
-    result = parse_probe(credential.account, completed.stdout, elapsed_ms)
+    result = parse_probe(credential.account, completed.stdout, elapsed_ms, include_fable)
     if result.state == "UNKNOWN":
         return ProbeResult(**{**result.__dict__, "error": "rate-limit windows unavailable"})
     return result
@@ -210,10 +341,93 @@ def probe_credentials(
     model: str,
     timeout: float,
     environ: Mapping[str, str],
+    include_fable: bool = False,
+    claude_bin: str = "claude",
 ) -> list[ProbeResult]:
-    worker = partial(probe_credential, model=model, timeout=timeout, environ=environ)
+    worker = partial(
+        probe_credential,
+        model=model,
+        timeout=timeout,
+        environ=environ,
+        include_fable=include_fable,
+        claude_bin=claude_bin,
+    )
     with ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(credentials))) as executor:
         return list(executor.map(worker, credentials))
+
+
+def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
+    if not isinstance(entry, dict) or not isinstance(entry.get("observed_at"), (int, float)):
+        return False
+    if now - float(entry["observed_at"]) >= CACHE_TTL_SECONDS:
+        return False
+    result = _result_from_data(entry.get("result"))
+    if result is None:
+        return False
+    windows = [result.five_hour, result.seven_day, *([result.fable] if include_fable else [])]
+    return all(window.resets_at is None or window.resets_at > now for window in windows)
+
+
+def collect_results(
+    credentials: list[Credential],
+    *,
+    include_fable: bool = False,
+    refresh: bool = False,
+    timeout: float = 60,
+    environ: Mapping[str, str] | None = None,
+    cache_file: Path | None = None,
+    claude_bin: str = "claude",
+    now: float | None = None,
+) -> tuple[list[ProbeResult], str]:
+    active_env = os.environ if environ is None else environ
+    path = cache_file or _cache_path(active_env)
+    timestamp = time.time() if now is None else now
+    mode = "fable" if include_fable else "normal"
+    probe_model = "fable" if include_fable else "haiku"
+
+    with _cache_lock(path):
+        cache = _read_cache(path)
+        modes = cache.setdefault("modes", {})
+        mode_data = modes.get(mode) if isinstance(modes.get(mode), dict) else {}
+        entries = mode_data.get("accounts") if isinstance(mode_data.get("accounts"), dict) else {}
+        cached: dict[str, ProbeResult] = {}
+        missing: list[Credential] = []
+
+        for credential in credentials:
+            entry = entries.get(credential.env_name)
+            result = _result_from_data(entry.get("result")) if isinstance(entry, dict) else None
+            if not refresh and result is not None and _entry_is_fresh(entry, timestamp, include_fable):
+                cached[credential.env_name] = result
+            else:
+                missing.append(credential)
+
+        live = (
+            probe_credentials(
+                missing,
+                probe_model,
+                timeout,
+                active_env,
+                include_fable,
+                claude_bin,
+            )
+            if missing
+            else []
+        )
+        live_by_name = {credential.env_name: result for credential, result in zip(missing, live, strict=True)}
+        new_entries = {}
+        for credential in credentials:
+            result = live_by_name.get(credential.env_name) or cached.get(credential.env_name)
+            if result is not None and result.state not in {"ERROR", "UNKNOWN"}:
+                observed_at = (
+                    timestamp if credential.env_name in live_by_name else entries[credential.env_name]["observed_at"]
+                )
+                new_entries[credential.env_name] = {"observed_at": observed_at, "result": _result_data(result)}
+        modes[mode] = {"accounts": new_entries}
+        with contextlib.suppress(OSError):
+            _write_cache(path, cache)
+
+    ordered = [live_by_name.get(credential.env_name) or cached.get(credential.env_name) for credential in credentials]
+    return [result for result in ordered if result is not None], "live" if missing else "cached"
 
 
 def _error_result(account: str, error: str, latency_ms: int | None = None) -> ProbeResult:
@@ -229,18 +443,88 @@ def _error_result(account: str, error: str, latency_ms: int | None = None) -> Pr
     )
 
 
-def rank_results(results: list[ProbeResult]) -> list[ProbeResult]:
+def _metric(value: float | None) -> float:
+    return -1.0 if value is None else value
+
+
+def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
     return sorted(
-        results, key=lambda result: (result.margin is not None, result.margin or -1, result.account), reverse=True
+        results,
+        key=lambda result: (
+            result.margin is None,
+            -_metric(result.margin),
+            -_metric(result.fable.remaining) if include_fable else 0,
+            -_metric(result.seven_day.remaining),
+            -_metric(result.five_hour.remaining),
+            result.account,
+        ),
     )
+
+
+def select_credential(
+    environ: Mapping[str, str] | None = None,
+    *,
+    include_fable: bool = False,
+    refresh: bool = False,
+    timeout: float = 60,
+    cache_file: Path | None = None,
+    claude_bin: str = "claude",
+) -> RouteDecision:
+    active_env = os.environ if environ is None else environ
+    credentials = discover_credentials(active_env)
+    if not credentials:
+        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
+    results, source = collect_results(
+        credentials,
+        include_fable=include_fable,
+        refresh=refresh,
+        timeout=timeout,
+        environ=active_env,
+        cache_file=cache_file,
+        claude_bin=claude_bin,
+    )
+    eligible = [result for result in results if result.state in ELIGIBLE_STATES]
+    if not eligible:
+        raise RoutingError("no Claude account has verified routing capacity", results)
+    winner = rank_results(eligible, include_fable)[0]
+    by_account = {credential.account: credential for credential in credentials}
+    return RouteDecision(by_account[winner.account], winner, source)
+
+
+def format_selection(decision: RouteDecision, include_fable: bool = False) -> str:
+    result = decision.result
+    parts = [
+        f"account={result.account}",
+        f"routing_left={_percent(result.routing_left)}",
+        f"5h_left={_percent(result.five_hour.remaining)}",
+        f"7d_left={_percent(result.seven_day.remaining)}",
+    ]
+    if include_fable:
+        parts.append(f"fable_left={_percent(result.fable.remaining)}")
+    parts.append(f"source={decision.source}")
+    return "[agenti] " + " ".join(parts)
+
+
+def requested_model(extra_args: list[str], settings_path: Path | None = None) -> str:
+    for index, value in enumerate(extra_args):
+        if value == "--model" and index + 1 < len(extra_args):
+            return extra_args[index + 1]
+        if value.startswith("--model="):
+            return value.split("=", 1)[1]
+    path = settings_path or Path.home() / ".claude" / "settings.json"
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        return str(settings.get("model") or "") if isinstance(settings, dict) else ""
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def route_requires_fable(extra_args: list[str], settings_path: Path | None = None) -> bool:
+    return "fable" in requested_model(extra_args, settings_path).lower()
 
 
 def _percent(value: float | None) -> str:
     return "?" if value is None else f"{value:.0f}%"
-
-
-def _usage(window: QuotaWindow) -> str:
-    return f"{_percent(window.used)}/{_percent(window.remaining)}"
 
 
 def _duration(seconds: int | None, now: int) -> str:
@@ -258,55 +542,50 @@ def _duration(seconds: int | None, now: int) -> str:
     return f"{days}d{hours:02d}h"
 
 
-def _context(result: ProbeResult) -> str:
-    if result.context_used is None or result.context_capacity is None:
-        return "?"
-    percentage = result.context_used / result.context_capacity * 100 if result.context_capacity else 0
-    return f"{result.context_used}/{result.context_capacity} ({percentage:.0f}%)"
-
-
-def render_table(results: list[ProbeResult], now: int | None = None) -> str:
+def render_table(results: list[ProbeResult], now: int | None = None, include_fable: bool = False) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
         "ACCOUNT",
         "STATE",
-        "MARGIN",
-        "5H USED/LEFT",
+        "ROUTING LEFT",
+        "5H LEFT",
         "5H RESET",
-        "7D USED/LEFT",
+        "7D LEFT",
         "7D RESET",
-        "PROBE CTX",
     ]
+    if include_fable:
+        headers.extend(["FABLE LEFT", "FABLE RESET"])
     rows = []
-    for rank, result in enumerate(rank_results(results), 1):
-        rows.append(
-            [
-                str(rank),
-                result.account,
-                result.state,
-                _percent(result.margin),
-                _usage(result.five_hour),
-                _duration(result.five_hour.resets_at, timestamp),
-                _usage(result.seven_day),
-                _duration(result.seven_day.resets_at, timestamp),
-                _context(result),
-            ]
-        )
+    for rank, result in enumerate(rank_results(results, include_fable), 1):
+        row = [
+            str(rank),
+            result.account,
+            result.state,
+            _percent(result.margin),
+            _percent(result.five_hour.remaining),
+            _duration(result.five_hour.resets_at, timestamp),
+            _percent(result.seven_day.remaining),
+            _duration(result.seven_day.resets_at, timestamp),
+        ]
+        if include_fable:
+            row.extend([_percent(result.fable.remaining), _duration(result.fable.resets_at, timestamp)])
+        rows.append(row)
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
     lines.extend("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows)
-    errors = [f"{result.account}: {result.error}" for result in rank_results(results) if result.error]
+    errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
     return "\n".join(lines)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Rank Claude Code OAuth accounts by usable quota margin")
+    parser = argparse.ArgumentParser(description="Rank Claude Code OAuth accounts by remaining routing capacity")
     parser.add_argument("--dry-run", action="store_true", help="probe and rank accounts without launching workload")
-    parser.add_argument("--model", default="haiku", help="model used for the quota probe")
+    parser.add_argument("--fable", action="store_true", help="probe and include the separate Fable weekly quota")
+    parser.add_argument("--refresh", action="store_true", help="ignore the 60-second quota cache")
     parser.add_argument("--timeout", type=float, default=60, help="per-account probe timeout in seconds")
     return parser
 
@@ -322,15 +601,18 @@ def main() -> int:
         print(f"claude-quota-balancer: no non-empty {TOKEN_PREFIX}* variables found", file=sys.stderr)
         return 2
     workers = min(MAX_PROBE_WORKERS, len(credentials))
-    results = probe_credentials(credentials, args.model, args.timeout, os.environ)
-    print(render_table(results))
-    account_label = "account" if len(credentials) == 1 else "accounts"
-    worker_label = "worker" if workers == 1 else "workers"
+    results, source = collect_results(
+        credentials,
+        include_fable=args.fable,
+        refresh=args.refresh,
+        timeout=args.timeout,
+    )
+    print(render_table(results, include_fable=args.fable))
     print(
         f"\nDry-run execution time: {time.monotonic() - started:.2f}s "
-        f"({len(credentials)} {account_label}, {workers} {worker_label})"
+        f"(accounts={len(credentials)}, max_workers={workers}, source={source})"
     )
-    return 0 if any(result.state not in {"ERROR", "UNKNOWN"} for result in results) else 1
+    return 0 if any(result.state in ELIGIBLE_STATES for result in results) else 1
 
 
 if __name__ == "__main__":

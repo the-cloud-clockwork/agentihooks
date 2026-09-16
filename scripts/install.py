@@ -32,8 +32,14 @@ Commands:
         Create a .claudeignore in the current directory.
 
     agentihooks claude [extra flags]
-        Launch claude with profile flags (model, permissions, effort, etc.)
+        Route to the healthiest OAuth account and launch Claude.
         Alias: agenti (added to ~/.bashrc by init)
+
+    agentihooks claude-terminal [launcher options] -- [claude flags]
+        Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
+
+    agentihooks balance --dry-run [--fable] [--refresh]
+        Show ranked OAuth account capacity without launching Claude.
 
     agentihooks --list-profiles     # show available profiles
     agentihooks --query             # print active profile name
@@ -5304,11 +5310,7 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
-def cmd_claude(extra_args: list[str]) -> None:
-    """Launch claude with bypassPermissions. No other flags injected."""
-    cmd = ["claude", "--dangerously-skip-permissions", *extra_args]
-
-    # Source env first, then exec claude
+def _load_claude_runtime_env() -> None:
     env_file = _ENV_FILE_DST
     if env_file.is_file():
         from dotenv import dotenv_values
@@ -5323,7 +5325,61 @@ def cmd_claude(extra_args: list[str]) -> None:
                     if v is not None:
                         os.environ[k] = v
 
-    os.execvp("claude", cmd)
+
+def cmd_claude(extra_args: list[str]) -> None:
+    """Route to the healthiest Claude account, then replace this process with Claude."""
+    from scripts.claude_quota_balancer import (
+        RoutingError,
+        format_selection,
+        render_table,
+        route_requires_fable,
+        select_credential,
+    )
+
+    _load_claude_runtime_env()
+    claude_bin = shutil.which("claude") or "claude"
+    include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
+    try:
+        decision = select_credential(os.environ, include_fable=include_fable, claude_bin=claude_bin)
+    except RoutingError as exc:
+        print(f"agentihooks: {exc}", file=sys.stderr)
+        if exc.results:
+            print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
+        raise SystemExit(3) from exc
+
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
+        if name != decision.credential.env_name:
+            os.environ.pop(name, None)
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = decision.credential.token
+    print(format_selection(decision, include_fable), flush=True)
+    cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
+    os.execvpe(claude_bin, cmd, os.environ)
+
+
+def cmd_balance(*, include_fable: bool, refresh: bool, timeout: float) -> int:
+    from scripts.claude_quota_balancer import (
+        ELIGIBLE_STATES,
+        collect_results,
+        discover_credentials,
+        render_table,
+    )
+
+    _load_claude_runtime_env()
+    credentials = discover_credentials(os.environ)
+    if not credentials:
+        print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
+        return 2
+    results, source = collect_results(
+        credentials,
+        include_fable=include_fable,
+        refresh=refresh,
+        timeout=timeout,
+        claude_bin=shutil.which("claude") or "claude",
+    )
+    print(render_table(results, include_fable=include_fable))
+    print(f"\nsource={source}")
+    return 0 if any(result.state in ELIGIBLE_STATES for result in results) else 1
 
 
 # ---------------------------------------------------------------------------
@@ -5874,6 +5930,10 @@ def main() -> None:
     if _argv and _argv[0] == "claude":
         cmd_claude(_argv[1:])
         return
+    if _argv and _argv[0] == "claude-terminal":
+        from scripts.claude_terminal import main as terminal_main
+
+        raise SystemExit(terminal_main(_argv[1:]))
 
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
@@ -5987,7 +6047,14 @@ def main() -> None:
         help="Edit only this target's chain (default: every installed target). Ignored by unlink.",
     )
 
-    sub.add_parser("claude", help="Launch claude with --dangerously-skip-permissions (no other flags injected)")
+    sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
+    sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
+
+    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
+    balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
+    balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
+    balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
+    balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
     ign_p.add_argument(
@@ -6284,6 +6351,8 @@ notes:
         except ValueError:
             extra = []
         cmd_claude(extra)
+    elif args.command == "balance":
+        sys.exit(cmd_balance(include_fable=args.fable, refresh=args.refresh, timeout=args.timeout))
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report
