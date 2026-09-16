@@ -15,6 +15,10 @@ on:
         required: true
         type: choice
         options: [patch, minor, major]
+      publish_pypi:
+        description: "Publish to PyPI immediately after creating the release"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -76,6 +80,7 @@ jobs:
             --latest
 
       - name: Dispatch publish-pypi at the new tag
+        if: inputs.publish_pypi
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
