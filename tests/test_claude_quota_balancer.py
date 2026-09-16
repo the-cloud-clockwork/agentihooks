@@ -114,6 +114,8 @@ def test_table_orders_margin_and_shows_resets():
     assert "70%" in table
     assert "1h00m" in table
     assert "1000/200000 (0%)" in table
+    assert "MODEL" not in table
+    assert "LATENCY" not in table
 
 
 def test_dry_run_prints_total_execution_time(monkeypatch, capsys):

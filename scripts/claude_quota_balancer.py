@@ -277,8 +277,6 @@ def render_table(results: list[ProbeResult], now: int | None = None) -> str:
         "7D USED/LEFT",
         "7D RESET",
         "PROBE CTX",
-        "MODEL",
-        "LATENCY",
     ]
     rows = []
     for rank, result in enumerate(rank_results(results), 1):
@@ -293,8 +291,6 @@ def render_table(results: list[ProbeResult], now: int | None = None) -> str:
                 _usage(result.seven_day),
                 _duration(result.seven_day.resets_at, timestamp),
                 _context(result),
-                result.model,
-                "?" if result.latency_ms is None else f"{result.latency_ms}ms",
             ]
         )
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
