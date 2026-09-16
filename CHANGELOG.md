@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-16
+
+### Added
+
+- Claude OAuth account routing across every exported `AH_CC_TOKEN_*`
+  credential. The router probes five-hour and weekly capacity concurrently,
+  ranks accounts by their lowest remaining quota, caches results for 60
+  seconds, and fails closed when no account has verified capacity.
+- Automatic Fable-aware routing. An explicit or configured Fable model includes
+  its separate weekly quota in the routing decision.
+- `agentihooks balance --dry-run` for ranked capacity diagnostics and
+  `--show-account-metadata=<suffix>` for a redacted dump of every JSON event
+  returned by one selected account.
+- The built-in `run-claude-terminal` skill and launcher for WSL, macOS, and
+  native Linux, with arbitrary Claude flag forwarding and safe prompt files.
+
+### Changed
+
+- `agentihooks claude` and its `agenti` alias select and export the healthiest
+  OAuth credential before replacing the process with Claude. Child agents
+  inherit only the selected account.
+- `run-claude-terminal` falls back to bare Claude when routing is unavailable,
+  preserving existing keychain, direct OAuth, API-key, or provider-based
+  authentication. Direct `agenti` launches remain fail-closed.
+
 ## [2.11.0] - 2026-09-16
 
 ### Fixed
