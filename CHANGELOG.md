@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-09-16
+
+### Fixed
+
+- Codex installation no longer automatically sets `model_catalog_json` to an
+  AgentiHooks-generated catalog. Codex can discover models without the stale
+  catalog override.
+- Re-running `agentihooks init --target codex` removes the legacy AgentiHooks
+  catalog override while preserving operator-defined custom catalogs.
+
+### Removed
+
+- Automatic Codex model-catalog refresh at session start and the associated
+  context-window pinning.
+
+### Added
+
+- The release workflow accepts `publish_pypi=false` to create the release before
+  publishing it. PyPI publication can then be dispatched at the release tag
+  after the snapshot PR is verified and merged.
+
 ## [2.10.0] - 2026-09-13
 
 ### Fixed
