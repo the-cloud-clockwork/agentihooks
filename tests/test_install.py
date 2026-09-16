@@ -81,6 +81,37 @@ class TestClaudeRouting:
         assert exc.value.code == 3
         assert "no capacity" in capsys.readouterr().err
 
+    def test_terminal_fallback_preserves_existing_auth(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        observed = {}
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "route_requires_fable", lambda *args, **kwargs: False)
+        monkeypatch.setattr(
+            balancer,
+            "select_credential",
+            lambda *args, **kwargs: (_ for _ in ()).throw(balancer.RoutingError("no router accounts")),
+        )
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "api-secret")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://litellm.example")
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "direct-oauth")
+
+        def execvpe(executable, command, environ):
+            observed.update(executable=executable, command=command, environ=dict(environ))
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(["--agentihooks-fallback-bare", "--model", "sonnet"])
+
+        assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "sonnet"]
+        assert observed["environ"]["ANTHROPIC_API_KEY"] == "api-secret"
+        assert observed["environ"]["ANTHROPIC_BASE_URL"] == "https://litellm.example"
+        assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "direct-oauth"
+        assert "launching bare Claude" in capsys.readouterr().err
+
     def test_cmd_balance_prints_ranked_capacity(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
 
@@ -103,6 +134,30 @@ class TestClaudeRouting:
         assert "ROUTING LEFT" in output
         assert "70%" in output
         assert "source=cached" in output
+
+    def test_cmd_balance_can_print_raw_account_metadata(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+        payload = {
+            "schema_version": 1,
+            "accounts": [{"account": "ALPHA", "return_code": 0, "events": [{"type": "system"}]}],
+        }
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [credential])
+        monkeypatch.setattr(balancer, "collect_account_metadata", lambda *args, **kwargs: payload)
+
+        assert (
+            install.cmd_balance(
+                include_fable=False,
+                refresh=False,
+                timeout=10,
+                show_account_metadata="ALPHA",
+            )
+            == 0
+        )
+        assert json.loads(capsys.readouterr().out) == payload
 
 
 class TestUserEnvManifest:

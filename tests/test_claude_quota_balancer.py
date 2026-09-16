@@ -50,6 +50,21 @@ def test_discovers_dynamic_token_names_without_exposing_values():
     assert "secret" not in repr(credentials)
 
 
+def test_account_metadata_slug_selects_exact_environment_suffix():
+    credentials = [
+        balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a"),
+        balancer.Credential("AH_CC_TOKEN_ALPHA_2", "secret-b"),
+    ]
+
+    assert balancer.credential_for_slug(credentials, "ALPHA").env_name == "AH_CC_TOKEN_ALPHA"
+    try:
+        balancer.credential_for_slug(credentials, "MISSING")
+    except balancer.RoutingError as exc:
+        assert "available: ALPHA, ALPHA_2" in str(exc)
+    else:
+        raise AssertionError("missing suffix should fail")
+
+
 def test_ranks_by_the_tightest_quota_window():
     high = balancer.parse_probe("HIGH", _stream(0.20, 0.30), 100)
     reduce = balancer.parse_probe("REDUCE", _stream(0.10, 0.70), 100)
@@ -276,3 +291,61 @@ def test_fable_selection_requires_fable_window(monkeypatch, tmp_path):
         pass
     else:
         raise AssertionError("Fable routing should require the Fable quota window")
+
+
+def test_account_metadata_captures_all_json_and_redacts_tokens(monkeypatch):
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "oauth-secret")
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "system", "subtype": "init", "apiKeySource": "oauth", "value": "oauth-secret"}),
+            json.dumps({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed"}}),
+            "not-json oauth-secret",
+        ]
+    )
+
+    def run(command, **kwargs):
+        assert "--include-partial-messages" in command
+        return subprocess.CompletedProcess(command, 0, stdout, "stderr oauth-secret")
+
+    monkeypatch.setattr(balancer.subprocess, "run", run)
+
+    metadata = balancer.collect_account_metadata(
+        [credential],
+        environ={"AH_CC_TOKEN_ALPHA": "oauth-secret"},
+    )
+
+    encoded = json.dumps(metadata)
+    assert "oauth-secret" not in encoded
+    account = metadata["accounts"][0]
+    assert account["events"][0]["subtype"] == "init"
+    assert account["events"][1]["type"] == "rate_limit_event"
+    assert account["non_json_stdout"] == ["not-json <redacted>"]
+    assert account["stderr"] == "stderr <redacted>"
+
+
+def test_show_account_metadata_prints_json_instead_of_table(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["claude_quota_balancer.py", "--show-account-metadata=ALPHA"])
+    monkeypatch.setattr(
+        balancer,
+        "discover_credentials",
+        lambda environ: [balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")],
+    )
+    payload = {
+        "schema_version": 1,
+        "generated_at": "now",
+        "probe_model": "haiku",
+        "account_count": 1,
+        "accounts": [{"account": "ALPHA", "return_code": 0, "events": [{"type": "system"}]}],
+    }
+    observed = {}
+
+    def collect(credentials, **kwargs):
+        observed["accounts"] = [credential.account for credential in credentials]
+        return payload
+
+    monkeypatch.setattr(balancer, "collect_account_metadata", collect)
+
+    assert balancer.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output == payload
+    assert observed == {"accounts": ["ALPHA"]}

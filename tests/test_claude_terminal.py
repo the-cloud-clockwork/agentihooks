@@ -40,7 +40,7 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     assert rc == 0
     launcher = next((runtime / "agentihooks-claude-terminal").glob("*.sh"))
     launcher_text = launcher.read_text()
-    assert "/usr/bin/agentihooks claude --name quota-test" in launcher_text
+    assert "/usr/bin/agentihooks claude --agentihooks-fallback-bare --name quota-test" in launcher_text
     assert "--resume session-id --fork-session --model fable" in launcher_text
     assert prompt not in launcher_text
     prompt_file = next((runtime / "agentihooks-claude-terminal").glob("*.prompt"))

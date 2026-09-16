@@ -63,7 +63,14 @@ def _write_launcher(
         prompt_file.chmod(0o600)
 
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
-    command = [agentihooks_bin, "claude", "--name", name, *claude_args]
+    command = [
+        agentihooks_bin,
+        "claude",
+        "--agentihooks-fallback-bare",
+        "--name",
+        name,
+        *claude_args,
+    ]
     if prompt_file is not None:
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
     else:

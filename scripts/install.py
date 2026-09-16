@@ -5336,12 +5336,19 @@ def cmd_claude(extra_args: list[str]) -> None:
         select_credential,
     )
 
+    fallback_flag = "--agentihooks-fallback-bare"
+    fallback_bare = fallback_flag in extra_args
+    extra_args = [argument for argument in extra_args if argument != fallback_flag]
     _load_claude_runtime_env()
     claude_bin = shutil.which("claude") or "claude"
     include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
     try:
         decision = select_credential(os.environ, include_fable=include_fable, claude_bin=claude_bin)
     except RoutingError as exc:
+        if fallback_bare:
+            print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
+            cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
+            os.execvpe(claude_bin, cmd, os.environ)
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
@@ -5357,10 +5364,19 @@ def cmd_claude(extra_args: list[str]) -> None:
     os.execvpe(claude_bin, cmd, os.environ)
 
 
-def cmd_balance(*, include_fable: bool, refresh: bool, timeout: float) -> int:
+def cmd_balance(
+    *,
+    include_fable: bool,
+    refresh: bool,
+    timeout: float,
+    show_account_metadata: str = "",
+) -> int:
     from scripts.claude_quota_balancer import (
         ELIGIBLE_STATES,
+        RoutingError,
+        collect_account_metadata,
         collect_results,
+        credential_for_slug,
         discover_credentials,
         render_table,
     )
@@ -5370,6 +5386,20 @@ def cmd_balance(*, include_fable: bool, refresh: bool, timeout: float) -> int:
     if not credentials:
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
+    if show_account_metadata:
+        try:
+            credential = credential_for_slug(credentials, show_account_metadata)
+        except RoutingError as exc:
+            print(f"agentihooks: {exc}", file=sys.stderr)
+            return 2
+        metadata = collect_account_metadata(
+            [credential],
+            include_fable=include_fable,
+            timeout=timeout,
+            claude_bin=shutil.which("claude") or "claude",
+        )
+        print(json.dumps(metadata, indent=2, sort_keys=True))
+        return 0 if all(account["return_code"] == 0 for account in metadata["accounts"]) else 1
     results, source = collect_results(
         credentials,
         include_fable=include_fable,
@@ -6053,6 +6083,12 @@ def main() -> None:
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
     balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
+    balance_p.add_argument(
+        "--show-account-metadata",
+        metavar="SLUG",
+        default="",
+        help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
+    )
     balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
     balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
 
@@ -6352,7 +6388,14 @@ notes:
             extra = []
         cmd_claude(extra)
     elif args.command == "balance":
-        sys.exit(cmd_balance(include_fable=args.fable, refresh=args.refresh, timeout=args.timeout))
+        sys.exit(
+            cmd_balance(
+                include_fable=args.fable,
+                refresh=args.refresh,
+                timeout=args.timeout,
+                show_account_metadata=args.show_account_metadata,
+            )
+        )
     elif args.command == "lint-claude":
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report

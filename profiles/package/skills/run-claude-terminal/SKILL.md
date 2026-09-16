@@ -36,7 +36,9 @@ agentihooks claude-terminal \
 ```
 
 The command selects the healthiest `AH_CC_TOKEN_*` account inside the new
-terminal. Fable models automatically include the separate Fable quota.
+terminal. Fable models automatically include the separate Fable quota. When
+the router has no configured or eligible account, the terminal launches bare
+Claude with its existing direct, keychain, or provider authentication.
 
 For a non-launching check, add `--dry-run` before `--`.
 

@@ -12,6 +12,7 @@ import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
@@ -82,6 +83,15 @@ def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
         for name in sorted(environ)
         if name.startswith(TOKEN_PREFIX) and name != TOKEN_PREFIX and environ[name]
     ]
+
+
+def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
+    target = f"{TOKEN_PREFIX}{slug}"
+    for credential in credentials:
+        if credential.env_name == target:
+            return credential
+    available = ", ".join(credential.account for credential in credentials) or "none"
+    raise RoutingError(f"account suffix '{slug}' not found; available: {available}")
 
 
 def _cache_path(environ: Mapping[str, str]) -> Path:
@@ -180,8 +190,8 @@ def _cache_lock(path: Path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def _probe_command(model: str, claude_bin: str = "claude") -> list[str]:
-    return [
+def _probe_command(model: str, claude_bin: str = "claude", include_partial: bool = False) -> list[str]:
+    command = [
         claude_bin,
         "-p",
         "Reply with exactly OK.",
@@ -201,6 +211,9 @@ def _probe_command(model: str, claude_bin: str = "claude") -> list[str]:
         "--max-budget-usd",
         "0.25" if model == "fable" else "0.10",
     ]
+    if include_partial:
+        command.append("--include-partial-messages")
+    return command
 
 
 def _child_environment(credential: Credential, environ: Mapping[str, str]) -> dict[str, str]:
@@ -354,6 +367,99 @@ def probe_credentials(
     )
     with ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(credentials))) as executor:
         return list(executor.map(worker, credentials))
+
+
+def _redact(text: str, secrets: list[str]) -> str:
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "<redacted>")
+    return redacted
+
+
+def probe_account_metadata(
+    credential: Credential,
+    *,
+    model: str,
+    timeout: float,
+    environ: Mapping[str, str],
+    claude_bin: str,
+    secrets: list[str],
+) -> dict:
+    command = _probe_command(model, claude_bin, include_partial=True)
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_child_environment(credential, environ),
+        )
+        stdout = completed.stdout
+        stderr = completed.stderr
+        return_code = completed.returncode
+        error = ""
+    except FileNotFoundError:
+        stdout, stderr, return_code, error = "", "", None, "claude executable not found"
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        return_code, error = None, f"probe timed out after {timeout:g}s"
+
+    safe_stdout = _redact(stdout, secrets)
+    events = []
+    non_json = []
+    for line in safe_stdout.splitlines():
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            non_json.append(line)
+    return {
+        "account": credential.account,
+        "env_var": credential.env_name,
+        "probe_model": model,
+        "return_code": return_code,
+        "elapsed_ms": round((time.monotonic() - started) * 1000),
+        "error": error,
+        "events": events,
+        "non_json_stdout": non_json,
+        "stderr": _redact(stderr, secrets),
+        "probe_command": command,
+    }
+
+
+def collect_account_metadata(
+    credentials: list[Credential],
+    *,
+    include_fable: bool = False,
+    timeout: float = 60,
+    environ: Mapping[str, str] | None = None,
+    claude_bin: str = "claude",
+) -> dict:
+    active_env = os.environ if environ is None else environ
+    model = "fable" if include_fable else "haiku"
+    secrets = [credential.token for credential in credentials]
+    inherited = active_env.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if inherited:
+        secrets.append(inherited)
+    worker = partial(
+        probe_account_metadata,
+        model=model,
+        timeout=timeout,
+        environ=active_env,
+        claude_bin=claude_bin,
+        secrets=secrets,
+    )
+    with ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(credentials))) as executor:
+        accounts = list(executor.map(worker, credentials))
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "probe_model": model,
+        "account_count": len(accounts),
+        "accounts": accounts,
+    }
 
 
 def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
@@ -584,6 +690,12 @@ def render_table(results: list[ProbeResult], now: int | None = None, include_fab
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rank Claude Code OAuth accounts by remaining routing capacity")
     parser.add_argument("--dry-run", action="store_true", help="probe and rank accounts without launching workload")
+    parser.add_argument(
+        "--show-account-metadata",
+        metavar="SLUG",
+        default="",
+        help="print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
+    )
     parser.add_argument("--fable", action="store_true", help="probe and include the separate Fable weekly quota")
     parser.add_argument("--refresh", action="store_true", help="ignore the 60-second quota cache")
     parser.add_argument("--timeout", type=float, default=60, help="per-account probe timeout in seconds")
@@ -592,14 +704,27 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if not args.dry_run:
-        print("claude-quota-balancer: only --dry-run is implemented", file=sys.stderr)
+    if not args.dry_run and not args.show_account_metadata:
+        print("claude-quota-balancer: use --dry-run or --show-account-metadata", file=sys.stderr)
         return 2
     started = time.monotonic()
     credentials = discover_credentials(os.environ)
     if not credentials:
         print(f"claude-quota-balancer: no non-empty {TOKEN_PREFIX}* variables found", file=sys.stderr)
         return 2
+    if args.show_account_metadata:
+        try:
+            credential = credential_for_slug(credentials, args.show_account_metadata)
+        except RoutingError as exc:
+            print(f"claude-quota-balancer: {exc}", file=sys.stderr)
+            return 2
+        metadata = collect_account_metadata(
+            [credential],
+            include_fable=args.fable,
+            timeout=args.timeout,
+        )
+        print(json.dumps(metadata, indent=2, sort_keys=True))
+        return 0 if all(account["return_code"] == 0 for account in metadata["accounts"]) else 1
     workers = min(MAX_PROBE_WORKERS, len(credentials))
     results, source = collect_results(
         credentials,
