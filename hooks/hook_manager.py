@@ -390,19 +390,6 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("enforcement session start failed", {"error": str(e)})
 
-    if _is_codex():
-        try:
-            from hooks.config import CODEX_CONTEXT_PIN_ENABLED
-
-            if CODEX_CONTEXT_PIN_ENABLED:
-                from hooks.context.codex_context_pin import refresh as _refresh_catalog
-
-                _pinned = _refresh_catalog()
-                if _pinned and _pinned[0]:
-                    log("codex context pin applied", {"restored": _pinned[0], "highwater": _pinned[1]})
-        except Exception as e:
-            log("codex context pin failed", {"error": str(e)})
-
     from hooks.config import MCP_HYGIENE_ENABLED
 
     if MCP_HYGIENE_ENABLED:

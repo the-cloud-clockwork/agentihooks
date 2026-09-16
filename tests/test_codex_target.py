@@ -17,6 +17,25 @@ def adapter(monkeypatch, tmp_path):
 
 
 class TestConfigToml:
+    @pytest.mark.parametrize("existing", [None, "managed", "custom"])
+    def test_init_withdraws_only_automatic_model_catalog(self, adapter, existing):
+        from hooks.context.codex_context_pin import catalog_path, live_cache_path
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        live_cache_path().write_text(json.dumps({"models": [{"slug": "example", "max_context_window": 272000}]}))
+        config = home / "config.toml"
+        value = str(catalog_path()) if existing == "managed" else str(home / "custom.json")
+        if existing:
+            config.write_text(f'model_catalog_json = "{value}"\n')
+
+        adapter.write_settings({})
+        adapter.write_settings({})
+
+        doc = adapter._load_toml(config)
+        assert doc.get("model_catalog_json") == (value if existing == "custom" else None)
+        assert not catalog_path().exists()
+
     def test_list_value_is_managed_and_withdrawn(self, adapter):
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)

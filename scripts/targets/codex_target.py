@@ -110,6 +110,10 @@ class CodexAdapter:
 
         config_path = home / "config.toml"
         doc = self._load_toml(config_path)
+        from hooks.context.codex_context_pin import catalog_path
+
+        if doc.get("model_catalog_json") == str(catalog_path()):
+            del doc["model_catalog_json"]
 
         # Native settings arrive already merged (base + bundle + profile chain).
         # Everything else is authored natively (profiles/_base/config.base.toml
@@ -145,19 +149,6 @@ class CodexAdapter:
 
         self._dump_toml(config_path, doc)
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
-
-        # model_catalog_json must name a file that already parses — codex exits
-        # non-zero when it does not — so the catalog is built before the key
-        # naming it is written.
-        try:
-            from hooks.context.codex_context_pin import catalog_path, refresh
-
-            if refresh() is not None:
-                doc.setdefault("model_catalog_json", str(catalog_path()))
-                self._dump_toml(config_path, doc)
-                _i._cprint(f"  [--] Codex model catalog pinned at {catalog_path()}")
-        except Exception as e:
-            _i._cprint(f"  [!!] Could not pin the codex model catalog: {e}")
 
         self._write_hooks_json(home)
         return config_path
