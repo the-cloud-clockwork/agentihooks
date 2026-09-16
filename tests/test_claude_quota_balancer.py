@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 
 from scripts import claude_quota_balancer as balancer
 
@@ -97,3 +98,17 @@ def test_table_orders_margin_and_shows_resets():
     assert "70%" in table
     assert "1h00m" in table
     assert "1000/200000 (0%)" in table
+
+
+def test_dry_run_prints_total_execution_time(monkeypatch, capsys):
+    result = balancer.parse_probe("ALPHA", _stream(0.20, 0.30), 100)
+    elapsed = iter([10.0, 12.345])
+    monkeypatch.setattr(sys, "argv", ["claude_quota_balancer.py", "--dry-run"])
+    monkeypatch.setattr(
+        balancer, "discover_credentials", lambda environ: [balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")]
+    )
+    monkeypatch.setattr(balancer, "probe_credential", lambda *args: result)
+    monkeypatch.setattr(balancer.time, "monotonic", lambda: next(elapsed))
+
+    assert balancer.main() == 0
+    assert "Dry-run execution time: 2.35s" in capsys.readouterr().out

@@ -306,12 +306,14 @@ def main() -> int:
     if not args.dry_run:
         print("claude-quota-balancer: only --dry-run is implemented", file=sys.stderr)
         return 2
+    started = time.monotonic()
     credentials = discover_credentials(os.environ)
     if not credentials:
         print(f"claude-quota-balancer: no non-empty {TOKEN_PREFIX}* variables found", file=sys.stderr)
         return 2
     results = [probe_credential(credential, args.model, args.timeout, os.environ) for credential in credentials]
     print(render_table(results))
+    print(f"\nDry-run execution time: {time.monotonic() - started:.2f}s")
     return 0 if any(result.state not in {"ERROR", "UNKNOWN"} for result in results) else 1
 
 
