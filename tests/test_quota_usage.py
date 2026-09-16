@@ -30,6 +30,7 @@ def test_native_rate_limits_render_requested_banner(monkeypatch, tmp_path):
     assert "ATTENTION TO QOUTA USAGE" in banner
     assert "5H REMAINING: 69%" in banner
     assert "7D REMAINING: 28%" in banner
+    assert "Shown every 5 tool calls" in banner
     assert "used" not in banner
 
 
@@ -140,6 +141,7 @@ def test_statusline_snapshot_reaches_user_prompt_hook(tmp_path):
     assert "ATTENTION TO QOUTA USAGE" in result.stdout
     assert "5H REMAINING: 79%" in result.stdout
     assert "7D REMAINING: 37%" in result.stdout
+    assert "Shown every 5 tool calls" in result.stdout
     assert "used" not in result.stdout
 
 
@@ -174,4 +176,5 @@ def test_pretool_banner_fires_on_every_fifth_tool_call(tmp_path):
     assert "ATTENTION TO QOUTA USAGE" in results[4].stdout
     assert "5H REMAINING: 65%" in results[4].stdout
     assert "7D REMAINING: 52%" in results[4].stdout
+    assert "Shown every 5 tool calls" in results[4].stdout
     assert "used" not in results[4].stdout

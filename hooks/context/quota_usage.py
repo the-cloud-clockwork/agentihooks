@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hooks.config import AGENTIHOOKS_HOME, QUOTA_USAGE_STALE_SEC
+from hooks.config import AGENTIHOOKS_HOME, QUOTA_USAGE_STALE_SEC, QUOTA_USAGE_TOOL_CALLS
 
 _TITLE = "ATTENTION TO QOUTA USAGE"
 
@@ -115,6 +115,7 @@ def quota_banner(session_id: str) -> str | None:
     ]
     if len(lines) != 2:
         return None
+    lines.append(f"Shown every {QUOTA_USAGE_TOOL_CALLS} tool calls")
     width = 78
     border = "═" * width
     title = f"║  {_TITLE}".ljust(width + 1) + "║"
