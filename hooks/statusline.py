@@ -170,6 +170,15 @@ def main() -> None:
         worktree = payload.get("worktree")
         vim = payload.get("vim")
         rate_limits = payload.get("rate_limits") or {}
+        session_id = payload.get("session_id", "")
+
+        if session_id and rate_limits:
+            try:
+                from hooks.context.quota_usage import record_rate_limits
+
+                record_rate_limits(session_id, rate_limits)
+            except Exception:
+                pass
 
         # Context window — trust Claude Code's native used_percentage
         used_pct = cw.get("used_percentage") or 0.0
@@ -310,7 +319,6 @@ def main() -> None:
         # Context threshold warning (compact advisor)
         from hooks.config import TOKEN_CONTROL_ENABLED, TOKEN_MONITOR_ENABLED
 
-        session_id = payload.get("session_id", "")
         if TOKEN_CONTROL_ENABLED and TOKEN_MONITOR_ENABLED and session_id:
             try:
                 from hooks.observability.token_monitor import should_warn_context

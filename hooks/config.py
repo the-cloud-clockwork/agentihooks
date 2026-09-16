@@ -495,6 +495,9 @@ BRAIN_HTTP_TIMEOUT = float(os.getenv("BRAIN_HTTP_TIMEOUT", "3"))
 CLAUDE_USAGE_FILE: str = os.getenv("CLAUDE_USAGE_FILE", "")
 CLAUDE_USAGE_STALE_SEC: int = int(os.getenv("CLAUDE_USAGE_STALE_SEC", "300"))
 CLAUDE_USAGE_POLL_SEC: int = int(os.getenv("CLAUDE_USAGE_POLL_SEC", "60"))
+QUOTA_USAGE_INJECTION_ENABLED = _env_bool("QUOTA_USAGE_INJECTION_ENABLED", "true")
+QUOTA_USAGE_TOOL_CALLS: int = int(os.getenv("QUOTA_USAGE_TOOL_CALLS", "5"))
+QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 
 # =============================================================================
 # CONTEXT AUDIT — per-tool token consumption tracking
