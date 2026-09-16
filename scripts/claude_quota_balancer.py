@@ -7,9 +7,12 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+MAX_PROBE_WORKERS = 3
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,17 @@ def probe_credential(
     return result
 
 
+def probe_credentials(
+    credentials: list[Credential],
+    model: str,
+    timeout: float,
+    environ: Mapping[str, str],
+) -> list[ProbeResult]:
+    worker = partial(probe_credential, model=model, timeout=timeout, environ=environ)
+    with ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(credentials))) as executor:
+        return list(executor.map(worker, credentials))
+
+
 def _error_result(account: str, error: str, latency_ms: int | None = None) -> ProbeResult:
     return ProbeResult(
         account=account,
@@ -311,9 +325,15 @@ def main() -> int:
     if not credentials:
         print(f"claude-quota-balancer: no non-empty {TOKEN_PREFIX}* variables found", file=sys.stderr)
         return 2
-    results = [probe_credential(credential, args.model, args.timeout, os.environ) for credential in credentials]
+    workers = min(MAX_PROBE_WORKERS, len(credentials))
+    results = probe_credentials(credentials, args.model, args.timeout, os.environ)
     print(render_table(results))
-    print(f"\nDry-run execution time: {time.monotonic() - started:.2f}s")
+    account_label = "account" if len(credentials) == 1 else "accounts"
+    worker_label = "worker" if workers == 1 else "workers"
+    print(
+        f"\nDry-run execution time: {time.monotonic() - started:.2f}s "
+        f"({len(credentials)} {account_label}, {workers} {worker_label})"
+    )
     return 0 if any(result.state not in {"ERROR", "UNKNOWN"} for result in results) else 1
 
 

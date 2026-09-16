@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import threading
 
 from scripts import claude_quota_balancer as balancer
 
@@ -88,6 +89,21 @@ def test_probe_passes_only_selected_oauth_token(monkeypatch):
     assert "selected-secret" not in observed["command"]
 
 
+def test_probes_run_concurrently_with_three_workers(monkeypatch):
+    barrier = threading.Barrier(3)
+
+    def probe(credential, *args, **kwargs):
+        barrier.wait(timeout=5)
+        return balancer.parse_probe(credential.account, _stream(0.20, 0.30), 100)
+
+    monkeypatch.setattr(balancer, "probe_credential", probe)
+    credentials = [balancer.Credential(f"AH_CC_TOKEN_{name}", "secret") for name in ("A", "B", "C")]
+
+    results = balancer.probe_credentials(credentials, "haiku", 10, {})
+
+    assert [result.account for result in results] == ["A", "B", "C"]
+
+
 def test_table_orders_margin_and_shows_resets():
     high = balancer.parse_probe("HIGH", _stream(0.20, 0.30), 100)
     drain = balancer.parse_probe("DRAIN", _stream(0.05, 0.96), 200)
@@ -107,8 +123,8 @@ def test_dry_run_prints_total_execution_time(monkeypatch, capsys):
     monkeypatch.setattr(
         balancer, "discover_credentials", lambda environ: [balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")]
     )
-    monkeypatch.setattr(balancer, "probe_credential", lambda *args: result)
+    monkeypatch.setattr(balancer, "probe_credentials", lambda *args: [result])
     monkeypatch.setattr(balancer.time, "monotonic", lambda: next(elapsed))
 
     assert balancer.main() == 0
-    assert "Dry-run execution time: 2.35s" in capsys.readouterr().out
+    assert "Dry-run execution time: 2.35s (1 account, 1 worker)" in capsys.readouterr().out
