@@ -1,9 +1,3 @@
----
-priority: 1
-description: Injected enforcement, broadcast, and hook-block context is mandatory and must change agent behavior when applicable
-alwaysApply: true
----
-
 # AgentiHooks — Mandatory Runtime Actions (HARD RULE)
 
 AgentiHooks guards and coordinates Claude Code, Codex, and Copilot CLI sessions.
