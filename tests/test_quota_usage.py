@@ -28,8 +28,9 @@ def test_native_rate_limits_render_requested_banner(monkeypatch, tmp_path):
     banner = quota_usage.quota_banner("session-1")
 
     assert "ATTENTION TO QOUTA USAGE" in banner
-    assert "5H: 31% used | 69% remaining" in banner
-    assert "7D: 72% used | 28% remaining" in banner
+    assert "5H REMAINING: 69%" in banner
+    assert "7D REMAINING: 28%" in banner
+    assert "used" not in banner
 
 
 def test_stale_native_snapshot_is_not_injected(monkeypatch, tmp_path):
@@ -75,8 +76,9 @@ def test_router_cache_supplies_first_prompt(monkeypatch, tmp_path):
 
     banner = quota_usage.quota_banner("new-session")
 
-    assert "5H: 12% used | 88% remaining" in banner
-    assert "7D: 44% used | 56% remaining" in banner
+    assert "5H REMAINING: 88%" in banner
+    assert "7D REMAINING: 56%" in banner
+    assert "used" not in banner
 
 
 def _hook_env(tmp_path):
@@ -136,8 +138,9 @@ def test_statusline_snapshot_reaches_user_prompt_hook(tmp_path):
 
     assert result.returncode == 0
     assert "ATTENTION TO QOUTA USAGE" in result.stdout
-    assert "5H: 21% used | 79% remaining" in result.stdout
-    assert "7D: 63% used | 37% remaining" in result.stdout
+    assert "5H REMAINING: 79%" in result.stdout
+    assert "7D REMAINING: 37%" in result.stdout
+    assert "used" not in result.stdout
 
 
 def test_pretool_banner_fires_on_every_fifth_tool_call(tmp_path):
@@ -169,5 +172,6 @@ def test_pretool_banner_fires_on_every_fifth_tool_call(tmp_path):
     assert all(result.returncode == 0 for result in results)
     assert all("ATTENTION TO QOUTA USAGE" not in result.stdout for result in results[:4])
     assert "ATTENTION TO QOUTA USAGE" in results[4].stdout
-    assert "5H: 35% used | 65% remaining" in results[4].stdout
-    assert "7D: 48% used | 52% remaining" in results[4].stdout
+    assert "5H REMAINING: 65%" in results[4].stdout
+    assert "7D REMAINING: 52%" in results[4].stdout
+    assert "used" not in results[4].stdout

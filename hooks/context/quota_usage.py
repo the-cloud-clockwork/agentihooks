@@ -98,7 +98,7 @@ def _window_line(label: str, window: object) -> str | None:
     if not isinstance(window, dict) or not isinstance(window.get("used_percentage"), (int, float)):
         return None
     used = max(0.0, min(100.0, float(window["used_percentage"])))
-    return f"{label}: {used:.0f}% used | {100.0 - used:.0f}% remaining | {_reset_text(window.get('resets_at'))}"
+    return f"{label} REMAINING: {100.0 - used:.0f}% | {_reset_text(window.get('resets_at'))}"
 
 
 def quota_banner(session_id: str) -> str | None:

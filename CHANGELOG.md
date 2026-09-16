@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Claude Code sessions receive an `ATTENTION TO QOUTA USAGE` hook banner with
-  native 5-hour and 7-day quota usage on every user prompt and every fifth tool
-  call.
+  native 5-hour and 7-day remaining quota on every user prompt and every fifth
+  tool call.
 
 ## [2.12.0] - 2026-09-16
 
