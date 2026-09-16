@@ -577,6 +577,13 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    try:
+        from hooks.context.quota_usage import clear_session_state as _clear_quota_usage
+
+        _clear_quota_usage(session_id)
+    except Exception:
+        pass
+
     # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -640,6 +647,19 @@ def on_user_prompt_submit(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
+
+    try:
+        from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
+
+        if QUOTA_USAGE_INJECTION_ENABLED:
+            from hooks.common import inject_context as _inject_quota_usage
+            from hooks.context.quota_usage import quota_banner
+
+            _quota_banner = quota_banner(session_id)
+            if _quota_banner:
+                _inject_quota_usage(_quota_banner, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("quota usage user prompt failed", {"error": str(e)})
 
     # --- Secrets scanning ---
     if SECRETS_MODE != "off":
@@ -1195,19 +1215,35 @@ def on_pre_tool_use(payload: dict) -> None:
     # --- Combined PreToolUse context injection: broadcast + enforcement ---
     # Both sources must merge into a SINGLE hookSpecificOutput JSON; emitting
     # two separate JSON lines makes Claude Code drop the second.
-    from hooks.config import BRAIN_ENABLED, BROADCAST_ENABLED, ENFORCEMENT_INJECTION_ENABLED
+    from hooks.config import (
+        BRAIN_ENABLED,
+        BROADCAST_ENABLED,
+        ENFORCEMENT_INJECTION_ENABLED,
+        QUOTA_USAGE_INJECTION_ENABLED,
+        QUOTA_USAGE_TOOL_CALLS,
+    )
     from hooks.targets.capabilities import can_inject_context
 
     _pretool_blocks: list[str] = []
     _can_inject_pretool = can_inject_context("PreToolUse")
     _tool_call_count = 0
-    if BRAIN_ENABLED or ENFORCEMENT_INJECTION_ENABLED:
+    if BRAIN_ENABLED or ENFORCEMENT_INJECTION_ENABLED or QUOTA_USAGE_INJECTION_ENABLED:
         try:
             from hooks.context.enforcement import increment_and_get_count
 
             _tool_call_count = increment_and_get_count(session_id)
         except Exception as e:
             log("tool-call counter failed", {"error": str(e)})
+
+    if QUOTA_USAGE_INJECTION_ENABLED and _tool_call_count % max(1, QUOTA_USAGE_TOOL_CALLS) == 0:
+        try:
+            from hooks.context.quota_usage import quota_banner
+
+            _quota_banner = quota_banner(session_id)
+            if _quota_banner:
+                _pretool_blocks.append(_quota_banner)
+        except Exception as e:
+            log("quota usage pretool failed", {"error": str(e)})
 
     if BRAIN_ENABLED and _tool_call_count:
         try:
