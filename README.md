@@ -159,6 +159,7 @@ agentihooks broadcast --clear                # clear all
 # Launch claude with --dangerously-skip-permissions
 agentihooks claude                           # bypassPermissions + your extra args
 agenti                                       # alias (after source ~/.bashrc)
+agenti --route 0                             # force AH_CC_TOKEN_0
 
 # Bundle management
 agentihooks bundle link ~/dev/my-tools       # link a bundle
