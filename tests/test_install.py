@@ -81,6 +81,43 @@ class TestClaudeRouting:
         assert exc.value.code == 3
         assert "no capacity" in capsys.readouterr().err
 
+    def test_cmd_claude_route_selects_exact_slug_without_probing(self, monkeypatch, capsys):
+        from scripts import claude_quota_balancer as balancer
+
+        observed = {}
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(
+            balancer,
+            "select_credential",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("automatic routing ran")),
+        )
+        monkeypatch.setenv("AH_CC_TOKEN_0", "selected-secret")
+        monkeypatch.setenv("AH_CC_TOKEN_3", "peer-secret")
+
+        def execvpe(executable, command, environ):
+            observed.update(command=command, environ=dict(environ))
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(["--route", "0", "--model", "sonnet"])
+
+        assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "sonnet"]
+        assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "selected-secret"
+        assert observed["environ"]["AH_CC_TOKEN_0"] == "selected-secret"
+        assert "AH_CC_TOKEN_3" not in observed["environ"]
+        assert capsys.readouterr().out == "[agenti] account=0 route=forced\n"
+
+    @pytest.mark.parametrize("arguments", [["--route"], ["--route="], ["--route", "0", "--route=3"]])
+    def test_cmd_claude_rejects_invalid_route_syntax(self, arguments, capsys):
+        with pytest.raises(SystemExit) as exc:
+            install.cmd_claude(arguments)
+
+        assert exc.value.code == 2
+        assert "--route requires exactly one account slug" in capsys.readouterr().err
+
     def test_terminal_fallback_preserves_existing_auth(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
 

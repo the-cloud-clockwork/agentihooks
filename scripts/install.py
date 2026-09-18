@@ -31,8 +31,9 @@ Commands:
     agentihooks ignore [path] [--force]
         Create a .claudeignore in the current directory.
 
-    agentihooks claude [extra flags]
+    agentihooks claude [--route SLUG] [extra flags]
         Route to the healthiest OAuth account and launch Claude.
+        --route SLUG selects AH_CC_TOKEN_<SLUG> directly.
         Alias: agenti (added to ~/.bashrc by init)
 
     agentihooks claude-terminal [launcher options] -- [claude flags]
@@ -5326,10 +5327,35 @@ def _load_claude_runtime_env() -> None:
                         os.environ[k] = v
 
 
+def _extract_claude_route(extra_args: list[str]) -> tuple[str, list[str]]:
+    route = ""
+    forwarded = []
+    index = 0
+    while index < len(extra_args):
+        argument = extra_args[index]
+        if argument == "--route":
+            if route or index + 1 >= len(extra_args) or extra_args[index + 1].startswith("-"):
+                raise ValueError("--route requires exactly one account slug")
+            route = extra_args[index + 1]
+            index += 2
+            continue
+        if argument.startswith("--route="):
+            if route or not argument.removeprefix("--route="):
+                raise ValueError("--route requires exactly one account slug")
+            route = argument.removeprefix("--route=")
+            index += 1
+            continue
+        forwarded.append(argument)
+        index += 1
+    return route, forwarded
+
+
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude."""
     from scripts.claude_quota_balancer import (
         RoutingError,
+        credential_for_slug,
+        discover_credentials,
         format_selection,
         render_table,
         route_requires_fable,
@@ -5339,13 +5365,22 @@ def cmd_claude(extra_args: list[str]) -> None:
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
     extra_args = [argument for argument in extra_args if argument != fallback_flag]
+    try:
+        route, extra_args = _extract_claude_route(extra_args)
+    except ValueError as exc:
+        print(f"agentihooks: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     _load_claude_runtime_env()
     claude_bin = shutil.which("claude") or "claude"
     include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
     try:
-        decision = select_credential(os.environ, include_fable=include_fable, claude_bin=claude_bin)
+        if route:
+            selected_credential = credential_for_slug(discover_credentials(os.environ), route)
+        else:
+            decision = select_credential(os.environ, include_fable=include_fable, claude_bin=claude_bin)
+            selected_credential = decision.credential
     except RoutingError as exc:
-        if fallback_bare:
+        if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
             os.execvpe(claude_bin, cmd, os.environ)
@@ -5356,10 +5391,15 @@ def cmd_claude(extra_args: list[str]) -> None:
 
     os.environ.pop("ANTHROPIC_API_KEY", None)
     for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
-        if name != decision.credential.env_name:
+        if name != selected_credential.env_name:
             os.environ.pop(name, None)
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = decision.credential.token
-    print(format_selection(decision, include_fable), flush=True)
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
+    print(
+        f"[agenti] account={selected_credential.account} route=forced"
+        if route
+        else format_selection(decision, include_fable),
+        flush=True,
+    )
     cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
     os.execvpe(claude_bin, cmd, os.environ)
 
