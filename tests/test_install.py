@@ -1049,6 +1049,49 @@ class TestInitProfileRecall:
             called_args = mock_install.call_args[0][0]
             assert called_args.profile == "anton"
 
+    def test_force_keeps_bundle_linked_profiles_and_profile_chain(self):
+        import argparse
+        import copy
+        import os
+
+        bundle = {"path": "/home/test/bundle", "linked_at": "2026-01-01T00:00:00Z"}
+        linked = [{"name": "brain", "path": "/home/test/brain", "linked_at": "2026-01-01T00:00:00Z"}]
+        store = {"state": {**self._make_state("anton,brain", settings_profile="admin"), "bundle": bundle}}
+        store["state"]["linked_profiles"] = linked
+
+        def clean():
+            store["state"] = {}
+
+        def save(state):
+            store["state"] = copy.deepcopy(state)
+
+        args = argparse.Namespace(
+            profile=None,
+            init_settings_profile=None,
+            bundle=None,
+            force=True,
+            repo=None,
+            query=False,
+            list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", side_effect=lambda: copy.deepcopy(store["state"])),
+            patch.object(install, "_save_state", side_effect=save),
+            patch.object(install, "_clean_state_dir", side_effect=clean),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            os.environ.pop("AGENTIHOOKS_SETTINGS_PROFILE", None)
+            install.cmd_init_unified(args)
+
+        called_args = mock_install.call_args[0][0]
+        assert called_args.profile == "anton,brain"
+        assert called_args.settings_profile == "admin"
+        assert store["state"]["bundle"] == bundle
+        assert store["state"]["linked_profiles"] == linked
+
     def test_recalls_settings_profile_from_state(self):
         """When no CLI flag or env var, init uses settings_profile from state.json."""
         import argparse
