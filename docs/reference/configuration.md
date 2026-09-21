@@ -136,6 +136,10 @@ For `Write`: counts lines in the new content. For `Edit`: reads the current file
 | `AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK` | `true` | Enable/disable the guardrail. Set `false` or `0` to allow unrestricted edits. |
 | `AGENTIHOOKS_CLAUDE_MD_MAXLINES` | `200` | Maximum allowed lines in `CLAUDE.md` / `CLAUDE.local.md` files. |
 
+An operator can raise the cap for the current session by including
+`claude-md-max-lines=<number>` anywhere in a message. The value cannot lower the
+configured baseline, and the override clears when the session ends.
+
 ---
 
 ## Context Preprocessor (token compression)

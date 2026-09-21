@@ -628,6 +628,13 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    try:
+        from hooks.context.claude_md_sanity import clear_session_max_lines
+
+        clear_session_max_lines(session_id)
+    except Exception:
+        pass
+
     # --- Broadcast: deregister session + prune dead peers ---
     from hooks.config import BROADCAST_ENABLED
 
@@ -678,6 +685,22 @@ def on_user_prompt_submit(payload: dict) -> None:
                 )
     else:
         log("Secrets scanning skipped (mode=off)")
+
+    try:
+        from hooks.context.claude_md_sanity import parse_max_lines_signal, set_session_max_lines
+
+        requested_max_lines = parse_max_lines_signal(payload.get("prompt", ""))
+        if requested_max_lines is not None:
+            active_max_lines = set_session_max_lines(session_id, requested_max_lines)
+            if active_max_lines is not None:
+                from hooks.common import inject_banner
+
+                inject_banner(
+                    "CLAUDE.MD CAP",
+                    f"CLAUDE.md line cap raised to {active_max_lines} for this session.",
+                )
+    except Exception as e:
+        log("claude_md_sanity signal detection failed", {"error": str(e)})
 
     try:
         from hooks.common import inject_context as _inject_enforcements
