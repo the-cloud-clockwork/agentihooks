@@ -46,6 +46,10 @@ def _runtime_dir(environ: dict[str, str]) -> Path:
     return root
 
 
+def _started_marker(launcher: Path) -> Path:
+    return launcher.with_suffix(".started")
+
+
 def _write_launcher(
     directory: Path,
     name: str,
@@ -81,6 +85,7 @@ def _write_launcher(
         "#!/usr/bin/env bash\n"
         "set -u\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
+        f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"exec {shlex.quote(shell)} -l\n",
@@ -123,24 +128,25 @@ def _launch_command(
         return "macos", [osascript, "-e", f'tell application "Terminal" to do script "{escaped}"']
     if system == "Linux" and _is_wsl(environ):
         wt = shutil.which("wt.exe")
-        powershell = shutil.which("powershell.exe")
-        if not wt or not powershell:
-            raise RuntimeError("WSL interop requires wt.exe and powershell.exe")
+        if not wt or not shutil.which("wsl.exe"):
+            raise RuntimeError("WSL interop requires wt.exe and wsl.exe on PATH")
+        if ";" in str(launcher):
+            raise RuntimeError(f"launcher path contains ';', which wt.exe splits on: {launcher}")
         distro = environ.get("WSL_DISTRO_NAME", "")
-        wsl_call = ["wsl.exe", *(["-d", distro] if distro else []), "--", "bash", "-lc", str(launcher)]
-        ps_command = "& { " + " ".join("'" + value.replace("'", "''") + "'" for value in wsl_call) + " }"
+        # wt.exe is a Windows process: the program must be a Windows-resolvable name, never a /mnt/c path.
         return "wsl", [
             wt,
             "-w",
             "0",
             "new-tab",
             "--title",
-            title,
-            powershell,
-            "-NoExit",
-            "-NoProfile",
-            "-Command",
-            ps_command,
+            title.replace(";", "_"),
+            "wsl.exe",
+            *(["-d", distro] if distro else []),
+            "--",
+            "bash",
+            "-lc",
+            str(launcher),
         ]
     if system == "Linux":
         if not (environ.get("DISPLAY") or environ.get("WAYLAND_DISPLAY")):
@@ -163,6 +169,12 @@ def _parser() -> argparse.ArgumentParser:
     prompt.add_argument("--prompt", default="", help="Opening Claude prompt")
     prompt.add_argument("--prompt-file", default="", help="Read the opening prompt from this file")
     parser.add_argument("--dry-run", action="store_true", help="Print the launch without opening a terminal")
+    parser.add_argument(
+        "--start-timeout",
+        type=float,
+        default=30.0,
+        help="Seconds to wait for the new terminal to start the launcher before failing",
+    )
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
 
@@ -181,24 +193,44 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print(f"agentihooks claude-terminal: {exc}", file=sys.stderr)
         return 2
 
+    report = [
+        f"host={host}",
+        f"directory={directory}",
+        f"name={name}",
+        f"claude_args={shlex.join(claude_args)}",
+        f"launcher={launcher}",
+        f"prompt_file={prompt_file or 'none'}",
+        f"command={shlex.join(command)}",
+    ]
     if args.dry_run:
-        print(f"host={host}")
-        print(f"directory={directory}")
-        print(f"name={name}")
-        print(f"launcher={launcher}")
-        print(f"prompt_file={prompt_file or 'none'}")
-        print(f"command={shlex.join(command)}")
+        print("\n".join([*report, "status=dry-run"]))
         return 0
 
-    try:
-        subprocess.Popen(command, env=active_env, start_new_session=True)
-    except OSError as exc:
+    def discard() -> None:
         launcher.unlink(missing_ok=True)
         if prompt_file is not None:
             prompt_file.unlink(missing_ok=True)
+
+    marker = _started_marker(launcher)
+    try:
+        subprocess.Popen(command, env=active_env, start_new_session=True)
+    except OSError as exc:
+        discard()
         print(f"agentihooks claude-terminal: {exc}", file=sys.stderr)
         return 2
-    print(f"Opened routed Claude terminal '{name}' at {directory} ({host})")
+    deadline = time.monotonic() + args.start_timeout
+    while not marker.exists():
+        if time.monotonic() >= deadline:
+            discard()
+            print(
+                f"agentihooks claude-terminal: the new terminal did not start the launcher within "
+                f"{args.start_timeout:g}s; launch discarded\ncommand={shlex.join(command)}",
+                file=sys.stderr,
+            )
+            return 2
+        time.sleep(0.25)
+    marker.unlink(missing_ok=True)
+    print("\n".join([*report, "status=started"]))
     return 0
 
 

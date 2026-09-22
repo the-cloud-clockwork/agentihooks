@@ -2027,7 +2027,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 
     agentihooks init --bundle <path>    → link bundle + global install
     agentihooks init                    → re-run global install (bundle must be linked)
-    agentihooks init --force            → clean install (wipe state, re-init from scratch)
+    agentihooks init --force            → clean reinstall; keeps the bundle link, linked profiles and profile chain
     """
     if getattr(args, "dry_run", False):
         # The flag was accepted by argparse and read nowhere, so `init --dry-run`
@@ -2047,8 +2047,13 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
+    _kept_state: dict = {}
     if getattr(args, "force", False):
+        _kept_state = _load_state()
         _clean_state_dir()
+        _identity = {k: _kept_state[k] for k in ("bundle", "linked_profiles") if _kept_state.get(k)}
+        if _identity:
+            _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)
 
     # Global mode
@@ -2129,11 +2134,10 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # default target's chain so `init --target codex` on a claude machine
     # installs the same persona instead of falling to 'default'.
     _prev_global = _global_record(_prev_state, install_target) or _global_record(_prev_state)
+    if _is_force:
+        _prev_global = _global_record(_kept_state, install_target) or _global_record(_kept_state)
     if not profile_name:
-        if _is_force:
-            # --force = fresh install, ignore stored profile
-            profile_name = "default"
-        elif _prev_global.get("profile", ""):
+        if _prev_global.get("profile", ""):
             profile_name = _prev_global["profile"]
             print(f"Using profile from previous install: {profile_name}")
         elif sys.stdin.isatty():
@@ -2187,7 +2191,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                 f"was built from profile '{_marker_profile}'.\n"
                 f"Refusing to overwrite it with 'default'. Re-run with the intended profile:\n"
                 f"  agentihooks init --profile {_marker_profile}\n"
-                f"or force a clean default install with: agentihooks init --force",
+                f"or install the default profile explicitly with: agentihooks init --profile default",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -2196,7 +2200,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     settings_profile = getattr(args, "settings_profile", None)
     if not settings_profile:
         settings_profile = os.environ.get("AGENTIHOOKS_SETTINGS_PROFILE", "")
-    if not settings_profile and not _is_force:
+    if not settings_profile:
         settings_profile = _prev_global.get("settings_profile", "")
 
     # Build args for _install_global_inner
@@ -6051,7 +6055,7 @@ def main() -> None:
         "--force",
         action="store_true",
         default=False,
-        help="Clean install — wipe ~/.agentihooks/ (except .env) and re-init from scratch",
+        help="Clean reinstall — reset install state and caches; keeps the bundle link, linked profiles and profile chain",
     )
     init_p.add_argument(
         "--settings-profile",
