@@ -160,6 +160,8 @@ agentihooks broadcast --clear                # clear all
 agentihooks claude                           # bypassPermissions + your extra args
 agenti                                       # alias (after source ~/.bashrc)
 agenti --route 0                             # force AH_CC_TOKEN_0
+agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left
+agentihooks balance --current                # account this session runs on + quota table
 
 # Bundle management
 agentihooks bundle link ~/dev/my-tools       # link a bundle

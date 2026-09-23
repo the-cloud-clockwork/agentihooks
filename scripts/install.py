@@ -5414,19 +5414,49 @@ def cmd_balance(
     refresh: bool,
     timeout: float,
     show_account_metadata: str = "",
+    current: bool = False,
 ) -> int:
     from scripts.claude_quota_balancer import (
         RoutingError,
+        ancestor_oauth_token,
+        cached_observations,
         collect_account_metadata,
         collect_results,
         credential_for_slug,
         discover_credentials,
+        identify_session_account,
         is_routable,
         render_table,
     )
 
+    session_env = dict(os.environ)
     _load_claude_runtime_env()
     credentials = discover_credentials(os.environ)
+    if current:
+        known = discover_credentials(session_env) + credentials
+        session = identify_session_account(session_env, known, ancestor_oauth_token())
+        by_account = {credential.account: credential for credential in known}
+        live = []
+        if session.account:
+            live, _ = collect_results(
+                [by_account[session.account]],
+                include_fable=include_fable,
+                refresh=refresh,
+                timeout=timeout,
+                claude_bin=shutil.which("claude") or "claude",
+            )
+        observations = cached_observations(include_fable=include_fable)
+        rows = {result.account: result for _, result in observations}
+        observed = {result.account: seen for seen, result in observations}
+        rows.update({result.account: result for result in live})
+        print(f"current={session.account or 'none'} method={session.method}")
+        if rows:
+            print(
+                render_table(
+                    list(rows.values()), include_fable=include_fable, current=session.account, observed=observed
+                )
+            )
+        return 0 if session.account else 1
     if not credentials:
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
@@ -6134,6 +6164,11 @@ def main() -> None:
         help="Print every JSON event returned by a fresh probe for AH_CC_TOKEN_<SLUG>",
     )
     balance_p.add_argument("--refresh", action="store_true", help="Ignore the 60-second quota cache")
+    balance_p.add_argument(
+        "--current",
+        action="store_true",
+        help="Name the account this Claude session runs on; other accounts come from the quota cache",
+    )
     balance_p.add_argument("--timeout", type=float, default=60, help="Per-account probe timeout in seconds")
 
     ign_p = sub.add_parser("ignore", help="Create a .claudeignore in the current directory")
@@ -6438,6 +6473,7 @@ notes:
                 refresh=args.refresh,
                 timeout=args.timeout,
                 show_account_metadata=args.show_account_metadata,
+                current=args.current,
             )
         )
     elif args.command == "lint-claude":

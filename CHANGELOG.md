@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `agentihooks balance --current` names the `AH_CC_TOKEN_<slug>` the running
+  Claude session is routed to and prints the quota table, marking the current
+  row and showing each cached row's age. Packaged skill `get-current-balance`
+  wraps it.
+
 ### Changed
 
+- Probing a subset of accounts keeps the other accounts' entries in the router
+  cache instead of dropping them.
 - `agenti` routes to any account with at least 5% routing left, including
   `DRAIN`; accounts under 5% are never auto-selected. `--route` still forces
   any account.
