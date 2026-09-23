@@ -19,7 +19,7 @@ from pathlib import Path
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
-ELIGIBLE_STATES = {"NORMAL", "REDUCE", "DRAIN_SOON"}
+MIN_ROUTING_LEFT = 5.0
 
 
 @dataclass(frozen=True)
@@ -553,6 +553,10 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
+def is_routable(result: ProbeResult) -> bool:
+    return result.margin is not None and result.margin >= MIN_ROUTING_LEFT
+
+
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
     return sorted(
         results,
@@ -589,7 +593,7 @@ def select_credential(
         cache_file=cache_file,
         claude_bin=claude_bin,
     )
-    eligible = [result for result in results if result.state in ELIGIBLE_STATES]
+    eligible = [result for result in results if is_routable(result)]
     if not eligible:
         raise RoutingError("no Claude account has verified routing capacity", results)
     winner = rank_results(eligible, include_fable)[0]
@@ -737,7 +741,7 @@ def main() -> int:
         f"\nDry-run execution time: {time.monotonic() - started:.2f}s "
         f"(accounts={len(credentials)}, max_workers={workers}, source={source})"
     )
-    return 0 if any(result.state in ELIGIBLE_STATES for result in results) else 1
+    return 0 if any(is_routable(result) for result in results) else 1
 
 
 if __name__ == "__main__":

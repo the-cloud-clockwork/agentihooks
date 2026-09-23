@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `agenti` routes to any account with at least 5% routing left, including
+  `DRAIN`; accounts under 5% are never auto-selected. `--route` still forces
+  any account.
+
 ## [2.13.1] - 2026-09-17
 
 ### Changed

@@ -248,6 +248,21 @@ def test_selection_fails_closed_when_every_account_is_draining(monkeypatch, tmp_
         raise AssertionError("selection should fail closed")
 
 
+def test_selection_floor_is_five_percent_routing_left(monkeypatch, tmp_path):
+    floor = balancer.parse_probe("FLOOR", _stream(0.10, 0.95), 100)
+    under = balancer.parse_probe("UNDER", _stream(0.10, 0.951), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([under, floor], "live"))
+
+    decision = balancer.select_credential(
+        {"AH_CC_TOKEN_FLOOR": "floor-secret", "AH_CC_TOKEN_UNDER": "under-secret"},
+        cache_file=tmp_path / "cache.json",
+    )
+
+    assert decision.credential.env_name == "AH_CC_TOKEN_FLOOR"
+    assert decision.result.state == "DRAIN"
+    assert not balancer.is_routable(under)
+
+
 def test_selection_returns_highest_routing_left(monkeypatch, tmp_path):
     low = balancer.parse_probe("LOW", _stream(0.40, 0.60), 100)
     high = balancer.parse_probe("HIGH", _stream(0.20, 0.30), 100)

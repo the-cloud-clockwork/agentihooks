@@ -5416,12 +5416,12 @@ def cmd_balance(
     show_account_metadata: str = "",
 ) -> int:
     from scripts.claude_quota_balancer import (
-        ELIGIBLE_STATES,
         RoutingError,
         collect_account_metadata,
         collect_results,
         credential_for_slug,
         discover_credentials,
+        is_routable,
         render_table,
     )
 
@@ -5453,7 +5453,7 @@ def cmd_balance(
     )
     print(render_table(results, include_fable=include_fable))
     print(f"\nsource={source}")
-    return 0 if any(result.state in ELIGIBLE_STATES for result in results) else 1
+    return 0 if any(is_routable(result) for result in results) else 1
 
 
 # ---------------------------------------------------------------------------
