@@ -17,9 +17,10 @@ from functools import partial
 from pathlib import Path
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
-ELIGIBLE_STATES = {"NORMAL", "REDUCE", "DRAIN_SOON"}
+MIN_ROUTING_LEFT = 5.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,12 @@ class ProbeResult:
 
 
 @dataclass(frozen=True)
+class SessionAccount:
+    account: str
+    method: str
+
+
+@dataclass(frozen=True)
 class RouteDecision:
     credential: Credential
     result: ProbeResult
@@ -92,6 +99,59 @@ def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
             return credential
     available = ", ".join(credential.account for credential in credentials) or "none"
     raise RoutingError(f"account suffix '{slug}' not found; available: {available}")
+
+
+def ancestor_oauth_token(pid: int | None = None) -> str:
+    current = os.getppid() if pid is None else pid
+    while current > 1:
+        proc = Path("/proc") / str(current)
+        with contextlib.suppress(OSError):
+            for item in (proc / "environ").read_bytes().split(b"\0"):
+                name, _, value = item.partition(b"=")
+                if name == OAUTH_ENV.encode() and value:
+                    return value.decode()
+        try:
+            current = int((proc / "stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return ""
+    return ""
+
+
+def identify_session_account(
+    session_env: Mapping[str, str],
+    credentials: list[Credential],
+    ancestor_token: str = "",
+) -> SessionAccount:
+    token = session_env.get(OAUTH_ENV) or ancestor_token
+    if token:
+        for credential in credentials:
+            if credential.token == token:
+                return SessionAccount(credential.account, "oauth-token")
+        return SessionAccount("", "oauth-token-unmatched")
+    present = discover_credentials(session_env)
+    if len(present) == 1:
+        return SessionAccount(present[0].account, "sole-token")
+    return SessionAccount("", "unrouted")
+
+
+def cached_observations(
+    *,
+    include_fable: bool = False,
+    environ: Mapping[str, str] | None = None,
+    cache_file: Path | None = None,
+) -> list[tuple[float, ProbeResult]]:
+    path = cache_file or _cache_path(os.environ if environ is None else environ)
+    with _cache_lock(path):
+        cache = _read_cache(path)
+    modes = cache.get("modes") if isinstance(cache.get("modes"), dict) else {}
+    mode_data = modes.get("fable" if include_fable else "normal")
+    entries = mode_data.get("accounts") if isinstance(mode_data, dict) else None
+    observations = []
+    for entry in (entries or {}).values():
+        result = _result_from_data(entry.get("result")) if isinstance(entry, dict) else None
+        if result is not None and isinstance(entry.get("observed_at"), (int, float)):
+            observations.append((float(entry["observed_at"]), result))
+    return observations
 
 
 def _cache_path(environ: Mapping[str, str]) -> Path:
@@ -520,7 +580,8 @@ def collect_results(
             else []
         )
         live_by_name = {credential.env_name: result for credential, result in zip(missing, live, strict=True)}
-        new_entries = {}
+        probed = {credential.env_name for credential in credentials}
+        new_entries = {name: entry for name, entry in entries.items() if name not in probed}
         for credential in credentials:
             result = live_by_name.get(credential.env_name) or cached.get(credential.env_name)
             if result is not None and result.state not in {"ERROR", "UNKNOWN"}:
@@ -551,6 +612,10 @@ def _error_result(account: str, error: str, latency_ms: int | None = None) -> Pr
 
 def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
+
+
+def is_routable(result: ProbeResult) -> bool:
+    return result.margin is not None and result.margin >= MIN_ROUTING_LEFT
 
 
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
@@ -589,7 +654,7 @@ def select_credential(
         cache_file=cache_file,
         claude_bin=claude_bin,
     )
-    eligible = [result for result in results if result.state in ELIGIBLE_STATES]
+    eligible = [result for result in results if is_routable(result)]
     if not eligible:
         raise RoutingError("no Claude account has verified routing capacity", results)
     winner = rank_results(eligible, include_fable)[0]
@@ -636,7 +701,10 @@ def _percent(value: float | None) -> str:
 def _duration(seconds: int | None, now: int) -> str:
     if seconds is None:
         return "?"
-    remaining = max(0, seconds - now)
+    return _span(max(0, seconds - now))
+
+
+def _span(remaining: int) -> str:
     if remaining < 3600:
         return f"{remaining // 60}m"
     if remaining < 86400:
@@ -648,7 +716,13 @@ def _duration(seconds: int | None, now: int) -> str:
     return f"{days}d{hours:02d}h"
 
 
-def render_table(results: list[ProbeResult], now: int | None = None, include_fable: bool = False) -> str:
+def render_table(
+    results: list[ProbeResult],
+    now: int | None = None,
+    include_fable: bool = False,
+    current: str = "",
+    observed: Mapping[str, float] | None = None,
+) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
@@ -662,11 +736,13 @@ def render_table(results: list[ProbeResult], now: int | None = None, include_fab
     ]
     if include_fable:
         headers.extend(["FABLE LEFT", "FABLE RESET"])
+    if observed is not None:
+        headers.append("AGE")
     rows = []
     for rank, result in enumerate(rank_results(results, include_fable), 1):
         row = [
             str(rank),
-            result.account,
+            f"{result.account} (current)" if current and result.account == current else result.account,
             result.state,
             _percent(result.margin),
             _percent(result.five_hour.remaining),
@@ -676,6 +752,9 @@ def render_table(results: list[ProbeResult], now: int | None = None, include_fab
         ]
         if include_fable:
             row.extend([_percent(result.fable.remaining), _duration(result.fable.resets_at, timestamp)])
+        if observed is not None:
+            seen = observed.get(result.account)
+            row.append("?" if seen is None else _span(max(0, timestamp - int(seen))))
         rows.append(row)
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
@@ -737,7 +816,7 @@ def main() -> int:
         f"\nDry-run execution time: {time.monotonic() - started:.2f}s "
         f"(accounts={len(credentials)}, max_workers={workers}, source={source})"
     )
-    return 0 if any(result.state in ELIGIBLE_STATES for result in results) else 1
+    return 0 if any(is_routable(result) for result in results) else 1
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 [project]
 name = "agentihooks"
-version = "2.13.4"
+version = "2.13.5"
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -85,7 +85,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # and target-specific subdirectories at any depth.
 # One entry per discovered profiles package; the bare "profiles" key also
 # captures files under non-package subdirs like profiles/package/rules/.
-"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
+"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh"]
 "profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
 "profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
 

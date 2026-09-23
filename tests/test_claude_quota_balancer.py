@@ -4,6 +4,8 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 from scripts import claude_quota_balancer as balancer
 
 
@@ -248,6 +250,21 @@ def test_selection_fails_closed_when_every_account_is_draining(monkeypatch, tmp_
         raise AssertionError("selection should fail closed")
 
 
+def test_selection_floor_is_five_percent_routing_left(monkeypatch, tmp_path):
+    floor = balancer.parse_probe("FLOOR", _stream(0.10, 0.95), 100)
+    under = balancer.parse_probe("UNDER", _stream(0.10, 0.951), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([under, floor], "live"))
+
+    decision = balancer.select_credential(
+        {"AH_CC_TOKEN_FLOOR": "floor-secret", "AH_CC_TOKEN_UNDER": "under-secret"},
+        cache_file=tmp_path / "cache.json",
+    )
+
+    assert decision.credential.env_name == "AH_CC_TOKEN_FLOOR"
+    assert decision.result.state == "DRAIN"
+    assert not balancer.is_routable(under)
+
+
 def test_selection_returns_highest_routing_left(monkeypatch, tmp_path):
     low = balancer.parse_probe("LOW", _stream(0.40, 0.60), 100)
     high = balancer.parse_probe("HIGH", _stream(0.20, 0.30), 100)
@@ -349,3 +366,74 @@ def test_show_account_metadata_prints_json_instead_of_table(monkeypatch, capsys)
     output = json.loads(capsys.readouterr().out)
     assert output == payload
     assert observed == {"accounts": ["ALPHA"]}
+
+
+def test_session_account_matches_oauth_token_before_sole_token():
+    credentials = [
+        balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a"),
+        balancer.Credential("AH_CC_TOKEN_BETA", "secret-b"),
+    ]
+
+    by_env = balancer.identify_session_account({"CLAUDE_CODE_OAUTH_TOKEN": "secret-b"}, credentials)
+    by_ancestor = balancer.identify_session_account({"AH_CC_TOKEN_ALPHA": "secret-a"}, credentials, "secret-b")
+    sole = balancer.identify_session_account({"AH_CC_TOKEN_ALPHA": "secret-a"}, credentials)
+    unmatched = balancer.identify_session_account({}, credentials, "other")
+    unrouted = balancer.identify_session_account({"AH_CC_TOKEN_ALPHA": "a", "AH_CC_TOKEN_BETA": "b"}, credentials)
+
+    assert by_env == balancer.SessionAccount("BETA", "oauth-token")
+    assert by_ancestor == balancer.SessionAccount("BETA", "oauth-token")
+    assert sole == balancer.SessionAccount("ALPHA", "sole-token")
+    assert unmatched == balancer.SessionAccount("", "oauth-token-unmatched")
+    assert unrouted == balancer.SessionAccount("", "unrouted")
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").is_file(), reason="requires /proc")
+def test_ancestor_oauth_token_reads_nearest_parent_process():
+    grandchild = (
+        "from scripts.claude_quota_balancer import ancestor_oauth_token; print(ancestor_oauth_token() == 'canary')"
+    )
+    child = f"import subprocess, sys; subprocess.run([sys.executable, '-c', {grandchild!r}], env={{'PATH': ''}}, cwd={str(Path.cwd())!r})"
+    env = {"CLAUDE_CODE_OAUTH_TOKEN": "canary", "PYTHONPATH": str(Path(__file__).parents[1])}
+
+    completed = subprocess.run([sys.executable, "-c", child], env=env, capture_output=True, text=True, check=True)
+
+    assert completed.stdout.strip() == "True"
+
+
+def test_probing_one_account_keeps_other_cached_accounts(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
+
+    balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1000)
+    balancer.collect_results([alpha], cache_file=cache, environ={}, refresh=True, now=1100)
+    observations = balancer.cached_observations(cache_file=cache)
+
+    assert sorted((result.account, seen) for seen, result in observations) == [("ALPHA", 1100.0), ("BETA", 1000.0)]
+
+
+def test_table_marks_current_account_and_cache_age():
+    alpha = balancer.parse_probe("ALPHA", _stream(0.20, 0.30), 100)
+    beta = balancer.parse_probe("BETA", _stream(0.10, 0.40), 100)
+
+    table = balancer.render_table([alpha, beta], now=1000, current="BETA", observed={"ALPHA": 400, "BETA": 1000})
+
+    assert "BETA (current)" in table
+    assert "ALPHA (current)" not in table
+    assert "AGE" in table
+    assert "10m" in table
+
+
+def test_get_current_balance_skill_runs_the_current_flag():
+    skill = Path(__file__).parents[1] / "profiles" / "package" / "skills" / "get-current-balance" / "SKILL.md"
+    text = skill.read_text()
+
+    assert "name: get-current-balance" in text
+    assert "agentihooks balance --current" in text
