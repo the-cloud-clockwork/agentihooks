@@ -6,8 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.5] - 2026-09-23
+
 ### Added
 
+- The built-in `multi-agent-chat` skill, moved from the bundle: a chat room
+  between agents on different harnesses over one shared append-only file. The
+  wheel now ships `.sh` files under `profiles/` so skill scripts install.
 - `agentihooks balance --current` names the `AH_CC_TOKEN_<slug>` the running
   Claude session is routed to and prints the quota table, marking the current
   row and showing each cached row's age. Packaged skill `get-current-balance`
