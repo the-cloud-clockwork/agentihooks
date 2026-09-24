@@ -38,10 +38,12 @@ No install step: the hook reads condition directories in place on every call.
 
 ## Where conditions live
 
-| Layer | Directory | Source label |
+| Layer (lowest to highest priority) | Directory | Source label |
 |---|---|---|
 | Bundle (global) | `<bundle>/.claude/conditions/` | `bundle` |
 | Each profile in the active chain | `<profile>/.claude/conditions/` | `profile:<name>` |
+| Runtime (machine-wide, used when no bundle is linked) | `~/.agentihooks/conditions/` | `runtime` |
+| Directory (the repository the session runs in) | `<git-root>/.agentihooks/conditions/` | `directory` |
 
 The profile chain is the one installed for the running harness
 (`agentihooks init --profile anton,brain` gives two profile layers). Profiles
@@ -52,8 +54,63 @@ A later layer overrides an earlier one when the `<step>-<matcher>-<name>` part o
 the filename is the same, so a profile can replace a global condition by shipping
 a file with the same name.
 
-There is no project-local layer. A repository you clone cannot make the hook run
-its code.
+The directory layer is the repository's own `.agentihooks/` folder, next to its
+`enforcements.json`. It runs only when the repository is trusted:
+
+- it has no `origin` remote (local-only work), or
+- the `origin` owner matches the linked bundle's `origin` owner, or
+- the owner is listed in `CONDITIONS_TRUSTED_OWNERS` (comma list; `*` trusts all).
+
+A repository cloned from anyone else keeps its conditions on disk but they never
+run; `agentihooks conditions list` shows the layer as skipped with the owner.
+
+## Creating conditions from a session
+
+Tell the agent what you want, in your own words, with a phrase such as *set a
+condition*, *add a condition*, *create a new condition*, *update the condition*,
+*remove the condition*:
+
+> set a condition: after every `kubectl apply`, remind me the change must go through GitOps
+
+The agent writes the script and calls `condition_set` on the `hooks-utils` MCP
+server. The condition is live from the next matching tool call; nothing to open,
+save or install.
+
+| Tool | Gated | Does |
+|---|---|---|
+| `condition_set` | yes | writes `<step>-<matcher>-<name>[.async].<ext>` with the script body, executable |
+| `condition_clear` | yes | deletes a condition file (`scope` picks a layer when the name exists in several) |
+| `condition_list` | no | layers, trust, active conditions in order, files that do not parse |
+| `condition_show` | no | the script of one active condition |
+
+Where `condition_set` writes (`scope`):
+
+| `scope` | Target |
+|---|---|
+| `global` (default) | `<bundle>/.claude/conditions/`; `~/.agentihooks/conditions/` when no bundle is linked |
+| `profile` | `<profile>/.claude/conditions/` of the chain's first profile, or `profile="<name>"` |
+| `directory` | `<git-root>/.agentihooks/conditions/` of the session's repository |
+
+Files written into the bundle or a repository are ordinary working-tree changes:
+commit them the usual way to keep them.
+
+**The gate.** Agents never create, change or remove conditions on their own.
+The `UserPromptSubmit` hook arms a per-session gate only when the `prompt` field —
+the text you typed — contains one of the phrases above, not negated (*don't add a
+condition* does not arm it). Tool output, files, broadcasts and injected context
+never arm it. The gate closes at the end of the turn (`Stop`) and after an hour at
+most. While it is closed:
+
+- `condition_set` / `condition_clear` are denied in PreToolUse and refused by the
+  MCP server itself;
+- `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on any path under
+  `.claude/conditions/` or `.agentihooks/conditions/` are denied;
+- `Bash` commands that touch those folders are denied unless every program in
+  them only reads (`ls`, `cat`, `grep`, `find` without `-delete`/`-exec`, `git
+  add/commit/status/diff/log/push`, …) and nothing is redirected into a file.
+
+The Bash check is a pattern match and cannot see every indirect write; the MCP
+gate and the file-tool gate are exact.
 
 ## Filename grammar
 
@@ -216,7 +273,7 @@ failed calls.
 ## Performance
 
 Which conditions fire is answered from an index cached at
-`~/.agentihooks/cache/conditions-index.<target>.<checkout-crc>.json`. A cached lookup
+`~/.agentihooks/cache/conditions-index.<target>.<checkout-and-repo-crc>.json`. A cached lookup
 costs one `stat` of `state.json`, one `stat` per candidate directory, and one small
 JSON read; no directory is listed. The index is rebuilt when:
 
@@ -322,3 +379,4 @@ These tokens are reserved for that:
 | `CONDITIONS_ENABLED` | `true` | Run conditions on PreToolUse and PostToolUse |
 | `CONDITIONS_TIMEOUT_SEC` | `10` | Per-condition timeout; the process group is killed on expiry |
 | `CONDITIONS_MAX_PARALLEL` | `8` | Synchronous conditions run at once for one call |
+| `CONDITIONS_TRUSTED_OWNERS` | `""` | Extra git remote owners whose repositories' directory layer may run (`*` = all). The linked bundle's owner is always trusted |

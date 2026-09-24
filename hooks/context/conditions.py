@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -71,15 +72,32 @@ def parse_filename(filename: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _cache_path() -> Path:
+def _cache_path(repo: Path | None = None) -> Path:
     from hooks.config import AGENTIHOOKS_HOME
     from hooks.targets import current_target
 
-    root = f"{zlib.crc32(str(_CODE_ROOT).encode()):08x}"
-    return AGENTIHOOKS_HOME / "cache" / f"conditions-index.{current_target()}.{root}.json"
+    key = f"{zlib.crc32('|'.join((str(_CODE_ROOT), str(repo or ''))).encode()):08x}"
+    return AGENTIHOOKS_HOME / "cache" / f"conditions-index.{current_target()}.{key}.json"
 
 
-def layer_dirs(state: dict) -> tuple[list[tuple[str, Path]], list[Path]]:
+def runtime_dir() -> Path:
+    from hooks.config import AGENTIHOOKS_HOME
+
+    return AGENTIHOOKS_HOME / "conditions"
+
+
+def repo_root(cwd: str | Path | None) -> Path | None:
+    """The nearest ancestor of *cwd* holding ``.git`` (a worktree's ``.git`` file counts)."""
+    if not cwd:
+        return None
+    start = Path(cwd)
+    for directory in (start, *start.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
+def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[str, Path]], list[Path]]:
     """Condition dirs in layer order, plus every profile-dir candidate probed to find them."""
     bundle = profile_chain.bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
@@ -89,8 +107,60 @@ def layer_dirs(state: dict) -> tuple[list[tuple[str, Path]], list[Path]]:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
     for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
+    layers.append(("runtime", runtime_dir()))
+    root = repo_root(cwd)
+    if root is not None:
+        layers.append(("directory", root / ".agentihooks" / "conditions"))
     probed = [path for _, paths in profile_chain.profile_candidates(bundle, profile_csv, linked) for path in paths]
     return layers, probed
+
+
+def _remote_owner(repo: Path) -> str | None:
+    """Owner segment of the origin remote; ``""`` when the repo has no remote."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    url = out.stdout.strip()
+    if not url:
+        return ""
+    match = re.search(r"[:/]([^/:]+)/[^/]+?/?$", url)
+    return match.group(1).lower() if match else None
+
+
+def directory_trust(repo: Path, state: dict) -> tuple[bool, str]:
+    """Whether a repo's own conditions may run: no remote, or an owner the operator trusts."""
+    from hooks.config import CONDITIONS_TRUSTED_OWNERS
+
+    owners = {o.strip().lower() for o in CONDITIONS_TRUSTED_OWNERS.split(",") if o.strip()}
+    if "*" in owners:
+        return True, ""
+    bundle = profile_chain.bundle_path(state)
+    if bundle is not None:
+        bundle_owner = _remote_owner(bundle)
+        if bundle_owner:
+            owners.add(bundle_owner)
+    owner = _remote_owner(repo)
+    if owner == "":
+        return True, ""
+    return owner in owners, owner or "unknown"
+
+
+def _trusted_layers(layers: list[tuple[str, Path]], state: dict) -> tuple[list[tuple[str, Path]], dict]:
+    kept, untrusted = [], {}
+    for source, directory in layers:
+        if source == "directory" and directory.is_dir():
+            ok, owner = directory_trust(directory.parent.parent, state)
+            if not ok:
+                untrusted[str(directory)] = owner
+                continue
+        kept.append((source, directory))
+    return kept, untrusted
 
 
 def scan_layers(layers: list[tuple[str, Path]]) -> tuple[list[dict], list[dict]]:
@@ -143,9 +213,9 @@ def _fresh(sig: list[int], now_ns: int) -> bool:
     return sig[0] != -1 and now_ns - sig[0] < _FRESH_NS
 
 
-def load_index() -> dict:
+def load_index(cwd: str | Path | None = None) -> dict:
     """The condition index, rebuilt only when state.json or a condition dir changed."""
-    cache = _cache_path()
+    cache = _cache_path(repo_root(cwd))
     state_sig = _sig(profile_chain.state_path())
     try:
         cached = json.loads(cache.read_text())
@@ -159,10 +229,10 @@ def load_index() -> dict:
         and all(_sig(Path(d)) == sig for d, sig in cached.get("dirs", []))
     ):
         return cached["index"]
-    return _rebuild(cache, state_sig)
+    return _rebuild(cache, state_sig, cwd)
 
 
-def _rebuild(cache: Path, state_sig: list[int]) -> dict:
+def _rebuild(cache: Path, state_sig: list[int], cwd: str | Path | None = None) -> dict:
     parsed = True
     try:
         text = profile_chain.state_path().read_text()
@@ -173,8 +243,8 @@ def _rebuild(cache: Path, state_sig: list[int]) -> dict:
         state, parsed = {}, False
     if not isinstance(state, dict):
         state, parsed = {}, False
-    layers, probed = layer_dirs(state)
-    entries, _invalid = scan_layers(layers)
+    layers, probed = layer_dirs(state, cwd)
+    entries, _invalid = scan_layers(_trusted_layers(layers, state)[0])
     index = build_index(entries)
     dirs = [[str(d), _sig(d)] for _, d in layers]
     now_ns = time.time_ns()
@@ -196,8 +266,14 @@ def _rebuild(cache: Path, state_sig: list[int]) -> dict:
     return index
 
 
-def matching(step: str, tool_name: str, tool_input: dict | None, index: dict | None = None) -> list[dict]:
-    bucket = (index if index is not None else load_index()).get(step)
+def matching(
+    step: str,
+    tool_name: str,
+    tool_input: dict | None,
+    index: dict | None = None,
+    cwd: str | Path | None = None,
+) -> list[dict]:
+    bucket = (index if index is not None else load_index(cwd)).get(step)
     if not bucket:
         return []
     name = (tool_name or "").lower()
@@ -401,7 +477,9 @@ def run_step(step: str, payload: dict) -> StepResult | None:
 
     if not CONDITIONS_ENABLED:
         return None
-    entries = matching(step, str(payload.get("tool_name") or ""), payload.get("tool_input") or {})
+    entries = matching(
+        step, str(payload.get("tool_name") or ""), payload.get("tool_input") or {}, cwd=payload.get("cwd") or None
+    )
     if not entries:
         return None
     detached = [entry for entry in entries if entry["async"]]
@@ -501,3 +579,228 @@ def post_effect(payload: dict) -> PostEffect | None:
         if blocked:
             effect.contexts.append(reason)
     return effect
+
+
+# ---------------------------------------------------------------------------
+# Operator gate — conditions are created or removed only when the operator's
+# own prompt this turn asks for it
+# ---------------------------------------------------------------------------
+
+_SIGNAL = re.compile(
+    r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
+    r"\s+(?:up\s+)?(?:(?:a|an|the|this|that|these|those|new|another|one|my)\s+)*conditions?\b",
+    re.IGNORECASE,
+)
+_CONDITION_TOOL = re.compile(r"hooks[-_]utils.*condition_(?:set|clear)$", re.IGNORECASE)
+_EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+_READ_ONLY_HEADS = frozenset(
+    {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "grep",
+        "rg",
+        "wc",
+        "stat",
+        "file",
+        "jq",
+        "less",
+        "diff",
+        "tree",
+        "cd",
+        "echo",
+        "agentihooks",
+    }
+)
+_READ_ONLY_GIT = frozenset({"add", "commit", "status", "log", "diff", "show", "push", "ls-files", "blame", "fetch"})
+_HARMLESS_REDIRECT = re.compile(r"\d*>&\d+|&?\d*>\s*/dev/null")
+_GATE_TTL_SEC = 3600
+GATE_MESSAGE = (
+    "BLOCKED: conditions are created, changed or removed only when the operator's own prompt this turn "
+    "asks for it (e.g. 'set a condition ...'). Never create one on your own initiative."
+)
+
+
+class ConditionError(ValueError):
+    pass
+
+
+def contains_condition_signal(prompt: str) -> bool:
+    from hooks.context.ci_manifesto import _NEGATION_PREFIXES
+
+    for match in _SIGNAL.finditer(prompt or ""):
+        prefix = prompt[max(0, match.start() - 20) : match.start()].lower().strip()
+        if not any(prefix.endswith(neg.strip()) for neg in _NEGATION_PREFIXES):
+            return True
+    return False
+
+
+def _gate_path(session_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id or "")
+    return runtime_dir() / ".gate" / safe
+
+
+def arm_gate(session_id: str) -> None:
+    if not session_id:
+        return
+    path = _gate_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(int(time.time())))
+
+
+def disarm_gate(session_id: str) -> None:
+    if session_id:
+        _gate_path(session_id).unlink(missing_ok=True)
+
+
+def is_armed(session_id: str) -> bool:
+    if not session_id:
+        return False
+    try:
+        return time.time() - _gate_path(session_id).stat().st_mtime < _GATE_TTL_SEC
+    except OSError:
+        return False
+
+
+def _touches_conditions(text: str) -> bool:
+    return any(fragment in text for fragment in (".claude/conditions", ".agentihooks/conditions", str(runtime_dir())))
+
+
+def _read_only_shell(command: str) -> bool:
+    if ">" in _HARMLESS_REDIRECT.sub("", command):
+        return False
+    if re.search(r"\s-(?:delete|exec)\b", command):
+        return False
+    heads = tool_matcher.command_heads(command)
+    if "git" in heads:
+        subs = set(re.findall(r"\bgit\s+(?:-C\s+\S+\s+)?([a-z][a-z-]*)", command))
+        if not subs <= _READ_ONLY_GIT:
+            return False
+        heads = heads - {"git"}
+    return heads <= (_READ_ONLY_HEADS | {"find"})
+
+
+def write_guard(tool_name: str, tool_input: dict | None, session_id: str) -> str | None:
+    """Block an agent touching condition files or tools unless the operator armed this turn."""
+    name = tool_name or ""
+    tool_input = tool_input or {}
+    touches = bool(_CONDITION_TOOL.search(name))
+    if name in _EDIT_TOOLS:
+        touches = _touches_conditions(json.dumps(tool_input))
+    elif name == "Bash":
+        command = str(tool_input.get("command") or "")
+        near = "conditions" in command and (".claude" in command or ".agentihooks" in command)
+        touches = (near or _touches_conditions(command)) and not _read_only_shell(command)
+    if touches and not is_armed(session_id):
+        return GATE_MESSAGE
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Inventory, creation and removal (MCP tools and the CLI)
+# ---------------------------------------------------------------------------
+
+_LANGUAGES = {"bash": (".sh", "#!/usr/bin/env bash\n"), "python": (".py", "#!/usr/bin/env python3\n")}
+_SCOPES = ("global", "profile", "directory")
+
+
+def inventory(cwd: str | Path | None = None) -> dict:
+    state = profile_chain.read_state()
+    layers, _probed = layer_dirs(state, cwd)
+    _kept, untrusted = _trusted_layers(layers, state)
+    entries, invalid = scan_layers([(s, d) for s, d in layers if str(d) not in untrusted])
+    described = []
+    for source, directory in layers:
+        described.append(
+            {
+                "source": source,
+                "path": str(directory),
+                "exists": directory.is_dir(),
+                "count": sum(1 for e in entries if e["path"].startswith(f"{directory}/")),
+                "untrusted_owner": untrusted.get(str(directory)),
+            }
+        )
+    return {"layers": described, "conditions": entries, "invalid": invalid}
+
+
+def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> tuple[str, Path]:
+    state = profile_chain.read_state()
+    if scope == "global":
+        bundle = profile_chain.bundle_path(state)
+        return ("bundle", bundle / ".claude" / "conditions") if bundle else ("runtime", runtime_dir())
+    if scope == "profile":
+        chain = profile_chain.profile_dirs(
+            profile_chain.bundle_path(state), profile_chain.active_profile(state), profile_chain.linked_profiles(state)
+        )
+        if not chain:
+            raise ConditionError("no active profile chain")
+        match = next((pair for pair in chain if pair[0] == profile), None) if profile else chain[0]
+        if match is None:
+            raise ConditionError(f"profile {profile!r} is not in the active chain {[n for n, _ in chain]}")
+        return f"profile:{match[0]}", match[1] / ".claude" / "conditions"
+    if scope == "directory":
+        root = repo_root(cwd or os.getcwd())
+        if root is None:
+            raise ConditionError("scope 'directory' needs a working directory inside a git repository")
+        return "directory", root / ".agentihooks" / "conditions"
+    raise ConditionError(f"scope must be one of {', '.join(_SCOPES)}")
+
+
+def create_condition(
+    *,
+    step: str,
+    matcher: str,
+    name: str,
+    script: str,
+    session_id: str,
+    language: str = "bash",
+    scope: str = "global",
+    profile: str = "",
+    cwd: str | Path | None = None,
+    run_async: bool = False,
+    replace: bool = False,
+) -> dict:
+    if not is_armed(session_id):
+        raise ConditionError(GATE_MESSAGE)
+    if language not in _LANGUAGES:
+        raise ConditionError(f"language must be one of {', '.join(_LANGUAGES)}")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", name or ""):
+        raise ConditionError("name may use letters, digits and '_' only")
+    if not (script or "").strip():
+        raise ConditionError("script is empty")
+    ext, shebang = _LANGUAGES[language]
+    filename = f"{step}-{matcher}-{name}{'.async' if run_async else ''}{ext}"
+    try:
+        meta = parse_filename(filename)
+    except ValueError as e:
+        raise ConditionError(str(e)) from e
+    layer, directory = target_dir(scope, profile, cwd)
+    path = directory / filename
+    if path.exists() and not replace:
+        raise ConditionError(f"{path} exists; pass replace=true to overwrite it")
+    directory.mkdir(parents=True, exist_ok=True)
+    body = script if script.startswith("#!") else shebang + script
+    tmp = path.with_name(f".{filename}.{os.getpid()}.tmp")
+    tmp.write_text(body if body.endswith("\n") else body + "\n")
+    tmp.chmod(0o755)
+    os.replace(tmp, path)
+    return {"path": str(path), "layer": layer, "file": filename, "step": meta["step"], "matcher": meta["matcher"]}
+
+
+def remove_condition(*, file: str, session_id: str, scope: str = "", cwd: str | Path | None = None) -> dict:
+    if not is_armed(session_id):
+        raise ConditionError(GATE_MESSAGE)
+    state = profile_chain.read_state()
+    layers, _probed = layer_dirs(state, cwd)
+    found = [(source, directory / file) for source, directory in layers if (directory / file).is_file()]
+    if scope:
+        layer = target_dir(scope, cwd=cwd)[0] if scope != "profile" else None
+        found = [pair for pair in found if (pair[0] == layer if layer else pair[0].startswith("profile:"))]
+    if not found:
+        raise ConditionError(f"no condition file named {file!r} in the active layers")
+    if len(found) > 1:
+        raise ConditionError(f"{file!r} exists in several layers {[s for s, _ in found]}; pass scope")
+    source, path = found[0]
+    path.unlink()
+    return {"removed": str(path), "layer": source}

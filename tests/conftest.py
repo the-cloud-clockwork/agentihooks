@@ -68,7 +68,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
-    monkeypatch.setattr("hooks.context.conditions._cache_path", lambda: fake_state_dir / "cache" / "conditions.json")
+    monkeypatch.setattr("hooks.context.conditions._cache_path", lambda *a: fake_state_dir / "cache" / "conditions.json")
+    monkeypatch.setattr("hooks.context.conditions.runtime_dir", lambda: fake_state_dir / "conditions")
     for _name, _file in (
         ("_match_counter_path", "enforcement_match_counters.json"),
         ("_counter_path", "enforcement_counters.json"),

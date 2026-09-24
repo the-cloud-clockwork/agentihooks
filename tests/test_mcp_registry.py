@@ -41,7 +41,7 @@ class TestMCPRegistry:
         """Only the agentihooks-native categories are registered."""
         from hooks.mcp._registry import CATEGORY_MODULES
 
-        assert set(CATEGORY_MODULES) == {"channels", "enforcement"}
+        assert set(CATEGORY_MODULES) == {"channels", "enforcement", "conditions"}
 
     def test_build_server_callable(self):
         """build_server() is importable and callable."""

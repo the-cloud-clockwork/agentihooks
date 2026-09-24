@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Conditions can be created from a session: `hooks-utils` gains `condition_set`,
+  `condition_clear`, `condition_list` and `condition_show`. Creating or removing a
+  condition works only in a turn whose typed prompt asks for it ("set a condition
+  …"); the same gate denies agent writes to condition folders through Write, Edit
+  and Bash.
+- Two more condition layers: `~/.agentihooks/conditions/` (used when no bundle is
+  linked) and the repository's own `.agentihooks/conditions/`, which runs only for
+  repos without a remote, owned like the linked bundle, or listed in
+  `CONDITIONS_TRUSTED_OWNERS`.
+
 - Conditions: scripts in `<bundle>/.claude/conditions/` and
   `<profile>/.claude/conditions/`, named `<step>-<matcher>-<name>[.async].<ext>`,
   run on matching PreToolUse and PostToolUse calls. They can add context, rewrite
