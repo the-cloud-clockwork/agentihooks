@@ -249,6 +249,7 @@ Manage recurring reminders injected every N tool calls. Global runtime entries l
 ```bash
 agentihooks enforcement set "run tests before committing" 5
 agentihooks enforcement set --local "read the operator directory" 10
+agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
 agentihooks enforcement list [--local]
 agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 ```
@@ -256,6 +257,22 @@ agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 `--local` requires a Git project. Local files use the same JSON schema and cadence behavior as the global store. AgentiHooks creates the resource directory on the first local `set`, never edits Git ignore configuration, and leaves the directory in place after `clear`.
 
 During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. MCP enforcement tools remain global.
+
+`--matcher` limits an entry to matching tool calls (`bash`, `bash.git`, `edit+write`, `mcp`, `mcp__<server>`); its cadence then counts matching calls only. Grammar: [Conditions](../hooks/conditions.md#matcher-grammar).
+
+---
+
+## `agentihooks conditions`
+
+Inspect the [conditions](../hooks/conditions.md) the running harness would execute.
+
+```bash
+agentihooks conditions list                                   # layers, conditions in order, invalid files
+agentihooks conditions list --step post
+agentihooks conditions list --tool Bash --command "cd x && git push"
+```
+
+The profile chain is read for `AGENTIHOOKS_TARGET` (default `claude`).
 
 ---
 

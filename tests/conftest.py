@@ -64,6 +64,22 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     for _adopted in ("KB_ROUTER_TOKEN", "BRAIN_URL", "BRAIN_HTTP_TOKEN"):
         monkeypatch.delenv(_adopted, raising=False)
 
+    # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
+    # the operator's real condition scripts and write the real cache and counters.
+    fake_state_dir = fake_home / ".agentihooks"
+    monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
+    monkeypatch.setattr("hooks.context.conditions._cache_path", lambda: fake_state_dir / "cache" / "conditions.json")
+    monkeypatch.setattr(
+        "hooks.context.enforcement._match_counter_path", lambda: fake_state_dir / "enforcement_match_counters.json"
+    )
+    monkeypatch.setattr("hooks.config.CONDITIONS_ENABLED", False)
+    from hooks.targets import emitter
+
+    monkeypatch.setattr(emitter, "_forced", False)
+    monkeypatch.setattr(emitter, "_buffer", [])
+    monkeypatch.setattr(emitter, "_hook_fields", {})
+    monkeypatch.setattr(emitter, "_top_fields", {})
+
     try:
         import install
     except Exception:  # suite runs fine without the installer importable

@@ -51,6 +51,16 @@ _CLAUDE_PROJECT_TREE_TARGETS = frozenset({"claude"})
 # directly (`copilot skill --help`, 1.0.83); codex scans <repo>/.agents/skills.
 _REPO_SKILLS_LINK_TARGETS = frozenset({"codex"})
 
+# Targets whose host is verified to run a hook-rewritten tool input and to show
+# the agent a hook-replaced tool output. Copilot declares modifiedArgs, but a
+# command hook was never observed driving it (COPILOT-COMPAT §2.4), so a guard
+# must not judge a rewrite copilot would silently ignore.
+_REWRITE_TARGETS = frozenset({"claude"})
+
+# Targets whose host honours a PreToolUse "allow"/"ask" decision from stdout.
+# Codex accepts deny only; copilot's command transport ignores stdout decisions.
+_ALLOW_ASK_TARGETS = frozenset({"claude"})
+
 
 def can_inject_context(event: str, target: str | None = None) -> bool:
     target = target or current_target()
@@ -70,6 +80,18 @@ def supports_arg_mutation(target: str | None = None) -> bool:
 
 def arg_mutation_field(target: str | None = None) -> str | None:
     return _ARG_MUTATION_FIELD.get(target or current_target())
+
+
+def applies_input_rewrite(target: str | None = None) -> bool:
+    return (target or current_target()) in _REWRITE_TARGETS
+
+
+def supports_output_rewrite(target: str | None = None) -> bool:
+    return (target or current_target()) in _REWRITE_TARGETS
+
+
+def honors_allow_ask(target: str | None = None) -> bool:
+    return (target or current_target()) in _ALLOW_ASK_TARGETS
 
 
 # Events where a stdout decision envelope is meaningful. Emitting one on,

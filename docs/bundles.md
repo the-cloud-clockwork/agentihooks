@@ -32,24 +32,28 @@ agentihooks bundle pull
 
 ```
 my-tools/                                   <- the bundle directory
+├── enforcements.json                       # Bundle-global enforcements (optional "matcher" per entry)
 ├── .claude/                                # Bundle-global assets (layer 2 of 3-layer merge)
 │   ├── .mcp.json                           # Bundle MCP servers
 │   ├── CLAUDE.md                           # OPTIONAL — shared directives prepended ahead of every profile
 │   ├── skills/                             # Bundle-global skills
 │   ├── agents/                             # Bundle-global agents
 │   ├── commands/                           # Bundle-global commands
-│   └── rules/                              # Bundle-global rules
+│   ├── rules/                              # Bundle-global rules
+│   └── conditions/                         # Bundle-global conditions, run in place (docs/hooks/conditions.md)
 └── profiles/
     ├── infra-ops/                           # Custom profile
     │   ├── CLAUDE.md                        # System prompt (at profile ROOT)
     │   ├── profile.yml                      # name, description, otel config, allowedOverlays, claude launch config
+    │   ├── enforcements.json                # Profile enforcements
     │   └── .claude/
     │       ├── settings.overrides.json      # Per-profile settings overrides
     │       ├── .mcp.json                    # Profile MCP servers
     │       ├── skills/                      # Profile-specific skills
     │       ├── agents/                      # Profile-specific agents
     │       ├── commands/                    # Profile-specific commands
-    │       └── rules/                       # Profile-specific rules
+    │       ├── rules/                       # Profile-specific rules
+    │       └── conditions/                  # Profile conditions; same filename overrides the bundle's
     └── restricted/
         └── ...                              # Same structure
 ```

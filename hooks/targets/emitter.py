@@ -24,6 +24,8 @@ from hooks.targets.capabilities import context_cap_bytes as capability_cap
 
 _buffer: list[str] = []
 _forced = False
+_hook_fields: dict = {}
+_top_fields: dict = {}
 
 
 def force_buffer() -> None:
@@ -49,6 +51,12 @@ def has_buffered() -> bool:
     return bool(_buffer)
 
 
+def set_fields(hook_specific: dict | None = None, top_level: dict | None = None) -> None:
+    """Queue extra envelope keys (``updatedToolOutput``, ``decision``) for ``flush()``."""
+    _hook_fields.update(hook_specific or {})
+    _top_fields.update(top_level or {})
+
+
 def drain() -> str:
     """Return the buffered content joined, and clear the buffer.
 
@@ -58,6 +66,8 @@ def drain() -> str:
     etc.) without emitting anything itself, and always leaves the buffer
     empty. Safe to call when nothing is buffered — returns ``""``.
     """
+    _hook_fields.clear()
+    _top_fields.clear()
     if not _buffer:
         return ""
     content = "\n".join(_buffer)
@@ -71,15 +81,19 @@ def flush(event_name: str) -> None:
     Clears the buffer unconditionally once there is content to flush — see
     the module invariant above.
     """
-    if not _buffer:
+    if not _buffer and not _hook_fields and not _top_fields:
         return
     content = "\n".join(_buffer)
     _buffer.clear()
+    hook_fields, top_fields = dict(_hook_fields), dict(_top_fields)
+    _hook_fields.clear()
+    _top_fields.clear()
     if not buffers_single_envelope() and not _forced:
         # Claude path never buffers; guard against misuse.
-        print(content)
+        if content:
+            print(content)
         return
-    if not can_inject_context(event_name):
+    if content and not can_inject_context(event_name):
         from hooks.common import log
         from hooks.targets import current_target
 
@@ -87,6 +101,8 @@ def flush(event_name: str) -> None:
             "emitter: context dropped — no context channel for event on target",
             {"event": event_name, "target": current_target(), "chars": len(content)},
         )
+        content = ""
+    if not content and not hook_fields and not top_fields:
         return
     cap = capability_cap(event_name)
     if cap is not None and len(content.encode()) > cap:
@@ -101,15 +117,11 @@ def flush(event_name: str) -> None:
     # reached the model, a hookSpecificOutput-nested one did not). Codex
     # clones claude's nested contract.
     if current_target() == "copilot":
-        print(json.dumps({"additionalContext": content}))
+        if content:
+            print(json.dumps({"additionalContext": content}))
         return
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": event_name,
-                    "additionalContext": content,
-                }
-            }
-        )
-    )
+    specific = {"hookEventName": event_name, **({"additionalContext": content} if content else {}), **hook_fields}
+    out = dict(top_fields)
+    if len(specific) > 1:
+        out["hookSpecificOutput"] = specific
+    print(json.dumps(out))

@@ -91,7 +91,10 @@ What covers live re-emphasis now, at a fraction of the token cost:
   sessions running inside that repository. Every effective enforcement is also
   injected once at SessionStart before cadence-driven reminders begin. An
   enforcement added later reaches each running session on its next tool call or
-  user message once, then returns to its configured cadence.
+  user message once, then returns to its configured cadence. An entry with a
+  `matcher` (`"matcher": "bash.kubectl"`) is delivered only on matching tool calls,
+  and its cadence counts those calls only; see
+  [Conditions](../hooks/conditions.md#matcher-grammar) for the grammar.
 - **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
   mid-session, this pushes the new content to already-running sessions exactly
   once. This is the only case where re-sending a rule file earns its tokens: the

@@ -614,6 +614,17 @@ ENFORCEMENT_DELIVERY_STATE_FILE: str = os.getenv(
     "ENFORCEMENT_DELIVERY_STATE_FILE",
     str(AGENTIHOOKS_HOME / "enforcement_delivery_state.json"),
 )
+ENFORCEMENT_MATCH_COUNTER_FILE: str = os.getenv(
+    "ENFORCEMENT_MATCH_COUNTER_FILE",
+    str(AGENTIHOOKS_HOME / "enforcement_match_counters.json"),
+)
+
+# =============================================================================
+# CONDITIONS — bundle/profile scripts run on matching PreToolUse/PostToolUse calls
+# =============================================================================
+CONDITIONS_ENABLED = _env_bool("CONDITIONS_ENABLED", "true")
+CONDITIONS_TIMEOUT_SEC: float = float(os.getenv("CONDITIONS_TIMEOUT_SEC", "10"))
+CONDITIONS_MAX_PARALLEL: int = max(1, int(os.getenv("CONDITIONS_MAX_PARALLEL", "8")))
 
 # Brain payload shrinking — cap hot-arcs rows and per-entry body bytes.
 BRAIN_HOT_ARCS_TOP_N: int = int(os.getenv("BRAIN_HOT_ARCS_TOP_N", "10"))
