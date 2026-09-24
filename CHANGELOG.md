@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-09-24
+
 ### Added
 
 - Conditions can be created from a session: the MCP server gains `condition_set`,
