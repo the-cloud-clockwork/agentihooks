@@ -69,9 +69,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
     monkeypatch.setattr("hooks.context.conditions._cache_path", lambda: fake_state_dir / "cache" / "conditions.json")
-    monkeypatch.setattr(
-        "hooks.context.enforcement._match_counter_path", lambda: fake_state_dir / "enforcement_match_counters.json"
-    )
+    for _name, _file in (
+        ("_match_counter_path", "enforcement_match_counters.json"),
+        ("_counter_path", "enforcement_counters.json"),
+        ("_delivery_path", "enforcement_delivery_state.json"),
+        ("_store_path", "enforcements.json"),
+    ):
+        monkeypatch.setattr(f"hooks.context.enforcement.{_name}", lambda f=_file: fake_state_dir / f)
     monkeypatch.setattr("hooks.config.CONDITIONS_ENABLED", False)
     from hooks.targets import emitter
 

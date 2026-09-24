@@ -6,7 +6,7 @@ Detection priority (checked in order):
 3. git_log      — git log
 4. test_runner  — pytest/jest/npm test/cargo test output
 5. build_output — npm install / pip install / cargo build
-6. generic      — fallback hard cap
+6. generic      — left untouched
 
 Only fires for tool_name == "Bash".  Returns None when output is already
 within limits (no unnecessary modification).
@@ -121,7 +121,10 @@ def truncate_generic(output: str, max_chars: int = BASH_FILTER_MAX_CHARS) -> str
 # ---------------------------------------------------------------------------
 
 
-def _detect_output_type(command: str, output: str) -> str:
+_TEST_COMMAND = re.compile(r"\b(pytest|jest|vitest|cargo test|go test|(npm|yarn|pnpm)( run)? test)\b")
+
+
+def _detect_output_type(command: str) -> str:
     """Return the detected output category string."""
     cmd_lower = command.lower()
 
@@ -132,8 +135,7 @@ def _detect_output_type(command: str, output: str) -> str:
     if "git log" in cmd_lower:
         return "git_log"
 
-    # Test runner detection by output patterns
-    if re.search(r"(PASSED|FAILED|ERROR|pytest|jest|npm test|cargo test)", output, re.IGNORECASE):
+    if _TEST_COMMAND.search(cmd_lower):
         return "test_runner"
 
     if re.search(r"(npm install|pip install|cargo build)", cmd_lower):
@@ -166,7 +168,7 @@ def filter_bash_output(
 
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
 
-    output_type = _detect_output_type(command, tool_output)
+    output_type = _detect_output_type(command)
 
     if output_type == "docker_logs":
         lines = tool_output.splitlines()
@@ -192,7 +194,6 @@ def filter_bash_output(
             return None
         return truncate_test_output(tool_output)
 
-    # build_output and generic both use the hard char cap
-    if len(tool_output) <= BASH_FILTER_MAX_CHARS:
+    if output_type == "generic" or len(tool_output) <= BASH_FILTER_MAX_CHARS:
         return None
     return truncate_generic(tool_output)
