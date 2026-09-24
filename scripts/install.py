@@ -5934,19 +5934,19 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
 def _cmd_conditions(args: argparse.Namespace) -> None:
     """Handle the conditions CLI command."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-    from hooks.context import conditions, profile_chain
+    from hooks.context import conditions
 
-    layers, _probed = conditions.layer_dirs(profile_chain.read_state())
-    entries, invalid = conditions.scan_layers(layers)
+    found = conditions.inventory(Path.cwd())
+    entries = found["conditions"]
     step = getattr(args, "step", None)
 
-    print("Layers:")
-    if not layers:
-        print("  (no bundle linked and no profile chain)")
-    for source, directory in layers:
-        count = sum(1 for e in entries if e["path"].startswith(f"{directory}/"))
-        status = f"{count} condition(s)" if directory.is_dir() else "missing"
-        print(f"  {source:<22} {directory}  [{status}]")
+    print("Layers (later wins on the same step-matcher-name):")
+    for layer in found["layers"]:
+        if layer["untrusted_owner"]:
+            status = f"skipped: repo owner {layer['untrusted_owner']!r} is not trusted (CONDITIONS_TRUSTED_OWNERS)"
+        else:
+            status = f"{layer['count']} condition(s)" if layer["exists"] else "missing"
+        print(f"  {layer['source']:<22} {layer['path']}  [{status}]")
 
     shown = [e for e in entries if step is None or e["step"] == step]
     print(f"\nConditions: {len(shown)}")
@@ -5954,9 +5954,9 @@ def _cmd_conditions(args: argparse.Namespace) -> None:
         flags = "  async" if e["async"] else ""
         print(f"  {e['order']:>3}  {e['step']:<4}  {e['matcher']:<30}  {e['name']:<24}  {e['source']}{flags}")
 
-    if invalid:
-        print(f"\nInvalid files: {len(invalid)}")
-        for item in invalid:
+    if found["invalid"]:
+        print(f"\nInvalid files: {len(found['invalid'])}")
+        for item in found["invalid"]:
             print(f"  {item['path']}\n    {item['error']}")
 
     tool = getattr(args, "tool", "") or ""

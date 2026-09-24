@@ -361,6 +361,8 @@ is the configuration: `<step>-<matcher>-<name>[.async].<ext>`.
 - **Output:** plain text (context), or JSON with `context`, `tool_input` (pre rewrite), `tool_output` (post rewrite) and `decision`. Exit 2 denies.
 - **Matchers:** `any`, a tool name, `mcp`, `mcp__<server>`, `bash.<cli>`, joined with `+`. Enforcements accept the same grammar as a `matcher` property.
 - **Execution:** matching conditions run in parallel and merge in layer order. Guardrails judge the rewritten input. A cached index keeps the per-call lookup to a few `stat` calls.
+- **Layers:** bundle, profile chain, `~/.agentihooks/conditions/`, and the repository's own `.agentihooks/conditions/` (trusted repos only).
+- **From a session:** say "set a condition: …" and the agent creates it through the `hooks-utils` `condition_set` tool, live on the next tool call. Only a phrase in your typed prompt opens that gate; agents never add conditions on their own.
 
 [Full docs: Conditions](https://the-cloud-clockwork.github.io/agentihooks/docs/hooks/conditions/)
 

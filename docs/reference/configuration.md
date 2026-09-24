@@ -199,6 +199,7 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | `CONDITIONS_ENABLED` | `true` | Run bundle and profile [conditions](../hooks/conditions.md) on PreToolUse and PostToolUse. |
 | `CONDITIONS_TIMEOUT_SEC` | `10` | Per-condition timeout; the condition's process group is killed on expiry and the call proceeds. |
 | `CONDITIONS_MAX_PARALLEL` | `8` | Synchronous conditions run at once for one tool call. |
+| `CONDITIONS_TRUSTED_OWNERS` | `""` | Extra git remote owners whose repositories' `.agentihooks/conditions/` may run (`*` = all). Repos without a remote and repos owned like the linked bundle are always trusted. |
 
 ---
 

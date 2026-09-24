@@ -612,6 +612,12 @@ def on_session_end(payload: dict) -> None:
         clear_pr_signal(session_id)
     except Exception:
         pass
+    try:
+        from hooks.context.conditions import disarm_gate
+
+        disarm_gate(session_id)
+    except Exception:
+        pass
 
     # Clear voice output flag for this session
     try:
@@ -766,6 +772,11 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         prompt = payload.get("prompt", "")
         if prompt:
+            from hooks.context.conditions import arm_gate, contains_condition_signal
+
+            if contains_condition_signal(prompt):
+                arm_gate(session_id)
+                log("conditions: operator gate armed this turn", {"session_id": session_id})
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log(
@@ -912,6 +923,16 @@ def on_pre_tool_use(payload: dict) -> None:
 
     tool_name = payload.get("tool_name", "unknown")
     tool_input = payload.get("tool_input", {})
+
+    _gate_block = None
+    try:
+        from hooks.context.conditions import write_guard
+
+        _gate_block = write_guard(tool_name, tool_input, payload.get("session_id", ""))
+    except Exception as e:
+        log("conditions write guard failed", {"error": str(e)})
+    if _gate_block:
+        raise BlockAction(_gate_block)
 
     # Conditions run first so every guard below judges the input that will run.
     _conditions = None
@@ -1805,10 +1826,12 @@ def on_stop(payload: dict) -> None:
     # persist until on_session_end
     try:
         from hooks.context.branch_guard import clear_branch_signal
+        from hooks.context.conditions import disarm_gate
         from hooks.context.prod_lockdown import clear_bypass
 
         clear_bypass(session_id)
         clear_branch_signal(session_id)
+        disarm_gate(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
 
