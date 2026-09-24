@@ -72,7 +72,7 @@ condition*, *add a condition*, *create a new condition*, *update the condition*,
 
 > set a condition: after every `kubectl apply`, remind me the change must go through GitOps
 
-The agent writes the script and calls `condition_set` on the `hooks-utils` MCP
+The agent writes the script and calls `condition_set` on the `agentihooks` MCP
 server. The condition is live from the next matching tool call; nothing to open,
 save or install.
 

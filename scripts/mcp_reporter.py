@@ -83,7 +83,7 @@ def load_all_mcp_configs(project_path: Optional[str] = None) -> dict[str, dict]:
 def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
     """Estimate tool count per server.
 
-    For hooks-utils, reads from the MCP registry.
+    For the agentihooks server, reads from the MCP registry.
     For external servers, uses a default estimate based on server type.
     """
     counts: dict[str, int] = {}
@@ -91,8 +91,9 @@ def count_tools_per_server(servers: dict[str, dict]) -> dict[str, int]:
     for name, info in servers.items():
         config = info.get("config", {})
 
-        # hooks-utils: count from registry
-        if name == "hooks-utils":
+        from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
+
+        if name in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES):
             try:
                 import os
 

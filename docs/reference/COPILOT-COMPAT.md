@@ -558,7 +558,7 @@ $ copilot mcp list          # settings.json: {"disabledMcpServers":["probe-a"]}
 The `_agentihooks.mcpDefaultDisabled` directive applies that to every configured
 server after MCP registration, including servers agentihooks does not manage (they
 are in the same `mcp-config.json`). `mcpAlwaysEnabled` overrides the exempt set,
-which defaults to `hooks-utils` — disabling the toolbelt would remove the fleet
+which defaults to `agentihooks` — disabling the toolbelt would remove the fleet
 tools from the session.
 
 Copilot records a hand-enable in `enabledMcpServers`, and the installer never

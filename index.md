@@ -173,7 +173,7 @@ Then wire everything into Claude Code in one command:
 agentihooks init
 ```
 
-That's it. Hooks are active and the `hooks-utils` MCP server's 9 tools (channels + enforcement) are registered the next time you start `claude`.
+That's it. Hooks are active and the `agentihooks` MCP server's 13 tools (channels, enforcement, conditions) are registered the next time you start `claude`.
 
 ---
 
@@ -267,9 +267,9 @@ channels  enforcement
 
 `ALLOWED_TOOLS` is an **allowlist** — only the tools you name will be active. Tools not in the list are removed at server startup.
 
-**Where to edit:** open `~/.claude.json`, find the `hooks-utils` server under `mcpServers`, and update its `env` block. Restart Claude Code for the change to take effect.
+**Where to edit:** open `~/.claude.json`, find the `agentihooks` server under `mcpServers`, and update its `env` block. Restart Claude Code for the change to take effect.
 
-**Verify what's active:** ask Claude Code "what MCP tools do you have?" — the `hooks-utils` server lists its loaded channels/enforcement tools.
+**Verify what's active:** ask Claude Code "what MCP tools do you have?" — the `agentihooks` server lists its loaded channels/enforcement tools.
 
 ---
 
@@ -303,7 +303,7 @@ Registered files are tracked in `~/.agentihooks/state.json` and re-applied autom
 AgentiHooks is a platform, not just a tool. Fork the repo and you immediately inherit:
 
 - The full hook lifecycle (SessionStart → Stop) wired into Claude Code
-- MCP tools across 2 categories (channels, enforcement), ready to use or filter down
+- MCP tools across 3 categories (channels, enforcement, conditions), ready to use or filter down
 - Profile system — swap agent personality and permissions with one flag
 - Install scripts, settings management, and credential loading
 
@@ -350,7 +350,7 @@ rm -rf ~/.agentihooks
 | **[Getting Started]({{ site.baseurl }}/docs/getting-started/)** | Install, init, per-project config, profiles |
 | **[Cost Management]({{ site.baseurl }}/docs/cost-management/)** | Output filtering, read dedup, lazy loading, rate limit display |
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
-| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 2 categories (channels, enforcement) |
+| **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 3 categories (channels, enforcement, conditions) |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
 | **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
 | **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |

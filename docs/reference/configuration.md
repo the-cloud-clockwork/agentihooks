@@ -48,7 +48,7 @@ These variables control how `agentihooks init` installs and configures Claude Co
 
 ## MCP Transport
 
-Only relevant when running `hooks-utils` as a network server instead of a
+Only relevant when running `agentihooks` as a network server instead of a
 per-session stdio subprocess -- for clients that filter stdio MCP servers out at
 load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 

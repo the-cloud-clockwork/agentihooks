@@ -33,7 +33,7 @@ def _parse_env_file(
     was first-file-wins while its own docstring promised the opposite.
 
     ``override_file_owned`` re-applies values for keys this loader set on a
-    previous pass, so a long-lived process (the hooks-utils MCP server) picks
+    previous pass, so a long-lived process (the agentihooks MCP server) picks
     up an edited .env instead of reporting whatever was true at import.
     """
     if not env_file.is_file():
@@ -258,7 +258,7 @@ def reload_brain_env(force: bool = False) -> dict:
     """Re-read the .env files and re-bind the brain/amygdala module globals.
 
     Hooks are short-lived processes and always see current config. The
-    hooks-utils MCP server is not — it imports this module once and then
+    agentihooks MCP server is not — it imports this module once and then
     answers brain_status/brain_refresh from constants frozen at startup, so an
     edited .env leaves it confidently reporting a source it is no longer
     supposed to use.
@@ -411,8 +411,8 @@ PROJECT_BRIDGE_ENABLED = _env_bool("PROJECT_BRIDGE_ENABLED", "true")
 PROJECT_BRIDGE_MAX_BYTES = int(os.getenv("PROJECT_BRIDGE_MAX_BYTES", "0"))
 
 # Tell the agent its own session id at SessionStart. The session-scoped
-# hooks-utils tools (channel_acknowledge) take it as an argument, which is the
-# only identity mechanism that works when hooks-utils runs as a network server
+# agentihooks MCP tools (channel_acknowledge) take it as an argument, which is the
+# only identity mechanism that works when the MCP server runs as a network server
 # shared by every session.
 MCP_SESSION_ID_BANNER_ENABLED = _env_bool("MCP_SESSION_ID_BANNER_ENABLED", "true")
 

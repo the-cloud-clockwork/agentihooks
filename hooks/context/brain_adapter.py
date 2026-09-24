@@ -539,7 +539,7 @@ def get_status() -> dict:
     """Return current brain adapter state.
 
     Re-reads the .env files first. In a hook this is a no-op — the process was
-    born moments ago. In the long-lived hooks-utils MCP server it is the
+    born moments ago. In the long-lived agentihooks MCP server it is the
     difference between reporting the live configuration and reporting whatever
     was true when the server started, which is how a repointed brain goes
     unnoticed.

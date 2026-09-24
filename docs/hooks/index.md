@@ -61,7 +61,7 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
 | [Context Preprocessor](context-preprocessor.md) | Token compression for injected banners and tool output (scope=all) |
-| [MCP Transport](mcp-transport.md) | Running `hooks-utils` over `sse`/`streamable-http` instead of stdio, for clients that filter stdio MCP servers out. Covers the daemon `agentihooks init` now starts, `agentihooks mcp status` for diagnosing config-vs-reality drift, the systemd and pidfile supervisors, and the explicit `session_id` the network mode requires. |
+| [MCP Transport](mcp-transport.md) | Running `agentihooks` over `sse`/`streamable-http` instead of stdio, for clients that filter stdio MCP servers out. Covers the daemon `agentihooks init` now starts, `agentihooks mcp status` for diagnosing config-vs-reality drift, the systemd and pidfile supervisors, and the explicit `session_id` the network mode requires. |
 | [**Broadcast System**](broadcast.md) | **Real-time fleet messaging** — send a message to every active Claude Code session simultaneously. Deploy freezes, incident response, credential rotation, team coordination. Optional channel filtering via `AGENTIHOOKS_BASE_CHANNELS` env var for targeted delivery. |
 
 {: .highlight }

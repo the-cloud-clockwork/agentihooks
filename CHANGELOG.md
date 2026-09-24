@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Conditions can be created from a session: `hooks-utils` gains `condition_set`,
+- Conditions can be created from a session: the MCP server gains `condition_set`,
   `condition_clear`, `condition_list` and `condition_show`. Creating or removing a
   condition works only in a turn whose typed prompt asks for it ("set a condition
   …"); the same gate denies agent writes to condition folders through Write, Edit
@@ -32,12 +32,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The MCP server is registered as `agentihooks` (was `hooks-utils`); its tools are
+  `mcp__agentihooks__*`. `agentihooks init` removes the old `hooks-utils` entry
+  from `~/.claude.json`, `~/.codex/config.toml` and `~/.copilot/mcp-config.json`
+  when the entry runs agentihooks (a foreign server under that name is kept), and
+  carries per-project disables and Copilot enable/disable lists over to the new
+  name.
 - PostToolUse on Claude Code now ends as one JSON envelope, so post-time context
   (the retry-breaker banner, the subagent effort note) reaches the model instead of
   the debug log.
 
 ### Fixed
 
+- The credential guard's recursive-search rewrite no longer replaces heredoc
+  bodies with `<<HEREDOC` in the rewritten command.
 - The Bash output filter works on Claude Code: it reads `tool_response.stdout` and
   replaces the output the agent reads (`updatedToolOutput`) instead of adding a
   second copy. It trims only verbose kinds (docker/compose logs, kubectl, git log,

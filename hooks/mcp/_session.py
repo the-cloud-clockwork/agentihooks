@@ -1,4 +1,4 @@
-"""Caller-session resolution for the session-scoped hooks-utils MCP tools.
+"""Caller-session resolution for the session-scoped agentihooks MCP tools.
 
 Under stdio, Claude Code spawns one MCP subprocess per session, so the process
 environment *is* the identity boundary and an env lookup answers "who is

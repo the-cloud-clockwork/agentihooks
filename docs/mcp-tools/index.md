@@ -6,7 +6,7 @@ has_children: true
 
 # MCP Tools
 
-The AgentiHooks MCP server (`hooks-utils`) exposes tools across **2 categories**. The server runs `python -m hooks.mcp` and is registered automatically during `agentihooks init`.
+The AgentiHooks MCP server (`agentihooks`) exposes tools across **3 categories**. The server runs `python -m hooks.mcp` and is registered automatically during `agentihooks init`.
 
 ## Categories
 
@@ -16,7 +16,7 @@ The AgentiHooks MCP server (`hooks-utils`) exposes tools across **2 categories**
 | **Conditions** | `condition_set`, `condition_clear` (only in a turn whose typed prompt asks for it), `condition_list`, `condition_show` — see [Conditions](../hooks/conditions.md#creating-conditions-from-a-session) |
 | **Enforcement** | `enforcement_set`, `enforcement_list`, `enforcement_clear` — doctrine reminder banners injected at PreToolUse; `enforcement_set(matcher=...)` limits one to matching tool calls; `local=true` on set/list/clear scopes it to the session's repository |
 
-> Earlier releases shipped generic cloud-utility categories (aws, email, storage, database, compute, observability, utilities). These were removed; only the two agentihooks-native categories above ship now.
+> Earlier releases shipped generic cloud-utility categories (aws, email, storage, database, compute, observability, utilities). These were removed; only the three agentihooks-native categories above ship now. Releases before 2.14 registered the server as `hooks-utils`; `agentihooks init` replaces that entry.
 
 ---
 
@@ -42,7 +42,7 @@ An unknown category is skipped with a warning on stderr; if every requested cate
 
 stdio by default: Claude Code spawns one server process per session. Where a
 policy filters stdio MCP servers out of the client, `MCP_TRANSPORT` switches
-`hooks-utils` to `sse` or `streamable-http` and `agentihooks init` runs it as a
+`agentihooks` to `sse` or `streamable-http` and `agentihooks init` runs it as a
 daemon instead. See [MCP Transport]({{ site.baseurl }}/hooks/mcp-transport/).
 
 Two consequences of one process serving every session:

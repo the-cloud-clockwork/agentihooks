@@ -862,7 +862,7 @@ class TestMcpTransportModes:
     def test_stdio_is_the_default_and_unchanged(self, monkeypatch):
         monkeypatch.setattr(install, "_resolve_hooks_python", lambda: Path("/venv/bin/python"))
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry["command"] == "/venv/bin/python"
         assert entry["args"] == ["-m", "hooks.mcp"]
@@ -872,7 +872,7 @@ class TestMcpTransportModes:
     def test_sse_mode_emits_url_entry(self, monkeypatch):
         monkeypatch.setenv("AGENTIHOOKS_MCP_TRANSPORT", "sse")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry == {"type": "sse", "url": "http://localhost:8642/sse"}
 
@@ -881,7 +881,7 @@ class TestMcpTransportModes:
         "streamable-http" literal is rejected and silently never connects."""
         monkeypatch.setenv("AGENTIHOOKS_MCP_TRANSPORT", "streamable-http")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry == {"type": "http", "url": "http://localhost:8642/mcp"}
 
@@ -890,7 +890,7 @@ class TestMcpTransportModes:
         monkeypatch.setenv("MCP_HOST", "10.0.0.5")
         monkeypatch.setenv("MCP_PORT", "9100")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry["url"] == "http://10.0.0.5:9100/sse"
 
@@ -899,7 +899,7 @@ class TestMcpTransportModes:
         TLS to loopback buys nothing."""
         monkeypatch.setenv("AGENTIHOOKS_MCP_TRANSPORT", "sse")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry["url"].startswith("http://localhost:")
 
@@ -917,7 +917,7 @@ class TestMcpTransportModes:
             monkeypatch.setenv("AGENTIHOOKS_MCP_TRANSPORT", transport)
             monkeypatch.delenv("MCP_HOST", raising=False)
 
-            entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+            entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
             assert entry["url"] == f"http://localhost:8642{path}"
             assert "127.0.0.1" not in entry["url"]
@@ -927,7 +927,7 @@ class TestMcpTransportModes:
         monkeypatch.setenv("MCP_SCHEME", "https")
         monkeypatch.setenv("MCP_HOST", "mcp.internal")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry["url"] == "https://mcp.internal:8642/mcp"
 
@@ -946,7 +946,7 @@ class TestMcpTransportModes:
         which actually knows the outcome."""
         monkeypatch.setenv("AGENTIHOOKS_MCP_TRANSPORT", "streamable-http")
 
-        entry = install._build_mcp_config("all")["mcpServers"]["hooks-utils"]
+        entry = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
 
         assert entry["type"] == "http"
         assert not hasattr(install, "_probe_mcp_url_reachable")
@@ -1263,7 +1263,7 @@ class TestSystemdUnit:
 class TestManagedMcpChainCollection:
     """Regression guard for Defect B: _collect_all_managed_mcp_servers must walk
     the FULL comma-separated profile chain, not pass the joined string to
-    _resolve_profile_dir (which returns None and collapses the set to hooks-utils).
+    _resolve_profile_dir (which returns None and collapses the set to agentihooks).
     """
 
     def test_collect_walks_full_chain(self, install_env):
@@ -1282,11 +1282,11 @@ class TestManagedMcpChainCollection:
         with (
             patch.object(install, "_load_state", return_value=fake_state),
             patch.object(install, "_get_bundle_path", return_value=bundle),
-            patch.object(install, "_build_mcp_config", return_value={"mcpServers": {"hooks-utils": {"command": "x"}}}),
+            patch.object(install, "_build_mcp_config", return_value={"mcpServers": {"agentihooks": {"command": "x"}}}),
         ):
             managed = set(install._collect_all_managed_mcp_servers().keys())
-        # Both profiles' servers present — NOT collapsed to just hooks-utils.
-        assert managed == {"hooks-utils", "bundle-server", "profile-server", "second-server"}
+        # Both profiles' servers present — NOT collapsed to just agentihooks.
+        assert managed == {"agentihooks", "bundle-server", "profile-server", "second-server"}
 
 
 class TestManagedMcpLedger:

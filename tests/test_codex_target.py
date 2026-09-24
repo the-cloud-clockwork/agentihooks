@@ -377,13 +377,13 @@ class TestMcp:
     def test_stdio_and_http_translate_sse_skipped(self, adapter, capsys):
         adapter.register_mcp(
             {
-                "hooks-utils": {"command": "/py", "args": ["-m", "hooks.mcp"]},
+                "agentihooks": {"command": "/py", "args": ["-m", "hooks.mcp"]},
                 "agentibrain": {"type": "sse", "url": "http://localhost:8104/sse"},
                 "remote": {"type": "http", "url": "https://x.example/mcp", "headers": {"A": "B"}},
             }
         )
         text = (codex_home() / "config.toml").read_text()
-        assert "[mcp_servers.hooks-utils]" in text
+        assert "[mcp_servers.agentihooks]" in text
         assert "agentibrain" not in text
         assert "[mcp_servers.remote]" in text and "http_headers" in text
         assert "SSE" in capsys.readouterr().out
@@ -573,7 +573,7 @@ class TestHooksUtilsTransport:
         monkeypatch.setattr(adapter, "register_mcp", lambda servers: captured.update(servers))
         monkeypatch.setattr(_i, "_detect_venv", lambda: None)
         adapter.register_hooks_utils("default")
-        return captured["hooks-utils"]
+        return captured["agentihooks"]
 
     def test_stdio_is_a_command_entry(self, monkeypatch):
         entry = self._entry(monkeypatch, AGENTIHOOKS_MCP_TRANSPORT="stdio")
@@ -600,7 +600,7 @@ class TestHooksUtilsTransport:
 class TestTeardown:
     def _full_install(self, adapter, tmp_path):
         adapter.write_settings({"features": {"hooks": True}})
-        adapter.register_mcp({"hooks-utils": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
+        adapter.register_mcp({"agentihooks": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
         cmds_src = tmp_path / "commands"
         cmds_src.mkdir(exist_ok=True)
         (cmds_src / "review.md").write_text("---\ndescription: X\n---\n\nbody\n")
@@ -620,7 +620,7 @@ class TestTeardown:
         assert not (home / "prompts" / "review.md").exists()
         text = (home / "config.toml").read_text()
         assert "agentihooks" not in text
-        assert "hooks-utils" not in text
+        assert "agentihooks" not in text
         assert "notify" not in text
         assert "project_doc_max_bytes" not in text
         assert install._global_record(install._load_state(), "codex").get("managed_mcp") is None
@@ -675,7 +675,7 @@ class TestTeardownDestructiveEdges:
         """A name collision alone must not delete the operator's server."""
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
-        (home / "config.toml").write_text('[mcp_servers.hooks-utils]\ncommand = "/opt/operator-own-tool/bin/server"\n')
+        (home / "config.toml").write_text('[mcp_servers.agentihooks]\ncommand = "/opt/operator-own-tool/bin/server"\n')
         adapter.teardown()
         assert "operator-own-tool" in (home / "config.toml").read_text()
         assert "review it" in capsys.readouterr().out
@@ -684,7 +684,7 @@ class TestTeardownDestructiveEdges:
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
         (home / "config.toml").write_text(
-            '[mcp_servers.hooks-utils]\ncommand = "/usr/bin/python"\nargs = ["-m", "hooks.mcp"]\n'
+            '[mcp_servers.agentihooks]\ncommand = "/usr/bin/python"\nargs = ["-m", "hooks.mcp"]\n'
         )
         adapter.teardown()
         assert "hooks.mcp" not in (home / "config.toml").read_text()

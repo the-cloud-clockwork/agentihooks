@@ -282,7 +282,7 @@ MCP Surface Area Report
 Total: 9 servers, ~112 tools, ~16,800 schema tokens
 
 Server                         Source   Tools   ~Tokens
-hooks-utils                      user      32     4,800
+agentihooks                      user      32     4,800
 github                           user      40     6,000
 postgres                         user      15     2,250
 ...

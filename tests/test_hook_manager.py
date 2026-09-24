@@ -16,8 +16,8 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 class TestSessionIdBanner:
     """SessionStart tells the agent its own session id.
 
-    That id is the argument the session-scoped hooks-utils tools take, and it is
-    the only identity that works when hooks-utils runs as one network server
+    That id is the argument the session-scoped agentihooks tools take, and it is
+    the only identity that works when agentihooks runs as one network server
     shared by every session — so the agent has to be told it.
     """
 

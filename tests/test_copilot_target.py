@@ -447,9 +447,9 @@ class TestCommandsToSkills:
 
 class TestMcp:
     def test_stdio_server_written_as_local(self, adapter):
-        adapter.register_mcp({"hooks-utils": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
+        adapter.register_mcp({"agentihooks": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
         doc = json.loads((copilot_home() / "mcp-config.json").read_text())
-        entry = doc["mcpServers"]["hooks-utils"]
+        entry = doc["mcpServers"]["agentihooks"]
         assert entry["type"] == "local"
         assert entry["command"] == "/usr/bin/python"
         assert entry["args"] == ["-m", "hooks.mcp"]
@@ -623,7 +623,7 @@ class TestDoctor:
 
     def test_passes_core_checks_after_install(self, adapter, tmp_path, capsys):
         adapter.write_settings({})
-        adapter.register_mcp({"hooks-utils": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
+        adapter.register_mcp({"agentihooks": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
         prof = tmp_path / "p"
         prof.mkdir()
         (prof / "CLAUDE.md").write_text("persona")
@@ -652,7 +652,7 @@ class TestAdapterRegistration:
 class TestTeardown:
     def _full_install(self, adapter, tmp_path):
         adapter.write_settings({"_agentihooks": {"allowAll": True}})
-        adapter.register_mcp({"hooks-utils": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
+        adapter.register_mcp({"agentihooks": {"command": "/usr/bin/python", "args": ["-m", "hooks.mcp"]}})
         agents_src = tmp_path / "agents"
         agents_src.mkdir(exist_ok=True)
         (agents_src / "scout.md").write_text("---\ndescription: X\n---\n\nbody\n")
@@ -680,7 +680,7 @@ class TestTeardown:
         assert "statusLine" not in doc
         assert str(install.AGENTIHOOKS_ROOT) not in doc.get("trustedFolders", [])
         mcp = json.loads((home / "mcp-config.json").read_text())
-        assert "hooks-utils" not in mcp.get("mcpServers", {})
+        assert "agentihooks" not in mcp.get("mcpServers", {})
         assert install._global_record(install._load_state(), "copilot").get("managed_mcp") is None
 
     def test_preserves_operator_content(self, adapter, tmp_path):
@@ -740,11 +740,11 @@ class TestTeardownDestructiveEdges:
         home = copilot_home()
         home.mkdir(parents=True, exist_ok=True)
         (home / "mcp-config.json").write_text(
-            json.dumps({"mcpServers": {"hooks-utils": {"type": "local", "command": "/opt/operator-own/server"}}})
+            json.dumps({"mcpServers": {"agentihooks": {"type": "local", "command": "/opt/operator-own/server"}}})
         )
         adapter.teardown()
         doc = json.loads((home / "mcp-config.json").read_text())
-        assert "hooks-utils" in doc["mcpServers"]
+        assert "agentihooks" in doc["mcpServers"]
         assert "review it" in capsys.readouterr().out
 
     def test_missing_record_content_verified_statusline_removed(self, adapter):
@@ -973,7 +973,7 @@ class TestMcpDefaultDisabled:
 
     def test_hooks_utils_stays_enabled(self, adapter):
         adapter.write_settings({"_agentihooks": {"mcpDefaultDisabled": True}})
-        self._seed_mcp(["hooks-utils", "drawio"])
+        self._seed_mcp(["agentihooks", "drawio"])
         adapter.post_install_reconcile([], "smith")
         assert self._settings()["disabledMcpServers"] == ["drawio"]
 
@@ -996,9 +996,9 @@ class TestMcpDefaultDisabled:
 
     def test_custom_always_enabled_list(self, adapter):
         adapter.write_settings({"_agentihooks": {"mcpDefaultDisabled": True, "mcpAlwaysEnabled": ["drawio"]}})
-        self._seed_mcp(["hooks-utils", "drawio", "atlassian"])
+        self._seed_mcp(["agentihooks", "drawio", "atlassian"])
         adapter.post_install_reconcile([], "smith")
-        assert self._settings()["disabledMcpServers"] == ["atlassian", "hooks-utils"]
+        assert self._settings()["disabledMcpServers"] == ["agentihooks", "atlassian"]
 
     def test_absent_directive_disables_nothing(self, adapter):
         adapter.write_settings({})
@@ -1136,12 +1136,12 @@ class TestRefuterRegressions:
 
     def test_always_enabled_server_is_lifted_out_of_an_existing_disable(self, adapter):
         """Adding to the disabled set is not enough: a stale settings file, or one
-        past `/mcp disable hooks-utils`, would leave the toolbelt off forever."""
+        past `/mcp disable agentihooks`, would leave the toolbelt off forever."""
         adapter.write_settings({"_agentihooks": {"mcpDefaultDisabled": True}})
-        self._seed_mcp(["hooks-utils", "drawio"])
+        self._seed_mcp(["agentihooks", "drawio"])
         path = copilot_home() / "settings.json"
         doc = json.loads(path.read_text())
-        doc["disabledMcpServers"] = ["hooks-utils"]
+        doc["disabledMcpServers"] = ["agentihooks"]
         path.write_text(json.dumps(doc))
 
         adapter.post_install_reconcile([], "smith")
@@ -1151,7 +1151,7 @@ class TestRefuterRegressions:
         """The log line was computed independently of the written set and could
         claim a server was left enabled while it sat in disabledMcpServers."""
         adapter.write_settings({"_agentihooks": {"mcpDefaultDisabled": True}})
-        self._seed_mcp(["hooks-utils", "drawio"])
+        self._seed_mcp(["agentihooks", "drawio"])
         adapter.post_install_reconcile([], "smith")
         out = capsys.readouterr().out
         written = set(self._settings()["disabledMcpServers"])

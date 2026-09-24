@@ -208,7 +208,7 @@ agentihooks status                           # full system health
 agentihooks lint-claude [path]               # CLAUDE.md token cost analysis
 agentihooks mcp report                       # MCP surface area
 
-# hooks-utils daemon (network transport only — see docs/hooks/mcp-transport.md)
+# agentihooks daemon (network transport only — see docs/hooks/mcp-transport.md)
 agentihooks mcp status                       # config vs. reality; 0 ok, 1 stopped, 2 diverged
 agentihooks mcp start                        # once per boot where there is no systemd
 agentihooks mcp restart
@@ -236,13 +236,13 @@ update it with `git pull` in the checkout.
 2. Merges settings **in the target's own format**: `_base/<target base>` -> bundle overrides -> profile overrides -> settings-profile overlay
 3. Symlinks skills, agents, commands, and rules (3-layer merge, additive across chain)
 4. Writes `CLAUDE.md` to `~/.claude/CLAUDE.md`
-5. Installs MCP servers (hooks-utils + bundle + profile)
+5. Installs MCP servers (agentihooks + bundle + profile)
 6. Reconciles MCP servers — removes ones agentihooks installed on a prior run but that are no longer in any profile/bundle source (servers you added by hand are preserved)
 7. Installs CLI globally via `uv tool`
 8. Writes bashrc block (`agentienv` shell function + `agenti` alias)
 
 Under a network `MCP_TRANSPORT`, step 5 also renders the systemd unit and
-**starts the hooks-utils daemon** — restarting it unconditionally, since init has
+**starts the agentihooks daemon** — restarting it unconditionally, since init has
 just rewritten the url and possibly the port and a running process carries
 neither. That interrupts every Claude Code session on the machine for about a
 second, because the install is global. On a stdio install no daemon exists and
@@ -362,7 +362,7 @@ is the configuration: `<step>-<matcher>-<name>[.async].<ext>`.
 - **Matchers:** `any`, a tool name, `mcp`, `mcp__<server>`, `bash.<cli>`, joined with `+`. Enforcements accept the same grammar as a `matcher` property.
 - **Execution:** matching conditions run in parallel and merge in layer order. Guardrails judge the rewritten input. A cached index keeps the per-call lookup to a few `stat` calls.
 - **Layers:** bundle, profile chain, `~/.agentihooks/conditions/`, and the repository's own `.agentihooks/conditions/` (trusted repos only).
-- **From a session:** say "set a condition: …" and the agent creates it through the `hooks-utils` `condition_set` tool, live on the next tool call. Only a phrase in your typed prompt opens that gate; agents never add conditions on their own.
+- **From a session:** say "set a condition: …" and the agent creates it through the `agentihooks` `condition_set` tool, live on the next tool call. Only a phrase in your typed prompt opens that gate; agents never add conditions on their own.
 
 [Full docs: Conditions](https://the-cloud-clockwork.github.io/agentihooks/docs/hooks/conditions/)
 

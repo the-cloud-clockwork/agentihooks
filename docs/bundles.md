@@ -81,7 +81,7 @@ Later layers override earlier ones. This lets you start with the agentihooks bas
 
 For settings, the merge order is: `_base/settings.base.json` -> profile `.claude/settings.overrides.json` -> OTEL.
 
-For MCP servers: hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
+For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`.
 
 ## Shared `CLAUDE.md`
 

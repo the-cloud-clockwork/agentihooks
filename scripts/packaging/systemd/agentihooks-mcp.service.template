@@ -1,5 +1,5 @@
 [Unit]
-Description=agentihooks hooks-utils MCP server (network transport)
+Description=agentihooks MCP server (network transport)
 Documentation=https://github.com/The-Cloud-Clockwork/agentihooks
 After=network.target
 
