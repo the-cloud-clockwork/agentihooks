@@ -48,7 +48,7 @@ These variables control how `agentihooks init` installs and configures Claude Co
 
 ## MCP Transport
 
-Only relevant when running `hooks-utils` as a network server instead of a
+Only relevant when running `agentihooks` as a network server instead of a
 per-session stdio subprocess -- for clients that filter stdio MCP servers out at
 load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 
@@ -107,7 +107,7 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 | `TOKEN_REDIS_TTL` | `3600` | TTL (seconds) for Redis keys storing token metrics and warning state. |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash command output before it enters the context window. |
 | `BASH_FILTER_MAX_LINES` | `50` | Line limit for docker/kubectl output (keeps last N lines). |
-| `BASH_FILTER_MAX_CHARS` | `5000` | Character cap for build and generic output. |
+| `BASH_FILTER_MAX_CHARS` | `5000` | Character cap for install/build output. Other output (cat, git diff, grep) is never trimmed. |
 | `BASH_FILTER_TEST_MAX_FAILURES` | `10` | Maximum FAILED blocks to retain from test runner output. |
 | `BASH_FILTER_GIT_MAX_COMMITS` | `20` | Maximum commits to retain from `git log` output. |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant re-reads of unmodified files within a session. Files modified since last read are always allowed through (mtime guard). |
@@ -188,6 +188,18 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | `ENFORCEMENT_FILE` | `~/.agentihooks/enforcements.json` | Mutable global runtime enforcement store. |
 | `ENFORCEMENT_COUNTER_FILE` | `~/.agentihooks/enforcement_counters.json` | Per-session tool-call counters used for cadence. |
 | `ENFORCEMENT_DELIVERY_STATE_FILE` | `~/.agentihooks/enforcement_delivery_state.json` | Per-session IDs already seen, shared across prompt and tool hooks. |
+| `ENFORCEMENT_MATCH_COUNTER_FILE` | `~/.agentihooks/enforcement_match_counters.json` | Per-session, per-entry counts of matching tool calls for enforcements with a `matcher`. |
+
+---
+
+## Conditions
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONDITIONS_ENABLED` | `true` | Run bundle and profile [conditions](../hooks/conditions.md) on PreToolUse and PostToolUse. |
+| `CONDITIONS_TIMEOUT_SEC` | `10` | Per-condition timeout; the condition's process group is killed on expiry and the call proceeds. |
+| `CONDITIONS_MAX_PARALLEL` | `8` | Synchronous conditions run at once for one tool call. |
+| `CONDITIONS_TRUSTED_OWNERS` | `""` | Extra git remote owners whose repositories' `.agentihooks/conditions/` may run (`*` = all). Repos without a remote and repos owned like the linked bundle are always trusted. |
 
 ---
 

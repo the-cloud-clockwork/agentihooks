@@ -108,6 +108,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 
 **Handler actions:**
 
+0. **[Conditions](conditions.md)** -- runs every `pre-*` condition matching the tool; a deny blocks, a rewrite replaces the input that every later step judges
 1. Logs the transcript entry
 2. **Secret scanning** -- scans `tool_input` for credentials; exits with code `2` (block) if found
 3. **File read deduplication** -- if `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: checks whether the file was already read this session and is unmodified (by mtime). If so, exits with code `2` and tells Claude to use the content already in context
@@ -140,6 +141,7 @@ AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine*
 
 **Handler actions:**
 
+0. **[Conditions](conditions.md)** -- runs every `post-*` condition matching the tool; on Claude Code their output replacement and block ride the event's single JSON envelope
 1. Logs the transcript entry
 2. If `BASH_FILTER_ENABLED=true` and `tool_name == "Bash"`: detects verbose output categories (docker logs, kubectl, git log, test runners, build tools) and truncates to configured limits before it accumulates in the context window. Filtered output is re-emitted via `additionalContext` so Claude still sees the relevant portion
 3. If `FILE_READ_CACHE_ENABLED=true` and `tool_name == "Read"`: records the file path and its current mtime in the session cache (Redis or memory) so future re-reads can be detected

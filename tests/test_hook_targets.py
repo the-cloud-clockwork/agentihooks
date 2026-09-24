@@ -533,7 +533,7 @@ class TestCodexEnforcementFallback:
         monkeypatch.setattr(
             enforcement,
             "get_posttool_enforcements",
-            lambda session_id, cwd: calls.append((session_id, cwd)) or "local enforcement",
+            lambda session_id, cwd, **kw: calls.append((session_id, cwd, kw["tool_name"])) or "local enforcement",
         )
         hm.on_post_tool_use(
             {
@@ -545,7 +545,7 @@ class TestCodexEnforcementFallback:
                 "cwd": "/project",
             }
         )
-        assert calls == [("codex-local", "/project")]
+        assert calls == [("codex-local", "/project", "Unknown")]
         assert captured == ["local enforcement"]
 
 

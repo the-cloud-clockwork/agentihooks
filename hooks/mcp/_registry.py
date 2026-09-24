@@ -3,6 +3,7 @@
 CATEGORY_MODULES = {
     "channels": "hooks.mcp.channels",
     "enforcement": "hooks.mcp.enforcement",
+    "conditions": "hooks.mcp.conditions",
 }
 
 ALL_CATEGORIES = list(CATEGORY_MODULES.keys())

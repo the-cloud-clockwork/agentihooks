@@ -1,4 +1,4 @@
-"""Tests for the hooks-utils daemon lifecycle (scripts/mcp_daemon.py).
+"""Tests for the agentihooks daemon lifecycle (scripts/mcp_daemon.py).
 
 The behaviour under test is mostly about *not* being fooled: a recycled pid must
 not read as a running daemon, a stale daemon must not pass as matching config, and
@@ -242,7 +242,7 @@ class TestStatusDivergence:
         self._pidfile_backend(monkeypatch)
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
         (Path.home() / ".claude.json").write_text(
-            json.dumps({"mcpServers": {"hooks-utils": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
+            json.dumps({"mcpServers": {"agentihooks": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
             encoding="utf-8",
         )
         mcp_daemon._write_pidfile({"pid": 4242, "transport": "sse", "host": "localhost", "port": 8642})
@@ -277,7 +277,7 @@ class TestStatusDivergence:
         self._pidfile_backend(monkeypatch)
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
         (Path.home() / ".claude.json").write_text(
-            json.dumps({"mcpServers": {"hooks-utils": {"type": "http", "url": "http://localhost:8642/mcp"}}}),
+            json.dumps({"mcpServers": {"agentihooks": {"type": "http", "url": "http://localhost:8642/mcp"}}}),
             encoding="utf-8",
         )
         mcp_daemon._write_pidfile({"pid": 4242, "transport": "sse", "host": "localhost", "port": 8642})
@@ -485,7 +485,7 @@ class TestStatusFormatting:
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
         monkeypatch.setenv("MCP_PORT", "9111")
         (Path.home() / ".claude.json").write_text(
-            json.dumps({"mcpServers": {"hooks-utils": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
+            json.dumps({"mcpServers": {"agentihooks": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
             encoding="utf-8",
         )
         mcp_daemon._write_pidfile({"pid": 4242, "transport": "sse", "host": "localhost", "port": 8642})
@@ -512,7 +512,7 @@ class TestStatusFormatting:
         monkeypatch.setenv("AGENTIHOOKS_MCP_SUPERVISOR", "pidfile")
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
         (Path.home() / ".claude.json").write_text(
-            json.dumps({"mcpServers": {"hooks-utils": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
+            json.dumps({"mcpServers": {"agentihooks": {"type": "sse", "url": "http://localhost:8642/sse"}}}),
             encoding="utf-8",
         )
         mcp_daemon._write_pidfile({"pid": 4242, "transport": "sse", "host": "localhost", "port": 8642})

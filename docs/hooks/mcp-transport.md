@@ -18,10 +18,10 @@ nav_order: 5
 Some Claude Code deployments filter **every stdio-transport MCP server** out of
 the client at load time. The server is never spawned, its tools never appear,
 and `claude mcp add` refuses new registrations regardless of transport. On such
-a machine `hooks-utils` is simply absent, taking Fleet Command, enforcement and
+a machine `agentihooks` is simply absent, taking Fleet Command, enforcement and
 the brain tools with it.
 
-Network transports (`sse`, `streamable-http`) are not filtered, so `hooks-utils`
+Network transports (`sse`, `streamable-http`) are not filtered, so `agentihooks`
 can run as a persistent server the client connects to instead of spawns.
 
 **stdio remains the default.** Nothing below applies unless you opt in.
@@ -57,7 +57,7 @@ the reason and `agentihooks mcp start` to retry.
 
 Two costs worth knowing:
 
-- Every `agentihooks init` drops each live hooks-utils connection for about a
+- Every `agentihooks init` drops each live agentihooks connection for about a
   second, including a re-run that changed nothing.
 - **This is machine-wide.** The install is global, so it interrupts every Claude
   Code session on the box, not only the project you ran it from.
@@ -89,8 +89,8 @@ an enterprise policy.
 
 Observed on a policy-filtered machine: an entry whose url named `127.0.0.1` was
 dropped from the client's configured-server set outright — it did not appear in
-`claude mcp list`, and `claude mcp get hooks-utils` answered *no MCP server
-named "hooks-utils"*. Changing only the host spelling to `localhost`, with the
+`claude mcp list`, and `claude mcp get agentihooks` answered *no MCP server
+named "agentihooks"*. Changing only the host spelling to `localhost`, with the
 same daemon on the same port serving the same transport, connected immediately.
 
 Both names address the loopback interface, so nothing about the access boundary
@@ -151,7 +151,7 @@ them. Exit codes make it scriptable: **0** running and matching, **1** stopped,
 **2** diverged.
 
 ```
-hooks-utils daemon
+agentihooks daemon
   configured transport : sse
   configured endpoint  : localhost:9111
   ~/.claude.json       : sse http://localhost:8642/sse
@@ -243,12 +243,12 @@ alike:
 
 | What you see | What it means |
 |---|---|
-| `hooks-utils: … - ✔ Connected` | done |
-| `hooks-utils: … - ✗ Failed to connect` | entry accepted, daemon down or on the wrong port |
-| no `hooks-utils` line at all | the client is not reading the entry — policy, or a host spelling it rejects |
+| `agentihooks: … - ✔ Connected` | done |
+| `agentihooks: … - ✗ Failed to connect` | entry accepted, daemon down or on the wrong port |
+| no `agentihooks` line at all | the client is not reading the entry — policy, or a host spelling it rejects |
 
-That third row is the quiet one. `claude mcp get hooks-utils` confirms it by
-answering *no MCP server named "hooks-utils"* even though the entry is sitting
+That third row is the quiet one. `claude mcp get agentihooks` confirms it by
+answering *no MCP server named "agentihooks"* even though the entry is sitting
 in `~/.claude.json`.
 
 Do not reach for a bare `curl … -d '{"…","method":"tools/list"}'` here. Stateful

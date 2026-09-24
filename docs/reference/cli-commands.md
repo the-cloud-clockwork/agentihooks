@@ -34,12 +34,12 @@ agentihooks init [--bundle <path>] [--profile <name>]
 5. Writes `~/.claude/settings.json` with hook wiring and tool permissions
 6. Symlinks skills, agents, commands, and rules via 3-layer merge (agentihooks built-in -> bundle global -> each profile in chain)
 7. Writes `~/.claude/CLAUDE.md` -- single profile: file copy; chained profiles: concatenated with `---` separators and `<!-- profile: name -->` markers
-8. Installs MCPs (hooks-utils + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
+8. Installs MCPs (agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mcp.json`)
 9. Installs the `agentihooks` CLI globally via `uv tool install --editable .`
 10. Writes managed bashrc block (`agentienv` function + `agenti` alias)
 
 Step 8 has one extra behaviour when `MCP_TRANSPORT` names a network transport:
-it renders the systemd unit and **starts the hooks-utils daemon**, restarting it
+it renders the systemd unit and **starts the agentihooks daemon**, restarting it
 unconditionally. Reverting to `stdio` stops the daemon and removes the unit, so a
 downgrade cannot leave a process serving a port nothing points at. See
 [`agentihooks mcp`](#agentihooks-mcp) and
@@ -249,13 +249,30 @@ Manage recurring reminders injected every N tool calls. Global runtime entries l
 ```bash
 agentihooks enforcement set "run tests before committing" 5
 agentihooks enforcement set --local "read the operator directory" 10
+agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
 agentihooks enforcement list [--local]
 agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 ```
 
 `--local` requires a Git project. Local files use the same JSON schema and cadence behavior as the global store. AgentiHooks creates the resource directory on the first local `set`, never edits Git ignore configuration, and leaves the directory in place after `clear`.
 
-During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. MCP enforcement tools remain global.
+During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. The MCP tools take the same scope as `local=true`, resolved from the session's project directory (or an explicit `cwd`).
+
+`--matcher` limits an entry to matching tool calls (`bash`, `bash.git`, `edit+write`, `mcp`, `mcp__<server>`); its cadence then counts matching calls only. Grammar: [Conditions](../hooks/conditions.md#matcher-grammar).
+
+---
+
+## `agentihooks conditions`
+
+Inspect the [conditions](../hooks/conditions.md) the running harness would execute.
+
+```bash
+agentihooks conditions list                                   # layers, conditions in order, invalid files
+agentihooks conditions list --step post
+agentihooks conditions list --tool Bash --command "cd x && git push"
+```
+
+The profile chain is read for `AGENTIHOOKS_TARGET` (default `claude`).
 
 ---
 
@@ -302,7 +319,7 @@ agentihooks refresh-rules --clear
 
 ## `agentihooks mcp`
 
-Two unrelated jobs behind one word: a surface-area report, and the hooks-utils
+Two unrelated jobs behind one word: a surface-area report, and the agentihooks
 daemon's lifecycle.
 
 ```bash
@@ -316,7 +333,7 @@ agentihooks mcp stop
 ### The daemon subcommands
 
 These do nothing under stdio, which is the default — Claude Code spawns
-hooks-utils per session and there is no daemon. They exist for the network
+agentihooks per session and there is no daemon. They exist for the network
 transports; see [MCP Transport]({{ site.baseurl }}/hooks/mcp-transport/).
 
 `agentihooks init` starts the daemon itself, so `start` is only needed after a
@@ -370,7 +387,7 @@ agentihooks uninstall [--yes]
 - Skills, agents, commands, and rules symlinks in `~/.claude/` -- if they target the agentihooks repo
 - `~/.claude/CLAUDE.md` -- if it points into `profiles/`
 - MCP servers in `~/.claude.json` -- from profile `.mcp.json` files and `state.json`
-- The hooks-utils daemon -- stopped under both backends, and its systemd unit removed. Uninstall verifies afterwards and warns if a process survived, since an orphaned daemon with the CLI gone has nothing left to manage it
+- The agentihooks daemon -- stopped under both backends, and its systemd unit removed. Uninstall verifies afterwards and warns if a process survived, since an orphaned daemon with the CLI gone has nothing left to manage it
 - Bashrc block -- the `agentienv` function and `agenti` alias are removed from `~/.bashrc`
 - `agentihooks` CLI -- via `uv tool uninstall agentihooks`
 

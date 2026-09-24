@@ -119,7 +119,7 @@ class TargetAdapter(Protocol):
         ...
 
     def register_hooks_utils(self, profile_name: str) -> None:
-        """Register agentihooks' own hooks-utils MCP server with the target."""
+        """Register agentihooks' own MCP server with the target."""
         ...
 
     def register_mcp(self, servers: dict) -> None:

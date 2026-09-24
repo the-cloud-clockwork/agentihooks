@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.targets._common import (
+    LEGACY_MCP_SERVER_NAMES,
+    MCP_SERVER_NAME,
     _atomic_write,
     _command_is_wrapper,
     _install_module,
@@ -37,6 +39,7 @@ from scripts.targets._common import (
     clear_managed_mcp,
     drop_if_credentialed,
     has_env_reference,
+    migrate_legacy_mcp,
     reap_translated_commands,
     record_managed_mcp,
     scannable,
@@ -382,8 +385,13 @@ class CodexAdapter:
             # transport. Re-deriving it here is how this adapter shipped a
             # hardcoded http:// that the claude path had already fixed.
             # Codex takes the url alone — it infers the type itself.
-            entry = {"url": _i._build_mcp_config("")["mcpServers"]["hooks-utils"]["url"]}
-        self.register_mcp({"hooks-utils": entry})
+            entry = {"url": _i._build_mcp_config("")["mcpServers"][MCP_SERVER_NAME]["url"]}
+        config_path = self.home() / "config.toml"
+        doc = self._load_toml(config_path)
+        table = doc.get("mcp_servers")
+        if table is not None and migrate_legacy_mcp(table, self.name, str(config_path), entry.get("url")):
+            self._dump_toml(config_path, doc)
+        self.register_mcp({MCP_SERVER_NAME: entry})
 
     def register_mcp(self, servers: dict) -> None:
         """Merge a layer of MCP servers into [mcp_servers.*] in config.toml.
@@ -554,19 +562,21 @@ class CodexAdapter:
                 for n in recorded_names:
                     if table.pop(n, None) is not None:
                         removed.append(n)
-                if not recorded_names and "hooks-utils" in table:
-                    # No record: remove hooks-utils only when its content proves
-                    # it is ours — a name collision with the operator's own
-                    # server must not delete their entry.
+                for own in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES) if not recorded_names else ():
+                    if own not in table:
+                        continue
+                    # No record: remove it only when its content proves it is
+                    # ours — a name collision with the operator's own server
+                    # must not delete their entry.
                     import tomlkit as _tomlkit
 
-                    entry_text = _tomlkit.dumps({"e": table["hooks-utils"]})
+                    entry_text = _tomlkit.dumps({"e": table[own]})
                     if "hooks.mcp" in entry_text:
-                        table.pop("hooks-utils")
-                        removed.append("hooks-utils")
+                        table.pop(own)
+                        removed.append(own)
                     else:
                         _i._cprint(
-                            "  [!!] 'hooks-utils' in config.toml has no install record and "
+                            f"  [!!] '{own}' in config.toml has no install record and "
                             "does not look agentihooks-managed — left in place; review it."
                         )
                 if not len(table):

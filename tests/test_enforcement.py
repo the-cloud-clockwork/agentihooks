@@ -530,3 +530,90 @@ class TestLocalEnforcement:
 
         with pytest.raises(ProjectResourceError, match="not inside a Git project"):
             add_enforcement("no project", 5, local=True, cwd=tmp_path)
+
+
+class TestMatcher:
+    def _enabled(self):
+        return patch("hooks.context.enforcement.ENFORCEMENT_INJECTION_ENABLED", True)
+
+    def test_add_stores_normalized_matcher_and_rejects_invalid(self):
+        from hooks.context.enforcement import add_enforcement, list_enforcements
+
+        assert add_enforcement("git only", 3, matcher="Bash.GIT") is not None
+        assert list_enforcements()[0]["matcher"] == "bash.git"
+        assert add_enforcement("broken", 3, matcher="bad*token") is None
+
+    def test_matched_entry_skips_session_start_and_prompt(self):
+        from hooks.context.enforcement import (
+            add_enforcement,
+            get_session_start_enforcements,
+            get_user_prompt_enforcements,
+        )
+
+        add_enforcement("kubectl reads only", 1, matcher="bash.kubectl")
+        with self._enabled():
+            assert get_session_start_enforcements("m-1") is None
+            assert get_user_prompt_enforcements("m-1") is None
+
+    def test_first_matching_call_then_every_nth_matching_call(self):
+        from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
+
+        add_enforcement("kubectl reads only", 3, matcher="bash.kubectl")
+        kubectl = {"command": "kubectl get po"}
+        with self._enabled():
+            assert get_pretool_enforcements("m-2", tool_name="Read", tool_input={}) is None
+            assert get_pretool_enforcements("m-2", tool_name="Bash", tool_input={"command": "ls"}) is None
+            fired = [
+                get_pretool_enforcements("m-2", tool_name="Bash", tool_input=kubectl) is not None for _ in range(7)
+            ]
+        assert fired == [True, False, True, False, False, True, False]
+
+    def test_global_entries_unchanged_beside_matched_ones(self):
+        from hooks.context.enforcement import add_enforcement, get_pretool_enforcements
+
+        add_enforcement("global rule", 2)
+        add_enforcement("edit rule", 1, matcher="edit+write")
+        with self._enabled():
+            first = get_pretool_enforcements("m-3", tool_name="Read", tool_input={})
+            second = get_pretool_enforcements("m-3", tool_name="Edit", tool_input={})
+        assert "global rule" in first and "edit rule" not in first
+        assert "global rule" in second and "edit rule" in second
+        assert "Matcher: edit+write" in second
+
+    def test_codex_posttool_reads_the_pretool_count(self):
+        from hooks.context.enforcement import add_enforcement, get_posttool_enforcements, get_pretool_enforcements
+
+        add_enforcement("git rule", 2, matcher="bash.git")
+        git = {"command": "git status"}
+        with self._enabled():
+            for expected in (True, True, False, True):
+                get_pretool_enforcements("m-4", claim_unseen=False, tool_name="Bash", tool_input=git)
+                banner = get_posttool_enforcements("m-4", tool_name="Bash", tool_input=git)
+                assert ("git rule" in (banner or "")) is expected
+
+    def test_invalid_matcher_in_file_is_skipped(self, bundle_dir):
+        from hooks.context.enforcement import get_pretool_enforcements
+
+        (bundle_dir / "enforcements.json").write_text(
+            json.dumps({"enforcements": [{"id": "bad", "message": "never", "cadence": 1, "matcher": "a b"}]})
+        )
+        with (
+            self._enabled(),
+            patch("hooks.context.enforcement._get_bundle_path", return_value=bundle_dir),
+        ):
+            assert get_pretool_enforcements("m-5", tool_name="Bash", tool_input={}) is None
+
+    def test_session_end_clears_match_counters(self):
+        from hooks.context.enforcement import (
+            _load_match_counters,
+            add_enforcement,
+            get_pretool_enforcements,
+            reset_session_delivery,
+        )
+
+        add_enforcement("git rule", 2, matcher="bash")
+        with self._enabled():
+            get_pretool_enforcements("m-6", tool_name="Bash", tool_input={})
+        assert "m-6" in _load_match_counters()
+        reset_session_delivery("m-6")
+        assert "m-6" not in _load_match_counters()

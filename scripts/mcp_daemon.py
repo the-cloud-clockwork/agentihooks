@@ -1,4 +1,4 @@
-"""Lifecycle for the hooks-utils MCP daemon.
+"""Lifecycle for the agentihooks MCP daemon.
 
 Only network transports (``sse``, ``streamable-http``) need a persistent server:
 under stdio Claude Code spawns one process per session and there is nothing to
@@ -165,7 +165,7 @@ def _proc_fs_available() -> bool:
 
 
 def pid_alive(pid: int | None) -> bool:
-    """Is *pid* a live hooks-utils daemon?
+    """Is *pid* a live agentihooks MCP daemon?
 
     The cmdline cross-check is what stops a recycled pid reading as a running
     daemon. Where /proc is absent the signal check stands alone and callers are
@@ -263,7 +263,7 @@ def resolve_backend() -> str:
         return forced
     if forced and forced != "auto":
         print(
-            f"[hooks-utils] WARNING: unknown AGENTIHOOKS_MCP_SUPERVISOR={forced!r}; "
+            f"[agentihooks] WARNING: unknown AGENTIHOOKS_MCP_SUPERVISOR={forced!r}; "
             f"detecting instead. Valid values: {', '.join(VALID_SUPERVISORS)}.",
             file=sys.stderr,
         )
@@ -353,12 +353,14 @@ def configured_port() -> int:
 
 
 def _client_entry() -> dict | None:
-    """The hooks-utils entry as ~/.claude.json actually declares it."""
+    """The agentihooks MCP entry as ~/.claude.json actually declares it."""
     try:
         data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-    entry = (data.get("mcpServers") or {}).get("hooks-utils")
+    from scripts.targets._common import MCP_SERVER_NAME
+
+    entry = (data.get("mcpServers") or {}).get(MCP_SERVER_NAME)
     return entry if isinstance(entry, dict) else None
 
 
@@ -681,7 +683,7 @@ def status() -> DaemonStatus:
         if url and f":{port}" not in url:
             st.divergences.append(f"~/.claude.json url {url!r} does not name port {port}")
     elif transport in NETWORK_TRANSPORTS:
-        st.divergences.append("~/.claude.json has no hooks-utils entry — run `agentihooks init`")
+        st.divergences.append("~/.claude.json has no agentihooks MCP entry — run `agentihooks init`")
 
     return st
 
@@ -702,14 +704,14 @@ def _unit_transport() -> str:
 
 def format_status(st: DaemonStatus) -> str:
     lines = [
-        "hooks-utils daemon",
+        "agentihooks MCP daemon",
         f"  configured transport : {st.configured_transport}",
         f"  configured endpoint  : {st.configured_host}:{st.configured_port}",
     ]
     if st.client_entry:
         lines.append(f"  ~/.claude.json       : {st.client_entry.get('type')} {st.client_entry.get('url')}")
     else:
-        lines.append("  ~/.claude.json       : no hooks-utils entry")
+        lines.append("  ~/.claude.json       : no agentihooks MCP entry")
     lines += [
         f"  supervisor           : {st.backend}",
         f"  process              : {'running' if st.running else 'stopped'}" + (f" (pid {st.pid})" if st.pid else ""),
@@ -741,7 +743,7 @@ def main(action: str, python: str, cwd: str) -> int:
     if action in ("start", "restart"):
         if transport not in NETWORK_TRANSPORTS:
             print(
-                f"MCP_TRANSPORT is {transport!r} — Claude Code spawns hooks-utils per session "
+                f"MCP_TRANSPORT is {transport!r} — Claude Code spawns the agentihooks MCP server per session "
                 "and there is no daemon to run.",
                 file=sys.stderr,
             )

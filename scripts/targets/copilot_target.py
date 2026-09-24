@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.targets._common import (
+    LEGACY_MCP_SERVER_NAMES,
+    MCP_SERVER_NAME,
     TRANSLATED_COMMANDS_MANIFEST,
     _atomic_write,
     _command_is_wrapper,
@@ -41,6 +43,7 @@ from scripts.targets._common import (
     drop_if_credentialed,
     has_env_reference,
     load_manifest,
+    migrate_legacy_mcp,
     reap_translated_commands,
     record_managed_mcp,
     resolve_env_references,
@@ -165,7 +168,7 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     return (front if isinstance(front, dict) else {}), parts[2].lstrip("\n")
 
 
-_MCP_ALWAYS_ENABLED = ("hooks-utils",)
+_MCP_ALWAYS_ENABLED = (MCP_SERVER_NAME,)
 
 # WSL: reach a Windows browser, which holds the sessions the distro's own browser
 # does not. Tried in order; the first that resolves wins.
@@ -722,9 +725,33 @@ class CopilotAdapter:
             # validates MCP_PORT and honours MCP_SCHEME.
             entry = {
                 "type": "http",
-                "url": _i._build_mcp_config("")["mcpServers"]["hooks-utils"]["url"],
+                "url": _i._build_mcp_config("")["mcpServers"][MCP_SERVER_NAME]["url"],
             }
-        self.register_mcp({"hooks-utils": entry})
+        self._migrate_legacy_mcp(entry.get("url"))
+        self.register_mcp({MCP_SERVER_NAME: entry})
+
+    def _migrate_legacy_mcp(self, own_url: str | None) -> None:
+        home = self.home()
+        config_path = home / "mcp-config.json"
+        doc = self._load_json(config_path)
+        table = doc.get("mcpServers")
+        if not isinstance(table, dict):
+            return
+        renamed = migrate_legacy_mcp(table, self.name, str(config_path), own_url)
+        if not renamed:
+            return
+        doc["mcpServers"] = table
+        _atomic_write(config_path, json.dumps(doc, indent=2) + "\n")
+        settings_path = home / "settings.json"
+        settings = self._load_json(settings_path)
+        changed = False
+        for key in ("disabledMcpServers", "enabledMcpServers"):
+            names = settings.get(key)
+            if isinstance(names, list) and set(renamed) & set(names):
+                settings[key] = sorted({MCP_SERVER_NAME if n in renamed else n for n in names})
+                changed = True
+        if changed:
+            _atomic_write(settings_path, json.dumps(settings, indent=2) + "\n")
 
     def register_mcp(self, servers: dict) -> None:
         """Merge a layer of MCP servers into ~/.copilot/mcp-config.json.
@@ -957,17 +984,19 @@ class CopilotAdapter:
             table = doc.get("mcpServers")
             if isinstance(table, dict):
                 removed = [n for n in recorded_names if table.pop(n, None) is not None]
-                if not recorded_names and "hooks-utils" in table:
-                    # No record: remove hooks-utils only when its content proves
-                    # it is ours — a name collision with the operator's own
-                    # server must not delete their entry.
-                    entry_text = json.dumps(table["hooks-utils"])
+                for own in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES) if not recorded_names else ():
+                    if own not in table:
+                        continue
+                    # No record: remove it only when its content proves it is
+                    # ours — a name collision with the operator's own server
+                    # must not delete their entry.
+                    entry_text = json.dumps(table[own])
                     if "hooks.mcp" in entry_text:
-                        table.pop("hooks-utils")
-                        removed.append("hooks-utils")
+                        table.pop(own)
+                        removed.append(own)
                     else:
                         _i._cprint(
-                            "  [!!] 'hooks-utils' in mcp-config.json has no install record and "
+                            f"  [!!] '{own}' in mcp-config.json has no install record and "
                             "does not look agentihooks-managed — left in place; review it."
                         )
                 doc["mcpServers"] = table
@@ -992,7 +1021,7 @@ class CopilotAdapter:
         ``mcpAlwaysEnabled`` is a floor rather than a skip-list: a name in it is
         lifted OUT of ``disabledMcpServers`` as well as kept out of it. Adding to
         the set is not enough — a stale settings file, or one `/mcp disable
-        hooks-utils` in the past, would otherwise leave the toolbelt off forever
+        agentihooks` in the past, would otherwise leave the toolbelt off forever
         while the install reported it as enabled. Turning one off for good means
         dropping it from ``mcpAlwaysEnabled``, which is where that decision belongs.
         """
@@ -1009,7 +1038,10 @@ class CopilotAdapter:
 
         settings_path = home / "settings.json"
         doc = self._load_json(settings_path)
-        always_on = set(directives.get("mcpAlwaysEnabled") or _MCP_ALWAYS_ENABLED)
+        always_on = {
+            MCP_SERVER_NAME if n in LEGACY_MCP_SERVER_NAMES else n
+            for n in (directives.get("mcpAlwaysEnabled") or _MCP_ALWAYS_ENABLED)
+        }
         operator_enabled = set(doc.get("enabledMcpServers") or [])
 
         disabled = set(doc.get("disabledMcpServers") or [])

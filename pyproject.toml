@@ -1,6 +1,6 @@
 [project]
 name = "agentihooks"
-version = "2.13.5"
+version = "2.14.0"
 description = "Hook system and MCP tool server for Claude Code agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -77,7 +77,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 
 [tool.setuptools.package-data]
 "hooks.context" = ["data/*.json"]
-# systemd unit template for the network-transport hooks-utils daemon. Lives
+# systemd unit template for the network-transport agentihooks MCP daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
 # Ship every native config and Markdown artifact under profiles/ — personas,

@@ -42,6 +42,9 @@ Commands:
     agentihooks balance --dry-run [--fable] [--refresh]
         Show ranked OAuth account capacity without launching Claude.
 
+    agentihooks conditions list [--step pre|post] [--tool NAME] [--command CMD]
+        Show bundle and profile conditions, invalid files, and what fires for a call.
+
     agentihooks --list-profiles     # show available profiles
     agentihooks --query             # print active profile name
 
@@ -54,7 +57,8 @@ Profile layout (mirrors Claude Code project structure):
         ├── skills/                  # → ~/.claude/skills/
         ├── agents/                  # → ~/.claude/agents/
         ├── commands/                # → ~/.claude/commands/
-        └── rules/                   # → ~/.claude/rules/
+        ├── rules/                   # → ~/.claude/rules/
+        └── conditions/              # run in place on matching tool calls
 
 3-layer merge: agentihooks built-in → bundle global → profile-specific.
 The built-in layer (skills/agents/commands/rules) lives under profiles/package/
@@ -79,6 +83,7 @@ from pathlib import Path
 import yaml
 
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
+from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
 
 def _get_version() -> str:
@@ -1918,9 +1923,9 @@ def _clean_state_dir() -> None:
     # a network-mode install restarts it at step 6.
     try:
         if _mcp_daemon_module().stop():
-            _cprint("  [OK] Stopped the hooks-utils daemon before clearing state")
+            _cprint("  [OK] Stopped the agentihooks MCP daemon before clearing state")
     except Exception as e:  # never let cleanup fail a --force install
-        _cprint(f"  {_YELLOW}[WARN] Could not stop the hooks-utils daemon: {e}{_RESET}")
+        _cprint(f"  {_YELLOW}[WARN] Could not stop the agentihooks MCP daemon: {e}{_RESET}")
 
     # Whitelist: only these are deleted. Everything else survives.
     _DELETE_FILES = {
@@ -3009,7 +3014,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     adapter.install_persona(profile_dirs, profile_chain, bundle_dir)
 
     # --- 6. Install MCP servers (target-specific registration) ---
-    # Layer 1: hooks-utils from agentihooks
+    # Layer 1: the agentihooks MCP server
     adapter.register_hooks_utils(last_profile)
 
     # Network transport needs a persistent server; stdio does not. Only in
@@ -3024,7 +3029,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         # port nothing points at once the client entry reverts to stdio. Removing
         # the unit does not touch a process started outside systemd.
         if _mcp_daemon_module().stop():
-            _cprint("  [OK] Stopped the hooks-utils daemon (transport reverted to stdio)")
+            _cprint("  [OK] Stopped the agentihooks MCP daemon (transport reverted to stdio)")
         _remove_systemd_user_unit()
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
@@ -3413,7 +3418,7 @@ VALID_MCP_TRANSPORTS = ("stdio", "sse", "streamable-http")
 
 
 def _resolve_installer_mcp_transport() -> str:
-    """Transport for the ~/.claude.json hooks-utils entry. ``stdio`` by default.
+    """Transport for the ~/.claude.json agentihooks MCP entry. ``stdio`` by default.
 
     Resolved from ``AGENTIHOOKS_MCP_TRANSPORT`` in the installer's environment,
     then from ``~/.agentihooks/.env`` — the same file the daemon reads at
@@ -3483,7 +3488,7 @@ def _resolve_hooks_python() -> Path:
     if chosen is None:
         msg_parts = [
             "ERROR: no python found that can `import hooks` from a neutral cwd.",
-            "Refusing to write a broken hooks-utils MCP command into ~/.claude.json.",
+            "Refusing to write a broken agentihooks MCP command into ~/.claude.json.",
             "Tried:",
         ]
         for p in failed:
@@ -3499,7 +3504,7 @@ def _resolve_hooks_python() -> Path:
 
 
 def _build_mcp_config(mcp_categories: str) -> dict:
-    """Build the ~/.claude.json entry for the hooks-utils MCP server.
+    """Build the ~/.claude.json entry for the agentihooks MCP server.
 
     Two shapes, selected by ``_resolve_installer_mcp_transport()``:
 
@@ -3517,7 +3522,7 @@ def _build_mcp_config(mcp_categories: str) -> dict:
     if transport == "stdio":
         return {
             "mcpServers": {
-                "hooks-utils": {
+                MCP_SERVER_NAME: {
                     "command": str(_resolve_hooks_python()),
                     "args": ["-m", "hooks.mcp"],
                     "cwd": str(AGENTIHOOKS_ROOT),
@@ -3574,7 +3579,7 @@ def _build_mcp_config(mcp_categories: str) -> dict:
     # message fired on every healthy network-mode install — and it named a
     # systemctl command that cannot work under the pidfile backend. Whether the
     # daemon came up is reported by _ensure_mcp_daemon, which actually knows.
-    return {"mcpServers": {"hooks-utils": {"type": client_type, "url": f"{scheme}://{host}:{port}{path}"}}}
+    return {"mcpServers": {MCP_SERVER_NAME: {"type": client_type, "url": f"{scheme}://{host}:{port}{path}"}}}
 
 
 _SYSTEMD_UNIT_NAME = "agentihooks-mcp.service"
@@ -3616,7 +3621,7 @@ def _systemd_user_unit_path() -> Path:
 
 
 def _install_systemd_user_unit(transport: str) -> None:
-    """Write the hooks-utils daemon unit into the user systemd directory.
+    """Write the agentihooks MCP daemon unit into the user systemd directory.
 
     Only called when the MCP transport is network-mode, so stdio machines get no
     systemd artifact at all. Rendering and starting stay separate: this puts the
@@ -3684,10 +3689,41 @@ def _remove_systemd_user_unit() -> None:
 def _install_user_mcp(profile_name: str) -> None:
     """Generate and merge MCP server config into ~/.claude.json.
 
-    Builds the hooks-utils MCP server config with all categories enabled.
+    Builds the agentihooks MCP server config with all categories enabled.
     """
     mcp_config = _build_mcp_config("all")
+    _migrate_legacy_claude_mcp(mcp_config["mcpServers"][MCP_SERVER_NAME].get("url"))
     _merge_mcp_to_user_scope(mcp_config["mcpServers"])
+
+
+def _migrate_legacy_claude_mcp(own_url: str | None) -> None:
+    """Drop a legacy-named agentihooks entry from ~/.claude.json, carrying per-project disables over."""
+    from scripts.targets._common import is_own_mcp_entry
+
+    if not _CLAUDE_JSON.exists():
+        return
+    data = load_json(_CLAUDE_JSON)
+    servers = data.get("mcpServers") or {}
+    legacy = [n for n in LEGACY_MCP_SERVER_NAMES if n in servers and is_own_mcp_entry(servers[n], own_url)]
+    for name in LEGACY_MCP_SERVER_NAMES:
+        if name in servers and name not in legacy:
+            _cprint(f"  [!!] '{name}' in {_CLAUDE_JSON} does not run agentihooks — left in place; review it.")
+    if not legacy:
+        return
+    for name in legacy:
+        servers.pop(name)
+    for project in (data.get("projects") or {}).values():
+        disabled = project.get("disabledMcpServers") if isinstance(project, dict) else None
+        if isinstance(disabled, list) and set(legacy) & set(disabled):
+            project["disabledMcpServers"] = sorted({MCP_SERVER_NAME if n in legacy else n for n in disabled})
+    data["mcpServers"] = servers
+    save_json(_CLAUDE_JSON, data)
+    state = _load_state()
+    for key in ("managed_mcp_servers", "foreign_mcp_servers"):
+        if key in state:
+            state[key] = sorted(set(state.get(key) or []) - set(legacy))
+    _save_state(state)
+    _cprint(f"  [OK] Renamed MCP server {', '.join(legacy)} -> {MCP_SERVER_NAME} in {_CLAUDE_JSON}")
 
 
 def manage_user_mcp(mcp_path: Path, *, uninstall: bool = False) -> None:
@@ -3727,7 +3763,7 @@ def _reseed_managed_mcp_sources() -> None:
     """Re-merge bundle + active-profile .mcp.json into ~/.claude.json mcpServers.
 
     Idempotent. Used by `init` so the source-of-truth files (bundle
-    .claude/.mcp.json, profile .claude/.mcp.json, and the hooks-utils
+    .claude/.mcp.json, profile .claude/.mcp.json, and the agentihooks
     server) are always present in user scope.
     """
     state = _load_state()
@@ -3737,12 +3773,12 @@ def _reseed_managed_mcp_sources() -> None:
     # state into claude's file.
     profile_name = _global_record(state).get("profile")
 
-    # Layer 1: hooks-utils (driven by profile mcp_categories)
+    # Layer 1: agentihooks MCP server (driven by profile mcp_categories)
     if profile_name:
         try:
             _install_user_mcp(profile_name)
         except Exception as exc:
-            _cprint(f"  [WARN] Could not reseed hooks-utils MCP: {exc}")
+            _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
     # Layer 2: bundle .mcp.json
     bundle_dir = _get_bundle_path()
@@ -3788,7 +3824,7 @@ def sync_user_mcp() -> None:
     """Re-apply MCP source-of-truth files into ~/.claude.json mcpServers.
 
     Order:
-    1. Reseed bundle + active-profile .mcp.json + hooks-utils (managed sources)
+    1. Reseed bundle + active-profile .mcp.json + agentihooks MCP (managed sources)
     2. Re-merge user-tracked .mcp.json files from ~/.agentihooks/state.json mcpFiles
 
     Skips paths that no longer exist (with a warning) so a missing
@@ -4609,7 +4645,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     """Return the union of all MCP servers managed by agentihooks.
 
     Collects servers from:
-    1. The hooks-utils server (generated from profile mcp_categories)
+    1. The agentihooks MCP server (generated from profile mcp_categories)
     2. Bundle .claude/.mcp.json (or root .mcp.json)
     3. Profile .claude/.mcp.json
     4. All files tracked in ~/.agentihooks/state.json mcpFiles
@@ -4618,7 +4654,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     """
     merged: dict = {}
 
-    # --- 1. hooks-utils server ---
+    # --- 1. agentihooks MCP server ---
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
@@ -4637,7 +4673,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").
     # Resolve every hop via _resolve_profile_chain — passing the joined string
     # straight to _resolve_profile_dir returns None and silently drops every
-    # profile's MCP servers, collapsing the managed set to just hooks-utils.
+    # profile's MCP servers, collapsing the managed set to just agentihooks.
     state = _load_state()
     # Claude-scoped on purpose: this assembles ~/.claude's mcpServers, not codex's.
     global_target = _global_record(state)
@@ -4818,20 +4854,20 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 
-    # --- 3b. Stop and remove the hooks-utils daemon (network-transport installs) ---
+    # --- 3b. Stop and remove the agentihooks MCP daemon (network-transport installs) ---
     # Stop before removing the unit: disabling a unit does not reach a process
     # started under the pidfile backend, and once the unit is gone there is
     # nothing left to stop it with.
     _mcp_daemon = _mcp_daemon_module()
     if _mcp_daemon.stop():
-        _cprint("[OK] Stopped the hooks-utils daemon")
+        _cprint("[OK] Stopped the agentihooks MCP daemon")
     # Verify rather than assume. `stop()` is best-effort on both backends — a
     # systemctl stop fails silently if the user bus went away — and an uninstall
     # that reports success while a daemon keeps serving the port is the worst
     # outcome here, because nothing is left to manage it with.
     if _mcp_daemon.pid_alive(_mcp_daemon.read_pidfile().get("pid")):
         _cprint(
-            f"  {_YELLOW}[WARN] A hooks-utils daemon is still running. Stop it by hand before removing the CLI.{_RESET}"
+            f"  {_YELLOW}[WARN] An agentihooks MCP daemon is still running. Stop it by hand before removing the CLI.{_RESET}"
         )
     _remove_systemd_user_unit()
 
@@ -5826,6 +5862,8 @@ def _print_enforcements(entries: list[dict]) -> None:
         print(f"\n[{index}/{len(entries)}] {source}")
         print(f"  ID: {enforcement_id}")
         print(f"  Cadence: every {cadence} tool calls")
+        if entry.get("matcher"):
+            print(f"  Matcher: {entry['matcher']}")
         print(f"  Tag: {tag}")
         if created_at:
             print(f"  Created: {created_at}")
@@ -5902,10 +5940,20 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
             print("Error: message is required.", file=sys.stderr)
             sys.exit(1)
         tag = getattr(args, "tag", "") or None
-        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd)
+        matcher = getattr(args, "matcher", "") or None
+        if matcher:
+            from hooks.context.tool_matcher import parse as parse_matcher
+
+            try:
+                parse_matcher(matcher)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd, matcher=matcher)
         if enf_id:
             scope = "local, " if local else ""
-            print(f"Enforcement created: {enf_id} ({scope}every {cadence} tool calls)")
+            calls = f"{matcher} calls" if matcher else "tool calls"
+            print(f"Enforcement created: {enf_id} ({scope}every {cadence} {calls})")
         else:
             print("Error: failed to create enforcement.", file=sys.stderr)
             sys.exit(1)
@@ -5913,6 +5961,44 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
 
     print("Error: unknown enforcement action.", file=sys.stderr)
     sys.exit(1)
+
+
+def _cmd_conditions(args: argparse.Namespace) -> None:
+    """Handle the conditions CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context import conditions
+
+    found = conditions.inventory(Path.cwd())
+    entries = found["conditions"]
+    step = getattr(args, "step", None)
+
+    print("Layers (later wins on the same step-matcher-name):")
+    for layer in found["layers"]:
+        if layer["untrusted_owner"]:
+            status = f"skipped: repo owner {layer['untrusted_owner']!r} is not trusted (CONDITIONS_TRUSTED_OWNERS)"
+        else:
+            status = f"{layer['count']} condition(s)" if layer["exists"] else "missing"
+        print(f"  {layer['source']:<22} {layer['path']}  [{status}]")
+
+    shown = [e for e in entries if step is None or e["step"] == step]
+    print(f"\nConditions: {len(shown)}")
+    for e in shown:
+        flags = "  async" if e["async"] else ""
+        print(f"  {e['order']:>3}  {e['step']:<4}  {e['matcher']:<30}  {e['name']:<24}  {e['source']}{flags}")
+
+    if found["invalid"]:
+        print(f"\nInvalid files: {len(found['invalid'])}")
+        for item in found["invalid"]:
+            print(f"  {item['path']}\n    {item['error']}")
+
+    tool = getattr(args, "tool", "") or ""
+    if tool:
+        index = conditions.build_index(entries)
+        command = getattr(args, "bash_command", "") or ""
+        call = f"{tool} {command!r}" if command else tool
+        for s in [step] if step else list(conditions.STEPS):
+            fired = conditions.matching(s, tool, {"command": command} if command else {}, index)
+            print(f"\n{s} {call}: {', '.join(e['file'] for e in fired) or 'no conditions fire'}")
 
 
 def cmd_migrate(args) -> None:
@@ -6028,6 +6114,9 @@ def main() -> None:
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
         _argv.insert(1, "--local")
+    if _argv[:1] == ["enforcement"] and "--matcher" in _argv[2:]:
+        _at = _argv.index("--matcher", 2)
+        _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
 
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
@@ -6194,11 +6283,11 @@ def main() -> None:
     extract_p.add_argument("--source", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
     extract_p.add_argument("--output-dir", default=None, help="Output directory (default: source's .claude/commands/)")
 
-    mcp_p = sub.add_parser("mcp", help="MCP surface area analysis and hooks-utils daemon lifecycle")
+    mcp_p = sub.add_parser("mcp", help="MCP surface area analysis and agentihooks MCP daemon lifecycle")
     mcp_p.add_argument(
         "mcp_action",
         choices=["report", "start", "stop", "restart", "status"],
-        help="report = surface-area analysis; start/stop/restart/status = hooks-utils daemon",
+        help="report = surface-area analysis; start/stop/restart/status = agentihooks MCP daemon",
     )
     mcp_p.add_argument("--project", default=None, help="Project path to include (report only, default: CWD)")
 
@@ -6341,6 +6430,7 @@ examples:
   agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
   agentihooks enforcement set --local "project-only reminder" 10   # current Git project
+  agentihooks enforcement set "reads only against the cluster" 1 --matcher bash.kubectl   # only on kubectl calls
   agentihooks enforcement list
   agentihooks enforcement list --local
   agentihooks enforcement clear                                     # remove ALL
@@ -6358,10 +6448,24 @@ examples:
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
     enf_p.add_argument(
+        "--matcher",
+        default="",
+        help="Deliver only on matching tool calls: bash, bash.git, edit+write, mcp, mcp__<server>",
+    )
+    enf_p.add_argument(
         "--local",
         action="store_true",
         help="Use <git-root>/.agentihooks/enforcements.json instead of the global runtime store",
     )
+
+    cond_p = sub.add_parser(
+        "conditions",
+        help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
+    )
+    cond_p.add_argument("action", choices=["list"], help="Conditions action")
+    cond_p.add_argument("--step", choices=["pre", "post"], default=None, help="Only this step")
+    cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
+    cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
@@ -6581,6 +6685,8 @@ notes:
         _cmd_channel(args)
     elif args.command == "enforcement":
         _cmd_enforcement(args)
+    elif args.command == "conditions":
+        _cmd_conditions(args)
     elif args.command == "brain":
         _cmd_brain(args)
     elif args.command == "refresh-rules":

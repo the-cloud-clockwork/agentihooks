@@ -343,7 +343,7 @@ def _query_mcp_tools(url: str, headers: dict[str, str]) -> Optional[int]:
 
 
 def _count_hooks_utils_tools() -> int:
-    """Count tools from hooks-utils by building the MCP server."""
+    """Count tools from the agentihooks MCP server by building it."""
     try:
         from hooks.mcp import build_server
 
@@ -447,7 +447,9 @@ def check_mcp() -> dict[str, Any]:
 
             # Get tool count: live query → cache fallback
             tools = None
-            if name == "hooks-utils":
+            from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
+
+            if name in (MCP_SERVER_NAME, *LEGACY_MCP_SERVER_NAMES):
                 tools = _count_hooks_utils_tools()
             elif stype == "http":
                 # Try cache first
@@ -457,7 +459,7 @@ def check_mcp() -> dict[str, Any]:
                     url = cfg.get("url", "")
                     headers = cfg.get("headers", {})
                     tools = _query_mcp_tools(url, headers)
-            # stdio servers other than hooks-utils: check cache only
+            # stdio servers other than agentihooks: check cache only
             elif name in cache:
                 tools = cache[name]
 

@@ -186,6 +186,43 @@ def managed_mcp_names(target: str) -> list[str]:
     return list(_i._global_record(_i._load_state(), target).get("managed_mcp", []))
 
 
+# The agentihooks MCP server's registration name, and the names earlier releases
+# registered it under. `agentihooks init` replaces a legacy entry it can prove is
+# its own; an entry under a legacy name that runs something else is left alone.
+MCP_SERVER_NAME = "agentihooks"
+LEGACY_MCP_SERVER_NAMES = ("hooks-utils",)
+
+
+def is_own_mcp_entry(entry, own_url: str | None = None) -> bool:
+    """Whether an MCP config entry runs the agentihooks server."""
+    if not isinstance(entry, dict):
+        return "hooks.mcp" in str(entry)
+    if "hooks.mcp" in json.dumps(entry, default=str):
+        return True
+    return bool(own_url) and entry.get("url") == own_url
+
+
+def migrate_legacy_mcp(table: dict, target: str, where: str, own_url: str | None = None) -> list[str]:
+    """Drop legacy-named agentihooks entries from *table* in place; returns the names removed."""
+    _i = _install_module()
+    removed = []
+    for legacy in LEGACY_MCP_SERVER_NAMES:
+        if legacy not in table:
+            continue
+        if is_own_mcp_entry(table[legacy], own_url):
+            table.pop(legacy)
+            removed.append(legacy)
+        else:
+            _i._cprint(f"  [!!] '{legacy}' in {where} does not run agentihooks — left in place; review it.")
+    if removed:
+        state = _i._load_state()
+        record = _i._global_record(state, target, create=True)
+        record["managed_mcp"] = sorted(set(record.get("managed_mcp", [])) - set(removed))
+        _i._save_state(state)
+        _i._cprint(f"  [OK] Renamed MCP server {', '.join(removed)} -> {MCP_SERVER_NAME} in {where}")
+    return removed
+
+
 def _atomic_write(path: Path, content: str) -> None:
     """Write ``content`` to ``path`` via a same-directory temp file + ``os.replace``.
 
@@ -357,7 +394,7 @@ def identity_preamble(profile_chain: list[str]) -> str:
         f"When asked who you are, answer as **{base}**: your response "
         "template, your doctrine, and your agentihooks toolbelt "
         "(lifecycle-hook guardrails, the brain memory system, "
-        "`hooks-utils` MCP tools, the installed skills) — not a generic "
+        "`agentihooks` MCP tools, the installed skills) — not a generic "
         "description of the underlying coding agent, and never by reciting "
         "the raw profile chain as if it were a name."
     )

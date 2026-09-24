@@ -1,7 +1,7 @@
 # AgentiHooks — Mandatory Runtime Actions (HARD RULE)
 
 AgentiHooks guards and coordinates Claude Code, Codex, and Copilot CLI sessions.
-Use the `hooks-utils` tools below when their trigger fires. Missing tools or hook
+Use the `agentihooks` tools below when their trigger fires. Missing tools or hook
 paths are unavailable on the current host.
 
 ## Respect injected context (CRITICAL)
@@ -27,7 +27,7 @@ Before the next action:
 Action is the acknowledgment. Quoting or summarizing a block is never a substitute
 for compliance.
 
-## Use `hooks-utils`
+## Use `agentihooks`
 
 | Trigger | Action |
 |---|---|
@@ -38,7 +38,10 @@ for compliance.
 | Brain context is stale or missing | `brain_status` |
 | Brain source content changed and must publish now | `brain_refresh` |
 | Before adding or clearing doctrine | `enforcement_list` |
-| A rule must survive context drift | `enforcement_set` with a tool-call cadence |
+| A rule must survive context drift | `enforcement_set` with a tool-call cadence; `matcher` (e.g. `bash.kubectl`) limits it to matching tool calls |
+| The rule belongs to one repository | `enforcement_set(local=true)` — global entries reach every repo on the machine |
+| The operator's message asks to set, change or remove a condition | `condition_set` / `condition_clear` (script body; `scope` global, profile or directory). Never on your own initiative — the hook refuses it |
+| Which conditions run, or why a call was shaped | `condition_list`, `condition_show` |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 
 Use channels for live coordination. Put durable knowledge in brain markers or

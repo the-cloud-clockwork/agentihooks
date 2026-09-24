@@ -76,7 +76,7 @@ WRAPPER="$COPILOT_HOME/agentihooks-hook.sh"
 echo
 echo "[2] real binary accepts the config we wrote"
 MCP_OUT="$(cd "$WORK/repo" && timeout 60 copilot mcp list 2>&1)"
-printf '%s' "$MCP_OUT" | grep -q "hooks-utils" && ok "copilot mcp list sees hooks-utils" || no "copilot mcp list missing hooks-utils: $MCP_OUT"
+printf '%s' "$MCP_OUT" | grep -q "agentihooks" && ok "copilot mcp list sees agentihooks" || no "copilot mcp list missing agentihooks: $MCP_OUT"
 printf '%s' "$MCP_OUT" | grep -q "smoke-sse (sse)" && ok "SSE transport accepted (codex drops these)" || no "SSE server not accepted: $MCP_OUT"
 # A parse error in settings.json surfaces on any subcommand, so a clean run here
 # is the binary validating the file we wrote, not merely ignoring it.
@@ -242,7 +242,7 @@ else
     # userPromptSubmitted must NOT block; the {"decision":"block"} envelope must.
     printf '#!/bin/sh\necho PROBE >&2\nexit 2\n' > "$COPILOT_HOME/x2.sh" && chmod +x "$COPILOT_HOME/x2.sh"
     printf '{"version":1,"hooks":{"userPromptSubmitted":[{"type":"command","command":"%s","timeoutSeconds":10}]}}' "$COPILOT_HOME/x2.sh" > "$COPILOT_HOME/hooks/zz-probe.json"
-    L1="$(cd "$WORK/repo" && timeout 120 copilot -p "reply with exactly: NOT_BLOCKED" --no-color 2>&1 | head -2)"
+    L1="$(cd "$WORK/repo" && timeout 120 copilot -p "reply with exactly: NOT_BLOCKED" --no-color 2>&1)"
     printf '%s' "$L1" | grep -q "NOT_BLOCKED" && ok "exit 2 on userPromptSubmitted is advisory (turn ran)" \
       || no "exit 2 unexpectedly blocked userPromptSubmitted"
     printf '#!/bin/sh\nprintf %s\n' "'{\"decision\":\"block\",\"reason\":\"SMOKE-ENV-BLOCK\"}'" > "$COPILOT_HOME/x2.sh"

@@ -19,6 +19,7 @@ Counter: per-session, persisted at ~/.agentihooks/enforcement_counters.json.
 """
 
 import fcntl
+import functools
 import json
 import os
 import uuid
@@ -31,7 +32,9 @@ from hooks.config import (
     ENFORCEMENT_DELIVERY_STATE_FILE,
     ENFORCEMENT_FILE,
     ENFORCEMENT_INJECTION_ENABLED,
+    ENFORCEMENT_MATCH_COUNTER_FILE,
 )
+from hooks.context import tool_matcher
 
 
 def _store_path() -> Path:
@@ -44,6 +47,10 @@ def _counter_path() -> Path:
 
 def _delivery_path() -> Path:
     return Path(ENFORCEMENT_DELIVERY_STATE_FILE).expanduser()
+
+
+def _match_counter_path() -> Path:
+    return Path(ENFORCEMENT_MATCH_COUNTER_FILE).expanduser()
 
 
 def _load_store(path: Path | None = None) -> list[dict]:
@@ -84,8 +91,8 @@ def _load_counters() -> dict:
 def _save_counters(state: dict) -> None:
     p = _counter_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(state))
+    tmp = p.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(_recent(state)))
     os.replace(str(tmp), str(p))
 
 
@@ -104,15 +111,26 @@ def _save_delivery_state(state: dict[str, list[str]]) -> None:
     path = _delivery_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(json.dumps(state))
+    tmp.write_text(json.dumps(_recent(state)))
     os.replace(str(tmp), str(path))
 
 
+# Session-keyed files drop their oldest sessions past this many, so sessions
+# that never reached SessionEnd (crash, kill) cannot grow them forever.
+_SESSION_KEEP = 500
+
+
+def _recent(state: dict) -> dict:
+    if len(state) <= _SESSION_KEEP:
+        return state
+    return dict(list(state.items())[-_SESSION_KEEP:])
+
+
 @contextmanager
-def _delivery_lock():
-    path = _delivery_path().with_suffix(".lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+") as lock_file:
+def _file_lock(path: Path):
+    lock = path.with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -120,48 +138,27 @@ def _delivery_lock():
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+def _delivery_lock():
+    return _file_lock(_delivery_path())
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-from hooks.config import AGENTIHOOKS_HOME
-
-_STATE_PATH = AGENTIHOOKS_HOME / "state.json"
-
-
-def _read_state() -> dict:
-    try:
-        if _STATE_PATH.exists():
-            return json.loads(_STATE_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
+from hooks.context import profile_chain
 
 
 def _get_bundle_path() -> Path | None:
-    bp = _read_state().get("bundle", {}).get("path")
-    if bp:
-        p = Path(bp).expanduser()
-        if p.is_dir():
-            return p
-    return None
+    return profile_chain.bundle_path(profile_chain.read_state())
 
 
 def _get_active_profile() -> str | None:
-    from hooks.targets import global_record
-
-    return global_record(_read_state()).get("profile") or None
+    return profile_chain.active_profile(profile_chain.read_state())
 
 
 def _get_linked_profiles() -> dict[str, Path]:
-    linked = {}
-    for entry in _read_state().get("linked_profiles", []) or []:
-        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("path"):
-            continue
-        path = Path(entry["path"]).expanduser()
-        if path.is_dir():
-            linked[str(entry["name"])] = path
-    return linked
+    return profile_chain.linked_profiles(profile_chain.read_state())
 
 
 def _load_json_enforcements(path: Path, source: str) -> list[dict]:
@@ -192,24 +189,12 @@ def _load_bundle_enforcements() -> list[dict]:
 
 
 def _load_profile_enforcements() -> list[dict]:
-    bp = _get_bundle_path()
     profile = _get_active_profile()
     if not profile:
         return []
-    built_in = Path(__file__).resolve().parents[2] / "profiles"
-    linked = _get_linked_profiles()
     entries = []
-    for name in (part.strip() for part in profile.split(",")):
-        if not name:
-            continue
-        candidates = [built_in / name]
-        if bp is not None:
-            candidates.append(bp / "profiles" / name)
-        if name in linked:
-            candidates.append(linked[name])
-        profile_dir = next((path for path in candidates if path.is_dir()), None)
-        if profile_dir is not None:
-            entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
+    for _name, profile_dir in profile_chain.profile_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
+        entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
     return entries
 
 
@@ -263,11 +248,17 @@ def add_enforcement(
     *,
     local: bool = False,
     cwd: str | Path | None = None,
+    matcher: str | None = None,
 ) -> str | None:
     if not message or not message.strip():
         return None
     if not isinstance(cadence, int) or cadence < 1:
         return None
+    if matcher:
+        try:
+            matcher = tool_matcher.parse(matcher).token
+        except ValueError:
+            return None
     enforcement_id = uuid.uuid4().hex[:8]
     entry = {
         "id": enforcement_id,
@@ -276,6 +267,8 @@ def add_enforcement(
         "tag": tag or "",
         "created_at": _now_iso(),
     }
+    if matcher:
+        entry["matcher"] = matcher
     store = _local_store_path(cwd, create_parent=True) if local else _store_path()
     entries = _load_store(store)
     entries.append(entry)
@@ -320,11 +313,12 @@ def clear_enforcement(
 
 def increment_and_get_count(session_id: str) -> int:
     """Increment the per-session tool-call counter and return the new value."""
-    state = _load_counters()
-    cur = int(state.get(session_id, 0)) + 1
-    state[session_id] = cur
-    _save_counters(state)
-    return cur
+    with _file_lock(_counter_path()):
+        state = _load_counters()
+        cur = int(state.pop(session_id, 0)) + 1
+        state[session_id] = cur
+        _save_counters(state)
+        return cur
 
 
 def get_due_enforcements(tool_call_count: int, cwd: str | Path | None = None) -> list[dict]:
@@ -353,6 +347,75 @@ def _claim_unseen_enforcements(session_id: str, entries: list[dict], *, claim: b
             state[session_id] = sorted(seen | {entry["id"] for entry in unseen})
             _save_delivery_state(state)
         return unseen
+
+
+@functools.lru_cache(maxsize=256)
+def _parse_matcher(token: str) -> tool_matcher.Matcher:
+    return tool_matcher.parse(token)
+
+
+def _split_by_matcher(
+    entries: list[dict], tool_name: str | None = None, tool_input: dict | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Split into (global entries, matched entries that match this tool call)."""
+    plain, matched = [], []
+    for entry in entries:
+        token = entry.get("matcher")
+        if not token:
+            plain.append(entry)
+            continue
+        try:
+            matcher = _parse_matcher(str(token))
+        except ValueError as e:
+            from hooks.common import log
+
+            log("enforcement skipped — invalid matcher", {"id": entry.get("id"), "error": str(e)})
+            continue
+        if tool_name is not None and matcher.matches(tool_name, tool_input):
+            matched.append(entry)
+    return plain, matched
+
+
+def _load_match_counters() -> dict:
+    path = _match_counter_path()
+    if not path.exists() or path.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_match_counters(state: dict) -> None:
+    path = _match_counter_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(_recent(state)))
+    os.replace(str(tmp), str(path))
+
+
+def _matched_due(session_id: str, entries: list[dict], *, increment: bool) -> list[dict]:
+    """Matched entries due on this call: the first matching call, then every Nth."""
+    if not entries or not session_id:
+        return entries
+    with _delivery_lock():
+        state = _load_match_counters()
+        counts = state.get(session_id)
+        counts = counts if isinstance(counts, dict) else {}
+        due = []
+        for entry in entries:
+            n = int(counts.get(entry["id"], 0)) + (1 if increment else 0)
+            if increment:
+                counts[entry["id"]] = n
+            cadence = max(1, int(entry.get("cadence", 1) or 1))
+            if n == 1 or (n > 1 and n % cadence == 0):
+                due.append(entry)
+        if increment:
+            state.pop(session_id, None)
+            state[session_id] = counts
+            _save_match_counters(state)
+        return due
 
 
 def _merge_enforcements(*groups: list[dict]) -> list[dict]:
@@ -390,6 +453,8 @@ def format_enforcement_banner(msg: dict) -> str:
         "=== ENFORCEMENT [IMPORTANT] ===",
         f"ID: {enforcement_id}  Cadence: every {cadence} tool calls",
     ]
+    if msg.get("matcher"):
+        lines.append(f"Matcher: {msg['matcher']}")
     if tag:
         lines.append(f"Tag: {tag}")
     lines.extend([message, "=" * 30])
@@ -411,7 +476,8 @@ def get_session_start_enforcements(session_id: str, cwd: str | Path | None = Non
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
-        entries = _claim_unseen_enforcements(session_id, load_all_enforcements(cwd))
+        plain, _ = _split_by_matcher(load_all_enforcements(cwd))
+        entries = _claim_unseen_enforcements(session_id, plain)
         if not entries:
             return None
         return format_enforcement_context(entries)
@@ -423,7 +489,8 @@ def get_user_prompt_enforcements(session_id: str, cwd: str | Path | None = None)
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
-        entries = _claim_unseen_enforcements(session_id, load_all_enforcements(cwd))
+        plain, _ = _split_by_matcher(load_all_enforcements(cwd))
+        entries = _claim_unseen_enforcements(session_id, plain)
         if not entries:
             return None
         return format_enforcement_context(entries)
@@ -437,16 +504,18 @@ def get_pretool_enforcements(
     *,
     claim_unseen: bool = True,
     tool_call_count: int | None = None,
+    tool_name: str | None = None,
+    tool_input: dict | None = None,
 ) -> str | None:
     """Increment the counter and return formatted enforcement banners if any are due."""
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
         count = tool_call_count if tool_call_count is not None else increment_and_get_count(session_id)
-        entries = load_all_enforcements(cwd)
-        unseen = _claim_unseen_enforcements(session_id, entries, claim=claim_unseen)
-        due = _due_enforcements(entries, count)
-        selected = _merge_enforcements(unseen, due)
+        plain, matched = _split_by_matcher(load_all_enforcements(cwd), tool_name, tool_input)
+        unseen = _claim_unseen_enforcements(session_id, plain, claim=claim_unseen)
+        due = _due_enforcements(plain, count)
+        selected = _merge_enforcements(unseen, due, _matched_due(session_id, matched, increment=True))
         if not selected:
             return None
         return format_enforcement_context(selected)
@@ -454,15 +523,21 @@ def get_pretool_enforcements(
         return None
 
 
-def get_posttool_enforcements(session_id: str, cwd: str | Path | None = None) -> str | None:
+def get_posttool_enforcements(
+    session_id: str,
+    cwd: str | Path | None = None,
+    *,
+    tool_name: str | None = None,
+    tool_input: dict | None = None,
+) -> str | None:
     if not ENFORCEMENT_INJECTION_ENABLED:
         return None
     try:
         count = int(_load_counters().get(session_id, 0))
-        entries = load_all_enforcements(cwd)
-        unseen = _claim_unseen_enforcements(session_id, entries)
-        due = _due_enforcements(entries, count)
-        selected = _merge_enforcements(unseen, due)
+        plain, matched = _split_by_matcher(load_all_enforcements(cwd), tool_name, tool_input)
+        unseen = _claim_unseen_enforcements(session_id, plain)
+        due = _due_enforcements(plain, count)
+        selected = _merge_enforcements(unseen, due, _matched_due(session_id, matched, increment=False))
         if not selected:
             return None
         return format_enforcement_context(selected)
@@ -471,10 +546,11 @@ def get_posttool_enforcements(session_id: str, cwd: str | Path | None = None) ->
 
 
 def reset_session_counter(session_id: str) -> None:
-    state = _load_counters()
-    if session_id in state:
-        del state[session_id]
-        _save_counters(state)
+    with _file_lock(_counter_path()):
+        state = _load_counters()
+        if session_id in state:
+            del state[session_id]
+            _save_counters(state)
 
 
 def reset_session_delivery(session_id: str) -> None:
@@ -483,3 +559,7 @@ def reset_session_delivery(session_id: str) -> None:
         if session_id in state:
             del state[session_id]
             _save_delivery_state(state)
+        counters = _load_match_counters()
+        if session_id in counters:
+            del counters[session_id]
+            _save_match_counters(counters)

@@ -31,12 +31,12 @@ class TestPruneScope:
         """A server the operator added with `claude mcp add` is not agentihooks'."""
         _write_claude_json(
             {
-                "hooks-utils": {"command": "python"},
+                "agentihooks": {"command": "python"},
                 "operator-own": {"command": "node", "args": ["server.js"]},
             }
         )
-        install._save_state({"managed_mcp_servers": ["hooks-utils"]})
-        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: {"hooks-utils"})
+        install._save_state({"managed_mcp_servers": ["agentihooks"]})
+        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: {"agentihooks"})
 
         install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
 
@@ -44,15 +44,15 @@ class TestPruneScope:
 
     def test_prune_removes_own_stale_server(self, home, monkeypatch):
         """A server in the ledger but no longer in any source is agentihooks' to remove."""
-        _write_claude_json({"hooks-utils": {"command": "python"}, "dropped": {"command": "x"}})
-        install._save_state({"managed_mcp_servers": ["hooks-utils", "dropped"]})
-        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: {"hooks-utils"})
+        _write_claude_json({"agentihooks": {"command": "python"}, "dropped": {"command": "x"}})
+        install._save_state({"managed_mcp_servers": ["agentihooks", "dropped"]})
+        monkeypatch.setattr(install, "_get_managed_mcp_names", lambda: {"agentihooks"})
 
         install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
 
         servers = _read_claude_json()
         assert "dropped" not in servers, "prune left behind a server agentihooks installed"
-        assert "hooks-utils" in servers
+        assert "agentihooks" in servers
 
 
 class TestCleanScope:
@@ -305,14 +305,14 @@ class TestPruneUnderUncertainty:
     """Deleting on incomplete information is the bug class, not a fallback."""
 
     def test_orphan_sweep_skipped_when_sources_are_unresolvable(self, home, monkeypatch):
-        _write_claude_json({"hooks-utils": {"command": "python"}, "gateway": {"command": "x"}})
-        install._save_state({"managed_mcp_servers": ["hooks-utils", "gateway"]})
+        _write_claude_json({"agentihooks": {"command": "python"}, "gateway": {"command": "x"}})
+        install._save_state({"managed_mcp_servers": ["agentihooks", "gateway"]})
         # A moved venv makes _build_mcp_config sys.exit(1) deep inside the collector.
         monkeypatch.setattr(install, "_collect_all_managed_mcp_servers", lambda: (_ for _ in ()).throw(SystemExit(1)))
 
         install._prune_stale_mcp_servers(install.AGENTIHOOKS_STATE_DIR / "known-mcp-servers.json")
 
-        assert set(_read_claude_json()) == {"hooks-utils", "gateway"}, (
+        assert set(_read_claude_json()) == {"agentihooks", "gateway"}, (
             "prune deleted the whole ledger because it could not resolve what the chain defines"
         )
 
@@ -423,13 +423,13 @@ class TestMcpNameCollision:
 
     def test_collided_name_is_never_claimed(self, home):
         self._collide()
-        install._reconcile_managed_mcp_ledger({"shared", "hooks-utils"})
+        install._reconcile_managed_mcp_ledger({"shared", "agentihooks"})
         assert "shared" not in install._load_state()["managed_mcp_servers"]
 
     def test_dropping_the_profile_does_not_delete_operator_server(self, home):
         self._collide()
-        install._reconcile_managed_mcp_ledger({"shared", "hooks-utils"})
-        install._reconcile_managed_mcp_ledger({"hooks-utils"})  # profile drops it
+        install._reconcile_managed_mcp_ledger({"shared", "agentihooks"})
+        install._reconcile_managed_mcp_ledger({"agentihooks"})  # profile drops it
         assert "shared" in _read_claude_json(), "the operator's MCP server was deleted by a profile update"
 
     def test_uninstall_does_not_claim_by_name_match(self, home, monkeypatch):
