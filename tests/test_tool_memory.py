@@ -40,3 +40,21 @@ class TestToolMemory:
             entry = json.loads(lines[0])
             assert entry["tool"] == "Write"
             assert "File not found" in entry["error"]
+
+
+class TestIsErrorExplicitStatus:
+    def test_file_tools_trust_only_explicit_flags(self):
+        from hooks.tool_memory import _is_error, strict_detection
+
+        echoed = {"type": "create", "filePath": "/x.py", "content": "raise TimeoutError('not found')"}
+        for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit", "Read"):
+            assert strict_detection(tool)
+            assert _is_error(echoed, strict=strict_detection(tool)) == (False, "")
+        assert _is_error({"is_error": True, "content": "String to replace not found"}, strict=True)[0]
+        assert not strict_detection("Bash")
+
+    def test_copilot_result_type(self):
+        from hooks.tool_memory import _is_error
+
+        assert _is_error({"resultType": "failure", "textResultForLlm": "boom"}, strict=True) == (True, "boom")
+        assert _is_error({"resultType": "denied", "textResultForLlm": "error: blocked by hook"}) == (False, "")

@@ -83,6 +83,14 @@ FALSE_POSITIVE_PATTERNS = [
     "finding 0 errors",
 ]
 
+# Their success responses echo file content, so any file mentioning "error"
+# or "not found" would read as a failure under string matching.
+_CONTENT_ECHO_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Read"})
+
+
+def strict_detection(tool_name):
+    return tool_name.startswith("mcp__") or tool_name in _CONTENT_ECHO_TOOLS
+
 
 def _is_error(tool_result, strict=False):
     """Detect if tool_result contains an error. Returns (is_error, error_text).
@@ -112,6 +120,13 @@ def _is_error(tool_result, strict=False):
         if exit_code and exit_code != 0:
             stderr = tool_result.get("stderr", "")
             return True, (stderr or str(tool_result.get("stdout", "")))[:200]
+
+        # Copilot: a hook-denied or user-rejected call never ran, so it is not a failed attempt.
+        result_type = tool_result.get("resultType")
+        if result_type == "failure":
+            return True, str(tool_result.get("textResultForLlm", ""))[:200]
+        if result_type in ("denied", "rejected"):
+            return False, ""
 
     # In strict mode, skip string pattern matching (MCP tools).
     # MCP responses contain arbitrary user content that triggers false positives.
@@ -391,12 +406,7 @@ def record_error(payload):
     if tool_result is None:
         return
 
-    # Detect error
-    # For MCP tools, ONLY trust explicit flags (is_error, exitCode).
-    # String pattern matching produces false positives on MCP responses
-    # because Jira descriptions contain words like "error", "not found", etc.
-    is_mcp = tool_name.startswith("mcp__")
-    detected, error_text = _is_error(tool_result, strict=is_mcp)
+    detected, error_text = _is_error(tool_result, strict=strict_detection(tool_name))
     if not detected:
         return  # No error - exit silently
 

@@ -8,6 +8,7 @@ and the content contains a version field change.
 """
 
 import re
+from pathlib import Path
 
 from hooks.hook_manager import BlockAction
 
@@ -43,6 +44,10 @@ def check_version_guard(payload: dict) -> None:
 
     file_path = tool_input.get("file_path", "")
     if not file_path:
+        return
+
+    # Creating a manifest declares the first version; only changes to an existing one are bumps.
+    if not (Path(payload.get("cwd") or ".") / file_path).exists():
         return
 
     # Check if the target file is a version-managed manifest
