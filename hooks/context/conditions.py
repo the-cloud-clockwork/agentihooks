@@ -593,6 +593,10 @@ _SIGNAL = re.compile(
 )
 _CONDITION_TOOL = re.compile(r"hooks[-_]utils.*condition_(?:set|clear)$", re.IGNORECASE)
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+_NEAR_CONDITIONS = re.compile(
+    r"\.(?:claude|agentihooks)(?:/[^\s'\";|&]*)?/conditions\b"
+    r"|\bcd\s+\S*\.(?:claude|agentihooks)\S*\s*(?:&&|;)[^\n]*\bconditions/"
+)
 _READ_ONLY_HEADS = frozenset(
     {
         "ls",
@@ -687,11 +691,12 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str) -> str
     tool_input = tool_input or {}
     touches = bool(_CONDITION_TOOL.search(name))
     if name in _EDIT_TOOLS:
-        touches = _touches_conditions(json.dumps(tool_input))
+        paths = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path") if tool_input.get(key)]
+        touches = _touches_conditions(" ".join(paths) if paths else json.dumps(tool_input))
     elif name == "Bash":
         command = str(tool_input.get("command") or "")
-        near = "conditions" in command and (".claude" in command or ".agentihooks" in command)
-        touches = (near or _touches_conditions(command)) and not _read_only_shell(command)
+        touches = bool(_NEAR_CONDITIONS.search(command) or _touches_conditions(command))
+        touches = touches and not _read_only_shell(command)
     if touches and not is_armed(session_id):
         return GATE_MESSAGE
     return None

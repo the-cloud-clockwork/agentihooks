@@ -16,6 +16,7 @@ from hooks.hook_manager import BlockAction
 pytestmark = pytest.mark.unit
 
 SID = "sid-condition-tools"
+_CONDITIONS_DOC = (Path(__file__).resolve().parents[1] / "docs" / "hooks" / "conditions.md").read_text()
 
 
 def _git_repo(path: Path, remote: str | None = None) -> Path:
@@ -129,6 +130,11 @@ class TestWriteGuard:
             ("Bash", {"command": "git add .claude/conditions/pre-bash-x.sh && git commit -m 'add condition'"}),
             ("Bash", {"command": "agentihooks conditions list --tool Bash"}),
             ("Write", {"file_path": "/repo/hooks/context/conditions.py", "content": "x"}),
+            ("Write", {"file_path": "/repo/docs/guide.md", "content": _CONDITIONS_DOC}),
+            (
+                "Bash",
+                {"command": 'W="$(readlink -f ~/.claude/skills/wt.sh)"; $W new x && sed -i s/a/b/ hooks/conditions.py'},
+            ),
             ("Edit", {"file_path": "/repo/docs/hooks/conditions.md", "old_string": "a", "new_string": "b"}),
             ("mcp__hooks-utils__condition_list", {}),
         ],
