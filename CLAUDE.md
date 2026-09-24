@@ -46,7 +46,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 |--------|-----------|-------------|
 | **Identity** | `scripts/install.py`, `profiles/`, `settings.base.json`, `scripts/targets/` | Profile system, chaining, two-axis model, bundle merge, install targets |
 | **Guardrails** | `hooks/secrets.py`, `hooks/context/retry_breaker.py`, `hooks/context/branch_guard.py`, `hooks/context/prod_lockdown.py`, `hooks/context/ci_manifesto.py`, `hooks/context/dep_banner.py`, `hooks/context/_strip.py`, `hooks/context/version_guard.py`, `hooks/context/claude_md_sanity.py` | Two-tier secrets, retry breaker, branch/PR gating, prod lockdown, CI manifesto signal parsing, dep install banner, shared command stripping, version guard, CLAUDE.md bloat guard |
-| **Context Intelligence** | `hooks/context/preprocessor.py`, `hooks/context/brain_adapter.py`, `hooks/context/rules_refresh.py`, `hooks/tool_memory.py` | Token compression, brain injection, one-shot rule refresh to running sessions, tool memory |
+| **Context Intelligence** | `hooks/context/preprocessor.py`, `hooks/context/brain_adapter.py`, `hooks/context/rules_refresh.py`, `hooks/tool_memory.py`, `hooks/context/conditions.py`, `hooks/context/tool_matcher.py` | Token compression, brain injection, one-shot rule refresh to running sessions, tool memory, bundle conditions and the tool matcher they share with enforcements |
 | **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py` | Real-time messaging with channel-based targeting, brain adapter |
 
 ## Architecture

@@ -193,6 +193,10 @@ agentihooks enforcement set "run tests before commit" 5
 agentihooks enforcement set --local "project-only reminder" 10
 agentihooks enforcement list --local
 agentihooks enforcement clear --local
+agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
+
+# Conditions: what fires for a call
+agentihooks conditions list --tool Bash --command "git push"
 
 # Live rule refresh (push rule updates into running sessions)
 agentihooks refresh-rules --dry-run          # preview payload + target session IDs
@@ -342,6 +346,23 @@ CLI's hook contract and the evidence behind it:
 | `Notification` | Log notifications |
 | `PreCompact` | Log before compaction |
 | `PermissionRequest` | Log permission requests |
+
+## Conditions
+
+Scripts in a bundle or profile that run on the tool calls they match. The filename
+is the configuration: `<step>-<matcher>-<name>[.async].<ext>`.
+
+```
+<bundle>/.claude/conditions/pre-bash.git-guard.sh          # before every Bash call that runs git
+<bundle>/profiles/anton/.claude/conditions/post-bash-trim.py  # after every Bash call, anton only
+```
+
+- **Input:** the hook payload on stdin plus `AH_*` environment variables.
+- **Output:** plain text (context), or JSON with `context`, `tool_input` (pre rewrite), `tool_output` (post rewrite) and `decision`. Exit 2 denies.
+- **Matchers:** `any`, a tool name, `mcp`, `mcp__<server>`, `bash.<cli>`, joined with `+`. Enforcements accept the same grammar as a `matcher` property.
+- **Execution:** matching conditions run in parallel and merge in layer order. Guardrails judge the rewritten input. A cached index keeps the per-call lookup to a few `stat` calls.
+
+[Full docs: Conditions](https://the-cloud-clockwork.github.io/agentihooks/docs/hooks/conditions/)
 
 ## Configuration
 

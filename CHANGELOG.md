@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Conditions: scripts in `<bundle>/.claude/conditions/` and
+  `<profile>/.claude/conditions/`, named `<step>-<matcher>-<name>[.async].<ext>`,
+  run on matching PreToolUse and PostToolUse calls. They can add context, rewrite
+  the tool input (guardrails judge the rewrite), replace the tool output on Claude
+  Code, or deny. The lookup is served from a cached index keyed on directory mtimes.
+  `agentihooks conditions list` shows layers, invalid files, and what fires for a
+  call.
+- Enforcements accept an optional `matcher` with the same grammar (`bash.kubectl`,
+  `edit+write`, `mcp__<server>`). A matched entry is delivered only on matching tool
+  calls, and its cadence counts those calls. The flag is `--matcher` on
+  `agentihooks enforcement set`, and `matcher` on the MCP `enforcement_set`.
+
+### Changed
+
+- PostToolUse on Claude Code now ends as one JSON envelope, so post-time context
+  (the retry-breaker banner, the subagent effort note) reaches the model instead of
+  the debug log.
+
 ## [2.13.5] - 2026-09-23
 
 ### Added

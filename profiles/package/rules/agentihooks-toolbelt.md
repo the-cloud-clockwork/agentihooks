@@ -38,7 +38,7 @@ for compliance.
 | Brain context is stale or missing | `brain_status` |
 | Brain source content changed and must publish now | `brain_refresh` |
 | Before adding or clearing doctrine | `enforcement_list` |
-| A rule must survive context drift | `enforcement_set` with a tool-call cadence |
+| A rule must survive context drift | `enforcement_set` with a tool-call cadence; `matcher` (e.g. `bash.kubectl`) limits it to matching tool calls |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 
 Use channels for live coordination. Put durable knowledge in brain markers or

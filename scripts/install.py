@@ -42,6 +42,9 @@ Commands:
     agentihooks balance --dry-run [--fable] [--refresh]
         Show ranked OAuth account capacity without launching Claude.
 
+    agentihooks conditions list [--step pre|post] [--tool NAME] [--command CMD]
+        Show bundle and profile conditions, invalid files, and what fires for a call.
+
     agentihooks --list-profiles     # show available profiles
     agentihooks --query             # print active profile name
 
@@ -54,7 +57,8 @@ Profile layout (mirrors Claude Code project structure):
         ├── skills/                  # → ~/.claude/skills/
         ├── agents/                  # → ~/.claude/agents/
         ├── commands/                # → ~/.claude/commands/
-        └── rules/                   # → ~/.claude/rules/
+        ├── rules/                   # → ~/.claude/rules/
+        └── conditions/              # run in place on matching tool calls
 
 3-layer merge: agentihooks built-in → bundle global → profile-specific.
 The built-in layer (skills/agents/commands/rules) lives under profiles/package/
@@ -5826,6 +5830,8 @@ def _print_enforcements(entries: list[dict]) -> None:
         print(f"\n[{index}/{len(entries)}] {source}")
         print(f"  ID: {enforcement_id}")
         print(f"  Cadence: every {cadence} tool calls")
+        if entry.get("matcher"):
+            print(f"  Matcher: {entry['matcher']}")
         print(f"  Tag: {tag}")
         if created_at:
             print(f"  Created: {created_at}")
@@ -5902,10 +5908,20 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
             print("Error: message is required.", file=sys.stderr)
             sys.exit(1)
         tag = getattr(args, "tag", "") or None
-        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd)
+        matcher = getattr(args, "matcher", "") or None
+        if matcher:
+            from hooks.context.tool_matcher import parse as parse_matcher
+
+            try:
+                parse_matcher(matcher)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd, matcher=matcher)
         if enf_id:
             scope = "local, " if local else ""
-            print(f"Enforcement created: {enf_id} ({scope}every {cadence} tool calls)")
+            calls = f"{matcher} calls" if matcher else "tool calls"
+            print(f"Enforcement created: {enf_id} ({scope}every {cadence} {calls})")
         else:
             print("Error: failed to create enforcement.", file=sys.stderr)
             sys.exit(1)
@@ -5913,6 +5929,44 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
 
     print("Error: unknown enforcement action.", file=sys.stderr)
     sys.exit(1)
+
+
+def _cmd_conditions(args: argparse.Namespace) -> None:
+    """Handle the conditions CLI command."""
+    sys.path.insert(0, str(AGENTIHOOKS_ROOT))
+    from hooks.context import conditions, profile_chain
+
+    layers, _probed = conditions.layer_dirs(profile_chain.read_state())
+    entries, invalid = conditions.scan_layers(layers)
+    step = getattr(args, "step", None)
+
+    print("Layers:")
+    if not layers:
+        print("  (no bundle linked and no profile chain)")
+    for source, directory in layers:
+        count = sum(1 for e in entries if e["path"].startswith(f"{directory}/"))
+        status = f"{count} condition(s)" if directory.is_dir() else "missing"
+        print(f"  {source:<22} {directory}  [{status}]")
+
+    shown = [e for e in entries if step is None or e["step"] == step]
+    print(f"\nConditions: {len(shown)}")
+    for e in shown:
+        flags = "  async" if e["async"] else ""
+        print(f"  {e['order']:>3}  {e['step']:<4}  {e['matcher']:<30}  {e['name']:<24}  {e['source']}{flags}")
+
+    if invalid:
+        print(f"\nInvalid files: {len(invalid)}")
+        for item in invalid:
+            print(f"  {item['path']}\n    {item['error']}")
+
+    tool = getattr(args, "tool", "") or ""
+    if tool:
+        index = conditions.build_index(entries)
+        command = getattr(args, "bash_command", "") or ""
+        call = f"{tool} {command!r}" if command else tool
+        for s in [step] if step else list(conditions.STEPS):
+            fired = conditions.matching(s, tool, {"command": command} if command else {}, index)
+            print(f"\n{s} {call}: {', '.join(e['file'] for e in fired) or 'no conditions fire'}")
 
 
 def cmd_migrate(args) -> None:
@@ -6028,6 +6082,9 @@ def main() -> None:
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")
         _argv.insert(1, "--local")
+    if _argv[:1] == ["enforcement"] and "--matcher" in _argv[2:]:
+        _at = _argv.index("--matcher", 2)
+        _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
 
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
@@ -6341,6 +6398,7 @@ examples:
   agentihooks enforcement set "patches forbidden — code only"      # default cadence (every 5 tool calls)
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
   agentihooks enforcement set --local "project-only reminder" 10   # current Git project
+  agentihooks enforcement set "reads only against the cluster" 1 --matcher bash.kubectl   # only on kubectl calls
   agentihooks enforcement list
   agentihooks enforcement list --local
   agentihooks enforcement clear                                     # remove ALL
@@ -6358,10 +6416,24 @@ examples:
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
     enf_p.add_argument(
+        "--matcher",
+        default="",
+        help="Deliver only on matching tool calls: bash, bash.git, edit+write, mcp, mcp__<server>",
+    )
+    enf_p.add_argument(
         "--local",
         action="store_true",
         help="Use <git-root>/.agentihooks/enforcements.json instead of the global runtime store",
     )
+
+    cond_p = sub.add_parser(
+        "conditions",
+        help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
+    )
+    cond_p.add_argument("action", choices=["list"], help="Conditions action")
+    cond_p.add_argument("--step", choices=["pre", "post"], default=None, help="Only this step")
+    cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
+    cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
     # --- Rules refresh subcommand ---
     rr_p = sub.add_parser(
@@ -6581,6 +6653,8 @@ notes:
         _cmd_channel(args)
     elif args.command == "enforcement":
         _cmd_enforcement(args)
+    elif args.command == "conditions":
+        _cmd_conditions(args)
     elif args.command == "brain":
         _cmd_brain(args)
     elif args.command == "refresh-rules":

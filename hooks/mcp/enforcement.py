@@ -13,7 +13,7 @@ from hooks.common import log
 
 def register(mcp):
     @mcp.tool()
-    def enforcement_set(message: str, cadence: int, tag: str = "") -> str:
+    def enforcement_set(message: str, cadence: int, tag: str = "", matcher: str = "") -> str:
         """Register a drumbeat enforcement that re-injects every N tool calls.
 
         Enforcements are global (every session sees them) and permanent until
@@ -24,6 +24,10 @@ def register(mcp):
             message: Reminder text to inject (e.g. "patches forbidden — code only")
             cadence: Re-inject every N tool calls. Required, must be >= 1.
             tag: Optional tag for grouping (lets you clear-by-tag later).
+            matcher: Optional tool matcher; the enforcement is then delivered only on
+                matching tool calls and its cadence counts those calls only.
+                Grammar: any, bash, edit, mcp, mcp__<server>, mcp__<server>__<tool>,
+                bash.<cli> (e.g. bash.kubectl); join alternatives with "+".
 
         Returns:
             JSON with success status and enforcement_id.
@@ -33,10 +37,18 @@ def register(mcp):
 
             if not isinstance(cadence, int) or cadence < 1:
                 return json.dumps({"success": False, "error": "cadence must be int >= 1"})
+            if matcher:
+                from hooks.context.tool_matcher import parse
+
+                try:
+                    parse(matcher)
+                except ValueError as e:
+                    return json.dumps({"success": False, "error": f"invalid matcher: {e}"})
             enforcement_id = add_enforcement(
                 message=message,
                 cadence=cadence,
                 tag=tag or None,
+                matcher=matcher or None,
             )
             if enforcement_id:
                 return json.dumps(
@@ -45,6 +57,7 @@ def register(mcp):
                         "enforcement_id": enforcement_id,
                         "cadence": cadence,
                         "tag": tag or None,
+                        "matcher": matcher or None,
                     }
                 )
             return json.dumps({"success": False, "error": "Empty message or invalid cadence"})

@@ -912,6 +912,24 @@ def on_pre_tool_use(payload: dict) -> None:
     tool_name = payload.get("tool_name", "unknown")
     tool_input = payload.get("tool_input", {})
 
+    # Conditions run first so every guard below judges the input that will run.
+    _conditions = None
+    try:
+        from hooks.context.conditions import pre_effect
+
+        _conditions = pre_effect(payload)
+    except Exception as e:
+        log("conditions pre-tool failed", {"error": str(e)})
+    if _conditions is not None:
+        from hooks.common import inject_context
+
+        for _ctx in _conditions.contexts:
+            inject_context(_ctx, also_log=False, skip_compression=True)
+        if _conditions.block:
+            raise BlockAction(_conditions.block)
+        if _conditions.rewrite is not None:
+            payload["tool_input"] = tool_input = _conditions.rewrite
+
     if SECRETS_MODE == "off":
         log(
             f"Pre tool use: {tool_name} (secrets scanning skipped, mode=off)",
@@ -1303,6 +1321,8 @@ def on_pre_tool_use(payload: dict) -> None:
                 payload.get("cwd", ""),
                 claim_unseen=_can_inject_pretool,
                 tool_call_count=_tool_call_count,
+                tool_name=tool_name,
+                tool_input=payload.get("tool_input") or {},
             )
             if _enf_ctx:
                 _pretool_blocks.append(_enf_ctx)
@@ -1316,13 +1336,15 @@ def on_pre_tool_use(payload: dict) -> None:
         if _drained:
             _pretool_blocks.insert(0, _drained)
 
-    if _credential_rewrite:
-        _updated, _note = _credential_rewrite
+    _cond_decision = _conditions.decision if _conditions is not None else None
+    if _credential_rewrite or _cond_decision in ("allow", "ask"):
+        _updated, _note = _credential_rewrite or ({}, "")
+        _rewritten = bool(_credential_rewrite) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
             "PreToolUse",
-            "allow",
-            _note,
-            updated_input={**(payload.get("tool_input") or {}), **_updated},
+            "ask" if _cond_decision == "ask" else "allow",
+            "\n".join(r for r in (_note, _conditions.reason if _conditions is not None else "") if r),
+            updated_input={**(payload.get("tool_input") or {}), **_updated} if _rewritten else None,
             additional_context="\n\n".join(_pretool_blocks) or None,
         )
     elif _pretool_blocks:
@@ -1423,6 +1445,20 @@ def on_post_tool_use(payload: dict) -> None:
     _trace_session_id = payload.get("session_id", "")
 
     try:
+        from hooks.context.conditions import post_effect
+
+        _conditions = post_effect(payload)
+        if _conditions is not None:
+            from hooks.common import inject_context
+            from hooks.targets import emitter
+
+            for _ctx in _conditions.contexts:
+                inject_context(_ctx, also_log=False, skip_compression=True)
+            emitter.set_fields(_conditions.hook_fields, _conditions.top_fields)
+    except Exception as e:
+        log("conditions post-tool failed", {"error": str(e)})
+
+    try:
         from hooks.config import ENFORCEMENT_INJECTION_ENABLED
         from hooks.targets.capabilities import can_inject_context
 
@@ -1439,7 +1475,12 @@ def on_post_tool_use(payload: dict) -> None:
             if ENFORCEMENT_INJECTION_ENABLED:
                 from hooks.context.enforcement import get_posttool_enforcements
 
-                enforcement_context = get_posttool_enforcements(_trace_session_id, payload.get("cwd", ""))
+                enforcement_context = get_posttool_enforcements(
+                    _trace_session_id,
+                    payload.get("cwd", ""),
+                    tool_name=tool_name,
+                    tool_input=payload.get("tool_input") or {},
+                )
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
     except Exception as e:
@@ -1585,13 +1626,11 @@ def on_post_tool_use(payload: dict) -> None:
                                 filtered = preprocess(filtered, level)
                     except Exception:
                         pass
-                    from hooks.targets import buffers_single_envelope
+                    from hooks.targets import buffers_single_envelope, emitter
 
-                    if buffers_single_envelope():
+                    if buffers_single_envelope() or emitter.forced():
                         # One-JSON-object rule: joins the single end-of-process
                         # flush instead of printing its own object.
-                        from hooks.targets import emitter
-
                         emitter.buffer_context(filtered)
                     else:
                         print(_json.dumps({"additionalContext": filtered}))
@@ -2153,8 +2192,12 @@ def main() -> None:
         handler = EVENT_HANDLERS.get(event_name)
 
         from hooks.targets import buffers_single_envelope, emitter
+        from hooks.targets.capabilities import supports_output_rewrite
 
         if event_name == "PreToolUse" and not buffers_single_envelope():
+            emitter.force_buffer()
+        elif event_name == "PostToolUse" and supports_output_rewrite():
+            # updatedToolOutput / decision only parse when the envelope is all of stdout.
             emitter.force_buffer()
 
         try:

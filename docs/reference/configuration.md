@@ -188,6 +188,17 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 | `ENFORCEMENT_FILE` | `~/.agentihooks/enforcements.json` | Mutable global runtime enforcement store. |
 | `ENFORCEMENT_COUNTER_FILE` | `~/.agentihooks/enforcement_counters.json` | Per-session tool-call counters used for cadence. |
 | `ENFORCEMENT_DELIVERY_STATE_FILE` | `~/.agentihooks/enforcement_delivery_state.json` | Per-session IDs already seen, shared across prompt and tool hooks. |
+| `ENFORCEMENT_MATCH_COUNTER_FILE` | `~/.agentihooks/enforcement_match_counters.json` | Per-session, per-entry counts of matching tool calls for enforcements with a `matcher`. |
+
+---
+
+## Conditions
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONDITIONS_ENABLED` | `true` | Run bundle and profile [conditions](../hooks/conditions.md) on PreToolUse and PostToolUse. |
+| `CONDITIONS_TIMEOUT_SEC` | `10` | Per-condition timeout; the condition's process group is killed on expiry and the call proceeds. |
+| `CONDITIONS_MAX_PARALLEL` | `8` | Synchronous conditions run at once for one tool call. |
 
 ---
 
