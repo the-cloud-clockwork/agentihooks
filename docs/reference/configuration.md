@@ -107,7 +107,7 @@ Controls the Token Control Layer, which reduces context window consumption in ag
 | `TOKEN_REDIS_TTL` | `3600` | TTL (seconds) for Redis keys storing token metrics and warning state. |
 | `BASH_FILTER_ENABLED` | `true` | Truncate verbose bash command output before it enters the context window. |
 | `BASH_FILTER_MAX_LINES` | `50` | Line limit for docker/kubectl output (keeps last N lines). |
-| `BASH_FILTER_MAX_CHARS` | `5000` | Character cap for build and generic output. |
+| `BASH_FILTER_MAX_CHARS` | `5000` | Character cap for install/build output. Other output (cat, git diff, grep) is never trimmed. |
 | `BASH_FILTER_TEST_MAX_FAILURES` | `10` | Maximum FAILED blocks to retain from test runner output. |
 | `BASH_FILTER_GIT_MAX_COMMITS` | `20` | Maximum commits to retain from `git log` output. |
 | `FILE_READ_CACHE_ENABLED` | `true` | Block redundant re-reads of unmodified files within a session. Files modified since last read are always allowed through (mtime guard). |

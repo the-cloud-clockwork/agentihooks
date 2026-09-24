@@ -60,16 +60,22 @@ class TestBashOutputFilter:
         assert result is not None
         assert "truncated" in result
 
-    def test_hard_char_cap(self):
-        """10,000 char output → ≤5000 chars + truncation notice."""
+    def test_build_output_char_cap(self):
+        """10,000 char install output → ≤5000 chars + truncation notice."""
         from hooks.context.bash_output_filter import filter_bash_output
 
         output = "x" * 10_000
-        result = filter_bash_output("Bash", {"command": "some_verbose_command"}, output)
+        result = filter_bash_output("Bash", {"command": "npm install"}, output)
         assert result is not None
-        # The result should contain truncation notice and be shorter than original
         assert "truncated" in result
         assert len(result) < len(output)
+
+    @pytest.mark.parametrize("command", ["cat big.log", "git diff", "grep -rn ERROR .", "sed -n 1,400p f.py"])
+    def test_generic_output_is_untouched(self, command):
+        from hooks.context.bash_output_filter import filter_bash_output
+
+        output = "ERROR FAILED PASSED pytest\n" * 2000
+        assert filter_bash_output("Bash", {"command": command}, output) is None
 
     def test_passthrough_short_output(self):
         """20-line output → returns None (no modification)."""

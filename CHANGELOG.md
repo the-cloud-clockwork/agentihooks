@@ -26,6 +26,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (the retry-breaker banner, the subagent effort note) reaches the model instead of
   the debug log.
 
+### Fixed
+
+- The Bash output filter works on Claude Code: it reads `tool_response.stdout` and
+  replaces the output the agent reads (`updatedToolOutput`) instead of adding a
+  second copy. It trims only verbose kinds (docker/compose logs, kubectl, git log,
+  test runs detected by command, install/build output); other output is untouched.
+- The per-session tool-call counter is incremented under a file lock, reset at
+  SessionEnd, and every session-keyed enforcement file keeps only its 500 most
+  recent sessions. Tests no longer write the real `~/.agentihooks` enforcement files.
+- Copilot PreToolUse context leaves the hook as one top-level JSON object instead
+  of a nested object followed by a second one.
+- The MCP tools `enforcement_set`, `enforcement_list` and `enforcement_clear` take
+  `local=true` (and an optional `cwd`), so a repository's rule stays in that
+  repository instead of reaching every session on the machine.
+- `copilot_smoke.sh` reads the whole reply when checking that exit 2 on
+  `userPromptSubmitted` is advisory; Copilot 1.0.85 prints the reply on line 3.
+
 ## [2.13.5] - 2026-09-23
 
 ### Added

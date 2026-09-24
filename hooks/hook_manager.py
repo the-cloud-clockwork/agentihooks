@@ -571,9 +571,10 @@ def on_session_end(payload: dict) -> None:
         pass
 
     try:
-        from hooks.context.enforcement import reset_session_delivery
+        from hooks.context.enforcement import reset_session_counter, reset_session_delivery
 
         reset_session_delivery(session_id)
+        reset_session_counter(session_id)
     except Exception:
         pass
 
@@ -1348,7 +1349,10 @@ def on_pre_tool_use(payload: dict) -> None:
             additional_context="\n\n".join(_pretool_blocks) or None,
         )
     elif _pretool_blocks:
-        if _can_inject_pretool:
+        if _can_inject_pretool and not _emitter.forced():
+            # Copilot parses one JSON object: the blocks join the end-of-process flush.
+            _emitter.buffer_context("\n\n".join(_pretool_blocks))
+        elif _can_inject_pretool:
             import json as _json
 
             print(
@@ -1444,6 +1448,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
 
+    _conditions = None
     try:
         from hooks.context.conditions import post_effect
 
@@ -1596,10 +1601,12 @@ def on_post_tool_use(payload: dict) -> None:
             if BASH_FILTER_ENABLED:
                 from hooks.context.bash_output_filter import filter_bash_output
 
+                _response = payload.get("tool_response")
                 filtered = filter_bash_output(
                     tool_name,
                     payload.get("tool_input", {}),
-                    payload.get("tool_output", ""),
+                    payload.get("tool_output")
+                    or (str(_response.get("stdout") or "") if isinstance(_response, dict) else ""),
                 )
                 if filtered is not None:
                     import json as _json
@@ -1627,8 +1634,13 @@ def on_post_tool_use(payload: dict) -> None:
                     except Exception:
                         pass
                     from hooks.targets import buffers_single_envelope, emitter
+                    from hooks.targets.capabilities import supports_output_rewrite
 
-                    if buffers_single_envelope() or emitter.forced():
+                    if supports_output_rewrite() and isinstance(_response, dict):
+                        # Replace what the agent reads; a condition's own replacement wins.
+                        if _conditions is None or "updatedToolOutput" not in _conditions.hook_fields:
+                            emitter.set_fields({"updatedToolOutput": {**_response, "stdout": filtered}})
+                    elif buffers_single_envelope() or emitter.forced():
                         # One-JSON-object rule: joins the single end-of-process
                         # flush instead of printing its own object.
                         emitter.buffer_context(filtered)

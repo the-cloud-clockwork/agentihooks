@@ -39,6 +39,7 @@ for compliance.
 | Brain source content changed and must publish now | `brain_refresh` |
 | Before adding or clearing doctrine | `enforcement_list` |
 | A rule must survive context drift | `enforcement_set` with a tool-call cadence; `matcher` (e.g. `bash.kubectl`) limits it to matching tool calls |
+| The rule belongs to one repository | `enforcement_set(local=true)` — global entries reach every repo on the machine |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 
 Use channels for live coordination. Put durable knowledge in brain markers or

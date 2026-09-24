@@ -91,8 +91,8 @@ def _load_counters() -> dict:
 def _save_counters(state: dict) -> None:
     p = _counter_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(state))
+    tmp = p.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(_recent(state)))
     os.replace(str(tmp), str(p))
 
 
@@ -111,20 +111,35 @@ def _save_delivery_state(state: dict[str, list[str]]) -> None:
     path = _delivery_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(json.dumps(state))
+    tmp.write_text(json.dumps(_recent(state)))
     os.replace(str(tmp), str(path))
 
 
+# Session-keyed files drop their oldest sessions past this many, so sessions
+# that never reached SessionEnd (crash, kill) cannot grow them forever.
+_SESSION_KEEP = 500
+
+
+def _recent(state: dict) -> dict:
+    if len(state) <= _SESSION_KEEP:
+        return state
+    return dict(list(state.items())[-_SESSION_KEEP:])
+
+
 @contextmanager
-def _delivery_lock():
-    path = _delivery_path().with_suffix(".lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+") as lock_file:
+def _file_lock(path: Path):
+    lock = path.with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _delivery_lock():
+    return _file_lock(_delivery_path())
 
 
 def _now_iso() -> str:
@@ -298,11 +313,12 @@ def clear_enforcement(
 
 def increment_and_get_count(session_id: str) -> int:
     """Increment the per-session tool-call counter and return the new value."""
-    state = _load_counters()
-    cur = int(state.get(session_id, 0)) + 1
-    state[session_id] = cur
-    _save_counters(state)
-    return cur
+    with _file_lock(_counter_path()):
+        state = _load_counters()
+        cur = int(state.pop(session_id, 0)) + 1
+        state[session_id] = cur
+        _save_counters(state)
+        return cur
 
 
 def get_due_enforcements(tool_call_count: int, cwd: str | Path | None = None) -> list[dict]:
@@ -375,7 +391,7 @@ def _save_match_counters(state: dict) -> None:
     path = _match_counter_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(json.dumps(state))
+    tmp.write_text(json.dumps(_recent(state)))
     os.replace(str(tmp), str(path))
 
 
@@ -396,6 +412,7 @@ def _matched_due(session_id: str, entries: list[dict], *, increment: bool) -> li
             if n == 1 or (n > 1 and n % cadence == 0):
                 due.append(entry)
         if increment:
+            state.pop(session_id, None)
             state[session_id] = counts
             _save_match_counters(state)
         return due
@@ -529,10 +546,11 @@ def get_posttool_enforcements(
 
 
 def reset_session_counter(session_id: str) -> None:
-    state = _load_counters()
-    if session_id in state:
-        del state[session_id]
-        _save_counters(state)
+    with _file_lock(_counter_path()):
+        state = _load_counters()
+        if session_id in state:
+            del state[session_id]
+            _save_counters(state)
 
 
 def reset_session_delivery(session_id: str) -> None:

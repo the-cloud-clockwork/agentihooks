@@ -256,7 +256,7 @@ agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 
 `--local` requires a Git project. Local files use the same JSON schema and cadence behavior as the global store. AgentiHooks creates the resource directory on the first local `set`, never edits Git ignore configuration, and leaves the directory in place after `clear`.
 
-During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. MCP enforcement tools remain global.
+During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. The MCP tools take the same scope as `local=true`, resolved from the session's project directory (or an explicit `cwd`).
 
 `--matcher` limits an entry to matching tool calls (`bash`, `bash.git`, `edit+write`, `mcp`, `mcp__<server>`); its cadence then counts matching calls only. Grammar: [Conditions](../hooks/conditions.md#matcher-grammar).
 

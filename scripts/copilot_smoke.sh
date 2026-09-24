@@ -242,7 +242,7 @@ else
     # userPromptSubmitted must NOT block; the {"decision":"block"} envelope must.
     printf '#!/bin/sh\necho PROBE >&2\nexit 2\n' > "$COPILOT_HOME/x2.sh" && chmod +x "$COPILOT_HOME/x2.sh"
     printf '{"version":1,"hooks":{"userPromptSubmitted":[{"type":"command","command":"%s","timeoutSeconds":10}]}}' "$COPILOT_HOME/x2.sh" > "$COPILOT_HOME/hooks/zz-probe.json"
-    L1="$(cd "$WORK/repo" && timeout 120 copilot -p "reply with exactly: NOT_BLOCKED" --no-color 2>&1 | head -2)"
+    L1="$(cd "$WORK/repo" && timeout 120 copilot -p "reply with exactly: NOT_BLOCKED" --no-color 2>&1)"
     printf '%s' "$L1" | grep -q "NOT_BLOCKED" && ok "exit 2 on userPromptSubmitted is advisory (turn ran)" \
       || no "exit 2 unexpectedly blocked userPromptSubmitted"
     printf '#!/bin/sh\nprintf %s\n' "'{\"decision\":\"block\",\"reason\":\"SMOKE-ENV-BLOCK\"}'" > "$COPILOT_HOME/x2.sh"
