@@ -79,7 +79,7 @@ Per-target reference: `docs/reference/CODEX-COMPAT.md`,
 - **`agentihooks` CLI** → `scripts/install.py:main()` — installs hooks/settings/MCPs, manages profiles/bundles, broadcast CLI
 - **Lifecycle hooks** → all 10 hook events point to `python -m hooks` → `hooks/hook_manager.py:main()` (codex wires 10, copilot 12 — the extras fold onto the same handlers)
 - **StatusLine** → `hooks/statusline.py` — 2-3 line status bar (not a hook event)
-- **MCP tools** → `hooks/mcp/` — separate process registered as `hooks-utils`
+- **MCP tools** → `hooks/mcp/` — separate process registered as `agentihooks`
 
 ### Hook dispatch
 

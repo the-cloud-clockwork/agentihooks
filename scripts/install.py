@@ -83,6 +83,7 @@ from pathlib import Path
 import yaml
 
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
+from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
 
 def _get_version() -> str:
@@ -1922,9 +1923,9 @@ def _clean_state_dir() -> None:
     # a network-mode install restarts it at step 6.
     try:
         if _mcp_daemon_module().stop():
-            _cprint("  [OK] Stopped the hooks-utils daemon before clearing state")
+            _cprint("  [OK] Stopped the agentihooks MCP daemon before clearing state")
     except Exception as e:  # never let cleanup fail a --force install
-        _cprint(f"  {_YELLOW}[WARN] Could not stop the hooks-utils daemon: {e}{_RESET}")
+        _cprint(f"  {_YELLOW}[WARN] Could not stop the agentihooks MCP daemon: {e}{_RESET}")
 
     # Whitelist: only these are deleted. Everything else survives.
     _DELETE_FILES = {
@@ -3013,7 +3014,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     adapter.install_persona(profile_dirs, profile_chain, bundle_dir)
 
     # --- 6. Install MCP servers (target-specific registration) ---
-    # Layer 1: hooks-utils from agentihooks
+    # Layer 1: the agentihooks MCP server
     adapter.register_hooks_utils(last_profile)
 
     # Network transport needs a persistent server; stdio does not. Only in
@@ -3028,7 +3029,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         # port nothing points at once the client entry reverts to stdio. Removing
         # the unit does not touch a process started outside systemd.
         if _mcp_daemon_module().stop():
-            _cprint("  [OK] Stopped the hooks-utils daemon (transport reverted to stdio)")
+            _cprint("  [OK] Stopped the agentihooks MCP daemon (transport reverted to stdio)")
         _remove_systemd_user_unit()
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
@@ -3417,7 +3418,7 @@ VALID_MCP_TRANSPORTS = ("stdio", "sse", "streamable-http")
 
 
 def _resolve_installer_mcp_transport() -> str:
-    """Transport for the ~/.claude.json hooks-utils entry. ``stdio`` by default.
+    """Transport for the ~/.claude.json agentihooks MCP entry. ``stdio`` by default.
 
     Resolved from ``AGENTIHOOKS_MCP_TRANSPORT`` in the installer's environment,
     then from ``~/.agentihooks/.env`` — the same file the daemon reads at
@@ -3487,7 +3488,7 @@ def _resolve_hooks_python() -> Path:
     if chosen is None:
         msg_parts = [
             "ERROR: no python found that can `import hooks` from a neutral cwd.",
-            "Refusing to write a broken hooks-utils MCP command into ~/.claude.json.",
+            "Refusing to write a broken agentihooks MCP command into ~/.claude.json.",
             "Tried:",
         ]
         for p in failed:
@@ -3503,7 +3504,7 @@ def _resolve_hooks_python() -> Path:
 
 
 def _build_mcp_config(mcp_categories: str) -> dict:
-    """Build the ~/.claude.json entry for the hooks-utils MCP server.
+    """Build the ~/.claude.json entry for the agentihooks MCP server.
 
     Two shapes, selected by ``_resolve_installer_mcp_transport()``:
 
@@ -3521,7 +3522,7 @@ def _build_mcp_config(mcp_categories: str) -> dict:
     if transport == "stdio":
         return {
             "mcpServers": {
-                "hooks-utils": {
+                MCP_SERVER_NAME: {
                     "command": str(_resolve_hooks_python()),
                     "args": ["-m", "hooks.mcp"],
                     "cwd": str(AGENTIHOOKS_ROOT),
@@ -3578,7 +3579,7 @@ def _build_mcp_config(mcp_categories: str) -> dict:
     # message fired on every healthy network-mode install — and it named a
     # systemctl command that cannot work under the pidfile backend. Whether the
     # daemon came up is reported by _ensure_mcp_daemon, which actually knows.
-    return {"mcpServers": {"hooks-utils": {"type": client_type, "url": f"{scheme}://{host}:{port}{path}"}}}
+    return {"mcpServers": {MCP_SERVER_NAME: {"type": client_type, "url": f"{scheme}://{host}:{port}{path}"}}}
 
 
 _SYSTEMD_UNIT_NAME = "agentihooks-mcp.service"
@@ -3620,7 +3621,7 @@ def _systemd_user_unit_path() -> Path:
 
 
 def _install_systemd_user_unit(transport: str) -> None:
-    """Write the hooks-utils daemon unit into the user systemd directory.
+    """Write the agentihooks MCP daemon unit into the user systemd directory.
 
     Only called when the MCP transport is network-mode, so stdio machines get no
     systemd artifact at all. Rendering and starting stay separate: this puts the
@@ -3688,10 +3689,41 @@ def _remove_systemd_user_unit() -> None:
 def _install_user_mcp(profile_name: str) -> None:
     """Generate and merge MCP server config into ~/.claude.json.
 
-    Builds the hooks-utils MCP server config with all categories enabled.
+    Builds the agentihooks MCP server config with all categories enabled.
     """
     mcp_config = _build_mcp_config("all")
+    _migrate_legacy_claude_mcp(mcp_config["mcpServers"][MCP_SERVER_NAME].get("url"))
     _merge_mcp_to_user_scope(mcp_config["mcpServers"])
+
+
+def _migrate_legacy_claude_mcp(own_url: str | None) -> None:
+    """Drop a legacy-named agentihooks entry from ~/.claude.json, carrying per-project disables over."""
+    from scripts.targets._common import is_own_mcp_entry
+
+    if not _CLAUDE_JSON.exists():
+        return
+    data = load_json(_CLAUDE_JSON)
+    servers = data.get("mcpServers") or {}
+    legacy = [n for n in LEGACY_MCP_SERVER_NAMES if n in servers and is_own_mcp_entry(servers[n], own_url)]
+    for name in LEGACY_MCP_SERVER_NAMES:
+        if name in servers and name not in legacy:
+            _cprint(f"  [!!] '{name}' in {_CLAUDE_JSON} does not run agentihooks — left in place; review it.")
+    if not legacy:
+        return
+    for name in legacy:
+        servers.pop(name)
+    for project in (data.get("projects") or {}).values():
+        disabled = project.get("disabledMcpServers") if isinstance(project, dict) else None
+        if isinstance(disabled, list) and set(legacy) & set(disabled):
+            project["disabledMcpServers"] = sorted({MCP_SERVER_NAME if n in legacy else n for n in disabled})
+    data["mcpServers"] = servers
+    save_json(_CLAUDE_JSON, data)
+    state = _load_state()
+    for key in ("managed_mcp_servers", "foreign_mcp_servers"):
+        if key in state:
+            state[key] = sorted(set(state.get(key) or []) - set(legacy))
+    _save_state(state)
+    _cprint(f"  [OK] Renamed MCP server {', '.join(legacy)} -> {MCP_SERVER_NAME} in {_CLAUDE_JSON}")
 
 
 def manage_user_mcp(mcp_path: Path, *, uninstall: bool = False) -> None:
@@ -3731,7 +3763,7 @@ def _reseed_managed_mcp_sources() -> None:
     """Re-merge bundle + active-profile .mcp.json into ~/.claude.json mcpServers.
 
     Idempotent. Used by `init` so the source-of-truth files (bundle
-    .claude/.mcp.json, profile .claude/.mcp.json, and the hooks-utils
+    .claude/.mcp.json, profile .claude/.mcp.json, and the agentihooks
     server) are always present in user scope.
     """
     state = _load_state()
@@ -3741,12 +3773,12 @@ def _reseed_managed_mcp_sources() -> None:
     # state into claude's file.
     profile_name = _global_record(state).get("profile")
 
-    # Layer 1: hooks-utils (driven by profile mcp_categories)
+    # Layer 1: agentihooks MCP server (driven by profile mcp_categories)
     if profile_name:
         try:
             _install_user_mcp(profile_name)
         except Exception as exc:
-            _cprint(f"  [WARN] Could not reseed hooks-utils MCP: {exc}")
+            _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
     # Layer 2: bundle .mcp.json
     bundle_dir = _get_bundle_path()
@@ -3792,7 +3824,7 @@ def sync_user_mcp() -> None:
     """Re-apply MCP source-of-truth files into ~/.claude.json mcpServers.
 
     Order:
-    1. Reseed bundle + active-profile .mcp.json + hooks-utils (managed sources)
+    1. Reseed bundle + active-profile .mcp.json + agentihooks MCP (managed sources)
     2. Re-merge user-tracked .mcp.json files from ~/.agentihooks/state.json mcpFiles
 
     Skips paths that no longer exist (with a warning) so a missing
@@ -4613,7 +4645,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     """Return the union of all MCP servers managed by agentihooks.
 
     Collects servers from:
-    1. The hooks-utils server (generated from profile mcp_categories)
+    1. The agentihooks MCP server (generated from profile mcp_categories)
     2. Bundle .claude/.mcp.json (or root .mcp.json)
     3. Profile .claude/.mcp.json
     4. All files tracked in ~/.agentihooks/state.json mcpFiles
@@ -4622,7 +4654,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     """
     merged: dict = {}
 
-    # --- 1. hooks-utils server ---
+    # --- 1. agentihooks MCP server ---
     mcp_config = _build_mcp_config("all")
     merged.update(mcp_config["mcpServers"])
 
@@ -4641,7 +4673,7 @@ def _collect_all_managed_mcp_servers() -> dict:
     # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").
     # Resolve every hop via _resolve_profile_chain — passing the joined string
     # straight to _resolve_profile_dir returns None and silently drops every
-    # profile's MCP servers, collapsing the managed set to just hooks-utils.
+    # profile's MCP servers, collapsing the managed set to just agentihooks.
     state = _load_state()
     # Claude-scoped on purpose: this assembles ~/.claude's mcpServers, not codex's.
     global_target = _global_record(state)
@@ -4822,20 +4854,20 @@ def uninstall_global(args: argparse.Namespace) -> None:
     else:
         print(f"[--] Skipped {settings_path} (not managed)")
 
-    # --- 3b. Stop and remove the hooks-utils daemon (network-transport installs) ---
+    # --- 3b. Stop and remove the agentihooks MCP daemon (network-transport installs) ---
     # Stop before removing the unit: disabling a unit does not reach a process
     # started under the pidfile backend, and once the unit is gone there is
     # nothing left to stop it with.
     _mcp_daemon = _mcp_daemon_module()
     if _mcp_daemon.stop():
-        _cprint("[OK] Stopped the hooks-utils daemon")
+        _cprint("[OK] Stopped the agentihooks MCP daemon")
     # Verify rather than assume. `stop()` is best-effort on both backends — a
     # systemctl stop fails silently if the user bus went away — and an uninstall
     # that reports success while a daemon keeps serving the port is the worst
     # outcome here, because nothing is left to manage it with.
     if _mcp_daemon.pid_alive(_mcp_daemon.read_pidfile().get("pid")):
         _cprint(
-            f"  {_YELLOW}[WARN] A hooks-utils daemon is still running. Stop it by hand before removing the CLI.{_RESET}"
+            f"  {_YELLOW}[WARN] An agentihooks MCP daemon is still running. Stop it by hand before removing the CLI.{_RESET}"
         )
     _remove_systemd_user_unit()
 
@@ -6251,11 +6283,11 @@ def main() -> None:
     extract_p.add_argument("--source", default=None, help="Path to CLAUDE.md (default: ~/.claude/CLAUDE.md)")
     extract_p.add_argument("--output-dir", default=None, help="Output directory (default: source's .claude/commands/)")
 
-    mcp_p = sub.add_parser("mcp", help="MCP surface area analysis and hooks-utils daemon lifecycle")
+    mcp_p = sub.add_parser("mcp", help="MCP surface area analysis and agentihooks MCP daemon lifecycle")
     mcp_p.add_argument(
         "mcp_action",
         choices=["report", "start", "stop", "restart", "status"],
-        help="report = surface-area analysis; start/stop/restart/status = hooks-utils daemon",
+        help="report = surface-area analysis; start/stop/restart/status = agentihooks MCP daemon",
     )
     mcp_p.add_argument("--project", default=None, help="Project path to include (report only, default: CWD)")
 

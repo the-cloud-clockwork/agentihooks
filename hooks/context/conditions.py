@@ -591,7 +591,7 @@ _SIGNAL = re.compile(
     r"\s+(?:up\s+)?(?:(?:a|an|the|this|that|these|those|new|another|one|my)\s+)*conditions?\b",
     re.IGNORECASE,
 )
-_CONDITION_TOOL = re.compile(r"hooks[-_]utils.*condition_(?:set|clear)$", re.IGNORECASE)
+_CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 _NEAR_CONDITIONS = re.compile(
     r"\.(?:claude|agentihooks)(?:/[^\s'\";|&]*)?/conditions\b"

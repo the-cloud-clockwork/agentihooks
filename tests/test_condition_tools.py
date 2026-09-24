@@ -1,5 +1,5 @@
 """Session-created conditions: the operator-prompt gate, the write guard, the
-runtime and directory layers, repo trust, and the hooks-utils condition tools."""
+runtime and directory layers, repo trust, and the agentihooks condition tools."""
 
 import json
 import os
@@ -106,8 +106,8 @@ class TestWriteGuard:
     @pytest.mark.parametrize(
         "tool, tool_input",
         [
-            ("mcp__hooks-utils__condition_set", {"step": "pre"}),
-            ("mcp__hooks-utils__condition_clear", {"file": "x"}),
+            ("mcp__agentihooks__condition_set", {"step": "pre"}),
+            ("mcp__agentihooks__condition_clear", {"file": "x"}),
             ("Write", {"file_path": "/b/.claude/conditions/pre-bash-x.sh", "content": "exit 2"}),
             ("Edit", {"file_path": "/r/.agentihooks/conditions/pre-any-x.py", "old_string": "a", "new_string": "b"}),
             ("Bash", {"command": "cat > ~/.agentihooks/conditions/pre-any-x.sh <<'EOF'\nexit 0\nEOF"}),
@@ -136,7 +136,7 @@ class TestWriteGuard:
                 {"command": 'W="$(readlink -f ~/.claude/skills/wt.sh)"; $W new x && sed -i s/a/b/ hooks/conditions.py'},
             ),
             ("Edit", {"file_path": "/repo/docs/hooks/conditions.md", "old_string": "a", "new_string": "b"}),
-            ("mcp__hooks-utils__condition_list", {}),
+            ("mcp__agentihooks__condition_list", {}),
         ],
     )
     def test_reads_and_unrelated_paths_pass(self, tool, tool_input):
@@ -149,7 +149,7 @@ class TestWriteGuard:
                 {
                     "hook_event_name": "PreToolUse",
                     "session_id": SID,
-                    "tool_name": "mcp__hooks-utils__condition_set",
+                    "tool_name": "mcp__agentihooks__condition_set",
                     "tool_input": {"step": "pre"},
                     "cwd": "/tmp",
                 }

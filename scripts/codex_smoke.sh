@@ -124,8 +124,8 @@ else no "project rule body absent from the rollout (additionalContext spilled or
 grep -q "/.agents/" "$WORK/.git/info/exclude" 2>/dev/null && ok "repo skills root excluded locally" \
   || no "/.agents/ missing from .git/info/exclude"
 
-echo "[fleet] hooks-utils MCP actually returned a result"
-cx "Call the hooks-utils channel_list tool and report the raw result, then stop."
+echo "[fleet] agentihooks MCP actually returned a result"
+cx "Call the agentihooks channel_list tool and report the raw result, then stop."
 # The tool call itself is the evidence — a refusal mentioning the name is not.
 grep -q '"type":"item.completed"' "$WORK/out.jsonl" && grep -qi "channel" "$WORK/out.jsonl" \
   && ok "MCP tool produced a result" || nb "no MCP result observed this turn (model-dependent)"

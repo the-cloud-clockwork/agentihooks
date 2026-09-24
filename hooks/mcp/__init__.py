@@ -46,7 +46,7 @@ def _env_int(key: str, default: int) -> int:
         return int(raw)
     except ValueError:
         print(
-            f"[hooks-utils] WARNING: {key}={raw!r} is not an integer; using {default}.",
+            f"[agentihooks] WARNING: {key}={raw!r} is not an integer; using {default}.",
             file=sys.stderr,
         )
         return default
@@ -61,7 +61,7 @@ def resolve_transport() -> str:
     raw = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
     if raw not in VALID_TRANSPORTS:
         print(
-            f"[hooks-utils] WARNING: unknown MCP_TRANSPORT={raw!r}; falling back to stdio. "
+            f"[agentihooks] WARNING: unknown MCP_TRANSPORT={raw!r}; falling back to stdio. "
             f"Valid values: {', '.join(VALID_TRANSPORTS)}",
             file=sys.stderr,
         )
@@ -69,7 +69,7 @@ def resolve_transport() -> str:
     return raw
 
 
-def build_server(categories=None, name="hooks-utils"):
+def build_server(categories=None, name="agentihooks"):
     """Build an MCP server with the requested tool categories.
 
     Args:
@@ -117,13 +117,13 @@ def build_server(categories=None, name="hooks-utils"):
     # Claude Code captures for the MCP process.
     if unknown:
         print(
-            f"[hooks-utils] WARNING: ignoring unknown MCP categories {unknown}; "
+            f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; "
             f"valid categories: {sorted(CATEGORY_MODULES)}",
             file=sys.stderr,
         )
     if not mcp._tool_manager._tools:
         print(
-            "[hooks-utils] WARNING: MCP server started with ZERO tools "
+            "[agentihooks] WARNING: MCP server started with ZERO tools "
             f"(requested categories: {list(categories)}). Check MCP_CATEGORIES.",
             file=sys.stderr,
         )

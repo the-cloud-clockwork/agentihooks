@@ -1,4 +1,4 @@
-"""Tests for caller-session resolution in the hooks-utils MCP tools.
+"""Tests for caller-session resolution in the agentihooks MCP tools.
 
 The precedence here is what makes the tools correct under a shared network
 server: an explicit argument is the only identity a daemon serving many

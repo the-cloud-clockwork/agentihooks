@@ -342,7 +342,7 @@ def on_session_start(payload: dict) -> None:
         _host = {"codex": "Codex", "copilot": "Copilot CLI"}.get(_sid_target(), "Claude Code")
         _inject_sid(
             f"Your {_host} session_id is `{session_id}`. Pass it as the "
-            "`session_id` argument to the hooks-utils tools that need caller "
+            "`session_id` argument to the agentihooks MCP tools that need caller "
             "identity — channel_acknowledge."
         )
 

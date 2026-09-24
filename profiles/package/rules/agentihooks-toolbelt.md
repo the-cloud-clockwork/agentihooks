@@ -1,7 +1,7 @@
 # AgentiHooks — Mandatory Runtime Actions (HARD RULE)
 
 AgentiHooks guards and coordinates Claude Code, Codex, and Copilot CLI sessions.
-Use the `hooks-utils` tools below when their trigger fires. Missing tools or hook
+Use the `agentihooks` tools below when their trigger fires. Missing tools or hook
 paths are unavailable on the current host.
 
 ## Respect injected context (CRITICAL)
@@ -27,7 +27,7 @@ Before the next action:
 Action is the acknowledgment. Quoting or summarizing a block is never a substitute
 for compliance.
 
-## Use `hooks-utils`
+## Use `agentihooks`
 
 | Trigger | Action |
 |---|---|

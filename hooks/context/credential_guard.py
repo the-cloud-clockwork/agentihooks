@@ -232,6 +232,21 @@ def strip_heredocs(cmd):
     return HEREDOC.sub("<<HEREDOC", cmd)
 
 
+def mask_heredocs(cmd):
+    """``strip_heredocs`` that can be undone: (masked command, original heredocs)."""
+    kept = []
+
+    def _keep(match):
+        kept.append(match.group(0))
+        return f"<<AHHEREDOC{len(kept) - 1}"
+
+    return HEREDOC.sub(_keep, cmd), kept
+
+
+def unmask_heredocs(cmd, kept):
+    return re.sub(r"<<AHHEREDOC(\d+)", lambda m: kept[int(m.group(1))], cmd)
+
+
 def split_commands(cmd):
     return [c for c in re.split(r"&&|\|\||;|\n", cmd) if c.strip()]
 
@@ -763,7 +778,7 @@ def decide_bash(tool_input, ctx=None):
     if not command:
         return ALLOW
     ctx = ctx or Context()
-    command = strip_heredocs(command)
+    command, heredocs = mask_heredocs(command)
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False
     for i in range(0, len(parts), 2):
@@ -782,7 +797,10 @@ def decide_bash(tool_input, ctx=None):
             changed = True
         ctx.track_cd(seg)
     if changed:
-        return Verdict(rewrite={"command": "".join(parts)}, note="credential files excluded from recursive search")
+        return Verdict(
+            rewrite={"command": unmask_heredocs("".join(parts), heredocs)},
+            note="credential files excluded from recursive search",
+        )
     return ALLOW
 
 
