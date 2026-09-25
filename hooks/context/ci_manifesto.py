@@ -63,20 +63,6 @@ _DEFAULT_BRANCH_SIGNALS = [
     "branch it",
     "feature branch",
 ]
-_DEFAULT_PR_SIGNALS = [
-    "open a pr",
-    "open the pr",
-    "create a pr",
-    "create the pr",
-    "make a pr",
-    "make the pr",
-    "pr please",
-    "pr allowed",
-    "open pr",
-    "create pr",
-    "raise a pr",
-    "submit a pr",
-]
 
 
 def _manifesto_path() -> Path:
@@ -97,13 +83,12 @@ def _load() -> dict:
                 "release": _DEFAULT_RELEASE_SIGNALS,
                 "hotfix": _DEFAULT_HOTFIX_SIGNALS,
                 "branch": _DEFAULT_BRANCH_SIGNALS,
-                "pr": _DEFAULT_PR_SIGNALS,
             }
         mtime = path.stat().st_mtime
         if _manifesto_cache["path"] == str(path) and _manifesto_cache["mtime"] == mtime and _manifesto_cache["content"]:
             return _manifesto_cache
         content = path.read_text(encoding="utf-8")
-        release, hotfix, branch, pr = _parse_signals(content)
+        release, hotfix, branch = _parse_signals(content)
         _manifesto_cache.update(
             {
                 "path": str(path),
@@ -112,7 +97,6 @@ def _load() -> dict:
                 "release": release,
                 "hotfix": hotfix,
                 "branch": branch,
-                "pr": pr,
             }
         )
         return _manifesto_cache
@@ -125,7 +109,6 @@ def _load() -> dict:
             "release": _DEFAULT_RELEASE_SIGNALS,
             "hotfix": _DEFAULT_HOTFIX_SIGNALS,
             "branch": _DEFAULT_BRANCH_SIGNALS,
-            "pr": _DEFAULT_PR_SIGNALS,
         }
 
 
@@ -133,25 +116,20 @@ _SECTION_RE = re.compile(
     r"\*\*(Release-gate signals|Hotfix signals)\*\*.*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
-# Branch Discipline and PR Discipline sections — both share the
-# "Unlock (per-turn operator signal)" fenced-block convention. We match
-# by section title (section numbering changes when new sections land).
+# Branch Discipline section — "Unlock (per-turn operator signal)" fenced-block
+# convention. We match by section title (section numbering changes when new
+# sections land).
 _BRANCH_SECTION_RE = re.compile(
     r"##\s*\d+\.\s*Branch\s+Discipline.*?###\s*Unlock\s*\([^)]*operator signal\).*?```(.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
-_PR_SECTION_RE = re.compile(
-    r"##\s*\d+\.\s*PR\s+Discipline.*?###\s*Unlock\s*\([^)]*operator signal\).*?```(.*?)```",
-    re.DOTALL | re.IGNORECASE,
-)
 
 
-def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Extract signal phrases from §9 (release/hotfix), §14 (branch), §15 (PR) of the manifesto."""
+def _parse_signals(content: str) -> tuple[list[str], list[str], list[str]]:
+    """Extract signal phrases from §9 (release/hotfix) and §14 (branch) of the manifesto."""
     release: list[str] = []
     hotfix: list[str] = []
     branch: list[str] = []
-    pr: list[str] = []
     for m in _SECTION_RE.finditer(content):
         header = m.group(1).lower()
         block = m.group(2).strip()
@@ -169,22 +147,13 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
             for line in bm.group(1).strip().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-    pm = _PR_SECTION_RE.search(content)
-    if pm:
-        pr = [
-            line.strip().lower()
-            for line in pm.group(1).strip().splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
     if not release:
         release = _DEFAULT_RELEASE_SIGNALS
     if not hotfix:
         hotfix = _DEFAULT_HOTFIX_SIGNALS
     if not branch:
         branch = _DEFAULT_BRANCH_SIGNALS
-    if not pr:
-        pr = _DEFAULT_PR_SIGNALS
-    return release, hotfix, branch, pr
+    return release, hotfix, branch
 
 
 def get_release_signals() -> list[str]:
@@ -197,10 +166,6 @@ def get_hotfix_signals() -> list[str]:
 
 def get_branch_signals() -> list[str]:
     return _load().get("branch", _DEFAULT_BRANCH_SIGNALS)
-
-
-def get_pr_signals() -> list[str]:
-    return _load().get("pr", _DEFAULT_PR_SIGNALS)
 
 
 _NEGATION_PREFIXES = (
@@ -247,10 +212,6 @@ def contains_hotfix_signal(text: str) -> bool:
 
 def contains_branch_signal(text: str) -> bool:
     return _signal_match(text, get_branch_signals())
-
-
-def contains_pr_signal(text: str) -> bool:
-    return _signal_match(text, get_pr_signals())
 
 
 # Claude Code injects hook stdout and additionalContext into the model's

@@ -6,7 +6,6 @@ message contains a release-gate or hotfix signal (CI Manifesto §9).
 Blocked by default:
   - Docker/image operations with :latest/:prod/:stable tags  (hotfix bypass only)
   - gh workflow run release.yml                              (release-gate OR hotfix)
-  - gh pr merge targeting main/master                        (release-gate OR hotfix)
 
 Signal vocabulary is parsed from the CI Manifesto (source of truth).
 Fallback vocabulary in ci_manifesto.py mirrors manifesto §9.
@@ -48,15 +47,6 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+release\.yml\b", re.I),
         "release.yml workflow trigger",
-        "release-gate signal required — see CI Manifesto §4",
-        "release",
-    ),
-    (
-        re.compile(
-            r"\bgh\b[^|&;\n]*\bpr\s+merge\b[^|&;\n]*(--base\s+(main|master)\b|\b(main|master)\b(?!\s*\.))",
-            re.I,
-        ),
-        "gh pr merge to main/master",
         "release-gate signal required — see CI Manifesto §4",
         "release",
     ),

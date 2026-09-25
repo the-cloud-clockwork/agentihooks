@@ -598,7 +598,7 @@ def on_session_end(payload: dict) -> None:
 
     # Clear all signals at session end (per-turn + session-scoped)
     try:
-        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
+        from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.prod_lockdown import (
             clear_bypass,
             clear_hotfix_signal,
@@ -609,7 +609,6 @@ def on_session_end(payload: dict) -> None:
         clear_release_signal(session_id)
         clear_hotfix_signal(session_id)
         clear_branch_signal(session_id)
-        clear_pr_signal(session_id)
     except Exception:
         pass
     try:
@@ -759,13 +758,12 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("prod_lockdown bypass detection failed", {"error": str(e)})
 
-    # --- Release-gate / hotfix / branch / PR signals (CI Manifesto §9, §14, §15) ---
+    # --- Release-gate / hotfix / branch signals (CI Manifesto §9, §14) ---
     try:
-        from hooks.context.branch_guard import set_branch_signal, set_pr_signal
+        from hooks.context.branch_guard import set_branch_signal
         from hooks.context.ci_manifesto import (
             contains_branch_signal,
             contains_hotfix_signal,
-            contains_pr_signal,
             contains_release_signal,
         )
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
@@ -793,12 +791,6 @@ def on_user_prompt_submit(payload: dict) -> None:
                 set_branch_signal(session_id)
                 log(
                     "ci_manifesto: branch-creation signal active this turn",
-                    {"session_id": session_id},
-                )
-            if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
-                set_pr_signal(session_id)
-                log(
-                    "ci_manifesto: PR-creation signal active this turn",
                     {"session_id": session_id},
                 )
     except Exception as e:
@@ -1106,6 +1098,17 @@ def on_pre_tool_use(payload: dict) -> None:
                 file=sys.stderr,
                 flush=True,
             )
+
+    # --- Venv guard: block `uv --active` syncing a shared venv to one project's lock ---
+    if tool_name == "Bash":
+        try:
+            from hooks.context.venv_guard import check_venv_guard
+
+            check_venv_guard(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("venv_guard check failed", {"error": str(e)})
 
     # --- kubectl mutation guard: HARD FLOOR — block live-system state mutation ---
     if tool_name == "Bash":
@@ -1512,15 +1515,14 @@ def on_post_tool_use(payload: dict) -> None:
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 
-    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
+    # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14) ---
     if tool_name == "AskUserQuestion":
         _trace_mark("ask_user_question_signals", tool_name, _trace_session_id)
         try:
-            from hooks.context.branch_guard import set_branch_signal, set_pr_signal
+            from hooks.context.branch_guard import set_branch_signal
             from hooks.context.ci_manifesto import (
                 contains_branch_signal,
                 contains_hotfix_signal,
-                contains_pr_signal,
                 contains_release_signal,
             )
             from hooks.context.prod_lockdown import (
@@ -1561,12 +1563,6 @@ def on_post_tool_use(payload: dict) -> None:
                     set_branch_signal(session_id)
                     log(
                         "ci_manifesto: branch signal via AskUserQuestion answer",
-                        {"session_id": session_id},
-                    )
-                if contains_pr_signal(combined):
-                    set_pr_signal(session_id)
-                    log(
-                        "ci_manifesto: PR signal via AskUserQuestion answer",
                         {"session_id": session_id},
                     )
                 try:
@@ -2009,13 +2005,12 @@ def on_subagent_stop(payload: dict) -> None:
 
     # Clear any signals set during the subagent's lifetime
     try:
-        from hooks.context.branch_guard import clear_branch_signal, clear_pr_signal
+        from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.prod_lockdown import clear_bypass, clear_release_signal
 
         clear_bypass(agent_id)
         clear_release_signal(agent_id)
         clear_branch_signal(agent_id)
-        clear_pr_signal(agent_id)
     except Exception:
         pass
 
