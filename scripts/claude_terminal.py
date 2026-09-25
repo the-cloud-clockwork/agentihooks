@@ -50,12 +50,27 @@ def _started_marker(launcher: Path) -> Path:
     return launcher.with_suffix(".started")
 
 
+def _route_report(launcher: Path) -> Path:
+    return launcher.with_suffix(".route")
+
+
+def _read_route_report(path: Path) -> dict[str, str]:
+    fields = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition("=")
+        if key:
+            fields[key] = value
+    return fields
+
+
 def _write_launcher(
     directory: Path,
     name: str,
     prompt: str,
     claude_args: list[str],
     environ: dict[str, str],
+    exclude: str = "",
+    fallback_bare: bool = True,
 ) -> tuple[Path, Path | None]:
     root = _runtime_dir(environ)
     safe_name = "".join(character if character.isalnum() or character in "._-" else "_" for character in name)
@@ -70,7 +85,10 @@ def _write_launcher(
     command = [
         agentihooks_bin,
         "claude",
-        "--agentihooks-fallback-bare",
+        *(["--agentihooks-exclude", exclude] if exclude else []),
+        *(["--agentihooks-fallback-bare"] if fallback_bare else []),
+        "--agentihooks-report",
+        str(_route_report(launcher)),
         "--name",
         name,
         *claude_args,
@@ -79,7 +97,11 @@ def _write_launcher(
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
     else:
         command_text = shlex.join(command)
-    cleanup = [str(launcher), *([str(prompt_file)] if prompt_file is not None else [])]
+    cleanup = [
+        str(launcher),
+        str(_route_report(launcher)),
+        *([str(prompt_file)] if prompt_file is not None else []),
+    ]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
@@ -175,6 +197,18 @@ def _parser() -> argparse.ArgumentParser:
         default=30.0,
         help="Seconds to wait for the new terminal to start the launcher before failing",
     )
+    parser.add_argument(
+        "--route-timeout",
+        type=float,
+        default=150.0,
+        help="Seconds to wait for the new session to report which account it was routed to",
+    )
+    parser.add_argument(
+        "--handoff",
+        action="store_true",
+        help="Quota handoff: route to an account other than this session's, never fall back to bare "
+        "Claude, and mark this session handed off once the new one is routed",
+    )
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
 
@@ -187,7 +221,18 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
-        launcher, prompt_file = _write_launcher(directory, name, prompt, claude_args, active_env)
+        exclude = ""
+        if args.handoff:
+            from hooks.context.account_sessions import UNROUTED, environment_account
+
+            current = environment_account(active_env)
+            exclude = "" if current == UNROUTED else current
+            if not prompt:
+                raise ValueError("--handoff needs the handoff document as --prompt-file")
+        # A handoff must land on another account, so it never falls back to bare Claude.
+        launcher, prompt_file = _write_launcher(
+            directory, name, prompt, claude_args, active_env, exclude=exclude, fallback_bare=not args.handoff
+        )
         host, command = _launch_command(launcher, directory, name, active_env)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"agentihooks claude-terminal: {exc}", file=sys.stderr)
@@ -230,7 +275,37 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             return 2
         time.sleep(0.25)
     marker.unlink(missing_ok=True)
-    print("\n".join([*report, "status=started"]))
+    report.append("status=started")
+
+    route_path = _route_report(launcher)
+    deadline = time.monotonic() + args.route_timeout
+    while not route_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.25)
+    route = _read_route_report(route_path) if route_path.exists() else {}
+    route_path.unlink(missing_ok=True)
+    report.append(f"route_status={route.get('status', 'pending')}")
+    if route.get("account"):
+        report.append(f"account={route['account']}")
+    if route.get("placement"):
+        report.append(f"placement={route['placement']}")
+    if route.get("error"):
+        report.append(f"route_error={route['error']}")
+    if not args.handoff:
+        print("\n".join(report))
+        return 0
+
+    if route.get("status") != "routed":
+        print("\n".join([*report, "handoff=failed"]))
+        print(
+            "agentihooks claude-terminal: handoff failed; the new session was not routed to another account",
+            file=sys.stderr,
+        )
+        return 3
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+
+    marked = mark_handed_off(agent_pid(), route["account"])
+    print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 
 

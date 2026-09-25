@@ -467,16 +467,19 @@ def on_session_start(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
+            from hooks.context.account_sessions import agent_pid, session_account
             from hooks.context.broadcast import (
                 check_and_inject_broadcasts,
                 register_session,
             )
 
+            _agent_pid = agent_pid()
             register_session(
                 session_id,
-                pid=os.getppid(),
+                pid=_agent_pid,
                 cwd=payload.get("cwd", ""),
                 model=payload.get("model", ""),
+                account=session_account(_agent_pid),
             )
             check_and_inject_broadcasts(session_id)
         except Exception as e:
@@ -585,6 +588,13 @@ def on_session_end(payload: dict) -> None:
     except Exception:
         pass
 
+    try:
+        from hooks.context.quota_policy import clear_session_state as _clear_quota_policy
+
+        _clear_quota_policy(session_id)
+    except Exception:
+        pass
+
     # Clear context audit state for this session
     from hooks.config import CONTEXT_AUDIT_ENABLED
 
@@ -674,6 +684,21 @@ def on_user_prompt_submit(payload: dict) -> None:
                 _inject_quota_usage(_quota_banner, also_log=False, skip_compression=True)
     except Exception as e:
         log("quota usage user prompt failed", {"error": str(e)})
+
+    try:
+        from hooks.config import QUOTA_POLICY_ENABLED
+
+        if QUOTA_POLICY_ENABLED:
+            from hooks.common import inject_context as _inject_quota_policy
+            from hooks.context.quota_policy import prompt_context, record_push_signal
+
+            if session_id not in _KNOWN_SUBAGENT_IDS and record_push_signal(session_id, payload.get("prompt", "")):
+                log("quota policy: operator push-to-100 signal", {"session_id": session_id})
+            _policy_text = prompt_context(session_id, payload.get("cwd", ""))
+            if _policy_text:
+                _inject_quota_policy(_policy_text, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("quota policy user prompt failed", {"error": str(e)})
 
     # --- Secrets scanning ---
     if SECRETS_MODE != "off":
@@ -951,6 +976,23 @@ def on_pre_tool_use(payload: dict) -> None:
             raise BlockAction(_conditions.block)
         if _conditions.rewrite is not None:
             payload["tool_input"] = tool_input = _conditions.rewrite
+
+    # --- Quota policy: hand off, wait or stop when this session's quota runs out ---
+    _quota_policy_ctx = None
+    _quota_policy_block = None
+    try:
+        from hooks.config import QUOTA_POLICY_ENABLED
+
+        if QUOTA_POLICY_ENABLED:
+            from hooks.context.quota_policy import pretool as _quota_policy_pretool
+
+            _quota_policy_block, _quota_policy_ctx = _quota_policy_pretool(
+                payload.get("session_id", ""), tool_name, payload.get("cwd", "")
+            )
+    except Exception as e:
+        log("quota policy pre-tool failed", {"error": str(e)})
+    if _quota_policy_block:
+        raise BlockAction(_quota_policy_block)
 
     if SECRETS_MODE == "off":
         log(
@@ -1298,7 +1340,9 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("tool-call counter failed", {"error": str(e)})
 
-    if QUOTA_USAGE_INJECTION_ENABLED and _tool_call_count % max(1, QUOTA_USAGE_TOOL_CALLS) == 0:
+    if _quota_policy_ctx:
+        _pretool_blocks.append(_quota_policy_ctx)
+    elif QUOTA_USAGE_INJECTION_ENABLED and _tool_call_count % max(1, QUOTA_USAGE_TOOL_CALLS) == 0:
         try:
             from hooks.context.quota_usage import quota_banner
 
@@ -1965,16 +2009,20 @@ def on_subagent_start(payload: dict) -> None:
         from hooks.config import BROADCAST_ENABLED
 
         if BROADCAST_ENABLED and agent_id:
+            from hooks.context.account_sessions import agent_pid, session_account
             from hooks.context.broadcast import (
                 check_and_inject_broadcasts,
                 register_session,
             )
 
+            _agent_pid = agent_pid()
             register_session(
                 agent_id,
-                pid=os.getppid(),
+                pid=_agent_pid,
                 cwd=payload.get("cwd", ""),
                 model=payload.get("model", ""),
+                account=session_account(_agent_pid),
+                supersede=False,
             )
             check_and_inject_broadcasts(agent_id)
     except Exception as e:
