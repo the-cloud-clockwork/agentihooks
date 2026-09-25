@@ -32,12 +32,14 @@ Commands:
         Create a .claudeignore in the current directory.
 
     agentihooks claude [--route SLUG] [extra flags]
-        Route to the healthiest OAuth account and launch Claude.
-        --route SLUG selects AH_CC_TOKEN_<SLUG> directly.
+        Route to the healthiest OAuth account that runs fewer than
+        AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 2) live sessions, and launch Claude.
+        --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the cap.
         Alias: agenti (added to ~/.bashrc by init)
 
-    agentihooks claude-terminal [launcher options] -- [claude flags]
+    agentihooks claude-terminal [launcher options] [--handoff] -- [claude flags]
         Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
+        --handoff moves this session's work to another account (quota handoff).
 
     agentihooks balance --dry-run [--fable] [--refresh]
         Show ranked OAuth account capacity without launching Claude.
@@ -5390,10 +5392,41 @@ def _extract_claude_route(extra_args: list[str]) -> tuple[str, list[str]]:
     return route, forwarded
 
 
+def _extract_internal_values(extra_args: list[str], flag: str) -> tuple[list[str], list[str]]:
+    values = []
+    forwarded = []
+    index = 0
+    while index < len(extra_args):
+        if extra_args[index] == flag and index + 1 < len(extra_args):
+            values.append(extra_args[index + 1])
+            index += 2
+            continue
+        forwarded.append(extra_args[index])
+        index += 1
+    return values, forwarded
+
+
+def _write_route_report(path: str, **fields: str) -> None:
+    if not path:
+        return
+    target = Path(path)
+    temporary = target.with_name(f".{target.name}.tmp")
+    temporary.write_text("".join(f"{key}={value}\n" for key, value in fields.items()), encoding="utf-8")
+    os.replace(temporary, target)
+
+
 def cmd_claude(extra_args: list[str]) -> None:
-    """Route to the healthiest Claude account, then replace this process with Claude."""
+    """Route to the healthiest Claude account, then replace this process with Claude.
+
+    Accounts already running AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT live sessions are
+    skipped while another routable account has room; --route forces one account.
+    """
+    import fcntl
+
+    from hooks.context.account_sessions import max_sessions, sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
+        _cache_path,
         credential_for_slug,
         discover_credentials,
         format_selection,
@@ -5405,6 +5438,9 @@ def cmd_claude(extra_args: list[str]) -> None:
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
     extra_args = [argument for argument in extra_args if argument != fallback_flag]
+    excluded, extra_args = _extract_internal_values(extra_args, "--agentihooks-exclude")
+    reports, extra_args = _extract_internal_values(extra_args, "--agentihooks-report")
+    report = reports[-1] if reports else ""
     try:
         route, extra_args = _extract_claude_route(extra_args)
     except ValueError as exc:
@@ -5413,21 +5449,43 @@ def cmd_claude(extra_args: list[str]) -> None:
     _load_claude_runtime_env()
     claude_bin = shutil.which("claude") or "claude"
     include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
+    route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
+    route_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # Held until exec: the descriptor is close-on-exec, so the next launch counts this
+    # process only once it already runs as claude.
+    route_lock = route_lock_path.open("a+", encoding="utf-8")
+    fcntl.flock(route_lock, fcntl.LOCK_EX)
+    cap = max_sessions(os.environ)
     try:
         if route:
             selected_credential = credential_for_slug(discover_credentials(os.environ), route)
         else:
-            decision = select_credential(os.environ, include_fable=include_fable, claude_bin=claude_bin)
+            decision = select_credential(
+                os.environ,
+                include_fable=include_fable,
+                claude_bin=claude_bin,
+                sessions=sessions_by_account(),
+                max_sessions=cap,
+                exclude=excluded,
+            )
             selected_credential = decision.credential
     except RoutingError as exc:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
+            _write_route_report(report, status="bare", error=str(exc))
             cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
             os.execvpe(claude_bin, cmd, os.environ)
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
+        _write_route_report(report, status="failed", error=str(exc))
         raise SystemExit(3) from exc
+    _write_route_report(
+        report,
+        status="routed",
+        account=selected_credential.account,
+        placement="forced" if route else decision.placement,
+    )
 
     os.environ.pop("ANTHROPIC_API_KEY", None)
     for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
@@ -5452,6 +5510,7 @@ def cmd_balance(
     show_account_metadata: str = "",
     current: bool = False,
 ) -> int:
+    from hooks.context.account_sessions import max_sessions, sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5468,13 +5527,15 @@ def cmd_balance(
     session_env = dict(os.environ)
     _load_claude_runtime_env()
     credentials = discover_credentials(os.environ)
+    live = sessions_by_account()
+    cap = max_sessions(os.environ)
     if current:
         known = discover_credentials(session_env) + credentials
         session = identify_session_account(session_env, known, ancestor_oauth_token())
         by_account = {credential.account: credential for credential in known}
-        live = []
+        probed = []
         if session.account:
-            live, _ = collect_results(
+            probed, _ = collect_results(
                 [by_account[session.account]],
                 include_fable=include_fable,
                 refresh=refresh,
@@ -5484,12 +5545,17 @@ def cmd_balance(
         observations = cached_observations(include_fable=include_fable)
         rows = {result.account: result for _, result in observations}
         observed = {result.account: seen for seen, result in observations}
-        rows.update({result.account: result for result in live})
+        rows.update({result.account: result for result in probed})
         print(f"current={session.account or 'none'} method={session.method}")
         if rows:
             print(
                 render_table(
-                    list(rows.values()), include_fable=include_fable, current=session.account, observed=observed
+                    list(rows.values()),
+                    include_fable=include_fable,
+                    current=session.account,
+                    observed=observed,
+                    sessions=live,
+                    max_sessions=cap,
                 )
             )
         return 0 if session.account else 1
@@ -5517,8 +5583,8 @@ def cmd_balance(
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    print(render_table(results, include_fable=include_fable))
-    print(f"\nsource={source}")
+    print(render_table(results, include_fable=include_fable, sessions=live, max_sessions=cap))
+    print(f"\nsource={source} max_sessions_per_account={cap}")
     return 0 if any(is_routable(result) for result in results) else 1
 
 

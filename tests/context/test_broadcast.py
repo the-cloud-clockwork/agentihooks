@@ -285,7 +285,47 @@ class TestSessionRegistry:
         assert sessions["sess-old"]["superseded_by"] == "sess-new"
         assert sessions["sess-new"]["status"] == "alive"
 
-    def test_register_does_not_touch_other_pids(self, broadcast_dir):
+    def test_subagent_shares_the_pid_without_superseding_its_parent(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, register_session
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("parent", pid=12345, cwd="/tmp", model="opus", account="alpha")
+            register_session("agent-1", pid=12345, cwd="/tmp", model="opus", account="alpha", supersede=False)
+            sessions = _load_sessions()
+
+        assert sessions["parent"]["status"] == "alive"
+        assert sessions["parent"]["account"] == "alpha"
+        assert sessions["agent-1"]["status"] == "alive"
+
+    def test_handed_off_session_is_marked_and_reported(self, broadcast_dir):
+        from hooks.context.broadcast import mark_handed_off, register_session, session_status
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=os.getpid(), cwd="/tmp", model="opus", account="alpha")
+            register_session("sess-b", pid=22222, cwd="/tmp", model="opus", account="alpha")
+            marked = mark_handed_off(os.getpid(), "beta")
+            status = session_status("sess-a")
+            other = session_status("sess-b")
+
+        assert marked == ["sess-a"]
+        assert status["status"] == "handed_off"
+        assert status["handed_off_to"] == "beta"
+        assert other["status"] == "alive"
+
+    def test_heartbeat_flips_dead_handed_off_sessions(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, heartbeat_sessions, mark_handed_off, register_session
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("gone", pid=2**22 + 7, cwd="/tmp", model="opus")
+            mark_handed_off(2**22 + 7, "beta")
+            heartbeat_sessions()
+            sessions = _load_sessions()
+
+        assert sessions["gone"]["status"] == "dead"
+
         """Registering a new session from pid A must not affect sessions from pid B."""
         from hooks.context.broadcast import _load_sessions, register_session
 

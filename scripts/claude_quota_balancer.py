@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -76,6 +76,9 @@ class RouteDecision:
     credential: Credential
     result: ProbeResult
     source: str
+    sessions: int | None = None
+    max_sessions: int | None = None
+    placement: str = "open"
 
 
 class RoutingError(RuntimeError):
@@ -640,7 +643,14 @@ def select_credential(
     timeout: float = 60,
     cache_file: Path | None = None,
     claude_bin: str = "claude",
+    sessions: Mapping[str, int] | None = None,
+    max_sessions: int = 2,
+    exclude: Iterable[str] = (),
 ) -> RouteDecision:
+    """Pick the account with the most routing left among those below the per-account session cap.
+
+    When every routable account is at the cap, the least-loaded one wins (placement=overflow).
+    """
     active_env = os.environ if environ is None else environ
     credentials = discover_credentials(active_env)
     if not credentials:
@@ -654,12 +664,27 @@ def select_credential(
         cache_file=cache_file,
         claude_bin=claude_bin,
     )
-    eligible = [result for result in results if is_routable(result)]
+    excluded = set(exclude)
+    eligible = [result for result in results if is_routable(result) and result.account not in excluded]
     if not eligible:
-        raise RoutingError("no Claude account has verified routing capacity", results)
-    winner = rank_results(eligible, include_fable)[0]
+        outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
+        raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
+    counts = sessions or {}
+    below_cap = [result for result in eligible if counts.get(result.account, 0) < max_sessions]
+    if below_cap or sessions is None:
+        winner, placement = rank_results(below_cap or eligible, include_fable)[0], "open"
+    else:
+        winner = min(rank_results(eligible, include_fable), key=lambda result: counts.get(result.account, 0))
+        placement = "overflow"
     by_account = {credential.account: credential for credential in credentials}
-    return RouteDecision(by_account[winner.account], winner, source)
+    return RouteDecision(
+        by_account[winner.account],
+        winner,
+        source,
+        sessions=None if sessions is None else counts.get(winner.account, 0),
+        max_sessions=None if sessions is None else max_sessions,
+        placement=placement,
+    )
 
 
 def format_selection(decision: RouteDecision, include_fable: bool = False) -> str:
@@ -672,6 +697,10 @@ def format_selection(decision: RouteDecision, include_fable: bool = False) -> st
     ]
     if include_fable:
         parts.append(f"fable_left={_percent(result.fable.remaining)}")
+    if decision.sessions is not None:
+        parts.append(f"sessions={decision.sessions}/{decision.max_sessions}")
+    if decision.placement != "open":
+        parts.append(f"placement={decision.placement}")
     parts.append(f"source={decision.source}")
     return "[agenti] " + " ".join(parts)
 
@@ -722,12 +751,15 @@ def render_table(
     include_fable: bool = False,
     current: str = "",
     observed: Mapping[str, float] | None = None,
+    sessions: Mapping[str, int] | None = None,
+    max_sessions: int | None = None,
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
         "ACCOUNT",
         "STATE",
+        *(["SESSIONS"] if sessions is not None else []),
         "ROUTING LEFT",
         "5H LEFT",
         "5H RESET",
@@ -744,6 +776,7 @@ def render_table(
             str(rank),
             f"{result.account} (current)" if current and result.account == current else result.account,
             result.state,
+            *([f"{sessions.get(result.account, 0)}/{max_sessions}"] if sessions is not None else []),
             _percent(result.margin),
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),
@@ -763,6 +796,10 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
+    known = {result.account for result in results}
+    unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}
+    if unlisted:
+        lines.extend(["", *(f"{account}: {count} session(s)" for account, count in sorted(unlisted.items()))])
     return "\n".join(lines)
 
 

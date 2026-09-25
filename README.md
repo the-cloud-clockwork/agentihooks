@@ -159,9 +159,12 @@ agentihooks broadcast --clear                # clear all
 # Launch claude with --dangerously-skip-permissions
 agentihooks claude                           # bypassPermissions + your extra args
 agenti                                       # alias (after source ~/.bashrc)
-agenti --route 0                             # force AH_CC_TOKEN_0
-agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left
+agenti --route 0                             # force AH_CC_TOKEN_0 (ignores the session cap)
+agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left + live SESSIONS n/cap
 agentihooks balance --current                # account this session runs on + quota table
+agentihooks claude-terminal --handoff --prompt-file handoff.md   # quota handoff to another account
+# agenti skips accounts running AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 2) live sessions;
+# the quota policy hands a session off at 98% weekly / 99% 5-hour use (see the toolbelt rule)
 
 # Bundle management
 agentihooks bundle link ~/dev/my-tools       # link a bundle

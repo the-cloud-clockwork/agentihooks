@@ -37,6 +37,9 @@ The table marks the current row `(current)` and probes it live. Other rows come
 from the router cache, and `AGE` gives how old each one is. A routed session
 holds only its own token, so those rows refresh only when `agenti` or
 `agentihooks balance` runs from a shell that exports every `AH_CC_TOKEN_*`.
+`SESSIONS n/cap` counts the live Claude sessions on each account right now
+(cap: `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT`); sessions on no account are listed
+under the table as `unrouted`.
 
 ## 3. Report
 
