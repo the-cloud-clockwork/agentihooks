@@ -6,6 +6,7 @@ message contains a release-gate or hotfix signal (CI Manifesto §9).
 Blocked by default:
   - Docker/image operations with :latest/:prod/:stable tags  (hotfix bypass only)
   - gh workflow run release.yml                              (release-gate OR hotfix)
+  - gh pr merge targeting main/master/v1                     (release-gate OR hotfix; bypass mode does not lift it)
 
 Signal vocabulary is parsed from the CI Manifesto (source of truth).
 Fallback vocabulary in ci_manifesto.py mirrors manifesto §9.
@@ -47,6 +48,15 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+release\.yml\b", re.I),
         "release.yml workflow trigger",
+        "release-gate signal required — see CI Manifesto §4",
+        "release",
+    ),
+    (
+        re.compile(
+            r"\bgh\b[^|&;\n]*\bpr\s+merge\b[^|&;\n]*(--base\s+(main|master|v1)\b|\b(main|master|v1)\b(?!\s*\.))",
+            re.I,
+        ),
+        "gh pr merge to main/master/v1",
         "release-gate signal required — see CI Manifesto §4",
         "release",
     ),
@@ -222,8 +232,6 @@ def check_prod_lockdown(payload: dict) -> None:
         controls_off = is_controls_disabled(session_id)
     except Exception:
         controls_off = False
-    if controls_off:
-        return
     # Legacy full bypass (--emergency-prod etc.) — unlocks everything, per-turn
     full_bypass = bool(session_id and is_bypass_active(session_id))
     # Session-scoped hotfix signal — unlocks everything
@@ -240,6 +248,9 @@ def check_prod_lockdown(payload: dict) -> None:
     for pattern, name, reason, category in _BLOCKED:
         if not pattern.search(check_text):
             continue
+        # Bypass mode never opens a merge into a protected branch.
+        if controls_off and name != "gh pr merge to main/master/v1":
+            return
         if full_bypass or hotfix_unlock:
             return
         if category == "release" and release_unlock:

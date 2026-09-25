@@ -127,11 +127,20 @@ class TestBranchGuardIntegration:
         set_controls_disabled("test")
         self._check("git checkout -b feat/x")
 
-    def test_pr_create_allowed_with_bypass(self):
+    def test_pr_create_to_feature_base_allowed_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
 
         set_controls_disabled("test")
-        self._check("gh pr create --base main --title t --body b")
+        self._check("gh pr create --base feat-x --title t --body b")
+
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_pr_create_to_protected_base_blocked_under_bypass(self, base):
+        from hooks.context.controls_toggle import set_controls_disabled
+        from hooks.hook_manager import BlockAction
+
+        set_controls_disabled("test")
+        with patch("hooks.context.branch_guard._has_pr_signal", return_value=False), pytest.raises(BlockAction):
+            self._check(f"gh pr create --base {base} --title t --body b")
 
     def test_pr_creation_unlocked_under_bypass(self):
         # Bypass mode unlocks branch and PR creation; the HARD FLOOR does not move.
@@ -184,7 +193,7 @@ class TestBranchGuardIntegration:
 
         set_controls_disabled("parent-sess")
         self._check(
-            "gh pr create --base main --title t --body b",
+            "gh pr create --base feat-x --title t --body b",
             sid="child-sess",
         )
 
@@ -201,20 +210,20 @@ class TestProdLockdownIntegration:
         with pytest.raises(BlockAction):
             self._check("gh workflow run release.yml")
 
-    def test_pr_merge_main_allowed_without_signal(self):
-        self._check("gh pr merge 123 --rebase --base main")
-
     def test_release_workflow_allowed_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
 
         set_controls_disabled("test")
         self._check("gh workflow run release.yml")
 
-    def test_pr_merge_main_allowed_with_bypass(self):
+    @pytest.mark.parametrize("base", ["main", "master", "v1"])
+    def test_pr_merge_protected_blocked_under_bypass(self, base):
         from hooks.context.controls_toggle import set_controls_disabled
+        from hooks.hook_manager import BlockAction
 
         set_controls_disabled("test")
-        self._check("gh pr merge 123 --base main")
+        with pytest.raises(BlockAction):
+            self._check(f"gh pr merge 123 --base {base}")
 
     def test_latest_image_push_allowed_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
