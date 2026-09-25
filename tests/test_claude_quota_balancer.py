@@ -437,3 +437,67 @@ def test_get_current_balance_skill_runs_the_current_flag():
 
     assert "name: get-current-balance" in text
     assert "agentihooks balance --current" in text
+
+
+def _three(monkeypatch):
+    best = balancer.parse_probe("BEST", _stream(0.10, 0.20), 100)
+    mid = balancer.parse_probe("MID", _stream(0.30, 0.40), 100)
+    low = balancer.parse_probe("LOW", _stream(0.50, 0.70), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([low, mid, best], "cached"))
+    return {"AH_CC_TOKEN_BEST": "b", "AH_CC_TOKEN_MID": "m", "AH_CC_TOKEN_LOW": "l"}
+
+
+def test_account_at_the_session_cap_yields_to_the_next_one(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+
+    decision = balancer.select_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, max_sessions=2
+    )
+
+    assert decision.result.account == "MID"
+    assert decision.placement == "open"
+    assert balancer.format_selection(decision) == (
+        "[agenti] account=MID routing_left=60% 5h_left=70% 7d_left=60% sessions=1/2 source=cached"
+    )
+
+
+def test_cap_is_configurable(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+
+    decision = balancer.select_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 2, "MID": 1}, max_sessions=3
+    )
+
+    assert decision.result.account == "BEST"
+
+
+def test_every_account_at_cap_overflows_to_the_least_loaded(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+
+    decision = balancer.select_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 4, "MID": 2, "LOW": 2}, max_sessions=2
+    )
+
+    assert decision.result.account == "MID"
+    assert decision.placement == "overflow"
+    assert "placement=overflow" in balancer.format_selection(decision)
+
+
+def test_excluded_account_is_never_selected(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+
+    decision = balancer.select_credential(env, cache_file=tmp_path / "c.json", exclude=["BEST"])
+    assert decision.result.account == "MID"
+
+    with pytest.raises(balancer.RoutingError, match="outside BEST, LOW, MID"):
+        balancer.select_credential(env, cache_file=tmp_path / "c.json", exclude=["BEST", "MID", "LOW"])
+
+
+def test_table_shows_live_sessions_per_account():
+    alpha = balancer.parse_probe("alpha", _stream(0.10, 0.20), 100)
+
+    table = balancer.render_table([alpha], now=0, sessions={"alpha": 1, "unrouted": 2}, max_sessions=2)
+
+    assert "SESSIONS" in table.splitlines()[0]
+    assert "1/2" in table.splitlines()[2]
+    assert table.splitlines()[-1] == "unrouted: 2 session(s)"

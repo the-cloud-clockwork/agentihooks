@@ -184,13 +184,6 @@ def clear_pr_counter(session_id: str) -> None:
 
 
 def _has_pr_signal(session_id: str) -> bool:
-    try:
-        from hooks.context.controls_toggle import is_controls_disabled
-
-        if is_controls_disabled(session_id):
-            return True
-    except Exception:
-        pass
     if not session_id:
         return False
     r = get_redis()
@@ -208,12 +201,14 @@ _PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
 
 # PR base-branch enforcement (CI Manifesto §4/§5). main is the SNAPSHOT branch:
 # dev is the stable working branch, and a dev→main PR is the mechanism for
-# stamping a known-good snapshot of main. PR creation is operator-initiated
-# (gated by a PR signal + per-session counter) and may target main or any
-# branch. Direct push / commit / merge to main remain HARD FLOOR — snapshots
+# stamping a known-good snapshot of main. A PR into dev needs no signal; any
+# other base is operator-initiated (PR signal + per-session counter), and for
+# main/master/v1 bypass mode does not lift that. Direct push / commit / merge
+# to main remain HARD FLOOR — snapshots
 # reach main only through a PR. A bare `gh pr create` is still rejected so the
 # base is always explicit (no accidental default-branch PR).
-_PR_BASE_EXPLICIT_PATTERN = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base\s+\S+")
+_PR_BASE_RE = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base[\s=]+(\S+)")
+PROTECTED_PR_BASES = frozenset({"main", "master", "v1"})
 
 
 # Branch-creation patterns (blocked without branch signal).
@@ -232,7 +227,7 @@ _BLOCKED_PATTERNS = [
     # Push to main/master (direct push bypasses PR workflow)
     (
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
-        "Pushing directly to main/master is blocked. Snapshot main via a PR: gh pr create --base main.",
+        "Pushing directly to main/master is blocked. Reach main through a PR: gh pr create --base main.",
     ),
     # Merge into main/master (direct merge bypasses PR workflow). The `/`
     # in the lookbehind exempts a remote-tracking ref used as the merge
@@ -343,34 +338,45 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    # PR creation — default-deny unless operator signaled this session (§15),
-    # or bypass mode is active (it unlocks branch and PR creation by doctrine).
+    # PR creation (§15): --base dev is open to agents; main/master/v1 always need the
+    # operator's PR signal (bypass mode does not lift it); any other base needs the
+    # signal or bypass mode.
     if _PR_CREATE_PATTERN.search(check_text):
+        base_match = _PR_BASE_RE.search(check_text)
+        if not base_match:
+            log(
+                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: gh pr create needs an explicit --base.\n"
+                "A bare `gh pr create` targets the default branch implicitly.\n"
+                "Use --base main for a release PR, or --base dev for a feature PR."
+            )
+        base = base_match.group(1).strip("'\"")
+        if base == "dev":
+            log("branch_guard: PR into dev allowed", {"session_id": session_id})
+            return
+        protected = base in PROTECTED_PR_BASES
         try:
             from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
 
-            _bypass_active = _ctl_off(session_id)
+            _bypass_active = not protected and _ctl_off(session_id)
         except Exception:
             _bypass_active = False
         if not _bypass_active and not _has_pr_signal(session_id):
             log(
                 "branch_guard: PR creation blocked (no signal)",
-                {"command": command[:200], "session_id": session_id},
+                {"command": command[:200], "base": base, "session_id": session_id},
             )
             raise BlockAction(
-                "BLOCKED: agent PR creation is disabled (CI Manifesto §15).\n"
-                "Agents commit and push — the operator decides when to open a PR.\n"
-                "To unlock for this session, include a PR phrase in your message\n"
+                f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
+                "PRs into dev need no signal; main, master and v1 are protected.\n"
+                "To unlock for this session, the operator includes a PR phrase in a message\n"
                 "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
             )
-        try:
-            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
-
-            _bypass_counter = _ctl_off(session_id)
-        except Exception:
-            _bypass_counter = False
         count = _get_pr_counter(session_id)
-        if not _bypass_counter and count >= _PR_SIGNAL_MAX_COUNT:
+        if not _bypass_active and count >= _PR_SIGNAL_MAX_COUNT:
             log(
                 "branch_guard: PR creation blocked (counter limit)",
                 {"count": count, "session_id": session_id},
@@ -379,18 +385,8 @@ def check_branch_guard(payload: dict) -> None:
                 f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
                 "Include a PR phrase in your next message to re-authorize and reset the counter."
             )
-        if not _PR_BASE_EXPLICIT_PATTERN.search(check_text):
-            log(
-                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
-                {"command": command[:200], "session_id": session_id},
-            )
-            raise BlockAction(
-                "BLOCKED: gh pr create needs an explicit --base.\n"
-                "A bare `gh pr create` targets the default branch implicitly.\n"
-                "Use --base main for a snapshot PR, or --base dev for a feature PR."
-            )
         new_count = increment_pr_counter(session_id)
-        log("branch_guard: PR creation allowed", {"count": new_count, "session_id": session_id})
+        log("branch_guard: PR creation allowed", {"count": new_count, "base": base, "session_id": session_id})
 
 
 _COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")

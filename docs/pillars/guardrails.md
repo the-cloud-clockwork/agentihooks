@@ -21,7 +21,7 @@ Claude Code agents are powerful. Without boundaries, they can push to production
 
 - **Controls toggle (bypass mode)** — operator phrase `disable controls` flips a session-wide bypass that lifts every CI-manifesto signal gate at once: branch creation, PR creation, and force-push to non-main branches. Spawned subagents inherit it. HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced. Restored by `enable controls` or SessionEnd. See [Guardrail 9](#guardrail-9-controls-toggle-bypass-mode).
 - **Two-tier secrets** — code-file writes still hard-block; inline Bash args (no file redirect) scan + log + note only. Lets agents pass a token to `curl -H` without breaking the workflow, while keeping durable storage locked.
-- **Session-scoped PR signals** — one signal phrase from the operator unlocks PR creation for the full session instead of expiring per-turn. PR has a 3-per-session counter.
+- **Session-scoped PR signals** — a PR into `dev` needs no signal. Any other base needs one signal phrase from the operator, which unlocks PR creation for the full session, with a 3-per-session counter. `main`, `master` and `v1` are protected: bypass mode does not open PRs or merges into them.
 - **Subagent signal isolation** — subagents cannot self-arm PR signals. Only top-level operator sessions can.
 - **`gh pr create --base main` required** — PRs to branches other than main are now blocked. Dev work pushes directly, no PR needed.
 - **Dependency banner** — every `pip/npm/cargo/...` install emits a visible banner. Never blocks — surfaces supply chain additions for operator audit.
@@ -101,7 +101,7 @@ The secrets scanner intercepts credentials before they can enter tool calls, log
 | `private_key` | PEM-encoded RSA, EC, OPENSSH, PGP private keys |
 | `bearer_token` | `Authorization: Bearer <token>` headers |
 | `db_url_creds` | `postgres://user:pass@host`, `mysql://`, `mongodb://` URLs |
-| `generic_secret` | `PASSWORD=`, `API_KEY=`, `SECRET=` assignments with 8+ char values |
+| `generic_secret` | `PASSWORD=`, `API_KEY=`, `SECRET=` assignments with 8+ char literal values (quotes excluded); comparisons (`==`, `===`) and code values such as `settings.x`, `get_secret()` or `Optional[str]` are not flagged |
 
 In `strict` mode, three additional patterns activate:
 
@@ -143,7 +143,7 @@ The retry circuit breaker tracks consecutive failures per operation. When the sa
 
 **Stage 1 — Soft warning (default: 5 failures):** Injects a banner into Claude's context telling it to stop retrying and instead launch parallel `error-researcher` agents for web search. The agent still *can* proceed — but it now knows it should research first.
 
-**Stage 2 — Hard block (default: 10 failures):** Raises a `BlockAction` via `PreToolUse`, preventing the tool from executing at all. The agent must research and change approach before the block lifts.
+**Stage 2 — Hard block (default: 10 failures):** Raises a `BlockAction` via `PreToolUse`, preventing the tool from executing. The breaker is then half-open: the next call to that operation runs as a single trial. A success resets the counter; another failure blocks again.
 
 ### How operations are fingerprinted
 
@@ -156,9 +156,11 @@ The breaker tracks per-operation, not per-tool. Operations are fingerprinted by 
 | `Bash: terraform plan` | `bash:terraform:plan` |
 | `Bash: terraform apply` | `bash:terraform:apply` |
 | `Bash: docker build .` | `bash:docker:build` |
-| `Edit` | `edit` |
+| `Edit /repo/app.py` | `edit:/repo/app.py` |
 
-This means `kubectl apply` and `kubectl get` have independent counters — a stuck `apply` doesn't block unrelated reads.
+This means `kubectl apply` and `kubectl get` have independent counters — a stuck `apply` doesn't block unrelated reads. File tools are keyed per path, and a call made inside a subagent is prefixed with its `agent_id`, so parallel subagents never share a counter.
+
+`Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Read` echo file content in their success response, so for them (as for MCP tools) only an explicit error flag counts as a failure — never words like "error" or "not found" in the content.
 
 Error text is also normalized (hex, timestamps, paths, numbers stripped) before fingerprinting, so slightly different error messages from the same root cause are treated as the same failure.
 
@@ -207,7 +209,7 @@ The guard strips heredoc bodies and quoted commit messages before pattern matchi
 **Hook:** `PreToolUse` (block, `Edit` and `Write` tools)
 **Default:** On — always active
 
-Version fields in project manifests should be managed by the CI release workflow, not by an AI agent editing files directly. The version guard blocks any `Edit` or `Write` operation that would modify a version field in a known manifest file.
+Version fields in project manifests should be managed by the CI release workflow, not by an AI agent editing files directly. The version guard blocks any `Edit` or `Write` operation that would modify a version field in a known manifest file that already exists. Creating a new manifest may declare its first version.
 
 ### Protected files
 
@@ -358,8 +360,7 @@ A session-level escape hatch the operator activates by saying **`disable control
 While bypass mode is ACTIVE:
 
 - Branch creation (CI Manifesto §13) — `git checkout -b`, `git switch -c`, `git branch <name>`
-- PR creation (§14) — `gh pr create` with no per-session counter cap
-- Release-gate merges (§4) — `gh pr merge` to main/master
+- PR creation (§14) into non-protected bases — `gh pr create` with no per-session counter cap (PRs into `main`/`master`/`v1` still need the operator's PR signal)
 - Release workflow trigger — `gh workflow run release.yml`
 - Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
 - Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`

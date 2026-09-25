@@ -114,7 +114,17 @@ def _compute_operation_key(tool_name: str, tool_input: dict) -> str:
                 return f"bash:{base}:{':'.join(subs)}"
 
         return f"bash:{base}"
+    path = (tool_input or {}).get("file_path") or (tool_input or {}).get("notebook_path")
+    if path:
+        return f"{tool_name.lower()}:{path}"
     return tool_name.lower()
+
+
+def _payload_operation_key(payload: dict) -> str:
+    """Operation key scoped to the calling subagent, so siblings never share a counter."""
+    op_key = _compute_operation_key(payload.get("tool_name", "unknown"), payload.get("tool_input", {}))
+    agent_id = payload.get("agent_id")
+    return f"{agent_id}/{op_key}" if agent_id else op_key
 
 
 def _compute_error_key(error_text: str) -> str:
@@ -253,7 +263,7 @@ Retry-breaker is not a suggestion. It is operator policy."""
 def on_post_tool_result(payload: dict) -> None:
     """PostToolUse handler: track failures, inject research instructions at threshold."""
     from hooks.config import RETRY_BREAKER_MAX
-    from hooks.tool_memory import _is_error
+    from hooks.tool_memory import _is_error, strict_detection
 
     tool_name = payload.get("tool_name", "unknown")
     tool_input = payload.get("tool_input", {})
@@ -263,11 +273,8 @@ def on_post_tool_result(payload: dict) -> None:
     if not session_id or tool_result is None:
         return
 
-    op_key = _compute_operation_key(tool_name, tool_input)
-
-    # Detect error (strict mode for MCP tools to avoid false positives)
-    is_mcp = tool_name.startswith("mcp__")
-    detected, error_text = _is_error(tool_result, strict=is_mcp)
+    op_key = _payload_operation_key(payload)
+    detected, error_text = _is_error(tool_result, strict=strict_detection(tool_name))
 
     if not detected:
         # Success — reset counter for this operation
@@ -312,17 +319,23 @@ def check_hard_block(payload: dict) -> None:
     from hooks.config import RETRY_BREAKER_HARD_MAX
     from hooks.hook_manager import BlockAction
 
-    tool_name = payload.get("tool_name", "unknown")
-    tool_input = payload.get("tool_input", {})
     session_id = payload.get("session_id", "")
 
     if not session_id:
         return
 
-    op_key = _compute_operation_key(tool_name, tool_input)
+    op_key = _payload_operation_key(payload)
     state = _get_state(session_id, op_key)
 
     if state["count"] >= RETRY_BREAKER_HARD_MAX:
+        # Half-open: after each block one trial call goes through, so a
+        # success can still reset the counter instead of waiting out the TTL.
+        if state.get("blocked"):
+            state["blocked"] = False
+            _set_state(session_id, op_key, state)
+            return
+        state["blocked"] = True
+        _set_state(session_id, op_key, state)
         error_text = state.get("last_error_text", "unknown error")
         raise BlockAction(
             f"BLOCKED: Circuit breaker HARD STOP.\n"
@@ -333,6 +346,7 @@ def check_hard_block(payload: dict) -> None:
             f"  Agent(subagent_type='error-researcher', model='haiku', prompt='<tool + causes>')\n"
             f"\n"
             f"Then read BOTH reports and pick a DIFFERENT approach.\n"
+            f"The next call to this operation runs as a single trial; another failure blocks again.\n"
             f"If error-researcher is unavailable, use WebSearch directly.\n"
             f"\n"
             f"Last error: {error_text[:150]}"

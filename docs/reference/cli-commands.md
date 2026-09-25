@@ -276,6 +276,60 @@ The profile chain is read for `AGENTIHOOKS_TARGET` (default `claude`).
 
 ---
 
+## `agentihooks claude` / `agenti`
+
+Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
+`--dangerously-skip-permissions` and every other flag passed through. See
+[Claude Account Load Balancing](../pillars/load-balancing.md).
+
+```bash
+agenti                          # most routing left among accounts below the session cap
+agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
+agenti --model fable            # Fable models also weigh the separate Fable quota
+```
+
+The launch line reports `account`, `routing_left`, `sessions=n/cap`, and
+`placement=overflow` when every account was already at the cap.
+
+---
+
+## `agentihooks claude-terminal`
+
+Open a routed Claude session in a new terminal (WSL, macOS, native Linux).
+
+```bash
+agentihooks claude-terminal --dir ~/dev/repo --name fix-x --prompt-file task.md -- --model opus
+agentihooks claude-terminal --handoff --dir "$PWD" --name repo-handoff --prompt-file handoff.md
+```
+
+| Flag | Meaning |
+|---|---|
+| `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
+| `--dry-run` | Print the launch without opening a terminal |
+| `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
+| `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
+| `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
+
+Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
+`failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
+`--handoff`.
+
+---
+
+## `agentihooks balance`
+
+```bash
+agentihooks balance              # every account: state, SESSIONS n/cap, routing left, resets
+agentihooks balance --current    # which account this session runs on
+agentihooks balance --refresh    # ignore the 60-second quota cache
+agentihooks balance --fable      # include the Fable weekly quota
+```
+
+`SESSIONS` counts live interactive Claude processes per account from `/proc`;
+sessions on no account are listed under the table as `unrouted`.
+
+---
+
 ## `agentihooks refresh-rules`
 
 Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.

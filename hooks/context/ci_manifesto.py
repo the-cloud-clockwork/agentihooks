@@ -44,6 +44,7 @@ _DEFAULT_RELEASE_SIGNALS = [
     "merge to main",
     "merge the pr",
     "merge it",
+    "release dance",
 ]
 _DEFAULT_HOTFIX_SIGNALS = [
     "hotfix",
@@ -76,6 +77,7 @@ _DEFAULT_PR_SIGNALS = [
     "create pr",
     "raise a pr",
     "submit a pr",
+    "release dance",
 ]
 
 

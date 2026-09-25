@@ -98,7 +98,15 @@ agentihooks broadcast emit "clear all broadcasts"
 
 `emit` is sandboxed: Claude Haiku can **only** run `agentihooks broadcast` commands — all other tools are disallowed.
 
-[Full docs: Fleet Command](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/fleet-command/)
+**Account load balancing.** Several Claude subscriptions (`AH_CC_TOKEN_<slug>`)
+share the fleet: `agenti` puts each new session on the account with the most quota
+left that runs fewer than 2 sessions, and `agentihooks balance` shows sessions per
+account. When a session's own quota runs out (98% of the week or 99% of the 5-hour
+window), the hook tells it, by fixed rules, to hand the task to a new terminal on
+another account, wait for the 5-hour reset, or stop and ask you.
+
+[Full docs: Fleet Command](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/fleet-command/) ·
+[Account load balancing](https://the-cloud-clockwork.github.io/agentihooks/docs/pillars/load-balancing/)
 
 ---
 
@@ -159,9 +167,13 @@ agentihooks broadcast --clear                # clear all
 # Launch claude with --dangerously-skip-permissions
 agentihooks claude                           # bypassPermissions + your extra args
 agenti                                       # alias (after source ~/.bashrc)
-agenti --route 0                             # force AH_CC_TOKEN_0
-agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left
+agenti --route 0                             # force AH_CC_TOKEN_0 (ignores the session cap)
+agentihooks balance                          # rank every AH_CC_TOKEN_* by quota left + live SESSIONS n/cap
 agentihooks balance --current                # account this session runs on + quota table
+agentihooks claude-terminal --handoff --prompt-file handoff.md   # quota handoff to another account
+# agenti skips accounts running AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 2) live sessions;
+# the quota policy hands a session off at 98% weekly / 99% 5-hour use, waits for the 5h reset
+# or stops — see docs/pillars/load-balancing.md
 
 # Bundle management
 agentihooks bundle link ~/dev/my-tools       # link a bundle

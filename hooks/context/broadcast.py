@@ -704,15 +704,23 @@ def encode_cwd(cwd: str) -> str:
     return cwd.replace("/", "-").replace(".", "-")
 
 
-def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
+def register_session(
+    session_id: str,
+    pid: int,
+    cwd: str,
+    model: str,
+    account: str = "",
+    supersede: bool = True,
+) -> None:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         now = _now_iso()
         # A single Claude Code PID only hosts ONE active session at a time.
         # When a new session_id registers from the same pid, supersede any
         # previously-alive entries for that pid (they're from an earlier
-        # session lifecycle — /resume or /clear).
-        if pid:
+        # session lifecycle — /resume or /clear). Subagents share their
+        # parent's pid and pass supersede=False.
+        if pid and supersede:
             for existing_sid, existing_info in sessions.items():
                 if existing_sid == session_id:
                     continue
@@ -732,15 +740,37 @@ def register_session(session_id: str, pid: int, cwd: str, model: str) -> None:
             "pid": pid,
             "cwd": cwd,
             "model": model,
+            "account": account,
         }
         _save_sessions(sessions)
 
 
 def deregister_session(session_id: str) -> None:
     """Hard-delete a session entry. Prefer mark_session_closed for crash-recovery."""
-    sessions = _load_sessions()
-    sessions.pop(session_id, None)
-    _save_sessions(sessions)
+    with _file_lock(_sessions_path()):
+        sessions = _load_sessions()
+        sessions.pop(session_id, None)
+        _save_sessions(sessions)
+
+
+def mark_handed_off(pid: int, target_account: str) -> list[str]:
+    """Flip every live session of ``pid`` to status=handed_off; returns their ids."""
+    marked = []
+    with _file_lock(_sessions_path()):
+        sessions = _load_sessions()
+        for sid, info in sessions.items():
+            if info.get("pid") == pid and info.get("status") == "alive":
+                info["status"] = "handed_off"
+                info["handed_off_at"] = _now_iso()
+                info["handed_off_to"] = target_account
+                marked.append(sid)
+        if marked:
+            _save_sessions(sessions)
+    return marked
+
+
+def session_status(session_id: str) -> dict:
+    return dict(_load_sessions().get(session_id) or {})
 
 
 def mark_session_closed(session_id: str) -> None:
@@ -759,6 +789,11 @@ def mark_session_closed(session_id: str) -> None:
 
 def heartbeat_sessions() -> dict:
     """Daemon tick: update last_seen for live PIDs, flip dead ones, prune 24h-old."""
+    with _file_lock(_sessions_path()):
+        return _heartbeat_locked()
+
+
+def _heartbeat_locked() -> dict:
     sessions = _load_sessions()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
@@ -780,7 +815,7 @@ def heartbeat_sessions() -> dict:
             except ValueError:
                 pass
 
-        if status == "alive":
+        if status in ("alive", "handed_off"):
             alive = False
             try:
                 if pid:
@@ -790,7 +825,7 @@ def heartbeat_sessions() -> dict:
                 alive = False
             if alive:
                 info["last_seen"] = now_iso
-                summary["alive"] += 1
+                summary["alive"] += status == "alive"
                 changed = True
             else:
                 info["status"] = "dead"
@@ -819,20 +854,23 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
     When cleanup=True, entries whose PID is gone are marked "dead" (not
     deleted — preserved for the 24h retention window).
     """
-    sessions = _load_sessions()
-    if cleanup:
-        changed = False
-        for sid, info in sessions.items():
-            pid = info.get("pid")
-            if not pid or info.get("status") in ("dead", "closed", "superseded"):
-                continue
-            try:
-                os.kill(pid, 0)
-            except (OSError, ProcessLookupError):
-                info["status"] = "dead"
-                changed = True
-        if changed:
-            _save_sessions(sessions)
+    if not cleanup:
+        sessions = _load_sessions()
+    else:
+        with _file_lock(_sessions_path()):
+            sessions = _load_sessions()
+            changed = False
+            for sid, info in sessions.items():
+                pid = info.get("pid")
+                if not pid or info.get("status") in ("dead", "closed", "superseded"):
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except (OSError, ProcessLookupError):
+                    info["status"] = "dead"
+                    changed = True
+            if changed:
+                _save_sessions(sessions)
     if include_all:
         return sessions
     return {sid: info for sid, info in sessions.items() if info.get("status") == "alive"}

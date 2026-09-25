@@ -499,6 +499,16 @@ QUOTA_USAGE_INJECTION_ENABLED = _env_bool("QUOTA_USAGE_INJECTION_ENABLED", "true
 QUOTA_USAGE_TOOL_CALLS: int = int(os.getenv("QUOTA_USAGE_TOOL_CALLS", "5"))
 QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 
+# Quota policy — what a session does when its own quota runs out (hooks/context/quota_policy.py).
+# Handoff when 7d used >= WEEK_PCT or 5h used >= 5H_PCT; a target account needs MIN_LEFT% routing
+# left; a spent 5h window with >= WAIT_MIN_WEEK_LEFT% of the week left waits for the reset.
+# AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 2) is read by hooks/context/account_sessions.py.
+QUOTA_POLICY_ENABLED = _env_bool("QUOTA_POLICY_ENABLED", "true")
+QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", "98"))
+QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
+QUOTA_HANDOFF_MIN_LEFT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_MIN_LEFT", "20"))
+QUOTA_WAIT_MIN_WEEK_LEFT: float = float(os.getenv("AGENTIHOOKS_WAIT_MIN_WEEK_LEFT", "10"))
+
 # =============================================================================
 # CONTEXT AUDIT — per-tool token consumption tracking
 # =============================================================================
