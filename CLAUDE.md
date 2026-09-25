@@ -7,14 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # The canonical Python is the workspace venv at ~/dev/tcc-ecosystem/.venv
 # (~/.agentihooks/.venv must NEVER exist — the installer no longer looks there).
-# Always use `uv run` or the venv Python so hooks and tests run against the same packages.
+# Call the venv's binaries directly. It is shared with the other editable repos,
+# so never `uv run --active` / `uv sync --active` against it (venv_guard blocks it):
+# that syncs it to this repo's lock and moves the other repos' packages.
+V=~/dev/tcc-ecosystem/.venv/bin
 
-uv pip install --python ~/dev/tcc-ecosystem/.venv/bin/python -e ".[all]"  # install/update deps
-uv run python -m pytest                                                # run all tests
-uv run python -m pytest tests/test_hook_manager.py                     # single file
-uv run python -m pytest tests/test_config.py::TestSecretsMode -v       # single test
-uv run ruff check .                                                    # lint
-uv run ruff format .                                                   # format
+uv pip install --python $V/python -e ".[all]"                  # install/update deps
+$V/python -m pytest                                            # run all tests
+$V/python -m pytest tests/test_hook_manager.py                 # single file
+$V/python -m pytest tests/test_config.py::TestSecretsMode -v   # single test
+$V/ruff check .                                                # lint
+$V/ruff format .                                               # format
 agentihooks init --profile anton                                       # global install
 ```
 
