@@ -363,3 +363,82 @@ class TestClearState:
 
         clear_session_state("clear-session")
         assert _get_state("clear-session", "bash:npm")["count"] == 0
+
+
+class TestFileToolKeys:
+    def test_file_tools_keyed_per_path(self):
+        from hooks.context.retry_breaker import _compute_operation_key
+
+        assert _compute_operation_key("Write", {"file_path": "/a/b.py"}) == "write:/a/b.py"
+        assert _compute_operation_key("NotebookEdit", {"notebook_path": "/a/n.ipynb"}) == "notebookedit:/a/n.ipynb"
+
+    def test_successful_write_echoing_error_words_is_not_a_failure(self):
+        from hooks.context.retry_breaker import _get_state, _payload_operation_key, on_post_tool_result
+
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/repo/ibkr_bridge.py", "content": "raise ValueError('invalid')"},
+            "tool_response": {
+                "type": "create",
+                "filePath": "/repo/ibkr_bridge.py",
+                "content": "raise ValueError('not found')",
+            },
+            "session_id": "write-fp",
+        }
+        for _ in range(12):
+            on_post_tool_result(payload)
+        assert _get_state("write-fp", _payload_operation_key(payload))["count"] == 0
+
+    def test_subagents_do_not_share_a_counter(self):
+        from hooks.context.retry_breaker import _get_state, _payload_operation_key, on_post_tool_result
+
+        base = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm install"},
+            "tool_response": {"is_error": True, "content": "ENOENT"},
+            "session_id": "shared-parent",
+        }
+        on_post_tool_result({**base, "agent_id": "a1"})
+        on_post_tool_result({**base, "agent_id": "a1"})
+        on_post_tool_result({**base, "agent_id": "a2"})
+        assert _get_state("shared-parent", _payload_operation_key({**base, "agent_id": "a1"}))["count"] == 2
+        assert _get_state("shared-parent", _payload_operation_key({**base, "agent_id": "a2"}))["count"] == 1
+
+
+class TestHardBlockHalfOpen:
+    def test_trial_call_after_block_can_reset(self):
+        from hooks.context.retry_breaker import _get_state, _set_state, check_hard_block, on_post_tool_result
+        from hooks.hook_manager import BlockAction
+
+        _set_state(
+            "half-open",
+            "bash:npm",
+            {"count": 10, "last_error_key": "enoent", "last_error_text": "ENOENT", "last_input": "npm install"},
+        )
+        payload = {"tool_name": "Bash", "tool_input": {"command": "npm install"}, "session_id": "half-open"}
+
+        with pytest.raises(BlockAction):
+            check_hard_block(payload)
+        check_hard_block(payload)
+
+        on_post_tool_result({**payload, "tool_response": {"exitCode": 0, "stdout": "ok"}})
+        assert _get_state("half-open", "bash:npm")["count"] == 0
+
+    def test_trial_failure_blocks_again(self):
+        from hooks.context.retry_breaker import _set_state, check_hard_block, on_post_tool_result
+        from hooks.hook_manager import BlockAction
+
+        _set_state(
+            "half-open-fail",
+            "bash:npm",
+            {"count": 10, "last_error_key": "enoent", "last_error_text": "ENOENT", "last_input": "npm install"},
+        )
+        payload = {"tool_name": "Bash", "tool_input": {"command": "npm install"}, "session_id": "half-open-fail"}
+
+        with pytest.raises(BlockAction):
+            check_hard_block(payload)
+        check_hard_block(payload)
+        with patch.object(_breaker_mod, "_inject_breaker_message"):
+            on_post_tool_result({**payload, "tool_response": {"is_error": True, "content": "ENOENT"}})
+        with pytest.raises(BlockAction):
+            check_hard_block(payload)

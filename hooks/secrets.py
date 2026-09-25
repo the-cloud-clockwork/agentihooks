@@ -11,15 +11,29 @@ Supports tiered pattern sets controlled by ``AGENTIHOOKS_SECRETS_MODE``:
 """
 
 import re
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 
 class _Pattern(NamedTuple):
     name: str
     regex: re.Pattern
+    accept: Callable[[re.Match], bool] | None = None
+
+    def matches(self, text: str) -> list[re.Match]:
+        return [m for m in self.regex.finditer(text) if self.accept is None or self.accept(m)]
 
 
 _NOSECRET_RE = re.compile(r"#\s*nosecret\b", re.IGNORECASE)
+
+# A bare value that is a member access, call or subscript (`settings.x`,
+# `get_secret()`, `Optional[str]`) is code reading a secret, not a literal one.
+_CODE_EXPRESSION_RE = re.compile(r"[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$]|\(|\[)")
+
+
+def _is_literal_secret(match: re.Match) -> bool:
+    bare = match.group("bare")
+    return bare is None or not _CODE_EXPRESSION_RE.match(bare)
+
 
 _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
@@ -48,11 +62,14 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "generic_secret",
-        # Match KEY = VALUE but skip env var references ($VAR) and placeholders (<...> or {...})
+        # Match KEY = VALUE but skip env var references ($VAR), placeholders (<...> or {...}),
+        # comparisons (==, ===), and quoted values under 8 chars such as Terraform time units
         re.compile(
-            r"(?:PASSWORD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)\s*[=:]\s*(?!\$)(?!<)(?!\{)[^\s$<{]{8,}",
+            r"(?:PASSWORD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)\s*(?:=(?!=)|:)\s*"
+            r"""(?:["'](?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))""",
             re.IGNORECASE,
         ),
+        _is_literal_secret,
     ),
 ]
 
@@ -105,7 +122,7 @@ def scan(text: str, *, mode: str | None = None) -> list[str]:
     filtered = "".join(line for line in text.splitlines(keepends=True) if not _NOSECRET_RE.search(line))
     hits: list[str] = []
     for pattern in patterns:
-        if pattern.regex.search(filtered):
+        if pattern.matches(filtered):
             hits.append(pattern.name)
     return hits
 
@@ -124,5 +141,6 @@ def redact(text: str, *, mode: str | None = None) -> str:
 
     patterns = _get_patterns(mode)
     for pattern in patterns:
-        text = pattern.regex.sub(f"[REDACTED:{pattern.name}]", text)
+        for m in reversed(pattern.matches(text)):
+            text = f"{text[: m.start()]}[REDACTED:{pattern.name}]{text[m.end() :]}"
     return text

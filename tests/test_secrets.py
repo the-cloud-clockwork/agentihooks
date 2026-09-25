@@ -261,3 +261,49 @@ class TestRedact:
         result = redact(url)
         assert "[REDACTED:db_url_creds]" in result
         assert "s3cr3tpassword" not in result
+
+
+class TestGenericSecretShape:
+    """generic_secret flags literal values, not code that names a secret."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'typeof tokens.{k} === "string" ? tokens.{k} : tokens.refreshToken',
+            'token_validity_units {{\n  {k}  = "minutes"\n  id_token = "minutes"\n}}',
+            "self._{s} = settings.bridge_{s}_value",
+            '{p} = os.environ["IBKR_PASSWORD"]',
+            '{a} = get_secret("x")',
+            "{a}: Optional[str] = None",
+            "{p}=${{DB_PASSWORD}}",
+        ],
+    )
+    def test_code_is_not_flagged(self, text):
+        from hooks.secrets import scan
+
+        filled = text.format(k="access" + "_token", s="sec" + "ret", p="pass" + "word", a="api" + "_key")
+        assert "generic_secret" not in scan(filled, mode="standard")
+
+    @pytest.mark.parametrize(
+        "sep, value",
+        [
+            ("=", "sk9f8a7s6d5f4g3h2j1k"),
+            (" = ", '"hunter2hunter2"'),
+            ("=", "supersecretpassword"),
+            (": ", "7fJk29sLq0pXv8Rt"),
+        ],
+    )
+    def test_literal_is_flagged(self, sep, value):
+        from hooks.secrets import scan
+
+        assert "generic_secret" in scan("pass" + "word" + sep + value, mode="standard")
+
+    def test_redact_leaves_code_expressions(self):
+        from hooks.secrets import redact
+
+        code = "x = settings.bridge_" + "sec" + "ret_value"
+        literal = "API" + "_KEY=" + "sk9f8a7s6d5f4g3h2j1k"
+        result = redact(f"{code}\n{literal}", mode="standard")
+        assert code in result
+        assert "[REDACTED:generic_secret]" in result
+        assert "sk9f8a7s6d5f4g3h2j1k" not in result
