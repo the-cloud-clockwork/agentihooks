@@ -21,7 +21,7 @@ Claude Code agents are powerful. Without boundaries, they can push to production
 
 - **Controls toggle (bypass mode)** — operator phrase `disable controls` flips a session-wide bypass that lifts every CI-manifesto signal gate at once: branch creation, PR creation, and force-push to non-main branches. Spawned subagents inherit it. HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced. Restored by `enable controls` or SessionEnd. See [Guardrail 9](#guardrail-9-controls-toggle-bypass-mode).
 - **Two-tier secrets** — code-file writes still hard-block; inline Bash args (no file redirect) scan + log + note only. Lets agents pass a token to `curl -H` without breaking the workflow, while keeping durable storage locked.
-- **Session-scoped PR signals** — one signal phrase from the operator unlocks PR creation for the full session instead of expiring per-turn. PR has a 3-per-session counter.
+- **Session-scoped PR signals** — a PR into `dev` needs no signal. Any other base needs one signal phrase from the operator, which unlocks PR creation for the full session, with a 3-per-session counter. `main`, `master` and `v1` are protected: bypass mode does not open PRs or merges into them.
 - **Subagent signal isolation** — subagents cannot self-arm PR signals. Only top-level operator sessions can.
 - **`gh pr create --base main` required** — PRs to branches other than main are now blocked. Dev work pushes directly, no PR needed.
 - **Dependency banner** — every `pip/npm/cargo/...` install emits a visible banner. Never blocks — surfaces supply chain additions for operator audit.
@@ -360,8 +360,7 @@ A session-level escape hatch the operator activates by saying **`disable control
 While bypass mode is ACTIVE:
 
 - Branch creation (CI Manifesto §13) — `git checkout -b`, `git switch -c`, `git branch <name>`
-- PR creation (§14) — `gh pr create` with no per-session counter cap
-- Release-gate merges (§4) — `gh pr merge` to main/master
+- PR creation (§14) into non-protected bases — `gh pr create` with no per-session counter cap (PRs into `main`/`master`/`v1` still need the operator's PR signal)
 - Release workflow trigger — `gh workflow run release.yml`
 - Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
 - Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`

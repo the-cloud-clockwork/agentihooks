@@ -175,14 +175,29 @@ class TestPRBaseGuard:
     def test_pr_base_dev_allowed(self):
         self._assert_allowed_with_signal("gh pr create --base dev --head feat --fill")
 
-    def test_pr_no_signal_blocked(self):
+    @pytest.mark.parametrize("base", ["main", "master", "v1", "feat-x"])
+    def test_pr_no_signal_blocked(self, base):
         from unittest.mock import patch
 
         from hooks.hook_manager import BlockAction
 
-        with patch("hooks.context.branch_guard._has_pr_signal", return_value=False):
+        with (
+            patch("hooks.context.branch_guard._has_pr_signal", return_value=False),
+            patch("hooks.context.controls_toggle.is_controls_disabled", return_value=False),
+        ):
             with pytest.raises(BlockAction):
-                self._check("gh pr create --base dev")
+                self._check(f"gh pr create --base {base} --fill")
+
+    def test_pr_into_dev_needs_no_signal_or_counter(self):
+        from unittest.mock import patch
+
+        with (
+            patch("hooks.context.branch_guard._has_pr_signal", return_value=False),
+            patch("hooks.context.branch_guard._get_pr_counter", return_value=99),
+            patch("hooks.context.controls_toggle.is_controls_disabled", return_value=False),
+        ):
+            self._check("gh pr create --base dev --fill")
+            self._check("gh pr create --base=dev --fill")
 
 
 class TestPrSignalResetsCounter:
