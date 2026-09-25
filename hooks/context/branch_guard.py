@@ -184,13 +184,6 @@ def clear_pr_counter(session_id: str) -> None:
 
 
 def _has_pr_signal(session_id: str) -> bool:
-    try:
-        from hooks.context.controls_toggle import is_controls_disabled
-
-        if is_controls_disabled(session_id):
-            return True
-    except Exception:
-        pass
     if not session_id:
         return False
     r = get_redis()

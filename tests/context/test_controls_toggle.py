@@ -139,8 +139,8 @@ class TestBranchGuardIntegration:
         from hooks.hook_manager import BlockAction
 
         set_controls_disabled("test")
-        with patch("hooks.context.branch_guard._has_pr_signal", return_value=False), pytest.raises(BlockAction):
-            self._check(f"gh pr create --base {base} --title t --body b")
+        with pytest.raises(BlockAction):
+            self._check(f"gh pr create --base {base} --title t --body b", sid=f"no-signal-{base}")
 
     def test_pr_creation_unlocked_under_bypass(self):
         # Bypass mode unlocks branch and PR creation; the HARD FLOOR does not move.
