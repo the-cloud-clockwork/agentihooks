@@ -2,6 +2,7 @@
 title: "Claude Account Load Balancing"
 parent: The Four Pillars
 nav_order: 7
+permalink: /docs/pillars/load-balancing/
 ---
 
 # Claude Account Load Balancing
