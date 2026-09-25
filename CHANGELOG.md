@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-25
+
+### Added
+
+- Claude account load balancing. `agenti` and `agentihooks claude-terminal` skip
+  accounts already running `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 2) live
+  sessions while another routable account has room; when every account is full the
+  least-loaded one takes the session (`placement=overflow`). Live sessions are
+  counted from `/proc` by the one `AH_CC_TOKEN_<slug>` name each routed session
+  carries. `agentihooks balance` shows `SESSIONS n/cap` per account.
+- Quota policy. When a session's own quota reaches 98% of the week or 99% of the
+  5-hour window, the hook computes one directive from the session's quota, the
+  router cache and the live session counts: hand the task to a new terminal on
+  another account, wait for the 5-hour reset (a cron job; other tools blocked), or
+  stop (tools blocked). The operator typing "keep pushing" continues to 100%.
+  Thresholds are `AGENTIHOOKS_HANDOFF_WEEK_PCT`, `AGENTIHOOKS_HANDOFF_5H_PCT`,
+  `AGENTIHOOKS_HANDOFF_MIN_LEFT`, `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT`;
+  `QUOTA_POLICY_ENABLED=false` turns it off.
+- `agentihooks claude-terminal --handoff`: routes to any account but this
+  session's, never falls back to bare Claude, waits for the new session's route
+  report, and marks this session handed off (its tools are then blocked). Every
+  launch now reports `route_status` and `account`.
+- Venv guard: `uv run --active` / `uv sync --active` is blocked when
+  `$VIRTUAL_ENV` is not the project's own `.venv`, so a shared workspace venv is
+  never synced to one project's lockfile.
+- Docs: "Claude Account Load Balancing" page; `agenti`, `claude-terminal` and
+  `balance` in the CLI reference; the toolbelt rule gains Conditions and Smart
+  load balancing sections.
+
+### Changed
+
+- PR gate: `gh pr create --base dev` needs no operator signal and no longer counts
+  toward the per-session limit. PRs into `main`, `master` or `v1` still need the
+  operator's PR phrase, and bypass mode no longer lifts it; `gh pr merge` into
+  those branches needs a release signal even under bypass.
+- The session registry records the real agent process PID (it recorded the hook's
+  short-lived shell, so every entry looked dead) and the account; subagents no
+  longer supersede their parent session; every registry write is locked.
+
+### Fixed
+
+- Retry breaker and tool memory: successful `Write`/`Edit`/`MultiEdit`/
+  `NotebookEdit`/`Read` responses echo file content and were counted as failures
+  when the file mentioned "error", "not found" or "timeout". They now count only
+  an explicit error flag. Breaker keys are per file path and per subagent, and the
+  hard block lets one trial call through after each block instead of blocking
+  until the TTL expires.
+- Copilot `resultType: failure` counts as an error; `denied` / `rejected` calls
+  (never ran) do not.
+- `generic_secret` no longer flags comparisons (`==`, `===`), code values
+  (`settings.x`, `get_secret()`, `Optional[str]`) or quoted values under 8
+  characters such as Terraform `token_validity_units`.
+- Version guard allows creating a manifest that does not exist yet.
+
 ## [2.14.0] - 2026-09-24
 
 ### Added
