@@ -203,6 +203,22 @@ See [Broadcast System](../hooks/broadcast.md) for full architecture and CLI docu
 
 ---
 
+## Account Load Balancing
+
+See [Claude Account Load Balancing](../pillars/load-balancing.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AH_CC_TOKEN_<slug>` | — | One Claude subscription OAuth token per account |
+| `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` | `2` | Live sessions per account before `agenti` routes to the next account |
+| `QUOTA_POLICY_ENABLED` | `true` | Hand off / wait / stop when a session's own quota runs out |
+| `AGENTIHOOKS_HANDOFF_WEEK_PCT` | `98` | 7-day used % that triggers the quota policy |
+| `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
+| `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
+| `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |

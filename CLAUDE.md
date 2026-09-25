@@ -50,7 +50,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 | **Identity** | `scripts/install.py`, `profiles/`, `settings.base.json`, `scripts/targets/` | Profile system, chaining, two-axis model, bundle merge, install targets |
 | **Guardrails** | `hooks/secrets.py`, `hooks/context/retry_breaker.py`, `hooks/context/branch_guard.py`, `hooks/context/prod_lockdown.py`, `hooks/context/ci_manifesto.py`, `hooks/context/dep_banner.py`, `hooks/context/_strip.py`, `hooks/context/version_guard.py`, `hooks/context/claude_md_sanity.py` | Two-tier secrets, retry breaker, branch/PR gating, prod lockdown, CI manifesto signal parsing, dep install banner, shared command stripping, version guard, CLAUDE.md bloat guard |
 | **Context Intelligence** | `hooks/context/preprocessor.py`, `hooks/context/brain_adapter.py`, `hooks/context/rules_refresh.py`, `hooks/tool_memory.py`, `hooks/context/conditions.py`, `hooks/context/tool_matcher.py` | Token compression, brain injection, one-shot rule refresh to running sessions, tool memory, bundle conditions and the tool matcher they share with enforcements |
-| **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py` | Real-time messaging with channel-based targeting, brain adapter |
+| **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py`, `scripts/claude_quota_balancer.py`, `scripts/claude_terminal.py`, `hooks/context/account_sessions.py`, `hooks/context/quota_policy.py` | Real-time messaging with channel-based targeting, brain adapter, Claude account load balancing and the quota handoff policy |
 
 ## Architecture
 
@@ -120,6 +120,19 @@ File-based pub/sub at `~/.agentihooks/broadcast.json`. Sessions auto-register/de
 ### Brain adapter
 
 `hooks/context/brain_adapter.py` bridges brain-api `/feed` or the legacy file source to the broadcast channel system. SessionStart always reconciles the feed; PreToolUse refreshes it every `BRAIN_REFRESH_TOOL_CALLS` tool calls (default 20) and injects new or restored entries into that tool call. Hot arcs default to 10 and each entry remains capped by `BRAIN_PAYLOAD_MAX_BYTES` (default 1536). Source failures preserve the last-known-good channel.
+
+### Claude account load balancing
+
+Each subscription is an `AH_CC_TOKEN_<slug>`; a routed session keeps exactly one,
+so the variable **name** identifies its account (never read the value out).
+`agenti` (`cmd_claude`) picks the most routing left among accounts below
+`AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` live sessions, counted from `/proc` by
+`hooks/context/account_sessions.py`. `hooks/context/quota_policy.py` is pure code
+deciding HANDOFF / WAIT / STOP / PUSH from the session's statusline quota and the
+router cache; PreToolUse blocks on STOP and WAIT. `claude-terminal --handoff` runs
+the handoff and marks the old session `handed_off`. Register the real agent PID
+(`agent_pid()`), never `os.getppid()` — that is the hook's short-lived shell.
+Docs: `docs/pillars/load-balancing.md`.
 
 ### Testing patterns
 
