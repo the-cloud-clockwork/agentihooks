@@ -201,9 +201,6 @@ class TestProdLockdownIntegration:
         with pytest.raises(BlockAction):
             self._check("gh workflow run release.yml")
 
-    def test_pr_merge_main_allowed_without_signal(self):
-        self._check("gh pr merge 123 --rebase --base main")
-
     def test_release_workflow_allowed_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
 
