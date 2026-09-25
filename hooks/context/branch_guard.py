@@ -234,7 +234,7 @@ _BLOCKED_PATTERNS = [
     # Push to main/master (direct push bypasses PR workflow)
     (
         re.compile(r"git\s+push\s+\S*\s+(origin\s+)?(HEAD:)?(?<![\w-])(main|master)(?![/\w-])"),
-        "Pushing directly to main/master is blocked. Snapshot main via a PR: gh pr create --base main.",
+        "Pushing directly to main/master is blocked. Reach main through a PR: gh pr create --base main.",
     ),
     # Merge into main/master (direct merge bypasses PR workflow). The `/`
     # in the lookbehind exempts a remote-tracking ref used as the merge
@@ -358,7 +358,7 @@ def check_branch_guard(payload: dict) -> None:
             raise BlockAction(
                 "BLOCKED: gh pr create needs an explicit --base.\n"
                 "A bare `gh pr create` targets the default branch implicitly.\n"
-                "Use --base main for a snapshot PR, or --base dev for a feature PR."
+                "Use --base main for a release PR, or --base dev for a feature PR."
             )
         base = base_match.group(1).strip("'\"")
         if base == "dev":

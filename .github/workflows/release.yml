@@ -16,9 +16,9 @@ on:
         type: choice
         options: [patch, minor, major]
       publish_pypi:
-        description: "Publish to PyPI immediately after creating the release"
+        description: "Publish to PyPI from the new tag right away. The release dance leaves this off and publishes from main after the dev->main PR merges"
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
