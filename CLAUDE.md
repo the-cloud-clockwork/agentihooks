@@ -24,22 +24,28 @@ agentihooks init --profile anton                                       # global 
 `ruff check` and `ruff format --check` fail independently — CI runs both, so run
 both. CI also runs the whole suite, not `-m unit`, which collects under half of it.
 
-## Release & snapshot ritual
+## Release dance
 
-The CI manifesto covers the merge method into `main`. These three are specific to
-this repo and each one has already cost a broken snapshot:
+agentihooks is open source; it has releases, not snapshots. "Do the release dance"
+means, in order:
 
-1. **Release before cutting the snapshot PR.** `release.yml` bumps the version on
-   `dev`, so a PR cut first leaves `main` declaring the previous version while
-   shipping the new code.
-2. **After a squash-merge into `main`, merge `origin/main` back into `dev`
-   immediately.** The squash gives the two branches identical trees but no shared
-   recent history, so the *next* snapshot PR diffs from the previous merge base and
-   replays every file as a phantom conflict. The merge-back changes history only —
-   verify with `git rev-parse HEAD^{tree}` before and after, which must match.
-3. **`git fetch` updates `origin/dev`, not your local branch.** Releases land on
-   `dev` via CI, so a local branch that looks current is usually behind. Merging
-   from a stale local `dev` silently reverts whatever CI committed.
+1. **Release notes** — a `CHANGELOG.md` entry for the new version, PR'd into `dev`.
+2. **Release** — `gh workflow run release.yml --ref dev -f bump=patch|minor|major`
+   bumps `pyproject.toml` on `dev`, tags `vX.Y.Z` and creates the GitHub release
+   with generated notes. `publish_pypi` stays off.
+3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2 so `main`
+   declares the new version.
+4. **Merge the PR** — `gh pr merge --rebase` (`--squash` only when GitHub cannot
+   rebase; then merge `origin/main` back into `dev` at once and check that
+   `git rev-parse HEAD^{tree}` is unchanged, or the next PR replays every file as a
+   phantom conflict).
+5. **Publish to PyPI from `main`** — `gh workflow run publish-pypi.yml --ref main`,
+   then verify `https://pypi.org/pypi/agentihooks/X.Y.Z/json` answers 200 and a
+   clean install reports the version.
+
+The phrase "release dance" is itself the operator's PR and release signal, so
+steps 3 and 4 pass the `main` gate. `git fetch` updates `origin/dev`, not your
+local branch: the release commit lands on `dev` from CI, so pull before any merge.
 
 ## The Four Pillars
 
