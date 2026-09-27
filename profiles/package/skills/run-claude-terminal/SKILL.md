@@ -23,7 +23,7 @@ terminal command by hand.
 | a directory ("in ~/dev/foo", "at /repo") | `--dir <path>` — absolute, `~/…`, or relative to `$RUN_CLAUDE_BASE_DIR` → `~/dev` → `$HOME` |
 | a session or tab name | `--name <name>` — default `s-YYMMDD-HHMMSS` |
 | an opening prompt or task | `--prompt-file <file>` (see below) |
-| a model ("use opus", "on fable") | `-- --model <name>` |
+| a model ("use opus", "on fable") | `-- --model opus` or `-- --model fable` — the alias, never a versioned id; Claude resolves it to the latest release |
 | resume a session | `-- --resume <session-id>` |
 | fork a session | `-- --resume <session-id> --fork-session` |
 | any other Claude flag | after `--`, unchanged |
