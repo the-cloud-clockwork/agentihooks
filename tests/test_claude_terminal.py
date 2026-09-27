@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from scripts import claude_terminal
@@ -178,6 +179,31 @@ def test_headless_linux_fails_clearly(monkeypatch, tmp_path, capsys):
 
     assert rc == 2
     assert "no DISPLAY or WAYLAND_DISPLAY" in capsys.readouterr().err
+
+
+def test_launcher_in_a_bare_login_shell_sees_the_accounts_agentienv_loads(monkeypatch, tmp_path):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    (state / ".env").write_text("AH_CC_TOKEN_alpha=tok-a\nAFTER=$UNSET_BY_DESIGN\n")
+    (state / "accounts.env").write_text("AH_CC_TOKEN_beta=tok-b\n")
+    (tmp_path / ".env").write_text("AH_CC_TOKEN_gamma=tok-g\n")
+    seen = tmp_path / "seen"
+    fake = tmp_path / "agentihooks"
+    fake.write_text(f"#!/bin/sh\nenv | grep -c '^AH_CC_TOKEN_' > {seen}\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(claude_terminal.shutil, "which", lambda name: str(fake) if name == "agentihooks" else None)
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "SHELL": "/bin/true"}
+
+    launcher, _ = claude_terminal._write_launcher(tmp_path, "bare", "", [], environ)
+    subprocess.run(
+        ["bash", "-lc", str(launcher)],
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        stdin=subprocess.DEVNULL,
+        timeout=20,
+        check=False,
+    )
+
+    assert seen.read_text().strip() == "3"
 
 
 def test_packaged_skill_exists_and_routes_through_agentihooks():
