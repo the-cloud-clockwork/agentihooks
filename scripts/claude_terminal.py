@@ -103,15 +103,8 @@ def _write_launcher(
         *([str(prompt_file)] if prompt_file is not None else []),
     ]
     shell = environ.get("SHELL") or "/bin/bash"
-    state = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
     launcher.write_text(
         "#!/usr/bin/env bash\n"
-        # The new terminal runs this in a non-interactive shell, where ~/.bashrc's agentienv never loads the accounts.
-        "set -a\n"
-        f'for f in {shlex.quote(str(state / ".env"))} {shlex.quote(str(state))}/*.env "$HOME/.env"; do\n'
-        '  [[ -f "$f" ]] && . "$f" 2>/dev/null\n'
-        "done\n"
-        "set +a\n"
         "set -u\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
@@ -174,7 +167,8 @@ def _launch_command(
             *(["-d", distro] if distro else []),
             "--",
             "bash",
-            "-lc",
+            # Interactive, so ~/.bashrc exports the AH_CC_TOKEN_* accounts that --route resolves.
+            "-lic",
             str(launcher),
         ]
     if system == "Linux":
