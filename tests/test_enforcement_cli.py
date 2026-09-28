@@ -97,6 +97,33 @@ def test_set_rejects_invalid_matcher(tmp_path, monkeypatch, capsys):
     assert "invalid characters" in capsys.readouterr().err
 
 
+def test_set_rule_resolves_path_and_lists_metadata(repo, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+    rule = repo / "rules" / "deploy.md"
+    rule.parent.mkdir()
+    rule.write_text("# Deploy rule\n\nUse GitOps.\n")
+
+    _run(monkeypatch, "enforcement", "set", "--local", "--type", "rule", "--path", "rules/deploy.md")
+    created = capsys.readouterr().out
+    assert f"rule={rule.resolve()}" in created
+
+    entry = json.loads((repo / ".agentihooks" / "enforcements.json").read_text())["enforcements"][0]
+    assert entry["type"] == "rule"
+    assert entry["path"] == str(rule.resolve())
+    assert "message" not in entry
+
+    _run(monkeypatch, "enforcement", "list", "--local")
+    listed = capsys.readouterr().out
+    assert "Type: rule" in listed
+    assert f"Path: {rule.resolve()}" in listed
+
+
+def test_set_rule_requires_path(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, "enforcement", "set", "--type", "rule")
+    assert "--path is required" in capsys.readouterr().err
+
+
 def test_conditions_list_shows_layers_and_matches(tmp_path, monkeypatch, capsys):
     bundle = tmp_path / "bundle"
     conditions_dir = bundle / ".claude" / "conditions"

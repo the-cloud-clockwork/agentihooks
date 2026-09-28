@@ -250,6 +250,7 @@ Manage recurring reminders injected every N tool calls. Global runtime entries l
 agentihooks enforcement set "run tests before committing" 5
 agentihooks enforcement set --local "read the operator directory" 10
 agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
+agentihooks enforcement set --type rule --path rules/deploy.md
 agentihooks enforcement list [--local]
 agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 ```
@@ -259,6 +260,11 @@ agentihooks enforcement clear [--local] [--id <id> | --tag <tag>]
 During injection, project-local entries are added to bundle, profile, and runtime entries. A matching local ID has highest precedence. The MCP tools take the same scope as `local=true`, resolved from the session's project directory (or an explicit `cwd`).
 
 `--matcher` limits an entry to matching tool calls (`bash`, `bash.git`, `edit+write`, `mcp`, `mcp__<server>`); its cadence then counts matching calls only. Grammar: [Conditions](../hooks/conditions.md#matcher-grammar).
+
+`--type rule --path <file>` stores the canonical absolute path and reads the
+complete current UTF-8 file on every injection. Relative CLI paths resolve from
+the current directory. The MCP `enforcement_set` surface accepts the same `type`
+and `path` fields but requires an absolute path.
 
 ---
 

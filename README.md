@@ -206,6 +206,7 @@ agentihooks enforcement set --local "project-only reminder" 10
 agentihooks enforcement list --local
 agentihooks enforcement clear --local
 agentihooks enforcement set "cluster writes go through GitOps" 1 --matcher bash.kubectl
+agentihooks enforcement set --type rule --path rules/deploy.md
 
 # Conditions: what fires for a call
 agentihooks conditions list --tool Bash --command "git push"

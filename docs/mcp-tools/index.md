@@ -14,7 +14,7 @@ The AgentiHooks MCP server (`agentihooks`) exposes tools across **3 categories**
 |----------|-------|
 | **Channels** | `channel_publish`, `channel_list`, `channel_acknowledge`, `channel_clear`, `brain_refresh`, `brain_status` — fleet-command broadcast + brain adapter |
 | **Conditions** | `condition_set`, `condition_clear` (only in a turn whose typed prompt asks for it), `condition_list`, `condition_show` — see [Conditions](../hooks/conditions.md#creating-conditions-from-a-session) |
-| **Enforcement** | `enforcement_set`, `enforcement_list`, `enforcement_clear` — doctrine reminder banners injected at PreToolUse; `enforcement_set(matcher=...)` limits one to matching tool calls; `local=true` on set/list/clear scopes it to the session's repository |
+| **Enforcement** | `enforcement_set`, `enforcement_list`, `enforcement_clear` — doctrine banners injected at PreToolUse; `type="rule"` with an absolute `path` injects the complete current file; `matcher` limits one to matching tool calls; `local=true` scopes it to the session's repository |
 
 > Earlier releases shipped generic cloud-utility categories (aws, email, storage, database, compute, observability, utilities). These were removed; only the three agentihooks-native categories above ship now. Releases before 2.14 registered the server as `hooks-utils`; `agentihooks init` replaces that entry.
 
