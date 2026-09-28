@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-09-28
+
+### Fixed
+
+- Republished the file-backed enforcement release after PyPI's simple index
+  omitted `2.16.0`, preventing package-name installation through pip.
+
 ## [2.16.0] - 2026-09-28
 
 ### Added
