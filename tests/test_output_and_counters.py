@@ -184,3 +184,17 @@ class TestMCPLocalScope:
         monkeypatch.chdir(tmp_path)
         result = json.loads(mcp_tools["enforcement_set"]("x", 2, local=True))
         assert result["success"] is False and "Git project" in result["error"]
+
+    def test_rule_set_requires_absolute_path_and_stores_metadata(self, mcp_tools, tmp_path):
+        rule = tmp_path / "rule.md"
+        rule.write_text("# Complete rule\n")
+        relative = json.loads(mcp_tools["enforcement_set"](type="rule", path="rule.md"))
+        assert relative == {"success": False, "error": "MCP rule path must be absolute"}
+
+        created = json.loads(mcp_tools["enforcement_set"](type="rule", path=str(rule), cadence=7))
+        assert created["success"] is True
+        assert created["type"] == "rule"
+        assert created["path"] == str(rule)
+        entry = json.loads(enforcement._store_path().read_text())["enforcements"][-1]
+        assert entry["type"] == "rule"
+        assert entry["path"] == str(rule)

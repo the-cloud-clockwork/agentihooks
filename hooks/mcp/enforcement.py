@@ -8,6 +8,7 @@ Mirrors the channel_* tool surface but for the enforcement system:
 
 import json
 import os
+from pathlib import Path
 
 from hooks.common import log
 
@@ -20,7 +21,14 @@ def _scope_cwd(cwd: str) -> str:
 def register(mcp):
     @mcp.tool()
     def enforcement_set(
-        message: str, cadence: int, tag: str = "", matcher: str = "", local: bool = False, cwd: str = ""
+        message: str = "",
+        cadence: int = 5,
+        tag: str = "",
+        matcher: str = "",
+        local: bool = False,
+        cwd: str = "",
+        type: str = "message",
+        path: str = "",
     ) -> str:
         """Register a drumbeat enforcement that re-injects every N tool calls.
 
@@ -31,7 +39,7 @@ def register(mcp):
         re-injection only adds context tokens, no external API calls.
 
         Args:
-            message: Reminder text to inject (e.g. "patches forbidden — code only")
+            message: Reminder text to inject for type=message.
             cadence: Re-inject every N tool calls. Required, must be >= 1.
             tag: Optional tag for grouping (lets you clear-by-tag later).
             matcher: Optional tool matcher; the enforcement is then delivered only on
@@ -40,15 +48,29 @@ def register(mcp):
                 bash.<cli> (e.g. bash.kubectl); join alternatives with "+".
             local: Store it in the current repository only (see above).
             cwd: Directory inside the target repository; defaults to the session's project directory.
+            type: Enforcement type: message (default) or rule.
+            path: Absolute UTF-8 rule file path required for type=rule. Its complete
+                current contents are read on every injection.
 
         Returns:
             JSON with success status and enforcement_id.
         """
         try:
-            from hooks.context.enforcement import add_enforcement
+            from hooks.context.enforcement import add_enforcement, resolve_rule_path
 
             if not isinstance(cadence, int) or cadence < 1:
                 return json.dumps({"success": False, "error": "cadence must be int >= 1"})
+            if type not in {"message", "rule"}:
+                return json.dumps({"success": False, "error": "type must be message or rule"})
+            rule_path = None
+            if type == "rule":
+                if not path:
+                    return json.dumps({"success": False, "error": "path is required for type=rule"})
+                if not Path(path).expanduser().is_absolute():
+                    return json.dumps({"success": False, "error": "MCP rule path must be absolute"})
+                rule_path = resolve_rule_path(path)
+            elif not message.strip():
+                return json.dumps({"success": False, "error": "message is required for type=message"})
             if matcher:
                 from hooks.context.tool_matcher import parse
 
@@ -63,6 +85,8 @@ def register(mcp):
                 matcher=matcher or None,
                 local=local,
                 cwd=_scope_cwd(cwd) if local else None,
+                enforcement_type=type,
+                path=rule_path,
             )
             if enforcement_id:
                 return json.dumps(
@@ -72,10 +96,12 @@ def register(mcp):
                         "cadence": cadence,
                         "tag": tag or None,
                         "matcher": matcher or None,
+                        "type": type,
+                        "path": str(rule_path) if rule_path else None,
                         "scope": "local" if local else "global",
                     }
                 )
-            return json.dumps({"success": False, "error": "Empty message or invalid cadence"})
+            return json.dumps({"success": False, "error": "Invalid enforcement"})
         except Exception as e:
             log("MCP enforcement_set failed", {"error": str(e)})
             return json.dumps({"success": False, "error": str(e)})

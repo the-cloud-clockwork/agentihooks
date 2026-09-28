@@ -249,9 +249,15 @@ def add_enforcement(
     local: bool = False,
     cwd: str | Path | None = None,
     matcher: str | None = None,
+    enforcement_type: str = "message",
+    path: str | Path | None = None,
 ) -> str | None:
-    if not message or not message.strip():
+    if enforcement_type not in {"message", "rule"}:
         return None
+    if enforcement_type == "message" and (not message or not message.strip()):
+        return None
+    if enforcement_type == "rule":
+        path = resolve_rule_path(path)
     if not isinstance(cadence, int) or cadence < 1:
         return None
     if matcher:
@@ -262,11 +268,15 @@ def add_enforcement(
     enforcement_id = uuid.uuid4().hex[:8]
     entry = {
         "id": enforcement_id,
-        "message": message.strip(),
+        "type": enforcement_type,
         "cadence": cadence,
         "tag": tag or "",
         "created_at": _now_iso(),
     }
+    if enforcement_type == "rule":
+        entry["path"] = str(path)
+    else:
+        entry["message"] = message.strip()
     if matcher:
         entry["matcher"] = matcher
     store = _local_store_path(cwd, create_parent=True) if local else _store_path()
@@ -274,6 +284,31 @@ def add_enforcement(
     entries.append(entry)
     _save_store(entries, store)
     return enforcement_id
+
+
+def resolve_rule_path(path: str | Path | None, cwd: str | Path | None = None) -> Path:
+    if path is None or not str(path).strip():
+        raise ValueError("rule path is required")
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path(cwd or Path.cwd()) / candidate
+    try:
+        candidate = candidate.resolve(strict=True)
+    except OSError as e:
+        raise ValueError(f"rule file does not exist: {candidate}") from e
+    if not candidate.is_file():
+        raise ValueError(f"rule path is not a file: {candidate}")
+    from hooks.context.credential_guard import sensitive_kind
+
+    if sensitive_kind(str(candidate)):
+        raise ValueError(f"credential files cannot be enforcement rules: {candidate}")
+    try:
+        candidate.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"rule file is not UTF-8 text: {candidate}") from e
+    except OSError as e:
+        raise ValueError(f"rule file cannot be read: {candidate}") from e
+    return candidate
 
 
 def list_enforcements(*, local: bool = False, cwd: str | Path | None = None) -> list[dict]:
@@ -444,7 +479,17 @@ def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
 
 
 def format_enforcement_banner(msg: dict) -> str:
+    enforcement_type = msg.get("type", "message")
     message = msg.get("message", "")
+    if enforcement_type == "rule":
+        try:
+            path = resolve_rule_path(msg.get("path"))
+            message = path.read_text(encoding="utf-8")
+        except (ValueError, OSError, UnicodeDecodeError) as e:
+            from hooks.common import log
+
+            log("rule enforcement file unavailable", {"id": msg.get("id"), "error": str(e)})
+            message = f"RULE FILE UNAVAILABLE: {e}"
     tag = msg.get("tag") or ""
     enforcement_id = msg.get("id", "")
     cadence = msg.get("cadence", "")
@@ -455,6 +500,8 @@ def format_enforcement_banner(msg: dict) -> str:
     ]
     if msg.get("matcher"):
         lines.append(f"Matcher: {msg['matcher']}")
+    if enforcement_type == "rule":
+        lines.extend(["Type: rule", f"Path: {msg.get('path', '')}"])
     if tag:
         lines.append(f"Tag: {tag}")
     lines.extend([message, "=" * 30])

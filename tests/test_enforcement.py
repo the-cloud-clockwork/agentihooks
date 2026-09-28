@@ -60,6 +60,7 @@ class TestCRUD:
         entries = list_enforcements()
         assert len(entries) == 1
         assert entries[0]["message"] == "no patches"
+        assert entries[0]["type"] == "message"
         assert entries[0]["cadence"] == 5
         assert entries[0]["id"] == eid
 
@@ -296,6 +297,33 @@ class TestBannerFormat:
         banner = format_enforcement_banner(msg)
         assert "Tag:" not in banner
 
+    def test_rule_banner_reads_complete_current_file(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement, format_enforcement_banner, list_enforcements
+
+        rule = tmp_path / "rule.md"
+        rule.write_text("# Rule\n\nFirst version.\n")
+        enforcement_id = add_enforcement("", 4, enforcement_type="rule", path=rule)
+        entry = list_enforcements()[0]
+        assert entry["id"] == enforcement_id
+        assert entry["type"] == "rule"
+        assert entry["path"] == str(rule.resolve())
+        assert "# Rule\n\nFirst version.\n" in format_enforcement_banner(entry)
+
+        rule.write_text("# Rule\n\nSecond version.\nFull file.\n")
+        banner = format_enforcement_banner(entry)
+        assert "Second version.\nFull file." in banner
+        assert "First version." not in banner
+
+    def test_rule_rejects_missing_and_credential_paths(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement
+
+        with pytest.raises(ValueError, match="does not exist"):
+            add_enforcement("", 5, enforcement_type="rule", path=tmp_path / "missing.md")
+        credential = tmp_path / ".env"
+        credential.write_text("EXAMPLE=placeholder")
+        with pytest.raises(ValueError, match="credential files"):
+            add_enforcement("", 5, enforcement_type="rule", path=credential)
+
 
 class TestThreeSourceMerge:
     def test_bundle_only(self, bundle_dir):
@@ -457,6 +485,7 @@ class TestLocalEnforcement:
         assert entries == [
             {
                 "id": enforcement_id,
+                "type": "message",
                 "message": "project rule",
                 "cadence": 10,
                 "tag": "canary",

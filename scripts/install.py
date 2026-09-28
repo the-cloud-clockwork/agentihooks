@@ -5924,15 +5924,20 @@ def _print_enforcements(entries: list[dict]) -> None:
         cadence = entry.get("cadence", "?")
         tag = entry.get("tag", "") or "-"
         created_at = entry.get("created_at", "")
+        enforcement_type = entry.get("type", "message")
         message = str(entry.get("message", ""))
         print(f"\n[{index}/{len(entries)}] {source}")
         print(f"  ID: {enforcement_id}")
         print(f"  Cadence: every {cadence} tool calls")
+        print(f"  Type: {enforcement_type}")
         if entry.get("matcher"):
             print(f"  Matcher: {entry['matcher']}")
         print(f"  Tag: {tag}")
         if created_at:
             print(f"  Created: {created_at}")
+        if enforcement_type == "rule":
+            print(f"  Path: {entry.get('path', '')}")
+            continue
         print("  Message:")
         for line in textwrap.wrap(
             message,
@@ -5988,23 +5993,45 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
 
     if action == "set":
         words = getattr(args, "enf_args", None) or []
-        if not words:
-            print(
-                'Error: enforcement set requires a message. Example: agentihooks enforcement set "patches forbidden"',
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        # Last token is cadence ONLY if it's a positive integer; otherwise
-        # treat the whole input as the message and use default cadence.
+        enforcement_type = getattr(args, "enforcement_type", "message")
+        path_arg = getattr(args, "path", "") or ""
         cadence = 5
-        if len(words) >= 2 and words[-1].isdigit() and int(words[-1]) >= 1:
-            cadence = int(words[-1])
-            message = " ".join(words[:-1]).strip()
+        rule_path = None
+        if enforcement_type == "rule":
+            if len(words) == 1 and words[0].isdigit() and int(words[0]) >= 1:
+                cadence = int(words[0])
+            elif words:
+                print("Error: type=rule takes --path and an optional cadence, not a message.", file=sys.stderr)
+                sys.exit(1)
+            if not path_arg:
+                print("Error: --path is required for type=rule.", file=sys.stderr)
+                sys.exit(1)
+            from hooks.context.enforcement import resolve_rule_path
+
+            try:
+                rule_path = resolve_rule_path(path_arg, Path.cwd())
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+            message = ""
         else:
-            message = " ".join(words).strip()
-        if not message:
-            print("Error: message is required.", file=sys.stderr)
-            sys.exit(1)
+            if path_arg:
+                print("Error: --path requires --type rule.", file=sys.stderr)
+                sys.exit(1)
+            if not words:
+                print(
+                    'Error: enforcement set requires a message. Example: agentihooks enforcement set "patches forbidden"',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if len(words) >= 2 and words[-1].isdigit() and int(words[-1]) >= 1:
+                cadence = int(words[-1])
+                message = " ".join(words[:-1]).strip()
+            else:
+                message = " ".join(words).strip()
+            if not message:
+                print("Error: message is required.", file=sys.stderr)
+                sys.exit(1)
         tag = getattr(args, "tag", "") or None
         matcher = getattr(args, "matcher", "") or None
         if matcher:
@@ -6015,11 +6042,21 @@ def _cmd_enforcement(args: argparse.Namespace) -> None:
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
-        enf_id = add_enforcement(message=message, cadence=cadence, tag=tag, local=local, cwd=cwd, matcher=matcher)
+        enf_id = add_enforcement(
+            message=message,
+            cadence=cadence,
+            tag=tag,
+            local=local,
+            cwd=cwd,
+            matcher=matcher,
+            enforcement_type=enforcement_type,
+            path=rule_path,
+        )
         if enf_id:
             scope = "local, " if local else ""
             calls = f"{matcher} calls" if matcher else "tool calls"
-            print(f"Enforcement created: {enf_id} ({scope}every {cadence} {calls})")
+            rule = f", rule={rule_path}" if rule_path else ""
+            print(f"Enforcement created: {enf_id} ({scope}every {cadence} {calls}{rule})")
         else:
             print("Error: failed to create enforcement.", file=sys.stderr)
             sys.exit(1)
@@ -6183,6 +6220,10 @@ def main() -> None:
     if _argv[:1] == ["enforcement"] and "--matcher" in _argv[2:]:
         _at = _argv.index("--matcher", 2)
         _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
+    for _option in ("--type", "--path"):
+        if _argv[:1] == ["enforcement"] and _option in _argv[2:]:
+            _at = _argv.index(_option, 2)
+            _argv[1:1] = [_argv.pop(_at) for _ in range(min(2, len(_argv) - _at))]
 
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
@@ -6497,6 +6538,7 @@ examples:
   agentihooks enforcement set "use Monitor not CronCreate" 10      # custom cadence
   agentihooks enforcement set --local "project-only reminder" 10   # current Git project
   agentihooks enforcement set "reads only against the cluster" 1 --matcher bash.kubectl   # only on kubectl calls
+  agentihooks enforcement set --type rule --path rules/deploy.md     # inject the complete current file
   agentihooks enforcement list
   agentihooks enforcement list --local
   agentihooks enforcement clear                                     # remove ALL
@@ -6509,10 +6551,12 @@ examples:
         "enf_args",
         nargs="*",
         default=None,
-        help="set: <message> [cadence]. Cadence = re-inject every N tool calls (default 5)",
+        help="set: <message> [cadence], or [cadence] with --type rule --path <file>",
     )
     enf_p.add_argument("--tag", default="", help="Optional grouping tag")
     enf_p.add_argument("--id", dest="enf_id", default="", help="Clear by enforcement id")
+    enf_p.add_argument("--type", dest="enforcement_type", choices=["message", "rule"], default="message")
+    enf_p.add_argument("--path", default="", help="Rule file path for --type rule")
     enf_p.add_argument(
         "--matcher",
         default="",

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-28
+
+### Added
+
+- File-backed enforcements. `enforcement_set(type="rule", path="/absolute/rule.md")`
+  and `agentihooks enforcement set --type rule --path rules/rule.md` persist the
+  canonical path and inject the complete current UTF-8 file through the existing
+  first-delivery, cadence, matcher, scope, and target-specific hook path.
+
 ## [2.15.0] - 2026-09-25
 
 ### Added

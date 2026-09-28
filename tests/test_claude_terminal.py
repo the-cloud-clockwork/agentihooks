@@ -79,7 +79,7 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
         "UColt",
         "--",
         "bash",
-        "-lc",
+        "-lic",
         str(tmp_path / "launch.sh"),
     ]
     assert not any(argument.startswith("/mnt/") for argument in command[1:])

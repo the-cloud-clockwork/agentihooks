@@ -167,7 +167,8 @@ def _launch_command(
             *(["-d", distro] if distro else []),
             "--",
             "bash",
-            "-lc",
+            # Interactive, so ~/.bashrc exports the AH_CC_TOKEN_* accounts that --route resolves.
+            "-lic",
             str(launcher),
         ]
     if system == "Linux":
