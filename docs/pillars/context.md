@@ -84,9 +84,11 @@ What covers live re-emphasis now, at a fraction of the token cost:
   operator intent into the recent window on a counter-gated cadence
   (`BRAIN_REFRESH_TOOL_CALLS`, default 20 tool calls), reconciled by content hash so an
   unchanged brain re-publishes nothing.
-- **Enforcement drumbeat** — operator-curated one-liners re-injected every N
+- **Enforcement drumbeat** — operator-curated messages re-injected every N
   **tool calls** (see [Guardrails](guardrails.md)). Compact by design: the whole
-  point is a token or two of reminder, not a file dump. A project can add its
+  point is normally a token or two of reminder. An explicit `type: "rule"`
+  entry instead reads its absolute `path` on delivery and injects the complete
+  current rule file through the same cadence and matcher framework. A project can add its
   own entries at `<git-root>/.agentihooks/enforcements.json`; they apply only to
   sessions running inside that repository. Every effective enforcement is also
   injected once at SessionStart before cadence-driven reminders begin. An
