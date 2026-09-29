@@ -358,7 +358,7 @@ def main() -> None:
                 pass
 
         if parts_3:
-            print(f"  {_DIM}|{_RESET}  ".join(parts_3))
+            print(f" {_DIM}|{_RESET} ".join(parts_3))
 
     except Exception as e:
         print(f"ctx: err ({e})")

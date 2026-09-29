@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -38,11 +39,14 @@ def _run_statusline(account: str = "") -> str:
 
 def test_statusline_shows_routed_account_slug():
     output = _run_statusline("alpha")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
 
     assert "session:" in output
     assert "weekly:" in output
     assert "account:" in output
     assert "alpha" in output
+    assert "weekly:27% | account:alpha" in plain
+    assert "  |  " not in plain
 
 
 def test_statusline_shows_default_for_direct_authentication():
