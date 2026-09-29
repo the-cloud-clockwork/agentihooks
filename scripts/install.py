@@ -5473,6 +5473,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
+            os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
             os.execvpe(claude_bin, cmd, os.environ)
         print(f"agentihooks: {exc}", file=sys.stderr)
@@ -5492,6 +5493,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         if name != selected_credential.env_name:
             os.environ.pop(name, None)
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
+    os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
         f"[agenti] account={selected_credential.account} route=forced"
         if route

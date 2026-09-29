@@ -59,6 +59,7 @@ class TestClaudeRouting:
             "session-id",
         ]
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "winner-secret"
+        assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "WINNER"
         assert observed["environ"]["AH_CC_TOKEN_WINNER"] == "winner-secret"
         assert "AH_CC_TOKEN_PEER" not in observed["environ"]
         assert "ANTHROPIC_API_KEY" not in observed["environ"]
@@ -106,6 +107,7 @@ class TestClaudeRouting:
 
         assert observed["command"] == ["/usr/bin/claude", "--dangerously-skip-permissions", "--model", "sonnet"]
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "selected-secret"
+        assert observed["environ"]["AGENTIHOOKS_ROUTE_ACCOUNT"] == "0"
         assert observed["environ"]["AH_CC_TOKEN_0"] == "selected-secret"
         assert "AH_CC_TOKEN_3" not in observed["environ"]
         assert capsys.readouterr().out == "[agenti] account=0 route=forced\n"
@@ -133,6 +135,7 @@ class TestClaudeRouting:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "api-secret")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://litellm.example")
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "direct-oauth")
+        monkeypatch.setenv("AGENTIHOOKS_ROUTE_ACCOUNT", "stale")
 
         def execvpe(executable, command, environ):
             observed.update(executable=executable, command=command, environ=dict(environ))
@@ -147,6 +150,7 @@ class TestClaudeRouting:
         assert observed["environ"]["ANTHROPIC_API_KEY"] == "api-secret"
         assert observed["environ"]["ANTHROPIC_BASE_URL"] == "https://litellm.example"
         assert observed["environ"]["CLAUDE_CODE_OAUTH_TOKEN"] == "direct-oauth"
+        assert "AGENTIHOOKS_ROUTE_ACCOUNT" not in observed["environ"]
         assert "launching bare Claude" in capsys.readouterr().err
 
     def test_cmd_balance_prints_ranked_capacity(self, monkeypatch, capsys):
