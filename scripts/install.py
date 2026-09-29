@@ -6234,6 +6234,10 @@ def main() -> None:
         from scripts.claude_terminal import main as terminal_main
 
         raise SystemExit(terminal_main(_argv[1:]))
+    if _argv and _argv[0] == "kill-agent":
+        from scripts.kill_agent import main as kill_agent_main
+
+        raise SystemExit(kill_agent_main(_argv[1:]))
 
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
@@ -6349,6 +6353,7 @@ def main() -> None:
 
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
+    sub.add_parser("kill-agent", help="List or terminate a Claude Code or Codex session")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
