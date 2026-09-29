@@ -47,6 +47,23 @@ for compliance.
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
 
+## Built-in skills
+
+Invoke a skill explicitly as `$<name> <arguments>`. Model-invoked skills also
+run when the operator uses one of their trigger phrases.
+
+| Skill | Use | Example |
+|---|---|---|
+| `get-current-balance` | Identify this Claude session's routed OAuth account and show every account's quota and live-session count. | `$get-current-balance` or "which account am I on?" |
+| `kill-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$kill-agent engineer-a`; list with `$kill-agent --list --type any` |
+| `multi-agent-chat` | Open or join a file-backed room when participants run under different agent harnesses. This skill is explicit-only. | `$multi-agent-chat --name codex-a --topic "review"`; join with `$multi-agent-chat --target <room-id> --name claude-b` |
+| `run-claude-terminal` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$run-claude-terminal --dir ~/dev/project --name engineer-a -- --model opus` |
+
+The deterministic CLI primitives behind these skills are respectively
+`agentihooks balance --current`, `agentihooks kill-agent`, the scripts shipped
+with `multi-agent-chat`, and `agentihooks claude-terminal`. Follow each
+`SKILL.md`; do not reconstruct its process manually.
+
 ## Conditions
 
 A condition is an operator-authored script that runs on every tool call its
