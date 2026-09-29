@@ -558,7 +558,9 @@ class TestBundleClaudeMdPrepend:
         assert "_prepend_bundle_claude_md(bundle_dir)" in src
         # Must sit between the profile writer and the manifesto appender.
         assert src.index("_install_system_prompt") < src.index("_prepend_bundle_claude_md(bundle_dir)")
-        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index("_append_ci_manifesto_to_claude_md()")
+        assert src.index("_prepend_bundle_claude_md(bundle_dir)") < src.index(
+            "_append_ci_manifesto_to_claude_md(bundle_dir)"
+        )
         # Exactly one call site — never inside the chain loop.
         assert src.count("_prepend_bundle_claude_md(") == 1
         # And the install flow routes persona through the target adapter.
@@ -631,7 +633,7 @@ class TestBundleClaudeMdPrepend:
         with (
             patch.object(install, "CLAUDE_HOME", install_env["claude_home"]),
             patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
-            patch.object(cfg, "CI_MANIFESTO_PATH", str(manifesto)),
+            patch.object(cfg, "_resolve_manifesto_paths", return_value=[str(manifesto)]),
         ):
             for _ in range(4):  # simulate four `agentihooks init` runs
                 install._install_system_prompt(install_env["profile"], "test-profile")
@@ -760,7 +762,7 @@ class TestBundleClaudeMdPrepend:
         with (
             patch.object(install, "CLAUDE_HOME", install_env["claude_home"]),
             patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
-            patch.object(cfg, "CI_MANIFESTO_PATH", str(manifesto)),
+            patch.object(cfg, "_resolve_manifesto_paths", return_value=[str(manifesto)]),
         ):
             install._prepend_bundle_claude_md(install_env["bundle"])
             install._append_ci_manifesto_to_claude_md()
@@ -776,6 +778,32 @@ class TestBundleClaudeMdPrepend:
         # Order: bundle block -> profile -> manifesto
         assert text.index(install._BUNDLE_CLAUDE_MD_END) < text.index("<!-- profile: test-profile -->")
         assert text.index("<!-- profile: test-profile -->") < text.index("<!-- BEGIN CI MANIFESTO")
+
+    def test_all_bundle_manifestos_are_appended(self, install_env, monkeypatch):
+        import hooks.config as cfg
+
+        manifests = install_env["bundle"] / "manifestos"
+        manifests.mkdir()
+        (manifests / "README.md").write_text("directory docs")
+        (manifests / "a.md").write_text("# Doctrine A")
+        (manifests / "b.md").write_text("# Doctrine B")
+        dst = self._install_profile(install_env)
+        monkeypatch.delenv("CI_MANIFESTO_PATH", raising=False)
+        monkeypatch.delenv("MANIFESTOS_DIR", raising=False)
+        monkeypatch.delenv("AGENTIHOOKS_SKIP_MANIFESTO", raising=False)
+
+        with (
+            patch.object(install, "CLAUDE_HOME", install_env["claude_home"]),
+            patch.object(cfg, "CI_MANIFESTO_ENABLED", True),
+        ):
+            install._append_ci_manifesto_to_claude_md(install_env["bundle"])
+
+        text = dst.read_text()
+        assert "<!-- manifesto: a.md -->" in text
+        assert "<!-- manifesto: b.md -->" in text
+        assert "# Doctrine A" in text
+        assert "# Doctrine B" in text
+        assert "directory docs" not in text
 
 
 # ---------------------------------------------------------------------------
