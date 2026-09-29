@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.2] - 2026-09-29
+
+### Added
+
+- `kill-agent` skill and CLI command to list or terminate Claude Code and Codex
+  sessions by exact name, UUID, or PID with dry-run validation, caller
+  protection, process-group termination, escalation, and exit verification.
+- Routed Claude account slug in the native status line; direct authentication
+  renders `account:default`.
+
+### Changed
+
+- Bundle manifesto loading is additive by default: every `*.md` manifesto is
+  installed in filename order, while `AGENTIHOOKS_SKIP_MANIFESTO` provides
+  comma-separated opt-out names. `README.md` remains documentation only.
+- The packaged AgentiHooks rule documents all four built-in skills and their
+  deterministic invocation paths.
+
 ## [2.16.1] - 2026-09-28
 
 ### Fixed

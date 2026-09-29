@@ -660,35 +660,45 @@ CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 
 
-# Manifesto resolution (first hit wins):
-#   1. $CI_MANIFESTO_PATH explicit env override
-#   2. $MANIFESTOS_DIR/<MANIFESTO_NAME>.md (multi-manifesto bundle pattern)
-#   3. $AGENTIHOOKS_BUNDLE_ROOT/manifestos/ANTON-CORE-CI-MANIFESTO.md
-#   4. ~/dev/tcc-ecosystem/agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md (default)
-#   5. legacy fallback ~/dev/tcc-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md
-def _resolve_manifesto_path() -> str:
+# Manifesto resolution loads every Markdown manifesto in deterministic filename
+# order. CI_MANIFESTO_PATH remains a single-file compatibility override.
+def _manifesto_skip_names() -> set[str]:
+    raw = os.getenv("AGENTIHOOKS_SKIP_MANIFESTO", "")
+    return {Path(name.strip()).stem.casefold() for name in raw.split(",") if name.strip()}
+
+
+def _resolve_manifesto_paths(bundle_root: str | Path | None = None) -> list[str]:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
-        return explicit
-    name = os.getenv("MANIFESTO_NAME", "ANTON-CORE-CI-MANIFESTO")
+        path = Path(explicit).expanduser()
+        return [str(path)] if path.is_file() else []
     manifests_dir = os.getenv("MANIFESTOS_DIR")
-    if manifests_dir:
-        candidate = Path(manifests_dir).expanduser() / f"{name}.md"
-        if candidate.exists():
-            return str(candidate)
-    bundle_root = os.getenv("AGENTIHOOKS_BUNDLE_ROOT")
-    if bundle_root:
-        candidate = Path(bundle_root).expanduser() / "manifestos" / f"{name}.md"
-        if candidate.exists():
-            return str(candidate)
-    default = Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos" / f"{name}.md"
-    if default.exists():
-        return str(default)
-    legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / f"{name}.md"
-    return str(legacy)
+    root = bundle_root or os.getenv("AGENTIHOOKS_BUNDLE_ROOT")
+    directory = (
+        Path(manifests_dir).expanduser()
+        if manifests_dir
+        else Path(root).expanduser() / "manifestos"
+        if root
+        else Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos"
+    )
+    skip = _manifesto_skip_names()
+    if directory.is_dir():
+        return [
+            str(path)
+            for path in sorted(directory.glob("*.md"), key=lambda item: item.name.casefold())
+            if path.name.casefold() != "readme.md" and path.stem.casefold() not in skip
+        ]
+    legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"
+    return [str(legacy)] if legacy.is_file() and legacy.stem.casefold() not in skip else []
 
 
-CI_MANIFESTO_PATH: str = _resolve_manifesto_path()
+def _resolve_manifesto_path() -> str:
+    paths = _resolve_manifesto_paths()
+    return paths[0] if paths else ""
+
+
+CI_MANIFESTO_PATHS: list[str] = _resolve_manifesto_paths()
+CI_MANIFESTO_PATH: str = CI_MANIFESTO_PATHS[0] if CI_MANIFESTO_PATHS else ""
 # Optional cap on the bytes the manifesto inject contributes to SessionStart /
 # UserPromptSubmit. 0 (default) = no cap; full doctrine ships through. Set
 # >0 to opt in to truncation when stacking multiple injections under

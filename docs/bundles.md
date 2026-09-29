@@ -88,7 +88,7 @@ For MCP servers: agentihooks + bundle `.claude/.mcp.json` + profile `.claude/.mc
 `~/.claude/CLAUDE.md` is assembled from up to three sources, in this order:
 
 ```
-[ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ CI manifesto ]
+[ bundle .claude/CLAUDE.md ]  ->  [ profile CLAUDE.md (one per chained profile) ]  ->  [ all enabled bundle manifestos ]
 ```
 
 An **optional** `<bundle>/.claude/CLAUDE.md` holds directives every profile should
@@ -109,6 +109,12 @@ is genuinely profile-specific.
 Re-running `agentihooks init` replaces the block in place — it never stacks. If the
 bundle has no `.claude/CLAUDE.md`, or no profile in the chain has a `CLAUDE.md` to
 prepend onto, the step is a no-op.
+
+Every `*.md` file under the linked bundle's `manifestos/` directory is appended
+in filename order; `README.md` is excluded. Set
+`AGENTIHOOKS_SKIP_MANIFESTO=uno,dos,tres` to omit named manifestos. Names may
+include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
+override, and `MANIFESTOS_DIR` can replace the bundle directory.
 
 ## Profile Resolution Order
 

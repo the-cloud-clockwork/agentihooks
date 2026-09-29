@@ -1,6 +1,6 @@
 """CI Manifesto injector — doctrine-as-context primitive.
 
-Reads a single markdown file (the CI/release doctrine) and injects it into the
+Reads every enabled bundle manifesto and injects them into the
 session context at SessionStart, with counter-gated re-injection on
 UserPromptSubmit to fight attention decay.
 
@@ -10,7 +10,7 @@ source of truth rather than hardcoding.
 
 Config (env vars via hooks.config):
     CI_MANIFESTO_ENABLED          (bool, default True)
-    CI_MANIFESTO_PATH             (str,  default $HOME/dev/tcc-ecosystem/documents/anton/ANTON-CORE-CI-MANIFESTO.md)
+    AGENTIHOOKS_SKIP_MANIFESTO    (comma-separated manifesto names to exclude)
     CI_MANIFESTO_REFRESH_EVERY    (int,  default 8 turns)
 
 Public API:
@@ -81,19 +81,20 @@ _DEFAULT_PR_SIGNALS = [
 ]
 
 
-def _manifesto_path() -> Path:
-    from hooks.config import CI_MANIFESTO_PATH
+def _manifesto_paths() -> list[Path]:
+    from hooks.config import _resolve_manifesto_paths
 
-    return Path(CI_MANIFESTO_PATH).expanduser()
+    return [Path(path).expanduser() for path in _resolve_manifesto_paths()]
 
 
 def _load() -> dict:
     """Read manifesto from disk (mtime-gated cache) and parse signal vocabulary."""
-    path = _manifesto_path()
+    paths = [path for path in _manifesto_paths() if path.is_file()]
+    path_key = ",".join(str(path) for path in paths)
     try:
-        if not path.is_file():
+        if not paths:
             return {
-                "path": str(path),
+                "path": "",
                 "mtime": 0.0,
                 "content": "",
                 "release": _DEFAULT_RELEASE_SIGNALS,
@@ -101,14 +102,16 @@ def _load() -> dict:
                 "branch": _DEFAULT_BRANCH_SIGNALS,
                 "pr": _DEFAULT_PR_SIGNALS,
             }
-        mtime = path.stat().st_mtime
-        if _manifesto_cache["path"] == str(path) and _manifesto_cache["mtime"] == mtime and _manifesto_cache["content"]:
+        mtime = tuple(path.stat().st_mtime for path in paths)
+        if _manifesto_cache["path"] == path_key and _manifesto_cache["mtime"] == mtime and _manifesto_cache["content"]:
             return _manifesto_cache
-        content = path.read_text(encoding="utf-8")
+        content = "\n\n---\n\n".join(
+            f"<!-- manifesto: {path.name} -->\n{path.read_text(encoding='utf-8').strip()}" for path in paths
+        )
         release, hotfix, branch, pr = _parse_signals(content)
         _manifesto_cache.update(
             {
-                "path": str(path),
+                "path": path_key,
                 "mtime": mtime,
                 "content": content,
                 "release": release,
@@ -119,9 +122,9 @@ def _load() -> dict:
         )
         return _manifesto_cache
     except Exception as e:
-        log("ci_manifesto load failed", {"path": str(path), "error": str(e)})
+        log("ci_manifesto load failed", {"path": path_key, "error": str(e)})
         return {
-            "path": str(path),
+            "path": path_key,
             "mtime": 0.0,
             "content": "",
             "release": _DEFAULT_RELEASE_SIGNALS,
@@ -320,7 +323,7 @@ def inject_on_session_start() -> None:
             return
         payload = _build_injection()
         if not payload:
-            log("ci_manifesto: empty payload (file missing?)", {"path": str(_manifesto_path())})
+            log("ci_manifesto: empty payload (file missing?)", {"paths": [str(path) for path in _manifesto_paths()]})
             return
 
         from hooks.targets import buffers_single_envelope

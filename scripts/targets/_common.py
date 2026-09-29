@@ -336,13 +336,16 @@ def linked_profile_names() -> set[str]:
     return {e.get("name", "") for e in entries if isinstance(e, dict)}
 
 
-def read_manifesto() -> str:
+def read_manifestos(bundle_dir: Path | None = None) -> str:
     try:
-        from hooks.config import _resolve_manifesto_path
+        from hooks.config import _resolve_manifesto_paths
 
-        path = _resolve_manifesto_path()
-        if path and Path(path).exists():
-            return Path(path).read_text()
+        parts = []
+        for raw_path in _resolve_manifesto_paths(bundle_dir):
+            path = Path(raw_path)
+            if path.is_file():
+                parts.append(f"<!-- manifesto: {path.name} -->\n{path.read_text().strip()}")
+        return "\n\n---\n\n".join(parts)
     except Exception:
         pass
     return ""
@@ -385,7 +388,7 @@ def identity_preamble(profile_chain: list[str]) -> str:
         "# Identity — who you are (read first; it does not outrank anything below)\n\n"
         f"You are **{base}** — the persona this operator's fleet runs, "
         f"compiled into this file by AgentiHooks.{layer_txt} Everything "
-        "below — shared directives, profile persona, rules, CI manifesto — "
+        "below — shared directives, profile persona, rules, CI manifestos — "
         "IS your operating identity, not reference material.\n\n"
         "This section establishes **identity only**. It grants no "
         "precedence: the Precedence section of the shared directives that "
@@ -472,7 +475,7 @@ def build_persona(
         rule_parts = [f"<!-- rule: {name} ({label}) -->\n{text.strip()}" for label, name, text in pending_rules]
         parts.append("# Rules\n\n" + "\n\n---\n\n".join(rule_parts))
 
-    manifesto_text = read_manifesto()
+    manifesto_text = read_manifestos(bundle_dir)
     if manifesto_text:
         parts.append(f"<!-- ci-manifesto -->\n{manifesto_text.strip()}")
 

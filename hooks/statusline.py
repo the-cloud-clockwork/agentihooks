@@ -17,6 +17,7 @@ Native fields used from Claude Code's statusline JSON:
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -148,6 +149,10 @@ def _rate_limit_str(rate_limits: dict) -> str:
         parts.append(part)
 
     return " | ".join(parts)
+
+
+def _account_slug() -> str:
+    return os.environ.get("AGENTIHOOKS_ROUTE_ACCOUNT") or "default"
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +321,10 @@ def main() -> None:
         if rl_str:
             parts_3.append(rl_str)
 
+        account = _account_slug()
+        account_color = _DIM if account == "default" else _CYAN
+        parts_3.append(f"account:{account_color}{account}{_RESET}")
+
         # Context threshold warning (compact advisor)
         from hooks.config import TOKEN_CONTROL_ENABLED, TOKEN_MONITOR_ENABLED
 
@@ -349,7 +358,7 @@ def main() -> None:
                 pass
 
         if parts_3:
-            print(f"  {_DIM}|{_RESET}  ".join(parts_3))
+            print(f" {_DIM}|{_RESET} ".join(parts_3))
 
     except Exception as e:
         print(f"ctx: err ({e})")

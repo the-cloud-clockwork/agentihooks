@@ -3199,7 +3199,7 @@ def _install_claude_persona(
     _prepend_bundle_claude_md(bundle_dir)
 
     # --- 5b. Append CI manifesto to ~/.claude/CLAUDE.md (memory channel) ---
-    _append_ci_manifesto_to_claude_md()
+    _append_ci_manifesto_to_claude_md(bundle_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -4188,8 +4188,8 @@ def _symlink_dir_contents(
     _state_record_links(records)
 
 
-def _append_ci_manifesto_to_claude_md() -> None:
-    """Append the CI manifesto to ~/.claude/CLAUDE.md as a fenced block.
+def _append_ci_manifesto_to_claude_md(bundle_dir: Path | None = None) -> None:
+    """Append every enabled bundle manifesto to ~/.claude/CLAUDE.md as a fenced block.
 
     The manifesto used to be injected at SessionStart via stdout, but Claude
     Code's hook output is capped at ~2KB before the harness substitutes the
@@ -4207,18 +4207,25 @@ def _append_ci_manifesto_to_claude_md() -> None:
         return
     if not getattr(_cfg, "CI_MANIFESTO_ENABLED", True):
         return
-    manifesto_path = Path(getattr(_cfg, "CI_MANIFESTO_PATH", "")).expanduser()
-    if not manifesto_path.exists():
-        _cprint(f"  [--] CI manifesto not found at {manifesto_path} — skipping CLAUDE.md append.")
+    manifesto_paths = [Path(path) for path in _cfg._resolve_manifesto_paths(bundle_dir)]
+    if not manifesto_paths:
+        _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
         return
     dst = CLAUDE_HOME / _CLAUDE_MD_NAME
     if not dst.exists():
         # Nothing to append to — install_system_prompt handles its own write
         return
-    body = manifesto_path.read_text().rstrip()
+    bodies = [
+        f"<!-- manifesto: {path.name} -->\n{path.read_text().rstrip()}" for path in manifesto_paths if path.is_file()
+    ]
+    if not bodies:
+        _cprint("  [--] No enabled manifestos found — skipping CLAUDE.md append.")
+        return
+    body = "\n\n---\n\n".join(bodies)
+    sources = ", ".join(str(path) for path in manifesto_paths)
     block = (
         "\n\n<!-- BEGIN CI MANIFESTO (auto-injected by agentihooks init) -->\n"
-        f"<!-- Source: {manifesto_path} -->\n\n"
+        f"<!-- Sources: {sources} -->\n\n"
         f"{body}\n\n"
         "<!-- END CI MANIFESTO -->\n"
     )
@@ -4242,7 +4249,7 @@ def _append_ci_manifesto_to_claude_md() -> None:
     # no bundle block was prepended, so nothing earlier took a backup.
     _claim_claude_md_ownership(dst)
     dst.write_text(new_content)
-    _cprint(f"  [OK] Appended CI manifesto to {dst} ({len(body):,} bytes)")
+    _cprint(f"  [OK] Appended {len(bodies)} manifesto(s) to {dst} ({len(body):,} bytes)")
 
 
 # Markers for the optional bundle-wide CLAUDE.md, prepended ahead of all profile
@@ -5473,6 +5480,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         if fallback_bare and not route:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
+            os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
             os.execvpe(claude_bin, cmd, os.environ)
         print(f"agentihooks: {exc}", file=sys.stderr)
@@ -5492,6 +5500,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         if name != selected_credential.env_name:
             os.environ.pop(name, None)
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = selected_credential.token
+    os.environ["AGENTIHOOKS_ROUTE_ACCOUNT"] = selected_credential.account
     print(
         f"[agenti] account={selected_credential.account} route=forced"
         if route
@@ -6234,6 +6243,10 @@ def main() -> None:
         from scripts.claude_terminal import main as terminal_main
 
         raise SystemExit(terminal_main(_argv[1:]))
+    if _argv and _argv[0] == "kill-agent":
+        from scripts.kill_agent import main as kill_agent_main
+
+        raise SystemExit(kill_agent_main(_argv[1:]))
 
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
@@ -6349,6 +6362,7 @@ def main() -> None:
 
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
+    sub.add_parser("kill-agent", help="List or terminate a Claude Code or Codex session")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
