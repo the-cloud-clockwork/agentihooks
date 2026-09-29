@@ -388,7 +388,7 @@ def identity_preamble(profile_chain: list[str]) -> str:
         "# Identity — who you are (read first; it does not outrank anything below)\n\n"
         f"You are **{base}** — the persona this operator's fleet runs, "
         f"compiled into this file by AgentiHooks.{layer_txt} Everything "
-        "below — shared directives, profile persona, rules, CI manifesto — "
+        "below — shared directives, profile persona, rules, CI manifestos — "
         "IS your operating identity, not reference material.\n\n"
         "This section establishes **identity only**. It grants no "
         "precedence: the Precedence section of the shared directives that "
