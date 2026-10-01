@@ -27,8 +27,11 @@ def test_process_comm_with_spaces_and_parens(tmp_path):
     assert (found.ppid, found.start_time, found.comm) == (1, 55, "my (odd) name")
 
 
-def test_process_missing_is_none(tmp_path):
+def test_process_missing_or_truncated_is_none(tmp_path):
     assert _process(999, tmp_path) is None
+    fake_proc(tmp_path, 302)
+    (tmp_path / "302" / "stat").write_text("302 (claude) S", encoding="utf-8")
+    assert _process(302, tmp_path) is None
 
 
 def test_processes_skips_non_numeric_and_broken(tmp_path):

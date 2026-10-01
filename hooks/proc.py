@@ -22,18 +22,18 @@ def _process(pid: int, proc: Path) -> Process | None:
             item.decode(errors="replace") for item in (proc / str(pid) / "cmdline").read_bytes().split(b"\0") if item
         )
         comm = (proc / str(pid) / "comm").read_text(encoding="utf-8").strip()
+        return Process(
+            pid=pid,
+            ppid=int(tail[1]),
+            pgid=int(tail[2]),
+            sid=int(tail[3]),
+            start_time=int(tail[19]),
+            state=tail[0],
+            comm=comm,
+            argv=argv,
+        )
     except (OSError, IndexError, ValueError):
         return None
-    return Process(
-        pid=pid,
-        ppid=int(tail[1]),
-        pgid=int(tail[2]),
-        sid=int(tail[3]),
-        start_time=int(tail[19]),
-        state=tail[0],
-        comm=comm,
-        argv=argv,
-    )
 
 
 def processes(proc: Path = Path("/proc")) -> dict[int, Process]:
