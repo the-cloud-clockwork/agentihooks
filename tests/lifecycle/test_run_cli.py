@@ -62,7 +62,7 @@ def test_gc_prints_actionable_lines(monkeypatch, capsys):
             {"path": "/w/b", "action": "keep", "reason": "recent", "size": 0, "due": False},
         ],
     }
-    monkeypatch.setattr(gc_cli, "sweep", lambda scope="": report)
+    monkeypatch.setattr(gc_cli, "sweep", lambda scope="", act=False: report)
     assert gc_cli.main(["gc"]) == 0
     out = capsys.readouterr().out
     assert "remove    due" in out and "/w/a" in out and "/w/b" not in out

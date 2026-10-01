@@ -38,3 +38,4 @@ class Finding:
     last_touch: float = 0.0
     size: int = 0
     due: bool = False
+    outcome: str = ""
