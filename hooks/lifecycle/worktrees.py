@@ -1,15 +1,15 @@
 import os
 from pathlib import Path
 
-from hooks.lifecycle.gitstate import TreeState, inspect
-from hooks.lifecycle.lease import read_lease
+from hooks.lifecycle.gitstate import TreeState, git, inspect
+from hooks.lifecycle.lease import admin_dir, read_lease
 from hooks.lifecycle.liveness import Snapshot, in_boot_grace, lease_alive, path_in_use
 from hooks.lifecycle.model import Finding, Lease, Root
 
 PROTECTED = {"dev", "main", "master"}
 CLEAN_IDLE = 2 * 3600
 DIRTY_IDLE = 24 * 3600
-NESTED_DEPTH = 5
+NESTED_DEPTH = 8
 
 
 def _is_worktree(path: Path) -> bool:
@@ -33,17 +33,36 @@ def nested_worktrees(top: Path, depth: int = NESTED_DEPTH) -> list[Path]:
     return sorted(found)
 
 
+def registered(primary: Path) -> list[Path]:
+    result = git(primary, "worktree", "list", "--porcelain")
+    if result.returncode != 0:
+        return []
+    return [Path(line[len("worktree ") :]) for line in result.stdout.splitlines() if line.startswith("worktree ")]
+
+
+def _managing_root(path: Path, roots: list[Root]) -> Root | None:
+    for root in roots:
+        if root.kind in ("worktrees", "scratch") and path.is_relative_to(root.path):
+            return root
+    return None
+
+
 def discover(roots: list[Root]) -> list[tuple[Path, Root]]:
-    found = []
+    found: dict[Path, Root] = {}
     for root in roots:
         base = Path(root.path)
         if root.kind == "worktrees":
-            found += [
-                (path, root) for path in sorted(base.glob("*/*")) + sorted(base.glob("*/_tmp/*")) if _is_worktree(path)
-            ]
+            candidates = sorted(base.glob("*/*")) + sorted(base.glob("*/_tmp/*"))
+            found.update({path: root for path in candidates if _is_worktree(path)})
         elif root.kind == "scratch":
-            found += [(path, root) for path in nested_worktrees(base)]
-    return found
+            found.update({path: root for path in nested_worktrees(base)})
+    primaries = {admin.parent.parent.parent for path in found if (admin := admin_dir(path))}
+    for primary in sorted(primaries):
+        for path in registered(primary):
+            root = _managing_root(path, roots)
+            if path != primary and path not in found and root and _is_worktree(path):
+                found[path] = root
+    return sorted(found.items())
 
 
 def _held(state: TreeState, lease: Lease | None, snap: Snapshot) -> str:
