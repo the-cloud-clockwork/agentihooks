@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from hooks.config import LOG_ENABLED, LOG_FILE, LOG_HOOKS_COMMANDS, LOG_USE_COLORS
+from hooks.logfile import append_text
 
 __all__ = [
     # Logging (writes to log file - Claude does NOT see this)
@@ -118,8 +119,7 @@ def log(message: str, payload: dict | None = None) -> None:
         if payload:
             entry["payload"] = payload
 
-        with open(log_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        append_text(log_path, json.dumps(entry) + "\n")
     except Exception:  # NOSONAR — hooks must never crash the parent process
         pass  # Silent failure - never break Claude
 
@@ -154,8 +154,7 @@ def log_command(script_name: str, output: str) -> None:
 {output}
 {separator}
 """
-        with open(log_path, "a") as f:
-            f.write(log_entry)
+        append_text(log_path, log_entry)
     except Exception:  # NOSONAR — hooks must never crash the parent process
         pass  # Silent failure - never break Claude
 
@@ -190,8 +189,7 @@ def log_transcript(conversation_id: str, entry_type: str, content: str) -> None:
 {content}
 {separator}
 """
-        with open(log_path, "a") as f:
-            f.write(log_entry)
+        append_text(log_path, log_entry)
     except Exception:  # NOSONAR — hooks must never crash the parent process
         pass  # Silent failure - never break Claude
 

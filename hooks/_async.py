@@ -23,6 +23,7 @@ import sys
 from typing import Any, Callable
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.logfile import append_text, rotate_if_full
 
 _LOG_FILE = AGENTIHOOKS_HOME / "logs" / "async-hooks.log"
 
@@ -90,6 +91,7 @@ def fork_and_call(
 
 def _detach_stdio() -> None:
     try:
+        rotate_if_full(_LOG_FILE)
         log_fd = os.open(str(_LOG_FILE), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         os.dup2(log_fd, 1)
         os.dup2(log_fd, 2)
@@ -119,8 +121,6 @@ def _install_alarm(timeout_sec: int, task_name: str) -> None:
 def _best_effort_log(msg: str) -> None:
     """Parent-side logging helper used when we can't even fork."""
     try:
-        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(_LOG_FILE, "a") as f:
-            f.write(f"[async] {msg}\n")
+        append_text(_LOG_FILE, f"[async] {msg}\n")
     except OSError:
         pass
