@@ -6247,6 +6247,10 @@ def main() -> None:
         from scripts.kill_agent import main as kill_agent_main
 
         raise SystemExit(kill_agent_main(_argv[1:]))
+    if _argv and _argv[0] in ("gc", "lease", "scratch"):
+        from scripts.gc_cli import main as gc_main
+
+        raise SystemExit(gc_main(_argv))
 
     parser = argparse.ArgumentParser(
         description="agentihooks — Claude Code harness: hooks, profiles, skills, MCPs.",
