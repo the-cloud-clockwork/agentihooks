@@ -339,6 +339,9 @@ LOG_FILE = os.getenv("CLAUDE_HOOK_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "ho
 # This is a copy of the Claude Code transcript, streamed in real-time
 AGENT_LOG_FILE = os.getenv("AGENT_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "agent.log"))
 
+LOG_MAX_BYTES = int(os.getenv("AGENTIHOOKS_LOG_MAX_MB", "20")) * 1024 * 1024
+LOG_BACKUPS = int(os.getenv("AGENTIHOOKS_LOG_BACKUPS", "3"))
+
 
 def _env_bool(key: str, default: str = "false") -> bool:
     """Parse env var as boolean. Accepts: true/false, 1/0, yes/no."""

@@ -74,6 +74,8 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `LOG_ENABLED` | `true` | Enable or disable hook logging entirely. |
 | `CLAUDE_HOOK_LOG_FILE` | `~/.agentihooks/logs/hooks.log` | Hook event log file path. |
 | `AGENT_LOG_FILE` | `~/.agentihooks/logs/agent.log` | Agent transcript log file path. |
+| `AGENTIHOOKS_LOG_MAX_MB` | `20` | Size at which `hooks.log`, `agent.log` and `async-hooks.log` rotate. |
+| `AGENTIHOOKS_LOG_BACKUPS` | `3` | Rotated copies kept per log (`.1` newest). `0` truncates instead. |
 | `LOG_TRANSCRIPT` | `true` | Auto-log conversation transcript entries on each hook event. |
 | `STREAM_AGENT_LOG` | `true` | Stream transcript to `AGENT_LOG_FILE` in real-time. |
 | `LOG_HOOKS_COMMANDS` | `false` | Enable verbose command output logging. |
