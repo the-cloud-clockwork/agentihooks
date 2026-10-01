@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-10-01
+
+### Added
+
+- Workspace lifecycle: `agentihooks gc` classifies git worktrees, scratch task
+  dirs and tool files from `lifecycle.json` roots and, with `--enforce`, removes
+  what is unused and loses nothing: clean worktrees reachable from a remote after
+  2 h idle, dirty or unpushed ones after 24 h once snapshotted to `wip/`, scratch
+  dirs past their TTL or over budget. Liveness checks process cwds, lease holders
+  (pid + start time + boot_id, or a live session with the same sessionId) and a
+  2 h boot grace; actions need two agreeing sweeps an hour apart and are
+  journaled.
+- `agentihooks lease`, `agentihooks scratch new|rm` and the hourly
+  `agentihooks-gc.timer` installed by `agentihooks init`.
+- PreToolUse claims record the calling session on any managed worktree or
+  scratch dir a tool call names and block calls while gc removes that path; a
+  disk guard warns below `AGENTIHOOKS_DISK_WARN_GB`.
+- Docs: WSL disk reclaim runbook (sparse VHDX, `/tmp` wipes on boot).
+
+### Changed
+
+- `hooks.log`, `agent.log` and `async-hooks.log` rotate at
+  `AGENTIHOOKS_LOG_MAX_MB` (20) keeping `AGENTIHOOKS_LOG_BACKUPS` (3).
+- Process identity helpers moved from `scripts/kill_agent.py` to `hooks/proc.py`.
+
+### Fixed
+
+- `hooks.proc._process` returns `None` on a truncated stat line instead of
+  raising.
+
 ## [2.16.2] - 2026-09-29
 
 ### Added
