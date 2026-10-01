@@ -85,3 +85,14 @@ def test_discover_finds_tmp_and_nested_scratch_worktrees(repo, tmp_path):
     found = {path for path, _root in discover(roots)}
     assert {top, tmp, nested} <= found
     assert repo.primary not in found
+
+
+def test_discover_follows_git_registry_to_deeply_nested_worktrees(repo, tmp_path):
+    repo.worktree("anchor")
+    deep_base = tmp_path / "scratch" / "proj" / "crew" / "notes" / "member" / "task-x" / "a" / "b" / "c"
+    deep = repo.worktree("wt-deep", base=deep_base)
+    roots = [repo.root(), Root("scratchpad", str(tmp_path / "scratch"), "scratch")]
+    found = dict(discover(roots))
+    assert found[deep].id == "scratchpad"
+    outside = repo.worktree("elsewhere", base=tmp_path / "unmanaged")
+    assert outside not in dict(discover(roots))
