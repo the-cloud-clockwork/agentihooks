@@ -3034,6 +3034,12 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _cprint("  [OK] Stopped the agentihooks MCP daemon (transport reverted to stdio)")
         _remove_systemd_user_unit()
 
+    from hooks.lifecycle.guard import enabled as _gc_enabled
+    from hooks.lifecycle.timer import install_timer, remove_timer
+
+    _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
+    _cprint("  " + (install_timer(_gc_python, _gc_root) if _gc_enabled() else remove_timer()))
+
     # MCP layers, target-native. A layer that ships the target's own MCP file
     # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
     # as-is; otherwise the layer's Claude .mcp.json is re-projected by the

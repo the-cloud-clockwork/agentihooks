@@ -11,6 +11,7 @@ from hooks.lifecycle.liveness import owner_holder, take_snapshot
 from hooks.lifecycle.model import ACTIONABLE
 from hooks.lifecycle.run import sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
+from hooks.lifecycle.timer import install_timer, remove_timer
 
 GB = 1 << 30
 
@@ -24,6 +25,8 @@ def _parser() -> argparse.ArgumentParser:
     gc.add_argument("--json", action="store_true", help="Print the full report as JSON")
     gc.add_argument("--path", default="", help="Only report findings under this path")
     gc.add_argument("--enforce", action="store_true", help="Act on findings that are due: remove, snapshot, archive")
+    gc.add_argument("--install-timer", action="store_true", help="Install and enable the hourly systemd user timer")
+    gc.add_argument("--remove-timer", action="store_true", help="Disable and remove the systemd user timer")
     lease = sub.add_parser("lease", help="Record the calling agent session as owner of a worktree or scratch dir")
     lease.add_argument("path")
     lease.add_argument("--kind", choices=("worktree", "ephemeral", "scratch"), default="worktree")
@@ -90,6 +93,14 @@ def main(argv: list[str]) -> int:
         return _lease(Path(args.path).resolve(), args.kind)
     if args.command == "scratch":
         return _scratch_new(args.name) if args.action == "new" else _scratch_rm(args.name)
+    if args.install_timer or args.remove_timer:
+        root = str(Path(__file__).resolve().parents[1])
+        print(install_timer(sys.executable, root) if args.install_timer else remove_timer())
+        return 0
     report = sweep(scope=str(Path(args.path).resolve()) if args.path else "", act=args.enforce)
     print(json.dumps(report, indent=2)) if args.json else _print_report(report)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

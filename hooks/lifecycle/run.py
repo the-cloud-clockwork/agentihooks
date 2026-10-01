@@ -10,6 +10,7 @@ from hooks.lifecycle.config import load_roots
 from hooks.lifecycle.files import classify_files
 from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.liveness import Snapshot, lease_alive, path_in_use, take_snapshot
+from hooks.lifecycle.locks import removing
 from hooks.lifecycle.model import ACTIONABLE, Finding, Root
 from hooks.lifecycle.scratch import classify_scratch, walk_stats
 from hooks.lifecycle.state import confirm
@@ -54,13 +55,14 @@ def enforce(findings: list[Finding], roots: list[Root], home: Path, fresh: Calla
         if not (item.due and item.action in ACTIONABLE):
             result.append(item)
             continue
-        if not _still_safe(item, by_id, view):
-            result.append(replace(item, outcome="skipped: no longer safe"))
-            continue
-        try:
-            outcome = apply(item, journal)
-        except (ActionError, OSError, subprocess.TimeoutExpired) as error:
-            outcome = f"failed: {error}"
+        with removing(home, item.path):
+            if not _still_safe(item, by_id, view):
+                result.append(replace(item, outcome="skipped: no longer safe"))
+                continue
+            try:
+                outcome = apply(item, journal)
+            except (ActionError, OSError, subprocess.TimeoutExpired) as error:
+                outcome = f"failed: {error}"
         result.append(replace(item, outcome=outcome))
     return result
 
