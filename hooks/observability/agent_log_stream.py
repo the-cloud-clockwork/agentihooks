@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 from hooks.config import AGENT_LOG_FILE, AGENTIHOOKS_HOME, STREAM_AGENT_LOG
+from hooks.logfile import rotate_if_full
 
 # Track last copied position per session
 POSITION_DIR = AGENTIHOOKS_HOME / "agent_stream_positions"
@@ -110,6 +111,7 @@ def stream_to_agent_log(session_id: str, transcript_path: str) -> None:
             new_lines = lines[last_pos:]
 
             # Append to agent log
+            rotate_if_full(agent_log)
             with open(agent_log, "a") as f:
                 for line in new_lines:
                     # Validate it's proper JSON before writing

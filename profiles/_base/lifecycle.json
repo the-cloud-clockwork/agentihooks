@@ -1,0 +1,11 @@
+{
+  "roots": [
+    {"id": "worktrees", "path": "~/dev/worktrees", "kind": "worktrees"},
+    {"id": "scratchpad", "path": "~/scratchpad", "kind": "scratch", "idle_days": 7, "budget_gb": 50},
+    {"id": "chat-exchange", "path": "~/.multi-agent-chat/exchange", "kind": "ttl", "idle_days": 14},
+    {"id": "chat-state", "path": "~/.multi-agent-chat/.state", "kind": "ttl", "idle_days": 14},
+    {"id": "chat-transcripts", "path": "~/.multi-agent-chat", "kind": "archive", "idle_days": 14, "include": ["chat-*.txt"]},
+    {"id": "ledger-watches", "path": "~/development-ledger/.sessions", "kind": "ttl", "idle_days": 1},
+    {"id": "ledgers", "path": "~/development-ledger", "kind": "archive", "idle_days": 30, "include": ["*.json", "*.html"]}
+  ]
+}

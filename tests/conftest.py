@@ -38,6 +38,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     (fake_home / ".agents" / "skills").mkdir(parents=True)
 
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     # CODEX_HOME is read BEFORE Path.home() by targets.codex_target.codex_home,
     # so patching Path.home does not cover it. Unset today on the developer's

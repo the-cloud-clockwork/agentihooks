@@ -310,6 +310,9 @@ def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
+    from hooks.lifecycle.guard import session_event
+
+    session_event()
     otel.emit_event(
         "agentihooks.session.started",
         {
@@ -524,6 +527,9 @@ def on_session_end(payload: dict) -> None:
     """Handle SessionEnd event."""
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
+    from hooks.lifecycle.guard import session_event
+
+    session_event()
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
@@ -993,6 +999,12 @@ def on_pre_tool_use(payload: dict) -> None:
         log("quota policy pre-tool failed", {"error": str(e)})
     if _quota_policy_block:
         raise BlockAction(_quota_policy_block)
+
+    from hooks.lifecycle.guard import pretool as _lifecycle_pretool
+
+    _lifecycle_block = _lifecycle_pretool(payload)
+    if _lifecycle_block:
+        raise BlockAction(_lifecycle_block)
 
     if SECRETS_MODE == "off":
         log(

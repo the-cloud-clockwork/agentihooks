@@ -336,6 +336,40 @@ sessions on no account are listed under the table as `unrouted`.
 
 ---
 
+## `agentihooks gc`, `lease`, `scratch`
+
+Workspace lifecycle for agent-created directories: git worktrees, scratch dirs and tool files.
+
+```bash
+agentihooks gc                     # report what is safe to remove
+agentihooks gc --enforce           # act on findings that are due: remove, snapshot to wip/, archive
+agentihooks gc --json              # full report; also written to ~/.agentihooks/gc-last.json
+agentihooks gc --path ~/scratchpad/myrepo
+agentihooks gc --install-timer     # hourly systemd user timer (agentihooks install does this when LIFECYCLE_GC_ENABLED)
+agentihooks gc --remove-timer
+agentihooks lease <worktree>       # record the calling agent session as owner (wt.sh new calls this)
+agentihooks lease <dir> --kind scratch|ephemeral
+agentihooks scratch new <repo>/<task>   # mkdir ~/scratchpad/<repo>/<task> + lease, prints the path
+agentihooks scratch rm <task-dir>       # safe replacement for rm -rf "$dir": refuses when another
+                                        # process works inside, another live session holds the lease,
+                                        # or a nested worktree has uncommitted or unpushed work
+```
+
+A path is actionable only when it is **unused** and **removing it loses nothing**:
+
+- Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently, and the machine has been up at least 2 h.
+- Worktrees: clean and reachable from a remote after 2 h idle (`remove`); dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first). Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
+- Scratch task dirs (`~/scratchpad/<repo>/<task>`): idle past the root's `idle_days`, then the oldest dead dirs while the root is over `budget_gb`. A `.keep` file pins a dir; files at depth ≤ 2 are never touched.
+- An action is `due` only after two sweeps at least 1 h apart in the same boot. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
+- `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree.
+- Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
+
+Triggers: `agentihooks-gc.timer` runs `gc --enforce` hourly, first 2 h after boot. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`; without systemd, the sweep runs as a detached hook task.
+
+Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in the bundle, each active profile and `~/.agentihooks/lifecycle.json`, merged by `id` (`"enabled": false` drops a root). Kinds: `worktrees`, `scratch`, `ttl` (delete idle entries), `archive` (gzip idle files matching `include`).
+
+---
+
 ## `agentihooks refresh-rules`
 
 Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
