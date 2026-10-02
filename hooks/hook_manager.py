@@ -313,6 +313,12 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.guard import session_event
 
     session_event()
+    try:
+        from hooks.lifecycle.deps_kick import kick as deps_kick
+
+        deps_kick()
+    except Exception as e:
+        log("deps kick failed", {"error": str(e)})
     otel.emit_event(
         "agentihooks.session.started",
         {
