@@ -55,6 +55,37 @@ class TestPruneScope:
         assert "agentihooks" in servers
 
 
+class TestLegacySerenaMigration:
+    ROUTER = {"type": "http", "url": "http://127.0.0.1:8643/mcp"}
+
+    def test_hand_added_stdio_serena_is_replaced_by_the_profile_entry(self, home):
+        _write_claude_json(
+            {
+                "serena": {
+                    "type": "stdio",
+                    "command": "serena",
+                    "args": ["start-mcp-server", "--context", "claude-code-worktrees", "--project-from-cwd"],
+                    "env": {},
+                }
+            }
+        )
+        install._save_state({"managed_mcp_servers": []})
+
+        install._merge_mcp_to_user_scope({"serena": self.ROUTER})
+
+        assert _read_claude_json()["serena"] == self.ROUTER
+        assert "serena" in install._load_state()["managed_mcp_servers"]
+
+    def test_any_other_hand_added_serena_is_kept(self, home):
+        mine = {"command": "node", "args": ["my-serena.js"]}
+        _write_claude_json({"serena": mine})
+        install._save_state({"managed_mcp_servers": []})
+
+        install._merge_mcp_to_user_scope({"serena": self.ROUTER})
+
+        assert _read_claude_json()["serena"] == mine
+
+
 class TestCleanScope:
     def test_clean_keeps_foreign_symlinks(self, home):
         """`init --clean` must not flatten ~/.claude asset dirs wholesale."""
