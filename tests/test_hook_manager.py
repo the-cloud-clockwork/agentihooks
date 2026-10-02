@@ -166,6 +166,44 @@ class TestBlockActionIntegration:
         result = self._run(self._write_payload("x = 1\n"))
         assert result.returncode == 0
 
+    def _mcp_payload(self, tool_name: str, tool_input: dict) -> dict:
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "session_id": "test",
+            "transcript_path": "",
+        }
+
+    def test_mcp_symbol_edit_secret_exits_2(self):
+        """A Serena symbol edit carrying a credential is blocked (exit 2)."""
+        key = "AKIA" + "IOSFODNN7EXAMPLE"
+        result = self._run(
+            self._mcp_payload(
+                "mcp__serena__replace_symbol_body",
+                {"name_path": "Config", "relative_path": "app.py", "body": f"KEY = '{key}'"},
+            )
+        )
+        assert result.returncode == 2
+        assert "aws_access_key" in result.stderr
+
+    def test_mcp_nested_secret_exits_2(self):
+        """A credential nested in a list of file objects is blocked (exit 2)."""
+        key = "AKIA" + "IOSFODNN7EXAMPLE"
+        result = self._run(
+            self._mcp_payload(
+                "mcp__github__push_files",
+                {"branch": "dev", "files": [{"path": "a.py", "content": "x = 1"}, {"path": "b.py", "content": key}]},
+            )
+        )
+        assert result.returncode == 2
+        assert "BLOCKED" in result.stderr
+
+    def test_clean_mcp_exits_0(self):
+        """A clean MCP call is not blocked."""
+        result = self._run(self._mcp_payload("mcp__serena__find_symbol", {"name_path_pattern": "Config"}))
+        assert result.returncode == 0
+
 
 class TestSecretsModesIntegration:
     """Integration tests: AGENTIHOOKS_SECRETS_MODE controls blocking behavior."""
@@ -256,5 +294,19 @@ class TestSecretsModesIntegration:
         """mode=warn should warn but not block Write with secrets."""
         key = "AKIA" + "IOSFODNN7EXAMPLE"
         result = self._run(self._write_payload(f"key = '{key}'"), mode="warn")
+        assert result.returncode == 0
+        assert "WARNING" in result.stdout
+
+    def test_mode_warn_mcp_allows_secrets(self):
+        """mode=warn should warn but not block an MCP call with secrets."""
+        key = "AKIA" + "IOSFODNN7EXAMPLE"
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__serena__replace_content",
+            "tool_input": {"relative_path": "app.py", "needle": "x", "repl": key, "mode": "literal"},
+            "session_id": "test",
+            "transcript_path": "",
+        }
+        result = self._run(payload, mode="warn")
         assert result.returncode == 0
         assert "WARNING" in result.stdout

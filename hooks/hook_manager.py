@@ -1012,7 +1012,7 @@ def on_pre_tool_use(payload: dict) -> None:
             {"tool": tool_name, "session_id": payload.get("session_id", "")},
         )
     else:
-        from hooks.secrets import redact, scan
+        from hooks.secrets import iter_strings, redact, scan
 
         # Bypass mode lifts the secrets-in-files block (operator decides when to allow it).
         # Detection still runs — we log and emit telemetry so the operator can audit.
@@ -1079,8 +1079,11 @@ def on_pre_tool_use(payload: dict) -> None:
                     "Logged and noted — transcript secrecy is operator-managed. "
                     "Do not echo values back or persist them."
                 )
-        elif tool_name in ("Write", "Edit"):
-            content = tool_input.get("content", "") or tool_input.get("new_string", "")
+        elif tool_name in ("Write", "Edit") or tool_name.startswith("mcp__"):
+            if tool_name.startswith("mcp__"):
+                content = "\n".join(iter_strings(tool_input))
+            else:
+                content = tool_input.get("content", "") or tool_input.get("new_string", "")
             log(f"Pre tool use: {tool_name}", {"tool": tool_name, "session_id": payload.get("session_id", "")})
             hits = scan(content, mode=SECRETS_MODE)
             if hits:
