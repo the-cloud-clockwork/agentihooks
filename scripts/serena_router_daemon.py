@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -43,8 +44,17 @@ def _unit_path() -> Path:
 
 
 def render_unit(python: str) -> str:
+    replacements = {
+        "__PYTHON__": python,
+        "__CWD__": str(REPO_ROOT),
+        "__PORT__": str(port()),
+        "__SERENA__": shutil.which("serena") or "serena",
+        "__PATH__": os.environ.get("PATH", ""),
+    }
     text = TEMPLATE.read_text()
-    return text.replace("__PYTHON__", python).replace("__CWD__", str(REPO_ROOT)).replace("__PORT__", str(port()))
+    for placeholder, value in replacements.items():
+        text = text.replace(placeholder, value)
+    return text
 
 
 def _systemctl(*args: str) -> subprocess.CompletedProcess:
@@ -58,6 +68,7 @@ def _start_systemd(python: str) -> str:
         unit.parent.mkdir(parents=True, exist_ok=True)
         unit.write_text(rendered)
         _systemctl("daemon-reload")
+    _systemctl("reset-failed", UNIT_NAME)
     proc = _systemctl("enable", "--now", UNIT_NAME)
     return "" if proc.returncode == 0 else (proc.stderr or proc.stdout).strip()
 

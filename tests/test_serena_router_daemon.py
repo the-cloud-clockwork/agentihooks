@@ -3,10 +3,16 @@ from __future__ import annotations
 from scripts import serena_router_daemon as daemon
 
 
-def test_unit_renders_python_port_and_checkout(monkeypatch):
+def test_unit_renders_python_port_and_checkout(monkeypatch, tmp_path):
+    shim = tmp_path / "bin" / "serena"
+    shim.parent.mkdir()
+    shim.write_text("#!/bin/sh\n")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim.parent}:/usr/bin:/mnt/c/Program Files/x")
     monkeypatch.setenv("AGENTIHOOKS_SERENA_ROUTER_PORT", "9911")
     unit = daemon.render_unit("/opt/py/bin/python3")
-    assert "ExecStart=/opt/py/bin/python3 -m hooks.serena_router --host 127.0.0.1 --port 9911" in unit
+    assert f"--port 9911 --serena {shim}" in unit
+    assert f'Environment="PATH={shim.parent}:/usr/bin:/mnt/c/Program Files/x"' in unit
     assert f"WorkingDirectory={daemon.REPO_ROOT}" in unit
     assert "Environment=SERENA_USAGE_REPORTING=false" in unit
     assert "__" not in unit
