@@ -43,6 +43,9 @@ for compliance.
 | The operator's message asks to set, change or remove a condition | `condition_set` / `condition_clear` (script body; `scope` global, profile or directory). Never on your own initiative — the hook refuses it |
 | Which conditions run, or why a call was shaped | `condition_list`, `condition_show` |
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
+| Serena refuses, or which worktrees hold a backend | `agentihooks serena status` (page http://127.0.0.1:8643/); router down → `agentihooks serena restart` |
+| A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
+| A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `claude-terminal` sessions restart at their next stop |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
