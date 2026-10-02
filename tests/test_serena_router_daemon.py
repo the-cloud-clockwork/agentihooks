@@ -18,6 +18,15 @@ def test_unit_renders_python_port_and_checkout(monkeypatch, tmp_path):
     assert "__" not in unit
 
 
+def test_unit_passes_the_bundle_context_when_the_bundle_ships_one(monkeypatch, tmp_path):
+    context = tmp_path / "claude-code-worktrees.yml"
+    monkeypatch.setattr(daemon, "bundle_context", lambda: context)
+    assert f"--context {context}\n" in daemon.render_unit("/py")
+    monkeypatch.setattr(daemon, "bundle_context", lambda: None)
+    unit = daemon.render_unit("/py")
+    assert "--context" not in unit and "__" not in unit
+
+
 def test_release_reports_failure_when_router_is_down(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SERENA_ROUTER_PORT", "1")
     assert daemon.release("/nowhere") == 1
