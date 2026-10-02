@@ -108,8 +108,10 @@ def _write_launcher(
         "set -u\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
+        f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )

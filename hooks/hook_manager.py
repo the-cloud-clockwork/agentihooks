@@ -1976,6 +1976,14 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("voice_output stop hook failed", {"error": str(e)})
 
+    try:
+        from hooks.lifecycle.refresh import on_stop as refresh_on_stop
+
+        if refresh_on_stop(payload):
+            log("session refresh scheduled", {"session_id": session_id})
+    except Exception as e:
+        log("session refresh failed", {"error": str(e)})
+
 
 def on_subagent_start(payload: dict) -> None:
     """Handle SubagentStart event — wire the brain through to subagents.
