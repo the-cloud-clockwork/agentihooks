@@ -164,11 +164,15 @@ def unsatisfied() -> list[Dep]:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks deps")
-    parser.add_argument("action", choices=["check", "ensure"])
+    parser.add_argument("action", choices=["check", "ensure", "mark-changed"])
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--reason", default="manual", help="mark-changed: what changed (recorded in the install log)")
     args = parser.parse_args(argv)
     if args.action == "ensure":
         return ensure(quiet=args.quiet)
+    if args.action == "mark-changed":
+        _record(Dep(id=args.reason, kind="system", check=(), affects_sessions=True), ok=True)
+        return 0
     missing = unsatisfied()
     for dep in missing:
         print(f"missing: {dep.id} ({dep.kind}){' — ' + dep.hint if dep.hint else ''}")
