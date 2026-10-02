@@ -140,6 +140,15 @@ async def test_untracked_serena_dir_is_excluded(router, repo):
         assert ".serena/" in exclude.read_text().splitlines()
 
 
+async def test_worktree_inherits_the_primary_checkout_serena_config(router, repo):
+    config = repo["primary"] / ".serena" / "project.yml"
+    config.parent.mkdir()
+    config.write_text('language_servers: ["python"]\n')
+    async with connect(router) as session:
+        await session.call_tool("activate_project", {"project": str(repo["a"])})
+    assert (repo["a"] / ".serena" / "project.yml").read_text() == 'language_servers: ["python"]\n'
+
+
 def test_app_bounds_idle_sessions():
     app = build_app(Pool(BackendConfig(command=(sys.executable, str(FAKE)))), [])
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS

@@ -6,7 +6,14 @@ from contextlib import asynccontextmanager
 from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, TextContent, Tool
 
-from hooks.serena_router.binding import PRIMARY, Binding, BindingError, ensure_excluded, resolve
+from hooks.serena_router.binding import (
+    PRIMARY,
+    Binding,
+    BindingError,
+    ensure_excluded,
+    inherit_project_config,
+    resolve,
+)
 from hooks.serena_router.pool import BackendError, Pool
 
 ACTIVATE = "activate_project"
@@ -28,6 +35,7 @@ def edit_tools(tools: list[Tool]) -> frozenset[str]:
 async def activate(pool: Pool, binding: Binding, project: str) -> CallToolResult:
     try:
         root, kind = resolve(project)
+        inherit_project_config(root)
         ensure_excluded(root)
         await pool.get(root)
     except (BindingError, BackendError) as exc:
