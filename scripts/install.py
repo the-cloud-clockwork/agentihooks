@@ -3385,7 +3385,11 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
             # machine that predates the ledger marks every server foreign,
             # leaving the ledger permanently empty and prune with nothing to
             # sweep.
-            if name not in ours and existing_servers[name] != config and not _is_legacy_mcp(name, existing_servers[name]):
+            if (
+                name not in ours
+                and existing_servers[name] != config
+                and not _is_legacy_mcp(name, existing_servers[name])
+            ):
                 skipped.append(name)
                 continue
             if existing_servers[name] != config:
