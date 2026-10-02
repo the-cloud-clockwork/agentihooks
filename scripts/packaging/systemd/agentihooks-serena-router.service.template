@@ -7,9 +7,11 @@ StartLimitBurst=5
 
 [Service]
 Type=exec
-ExecStart=__PYTHON__ -m hooks.serena_router --host 127.0.0.1 --port __PORT__
+ExecStart=__PYTHON__ -m hooks.serena_router --host 127.0.0.1 --port __PORT__ --serena __SERENA__
 WorkingDirectory=__CWD__
 Environment=SERENA_USAGE_REPORTING=false
+# The user manager's PATH lacks ~/.local/bin and the language-server toolchain the backends need.
+Environment="PATH=__PATH__"
 Restart=always
 RestartSec=3
 StandardOutput=journal
