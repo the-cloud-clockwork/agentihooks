@@ -3348,6 +3348,17 @@ def _state_claim_mcp(names: set[str]) -> None:
         _save_state(state)
 
 
+def _is_legacy_mcp(name: str, config: object) -> bool:
+    """A stdio Serena registered by hand before the router replaced it."""
+    return (
+        name == "serena"
+        and isinstance(config, dict)
+        and config.get("type", "stdio") == "stdio"
+        and config.get("command") == "serena"
+        and (config.get("args") or [])[:1] == ["start-mcp-server"]
+    )
+
+
 def _merge_mcp_to_user_scope(servers: dict) -> None:
     """Merge *servers* into the top-level mcpServers of ~/.claude.json.
 
@@ -3374,7 +3385,7 @@ def _merge_mcp_to_user_scope(servers: dict) -> None:
             # machine that predates the ledger marks every server foreign,
             # leaving the ledger permanently empty and prune with nothing to
             # sweep.
-            if name not in ours and existing_servers[name] != config:
+            if name not in ours and existing_servers[name] != config and not _is_legacy_mcp(name, existing_servers[name]):
                 skipped.append(name)
                 continue
             if existing_servers[name] != config:
