@@ -43,12 +43,26 @@ def _unit_path() -> Path:
     return Path.home() / ".config" / "systemd" / "user" / UNIT_NAME
 
 
+def bundle_context() -> Path | None:
+    from scripts.install import _get_bundle_path
+
+    bundle = _get_bundle_path()
+    path = bundle / "serena" / "contexts" / "claude-code-worktrees.yml" if bundle else None
+    return path if path and path.is_file() else None
+
+
+def _context_args() -> list[str]:
+    context = bundle_context()
+    return ["--context", str(context)] if context else []
+
+
 def render_unit(python: str) -> str:
     replacements = {
         "__PYTHON__": python,
         "__CWD__": str(REPO_ROOT),
         "__PORT__": str(port()),
         "__SERENA__": shutil.which("serena") or "serena",
+        "__CONTEXT_ARGS__": " ".join(_context_args()),
         "__PATH__": os.environ.get("PATH", ""),
     }
     text = TEMPLATE.read_text()
@@ -77,7 +91,7 @@ def _start_pidfile(python: str) -> str:
     _logfile().parent.mkdir(parents=True, exist_ok=True)
     with open(_logfile(), "ab") as log:
         proc = subprocess.Popen(  # noqa: S603
-            [python, "-m", "hooks.serena_router", "--host", HOST, "--port", str(port())],
+            [python, "-m", "hooks.serena_router", "--host", HOST, "--port", str(port()), *_context_args()],
             cwd=REPO_ROOT,
             env={**os.environ, "SERENA_USAGE_REPORTING": "false"},
             stdin=subprocess.DEVNULL,
