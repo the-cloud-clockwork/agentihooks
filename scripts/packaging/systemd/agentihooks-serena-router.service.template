@@ -1,0 +1,19 @@
+[Unit]
+Description=agentihooks Serena router (one MCP endpoint, one Serena per worktree)
+Documentation=https://github.com/The-Cloud-Clockwork/agentihooks
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=__PYTHON__ -m hooks.serena_router --host 127.0.0.1 --port __PORT__
+WorkingDirectory=__CWD__
+Environment=SERENA_USAGE_REPORTING=false
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

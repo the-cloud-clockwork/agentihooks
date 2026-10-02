@@ -6249,6 +6249,10 @@ def main() -> None:
         from scripts.claude_terminal import main as terminal_main
 
         raise SystemExit(terminal_main(_argv[1:]))
+    if _argv and _argv[0] == "serena":
+        from scripts.serena_router_daemon import main as serena_main
+
+        raise SystemExit(serena_main(_argv[1:]))
     if _argv and _argv[0] == "kill-agent":
         from scripts.kill_agent import main as kill_agent_main
 
@@ -6373,6 +6377,7 @@ def main() -> None:
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
     sub.add_parser("kill-agent", help="List or terminate a Claude Code or Codex session")
+    sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
