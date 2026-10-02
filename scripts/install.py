@@ -5473,6 +5473,13 @@ def cmd_claude(extra_args: list[str]) -> None:
     _load_claude_runtime_env()
     claude_bin = shutil.which("claude") or "claude"
     include_fable = route_requires_fable(extra_args, CLAUDE_HOME / "settings.json")
+    # Before the route lock: an install must not hold every other launch waiting.
+    try:
+        from scripts.deps_preflight import ensure as deps_ensure
+
+        deps_ensure()
+    except Exception as exc:  # noqa: BLE001 - a broken manifest must not stop a launch
+        print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
     route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
     route_lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Held until exec: the descriptor is close-on-exec, so the next launch counts this
@@ -6264,6 +6271,10 @@ def main() -> None:
         from scripts.serena_router_daemon import main as serena_main
 
         raise SystemExit(serena_main(_argv[1:]))
+    if _argv and _argv[0] == "deps":
+        from scripts.deps_preflight import main as deps_main
+
+        raise SystemExit(deps_main(_argv[1:]))
     if _argv and _argv[0] == "kill-agent":
         from scripts.kill_agent import main as kill_agent_main
 
@@ -6389,6 +6400,7 @@ def main() -> None:
     sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
     sub.add_parser("kill-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
+    sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
