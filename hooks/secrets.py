@@ -11,7 +11,7 @@ Supports tiered pattern sets controlled by ``AGENTIHOOKS_SECRETS_MODE``:
 """
 
 import re
-from typing import Callable, NamedTuple
+from typing import Callable, Iterator, NamedTuple
 
 
 class _Pattern(NamedTuple):
@@ -125,6 +125,17 @@ def scan(text: str, *, mode: str | None = None) -> list[str]:
         if pattern.matches(filtered):
             hits.append(pattern.name)
     return hits
+
+
+def iter_strings(obj: object) -> Iterator[str]:
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from iter_strings(value)
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            yield from iter_strings(value)
 
 
 def redact(text: str, *, mode: str | None = None) -> str:
