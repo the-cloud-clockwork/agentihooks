@@ -571,6 +571,15 @@ def check_broadcast() -> dict[str, Any]:
         return {"enabled": False, "sessions": 0, "messages": 0, "ok": True}
 
 
+def check_serena_router() -> dict[str, Any]:
+    from scripts import serena_router_daemon
+
+    body = serena_router_daemon._request("/status.json")
+    if body is None:
+        return {"running": False, "url": serena_router_daemon.base_url(), "backends": 0}
+    return {"running": True, "url": serena_router_daemon.base_url(), "backends": len(body["backends"])}
+
+
 def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
     results: dict[str, Any] = {
         "profile": check_profile(),
@@ -582,6 +591,7 @@ def run_all_checks(session_id: Optional[str] = None) -> dict[str, Any]:
         "mcp": check_mcp(),
         "quota": check_quota(),
         "broadcast": check_broadcast(),
+        "serena_router": check_serena_router(),
     }
     if session_id:
         results["session"] = check_session(session_id)
@@ -655,6 +665,12 @@ def format_cli(results: dict[str, Any]) -> str:
         lines.append(_cprint(f"[OK] Broadcast: {b['sessions']} sessions, {b['messages']} messages"))
     else:
         lines.append(_cprint("[--] Broadcast: disabled"))
+
+    s = results.get("serena_router", {})
+    if s.get("running"):
+        lines.append(_cprint(f"[OK] Serena router: {s['url']}, {s['backends']} backend(s)"))
+    else:
+        lines.append(_cprint(f"[--] Serena router: not running ({s.get('url', '')})"))
 
     # Guardrails
     g = results["guardrails"]
