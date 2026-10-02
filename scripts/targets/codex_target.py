@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -69,6 +70,26 @@ CODEX_HOOK_EVENTS = (
 # Events codex refuses additionalContext on — it warns per handler when the key
 # is set on one of them ("this event cannot emit additionalContext").
 _NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
+
+
+_REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
+
+
+def _forward_env_references(entry: dict) -> None:
+    """Codex passes env values literally: resolve ${VAR} in a bash wrapper fed by env_vars."""
+    env = entry.get("env") or {}
+    refs = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
+    if not refs:
+        return
+    assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in refs.items())
+    entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', entry["command"], *entry.get("args", [])]
+    entry["command"] = "bash"
+    entry["env_vars"] = sorted({n for v in refs.values() for n in _REFERENCE_NAME.findall(v)})
+    literal = {k: v for k, v in env.items() if k not in refs}
+    if literal:
+        entry["env"] = literal
+    else:
+        entry.pop("env", None)
 
 
 def codex_home() -> Path:
@@ -441,6 +462,7 @@ class CodexAdapter:
                         clean_env[ek] = ev
                     if clean_env:
                         entry["env"] = clean_env
+                        _forward_env_references(entry)
             elif spec.get("url"):
                 entry["url"] = spec["url"]
                 # Claude Code expands ${VAR} placeholders in header values at

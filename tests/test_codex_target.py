@@ -460,6 +460,18 @@ class TestMcp:
         adapter.register_mcp({"local": {"command": "/py", "env": {"UPSTREAM_KEY": "${MY_TOKEN}"}}})
         assert "${MY_TOKEN}" in (codex_home() / "config.toml").read_text()
 
+    def test_env_reference_resolved_by_bash_wrapper(self, adapter):
+        import tomllib
+
+        adapter.register_mcp(
+            {"pw": {"command": "cmd.exe", "args": ["/c", "npx"], "env": {"TOKEN": "${SRC_TOKEN}", "WSLENV": "TOKEN"}}}
+        )
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["pw"]
+        assert entry["command"] == "bash"
+        assert entry["args"] == ["-c", 'TOKEN="${SRC_TOKEN}" exec "$0" "$@"', "cmd.exe", "/c", "npx"]
+        assert entry["env_vars"] == ["SRC_TOKEN"]
+        assert entry["env"] == {"WSLENV": "TOKEN"}
+
     def test_credential_shaped_env_var_dropped(self, adapter, capsys):
         dummy_key = "AKIA" + "TESTDUMMY0000000"
         adapter.register_mcp(
