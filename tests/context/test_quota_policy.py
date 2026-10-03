@@ -211,3 +211,41 @@ def test_pre_tool_use_raises_the_stop_block():
             hook_manager.on_pre_tool_use(
                 {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-stop", "cwd": "/tmp"}
             )
+
+
+def test_reserve_account_is_the_last_handoff_target():
+    others = [_c("big", 0, 30), _c("small", 0, 88), _c("tiny", 0, 96)]
+
+    def pick(reserve):
+        return qp.decide(
+            account="alpha",
+            five_used=10,
+            week_used=97.5,
+            five_reset=None,
+            week_reset=None,
+            others=others,
+            max_sessions=2,
+            push=False,
+            week_pct=97,
+            min_left=20,
+            reserve=reserve,
+        )
+
+    assert pick(frozenset()).target.account == "big"
+    assert pick(frozenset({"big"})).target.account == "small"
+    assert (
+        qp.decide(
+            account="alpha",
+            five_used=10,
+            week_used=97.5,
+            five_reset=None,
+            week_reset=None,
+            others=[_c("big", 0, 30), _c("tiny", 0, 96)],
+            max_sessions=2,
+            push=False,
+            week_pct=97,
+            min_left=20,
+            reserve=frozenset({"big"}),
+        ).target.account
+        == "big"
+    )

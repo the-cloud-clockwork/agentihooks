@@ -22,6 +22,7 @@ from hooks.config import (
     QUOTA_HANDOFF_5H_PCT,
     QUOTA_HANDOFF_MIN_LEFT,
     QUOTA_HANDOFF_WEEK_PCT,
+    QUOTA_RESERVE_ACCOUNTS,
     QUOTA_WAIT_MIN_WEEK_LEFT,
 )
 
@@ -77,6 +78,7 @@ def decide(
     week_pct: float = QUOTA_HANDOFF_WEEK_PCT,
     min_left: float = QUOTA_HANDOFF_MIN_LEFT,
     wait_min_week_left: float = QUOTA_WAIT_MIN_WEEK_LEFT,
+    reserve: frozenset[str] = QUOTA_RESERVE_ACCOUNTS,
 ) -> Decision | None:
     week_hit = week_used >= week_pct
     five_hit = five_used >= five_pct
@@ -84,6 +86,8 @@ def decide(
         return None
 
     pool = [c for c in others if c.account != account and c.five_used < five_pct and c.week_used < week_pct]
+    unreserved = [c for c in pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
+    pool = unreserved or pool
     good = [c for c in pool if c.routing_left >= min_left]
     viable = [c for c in pool if c.routing_left >= MIN_ROUTING_LEFT]
     best_good = min(good, key=lambda c: (c.sessions >= max_sessions, -c.routing_left, c.account)) if good else None
