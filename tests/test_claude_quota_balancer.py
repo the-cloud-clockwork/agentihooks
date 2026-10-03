@@ -501,3 +501,17 @@ def test_table_shows_live_sessions_per_account():
     assert "SESSIONS" in table.splitlines()[0]
     assert "1/2" in table.splitlines()[2]
     assert table.splitlines()[-1] == "unrouted: 2 session(s)"
+
+
+def test_reserve_account_is_chosen_only_when_no_other_is_routable(monkeypatch, tmp_path):
+    env = _three(monkeypatch)
+
+    reserved = balancer.select_credential(
+        {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST"}, cache_file=tmp_path / "c.json"
+    )
+    everything = balancer.select_credential(
+        {**env, "AGENTIHOOKS_RESERVE_ACCOUNTS": "BEST,MID,LOW"}, cache_file=tmp_path / "c.json"
+    )
+
+    assert reserved.result.account == "MID"
+    assert everything.result.account == "BEST"

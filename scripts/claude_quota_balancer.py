@@ -669,6 +669,8 @@ def select_credential(
     if not eligible:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
+    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
+    eligible = [result for result in eligible if result.account not in reserve] or eligible
     counts = sessions or {}
     below_cap = [result for result in eligible if counts.get(result.account, 0) < max_sessions]
     if below_cap or sessions is None:

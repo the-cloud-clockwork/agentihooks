@@ -511,6 +511,9 @@ QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", 
 QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
 QUOTA_HANDOFF_MIN_LEFT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_MIN_LEFT", "20"))
 QUOTA_WAIT_MIN_WEEK_LEFT: float = float(os.getenv("AGENTIHOOKS_WAIT_MIN_WEEK_LEFT", "10"))
+QUOTA_RESERVE_ACCOUNTS: frozenset[str] = frozenset(
+    slug.strip() for slug in os.getenv("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()
+)
 
 # =============================================================================
 # CONTEXT AUDIT — per-tool token consumption tracking
