@@ -90,3 +90,24 @@ def test_a_handoff_stays_on_claude(monkeypatch, tmp_path, capsys):
     )
     assert rc == 2
     assert "--handoff moves work to another Claude account" in capsys.readouterr().err
+
+
+def test_an_explicit_codex_agent_is_used_even_when_claude_has_quota(monkeypatch):
+    _quota(monkeypatch, claude=True, codex=False)
+    assert agent_choice.choose("codex", {}) == ("codex", "requested")
+
+
+def test_claude_quota_comes_from_routable_accounts_in_the_router_cache(monkeypatch):
+    from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
+
+    def result(margin):
+        return ProbeResult("a", "allowed", "NORMAL", margin, QuotaWindow(), QuotaWindow())
+
+    monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: [(0, result(2.0))])
+    assert agent_choice.has_quota("claude", {}) is False
+    monkeypatch.setattr(
+        "scripts.claude_quota_balancer.cached_observations", lambda: [(0, result(2.0)), (0, result(40.0))]
+    )
+    assert agent_choice.has_quota("claude", {}) is True
+    monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: [])
+    assert agent_choice.has_quota("claude", {}) is None
