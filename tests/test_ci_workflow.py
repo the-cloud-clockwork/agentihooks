@@ -187,3 +187,41 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert "git/commits/$GITHUB_SHA" in tree["run"]
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
+
+
+def _warm_step(predicate) -> dict:
+    (step,) = [s for s in _workflow()["jobs"]["warm-cache"]["steps"] if predicate(s)]
+    return step
+
+
+def test_warm_cache_runs_only_when_the_dev_push_skips_its_tests():
+    job = _workflow()["jobs"]["warm-cache"]
+    assert job["needs"] == "already-tested"
+    assert job["if"] == "${{ !cancelled() && needs.already-tested.outputs.skip == 'true' }}"
+
+
+def test_warm_cache_covers_every_unit_python_version():
+    jobs = _workflow()["jobs"]
+    assert (
+        jobs["warm-cache"]["strategy"]["matrix"]["python-version"]
+        == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    )
+    (step,) = [s for s in jobs["warm-cache"]["steps"] if s.get("uses", "").startswith("actions/setup-python")]
+    assert step["with"]["python-version"] == "${{ matrix.python-version }}"
+
+
+def test_warm_cache_writes_the_key_the_unit_shards_restore():
+    _, unit_uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    uv = _warm_step(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    assert uv["uses"] == unit_uv["uses"]
+    assert uv["with"]["enable-cache"] is True
+    assert uv["with"]["cache-dependency-glob"] == unit_uv["with"]["cache-dependency-glob"]
+    assert "save-cache" not in uv["with"]
+
+
+def test_warm_cache_installs_only_on_a_cache_miss():
+    uv = _warm_step(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    install = _warm_step(lambda s: s.get("name") == "Install dependencies")
+    _, unit_install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
+    assert install["if"] == f"steps.{uv['id']}.outputs.cache-hit != 'true'"
+    assert install["run"] == unit_install["run"]
