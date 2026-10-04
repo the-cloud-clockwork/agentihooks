@@ -40,7 +40,7 @@ def _hook_commands(hooks: dict) -> set[str]:
         for g in groups
         if isinstance(g, dict)
         for h in g.get("hooks", [])
-        if isinstance(h, dict)
+        if isinstance(h, dict) and h.get("command")
     }
 
 
