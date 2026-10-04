@@ -84,7 +84,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # systemd unit template for the network-transport agentihooks MCP daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
-"scripts.swarm_ledger" = ["*.html"]
+"scripts.swarm_ledger" = ["*.html", "*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
 # rules, settings, and profile manifests. Recursive ** globs cover .claude/
 # and target-specific subdirectories at any depth.

@@ -68,6 +68,30 @@ The deterministic CLI primitives behind these skills are respectively
 with `multi-agent-chat`, `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
+## Swarms and ledgers
+
+A swarm runs Claude and Codex agents over the tasks of a swarm ledger
+(`~/development-ledger/<slug>.json`, page http://127.0.0.1:8765/<slug>).
+
+| Trigger | Action |
+|---|---|
+| Start a swarm from an accepted plan | `$init-swarm`; the session stays the liaison and never claims a task |
+| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N`; the ledger page swarm panel writes the same ops |
+| Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, a `Monitor` on `agentihooks ledger watch <slug> --as <name>`, act on every OPERATOR line, then `ack` |
+| Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
+| A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
+| Context reaches `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Write the handoff document, `agentihooks swarm <slug> handoff <doc>`, stop; a successor continues from it |
+
+- Every agent session is one Langfuse trace in the project `agent-swarm`,
+  tagged with swarm, agent, lane, task and account.
+- The ledger page carries a fixed outline on the left, Stats and the swarm
+  panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
+  collapsed until clicked. HOME lists every ledger; a deleted ledger sits in the
+  bin 30 days, then the server removes it.
+- Ledger front end colours live only in `scripts/swarm_ledger/palette.css`, and
+  keep the ledger's own red and blue. Layout follows design system 2026-001 and
+  the `ui-doctrine` skill.
+
 ## Conditions
 
 A condition is an operator-authored script that runs on every tool call its
