@@ -395,6 +395,29 @@ class SwarmPanel(unittest.TestCase):
             ],
         )
 
+    def test_the_crew_box_shows_only_on_a_ledger_without_a_swarm(self):
+        out = self.run_js(
+            ["crewShown"],
+            f'[crewShown([{{name: "a"}}], {json.dumps(STATUS)}), crewShown([{{name: "a"}}], null), crewShown([], null)]',
+        )
+        self.assertEqual(out, [False, True, False])
+
+    def test_each_swarm_poll_hides_or_restores_the_crew_box(self):
+        stubs = (
+            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {}});"
+            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
+            "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
+            'const meta = {crew: [{name: "a"}]};'
+        )
+        script = (
+            stubs
+            + "".join(function_source(n) + "\n" for n in ("crewShown", "renderSwarm"))
+            + f"renderSwarm({json.dumps(STATUS)}); const withSwarm = $('crew-box').hidden;"
+            + "renderSwarm(null); process.stdout.write(JSON.stringify([withSwarm, $('crew-box').hidden]));"
+        )
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+        self.assertEqual(out, [True, False])
+
     def test_step_ops_report_pending_then_done_or_error_by_name(self):
         out = self.run_js(
             ["opNote"],
