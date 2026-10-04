@@ -240,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
         slug = self.slug()
         if self.refused():
             return None
-        if slug.startswith("swarm/"):
+        if self.path.startswith("/api/swarm/"):
             return self.put_swarm(slug.removeprefix("swarm/"))
         if not self.path.startswith("/api/") or not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
