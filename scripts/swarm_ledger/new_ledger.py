@@ -47,7 +47,12 @@ def check_types(content):
         isinstance(s, str) for s in content.get("sources", [])
     ):
         errors.append("sources must be a list of path strings")
-    for key, fields in (("phases", ("title", "description")), ("questions", ("text",)), ("followups", ("text",))):
+    for key, fields in (
+        ("phases", ("title", "description")),
+        ("questions", ("text",)),
+        ("followups", ("text",)),
+        ("tasks", ("title", "description", "phase", "lane")),
+    ):
         items = content.get(key, [])
         if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
             errors.append(f"{key} must be a list of objects")
@@ -88,7 +93,7 @@ def build_doc(content):
 
     def extra(key):
         base = {"comments": []}
-        if key in ("phases", "followups"):
+        if key in ("phases", "followups", "tasks"):
             base["done"] = False
         if key == "questions":
             base["answers"] = []
@@ -104,6 +109,10 @@ def build_doc(content):
         "notes": [],
         "chat": [],
         "followups": items("followups", "f", ("text",)),
+        "tasks": [
+            {**task, "lane": task["lane"] or "eng", "state": "open", "claimed_by": "", "issue_url": "", "pr_url": ""}
+            for task in items("tasks", "t", ("title", "description", "phase", "lane"))
+        ],
     }
 
 

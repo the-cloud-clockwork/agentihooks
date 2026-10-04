@@ -76,6 +76,9 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .num { flex: none; min-width: 26px; color: var(--blue-hi); font-weight: 700; font-size: var(--fs-item); }
 .item-title { font-size: var(--fs-item); font-weight: 600; }
 .desc { color: var(--muted); margin-top: 4px; }
+.task-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; font-size: .9em; color: var(--muted); }
+.task-meta .claimed { color: var(--blue-hi); }
+.task-meta a { color: inherit; }
 .done .item-title, .done .text { color: var(--muted); }
 .row > .scope { margin-left: auto; }
 .scope { flex: none; display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 2px 0; font: inherit;
@@ -225,6 +228,7 @@ details.crew { margin: 10px 0 0; }
   <section><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
   <section><h2>Plan phases</h2><ol id="phases"></ol></section>
+  <section><h2>Swarm tasks</h2><ol id="tasks"></ol></section>
   <section><h2>Open questions</h2><ol id="questions"></ol></section>
   <section><h2>Operator notes</h2><div id="notes"></div></section>
   <section><h2>Follow-ups or blockers</h2><ul id="followups"></ul></section>
@@ -322,6 +326,7 @@ details.crew { margin: 10px 0 0; }
       phases: list("phases", ["title", "description", "done", "out_of_scope"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
+      tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "done", "out_of_scope"], ["comments"]),
     };
   }
 
@@ -500,6 +505,19 @@ details.crew { margin: 10px 0 0; }
       commentsView(key, item.comments));
   }
 
+  function taskRow(item) {
+    const key = `tasks/${item.id}`;
+    const link = (url, label) => url ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
+    const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), h("span", { text: item.state }),
+      item.phase ? h("span", { text: item.phase }) : null,
+      item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
+      link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
+    const body = h("div", {}, h("div", { class: "item-title", text: item.title }),
+      item.description ? h("p", { class: "desc", text: item.description }) : null, meta);
+    const row = h("div", { class: "row" }, body, scopeDot(key, item));
+    return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, commentsView(key, item.comments));
+  }
+
   function listInto(id, items, make) {
     const el = $(id);
     el.replaceChildren(...items.map(make));
@@ -516,6 +534,7 @@ details.crew { margin: 10px 0 0; }
     $("sources-count").textContent = `· ${doc.sources.length}`;
     listInto("sources", doc.sources, (s) => h("li", { text: s }));
     listInto("phases", doc.phases, (p, i) => checkRow("phases", p, i + 1, p.title, p.description));
+    listInto("tasks", doc.tasks, taskRow);
     listInto("questions", doc.questions, (q, i) => questionRow(q, i + 1));
     $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
     listInto("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
@@ -550,7 +569,7 @@ details.crew { margin: 10px 0 0; }
     for (const e of meta.events || []) note(e.by, e.at);
     for (const m of meta.crew || []) note(m.name, m.last_seen);
     const threads = [doc.notes, doc.chat];
-    for (const list of ["phases", "questions", "followups"]) for (const i of doc[list]) threads.push(i.comments, i.answers || []);
+    for (const list of ["phases", "questions", "followups", "tasks"]) for (const i of doc[list]) threads.push(i.comments, i.answers || []);
     for (const t of threads) for (const e of t) note(e.by, e.at);
     return Object.values(seen).filter((at) => Date.now() - at < ACTIVE_MS).length;
   }

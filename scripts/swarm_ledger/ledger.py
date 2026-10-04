@@ -21,6 +21,8 @@ Usage: ledger.py [--slug SLUG] [--as NAME] <command> [args]      (env fallbacks 
   priority clear ID... | --all        clear priorities once answered
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
+  task add ID TITLE --lane eng|ci [--phase P] [--description D]   add a swarm task
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url or pr_url of a swarm task
   prompt                              print the join paragraph for a launch prompt
 
 Agent text is for the operator: plain words, what was done or why it was skipped. The server refuses
@@ -233,6 +235,21 @@ def cmd_claim(args):
     print(json.dumps({"claimed": args.item}))
 
 
+def cmd_task(args):
+    if args.action == "add":
+        title = " ".join(args.values)
+        send(
+            args, "task_add", task=args.id, title=title, lane=args.lane, phase=args.phase, description=args.description
+        )
+        print(json.dumps({"task": args.id, "added": title}))
+        return
+    fields = dict(value.split("=", 1) for value in args.values if "=" in value)
+    if len(fields) != len(args.values):
+        sys.exit("task set takes FIELD=VALUE pairs")
+    send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
+    print(json.dumps({"task": args.id, **fields}))
+
+
 def cmd_prompt(args):
     me = "agentihooks ledger"
     print(
@@ -287,6 +304,13 @@ def build_parser():
     priority.add_argument("--all", action="store_true")
     sub.add_parser("time-left").add_argument("minutes", type=_duration)
     sub.add_parser("claim").add_argument("item")
+    task = sub.add_parser("task")
+    task.add_argument("action", choices=["add", "set"])
+    task.add_argument("id")
+    task.add_argument("values", nargs="+")
+    task.add_argument("--lane", choices=["eng", "ci"], default="eng")
+    task.add_argument("--phase", default="")
+    task.add_argument("--description", default="")
     return parser
 
 

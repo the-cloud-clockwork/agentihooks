@@ -23,6 +23,7 @@ from typing import Optional
 import ledger_comments
 import ledger_notifications
 import ledger_priorities
+import ledger_tasks
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -35,10 +36,27 @@ LISTS = {
     "phases": ("title", "description", "done", "out_of_scope"),
     "questions": ("text", "out_of_scope"),
     "followups": ("text", "done", "out_of_scope"),
+    "tasks": (
+        "title",
+        "description",
+        "phase",
+        "lane",
+        "state",
+        "claimed_by",
+        "issue_url",
+        "pr_url",
+        "done",
+        "out_of_scope",
+    ),
 }
 BOOL_FIELDS = ("done", "out_of_scope")
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
-THREADS = {"phases": ("comments",), "questions": ("answers", "comments"), "followups": ("comments",)}
+THREADS = {
+    "phases": ("comments",),
+    "questions": ("answers", "comments"),
+    "followups": ("comments",),
+    "tasks": ("comments",),
+}
 SCALARS = ("title", "overview", "sources", "orchestrator", "chat_instructions", "policy", "time_left_minutes")
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass")
 OPERATOR_THREADS = re.compile(r"^(notes|questions/[^/]+/answers)$")
@@ -58,7 +76,9 @@ LOG_MAX_BYTES = 5 << 20
 MISSING = object()
 LOCK = threading.Lock()
 
-EXTENSION_OPS = {name: module for module in (ledger_priorities, ledger_notifications) for name in module.OPS}
+EXTENSION_OPS = {
+    name: module for module in (ledger_priorities, ledger_notifications, ledger_tasks) for name in module.OPS
+}
 
 
 def now_ms():
@@ -123,6 +143,7 @@ def normalize(doc):
     doc.setdefault("chat", [])
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
+    doc.setdefault("tasks", [])
     for name in LISTS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):

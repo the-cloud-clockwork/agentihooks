@@ -10,7 +10,7 @@ import ledger_comments
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 ROLES = ("orchestrator", "member")
 ITEM_PATH_RE = re.compile(r"^(phases|questions|followups)/[^/]+$")
-STATE_PATH_RE = re.compile(r"^((phases|followups)/[^/]+/done|(phases|questions|followups)/[^/]+/out_of_scope)$")
+STATE_PATH_RE = re.compile(r"^((phases|followups)/[^/]+/done|(phases|questions|followups|tasks)/[^/]+/out_of_scope)$")
 TEXT_ITEM_RE = re.compile(r"^(questions|followups)/[^/]+$")
 MAX_TEXT = 20000
 
