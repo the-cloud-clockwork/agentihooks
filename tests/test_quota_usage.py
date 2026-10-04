@@ -57,6 +57,7 @@ def test_router_cache_supplies_first_prompt(monkeypatch, tmp_path):
     import hooks.context.quota_usage as quota_usage
 
     monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(quota_usage, "QUOTA_USAGE_STALE_SEC", 300)
     for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("AH_CC_TOKEN_ALPHA", "secret")
