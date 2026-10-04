@@ -229,11 +229,13 @@ Every change to `template.html` keeps these:
   clear size scale. Centre column 1400px.
 - Wide layout: the plan on the left, a sticky column on the right with a
   glass Stats section (started, elapsed, agent-maintained Time Left, completion with a thin
-  bar, agents, last activity) and the Chat section under it. Chat is plain
-  rows like other messages, one input line pinned at its foot.
-- Chat sits in a fixed-height column: the log scrolls inside it, the section never grows with
-  messages; a faint Clear link empties it (one logged event). The crew list under Stats is
-  collapsed with a count; a red dot marks a member who owes the operator a reaction.
+  bar, agents, last activity). The crew list under Stats is collapsed with a count; a red dot
+  marks a member who owes the operator a reaction.
+- Chat is a round button in the bottom-right corner, same style as Sync, with a red chat icon and
+  a red count of agent messages newer than the last time the operator had it open (kept per
+  browser). It opens a panel above it that leaves the page usable: plain message rows that scroll,
+  one input line at its foot, Expand (wide, full height) or Shrink, Clear (empties it, one logged
+  event), and Close or Esc. A notification for a chat reply opens it.
 - Out of scope: a yellow dot and "out of scope" at the right end of the item row; the item text is
   dimmed, never struck, its checkbox disabled. Clicking the dot brings it back in scope. Every open
   item shows the dot faintly at all times, brighter on hover, to mark it out of scope (with a confirm).
