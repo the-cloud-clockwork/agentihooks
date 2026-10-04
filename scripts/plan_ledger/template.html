@@ -130,7 +130,7 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .notif-meta { display: flex; gap: 10px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); }
 .notif-meta .link { margin-left: auto; }
 .notif-text { margin: 2px -6px 0; padding: 4px 6px; border-radius: 8px; overflow-wrap: anywhere; cursor: pointer; transition: background .15s; }
-.notif-text:hover, .notif-text:focus-visible { background: rgba(239, 68, 68, .14); outline: none; }
+.notif-text:hover { background: rgba(239, 68, 68, .14); }
 input[type=checkbox] {
   appearance: none; flex: none; width: 18px; height: 18px; margin: 2px 0 0; border-radius: 5px; cursor: pointer;
   border: 1.5px solid var(--blue-hi); background: var(--field); display: grid; place-content: center;
@@ -630,8 +630,8 @@ details.crew { margin: 10px 0 0; }
           text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }),
         h("span", { text: n.label === "Reply" ? `Reply from ${n.by}` : n.label }),
         h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearNotification(n.id) } })),
-      h("div", { class: "notif-text", text: n.text, role: "link", tabindex: "0", title: "Go to it",
-        on: { click: (ev) => jumpToNotice(ev, n.item), keydown: (ev) => { if (ev.key === "Enter") jumpToNotice(ev, n.item); } } }))));
+      h("div", { class: "notif-text", text: n.text, title: "Go to it",
+        on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))));
     if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
   }
 

@@ -251,9 +251,10 @@ Every change to `template.html` keeps these:
   and Clear; Clear all sits at the top. Only what blocks on the operator's answer goes there.
 - Above Sync sit a back-to-top arrow and a notifications bell, in the same round style. The bell's
   red count is the number of notifications. It opens a panel beside the buttons that leaves the
-  page usable: newest first, each row with its time, a red `#id` link that jumps to the item and keeps the panel open; the row's text highlights on hover and jumps the same way when clicked (a chat
+  page usable: newest first, each row with its time, a red `#id` link that jumps to the item and keeps the panel open (a chat
   reply opens the chat), what happened, the text, and Clear; Clear all at the top;
-  the list scrolls; Esc or Close hides it. The server raises a notification for a new follow-up,
+  the list scrolls; Esc or Close hides it. Hovering a row's text highlights it, and clicking it jumps
+  like the `#id` link (selecting text to copy does not). The panel is 600px wide. The server raises a notification for a new follow-up,
   a new open question, or an agent comment or chat message that answers the operator. A row stays
   until the operator clears it; no agent op or seed edit can create or clear one.
 - A design change ships in the template and is rolled onto every existing
