@@ -229,11 +229,13 @@ Every change to `template.html` keeps these:
   clear size scale. Centre column 1400px.
 - Wide layout: the plan on the left, a sticky column on the right with a
   glass Stats section (started, elapsed, agent-maintained Time Left, completion with a thin
-  bar, agents, last activity) and the Chat section under it. Chat is plain
-  rows like other messages, one input line pinned at its foot.
-- Chat sits in a fixed-height column: the log scrolls inside it, the section never grows with
-  messages; a faint Clear link empties it (one logged event). The crew list under Stats is
-  collapsed with a count; a red dot marks a member who owes the operator a reaction.
+  bar, agents, last activity). The crew list under Stats is collapsed with a count; a red dot
+  marks a member who owes the operator a reaction.
+- Chat is a round button in the bottom-right corner, same style as Sync, with a red chat icon and
+  a red count of agent messages newer than the last time the operator had it open (kept per
+  browser). It opens a panel above it that leaves the page usable: plain message rows that scroll,
+  one input line at its foot, Expand (wide, full height) or Shrink, Clear (empties it, one logged
+  event), and Close or Esc. A notification for a chat reply opens it.
 - Out of scope: a yellow dot and "out of scope" at the right end of the item row; the item text is
   dimmed, never struck, its checkbox disabled. Clicking the dot brings it back in scope. Every open
   item shows the dot faintly at all times, brighter on hover, to mark it out of scope (with a confirm).
@@ -249,8 +251,8 @@ Every change to `template.html` keeps these:
   and Clear; Clear all sits at the top. Only what blocks on the operator's answer goes there.
 - Above Sync sit a back-to-top arrow and a notifications bell, in the same round style. The bell's
   red count is the number of notifications. It opens a panel beside the buttons that leaves the
-  page usable: newest first, each row with its time, a red `#id` link that jumps to the item (or
-  the chat) and keeps the panel open, what happened, the text, and Clear; Clear all at the top;
+  page usable: newest first, each row with its time, a red `#id` link that jumps to the item and keeps the panel open (a chat
+  reply opens the chat), what happened, the text, and Clear; Clear all at the top;
   the list scrolls; Esc or Close hides it. The server raises a notification for a new follow-up,
   a new open question, or an agent comment or chat message that answers the operator. A row stays
   until the operator clears it; no agent op or seed edit can create or clear one.
