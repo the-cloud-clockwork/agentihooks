@@ -97,7 +97,7 @@ handed off.
 
 | Output | Do |
 |---|---|
-| `handoff=done` (exit 0) | Tell the operator the `account` and `name` that took over, then stop. Tools stay blocked in this session. |
+| `handoff=done` (exit 0) | Tell the operator the `account` and `name` that took over, then stop. Tools stay blocked in this session, and its terminal (herdr pane or tab) closes at that stop unless `AGENTIHOOKS_HANDOFF_CLOSE_OLD=0`. |
 | `handoff=failed` (exit 3) | Stop and report `route_error` to the operator. Do not retry on this account. |
 
 ## 4. Complete

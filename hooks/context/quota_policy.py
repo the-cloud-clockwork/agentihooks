@@ -280,7 +280,8 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
             f"instructions.\n"
             f'2. Run: agentihooks init-agent --handoff --dir "{cwd}" --name "{name}" --prompt-file "{doc}"\n'
-            f"3. handoff=done: tell the operator which account and terminal took over, then stop. "
+            f"3. handoff=done: tell the operator which account and terminal took over, then stop; "
+            f"this terminal closes when you stop. "
             f"handoff=failed: stop and report the failure to the operator."
         )
     if d.action == "wait":
