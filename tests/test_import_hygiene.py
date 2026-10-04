@@ -15,9 +15,12 @@ test catches it at CI time before it ships.
 
 from __future__ import annotations
 
+import functools
+import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -31,31 +34,91 @@ HOOKS_DIR = REPO_ROOT / "hooks"
 # design — every entry is a future bug. Add ONLY with a justifying comment.
 _ALLOWED_NOISY: frozenset[str] = frozenset()
 
-# Pre-imports that must run before the target so package-init side effects
-# (logger setup, env loading) execute under the captured stdout.
-_PROBE_TEMPLATE = """
-import io, sys, importlib, traceback
-_real_out, _real_err = sys.__stdout__, sys.__stderr__
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
-try:
-    importlib.import_module({module!r})
-except BaseException:
-    # Restore the real streams before reporting. Letting the exception escape
-    # under the redirect writes the traceback into the StringIO and discards
-    # it, leaving the parent with exit 1 and an empty stderr — a failure that
-    # states only that something broke, never what.
-    captured = sys.stderr.getvalue()
-    sys.stdout, sys.stderr = _real_out, _real_err
-    sys.stderr.write(captured)
-    traceback.print_exc()
-    raise SystemExit(1)
-out = sys.stdout.getvalue()
-err = sys.stderr.getvalue()
-sys.stdout, sys.stderr = _real_out, _real_err
-sys.__stdout__.write(out)
-sys.__stderr__.write(err)
+# One interpreter loads the third-party dependencies once, then forks a child
+# per module. Every child starts with none of the package loaded, so each
+# module's import side effects are observed alone, as in a fresh process.
+_PROBE_RUNNER = r"""
+import importlib, io, json, os, sys, tempfile, traceback
+
+def import_quietly(name):
+    real = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
+    try:
+        importlib.import_module(name)
+        failure = ""
+    except BaseException:
+        failure = traceback.format_exc()
+    out, err = sys.stdout.getvalue(), sys.stderr.getvalue()
+    sys.stdout, sys.stderr = real
+    return out, err + failure, bool(failure)
+
+def first_party(name, package):
+    return name == package or name.startswith(package + ".")
+
+def run_child(names, package):
+    baseline = set(sys.modules)
+    with tempfile.TemporaryFile() as raw:
+        os.dup2(raw.fileno(), 1)
+        results = [import_quietly(name) for name in names]
+        raw.seek(0)
+        fd_out = raw.read().decode(errors="replace")
+    out, err, failed = results[-1]
+    loaded = [m for m in sys.modules if m not in baseline and not first_party(m, package) and not m.startswith("__")]
+    return {"stdout": fd_out + out, "stderr": err, "failed": failed, "pid": os.getpid(), "ppid": os.getppid(), "loaded": loaded}
+
+def in_child(names, package):
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        with os.fdopen(write_fd, "wb") as pipe:
+            pipe.write(json.dumps(run_child(names, package)).encode())
+        os._exit(0)
+    os.close(write_fd)
+    with os.fdopen(read_fd, "rb") as pipe:
+        payload = pipe.read()
+    _, status = os.waitpid(pid, 0)
+    if not payload:
+        return {"stdout": "", "stderr": f"probe child died (wait status {status})", "failed": True, "pid": pid, "ppid": os.getpid(), "loaded": []}
+    return json.loads(payload)
+
+output, package, *modules = sys.argv[1:]
+shared_out = []
+for name in in_child(modules, package)["loaded"]:
+    out, _, _ = import_quietly(name)
+    shared_out.append(out)
+report = {"shared_stdout": "".join(shared_out), "modules": {}}
+for name in modules:
+    result = in_child([name], package)
+    del result["loaded"]
+    report["modules"][name] = result
+with open(output, "w") as handle:
+    json.dump(report, handle)
 """
+
+
+def _probe_modules(package: str, modules: list[str], env: dict[str, str]) -> dict:
+    """Import each module in its own forked child of one interpreter.
+
+    Returns ``shared_stdout`` (stdout written while the dependencies loaded),
+    ``process_stdout`` (anything that escaped every capture) and ``modules``,
+    each with ``stdout``, ``stderr``, ``failed``, ``pid`` and ``ppid``.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        output = Path(scratch) / "report.json"
+        proc = subprocess.run(
+            [sys.executable, "-c", _PROBE_RUNNER, str(output), package, *modules],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+        if proc.returncode != 0 or not output.exists():
+            pytest.fail(f"import probe crashed (exit {proc.returncode})\nstderr: {proc.stderr}\nstdout: {proc.stdout}")
+        report = json.loads(output.read_text())
+    report["process_stdout"] = proc.stdout
+    return report
 
 
 def _all_hook_modules() -> list[str]:
@@ -73,61 +136,110 @@ def _all_hook_modules() -> list[str]:
     return sorted(modules)
 
 
+@functools.cache
+def _hook_report() -> dict:
+    # The suite-wide home-isolation fixture repoints $HOME. Where the
+    # interpreter installs into the user site (~/.local/lib/pythonX/
+    # site-packages — the layout on the self-hosted runner), that alone drops
+    # every dependency from the child's sys.path and the probe reports an
+    # import failure that says more about the fixture than the module. Hand
+    # the child the parent's resolved path so it imports exactly what pytest
+    # imported.
+    return _probe_modules("hooks", _all_hook_modules(), _probe_env())
+
+
+def test_shared_dependencies_do_not_write_to_stdout() -> None:
+    report = _hook_report()
+    noise = report["shared_stdout"] + report["process_stdout"]
+    assert not noise, (
+        f"a dependency of hooks writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{noise}"
+    )
+
+
 @pytest.mark.parametrize("module", _all_hook_modules())
 def test_module_import_does_not_write_to_stdout(module: str) -> None:
     if module in _ALLOWED_NOISY:
         pytest.skip(f"{module} is in _ALLOWED_NOISY quarantine")
 
-    probe = _PROBE_TEMPLATE.format(module=module)
-    env = {
+    result = _hook_report()["modules"][module]
+    if result["failed"]:
+        pytest.fail(f"{module}: import failed\nstderr: {result['stderr']}\nstdout: {result['stdout']}")
+    if result["stdout"]:
+        pytest.fail(
+            f"{module}: writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{result['stdout']}"
+        )
+
+
+def _write_package(root: Path, name: str, modules: dict[str, str]) -> None:
+    package = root / name
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    for module, source in modules.items():
+        (package / f"{module}.py").write_text(source)
+
+
+def _probe_env(*extra_paths: Path, **overrides: str) -> dict[str, str]:
+    return {
         **os.environ,
         "CLAUDE_HOOK_LOG_ENABLED": "false",
-        # The suite-wide home-isolation fixture repoints $HOME. Where the
-        # interpreter installs into the user site (~/.local/lib/pythonX/
-        # site-packages — the layout on the self-hosted runner), that alone
-        # drops every dependency from the child's sys.path and the probe
-        # reports an import failure that says more about the fixture than the
-        # module. Hand the child the parent's resolved path so it imports
-        # exactly what pytest imported.
-        "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+        "PYTHONPATH": os.pathsep.join([*map(str, extra_paths), *(p for p in sys.path if p)]),
+        **overrides,
     }
-    proc = subprocess.run(
-        [sys.executable, "-c", probe],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30,
-    )
-    if proc.returncode != 0:
-        pytest.fail(f"{module}: import failed (exit {proc.returncode})\nstderr: {proc.stderr}\nstdout: {proc.stdout}")
-    if proc.stdout:
-        pytest.fail(f"{module}: writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{proc.stdout}")
 
 
 class TestProbeHarness:
     """The probe itself is load-bearing: when it misreports, every module in
-    this file becomes undiagnosable. These guard the two ways it has failed.
+    this file becomes undiagnosable. These guard the ways it has failed.
     """
 
-    def test_import_failure_reports_the_exception(self, tmp_path: Path) -> None:
-        """A failing import must surface its traceback on stderr.
+    def test_noise_is_reported_against_every_module_that_loads_it(self, tmp_path: Path) -> None:
+        """Each module imports in a clean child, so a shared first-party module's
+        noise lands on every module that pulls it in, not only on the first.
+        """
+        _write_package(
+            tmp_path,
+            "noisypkg",
+            {
+                "shared": "print('loaded')\n",
+                "first": "from noisypkg import shared\n",
+                "second": "from noisypkg import shared\n",
+                "raw": "import os\nos.write(1, b'raw\\n')\n",
+                "quiet": "",
+            },
+        )
+        modules = ["noisypkg.first", "noisypkg.second", "noisypkg.raw", "noisypkg.quiet"]
+        report = _probe_modules("noisypkg", modules, _probe_env(tmp_path))
+        stdout = {name: result["stdout"] for name, result in report["modules"].items()}
+        assert stdout == {
+            "noisypkg.first": "loaded\n",
+            "noisypkg.second": "loaded\n",
+            "noisypkg.raw": "raw\n",
+            "noisypkg.quiet": "",
+        }
+
+    def test_dependency_noise_is_reported_as_shared(self, tmp_path: Path) -> None:
+        _write_package(tmp_path, "noisydep", {"core": "print('dependency')\n"})
+        _write_package(tmp_path, "quietpkg", {"user": "import noisydep.core\n"})
+        report = _probe_modules(
+            "quietpkg",
+            ["quietpkg.user"],
+            _probe_env(tmp_path),
+        )
+        assert report["shared_stdout"] == "dependency\n"
+
+    def test_import_failure_reports_the_exception(self) -> None:
+        """A failing import must surface its traceback.
 
         Redirecting stderr to a StringIO and letting the exception escape sends
-        the traceback into the buffer and drops it — the parent then sees exit 1
-        with an empty stderr, which says only that something broke.
+        the traceback into the buffer and drops it — the report then says only
+        that something broke.
         """
-        probe = _PROBE_TEMPLATE.format(module="hooks._definitely_not_a_real_module")
-        proc = subprocess.run(
-            [sys.executable, "-c", probe],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
-            timeout=30,
+        report = _probe_modules("hooks", ["hooks._definitely_not_a_real_module"], _probe_env())
+        result = report["modules"]["hooks._definitely_not_a_real_module"]
+        assert result["failed"]
+        assert "ModuleNotFoundError" in result["stderr"], (
+            f"probe swallowed the traceback — stderr was {result['stderr']!r}"
         )
-        assert proc.returncode != 0
-        assert "ModuleNotFoundError" in proc.stderr, f"probe swallowed the traceback — stderr was {proc.stderr!r}"
 
     def test_probe_resolves_imports_independently_of_home(self, tmp_path: Path) -> None:
         """Dependencies must stay importable when $HOME is repointed.
@@ -137,18 +249,17 @@ class TestProbeHarness:
         alone strips every dependency from the child's path, and every module
         importing one fails for a reason that has nothing to do with the module.
         """
-        probe = _PROBE_TEMPLATE.format(module="hooks.mcp")
-        proc = subprocess.run(
-            [sys.executable, "-c", probe],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "HOME": str(tmp_path / "elsewhere"),
-                "CLAUDE_HOOK_LOG_ENABLED": "false",
-                "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
-            },
-            timeout=30,
+        report = _probe_modules("hooks", ["hooks.mcp"], _probe_env(HOME=str(tmp_path / "elsewhere")))
+        result = report["modules"]["hooks.mcp"]
+        assert not result["failed"], f"import broke under a rewritten $HOME:\n{result['stderr']}"
+
+    def test_every_module_is_probed_from_one_interpreter(self, tmp_path: Path) -> None:
+        _write_package(tmp_path, "pairpkg", {"first": "", "second": ""})
+        report = _probe_modules(
+            "pairpkg",
+            ["pairpkg.first", "pairpkg.second"],
+            _probe_env(tmp_path),
         )
-        assert proc.returncode == 0, f"import broke under a rewritten $HOME:\n{proc.stderr}"
+        results = list(report["modules"].values())
+        assert len({result["ppid"] for result in results}) == 1
+        assert len({result["pid"] for result in results}) == 2
