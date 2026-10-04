@@ -57,6 +57,8 @@ def test_restart_kills_then_resumes_with_name_account_and_dir(monkeypatch):
     assert launch == [
         "/bin/agentihooks",
         "init-agent",
+        "--agent",
+        "claude",
         "--dir",
         "/work/wt",
         "--name",
