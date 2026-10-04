@@ -18,4 +18,6 @@ The unit job now runs each Python version as four shards on four runners (pytest
 
 Coverage was most of each shard's Run tests time. Only the 3.12 shards measure it now, with `COVERAGE_CORE=sysmon`; the 3.11 shards run without it. Run tests per shard went from 26 to 35 seconds (run 37239540788) to 13 to 18 seconds on 3.11 and 16 to 26 seconds on 3.12 (run 37239888769).
 
+The Tests workflow no longer measures coverage on any shard; Sonar measures it in its own workflow. Before the change the slowest 3.12 shard ran 21 to 26 seconds against 15 to 22 seconds for the slowest 3.11 shard (runs 37241498657, 37241419135, 37241352383).
+
 A dev push no longer repeats the suite its pull request already passed. Each passing pull request run records the tree it tested as a `tests-passed-<tree>` artifact; the `already-tested` job of a dev push skips unit and lint when that artifact exists for the pushed tree. A squash merge onto a dev that moved since the pull request run has a different tree and runs the full suite.
