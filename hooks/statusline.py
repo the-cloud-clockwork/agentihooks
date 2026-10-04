@@ -185,6 +185,14 @@ def main() -> None:
             except Exception:
                 pass
 
+        if session_id and cw:
+            try:
+                from hooks.context.context_usage import record_context_usage
+
+                record_context_usage(session_id, cw)
+            except Exception:
+                pass
+
         # Context window — trust Claude Code's native used_percentage
         used_pct = cw.get("used_percentage") or 0.0
         ctx_size = cw.get("context_window_size") or 0
