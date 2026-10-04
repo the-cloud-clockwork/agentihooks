@@ -57,7 +57,7 @@ def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
 
 def restart_commands(session_id: str, name: str, cwd: str, account: str) -> list[list[str]]:
     exe = shutil.which("agentihooks") or "agentihooks"
-    launch = [exe, "init-agent", "--dir", cwd, "--name", name, "--prompt", NOTE, "--"]
+    launch = [exe, "init-agent", "--agent", "claude", "--dir", cwd, "--name", name, "--prompt", NOTE, "--"]
     if account:
         launch += ["--route", account]
     launch += ["--resume", session_id]

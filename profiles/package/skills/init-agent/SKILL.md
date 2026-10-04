@@ -1,8 +1,8 @@
 ---
 name: init-agent
 description: >
-  Open a smart, quota-routed Claude Code session in a new terminal on WSL,
-  macOS, or native Linux. Accept a target directory, session name, opening
+  Open a Claude Code or Codex agent in a new herdr tab or terminal on WSL,
+  macOS, or native Linux; Claude sessions are quota-routed across accounts. Accept a target directory, session name, opening
   prompt, and arbitrary Claude flags including --resume, --fork-session, and
   --model. Use when the operator says "init agent", "init-agent",
   "run claude terminal", "open a routed Claude session", or asks an agent to
@@ -37,9 +37,15 @@ reports `herdr_error`.
 | "in its own workspace" | `--placement workspace` |
 | a crew ("for crew alpha", "in the alpha workspace") | `--workspace <crew-label>` — every member gets a tab in that workspace |
 | "in Windows Terminal", "not in herdr" | `--host native` |
+| "open codex", "a codex agent" | `--agent codex` — agent flags after `--` go to `codex` |
+| "open claude", "a claude agent" | `--agent claude` |
 
 Rules:
 
+- Without `--agent`, the launcher picks the first agent in
+  `AGENTIHOOKS_AGENT_PRIORITY` (default `claude,codex`) that has quota left and
+  prints `agent=` and `agent_reason=` (`priority`, or `fallthrough: claude has no
+  quota`). `--handoff` always opens Claude on another account.
 - Default herdr placement: a new tab in the caller's herdr workspace; outside
   herdr, a tab in the workspace named after the repository of `--dir`, created
   when missing.

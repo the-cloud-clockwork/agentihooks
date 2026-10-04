@@ -191,3 +191,26 @@ def test_the_agent_is_named_in_herdr_once_it_reports_its_route(monkeypatch, tmp_
     out = capsys.readouterr().out
     assert rc == 0 and renamed == [("w1:p7", "eng-a")]
     assert "account=ncgma" in out and "agent_name=eng-a" in out
+
+
+def test_renaming_waits_until_herdr_detects_the_agent(monkeypatch):
+    attempts = []
+
+    def cli(args, environ):
+        attempts.append(args)
+        if len(attempts) < 3:
+            raise herdr_host.HerdrError("herdr agent rename: no agent in pane")
+        return {}
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    monkeypatch.setattr(herdr_host.time, "sleep", lambda seconds: None)
+    assert herdr_host.rename_agent("w1:p1", "probe-codex", {}) is True
+    assert len(attempts) == 3
+
+
+def test_renaming_gives_up_when_no_agent_appears(monkeypatch):
+    def cli(args, environ):
+        raise herdr_host.HerdrError("herdr agent rename: no agent in pane")
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.rename_agent("w1:p1", "probe-codex", {}, timeout=0) is False

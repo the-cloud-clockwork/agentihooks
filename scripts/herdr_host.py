@@ -142,9 +142,14 @@ def agent_name(name: str) -> str:
     return cleaned[:32]
 
 
-def rename_agent(pane_id: str, name: str, environ: dict[str, str]) -> bool:
-    try:
-        _cli(["agent", "rename", pane_id, agent_name(name)], environ)
-    except (HerdrError, subprocess.TimeoutExpired):
-        return False
-    return True
+def rename_agent(pane_id: str, name: str, environ: dict[str, str], timeout: float = 15.0) -> bool:
+    """Name the agent once herdr has detected it in the pane; False when it never is."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            _cli(["agent", "rename", pane_id, agent_name(name)], environ)
+            return True
+        except (HerdrError, subprocess.TimeoutExpired):
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.5)
