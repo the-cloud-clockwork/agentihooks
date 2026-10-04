@@ -1,0 +1,290 @@
+---
+name: plan-ledger
+description: >
+  Turn a plan file (plus any documents written for the work) into one interactive
+  HTML ledger the operator keeps open in a browser: title, overview, sources, phase
+  checkboxes, open questions with answer boxes, operator notes, follow-ups, and a
+  comments dropdown under every item. Saves to localStorage and
+  ~/development-ledger/<slug>.json through a local server. Every agent working that
+  plan follows the ledger: it watches the JSON under a Monitor, acts on the
+  operator's checks, answers and notes, and records phase states and follow-ups in
+  the HTML as work lands. Use when the user says "plan ledger", "make a ledger for
+  this plan", "ledger this plan", or when you work a plan that already has a ledger.
+argument-hint: "<plan-file> [other development documents ...]"
+---
+
+# Plan Ledger — The Operator's Live Checklist for a Plan
+
+Every tool runs through one command that agentihooks installs (code in its
+`scripts/plan_ledger/`, standard library only), so every Bash call and every
+Monitor resolves it without shell state:
+
+```bash
+agentihooks ledger new …                               # build a ledger
+agentihooks ledger serve …                             # the local server
+agentihooks ledger watch …                             # the Monitor feed
+agentihooks ledger --slug <slug> --as <name> <command> # the agent CLI
+```
+
+A ledger `<slug>` is two files in `~/development-ledger/` (`$LEDGER_DIR`):
+`<slug>.html` (the page, with the agent-editable seed) and `<slug>.json` (the
+state plus `_meta`). The local server (`$LEDGER_PORT`, default 8765) serves the
+page, stores the operator's edits and folds agent edits of the HTML into the JSON.
+
+Use it for a plan with several phases worked across sessions; a single-step task
+needs no ledger.
+
+## Part A — Create a ledger
+
+### A1. Write the content file (AI-JUDGMENT)
+
+Read the plan file and every document named in the arguments. Write
+`~/scratchpad/<repo>/<task>/ledger-content.json`:
+
+```json
+{
+  "title": "<plan name>",
+  "overview": "<what the work is for and what done looks like, plain words, ≤ 200 words>",
+  "sources": ["<absolute path of the plan file>", "<every other development document>"],
+  "phases": [{"title": "<short name>", "description": "<what this phase is, semantically, ≤ 100 words>"}],
+  "questions": [{"text": "<a question only the operator can answer>"}],
+  "followups": [{"text": "<a known follow-up or blocker>"}]
+}
+```
+
+Phases follow the plan's own order and granularity. Questions are the plan's
+open decisions; an empty list is valid. Write for the operator: plain words, no
+ids or hashes in the overview. Done when the file holds every phase the plan
+names and every source path exists.
+
+### A2. Build the ledger
+
+<!-- DETERMINISTIC: validate limits, types and sources, write <slug>.html + <slug>.json -->
+```bash
+agentihooks ledger new --content <content.json> --plan <plan-file>
+```
+
+Slug = `<plan-file-stem>-<YYYY-MM-DD>`. It refuses an overview over 200 words,
+a phase description over 100, an empty title, no phases or a missing source.
+It leaves an existing ledger untouched (`"created": false`). Done when it
+prints `"created": true` or names the existing ledger.
+
+### A3. Start the server and hand the page to the operator
+
+<!-- DETERMINISTIC: start the server detached if it is not answering; prints the base URL -->
+```bash
+agentihooks ledger serve --ensure
+```
+
+Give the operator `<printed base URL>/<slug>`; `/` lists every ledger. Done
+when `--ensure` printed the base URL.
+
+### A4. Bind the crew and install the gate
+
+A ledger is one task unit: an orchestrator and every agent of that crew share it.
+Requirements: Python 3.11+ (the agentihooks floor), stdlib only; the gate needs Claude Code. Codex and
+Copilot sessions get the CLI and the watcher, with advisory rules only.
+
+`agentihooks init` installs the gate hooks with the rest of its settings
+(SessionStart, UserPromptSubmit, PostToolUse, Stop), so nothing is installed per
+ledger and a later `init` keeps them. Hooks load at session start: a session
+started before the install needs a restart.
+
+<!-- DETERMINISTIC: the join paragraph for each crew member's launch prompt -->
+```bash
+agentihooks ledger --slug <slug> --as <member-name> prompt
+```
+
+Paste that paragraph into each member's opening prompt. The orchestrator joins
+with `--role orchestrator`. Set the ledger's `orchestrator` to its name. A
+launcher that can set env may export `PLAN_LEDGER=<slug>` and
+`PLAN_LEDGER_AS=<name>` instead; the session then binds itself at start.
+Done when `agentihooks ledger --slug <slug> --as <name> status` lists every member.
+
+## Part B — Work a plan that has a ledger (every crew member)
+
+All commands are `agentihooks ledger --slug <slug> --as <name> <command>`
+(env `PLAN_LEDGER`, `PLAN_LEDGER_AS` replace the flags).
+
+### B1. Join, watch
+
+1. `join` (orchestrator: `join --role orchestrator`). A hook binds this session to the ledger.
+2. Start a `Monitor` (persistent when offered) on
+   `agentihooks ledger watch <slug> --as <name> --since-rev <last handled rev, or omit>`.
+   The orchestrator's Monitor is mandatory: a hook cannot wake an idle session, and the gate
+   refuses its stop while the watcher heartbeat is stale. Restart with `--since-rev` to replay.
+
+Each line is one operator event:
+
+```
+OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
+OPERATOR rev=13 comment edited on phases/p1 [c-1a2b] diff: "- old line\n+ new line"
+OPERATOR rev=14 comment deleted on phases/p1 [c-1a2b] was: "text"
+OPERATOR rev=15 answer added on questions/q3 [a-9f0e]: "text"
+OPERATOR rev=16 note added [n-77aa]: "text"
+OPERATOR rev=17 checked phases/p2
+OPERATOR rev=18 message added on chat [m-3c4d]: "text" | REPLY RULES: <chat_instructions>
+```
+
+plus `SEED_ERROR <message>` and `WARNING <message>`. Done when the Monitor printed `WATCHING`.
+
+### B2. Act on operator events, then ack (AI-JUDGMENT)
+
+Who owes what: chat, notes and answers belong to the orchestrator; an event on an item belongs to
+the member who `claim`ed it, else the orchestrator; chat starting `@name` belongs to that member.
+`events` lists what you owe.
+
+- `answer added|edited on questions/<id>` — apply it to the work; reply with `comment`. An edit
+  carries only the diff.
+- `checked|unchecked phases/<id>` — his ruling; unchecked means reopen.
+- `note …`, `comment …` — read and act; reply with `comment <item> <text>`.
+- `checked followups/<id>` — he closed it; stop work on it.
+- `… deleted` — he withdrew it; stop acting on it.
+- `message added on chat` — the orchestrator answers at once with `say <text>`; the line ends with
+  `| REPLY RULES: …`, the ledger's `chat_instructions` (default: under 100 words unless the operator
+  asks in a separate message to expand). Follow it exactly.
+- `sync requested` — the operator pressed Sync. It is owed by every crew member: re-read the whole
+  ledger, act on every operator event you have not handled, update phase and follow-up states, your
+  status comments and (orchestrator) the time left, then `ack`.
+- `stats sync requested` — the operator pressed the Stats sync. Owed by the orchestrator only: check
+  every phase and follow-up state and the time left against the real work, fix what is stale, `ack`.
+- `SEED_ERROR` / `WARNING` — fix the seed or the text at once.
+
+Run `ack` after acting. Done when `events` prints nothing.
+
+### B3. Record progress (AI-JUDGMENT)
+
+| Command | Use |
+|---|---|
+| `phase <id> done --status "<what was done>"` / `phase <id> open` | a phase landed or reopened |
+| `followup add "<text>"` / `followup done <id> --status "<what was done>"` / `followup open <id>` | a new blocker or follow-up, its closing, or reopening one checked by mistake |
+| `scope <item> out --status "<why it is skipped>"` / `scope <item> in` | an item the operator ruled out of scope, or back in |
+| `comment <item> "<text>"` | your status on an item; it amends your previous one |
+| `retext <item> "<text>"` | rewrite a follow-up or question in plain words |
+| `edit <chat\|item> <entry> "<text>"` / `delete <chat\|item> <entry>...` | fix or remove entries: yours, or (orchestrator) any agent's |
+| `audit` | every agent text the filter refuses today: the cleanup worklist |
+| `priority add <item> "<text>"` / `priority clear <id>` / `priority clear --all` | ask the operator something only he can answer and that blocks the work, one line of at most 20 plain words per item; clear it once answered |
+| `claim <item>` | take an item's operator events |
+| `say "<text>"` | chat (orchestrator); `--long` only after the operator asked to expand |
+| `time-left "<duration>"` | save remaining time; accepts `3h 20m`, `3h`, `20m`, or integer minutes |
+
+Time Left is one compact duration, for example `3h 20m`. The orchestrator estimates the remaining
+work on joining and revises it when progress or blockers change it. Set `0m` after verified
+completion. Done when `status` returns the saved `time_left_minutes`.
+
+Writing for the operator (the server enforces it):
+
+- A comment is the item's status in plain words: what was done, or why it was skipped. One per
+  agent per item: a second `comment` amends the first. A new entry is made only when the operator
+  commented after yours. Evidence (runs, SHAs, files, proofs) stays in PR bodies and notes.
+- Refused in comments, chat, follow-ups and questions: clock times, dates, commit hashes, run or job
+  ids, file names and paths, code identifiers, labels in capitals, dashes, arrows, AI phrasing, more
+  than one parenthesis or semicolon. Comments are at most 50 words, chat 100, item text 40. The
+  refusal names every problem; rewrite and send again.
+- Checked means completed: the text is dimmed, never struck. An item ruled out is never checked: `scope <item> out`
+  shows a yellow "out of scope" dot and disables the item; the operator clicks the dot to bring it
+  back, which adds a "Back in scope." comment and an operator event.
+
+Each command is attributed to your name. Titles, descriptions, overview and sources are edited in
+the HTML seed: the `<script id="ledger-data" type="application/json">` block of
+`~/development-ledger/<slug>.html`, with Edit, keeping its `_rev`; the server merges within
+2 seconds. Items are closed by checking them, never deleted. Done when `status` shows your change.
+
+### B4. The gate
+
+For a bound session the hooks do the following; each is tunable in the ledger's `policy`
+(`nudge_after_calls` 25, `stop_after_calls` 10, `stop_blocks` 3):
+
+- every tool result and prompt: unhandled operator events you owe are injected, up to 5;
+- after `nudge_after_calls` tool calls without a ledger command: a reminder to record progress;
+- Stop is blocked while events are unhandled, `stop_after_calls` calls passed without a ledger
+  command, or (orchestrator) the watcher is not running; after `stop_blocks` blocks it lets the
+  stop through and logs `gate bypassed` in the ledger for the operator;
+- any error, an unreadable ledger or a stopped server lets everything through; a ledger with every
+  phase and follow-up done is not gated; `PLAN_LEDGER_HOOKS=off` disables the hooks.
+
+### B5. Close
+
+When every phase is done and every follow-up closed, `leave`, then stop your Monitor.
+Done when `status` no longer lists you.
+
+## Page design (operator rules)
+
+Every change to `template.html` keeps these:
+
+- Minimal. Messages (comments, answers, notes) are plain rows: author and time
+  on one line, the text under it, faint Edit and Delete on the right. No cards,
+  boxes, bubbles or backgrounds around a message; a thin left line marks the
+  operator's own messages.
+- "Add comment / answer / note" is a plain text link that opens one underlined
+  input line; Enter sends. No free text boxes on the page.
+- Comments sit in a dropdown under each item, with a count: open by default when it holds comments,
+  closed when empty; the operator's own open or close choice is kept.
+  Original sources are collapsed by default, with a count.
+- Palette: black background with blue glass sections, red rule lines, white
+  text. Body text 14px; title, section heads, item titles and meta text on a
+  clear size scale. Centre column 1400px.
+- Wide layout: the plan on the left, a sticky column on the right with a
+  glass Stats section (started, elapsed, agent-maintained Time Left, completion with a thin
+  bar, agents, last activity) and the Chat section under it. Chat is plain
+  rows like other messages, one input line pinned at its foot.
+- Chat sits in a fixed-height column: the log scrolls inside it, the section never grows with
+  messages; a faint Clear link empties it (one logged event). The crew list under Stats is
+  collapsed with a count; a red dot marks a member who owes the operator a reaction.
+- Out of scope: a yellow dot and "out of scope" at the right end of the item row; the item text is
+  dimmed, never struck, its checkbox disabled. Clicking the dot brings it back in scope. Every open
+  item shows the dot faintly at all times, brighter on hover, to mark it out of scope (with a confirm).
+  Completed items are checked with dimmed text; nothing is ever struck through. Stats count
+  in-scope items and show how many are out of scope.
+- A round Sync button with a red sync icon floats in the bottom-left corner. It sends anything still
+  pending, then one sync order with a summary to every crew member; a red badge counts the members
+  who have not acked the latest sync. After a sync the button rests for 5 minutes (dimmed, the
+  time left in its title); the server refuses a sync inside that window too. A small red sync icon in
+  the Stats heading sends a stats-only check to the orchestrator, with its own 5-minute rest. The header carries only the title, no progress line.
+- Priorities sit under Original sources, closed by default, with a red count when anything waits on
+  the operator. Each row is a red `#id` link that jumps to and highlights its item, the one-line ask,
+  and Clear; Clear all sits at the top. Only what blocks on the operator's answer goes there.
+- A design change ships in the template and is rolled onto every existing
+  ledger with `agentihooks ledger new --upgrade <slug>`.
+
+## How saving works
+
+- Comments, answers and notes are message threads: Add opens a line, Enter
+  sends it, Ctrl+Enter adds a new line, Esc cancels; every entry has Edit
+  and Delete. Each send, edit or delete is saved at once and logged as one
+  event; checkboxes save at once.
+- A checkbox someone else changed after the page last saw it keeps their value.
+- Time Left displays the saved agent duration in hours/minutes, or "—" until supplied. Time and phase
+  completion never recalculate it. Other Stats are computed in the page; started uses
+  `_meta.created_at`, the ledger's earliest recorded timestamp.
+- Chat is the `chat` thread (last 500 messages); each send is one event, so
+  the orchestrator's watcher sees it within seconds.
+- The page polls the server every 2 s and redraws agent changes, keeping the
+  cursor and any message not yet sent. Original sources are collapsed by
+  default.
+- The server re-renders a ledger page from the current template whenever its
+  embedded version differs, keeping its token and content, and an open page
+  reloads itself once idle. `agentihooks ledger new --upgrade <slug>` does the same by hand;
+  older ledgers' string comments, answers and notes become entries on the first sync.
+- With the server down the page keeps edits in localStorage, shows "server
+  offline", and sends them when the server answers again.
+- Every API call carries the page's ledger token and a local Host header;
+  anything else gets 403.
+
+## Extracted Scripts
+
+In agentihooks `scripts/plan_ledger/`; `agentihooks ledger` dispatches to them (`__init__.py`).
+
+| Script | Purpose | Idempotent |
+|---|---|---|
+| `new_ledger.py` | Validate content, render `template.html` with a fresh token, write HTML + JSON | Yes (existing ledger untouched) |
+| `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; merges page saves and HTML seed edits | Yes |
+| `watch_ledger.py` | Monitor feed: operator changes, seed errors and word-limit warnings, replayable with `--since-rev` | Yes (read-only) |
+| `ledger.py` | Agent CLI: join, status, events, ack, say, comment, phase, followup, scope, retext, edit, delete, audit, time-left, claim, prompt | No (writes are attributed ops) |
+| `ledger_comments.py` | The agent text filter, one status comment per agent per item, entry permissions, `audit` (library) | — |
+| `ledger_hook.py` | Claude Code hook: binds sessions, injects owed events, blocks Stop | Yes |
+| `ledger_gate.py` | Routing of operator events to crew members (library) | — |
+| `ledger_agent_ops.py` | Server-side agent ops: join, ack, claim, set, add_item (library) | — |
+| `chat_ledger.py` | Post a chat message as an agent through the running server | No (each call adds a message) |
+| `ledger_core.py` | Seed parse/write, flatten, three-way merge, the `sync` both paths use | — (library) |
+| `template.html` | The page: HTML + CSS + vanilla JS, no external requests | — |

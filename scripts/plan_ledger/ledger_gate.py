@@ -1,0 +1,107 @@
+"""Who owes the operator a reaction: routes operator events to crew members.
+
+Pure functions over a ledger's `_meta` and document; the CLI, the server and the hook share them.
+"""
+
+import re
+
+DEFAULT_POLICY = {"nudge_after_calls": 25, "stop_after_calls": 10, "stop_blocks": 3}
+MENTION_RE = re.compile(r"^@([A-Za-z][\w.-]{0,63})")
+IGNORED_KINDS = ("chat cleared",)
+WRITE_COMMANDS = ("say", "comment", "phase", "followup", "claim", "ack", "join", "edit", "delete", "scope", "retext")
+WATCH_STALE_SECONDS = 20
+
+
+def policy(doc):
+    given = doc.get("policy") if isinstance(doc.get("policy"), dict) else {}
+    return {**DEFAULT_POLICY, **{k: v for k, v in given.items() if k in DEFAULT_POLICY and isinstance(v, int)}}
+
+
+def orchestrator(members):
+    return next((name for name, member in members.items() if member.get("role") == "orchestrator"), None)
+
+
+def owner(event, members):
+    boss = orchestrator(members)
+    target = event.get("target", "")
+    if target == "chat":
+        mention = MENTION_RE.match(event.get("text", ""))
+        named = mention.group(1) if mention else None
+        return named if named in members else boss
+    for name, member in members.items():
+        if target in member.get("claims", []):
+            return name
+    return boss
+
+
+def unhandled_for(meta, name):
+    members = meta.get("members", {})
+    me = members.get(name)
+    if me is None:
+        return []
+    since = me.get("handled_rev", 0)
+    mine = []
+    for event in meta.get("events", []):
+        if event.get("rev", 0) <= since or event.get("by") != "operator" or event.get("kind") in IGNORED_KINDS:
+            continue
+        who = owner(event, members)
+        if event.get("kind") == "sync requested" or who == name or who is None:
+            mine.append(event)
+    return mine
+
+
+def plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def sync_summary(doc, meta):
+    """The operator's sync order: what is pending, then what every member must do before acking."""
+    since = min((m.get("handled_rev", 0) for m in meta.get("members", {}).values()), default=0)
+    told = sum(
+        1
+        for e in meta.get("events", [])
+        if e.get("rev", 0) > since
+        and e.get("by") == "operator"
+        and e.get("kind") not in (*IGNORED_KINDS, "sync requested")
+    )
+    live = lambda name: [i for i in doc.get(name, []) if not i.get("out_of_scope")]  # noqa: E731
+    phases = sum(1 for i in live("phases") if not i.get("done"))
+    followups = sum(1 for i in live("followups") if not i.get("done"))
+    questions = sum(1 for i in live("questions") if not any(not a.get("deleted") for a in i.get("answers", [])))
+    return (
+        f"Operator sync. Since the crew last synced: {plural(told, 'operator message')}. Open now: "
+        f"{plural(phases, 'phase')} open, {plural(followups, 'follow-up')} open, {plural(questions, 'question')} "
+        "unanswered. Re-read the whole ledger, act on everything you have not handled, update every phase, "
+        "follow-up, status and the time left, then ack."
+    )
+
+
+def stats_summary(doc, meta):
+    """The operator's stats check, for the orchestrator: what the page shows now, and what to verify."""
+    live = lambda name: [i for i in doc.get(name, []) if not i.get("out_of_scope")]  # noqa: E731
+    phases, followups = live("phases"), live("followups")
+    left = doc.get("time_left_minutes")
+    shown = "not set" if left is None else f"{left // 60}h {left % 60}m"
+    return (
+        f"Operator stats check. The page shows {sum(1 for i in phases if i.get('done'))} of {len(phases)} phases done, "
+        f"{sum(1 for i in followups if i.get('done'))} of {len(followups)} follow-ups done, time left {shown}. "
+        "Check every phase and follow-up state and the time left against the real work, fix what is stale, then ack."
+    )
+
+
+def crew(meta):
+    return [
+        {
+            "name": name,
+            "role": member.get("role", "member"),
+            "last_seen": member.get("last_seen", 0),
+            "handled_rev": member.get("handled_rev", 0),
+            "unhandled": len(unhandled_for(meta, name)),
+        }
+        for name, member in meta.get("members", {}).items()
+    ]
+
+
+def closed(doc):
+    items = [*doc.get("phases", []), *doc.get("followups", [])]
+    return bool(doc.get("phases")) and all(item.get("done") or item.get("out_of_scope") for item in items)
