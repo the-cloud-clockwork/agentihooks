@@ -87,6 +87,7 @@ class Outline(unittest.TestCase):
         self.assertIn('<nav class="outline" id="outline"', page)
         self.assertIn('id="outline-toggle"', page)
         self.assertIn("renderOutline();", function_source("render"))
+        self.assertIn("renderOutline();", function_source("renderSwarm"))
 
     def test_wide_layout_offsets_the_content_and_keeps_the_button_stack_clear(self):
         page = TEMPLATE.read_text(encoding="utf-8")
