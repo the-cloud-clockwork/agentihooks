@@ -315,3 +315,12 @@ def test_agenti_writes_the_route_report_and_honours_exclusions(monkeypatch, tmp_
     assert seen["exclude"] == ["alpha"]
     assert seen["sessions"] == {"beta": 1}
     assert report.read_text() == "status=routed\naccount=beta\nplacement=open\n"
+
+
+def test_the_launcher_exports_the_agent_name_so_codex_can_be_found_by_it(tmp_path):
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "smoke codex", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent="codex")
+    )
+    text = launcher.read_text()
+    assert "export AGENTIHOOKS_AGENT_NAME='smoke codex'\n" in text
+    assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("codex\n")

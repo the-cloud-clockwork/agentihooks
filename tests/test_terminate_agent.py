@@ -159,3 +159,14 @@ def test_a_pane_herdr_already_closed_counts_as_closed(monkeypatch, capsys):
     monkeypatch.setattr("scripts.herdr_host._cli", gone)
     assert main(["uuid-1", "--type", "claude"]) == 0
     assert "pane_id=w1:p7 pane=closed" in capsys.readouterr().out
+
+
+def test_an_agent_without_a_name_argument_is_named_from_its_environment(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    proc = _herdr_env(tmp_path, 300, AGENTIHOOKS_AGENT_NAME="smoke-codex")
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(proc, registry={})
+    assert [(s.target, s.name) for s in found] == [("codex", "smoke-codex")]
+    assert resolve(found, "smoke-codex", "codex").process.pid == 300

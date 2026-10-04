@@ -36,6 +36,10 @@ def _registry() -> dict[str, dict]:
         return {}
 
 
+def _name(process: Process, proc: Path) -> str:
+    return _argument(process.argv, "--name") or agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+
+
 def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None) -> list[Session]:
     table = processes(proc)
     records = _registry() if registry is None else registry
@@ -57,7 +61,7 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
             Session(
                 session_id=session_id,
                 target=target,
-                name=_argument(process.argv, "--name"),
+                name=_name(process, proc),
                 process=process,
                 cwd=str(info.get("cwd", "")),
                 status=str(info.get("status", "alive")),
@@ -67,7 +71,7 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
         target = _target(process)
         if not target or process.pid in registered_pids:
             continue
-        name = _argument(process.argv, "--name")
+        name = _name(process, proc)
         if target == "claude" and any(value in {"-p", "--print"} for value in process.argv[1:]):
             continue
         result.append(Session("", target, name, process, "", "unregistered"))
@@ -180,18 +184,24 @@ def terminate(session: Session, members: list[Process], timeout: float, proc: Pa
     return escalated
 
 
-def herdr_pane(pid: int, proc: Path = Path("/proc")) -> tuple[str, str]:
-    """(HERDR_PANE_ID, HERDR_SOCKET_PATH) of an agent running in a herdr pane; empty outside herdr."""
+def agent_environ(pid: int, keys: tuple[str, ...], proc: Path = Path("/proc")) -> tuple[str, ...]:
+    """Values of only the named keys from a process environment; empty when unreadable or unset."""
     try:
         raw = (proc / str(pid) / "environ").read_bytes()
     except OSError:
-        return "", ""
-    wanted = {b"HERDR_PANE_ID": "", b"HERDR_SOCKET_PATH": ""}
+        return tuple("" for _ in keys)
+    wanted = dict.fromkeys(keys, "")
     for item in raw.split(b"\0"):
         key, _, value = item.partition(b"=")
-        if key in wanted:
-            wanted[key] = value.decode(errors="replace")
-    return wanted[b"HERDR_PANE_ID"], wanted[b"HERDR_SOCKET_PATH"]
+        if key.decode(errors="replace") in wanted:
+            wanted[key.decode(errors="replace")] = value.decode(errors="replace")
+    return tuple(wanted[key] for key in keys)
+
+
+def herdr_pane(pid: int, proc: Path = Path("/proc")) -> tuple[str, str]:
+    """(HERDR_PANE_ID, HERDR_SOCKET_PATH) of an agent running in a herdr pane; empty outside herdr."""
+    pane, socket = agent_environ(pid, ("HERDR_PANE_ID", "HERDR_SOCKET_PATH"), proc)
+    return pane, socket
 
 
 def _close_pane(pane: str, socket: str) -> str:

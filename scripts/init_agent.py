@@ -130,6 +130,7 @@ def _write_launcher(
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
+        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
