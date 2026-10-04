@@ -392,6 +392,13 @@ def test_a_swarm_spawn_exports_its_identity_and_enables_langfuse_traces(tmp_path
     assert text.index("OTEL_LANGFUSE_ENABLED") < text.index(" claude ")
 
 
+def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
+    env = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_COMPACT_LIMIT": "40"}
+    text = _launcher_text(tmp_path, env)
+    assert "export AGENTIHOOKS_COMPACT_LIMIT=40\n" in text
+    assert text.index("AGENTIHOOKS_COMPACT_LIMIT") < text.index(" claude ")
+
+
 def test_a_launch_outside_a_swarm_leaves_langfuse_alone(tmp_path):
     text = _launcher_text(tmp_path, {})
     assert "AGENTIHOOKS_SWARM" not in text

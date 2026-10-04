@@ -19,6 +19,7 @@ class SwarmConfig:
     max_eng: int
     max_ci: int
     state: str = "running"
+    compact_limit: int = 0
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,14 @@ class RedisStore:
         raw = self.redis.hgetall(self.key(slug, "config"))
         if not raw:
             raise SwarmError(f"no swarm {slug}")
-        return SwarmConfig(raw["slug"], raw["repo"], int(raw["max_eng"]), int(raw["max_ci"]), raw["state"])
+        return SwarmConfig(
+            raw["slug"],
+            raw["repo"],
+            int(raw["max_eng"]),
+            int(raw["max_ci"]),
+            raw["state"],
+            int(raw.get("compact_limit", 0)),
+        )
 
     def update(self, slug, **changes):
         if changes.get("state", STATES[0]) not in STATES:

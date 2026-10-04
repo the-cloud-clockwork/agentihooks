@@ -312,3 +312,11 @@ def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
     assert f"{led} followup add" in text
     assert text.index(f"{led} join") < text.index("Work it end to end")
     assert text.index(f"{led} leave") < text.index("agentihooks swarm sw done --pr")
+
+
+def test_set_compact_limit_stores_it_on_the_swarm(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", "compact-limit=40") == 0
+    assert store.config("sw").compact_limit == 40
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["compact_limit"] == 40

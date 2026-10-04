@@ -3,7 +3,7 @@
 agentihooks swarm list | tick
 agentihooks swarm <id> create --repo DIR [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
-agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N      (or just: swarm <id> max-eng-agents=N)
+agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC | say TEXT [--to NAME|eng|ci]
@@ -26,7 +26,7 @@ from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, tick
 
-SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci"}
+SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 
@@ -125,7 +125,16 @@ def cmd_set(store, args):
     if config.state == "running":
         for action in run_tick(store, args.slug):
             print(action)
-    print(json.dumps({"swarm": args.slug, "max_eng": config.max_eng, "max_ci": config.max_ci}))
+    print(
+        json.dumps(
+            {
+                "swarm": args.slug,
+                "max_eng": config.max_eng,
+                "max_ci": config.max_ci,
+                "compact_limit": config.compact_limit,
+            }
+        )
+    )
 
 
 def cmd_status(store, args):
