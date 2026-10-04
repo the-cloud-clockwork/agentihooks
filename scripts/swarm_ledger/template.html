@@ -47,13 +47,6 @@ section {
   margin-bottom: 12px; padding: 16px 18px; border-radius: 6px;
   background: var(--surface-1);
 }
-h2 {
-  display: flex; align-items: center; gap: 10px;
-  font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text);
-  margin: -2px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--signal-soft);
-}
-h2::before { content: ""; flex: none; width: 2px; height: 14px; background: var(--signal); box-shadow: 0 0 8px var(--signal); }
-.notif-head h2::before { display: none; }
 p { margin: 0; }
 ul, ol { margin: 0; padding: 0; list-style: none; }
 .sources li::before { content: "•"; color: var(--signal); margin-right: 8px; }
@@ -120,7 +113,6 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .chat-panel .chat-log { padding: 0 14px; }
 .chat-compose { padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
 .notif-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px 10px; border-bottom: 1px solid var(--rule); }
-.notif-head h2 { margin: 0; padding: 0; border: 0; flex: 1; }
 .notif-list { list-style: none; margin: 0; padding: 0 14px 12px; overflow-y: auto; }
 .notif-row { padding: 8px 0; border-top: 1px solid var(--rule); }
 .notif-row:first-child { border-top: 0; }
@@ -152,7 +144,7 @@ summary {
 summary:hover { color: var(--text-2); }
 summary::-webkit-details-marker { display: none; }
 summary::before { content: ""; width: 0; height: 0; border-left: 4px solid var(--accent); border-top: 3px solid transparent; border-bottom: 3px solid transparent; transition: transform .15s; }
-details[open] summary::before { transform: rotate(90deg); }
+details[open] > summary::before { transform: rotate(90deg); }
 summary .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--destructive); box-shadow: 0 0 6px var(--destructive); }
 summary .dot[hidden] { display: none; }
 .empty { color: var(--dim); }
@@ -163,8 +155,15 @@ summary .dot[hidden] { display: none; }
   details, .answer { margin-left: 0; width: 100%; }
 }
 details.sources-box { margin: 0; }
-details.sources-box > summary { font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; color: var(--text); }
+details.sources-box > summary { display: flex; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; color: var(--text); }
 details.sources-box[open] > summary { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--signal-soft); width: 100%; }
+details.fold > summary > .end { margin-left: auto; }
+details.fold > summary > span.end { display: flex; gap: 14px; }
+details.sources-box.panel-fold { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+details.sources-box.panel-fold > summary { margin: 0; padding: 12px 14px 10px; border-bottom: 0; }
+details.sources-box.panel-fold[open] > summary { border-bottom: 1px solid var(--rule); }
+details.panel-fold[open]::details-content { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat-panel:has(> details:not([open])) { height: auto; }
 .count { color: var(--accent); font-weight: 400; letter-spacing: .06em; }
 .thread { margin-left: 38px; margin-top: 10px; }
 .thread.flat { margin-left: 0; margin-top: 0; }
@@ -196,8 +195,6 @@ textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent); }
 .side::-webkit-scrollbar-thumb:hover { background: var(--hover); }
 .side section { margin-bottom: 0; }
 .side > section { flex: none; }
-.chat-head { display: flex; align-items: center; }
-.chat-head > :last-child { margin-left: auto; }
 .stat { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
 .stat:first-child { border-top: 0; padding-top: 0; }
 .stat dt { font-size: var(--fs-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
@@ -210,12 +207,14 @@ details.crew { margin: 10px 0 0; }
 .crew-row { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
 .crew-row .who { color: var(--text-2); }
 .crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 6px var(--signal); flex: none; align-self: center; }
-#swarm-box { padding-top: 0; padding-bottom: 14px; }
-.sw-head { position: sticky; top: 0; z-index: 1; margin: 0 -18px; padding: 16px 18px 0; border-radius: 6px 6px 0 0;
+#swarm-box { --sw-sum: 46px; padding-top: 0; padding-bottom: 14px; }
+#swarm-fold > summary { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 16px 18px 0; width: auto; border-radius: 6px 6px 0 0;
+  background: var(--panel); }
+#swarm-fold[open] > summary { margin: 0 -18px; padding-bottom: 10px; }
+.sw-head { position: sticky; top: var(--sw-sum); z-index: 1; margin: 0 -18px; padding: 12px 18px 0;
   background: var(--panel); border-bottom: 1px solid var(--rule); }
-#swarm-box h2 { margin-bottom: 12px; }
 #swarm-box[hidden] { display: none; }
-.sw-state { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--muted); }
+.sw-state { margin-left: auto; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--muted); }
 .sw-state.running { color: var(--positive); text-shadow: var(--glow); }
 .sw-state.paused { color: var(--warn); text-shadow: var(--glow); }
 .sw-state.stopping { color: var(--destructive); text-shadow: var(--glow); }
@@ -284,7 +283,11 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   overflow: hidden; text-overflow: ellipsis; transition: color .15s, background .15s; }
 .outline .ol-sec { margin-top: 12px; }
 .outline .ol-sec:first-child { margin-top: 0; }
-.outline .ol-sec > a { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.outline details { margin: 0; }
+.outline summary { display: flex; }
+.outline summary > a { flex: 1; min-width: 0; }
+.ol-tools { display: flex; gap: 14px; padding: 0 10px 10px; }
+.outline .ol-sec summary > a { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
 .outline .ol-items a { position: relative; padding-left: 24px; }
 .outline .ol-items a::before { content: "•"; position: absolute; left: 11px; color: var(--signal); }
 .outline a:hover { background: var(--hover); color: var(--text); }
@@ -319,24 +322,24 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   </header>
   <div class="banner" id="banner"></div>
   <div class="layout"><div class="col">
-  <section id="sec-overview" data-outline><h2>Overview</h2><p id="overview"></p></section>
-  <section id="sec-sources" data-outline><details class="sources-box" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
-  <section id="sec-priorities" data-outline><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
+  <section id="sec-overview" data-outline><details class="sources-box fold" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details></section>
+  <section id="sec-sources" data-outline="sources"><details class="sources-box fold" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
+  <section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
-  <section id="sec-phases" data-outline="phases"><h2>Plan phases</h2><ol id="phases"></ol></section>
-  <section id="sec-tasks" data-outline="tasks"><details class="sources-box" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span></summary><ol id="tasks"></ol></details></section>
-  <section id="sec-questions" data-outline="questions"><h2>Open questions</h2><ol id="questions"></ol></section>
-  <section id="sec-notes" data-outline><h2>Operator notes</h2><div id="notes"></div></section>
-  <section id="sec-followups" data-outline="followups"><h2>Follow-ups or blockers</h2><ul id="followups"></ul></section>
+  <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases<span class="end"><button class="link" type="button" data-comments="show">Show all comments</button><button class="link" type="button" data-comments="hide">Hide all comments</button></span></summary><ol id="phases"></ol></details></section>
+  <section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments="show">Show all comments</button><button class="link" type="button" data-comments="hide">Hide all comments</button></span></summary><ol id="tasks"></ol></details></section>
+  <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions<span class="end"><button class="link" type="button" data-comments="show">Show all comments</button><button class="link" type="button" data-comments="hide">Hide all comments</button></span></summary><ol id="questions"></ol></details></section>
+  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes</summary><div id="notes"></div></details></section>
+  <section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers<span class="end"><button class="link" type="button" data-comments="show">Show all comments</button><button class="link" type="button" data-comments="hide">Hide all comments</button></span></summary><ul id="followups"></ul></details></section>
   </div>
   <aside class="side">
-    <section><h2 class="chat-head"><span>Stats</span><button class="mini-sync" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></h2><dl id="stats" style="margin:0"></dl>
-      <details class="crew" id="crew-box" hidden><summary>Crew <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></section>
-    <section id="swarm-box" aria-label="Swarm" hidden><div class="sw-head"><h2 class="chat-head"><span>Swarm</span><span class="sw-state" id="swarm-state"></span></h2>
+    <section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats" style="margin:0"></dl>
+      <details class="crew fold" id="crew-box" hidden><summary>Crew <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></details></section>
+    <section id="swarm-box" aria-label="Swarm" hidden><details class="sources-box fold" id="swarm-fold" open><summary>Swarm<span class="sw-state" id="swarm-state"></span></summary><div class="sw-head">
       <dl class="sw-figs" id="swarm-figs"></dl>
       <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
       <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
-      </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details></section>
+      </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details></details></section>
   </aside>
   </div>
 </main>
@@ -361,16 +364,16 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
   <span class="sync-badge" id="chat-badge" hidden></span>
 </button>
-<section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden>
-  <div class="notif-head"><h2 id="chat-title">Chat</h2><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></div>
+<section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
+  <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
   <div class="chat-compose"><textarea class="line" id="chat-input" rows="1" placeholder="Message the swarm…" aria-label="Message the swarm"></textarea>
     <div class="hint">Enter to send · Ctrl+Enter for a new line</div></div>
-</section>
-<section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden>
-  <div class="notif-head"><h2>Notifications</h2><button class="link danger" id="notif-clear-all" type="button">Clear all</button><button class="link" id="notif-close" type="button">Close</button></div>
+</details></section>
+<section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
+  <summary class="notif-head">Notifications<span class="end"><button class="link danger" id="notif-clear-all" type="button">Clear all</button><button class="link" id="notif-close" type="button">Close</button></span></summary>
   <ul class="notif-list" id="notifs"></ul>
-</section>
+</details></section>
 <script id="ledger-data" type="application/json">__LEDGER_DATA__</script>
 <script>
 (() => {
@@ -379,6 +382,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   const API = location.protocol.startsWith("http") ? `/api/${SLUG}` : `http://127.0.0.1:${PORT}/api/${SLUG}`;
   const LS_KEY = `plan-ledger:${SLUG}:v2`;
   const CHAT_SEEN = `plan-ledger:${SLUG}:chat-seen`;
+  const FOLD_KEY = `plan-ledger:${SLUG}:fold`;
   const TOKEN = document.querySelector('meta[name="ledger-token"]').content;
   const PAGE = (document.querySelector('meta[name="ledger-page"]') || {}).content;
   const POLL_MS = 2000;
@@ -551,7 +555,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       } } }));
     const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
       h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : "") }, head, h("div", { class: "entry-body", text: entry.text }));
+    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }));
   }
 
   function threadView(path, list, cls) {
@@ -649,7 +653,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
     $("sources-count").textContent = `· ${doc.sources.length}`;
-    listInto("sources", doc.sources, (s) => h("li", { text: s }));
+    listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
     listInto("phases", doc.phases, (p, i) => checkRow("phases", p, i + 1, p.title, p.description));
     $("tasks-count").textContent = taskCounts(doc.tasks);
     listInto("tasks", doc.tasks, taskRow);
@@ -738,7 +742,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("prio-count").hidden = !list.length;
     $("prio-count").textContent = String(list.length);
     document.querySelector(".prio-head").hidden = !list.length;
-    $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio" },
+    $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio", id: `item-priorities-${p.id}` },
       h("a", { class: "prio-link", href: `#item-${p.item.replace("/", "-")}`, text: `#${p.item.split("/")[1]}`, on: { click: (ev) => jumpTo(ev, p.item) } }),
       h("span", { class: "prio-text", text: p.text }),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }))));
@@ -980,13 +984,29 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function outlineOf(doc, heads) {
+    const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
+      : { id: `item-${list}-${i.id}`, title: i.title || i.text || i.item || i.id };
     return heads.map((head) => ({ id: head.id, title: head.title,
-      items: (head.list ? doc[head.list] || [] : []).map((i) => ({ id: `item-${head.list}-${i.id}`, title: i.title || i.text || i.id })) }));
+      items: (head.list ? (doc[head.list] || []).filter((i) => !i.deleted) : []).map(entry(head.list)) }));
+  }
+
+  function outlineGroup(s) {
+    const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title });
+    const box = h("details", { class: "fold", id: `ol-${s.id}`, open: "" }, h("summary", {}, link(s)),
+      h("ul", { class: "ol-items" }, ...s.items.map((i) => h("li", {}, link(i)))));
+    collapsible(box);
+    return h("li", { class: "ol-sec" }, box);
+  }
+
+  function foldAll(label, open) {
+    return h("button", { class: "link", type: "button", text: label, on: { click: () => {
+      for (const box of $("outline").querySelectorAll("details.fold")) box.open = open;
+    } } });
   }
 
   function pageHeads() {
     return [...document.querySelectorAll(".col > section[data-outline]")].filter((s) => !s.hidden).map((s) => ({
-      id: s.id, title: s.querySelector("h2, summary").firstChild.textContent.trim(), list: s.dataset.outline }));
+      id: s.id, title: s.querySelector("summary").firstChild.textContent.trim(), list: s.dataset.outline }));
   }
 
   function renderOutline() {
@@ -995,9 +1015,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const sig = JSON.stringify(tree);
     if (nav.dataset.sig !== sig) {
       nav.dataset.sig = sig;
-      const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title });
-      nav.replaceChildren(h("ul", {}, ...tree.map((s) => h("li", { class: "ol-sec" }, link(s),
-        s.items.length ? h("ul", { class: "ol-items" }, ...s.items.map((i) => h("li", {}, link(i)))) : null))));
+      nav.replaceChildren(h("div", { class: "ol-tools" }, foldAll("Expand all", true), foldAll("Collapse all", false)),
+        h("ul", {}, ...tree.map(outlineGroup)));
     }
     markOutline();
   }
@@ -1010,7 +1029,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       const el = document.getElementById(a.dataset.target);
       if (el && el.getClientRects().length && el.getBoundingClientRect().top <= 120) current = a;
     }
-    const section = current && current.closest(".ol-sec").firstChild;
+    if (current && !current.getClientRects().length) current = current.closest(".ol-sec").querySelector("a");
+    const section = current && current.closest(".ol-sec").querySelector("a");
     for (const a of links) {
       a.classList.toggle("on", a === current);
       a.classList.toggle("in", a === section && a !== current);
@@ -1023,6 +1043,30 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   function reveal(el) {
     const box = el.closest("details");
     if (box) box.open = true;
+  }
+
+  function foldSaved() {
+    try { return JSON.parse(localStorage.getItem(FOLD_KEY) || "{}") || {}; } catch (e) { return {}; }
+  }
+
+  function collapsible(box) {
+    const saved = foldSaved();
+    if (typeof saved[box.id] === "boolean") box.open = saved[box.id];
+    box.querySelector(":scope > summary").addEventListener("click", (ev) => { if (ev.target.closest("button, a")) ev.preventDefault(); });
+    box.addEventListener("toggle", () => {
+      const state = foldSaved();
+      state[box.id] = box.open;
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked: defaults return on reload */ }
+    });
+  }
+
+  function setAllComments(section, open) {
+    if (open) section.querySelector("details.fold").open = true;
+    for (const box of section.querySelectorAll("details[data-key]")) {
+      (open ? openComments : closedComments).add(box.dataset.key);
+      (open ? closedComments : openComments).delete(box.dataset.key);
+      box.open = open;
+    }
   }
 
   function showOutline(open) {
@@ -1224,6 +1268,10 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     });
     input.addEventListener("input", () => grow(input));
     wireKeys(input, sendChat, () => showChat(false));
+    for (const box of document.querySelectorAll("details.fold")) collapsible(box);
+    for (const btn of document.querySelectorAll("button[data-comments]")) {
+      btn.addEventListener("click", () => setAllComments(btn.closest("section"), btn.dataset.comments === "show"));
+    }
     render();
     poll();
     pollSwarm();

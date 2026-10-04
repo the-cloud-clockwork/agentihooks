@@ -79,7 +79,7 @@ class Outline(unittest.TestCase):
         for tag in sections:
             self.assertRegex(tag, r'id="[^"]+"')
             self.assertIn("data-outline", tag)
-        for list_name in ("phases", "tasks", "questions", "followups"):
+        for list_name in ("sources", "priorities", "phases", "tasks", "questions", "notes", "followups"):
             self.assertIn(f'data-outline="{list_name}"', column)
 
     def test_outline_nav_and_narrow_toggle_exist_and_render_refreshes_it(self):

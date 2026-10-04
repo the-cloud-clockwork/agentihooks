@@ -92,6 +92,11 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
   collapsed until clicked. HOME lists every ledger; a deleted ledger sits in the
   bin 30 days, then the server removes it.
+- Every ledger page section, the chat and notification panels included, folds
+  on a click of its header and remembers that per viewer; a section with comment
+  dropdowns has Show all and Hide all comments for its own items only. Every
+  outline category folds the same way, with Expand all and Collapse all on top.
+  A new section ships foldable or its test fails.
 - Ledger front end colours live only in `scripts/swarm_ledger/palette.css`, and
   keep the ledger's own red and blue. Layout follows design system 2026-001 and
   the `ui-doctrine` skill.
