@@ -42,7 +42,7 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
-        run: python -m pytest tests/ -v --cov=hooks --cov-report=term-missing --tb=short
+        run: python -m pytest tests/ -v -n auto --cov=hooks --cov-report=term-missing --tb=short
 
   lint:
     runs-on: ubuntu-latest
