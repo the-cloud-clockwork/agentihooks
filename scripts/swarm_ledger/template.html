@@ -33,6 +33,7 @@
   --warning: var(--yellow);
   --destructive: var(--red);
   --divider: rgba(255, 255, 255, .06);
+  --panel: #0d1424;
 }
 * { box-sizing: border-box; }
 html { color-scheme: dark; }
@@ -197,9 +198,13 @@ textarea.line:focus { box-shadow: none; border-bottom-color: #93c5fd; }
 .hint { font-size: var(--fs-meta); color: var(--muted); margin-top: 4px; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 22px; align-items: start; }
 .col { min-width: 0; }
-.side { position: sticky; top: 24px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 22px; }
+.side { position: sticky; top: 24px; max-height: calc(100vh - 110px); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 22px;
+  scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+.side::-webkit-scrollbar { width: 6px; }
+.side::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
+.side::-webkit-scrollbar-thumb:hover { background: var(--glass-hi); }
 .side section { margin-bottom: 0; }
-.side > section:first-child { flex: none; }
+.side > section { flex: none; }
 .chat-head { display: flex; justify-content: space-between; align-items: baseline; }
 .stat { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
 .stat:first-child { border-top: 0; padding-top: 0; }
@@ -213,7 +218,9 @@ details.crew { margin: 10px 0 0; }
 .crew-row { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
 .crew-row .who { color: #cbd5e1; }
 .crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: none; align-self: center; }
-#swarm-box { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; padding-top: 16px; padding-bottom: 14px; }
+#swarm-box { padding-top: 0; padding-bottom: 14px; }
+.sw-head { position: sticky; top: 0; z-index: 1; margin: 0 -22px; padding: 16px 22px 0; border-radius: 16px 16px 0 0;
+  background: var(--panel); border-bottom: 1px solid var(--divider); }
 #swarm-box h2 { margin-bottom: 12px; }
 #swarm-box[hidden] { display: none; }
 .sw-state { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--muted); }
@@ -250,11 +257,7 @@ details.crew { margin: 10px 0 0; }
 .sw-note.ok { color: var(--positive); text-shadow: 0 0 10px currentColor; }
 .sw-note.bad { color: var(--destructive); text-shadow: 0 0 10px currentColor; }
 .sw-note.bad { flex-basis: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
-.sw-list { min-height: 96px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; margin: 0 -6px; padding: 0 6px;
-  border-top: 1px solid var(--divider); scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
-.sw-list::-webkit-scrollbar { width: 6px; }
-.sw-list::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
-.sw-list::-webkit-scrollbar-thumb:hover { background: var(--glass-hi); }
+.sw-list { margin: 0; }
 .sw-card { padding: 8px 0; border-top: 1px solid var(--divider); }
 .sw-card:first-child { border-top: 0; }
 .sw-top { display: flex; gap: 8px; align-items: baseline; }
@@ -302,7 +305,7 @@ a.sw-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
 }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
-  .side { position: static; max-height: none; }
+  .side { position: static; max-height: none; overflow: visible; }
 }
 </style>
 </head>
@@ -330,11 +333,11 @@ a.sw-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
   <aside class="side">
     <section><h2 class="chat-head"><span>Stats</span><button class="mini-sync" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></h2><dl id="stats" style="margin:0"></dl>
       <details class="crew" id="crew-box" hidden><summary>Crew <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></section>
-    <section id="swarm-box" aria-label="Swarm" hidden><h2 class="chat-head"><span>Swarm</span><span class="sw-state" id="swarm-state"></span></h2>
+    <section id="swarm-box" aria-label="Swarm" hidden><div class="sw-head"><h2 class="chat-head"><span>Swarm</span><span class="sw-state" id="swarm-state"></span></h2>
       <dl class="sw-figs" id="swarm-figs"></dl>
       <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
       <div class="sw-caps"><label>eng <input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"></label><label>ci <input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"></label><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
-      <ul class="sw-list" id="swarm-agents"></ul></section>
+      </div><ul class="sw-list" id="swarm-agents"></ul></section>
   </aside>
   </div>
 </main>

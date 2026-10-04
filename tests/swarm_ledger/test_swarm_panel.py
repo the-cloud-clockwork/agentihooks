@@ -193,14 +193,29 @@ class SwarmPanel(unittest.TestCase):
         self.assertIn('id="swarm-box"', sections[1])
         self.assertIn("hidden", sections[1])
 
-    def test_agent_list_scrolls_inside_a_fixed_height_under_the_header(self):
+    def test_sidebar_scrolls_on_its_own_pinned_to_the_viewport(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        side = re.search(r"^\.side \{([^}]*)\}", page, re.M).group(1)
+        self.assertIn("position: sticky", side)
+        self.assertRegex(side, r"max-height: calc\(100vh - \d+px\)")
+        self.assertIn("overflow-y: auto", side)
+        self.assertRegex(page, r"\.side > section \{[^}]*flex: none")
+        narrow = page.split("@media (max-width: 1100px) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertRegex(narrow, r"\.side \{[^}]*position: static; max-height: none; overflow: visible")
+
+    def test_agent_list_takes_its_natural_height_under_a_sticky_header(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         rule = re.search(r"\.sw-list \{([^}]*)\}", page).group(1)
-        self.assertRegex(rule, r"max-height: \d+px")
-        self.assertIn("overflow-y: auto", rule)
+        self.assertNotIn("max-height", rule)
+        self.assertNotIn("overflow", rule)
+        head = re.search(r"\.sw-head \{([^}]*)\}", page).group(1)
+        self.assertIn("position: sticky; top: 0", head)
+        self.assertRegex(head, r"background: var\(--panel\)")
+        self.assertRegex(page, r"--panel: #[0-9a-f]{6};")
         box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
-        self.assertLess(box.index('id="swarm-ctl"'), box.index('id="swarm-agents"'))
-        self.assertLess(box.index('id="swarm-figs"'), box.index('id="swarm-agents"'))
+        header = box.split('<div class="sw-head">', 1)[1].split('<ul class="sw-list"', 1)[0]
+        for part in ('id="swarm-state"', 'id="swarm-figs"', 'id="swarm-ctl"', 'id="cap-eng"', 'id="swarm-note"'):
+            self.assertIn(part, header)
 
     def test_swarm_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
