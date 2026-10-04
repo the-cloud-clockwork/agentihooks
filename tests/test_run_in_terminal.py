@@ -67,3 +67,15 @@ def test_an_automatic_herdr_failure_falls_back_to_the_native_terminal(monkeypatc
     assert run_in_terminal.main(["--dir", str(tmp_path)], {"HOME": str(tmp_path)}) == 0
     out = capsys.readouterr().out
     assert len(ran) == 1 and "herdr_error=server gone" in out and "host=native" in out
+
+
+def test_an_explicit_herdr_failure_fails_without_a_native_terminal(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+
+    def down(environ):
+        raise herdr_host.HerdrError("server gone")
+
+    monkeypatch.setattr(herdr_host, "ensure_server", down)
+    monkeypatch.setattr(run_in_terminal.subprocess, "run", lambda *a, **k: pytest.fail("native terminal opened"))
+    assert run_in_terminal.main(["--dir", str(tmp_path), "--host", "herdr"], {"HOME": str(tmp_path)}) == 2
+    assert "server gone" in capsys.readouterr().err
