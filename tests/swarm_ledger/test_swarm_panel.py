@@ -220,13 +220,17 @@ class SwarmPanel(unittest.TestCase):
         rule = re.search(r"\.sw-list \{([^}]*)\}", page).group(1)
         self.assertNotIn("max-height", rule)
         self.assertNotIn("overflow", rule)
+        title = re.search(r"#swarm-fold > summary \{([^}]*)\}", page).group(1)
+        self.assertIn("position: sticky; top: 0", title)
         head = re.search(r"\.sw-head \{([^}]*)\}", page).group(1)
-        self.assertIn("position: sticky; top: 0", head)
-        self.assertRegex(head, r"background: var\(--panel\)")
+        self.assertIn("position: sticky; top: var(--sw-sum)", head)
+        for rule in (title, head):
+            self.assertRegex(rule, r"background: var\(--panel\)")
         self.assertRegex((SCRIPTS / "palette.css").read_text(encoding="utf-8"), r"--panel: var\(--[a-z]+-\d{2,3}\);")
         box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('id="swarm-state"', box.split("<summary>", 1)[1].split("</summary>", 1)[0])
         header = box.split('<div class="sw-head">', 1)[1].split('<ul class="sw-list"', 1)[0]
-        for part in ('id="swarm-state"', 'id="swarm-figs"', 'id="swarm-ctl"', 'id="cap-eng"', 'id="swarm-note"'):
+        for part in ('id="swarm-figs"', 'id="swarm-ctl"', 'id="cap-eng"', 'id="swarm-note"'):
             self.assertIn(part, header)
 
     def test_swarm_styles_use_only_palette_tokens(self):
@@ -317,7 +321,7 @@ class SwarmPanel(unittest.TestCase):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIn('a.lane === "master" ? "sw-card master" : "sw-card"', page)
         self.assertRegex(page, r"\.sw-card\.master \.sw-name\s*\{")
-        self.assertLess(page.index('id="swarm-master"'), page.index('<details class="sw-agents"'))
+        self.assertLess(page.index('id="swarm-master"'), page.index('<details class="sw-agents fold"'))
 
     def test_an_unknown_task_falls_back_to_its_id(self):
         sw = {"agents": [{"name": "a", "lane": "eng", "task": "gone", "status": "idle"}]}
