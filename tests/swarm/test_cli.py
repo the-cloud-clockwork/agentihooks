@@ -287,3 +287,14 @@ def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
         "sw-eng-5": "working",
     }
     assert (agents["sw-eng-1"]["model"], agents["sw-eng-1"]["effort"]) == ("opus", "high")
+
+
+def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", harness="codex", model="gpt-6.1-sol", effort="high"))
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", harness="claude"))
+    run("sw", "status")
+    lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
+    assert "gpt-6.1-sol high" in lines["sw-eng-1"]
+    assert "unknown" in lines["sw-eng-2"]

@@ -296,6 +296,7 @@ class TestBrainAdapter:
                     "BRAIN_SOURCE_PATH": "/tmp/brain",
                     "BRAIN_CHANNEL": "brain",
                     "BRAIN_REFRESH_TOOL_CALLS": 20,
+                    "reload_brain_env": lambda force=False: {},
                 },
             ):
                 from hooks.context.brain_adapter import get_status

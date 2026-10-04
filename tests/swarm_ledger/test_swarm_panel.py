@@ -23,7 +23,16 @@ SLUG = "swarm-panel-2026-01-01"
 STATUS = {
     "config": {"slug": "s", "max_eng": 2, "max_ci": 1, "state": "running"},
     "agents": [
-        {"name": "s-eng-1", "lane": "eng", "harness": "claude", "account": "a", "task": "t1", "state": "working"}
+        {
+            "name": "s-eng-1",
+            "lane": "eng",
+            "harness": "codex",
+            "account": "a",
+            "task": "t1",
+            "state": "working",
+            "model": "gpt-6.1-sol",
+            "effort": "high",
+        }
     ],
     "tasks": {"open": 1, "claimed": 1, "blocked": 0, "pr": 0, "done": 2},
 }
@@ -244,7 +253,7 @@ class SwarmPanel(unittest.TestCase):
                 {
                     "name": "s-eng-7",
                     "lane": "eng",
-                    "model": "opus · high",
+                    "model": "opus high",
                     "account": "acct",
                     "task": "Handoff at the compact limit",
                     "pr": "https://x/pull/205",
@@ -254,7 +263,7 @@ class SwarmPanel(unittest.TestCase):
                 {
                     "name": "s-ci-4",
                     "lane": "ci",
-                    "model": "codex",
+                    "model": "unknown",
                     "account": "",
                     "task": "Split the suite across more runners",
                     "pr": "",

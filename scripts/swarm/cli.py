@@ -147,7 +147,8 @@ def cmd_status(store, args):
     print(f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}")
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     for a in agents:
-        print(f"{a.name}\t{a.lane}\t{a.harness}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
+        model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
+        print(f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
 
 
 def cmd_send_message(store, args):
