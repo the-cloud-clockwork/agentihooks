@@ -2,7 +2,7 @@ name: Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [dev, main]
   # dev is the deploy source and the only branch agents commit to, so it is the
   # branch that most needs gating. Without this every dev commit shipped
   # untested and only a snapshot PR to main ever ran the suite.
