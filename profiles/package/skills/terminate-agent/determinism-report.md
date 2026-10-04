@@ -25,11 +25,11 @@ Operator judgment is required only when duplicate names or a shared Codex host r
 
 | Primitive | Responsibility |
 |---|---|
-| `agentihooks kill-agent` | Complete deterministic workflow implemented by `scripts.kill_agent` |
+| `agentihooks terminate-agent` | Complete deterministic workflow implemented by `scripts.terminate_agent` |
 
 ## Rewritten Workflow
 
-The skill invokes `agentihooks kill-agent` for listing, dry-run validation, termination, escalation, and verification. It never derives process commands in prose.
+The skill invokes `agentihooks terminate-agent` for listing, dry-run validation, termination, escalation, and verification. It never derives process commands in prose.
 
 ## Token Estimate
 

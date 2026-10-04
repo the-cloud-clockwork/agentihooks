@@ -25,7 +25,7 @@ export AH_CC_TOKEN_work=...      # account "work"
 export AH_CC_TOKEN_personal=...  # account "personal"
 ```
 
-`agenti` (alias of `agentihooks claude`) and `agentihooks claude-terminal` launch
+`agenti` (alias of `agentihooks claude`) and `agentihooks init-agent` launch
 Claude on one of them. The launched session keeps only its own
 `AH_CC_TOKEN_<slug>`; that variable name is how every tool below tells which
 account a session runs on. Token values are never printed or logged.
@@ -94,7 +94,7 @@ waits or stops.
 
 | Directive | What the agent does | Enforcement |
 |---|---|---|
-| `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks claude-terminal --handoff`, reports where the work moved, stops | Injected on every tool call until done |
+| `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks init-agent --handoff`, reports where the work moved, stops | Injected on every tool call until done |
 | `QUOTA WAIT` | Creates a one-shot `CronCreate` job for the 5h reset, tells the operator, stops | Every tool except `CronCreate` / `CronList` / `CronDelete` is blocked |
 | `QUOTA STOP` | Tells the operator to add another account or say "keep pushing" | Every tool is blocked |
 | `QUOTA PUSH` | Continues on this account until 100% | The operator typed "keep pushing" (or "push to 100") this session |
@@ -105,7 +105,7 @@ released by the reset itself.
 ## Handoff
 
 ```bash
-agentihooks claude-terminal --handoff \
+agentihooks init-agent --handoff \
   --dir "$PWD" --name repo-handoff --prompt-file ~/scratchpad/repo/handoff/<session>.md
 ```
 

@@ -432,10 +432,10 @@ def test_table_marks_current_account_and_cache_age():
 
 
 def test_get_current_balance_skill_runs_the_current_flag():
-    skill = Path(__file__).parents[1] / "profiles" / "package" / "skills" / "get-current-balance" / "SKILL.md"
+    skill = Path(__file__).parents[1] / "profiles" / "package" / "skills" / "get-agents-quota" / "SKILL.md"
     text = skill.read_text()
 
-    assert "name: get-current-balance" in text
+    assert "name: get-agents-quota" in text
     assert "agentihooks balance --current" in text
 
 

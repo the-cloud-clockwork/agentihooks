@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts import claude_terminal
+from scripts import init_agent
 
 
 def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeypatch, tmp_path, capsys):
@@ -10,15 +10,15 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     prompt = "apostrophe ' quote \" semicolon ; and $(command)"
 
     monkeypatch.setattr(
-        claude_terminal.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
     )
     monkeypatch.setattr(
-        claude_terminal,
+        init_agent,
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
 
-    rc = claude_terminal.main(
+    rc = init_agent.main(
         [
             "--dir",
             str(project),
@@ -52,14 +52,14 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
 
 
 def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeypatch, tmp_path):
-    monkeypatch.setattr(claude_terminal.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
     monkeypatch.setattr(
-        claude_terminal.shutil,
+        init_agent.shutil,
         "which",
         lambda name: {"wt.exe": "/mnt/c/wt.exe", "wsl.exe": "/mnt/c/WINDOWS/system32/wsl.exe"}.get(name),
     )
 
-    host, command = claude_terminal._launch_command(
+    host, command = init_agent._launch_command(
         tmp_path / "launch.sh",
         tmp_path,
         "a;b",
@@ -86,14 +86,14 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
 
 
 def _launch(monkeypatch, tmp_path, popen):
-    monkeypatch.setattr(claude_terminal.shutil, "which", lambda name: None)
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
-        claude_terminal,
+        init_agent,
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(claude_terminal.subprocess, "Popen", popen)
-    return claude_terminal.main(
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    return init_agent.main(
         [
             "--dir",
             str(tmp_path),
@@ -137,10 +137,10 @@ def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypat
 
 
 def test_macos_command_uses_terminal_app(monkeypatch, tmp_path):
-    monkeypatch.setattr(claude_terminal.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(claude_terminal.shutil, "which", lambda name: "/usr/bin/osascript")
+    monkeypatch.setattr(init_agent.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/osascript")
 
-    host, command = claude_terminal._launch_command(tmp_path / "launch.sh", tmp_path, "session", {})
+    host, command = init_agent._launch_command(tmp_path / "launch.sh", tmp_path, "session", {})
 
     assert host == "macos"
     assert command[:2] == ["/usr/bin/osascript", "-e"]
@@ -148,15 +148,15 @@ def test_macos_command_uses_terminal_app(monkeypatch, tmp_path):
 
 
 def test_native_linux_uses_first_supported_terminal(monkeypatch, tmp_path):
-    monkeypatch.setattr(claude_terminal.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(claude_terminal, "_is_wsl", lambda environ: False)
+    monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(init_agent, "_is_wsl", lambda environ: False)
     monkeypatch.setattr(
-        claude_terminal.shutil,
+        init_agent.shutil,
         "which",
         lambda name: "/usr/bin/gnome-terminal" if name == "gnome-terminal" else None,
     )
 
-    host, command = claude_terminal._launch_command(
+    host, command = init_agent._launch_command(
         tmp_path / "launch.sh",
         tmp_path,
         "session",
@@ -168,10 +168,10 @@ def test_native_linux_uses_first_supported_terminal(monkeypatch, tmp_path):
 
 
 def test_headless_linux_fails_clearly(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(claude_terminal.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(claude_terminal, "_is_wsl", lambda environ: False)
+    monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(init_agent, "_is_wsl", lambda environ: False)
 
-    rc = claude_terminal.main(
+    rc = init_agent.main(
         ["--dir", str(tmp_path), "--dry-run"],
         {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")},
     )
@@ -181,27 +181,27 @@ def test_headless_linux_fails_clearly(monkeypatch, tmp_path, capsys):
 
 
 def test_packaged_skill_exists_and_routes_through_agentihooks():
-    skill = Path(__file__).parents[1] / "profiles" / "package" / "skills" / "run-claude-terminal" / "SKILL.md"
+    skill = Path(__file__).parents[1] / "profiles" / "package" / "skills" / "init-agent" / "SKILL.md"
 
     assert skill.is_file()
     text = skill.read_text()
-    assert "name: run-claude-terminal" in text
-    assert "agentihooks claude-terminal" in text
+    assert "name: init-agent" in text
+    assert "agentihooks init-agent" in text
 
 
 def _handoff(monkeypatch, tmp_path, popen, extra=(), env_extra=None):
     monkeypatch.setattr(
-        claude_terminal.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
     )
     monkeypatch.setattr(
-        claude_terminal,
+        init_agent,
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(claude_terminal.subprocess, "Popen", popen)
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
     env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "AH_CC_TOKEN_alpha": "tok"}
     env.update(env_extra or {})
-    return claude_terminal.main(
+    return init_agent.main(
         [
             "--dir",
             str(tmp_path),
@@ -231,7 +231,7 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
 
 
 def test_handoff_needs_a_handoff_document(monkeypatch, tmp_path, capsys):
-    rc = claude_terminal.main(["--dir", str(tmp_path), "--handoff", "--dry-run"], {"HOME": str(tmp_path)})
+    rc = init_agent.main(["--dir", str(tmp_path), "--handoff", "--dry-run"], {"HOME": str(tmp_path)})
 
     assert rc == 2
     assert "--handoff needs the handoff document" in capsys.readouterr().err
