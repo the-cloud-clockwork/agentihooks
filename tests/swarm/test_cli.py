@@ -263,3 +263,27 @@ def test_agent_prompt_starts_by_reading_the_ledger_json():
 
     text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x"})
     assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")
+
+
+def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    records = {
+        "sw-eng-1": AgentRecord("sw-eng-1", "eng", "t1", state="starting", model="opus", effort="high"),
+        "sw-eng-2": AgentRecord("sw-eng-2", "eng", "t1", idle_ticks=1),
+        "sw-eng-3": AgentRecord("sw-eng-3", "eng", "t1", idle_ticks=3),
+        "sw-eng-4": AgentRecord("sw-eng-4", "eng", "t1", state="finished", idle_ticks=5),
+        "sw-eng-5": AgentRecord("sw-eng-5", "eng", "t1"),
+    }
+    for record in records.values():
+        store.put_agent("sw", record)
+    run("sw", "status", "--json")
+    agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
+    assert {n: a["status"] for n, a in agents.items()} == {
+        "sw-eng-1": "working",
+        "sw-eng-2": "idle",
+        "sw-eng-3": "stalled",
+        "sw-eng-4": "finished",
+        "sw-eng-5": "working",
+    }
+    assert (agents["sw-eng-1"]["model"], agents["sw-eng-1"]["effort"]) == ("opus", "high")

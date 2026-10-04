@@ -32,6 +32,8 @@ class AgentRecord:
     started_at: int = 0
     state: str = "working"
     idle_ticks: int = 0
+    model: str = ""
+    effort: str = ""
 
 
 class RedisStore:

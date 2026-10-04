@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,11 @@ STATUS = {
     ],
     "tasks": {"open": 1, "claimed": 1, "blocked": 0, "pr": 0, "done": 2},
 }
+
+
+def function_source(name):
+    page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
 def completed(code, out="", err=""):
@@ -162,16 +168,150 @@ class SwarmPanel(unittest.TestCase):
 
     def test_page_has_controls_wired_to_the_endpoint(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        for control in ("start", "pause", "stop", "stop_now", "max_eng", "max_ci"):
+        for control in ("start", "pause", "stop", "stop_now", "max_eng", "max_ci", "set"):
             self.assertIn(f'data-swarm="{control}"', page)
         self.assertIn('method: "PUT"', page)
-
-    def test_page_has_a_hidden_swarm_panel_filled_from_the_endpoint(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        self.assertIn('id="swarm-box" hidden', page)
         self.assertIn("/api/swarm/", page)
-        for field in ("max_eng", "max_ci", "lane", "harness", "account", "task", "state"):
-            self.assertIn(field, page)
+
+    def test_panel_sits_in_the_sidebar_directly_under_stats(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        column = page.split('<div class="layout"><div class="col">', 1)[1].split("<aside", 1)[0]
+        side = page.split('<aside class="side">', 1)[1].split("</aside>", 1)[0]
+        self.assertNotIn("swarm", column)
+        sections = re.findall(r"<section[^>]*>", side)
+        self.assertEqual(len(sections), 2)
+        self.assertIn('id="stats"', side.split(sections[1], 1)[0])
+        self.assertIn('id="swarm-box"', sections[1])
+        self.assertIn("hidden", sections[1])
+
+    def test_agent_list_scrolls_inside_a_fixed_height_under_the_header(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        rule = re.search(r"\.sw-list \{([^}]*)\}", page).group(1)
+        self.assertRegex(rule, r"max-height: \d+px")
+        self.assertIn("overflow-y: auto", rule)
+        box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
+        self.assertLess(box.index('id="swarm-ctl"'), box.index('id="swarm-agents"'))
+        self.assertLess(box.index('id="swarm-figs"'), box.index('id="swarm-agents"'))
+
+    def test_swarm_styles_use_only_palette_tokens(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        rules = re.findall(r"^(?:\.sw-|#swarm)[^{]*\{[^}]*\}", page, re.M)
+        self.assertGreater(len(rules), 5)
+        for rule in rules:
+            self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])", rule)
+
+    def run_js(self, names, expr):
+        script = "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+        return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+
+    def test_cards_show_task_titles_pull_requests_status_model_and_last_activity(self):
+        sw = {
+            "agents": [
+                {
+                    "name": "s-eng-7",
+                    "lane": "eng",
+                    "harness": "claude",
+                    "account": "acct",
+                    "task": "t7",
+                    "model": "opus",
+                    "effort": "high",
+                    "started_at": 1000,
+                    "status": "working",
+                },
+                {
+                    "name": "s-ci-4",
+                    "lane": "ci",
+                    "harness": "codex",
+                    "account": "",
+                    "task": "ci-split-tests",
+                    "started_at": 1000,
+                    "status": "stalled",
+                },
+            ]
+        }
+        tasks = [
+            {"id": "t7", "title": "Handoff at the compact limit", "pr_url": "https://x/pull/205"},
+            {"id": "ci-split-tests", "title": "Split the suite across more runners", "pr_url": ""},
+        ]
+        now = 1000 + 3 * 3600_000 + 5 * 60_000
+        seen = {"s-eng-7": now - 120_000}
+        cards = self.run_js(
+            ["span", "swarmCards"], f"swarmCards({json.dumps(sw)}, {json.dumps(tasks)}, {json.dumps(seen)}, {now})"
+        )
+        self.assertEqual(
+            cards,
+            [
+                {
+                    "name": "s-eng-7",
+                    "lane": "eng",
+                    "model": "opus · high",
+                    "account": "acct",
+                    "task": "Handoff at the compact limit",
+                    "pr": "https://x/pull/205",
+                    "status": "working",
+                    "ago": "2m",
+                },
+                {
+                    "name": "s-ci-4",
+                    "lane": "ci",
+                    "model": "codex",
+                    "account": "",
+                    "task": "Split the suite across more runners",
+                    "pr": "",
+                    "status": "stalled",
+                    "ago": "3h 5m",
+                },
+            ],
+        )
+
+    def test_an_unknown_task_falls_back_to_its_id(self):
+        sw = {"agents": [{"name": "a", "lane": "eng", "task": "gone", "status": "idle"}]}
+        (card,) = self.run_js(["span", "swarmCards"], f"swarmCards({json.dumps(sw)}, [], {{}}, 5)")
+        self.assertEqual((card["task"], card["status"], card["ago"]), ("gone", "idle", ""))
+
+    def test_controls_that_do_not_apply_are_disabled(self):
+        states = ["running", "paused", "stopping", "stopped", "drained"]
+        out = self.run_js(["swarmControls"], f"{json.dumps(states)}.map(swarmControls)")
+        self.assertEqual(
+            dict(zip(states, out)),
+            {
+                "running": {"start": True, "pause": False, "stop": False, "stop_now": False},
+                "paused": {"start": False, "pause": True, "stop": False, "stop_now": False},
+                "stopping": {"start": False, "pause": True, "stop": True, "stop_now": False},
+                "stopped": {"start": False, "pause": True, "stop": True, "stop_now": True},
+                "drained": {"start": False, "pause": True, "stop": False, "stop_now": False},
+            },
+        )
+
+    def test_stop_now_asks_for_a_confirm_before_it_is_sent(self):
+        out = self.run_js(
+            ["controlClick"],
+            '[controlClick("stop_now", ""), controlClick("stop_now", "stop_now"), controlClick("start", "stop_now"),'
+            ' controlClick("pause", "")]',
+        )
+        self.assertEqual(
+            out,
+            [
+                {"send": False, "armed": "stop_now"},
+                {"send": True, "armed": ""},
+                {"send": True, "armed": ""},
+                {"send": True, "armed": ""},
+            ],
+        )
+
+    def test_each_op_reports_pending_then_done_or_error(self):
+        out = self.run_js(
+            ["opNote"],
+            '[opNote("pending", "stop_now"), opNote("done", "set"), opNote("error", "start", "no swarm x")]',
+        )
+        self.assertEqual(
+            out,
+            [
+                {"cls": "pending", "text": "Stop now: sending"},
+                {"cls": "ok", "text": "Set caps: done"},
+                {"cls": "bad", "text": "Start failed: no swarm x"},
+            ],
+        )
 
 
 if __name__ == "__main__":

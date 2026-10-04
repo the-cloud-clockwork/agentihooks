@@ -74,7 +74,13 @@ class HerdrRuntime:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
-        return Placed(fields.get("pane_id", ""), fields.get("agent", agent), fields.get("account", ""))
+        return Placed(
+            fields.get("pane_id", ""),
+            fields.get("agent", agent),
+            fields.get("account", ""),
+            fields.get("model", ""),
+            fields.get("effort", ""),
+        )
 
     def live_names(self):
         from scripts.terminate_agent import sessions

@@ -24,7 +24,7 @@ from scripts.swarm import delivery, timer
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import SwarmConfig, SwarmError, connect
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import agent_status, tick
 
 SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci"}
 TICK_LOCK_MS = 10 * 60 * 1000
@@ -134,7 +134,15 @@ def cmd_status(store, args):
     tasks = LedgerClient().tasks(args.slug)
     counts = {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
     if args.json:
-        print(json.dumps({"config": config.__dict__, "agents": [a.__dict__ for a in agents], "tasks": counts}))
+        print(
+            json.dumps(
+                {
+                    "config": config.__dict__,
+                    "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
+                    "tasks": counts,
+                }
+            )
+        )
         return
     print(f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}")
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))

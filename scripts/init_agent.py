@@ -111,10 +111,28 @@ MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
 
 
-def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> list[str]:
+def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
+    for i, arg in enumerate(args):
+        if arg in names and i + 1 < len(args):
+            return args[i + 1]
+        for name in names:
+            if name.startswith("--") and arg.startswith(f"{name}="):
+                return arg.split("=", 1)[1]
+    return ""
+
+
+def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
     prefix = f"AGENTIHOOKS_{agent.upper()}"
-    model = environ.get(f"{prefix}_MODEL") or MODEL_DEFAULTS[agent]
-    effort = environ.get(f"{prefix}_EFFORT") or EFFORT_DEFAULT
+    model = _flag_value(agent_args, ("--model", "-m")) or environ.get(f"{prefix}_MODEL") or MODEL_DEFAULTS[agent]
+    effort = _flag_value(agent_args, ("--effort",))
+    if agent == "codex":
+        found = next((a for a in agent_args if a.startswith("model_reasoning_effort=")), "")
+        effort = found.split("=", 1)[1].strip('"') if found else ""
+    return model, effort or environ.get(f"{prefix}_EFFORT") or EFFORT_DEFAULT
+
+
+def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> list[str]:
+    model, effort = model_effort(agent, agent_args, environ)
     has_model = any(a in ("--model", "-m") or a.startswith("--model=") for a in agent_args)
     if agent == "codex":
         args = [] if has_model else ["-m", model]
@@ -392,6 +410,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         f"claude_args={shlex.join(claude_args)}",
         f"launcher={launcher}",
         f"prompt_file={prompt_file or 'none'}",
+        *(f"{k}={v}" for k, v in zip(("model", "effort"), model_effort(agent, claude_args, active_env))),
     ]
     if args.dry_run:
         target = f"placement={args.placement}" if host == "herdr" else f"command={shlex.join(command)}"
