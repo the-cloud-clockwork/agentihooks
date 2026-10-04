@@ -8,11 +8,9 @@ import time
 from pathlib import Path
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
-from hooks.serena_router.app import SESSION_IDLE_SECONDS, build_app
-from hooks.serena_router.pool import BackendConfig, Pool, probe_tools
-from hooks.serena_router.server import UNBOUND, build_server, edit_tools
+# The MCP SDK loads inside the tests: every worker of a shard collects this file, one worker runs it.
+pytestmark = pytest.mark.xdist_group("serena-router")
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_serena.py"
 
@@ -34,6 +32,8 @@ def repo(tmp_path: Path) -> dict[str, Path]:
 
 @pytest.fixture
 async def router():
+    from hooks.serena_router.pool import BackendConfig, Pool, probe_tools
+
     config = BackendConfig(command=(sys.executable, str(FAKE)), start_timeout=30)
     pool = Pool(config)
     tools = await probe_tools(config)
@@ -42,6 +42,10 @@ async def router():
 
 
 def connect(router):
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    from hooks.serena_router.server import build_server
+
     pool, tools = router
     return create_connected_server_and_client_session(build_server(pool, tools))
 
@@ -62,6 +66,8 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
 
 
 async def test_edit_refused_while_unbound(router, repo):
+    from hooks.serena_router.server import UNBOUND
+
     async with connect(router) as session:
         result = await session.call_tool("replace_content", {"relative_path": "f.txt", "repl": "x"})
         assert result.isError
@@ -93,6 +99,8 @@ async def test_relative_activation_refused(router, repo):
 
 
 async def test_unannotated_tool_counts_as_edit(router):
+    from hooks.serena_router.server import edit_tools
+
     _, tools = router
     edits = edit_tools(tools)
     assert "mystery" in edits
@@ -126,6 +134,8 @@ async def test_release_stops_backend_and_next_call_restarts_it(router, repo):
 
 
 async def test_removed_worktree_unbinds_the_session(router, repo):
+    from hooks.serena_router.server import UNBOUND
+
     async with connect(router) as session:
         await session.call_tool("activate_project", {"project": str(repo["a"])})
         _git(repo["primary"], "worktree", "remove", "--force", str(repo["a"]))
@@ -151,6 +161,9 @@ async def test_worktree_inherits_the_primary_checkout_serena_config(router, repo
 
 
 def test_app_bounds_idle_sessions():
+    from hooks.serena_router.app import SESSION_IDLE_SECONDS, build_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
     app = build_app(Pool(BackendConfig(command=(sys.executable, str(FAKE)))), [])
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
 

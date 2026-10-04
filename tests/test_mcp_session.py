@@ -7,9 +7,21 @@ sessions from one process can trust.
 
 import pytest
 
-from hooks.mcp._session import resolve_session_id, set_env_fallback_allowed
+# hooks.mcp loads the MCP SDK, so it is imported inside the tests and one worker runs them.
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-session")]
 
-pytestmark = pytest.mark.unit
+
+def resolve_session_id(*args):
+    from hooks.mcp._session import resolve_session_id
+
+    return resolve_session_id(*args)
+
+
+def set_env_fallback_allowed(allowed):
+    from hooks.mcp._session import set_env_fallback_allowed
+
+    set_env_fallback_allowed(allowed)
+
 
 _ENV_VARS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
 
