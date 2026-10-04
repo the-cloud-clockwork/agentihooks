@@ -203,6 +203,7 @@ class TestCheckMcp:
         with (
             patch("scripts.status_checker.Path.home", return_value=tmp_path),
             patch("scripts.status_checker.CLAUDE_HOME", tmp_path / ".claude"),
+            patch("scripts.status_checker._query_mcp_tools", return_value=None),
         ):
             (tmp_path / ".claude").mkdir()
             result = check_mcp()
