@@ -298,3 +298,17 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
     assert "gpt-6.1-sol high" in lines["sw-eng-1"]
     assert "unknown" in lines["sw-eng-2"]
+
+
+def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1"})
+    led = "agentihooks ledger --slug sw --as sw-eng-1"
+    assert f"{led} join" in text
+    assert "agentihooks ledger watch sw --as sw-eng-1" in text
+    assert f"{led} ack" in text
+    assert f"{led} comment phases/p1" in text
+    assert f"{led} followup add" in text
+    assert text.index(f"{led} join") < text.index("Work it end to end")
+    assert text.index(f"{led} leave") < text.index("agentihooks swarm sw done --pr")
