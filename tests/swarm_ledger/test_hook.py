@@ -16,7 +16,13 @@ import new_ledger  # noqa: E402
 
 SLUG = "hook-2026-01-01"
 SID = "sess-1"
+CLOSED_PORT = socket.socket()
+CLOSED_PORT.bind(("127.0.0.1", 0))
 JOIN = f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss join --role orchestrator"
+
+
+def tearDownModule():
+    CLOSED_PORT.close()
 
 
 def make_ledger(done=False):
@@ -46,7 +52,7 @@ def make_ledger(done=False):
 
 def hook(event, **fields):
     payload = {"session_id": SID, "hook_event_name": event, **fields}
-    env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "1"}
+    env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(CLOSED_PORT.getsockname()[1])}
     run = subprocess.run(
         [sys.executable, str(SCRIPTS / "ledger_hook.py")],
         input=json.dumps(payload),
@@ -150,8 +156,10 @@ class Gate(unittest.TestCase):
 
     def test_block_budget_then_allow(self):
         ask("still there", 3)
+        start = time.monotonic()
         results = [hook("Stop") for _ in range(4)]
         self.assertEqual([bool(r) for r in results], [True, True, True, False])
+        self.assertLess(time.monotonic() - start, 2)
 
     def test_work_without_recording_blocks_stop(self):
         for _ in range(10):

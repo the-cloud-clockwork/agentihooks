@@ -1,3 +1,6 @@
+import socket
+import time
+
 import fakeredis
 import pytest
 
@@ -69,8 +72,12 @@ def test_no_redis_refuses():
 def test_an_unreachable_redis_is_refused_with_a_clear_error():
     from scripts.swarm.store import connect
 
-    with pytest.raises(SwarmError, match="refuses to run"):
-        connect({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:1/0"})
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        start = time.monotonic()
+        with pytest.raises(SwarmError, match="refuses to run"):
+            connect({"AGENTIHOOKS_SWARM_REDIS_URL": f"redis://127.0.0.1:{closed.getsockname()[1]}/0"})
+    assert time.monotonic() - start < 1
 
 
 def test_one_redis_for_every_caller_whatever_redis_url_says():
