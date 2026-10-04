@@ -82,6 +82,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
                 actions.append(f"retired {agent.name}")
+            else:
+                actions.append(f"could not retire {agent.name}, retrying next tick")
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent)
