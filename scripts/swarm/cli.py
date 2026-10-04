@@ -26,7 +26,7 @@ from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, tick
 
-SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci"}
+SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 
@@ -125,7 +125,16 @@ def cmd_set(store, args):
     if config.state == "running":
         for action in run_tick(store, args.slug):
             print(action)
-    print(json.dumps({"swarm": args.slug, "max_eng": config.max_eng, "max_ci": config.max_ci}))
+    print(
+        json.dumps(
+            {
+                "swarm": args.slug,
+                "max_eng": config.max_eng,
+                "max_ci": config.max_ci,
+                "compact_limit": config.compact_limit,
+            }
+        )
+    )
 
 
 def cmd_status(store, args):
