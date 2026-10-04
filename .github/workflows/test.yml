@@ -56,10 +56,9 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
-          # On a miss every shard would upload the same key; one per Python is enough.
-          save-cache: ${{ matrix.shard == 1 }}
+          version: "0.12.23"
+          # Downloading the wheels is faster than restoring a cache of them unpacked.
+          enable-cache: false
 
       # Everything below runs as `python -m <tool>`, never the bare console
       # script. pip on the self-hosted runner installs into the user site
