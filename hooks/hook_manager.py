@@ -1352,6 +1352,13 @@ def on_pre_tool_use(payload: dict) -> None:
 
     _pretool_blocks: list[str] = []
     _can_inject_pretool = can_inject_context("PreToolUse")
+    _recycle_ctx = None
+    try:
+        from hooks.context.context_recycle import directive as _recycle_directive
+
+        _recycle_ctx = _recycle_directive(payload.get("session_id", ""))
+    except Exception as e:
+        log("context recycle pre-tool failed", {"error": str(e)})
     _tool_call_count = 0
     if BRAIN_ENABLED or ENFORCEMENT_INJECTION_ENABLED or QUOTA_USAGE_INJECTION_ENABLED:
         try:
@@ -1361,6 +1368,8 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("tool-call counter failed", {"error": str(e)})
 
+    if _recycle_ctx:
+        _pretool_blocks.append(_recycle_ctx)
     if _quota_policy_ctx:
         _pretool_blocks.append(_quota_policy_ctx)
     elif QUOTA_USAGE_INJECTION_ENABLED and _tool_call_count % max(1, QUOTA_USAGE_TOOL_CALLS) == 0:

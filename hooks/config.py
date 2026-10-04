@@ -545,6 +545,7 @@ MCP_SCHEMA_AVG_TOKENS: int = int(os.getenv("MCP_SCHEMA_AVG_TOKENS", "150"))
 # SMART COMPACT SUGGESTIONS
 # =============================================================================
 COMPACT_SUGGEST_ENABLED = _env_bool("COMPACT_SUGGEST_ENABLED", "true")
+COMPACT_LIMIT: int = int(os.getenv("AGENTIHOOKS_COMPACT_LIMIT", "600"))
 
 # =============================================================================
 # CLAUDE.MD SANITY CHECK

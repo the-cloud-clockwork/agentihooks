@@ -81,6 +81,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             if runtime.retire(agent, agent.name in live):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
+                if store.handoff(slug, agent.task) and rows.get(agent.task, {}).get("state") in ACTIVE:
+                    _reopen(slug, ledger, rows, agent.task)
                 actions.append(f"retired {agent.name}")
             else:
                 actions.append(f"could not retire {agent.name}, retrying next tick")
@@ -144,6 +146,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             name = store.next_name(slug, lane)
             if not store.claim(slug, task["id"], name, LEASE_MS):
                 continue
+            handoff = store.handoff(slug, task["id"])
+            if handoff:
+                task["handoff"] = handoff
             record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting")
             store.put_agent(slug, record)
             try:
@@ -159,6 +164,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                     record, pane_id=placed.pane_id, harness=placed.harness, account=placed.account, state="working"
                 ),
             )
+            store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
 

@@ -6,7 +6,7 @@ agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N      (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC | say TEXT [--to NAME|eng|ci]
 """
 
 import argparse
@@ -17,6 +17,8 @@ import signal
 import sys
 import time
 import uuid
+from dataclasses import replace
+from pathlib import Path
 
 from scripts.swarm import delivery, timer
 from scripts.swarm.ledger_client import LedgerClient
@@ -185,9 +187,22 @@ def cmd_block(store, args):
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 
-def _retire(store, slug, agent):
-    from dataclasses import replace
+def cmd_handoff(store, args):
+    agent = _me(store, args)
+    try:
+        text = Path(args.doc).expanduser().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SwarmError(f"cannot read the handoff document {args.doc}: {exc.strerror}") from exc
+    store.put_handoff(args.slug, agent.task, text)
+    store.put_agent(args.slug, replace(agent, state="finished"))
+    print(
+        json.dumps(
+            {"task": agent.task, "state": "handoff", "next": "stop now; a successor continues from your document"}
+        )
+    )
 
+
+def _retire(store, slug, agent):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
 
@@ -221,6 +236,7 @@ def build_parser():
         sub.add_parser(name).add_argument("url")
     sub.add_parser("done").add_argument("--pr", default="")
     sub.add_parser("block").add_argument("note")
+    sub.add_parser("handoff").add_argument("doc")
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")
