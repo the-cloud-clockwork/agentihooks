@@ -100,6 +100,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
     # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
     monkeypatch.setattr("hooks.context.conditions._cache_path", lambda *a: fake_state_dir / "cache" / "conditions.json")
     monkeypatch.setattr("hooks.context.conditions.runtime_dir", lambda: fake_state_dir / "conditions")
@@ -159,7 +160,10 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         return
     from targets.copilot_target import CopilotAdapter
 
+    from hooks.context.codex_context_pin import catalog_path
+
     for label, value in (
+        ("codex model catalog", catalog_path()),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
