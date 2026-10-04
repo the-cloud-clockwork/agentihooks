@@ -1,11 +1,12 @@
 import json
 import os
 import time
+from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
 
 
-def _snapshot_path(session_id: str):
+def _snapshot_path(session_id: str) -> Path:
     safe_id = "".join(character if character.isalnum() or character in "-_" else "_" for character in session_id)
     return AGENTIHOOKS_HOME / "context_usage" / f"{safe_id}.json"
 
@@ -37,5 +38,5 @@ def used_tokens(session_id: str) -> int | None:
         return None
     try:
         return int(json.loads(_snapshot_path(session_id).read_text(encoding="utf-8"))["used_tokens"])
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
