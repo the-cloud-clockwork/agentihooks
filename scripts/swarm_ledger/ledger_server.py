@@ -37,6 +37,7 @@ LOGFILE = core.LEDGER_DIR / ".server.log"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+CODE_DIR = Path(__file__).resolve().parent
 
 
 def ledger_summaries():
@@ -203,9 +204,22 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, ops)
 
 
+def code_stamp(code_dir=CODE_DIR):
+    return max((p.stat().st_mtime_ns for p in code_dir.iterdir() if p.suffix in (".py", ".html")), default=0)
+
+
+def reload_if_changed(started, code_dir=CODE_DIR, execv=os.execv):
+    if code_stamp(code_dir) == started:
+        return False
+    execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
+    return True
+
+
 def watch_seeds(interval=2.0):
     seen = {}
+    started = code_stamp()
     while True:
+        reload_if_changed(started)
         for path in core.LEDGER_DIR.glob("*.html"):
             try:
                 mtime = path.stat().st_mtime
