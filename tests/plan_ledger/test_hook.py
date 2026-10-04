@@ -84,6 +84,14 @@ class Gate(unittest.TestCase):
         session = json.loads((core.LEDGER_DIR / ".sessions" / f"{SID}.json").read_text())
         self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "boss", "orchestrator"))
 
+    def test_only_the_agent_cli_counts_as_a_ledger_command(self):
+        import ledger_hook
+
+        self.assertTrue(ledger_hook.is_ledger_cli(["python3", "/x/plan_ledger/ledger.py", "say"]))
+        self.assertTrue(ledger_hook.is_ledger_cli(["agentihooks", "ledger", "say"]))
+        self.assertFalse(ledger_hook.is_ledger_cli(["pytest", "tests/test_ledger.py", "-k", "edit"]))
+        self.assertFalse(ledger_hook.is_ledger_cli(["python3", "watch_ledger.py", "s"]))
+
     def test_agentihooks_join_command_binds_the_session(self):
         (core.LEDGER_DIR / ".sessions" / f"{SID}.json").unlink()
         bash(f"agentihooks ledger --slug {SLUG} --as boss join --role orchestrator", '{"joined": "boss"}')

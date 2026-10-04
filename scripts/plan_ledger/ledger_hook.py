@@ -53,7 +53,7 @@ def tokens_of(command):
 
 
 def is_ledger_cli(tokens):
-    return any(t.endswith("ledger.py") for t in tokens) or any(
+    return any(Path(t).name == "ledger.py" for t in tokens) or any(
         a.endswith("agentihooks") and b == "ledger" for a, b in zip(tokens, tokens[1:])
     )
 

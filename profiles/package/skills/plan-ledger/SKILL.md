@@ -82,7 +82,7 @@ when `--ensure` printed the base URL.
 ### A4. Bind the crew and install the gate
 
 A ledger is one task unit: an orchestrator and every agent of that crew share it.
-Requirements: Python 3.9+, stdlib only; the gate needs Claude Code. Codex and
+Requirements: Python 3.11+ (the agentihooks floor), stdlib only; the gate needs Claude Code. Codex and
 Copilot sessions get the CLI and the watcher, with advisory rules only.
 
 `agentihooks init` installs the gate hooks with the rest of its settings
