@@ -2,7 +2,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "plan_ledger" / "template.html"
+TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def function_source(name):

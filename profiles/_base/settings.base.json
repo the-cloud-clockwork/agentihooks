@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "command": "__PYTHON__ /app/scripts/swarm_ledger/ledger_hook.py",
             "timeout": 10
           }
         ]
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "command": "__PYTHON__ /app/scripts/swarm_ledger/ledger_hook.py",
             "timeout": 10
           }
         ]
@@ -92,7 +92,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "command": "__PYTHON__ /app/scripts/swarm_ledger/ledger_hook.py",
             "timeout": 10
           }
         ]
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "command": "__PYTHON__ /app/scripts/swarm_ledger/ledger_hook.py",
             "timeout": 10
           }
         ]

@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "plan_ledger"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 os.environ["LEDGER_DIR"] = tempfile.mkdtemp(prefix="ledger-time_left_minutes-test-")
 import ledger  # noqa: E402

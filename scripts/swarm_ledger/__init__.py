@@ -1,4 +1,4 @@
-"""Plan ledger: a live plan page an operator and a crew of agents share. Standard library only."""
+"""Swarm ledger: a live plan page an operator and a crew of agents share. Standard library only."""
 
 import importlib
 import sys

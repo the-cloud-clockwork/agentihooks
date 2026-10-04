@@ -1,5 +1,5 @@
 ---
-name: plan-ledger
+name: swarm-ledger
 description: >
   Turn a plan file (plus any documents written for the work) into one interactive
   HTML ledger the operator keeps open in a browser: title, overview, sources, phase
@@ -8,15 +8,15 @@ description: >
   ~/development-ledger/<slug>.json through a local server. Every agent working that
   plan follows the ledger: it watches the JSON under a Monitor, acts on the
   operator's checks, answers and notes, and records phase states and follow-ups in
-  the HTML as work lands. Use when the user says "plan ledger", "make a ledger for
+  the HTML as work lands. Use when the user says "swarm ledger", "make a ledger for
   this plan", "ledger this plan", or when you work a plan that already has a ledger.
 argument-hint: "<plan-file> [other development documents ...]"
 ---
 
-# Plan Ledger — The Operator's Live Checklist for a Plan
+# Swarm Ledger — The Operator's Live Checklist for a Plan
 
 Every tool runs through one command that agentihooks installs (code in its
-`scripts/plan_ledger/`, standard library only), so every Bash call and every
+`scripts/swarm_ledger/`, standard library only), so every Bash call and every
 Monitor resolves it without shell state:
 
 ```bash
@@ -302,7 +302,7 @@ with `OPS`, `check(op)` and `apply(doc, op, ctx)`, registered in `ledger_core.EX
 
 ## Extracted Scripts
 
-In agentihooks `scripts/plan_ledger/`; `agentihooks ledger` dispatches to them (`__init__.py`).
+In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them (`__init__.py`).
 
 | Script | Purpose | Idempotent |
 |---|---|---|

@@ -8,7 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "plan_ledger"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 os.environ.setdefault("LEDGER_DIR", tempfile.mkdtemp(prefix="ledger-hook-test-"))
 import ledger_core as core  # noqa: E402
@@ -122,7 +122,7 @@ class Gate(unittest.TestCase):
     def test_only_the_agent_cli_counts_as_a_ledger_command(self):
         import ledger_hook
 
-        self.assertTrue(ledger_hook.is_ledger_cli(["python3", "/x/plan_ledger/ledger.py", "say"]))
+        self.assertTrue(ledger_hook.is_ledger_cli(["python3", "/x/swarm_ledger/ledger.py", "say"]))
         self.assertTrue(ledger_hook.is_ledger_cli(["agentihooks", "ledger", "say"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["pytest", "tests/test_ledger.py", "-k", "edit"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["python3", "watch_ledger.py", "s"]))

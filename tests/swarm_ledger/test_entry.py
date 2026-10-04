@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-from scripts.plan_ledger import run
+from scripts.swarm_ledger import run
 
 
 def help_of(argv):
