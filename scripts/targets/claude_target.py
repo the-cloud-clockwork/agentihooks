@@ -15,6 +15,8 @@ process is actually running, or the test suite's home-isolation patches on
 
 from __future__ import annotations
 
+import json
+import re
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -25,6 +27,54 @@ def _install_module():
     if mod is None:
         from scripts import install as mod  # production cold path
     return mod
+
+
+HOOK_RECORD_KEY = "claude_hook_commands"
+
+
+def _hook_commands(hooks: dict) -> set[str]:
+    return {
+        h.get("command", "")
+        for groups in hooks.values()
+        if isinstance(groups, list)
+        for g in groups
+        if isinstance(g, dict)
+        for h in g.get("hooks", [])
+        if isinstance(h, dict) and h.get("command")
+    }
+
+
+def _keep_foreign_hooks(settings_path: Path, rendered: dict) -> dict:
+    """Rendered hooks plus every existing hook group agentihooks did not write."""
+    _i = _install_module()
+    try:
+        existing = json.loads(settings_path.read_text()).get("hooks") or {}
+    except (OSError, ValueError, AttributeError):
+        existing = {}
+    state = _i._load_state()
+    owned = _hook_commands(rendered) | set(state.get(HOOK_RECORD_KEY, []))
+    roots = [re.compile(re.escape(str(r)) + r"(?=[/\s'\"]|$)") for r in _i._managed_roots()]
+
+    def ours(command: str) -> bool:
+        return command in owned or any(r.search(command) for r in roots)
+
+    merged = deepcopy(rendered)
+    if not isinstance(existing, dict):
+        existing = {}
+    for event, groups in existing.items():
+        if not isinstance(groups, list):
+            continue
+        foreign = [
+            g
+            for g in groups
+            if isinstance(g, dict)
+            and not any(ours(h.get("command", "")) for h in g.get("hooks", []) if isinstance(h, dict))
+        ]
+        if foreign:
+            merged[event] = merged.get(event, []) + foreign
+    state[HOOK_RECORD_KEY] = sorted(_hook_commands(rendered))
+    _i._save_state(state)
+    return merged
 
 
 class ClaudeAdapter:
@@ -65,6 +115,9 @@ class ClaudeAdapter:
         personal = _i._preserve_personal_keys(existing_settings_path)
         merged: dict = deepcopy(personal)
         merged.update(rendered)
+        merged["hooks"] = _keep_foreign_hooks(existing_settings_path, rendered.get("hooks") or {})
+        if not merged["hooks"]:
+            del merged["hooks"]
         merged[_i.MANAGED_BY_KEY] = _i.MANAGED_BY_VALUE
 
         _i._backup_settings(existing_settings_path)
