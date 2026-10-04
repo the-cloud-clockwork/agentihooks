@@ -56,6 +56,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request; the task moves to `pr`. |
 | `agentihooks swarm <id> done [--pr URL]` | Close the task; the swarm then closes the session. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
+| `agentihooks swarm <id> handoff DOC` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
 
 ## One task per agent life

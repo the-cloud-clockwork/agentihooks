@@ -17,6 +17,11 @@ def build(slug, repo, lane, name, task):
         lines.append(task["description"])
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
+    if task.get("handoff"):
+        lines += [
+            "A previous agent ran out of context on this task and left this handoff document. Continue from it:",
+            task["handoff"],
+        ]
     if lane == "ci":
         lines.append(
             f"Add a further bottleneck as a ci task: agentihooks ledger --slug {slug} --as {name} task add <short id> "
@@ -32,6 +37,8 @@ def build(slug, repo, lane, name, task):
         "5. Merge on green checks, then wt.sh done.",
         f"6. Close the task: {me} done --pr <pr url>. The swarm then closes this session; stop working.",
         "",
+        f"If your context nears its limit a hook tells you to write a handoff document: then run {me} handoff <doc> "
+        "and stop; a successor continues the task from it.",
         "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
         f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
         "",

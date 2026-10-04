@@ -25,6 +25,7 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
+        self.tasks = []
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
 
     def has_capacity(self):
@@ -36,6 +37,7 @@ class FakeRuntime:
         if self.fail:
             raise SpawnError("herdr down")
         self.spawned.append((lane, name, task["id"]))
+        self.tasks.append(dict(task))
         self.live.add(name)
         return Placed(pane_id=f"w1:p{len(self.spawned)}", harness="claude", account="acct")
 
@@ -215,3 +217,17 @@ def test_a_drained_swarm_wakes_up_for_new_tasks(store):
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert store.config("sw").state == "running" and runtime.spawned == [("eng", "sw-eng-1", "t2")]
+
+
+def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = store.agents("sw")[0]
+    store.put_handoff("sw", "t1", "seam 1 green, seam 2 red")
+    store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.killed == ["sw-eng-1"]
+    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1")
+    assert runtime.tasks[-1]["handoff"] == "seam 1 green, seam 2 red"
+    assert ledger.rows["t1"]["claimed_by"] == "sw-eng-2"
+    assert store.handoff("sw", "t1") == ""

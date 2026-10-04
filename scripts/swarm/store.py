@@ -92,6 +92,15 @@ class RedisStore:
             except WatchError:
                 return False
 
+    def put_handoff(self, slug, task, text):
+        self.redis.set(self.key(slug, "handoff", task), text)
+
+    def handoff(self, slug, task):
+        return self.redis.get(self.key(slug, "handoff", task)) or ""
+
+    def clear_handoff(self, slug, task):
+        self.redis.delete(self.key(slug, "handoff", task))
+
     def next_name(self, slug, lane):
         return f"{slug}-{lane}-{self.redis.incr(self.key(slug, 'seq', lane))}"
 

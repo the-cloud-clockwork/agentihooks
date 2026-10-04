@@ -235,3 +235,24 @@ def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
     )
     assert rt.retire(AgentRecord("sw-eng-1", "eng", "t1"), live=True)
     assert seen[0][1:] == ["terminate-agent", "sw-eng-1", "--force-shared"]
+
+
+def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_path, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    doc = tmp_path / "handoff.md"
+    doc.write_text("issue 7 is open, tests red on seam 2")
+    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] == ["finished"]
+    assert store.claimant("sw", "t1") == "sw-eng-1"
+    assert store.handoff("sw", "t1") == "issue 7 is open, tests red on seam 2"
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert "stop now" in capsys.readouterr().out
+
+
+def test_handoff_refuses_a_missing_document(env, capsys):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert run("sw", "--as", "sw-eng-1", "handoff", "/no/such/doc.md") == 1
+    assert "handoff" in capsys.readouterr().err
