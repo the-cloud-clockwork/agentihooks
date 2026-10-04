@@ -9,6 +9,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
+
+
+def pytest_collection_modifyitems(config, items):
+    config.stash[COLLECTED_NODEIDS] = [item.nodeid for item in items]
+
 
 @pytest.fixture(autouse=True)
 def _isolate_real_user_paths(tmp_path, monkeypatch):
