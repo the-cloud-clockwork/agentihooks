@@ -20,7 +20,7 @@ The definitive Claude Code harness — built on four pillars that make your agen
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
-[![CI](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/ci.yml)
+[![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
