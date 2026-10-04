@@ -77,8 +77,8 @@ agentihooks ledger serve --ensure
 ```
 
 Give the operator `<printed base URL>/<slug>`; `/` lists every ledger. The gate hook starts
-the server at every session start while any ledger exists, so the page comes back on its own
-after a reboot. Done
+the server at every session start while any ledger exists, so after a reboot the page is back
+as soon as any Claude Code session starts. Done
 when `--ensure` printed the base URL.
 
 ### A4. Bind the crew and install the gate
@@ -293,7 +293,7 @@ hosted service) can serve the same page; the rules stay in `ledger_core.sync` an
 | `PUT /api/<slug>` | `{"changes": [...], "ops": [...]}`: checkbox changes with their base, and ops (`add`, `edit`, `delete`, `clear`, `sync`, `stats_sync`, `priority_clear`, `notification_clear`, agent ops carrying `by`); the reply is the new state |
 | `GET /healthz` | `{"dir": "<ledger dir>"}` |
 
-Every call carries `X-Ledger-Token` (the page's `ledger-token` meta). A new kind of op is a module
+Every `/api/` call carries `X-Ledger-Token` (the page's `ledger-token` meta). A new kind of op is a module
 with `OPS`, `check(op)` and `apply(doc, op, ctx)`, registered in `ledger_core.EXTENSION_OPS`
 (priorities and notifications are built that way).
 

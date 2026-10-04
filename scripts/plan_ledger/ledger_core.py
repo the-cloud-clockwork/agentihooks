@@ -48,7 +48,7 @@ CHAT_KEPT = 500
 SYNC_COOLDOWN_MS = 5 * 60 * 1000
 SYNC_KINDS = {"sync": "sync requested", "stats_sync": "stats sync requested"}
 DEFAULT_CHAT_INSTRUCTIONS = (
-    "Answer with ledger.py say, in plain words for the operator: no times, ids, hashes, paths "
+    "Answer with agentihooks ledger say, in plain words for the operator: no times, ids, hashes, paths "
     "or capital labels. Under 100 words unless the operator asks, in a separate message, to expand."
 )
 SEEDS_KEPT = 50
@@ -580,7 +580,7 @@ def load_state(json_path, seed):
         return normalize(state), meta, False
     if seed is None:
         raise ValueError(f"{json_path} is missing and the HTML seed is unreadable")
-    doc = {k: v for k, v in seed.items() if k != "_rev"}
+    doc = {k: v for k, v in seed.items() if k not in ("_rev", "notifications")}
     meta = {"rev": 0, "stamps": {}, "events": [], "seeds": {"0": doc}, "seed_error": None, "updated_at": now_ms()}
     return doc, meta, True
 

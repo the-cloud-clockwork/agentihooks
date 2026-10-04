@@ -9,6 +9,8 @@ session start. Unbound sessions exit at once. Every error fails open.
 import json
 import os
 import shlex
+import socket
+import subprocess
 import sys
 import time
 import urllib.request
@@ -216,13 +218,11 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 
 
 def serve_ledgers():
-    import socket
-    import subprocess
-
     if not any(LEDGER_DIR.glob("*.json")):
         return
     try:
-        socket.create_connection(("127.0.0.1", int(os.environ.get("LEDGER_PORT", "8765"))), timeout=0.3).close()
+        address = (os.environ.get("LEDGER_HOST", "127.0.0.1"), int(os.environ.get("LEDGER_PORT", "8765")))
+        socket.create_connection(address, timeout=0.3).close()
     except OSError:
         subprocess.Popen(
             [sys.executable, str(HERE / "ledger_server.py"), "--ensure"],
@@ -234,12 +234,12 @@ def serve_ledgers():
 
 
 def dispatch(payload):
-    if payload.get("hook_event_name") == "SessionStart":
-        serve_ledgers()
     sid = payload.get("session_id")
     if not sid or not SESSIONS.exists() and payload.get("hook_event_name") not in ("SessionStart", "PostToolUse"):
         return
     bind(payload, sid)
+    if payload.get("hook_event_name") == "SessionStart":
+        serve_ledgers()
     sfile = SESSIONS / f"{sid}.json"
     session = read_json(sfile)
     handler = HANDLERS.get(payload.get("hook_event_name"))

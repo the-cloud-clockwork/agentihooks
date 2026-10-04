@@ -3,6 +3,7 @@
 OPS = ("notification_clear",)
 NEW_ITEM = {"questions": "New open question", "followups": "New follow-up"}
 REPLY_KINDS = {"comment added": "comments", "message added": "chat"}
+TEXT_KEPT = 280
 
 
 def check(op):
@@ -38,7 +39,7 @@ def _answers_operator(doc, event):
 
 def _from_event(doc, event):
     kind, target = event.get("kind"), event.get("target", "")
-    if event.get("by") in (None, "operator"):
+    if event["by"] == "operator":
         return None
     if kind == "added" and target.split("/")[0] in NEW_ITEM:
         return {"item": target, "label": NEW_ITEM[target.split("/")[0]]}
@@ -53,5 +54,11 @@ def derive(doc, ctx):
         found = _from_event(doc, event)
         if found:
             rows.append(
-                {"id": f"nt-{ctx.rev}-{n}", **found, "text": event.get("text", ""), "by": event["by"], "at": ctx.at}
+                {
+                    "id": f"nt-{ctx.rev}-{n}",
+                    **found,
+                    "text": event.get("text", "")[:TEXT_KEPT],
+                    "by": event["by"],
+                    "at": ctx.at,
+                }
             )

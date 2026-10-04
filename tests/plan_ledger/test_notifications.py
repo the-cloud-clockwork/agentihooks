@@ -74,6 +74,12 @@ class Notifications(unittest.TestCase):
         )
         self.assertEqual([(r["label"], r["item"]) for r in notes()], [("Reply", "chat")])
 
+    def test_a_long_answer_is_kept_short_on_the_row(self):
+        core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "expand please"}])
+        long = " ".join(["The phase is moving along well."] * 40)
+        core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "text": long}])
+        self.assertEqual(notes()[0]["text"], long[:280])
+
     def test_operator_actions_and_agent_status_alone_do_not_notify(self):
         core.sync(SLUG, ops=[comment(1, self.phase, "a note to self")])
         core.sync(SLUG, ops=[comment(2, self.phase, "and a second one")])
@@ -108,4 +114,14 @@ class Notifications(unittest.TestCase):
         )
         self.assertNotEqual(forged, html)
         html_path.write_text(forged, encoding="utf-8")
+        self.assertEqual(notes(), [])
+
+    def test_a_forged_seed_on_a_fresh_ledger_carries_no_notification(self):
+        html_path, json_path = core.paths(SLUG)
+        html = html_path.read_text(encoding="utf-8")
+        row = '{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}'
+        forged = html.replace('"notifications": []', f'"notifications": [{row}]')
+        self.assertNotEqual(forged, html)
+        html_path.write_text(forged, encoding="utf-8")
+        json_path.unlink()
         self.assertEqual(notes(), [])
