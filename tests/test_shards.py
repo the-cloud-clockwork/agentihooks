@@ -2,10 +2,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from tests.shards import assign_files, discover_test_files
+from tests import conftest
+from tests.shards import assign_files, discover_test_files, slowest_first
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +53,27 @@ def test_shard_option_collects_only_that_shards_files():
     )
     collected = {line.split("::")[0] for line in result.stdout.splitlines() if "::" in line}
     assert collected and collected <= expected
+
+
+def test_slow_tests_run_first_and_the_rest_keep_their_order():
+    durations = {"t::a": 0.01, "t::b": 0.5, "t::c": 0.02, "t::d[x]": 1.5, "t::e": 0.1}
+    nodeids = ["t::a", "t::b", "t::c", "t::d[x]@probe", "t::e", "t::new"]
+    assert slowest_first(nodeids, durations, 0.1) == ["t::d[x]@probe", "t::b", "t::e", "t::a", "t::c", "t::new"]
+
+
+def _modified_order(tmp_path, nodeids, **config):
+    (tmp_path / ".test_durations").write_text(json.dumps({"t::fast": 0.001, "t::slow": 2.0}))
+    items = [SimpleNamespace(nodeid=nodeid) for nodeid in nodeids]
+    conftest.pytest_collection_modifyitems(SimpleNamespace(stash=pytest.Stash(), rootpath=tmp_path, **config), items)
+    return [item.nodeid for item in items]
+
+
+def test_xdist_workers_hand_out_the_slow_tests_first(tmp_path):
+    assert _modified_order(tmp_path, ["t::fast", "t::slow"], workerinput={}) == ["t::slow", "t::fast"]
+
+
+def test_a_run_without_workers_keeps_file_order(tmp_path):
+    assert _modified_order(tmp_path, ["t::fast", "t::slow"]) == ["t::fast", "t::slow"]
 
 
 def _stored_durations():

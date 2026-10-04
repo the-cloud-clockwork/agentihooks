@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.shards import assign_files, discover_test_files
+from tests.shards import assign_files, discover_test_files, slowest_first
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -17,6 +17,10 @@ SHARD_FILES = pytest.StashKey[frozenset[str]]()
 
 
 def pytest_collection_modifyitems(config, items):
+    if hasattr(config, "workerinput"):
+        durations = json.loads((config.rootpath / ".test_durations").read_text())
+        order = {nodeid: i for i, nodeid in enumerate(slowest_first([item.nodeid for item in items], durations, 0.1))}
+        items.sort(key=lambda item: order[item.nodeid])
     config.stash[COLLECTED_NODEIDS] = [item.nodeid for item in items]
 
 

@@ -18,3 +18,9 @@ def assign_files(durations: dict[str, float], files: list[str], shards: int) -> 
         loads[lightest] += seconds[path]
         groups[lightest].append(path)
     return groups
+
+
+def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:
+    seconds = {nodeid: durations.get(nodeid.split("@", 1)[0], 0.0) for nodeid in nodeids}
+    slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
+    return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
