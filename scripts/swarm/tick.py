@@ -118,5 +118,8 @@ def _settle(slug, config, store, ledger, rows):
         return []
     store.update(slug, state="drained")
     blocked = [t["id"] for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope")]
-    ledger.notify(slug, f"swarm {slug} drained" + (f", {len(blocked)} blocked task(s) wait for you" if blocked else ""))
+    ledger.notify(
+        slug,
+        "The swarm has no task left to start" + (f", {len(blocked)} blocked tasks wait for you" if blocked else ""),
+    )
     return ["drained"]

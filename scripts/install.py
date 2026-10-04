@@ -6282,6 +6282,10 @@ def main() -> None:
         from scripts.swarm_ledger import run as ledger_run
 
         raise SystemExit(ledger_run(_argv[1:]))
+    if _argv and _argv[0] == "swarm":
+        from scripts.swarm.cli import main as swarm_main
+
+        raise SystemExit(swarm_main(_argv[1:]))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6437,6 +6441,10 @@ def main() -> None:
     sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
+    sub.add_parser(
+        "swarm",
+        help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
+    )
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
