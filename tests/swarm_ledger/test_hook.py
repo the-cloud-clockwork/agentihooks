@@ -21,6 +21,10 @@ CLOSED_PORT.bind(("127.0.0.1", 0))
 JOIN = f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss join --role orchestrator"
 
 
+def tearDownModule():
+    CLOSED_PORT.close()
+
+
 def make_ledger(done=False):
     content = {
         "title": "Demo",
