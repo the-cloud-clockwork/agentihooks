@@ -52,6 +52,15 @@ class TestConfig:
 class TestSecretsMode:
     """Tests for SECRETS_MODE configuration."""
 
+    @pytest.fixture(autouse=True)
+    def _reload_config_after(self):
+        yield
+        import importlib
+
+        import hooks.config as cfg
+
+        importlib.reload(cfg)
+
     def _reload_with_mode(self, tmp_path, mode_value=None):
         """Reload hooks.config with AGENTIHOOKS_HOME pointing to an empty tmp dir
         so that no real .env files are loaded, then optionally set SECRETS_MODE."""
