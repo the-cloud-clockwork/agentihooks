@@ -118,7 +118,7 @@ def run_child(name):
         fd_out = raw.read().decode(errors="replace")
     return {"stdout": fd_out + out, "stderr": err, "failed": failed, "pid": os.getpid(), "ppid": os.getppid()}
 
-def in_child(name):
+def fork_child(name):
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -127,6 +127,9 @@ def in_child(name):
             pipe.write(json.dumps(run_child(name)).encode())
         os._exit(0)
     os.close(write_fd)
+    return pid, read_fd
+
+def collect_child(pid, read_fd):
     with os.fdopen(read_fd, "rb") as pipe:
         payload = pipe.read()
     _, status = os.waitpid(pid, 0)
@@ -140,7 +143,8 @@ for name in dependencies(modules, package):
     if name not in sys.modules:
         out, _, _ = import_quietly(name)
         shared_out.append(out)
-report = {"shared_stdout": "".join(shared_out), "modules": {name: in_child(name) for name in modules}}
+children = {name: fork_child(name) for name in modules}
+report = {"shared_stdout": "".join(shared_out), "modules": {name: collect_child(*child) for name, child in children.items()}}
 with open(output, "w") as handle:
     json.dump(report, handle)
 """
@@ -323,6 +327,21 @@ class TestProbeHarness:
         results = list(report["modules"].values())
         assert len({result["ppid"] for result in results}) == 1
         assert len({result["pid"] for result in results}) == 2
+
+    def test_module_children_import_side_by_side(self, tmp_path: Path) -> None:
+        flag = tmp_path / "sibling.flag"
+        waiter = (
+            "import os, time\n"
+            "deadline = time.monotonic() + 2\n"
+            f"while not os.path.exists({str(flag)!r}):\n"
+            "    if time.monotonic() > deadline:\n"
+            "        raise TimeoutError('sibling child never ran alongside')\n"
+            "    time.sleep(0.01)\n"
+        )
+        _write_package(tmp_path, "sidepkg", {"waiter": waiter, "signal": f"open({str(flag)!r}, 'w').close()\n"})
+        report = _probe_modules("sidepkg", ["sidepkg.waiter", "sidepkg.signal"], _probe_env(tmp_path))
+        waited = report["modules"]["sidepkg.waiter"]
+        assert not waited["failed"], waited["stderr"]
 
     def test_modules_and_dependencies_execute_once_and_dependencies_load_before_the_fork(self, tmp_path: Path) -> None:
         log = tmp_path / "imports.log"
