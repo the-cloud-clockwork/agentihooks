@@ -74,7 +74,9 @@ class HerdrRuntime:
 
     def _terminate(self, name):
         try:
-            proc = self.run([_bin(), "terminate-agent", name], capture_output=True, text=True, timeout=60)
+            proc = self.run(
+                [_bin(), "terminate-agent", name, "--force-shared"], capture_output=True, text=True, timeout=60
+            )
         except subprocess.TimeoutExpired:
             return False
         return proc.returncode == 0

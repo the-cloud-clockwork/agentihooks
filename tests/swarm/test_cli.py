@@ -224,3 +224,14 @@ def test_runtime_retire_reports_a_failed_terminate_and_closes_leftover_panes(tmp
     agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent, live=True) is False and closed == []
     assert rt.retire(agent, live=False) is True and closed == [["pane", "close", "w3:p1"]]
+
+
+def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
+    seen = []
+    rt = runtime.HerdrRuntime(
+        home=tmp_path,
+        run=lambda argv, **kw: seen.append(argv) or subprocess.CompletedProcess(argv, 0),
+        herdr=lambda a: {},
+    )
+    assert rt.retire(AgentRecord("sw-eng-1", "eng", "t1"), live=True)
+    assert seen[0][1:] == ["terminate-agent", "sw-eng-1", "--force-shared"]
