@@ -86,8 +86,8 @@ class SurfaceLadder(unittest.TestCase):
                 for layer in value.split(","):
                     if layer.strip() in ("none", "inherit"):
                         continue
-                    offsets = re.findall(r"(-?[\d.]+)px", layer)
-                    self.assertTrue(layer.strip().startswith("inset") or offsets[:2] in (["0", "0"], ["0"]), (name, layer))
+                    offsets = re.findall(r"-?[\d.]+(?:px)?", layer)[:2]
+                    self.assertTrue(layer.strip().startswith("inset") or offsets == ["0", "0"], (name, layer))
 
     def test_no_capsule_badges(self):
         ledger = self.pages["ledger"]
