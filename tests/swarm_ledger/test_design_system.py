@@ -38,6 +38,18 @@ class Palette(unittest.TestCase):
             self.assertIn(f"--{name}", tokens)
             self.assertRegex(tokens[f"--{name}"], r"^var\(--[a-z]+-\d{2,3}\)$", name)
 
+    def test_the_palette_keeps_the_ledger_colours(self):
+        tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
+
+        def value(role):
+            return tokens[tokens[role][len("var(") : -1]]
+
+        expected = {"--canvas": "#03050b", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        for role, colour in expected.items():
+            self.assertEqual(value(role), colour, role)
+        self.assertEqual(value("--warn"), "#facc15")
+        self.assertEqual(value("--positive"), "#4ade80")
+
     def test_the_palette_is_the_only_place_a_colour_value_appears(self):
         template = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIsNone(LITERAL.search(template), LITERAL.search(template))
