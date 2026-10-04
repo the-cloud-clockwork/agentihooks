@@ -1,0 +1,34 @@
+/* The only file in the ledger front end that holds colour values. */
+:root {
+  --ink-950: #0c0e15;
+  --ink-900: rgba(12, 14, 21, .94);
+  --lift-025: rgba(255, 255, 255, .025);
+  --lift-050: rgba(255, 255, 255, .05);
+  --lift-070: rgba(255, 255, 255, .07);
+  --lift-080: rgba(255, 255, 255, .08);
+  --lift-160: rgba(255, 255, 255, .16);
+  --slate-100: #e8ebf2;
+  --slate-300: #c3c9d6;
+  --slate-400: #8a92a6;
+  --slate-600: #596075;
+  --indigo-400: #8b93ff;
+  --green-400: #4ade80;
+  --amber-400: #fbbf24;
+  --red-500: #f05252;
+
+  --canvas: var(--ink-950);
+  --surface-1: var(--lift-025);
+  --surface-2: var(--lift-050);
+  --hover: var(--lift-080);
+  --overlay: var(--ink-900);
+  --text: var(--slate-100);
+  --text-2: var(--slate-300);
+  --muted: var(--slate-400);
+  --dim: var(--slate-600);
+  --rule: var(--lift-070);
+  --edge: var(--lift-160);
+  --accent: var(--indigo-400);
+  --positive: var(--green-400);
+  --warn: var(--amber-400);
+  --destructive: var(--red-500);
+}

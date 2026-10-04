@@ -127,9 +127,10 @@ def render(doc, slug, port):
         "TOKEN": secrets.token_urlsafe(24),
         "DATA": core.seed_text(doc, 0),
         "PAGE": core.page_version(),
+        "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
     }
     page = TEMPLATE.read_text(encoding="utf-8")
-    return re.sub(r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE)__", lambda m: values[m.group(1)], page)
+    return re.sub(r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__", lambda m: values[m.group(1)], page)
 
 
 def upgrade_page(slug):
@@ -146,9 +147,10 @@ def upgrade_page(slug):
         "PORT": str(int(os.environ.get("LEDGER_PORT", "8765"))),
         "DATA": core.seed_text(doc, state["_meta"]["rev"]),
         "PAGE": core.page_version(),
+        "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
     }
     page = re.sub(
-        r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE)__",
+        r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
         lambda m: values[m.group(1)],
         TEMPLATE.read_text(encoding="utf-8"),
     )
