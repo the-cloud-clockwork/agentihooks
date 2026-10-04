@@ -175,6 +175,29 @@ def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
     assert "w1:p1" in runtime.closed
 
 
+def test_a_reopened_task_keeps_its_pull_request_link(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/3")
+    runtime.live.clear()
+    runtime.full = True
+    tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
+    assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["pr_url"].endswith("/3")
+
+
+@pytest.mark.parametrize(("pr_url", "state"), [("https://github.com/o/r/pull/3", "pr"), ("", "claimed")])
+def test_a_reclaimed_task_is_in_pr_state_only_when_it_has_a_pull_request(store, pr_url, state):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="pr" if pr_url else "claimed", pr_url=pr_url)
+    first = workers(store)[0]
+    store.put_handoff("sw", "t1", "pushed, waiting on checks")
+    store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1")
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == (state, "sw-eng-2")
+
+
 def test_a_claimed_task_without_an_agent_is_reopened(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")

@@ -32,6 +32,19 @@ body {
 main { max-width: 1802px; margin: 0 auto; padding: 32px 16px 96px; }
 header { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
 h1 { font-size: var(--fs-title); line-height: 1.25; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.title-pen { background: none; border: 0; padding: 4px; color: var(--muted); cursor: pointer; display: grid; place-content: center; transition: color .15s; }
+.title-pen:hover, .title-pen:focus-visible { color: var(--accent); filter: drop-shadow(0 0 6px currentColor); outline: none; }
+.title-pen svg { width: 16px; height: 16px; }
+.title-form { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.title-row[hidden], .title-form[hidden] { display: none; }
+#title-input {
+  width: min(560px, 70vw); padding: 4px 10px; border-radius: 6px; border: 0; color: var(--text); background: var(--surface-2);
+  font: inherit; font-size: var(--fs-title); font-weight: 700; box-shadow: inset 0 -1px 0 var(--accent);
+}
+#title-input:focus { outline: none; }
+.title-error { flex-basis: 100%; color: var(--destructive); text-shadow: var(--glow); font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; }
+.title-error:empty { display: none; }
 .status {
   flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-meta); letter-spacing: .12em; text-transform: uppercase;
   color: var(--muted); white-space: nowrap;
@@ -316,7 +329,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 <main>
   <header>
     <div>
-      <h1 id="title"></h1>
+      <div class="title-row" id="title-row"><h1 id="title"></h1><button class="title-pen" id="title-edit" type="button" aria-label="Rename the ledger" title="Rename the ledger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></div>
+      <form class="title-form" id="title-form" hidden><input id="title-input" type="text" maxlength="200" autocomplete="off" aria-label="Ledger title"><button class="link" type="submit">Save</button><button class="link" id="title-cancel" type="button">Cancel</button><div class="title-error" id="title-error" role="alert"></div></form>
     </div>
     <div class="status" id="status" role="status">loading</div>
   </header>
@@ -456,6 +470,10 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     if (op.op === "sync" || op.op === "stats_sync") return;
     if (op.op === "priority_clear") {
       d.priorities = op.target === "all" ? [] : d.priorities.filter((p) => p.id !== op.target);
+      return;
+    }
+    if (op.op === "title_set") {
+      d.title = op.text.trim();
       return;
     }
     if (op.op === "notification_clear") {
@@ -759,6 +777,27 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     if (item !== "chat") return jumpTo(ev, item);
     ev.preventDefault();
     showChat(true);
+  }
+
+  function editTitle(on) {
+    $("title-row").hidden = on;
+    $("title-form").hidden = !on;
+    $("title-error").textContent = "";
+    if (!on) return $("title-edit").focus();
+    const box = $("title-input");
+    box.value = doc.title;
+    box.focus();
+    box.select();
+  }
+
+  function saveTitle() {
+    const text = $("title-input").value.trim();
+    if (!text) {
+      $("title-error").textContent = "The title cannot be empty";
+      return $("title-input").focus();
+    }
+    editTitle(false);
+    if (text !== doc.title) queue({ op: "title_set", id: newId("title"), text });
   }
 
   function clearNotification(target) {
@@ -1223,6 +1262,14 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     if (seedBroken) banner(["This page's embedded copy was unreadable; loading the server's copy."]);
     $("sync").addEventListener("click", () => sendSync("sync", "sync"));
     $("stats-sync").addEventListener("click", () => sendSync("stats_sync", "stats-sync"));
+    $("title-edit").addEventListener("click", () => editTitle(true));
+    $("title-cancel").addEventListener("click", () => editTitle(false));
+    $("title-form").addEventListener("submit", (ev) => { ev.preventDefault(); saveTitle(); });
+    $("title-input").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); saveTitle(); }
+      else if (ev.key === "Escape") { ev.preventDefault(); editTitle(false); }
+    });
+    $("title-input").addEventListener("input", () => { $("title-error").textContent = ""; });
     $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
     $("to-top").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));

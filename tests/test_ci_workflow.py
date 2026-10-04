@@ -26,22 +26,20 @@ def test_dev_extra_declares_test_plugin(plugin):
     assert any(dep.startswith(plugin) for dep in dev)
 
 
-def test_workflow_runs_whole_suite_in_parallel_with_matrix_coverage():
+def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
     assert "-n auto" in command
     assert "tests/" in command
-    assert "${{ matrix.cov }}" in command
     assert "-m unit" not in command
 
 
-def test_only_the_newest_python_shards_measure_coverage():
-    matrix = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["strategy"]["matrix"]
-    assert matrix["include"] == [{"python-version": "3.12", "cov": "--cov=hooks --cov-report=term-missing"}]
-
-
-def test_coverage_is_measured_with_the_sys_monitoring_core():
+def test_unit_shards_measure_no_coverage():
+    command = _pytest_command()
+    assert "--cov" not in command
+    assert "matrix.cov" not in command
+    assert "include" not in _workflow()["jobs"]["unit"]["strategy"]["matrix"]
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
-    assert step["env"]["COVERAGE_CORE"] == "sysmon"
+    assert "COVERAGE_CORE" not in step.get("env", {})
 
 
 def _setup_python_steps(job: str) -> list[dict]:
@@ -66,11 +64,10 @@ def _unit_step_index(predicate) -> tuple[int, dict]:
     return index, steps[index]
 
 
-def test_unit_installs_extras_with_uv_cached_on_pyproject():
+def test_unit_installs_extras_with_uv_and_no_uv_cache():
     uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
-    assert uv["with"]["enable-cache"] is True
-    assert uv["with"]["cache-dependency-glob"] == "pyproject.toml"
+    assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
     assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
 
@@ -184,3 +181,8 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert "git/commits/$GITHUB_SHA" in tree["run"]
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
+
+
+def test_unit_pins_an_exact_uv_version():
+    _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
