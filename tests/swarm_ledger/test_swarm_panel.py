@@ -177,7 +177,19 @@ class SwarmPanel(unittest.TestCase):
 
     def test_page_has_controls_wired_to_the_endpoint(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        for control in ("start", "pause", "stop", "stop_now", "max_eng", "max_ci", "set"):
+        for control in (
+            "start",
+            "pause",
+            "stop",
+            "stop_now",
+            "max_eng",
+            "max_ci",
+            "set",
+            "eng_down",
+            "eng_up",
+            "ci_down",
+            "ci_up",
+        ):
             self.assertIn(f'data-swarm="{control}"', page)
         self.assertIn('method: "PUT"', page)
         self.assertIn("/api/swarm/", page)
@@ -321,6 +333,58 @@ class SwarmPanel(unittest.TestCase):
                 {"cls": "bad", "text": "Start failed: no swarm x"},
             ],
         )
+
+    def test_a_cap_step_sets_one_lane_from_its_current_cap_within_0_and_50(self):
+        config = {"max_eng": 2, "max_ci": 0}
+        out = self.run_js(
+            ["capStep"],
+            f"[capStep({json.dumps(config)}, 'eng', 1), capStep({json.dumps(config)}, 'eng', -1),"
+            f" capStep({json.dumps(config)}, 'ci', -1), capStep({{max_eng: 50, max_ci: 1}}, 'eng', 1)]",
+        )
+        self.assertEqual(
+            out,
+            [
+                {"action": "set", "max_eng": 3},
+                {"action": "set", "max_eng": 1},
+                {"action": "set", "max_ci": 0},
+                {"action": "set", "max_eng": 50},
+            ],
+        )
+
+    def test_step_buttons_at_a_bound_are_disabled(self):
+        out = self.run_js(["capBounds"], "[capBounds({max_eng: 0, max_ci: 50}), capBounds({max_eng: 3, max_ci: 1})]")
+        self.assertEqual(
+            out,
+            [
+                {"eng_down": True, "eng_up": False, "ci_down": False, "ci_up": True},
+                {"eng_down": False, "eng_up": False, "ci_down": False, "ci_up": False},
+            ],
+        )
+
+    def test_step_ops_report_pending_then_done_or_error_by_name(self):
+        out = self.run_js(
+            ["opNote"],
+            '[opNote("pending", "eng_up"), opNote("done", "ci_down"), opNote("error", "eng_down", "no swarm x")]',
+        )
+        self.assertEqual(
+            out,
+            [
+                {"cls": "pending", "text": "Raise eng cap: sending"},
+                {"cls": "ok", "text": "Lower ci cap: done"},
+                {"cls": "bad", "text": "Lower eng cap failed: no swarm x"},
+            ],
+        )
+
+    def test_a_one_lane_set_runs_only_that_lane(self):
+        code, _, run = self.control({"action": "set", "max_ci": 2})
+        self.assertEqual(code, 200)
+        self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "max-ci-agents=2"])
+
+    def test_a_cap_label_targets_its_input_not_a_step_button(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        for lane in ("eng", "ci"):
+            label = re.search(rf"<label[^>]*>{lane} <button[^>]*data-swarm=\"{lane}_down\"", page).group(0)
+            self.assertIn(f'for="cap-{lane}"', label)
 
 
 if __name__ == "__main__":
