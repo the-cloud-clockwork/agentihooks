@@ -106,7 +106,7 @@ Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
 | Directive | Fires when | Do |
 |---|---|---|
-| `QUOTA HANDOFF REQUIRED` | 7d used ≥ 98%, or 5h used ≥ 99% while another account has room | Write the handoff document at the path given, run the `agentihooks init-agent --handoff …` command given, report where the work moved, stop |
+| `QUOTA HANDOFF REQUIRED` | 7d used ≥ 98%, or 5h used ≥ 99% while another account has room | Write the handoff document at the path given, run the `agentihooks init-agent --handoff …` command given, report where the work moved, stop; the old terminal closes at that stop (`AGENTIHOOKS_HANDOFF_CLOSE_OLD=0` keeps it) |
 | `QUOTA WAIT` | 5h used ≥ 99%, the week has ≥ 10% left, and no other account qualifies | `CronCreate` the one-shot job given for the 5h reset, tell the operator when work resumes, stop |
 | `QUOTA STOP` | Nothing has room | Stop and tell the operator to add another account or say "keep pushing" |
 | `QUOTA PUSH` | The operator said "keep pushing" | Continue on this account until 100% |

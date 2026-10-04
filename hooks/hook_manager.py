@@ -1984,6 +1984,14 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("session refresh failed", {"error": str(e)})
 
+    try:
+        from hooks.lifecycle.handoff_close import on_stop as handoff_close_on_stop
+
+        if handoff_close_on_stop(payload):
+            log("handed-off session close scheduled", {"session_id": session_id})
+    except Exception as e:
+        log("handed-off session close failed", {"error": str(e)})
+
 
 def on_subagent_start(payload: dict) -> None:
     """Handle SubagentStart event — wire the brain through to subagents.
