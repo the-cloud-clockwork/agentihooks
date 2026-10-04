@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import platform
 import shlex
@@ -8,6 +9,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+from scripts import herdr_host
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -212,8 +215,52 @@ def _parser() -> argparse.ArgumentParser:
         help="Quota handoff: route to an account other than this session's, never fall back to bare "
         "Claude, and mark this session handed off once the new one is routed",
     )
+    parser.add_argument(
+        "--host",
+        choices=("herdr", "native"),
+        default="",
+        help="Terminal host; default $AGENTIHOOKS_TERMINAL_HOST, else herdr when installed and enabled, else native",
+    )
+    parser.add_argument(
+        "--placement",
+        choices=herdr_host.PLACEMENTS,
+        default="tab",
+        help="herdr: a tab in the workspace (default), a split of the calling pane, or a new workspace",
+    )
+    parser.add_argument("--workspace", default="", help="herdr: workspace label to place the session in (crew)")
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
+
+
+def _herdr_enabled(environ: dict[str, str]) -> bool:
+    home = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
+    try:
+        state = json.loads((home / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    herdr = state.get("herdr") if isinstance(state, dict) else None
+    return not (isinstance(herdr, dict) and herdr.get("enabled") is False)
+
+
+def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
+    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed and enabled."""
+    choice = requested or environ.get("AGENTIHOOKS_TERMINAL_HOST", "")
+    if choice:
+        return choice, True
+    return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
+
+
+def _start_herdr(launcher: Path, directory: Path, name: str, args, environ: dict[str, str]) -> list[str]:
+    started = herdr_host.ensure_server(environ)
+    env = {"HERDR_AGENT": "claude"}
+    placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
+    herdr_host.run(placed.pane_id, launcher, environ)
+    return [
+        f"workspace_id={placed.workspace_id}",
+        f"tab_id={placed.tab_id}",
+        f"pane_id={placed.pane_id}",
+        *(["herdr_server=started attach=herdr"] if started else []),
+    ]
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
@@ -236,22 +283,24 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         launcher, prompt_file = _write_launcher(
             directory, name, prompt, claude_args, active_env, exclude=exclude, fallback_bare=not args.handoff
         )
-        host, command = _launch_command(launcher, directory, name, active_env)
+        host, explicit = _select_host(args.host, active_env)
+        command: list[str] = []
+        if host != "herdr":
+            host, command = _launch_command(launcher, directory, name, active_env)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 2
 
     report = [
-        f"host={host}",
         f"directory={directory}",
         f"name={name}",
         f"claude_args={shlex.join(claude_args)}",
         f"launcher={launcher}",
         f"prompt_file={prompt_file or 'none'}",
-        f"command={shlex.join(command)}",
     ]
     if args.dry_run:
-        print("\n".join([*report, "status=dry-run"]))
+        target = f"placement={args.placement}" if host == "herdr" else f"command={shlex.join(command)}"
+        print("\n".join([f"host={host}", *report, target, "status=dry-run"]))
         return 0
 
     def discard() -> None:
@@ -260,8 +309,26 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             prompt_file.unlink(missing_ok=True)
 
     marker = _started_marker(launcher)
+    if host == "herdr":
+        try:
+            report += _start_herdr(launcher, directory, name, args, active_env)
+        except (herdr_host.HerdrError, OSError, subprocess.TimeoutExpired) as exc:
+            if explicit:
+                discard()
+                print(f"agentihooks init-agent: {exc}", file=sys.stderr)
+                return 2
+            report.append(f"herdr_error={exc}")
+            try:
+                host, command = _launch_command(launcher, directory, name, active_env)
+            except RuntimeError as fallback:
+                discard()
+                print(f"agentihooks init-agent: {exc}; native fallback: {fallback}", file=sys.stderr)
+                return 2
+    report.insert(0, f"host={host}")
     try:
-        subprocess.Popen(command, env=active_env, start_new_session=True)
+        if host != "herdr":
+            report.append(f"command={shlex.join(command)}")
+            subprocess.Popen(command, env=active_env, start_new_session=True)
     except OSError as exc:
         discard()
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
@@ -293,6 +360,10 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"placement={route['placement']}")
     if route.get("error"):
         report.append(f"route_error={route['error']}")
+    pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
+    if pane and route.get("status") in ("routed", "bare"):
+        renamed = herdr_host.rename_agent(pane, name, active_env)
+        report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
     if not args.handoff:
         print("\n".join(report))
         return 0
