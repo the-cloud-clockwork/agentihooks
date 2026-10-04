@@ -452,3 +452,56 @@ class TestNativeLayerDiscovery:
         f = tmp_path / "settings.overrides.json"
         f.write_text('{"effortLevel": "high"}')
         assert install._load_native_layer(f)["effortLevel"] == "high"
+
+
+class TestClaudeSettingsForeignHooks:
+    HERDR = {"hooks": [{"type": "command", "command": "sh '/opt/herdr/herdr-agent-state.sh' session"}]}
+
+    @staticmethod
+    def _ours(command: str) -> dict:
+        return {"hooks": [{"type": "command", "command": command}]}
+
+    @staticmethod
+    def _settings() -> dict:
+        import json
+
+        return json.loads((install.CLAUDE_HOME / "settings.json").read_text())
+
+    def _seed(self, hooks: dict) -> None:
+        import json
+
+        install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+        doc = {install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE, "hooks": hooks}
+        (install.CLAUDE_HOME / "settings.json").write_text(json.dumps(doc))
+
+    def test_a_hook_another_tool_wrote_survives_the_write(self):
+        self._seed({"SessionStart": [self.HERDR]})
+        rendered = {"SessionStart": [self._ours("python -m hooks")], "Stop": [self._ours("python -m hooks")]}
+        get_adapter("claude").write_settings({"hooks": rendered})
+        hooks = self._settings()["hooks"]
+        assert self.HERDR in hooks["SessionStart"]
+        assert self._ours("python -m hooks") in hooks["SessionStart"]
+        assert hooks["Stop"] == [self._ours("python -m hooks")]
+
+    def test_a_hook_agentihooks_wrote_before_is_replaced_not_kept(self):
+        adapter = get_adapter("claude")
+        adapter.write_settings({"hooks": {"SessionStart": [self._ours("echo old-profile")]}})
+        adapter.write_settings({"hooks": {"SessionStart": [self._ours("echo new-profile")]}})
+        assert self._settings()["hooks"] == {"SessionStart": [self._ours("echo new-profile")]}
+
+    def test_a_hook_running_from_an_agentihooks_root_is_ours(self):
+        stale = self._ours(f"cd {install.AGENTIHOOKS_ROOT} && python -m hooks.old")
+        self._seed({"PreCompact": [stale], "SessionStart": [self.HERDR]})
+        get_adapter("claude").write_settings({"hooks": {"SessionStart": [self._ours("python -m hooks")]}})
+        hooks = self._settings()["hooks"]
+        assert "PreCompact" not in hooks
+        assert hooks["SessionStart"] == [self._ours("python -m hooks"), self.HERDR]
+
+    def test_writing_twice_gives_the_same_hooks_as_once(self):
+        self._seed({"SessionStart": [self.HERDR]})
+        adapter = get_adapter("claude")
+        rendered = {"hooks": {"SessionStart": [self._ours("python -m hooks")]}}
+        adapter.write_settings(rendered)
+        once = self._settings()["hooks"]
+        adapter.write_settings(rendered)
+        assert self._settings()["hooks"] == once
