@@ -103,11 +103,11 @@ async def test_slow_backend_does_not_block_another(router, repo):
     async with connect(router) as a, connect(router) as b:
         await a.call_tool("activate_project", {"project": str(repo["a"])})
         await b.call_tool("activate_project", {"project": str(repo["b"])})
-        slow = asyncio.create_task(a.call_tool("slow", {"seconds": 3}))
-        await asyncio.sleep(0.3)
+        slow = asyncio.create_task(a.call_tool("slow", {"seconds": 1.5}))
+        await asyncio.sleep(0.2)
         started = time.monotonic()
         await b.call_tool("find_symbol", {})
-        assert time.monotonic() - started < 1.5
+        assert time.monotonic() - started < 1.0
         assert not slow.done()
         await slow
 

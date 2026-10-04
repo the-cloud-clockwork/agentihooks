@@ -97,6 +97,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(install, "STATE_JSON", fake_home / ".agentihooks" / "state.json", raising=False)
     monkeypatch.setattr(install, "_CLAUDE_JSON", fake_home / ".claude.json", raising=False)
     monkeypatch.setattr(install, "_BASHRC", fake_home / ".bashrc", raising=False)
+    monkeypatch.setattr("scripts.deps_preflight.manifest_path", lambda: None)
     # AGENTIHOOKS_ROOT is `Path(__file__).parent.parent` — the real checkout. It
     # feeds `_managed_roots()`, so leaving it real means every ownership test runs
     # with the developer's own repo silently trusted as a source. Nothing collides
