@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.conftest import COLLECTED_NODEIDS
+from tests.refresh_durations import median_durations
+
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
@@ -190,3 +193,18 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
 def test_unit_pins_an_exact_uv_version():
     _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
+
+
+def test_stored_durations_cover_the_collected_suite(request):
+    collected = request.config.stash[COLLECTED_NODEIDS]
+    stored = json.loads((_ROOT / ".test_durations").read_text())
+    missing = [nodeid for nodeid in collected if nodeid not in stored]
+    assert len(missing) * 10 <= len(collected), (
+        f"{len(missing)} of {len(collected)} tests have no stored duration; "
+        "refresh them with: python -m tests.refresh_durations"
+    )
+
+
+def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():
+    runs = [{"a": 0.1, "b": 1.0}, {"a": 2.5, "b": 1.2}, {"a": 0.2, "b": 1.1}]
+    assert median_durations(runs) == {"a": 0.2, "b": 1.1}
