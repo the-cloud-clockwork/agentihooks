@@ -50,3 +50,14 @@ def test_record_ignores_unusable_input(monkeypatch, tmp_path, session_id, window
     context_usage.record_context_usage(session_id, window)
 
     assert not (tmp_path / "context_usage").exists()
+
+
+def test_record_keeps_session_cost_and_reader_returns_it(monkeypatch, tmp_path):
+    import hooks.context.context_usage as context_usage
+
+    monkeypatch.setattr(context_usage, "AGENTIHOOKS_HOME", tmp_path)
+    assert context_usage.session_cost("session-1") is None
+    context_usage.record_context_usage("session-1", _CONTEXT_WINDOW, 2.5)
+    assert context_usage.session_cost("session-1") == 2.5
+    context_usage.record_context_usage("session-1", _CONTEXT_WINDOW)
+    assert context_usage.session_cost("session-1") is None

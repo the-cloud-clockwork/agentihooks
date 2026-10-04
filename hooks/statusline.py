@@ -189,7 +189,7 @@ def main() -> None:
             try:
                 from hooks.context.context_usage import record_context_usage
 
-                record_context_usage(session_id, cw)
+                record_context_usage(session_id, cw, cost_data.get("total_cost_usd"))
             except Exception:
                 pass
 

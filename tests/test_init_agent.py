@@ -379,6 +379,25 @@ def test_resource_attributes_skip_absent_swarm_values(tmp_path):
     assert "export OTEL_RESOURCE_ATTRIBUTES=agent=swarm-buildout-eng-4\n" in text
 
 
+def test_a_swarm_spawn_exports_its_identity_and_enables_langfuse_traces(tmp_path):
+    env = {"AGENTIHOOKS_SWARM": "swarm-buildout", "AGENTIHOOKS_SWARM_LANE": "eng", "AGENTIHOOKS_SWARM_TASK": "t14"}
+    text = _launcher_text(tmp_path, env)
+    for line in (
+        "export AGENTIHOOKS_SWARM=swarm-buildout\n",
+        "export AGENTIHOOKS_SWARM_LANE=eng\n",
+        "export AGENTIHOOKS_SWARM_TASK=t14\n",
+        "export OTEL_LANGFUSE_ENABLED=1\n",
+    ):
+        assert line in text
+    assert text.index("OTEL_LANGFUSE_ENABLED") < text.index(" claude ")
+
+
+def test_a_launch_outside_a_swarm_leaves_langfuse_alone(tmp_path):
+    text = _launcher_text(tmp_path, {})
+    assert "AGENTIHOOKS_SWARM" not in text
+    assert "LANGFUSE" not in text
+
+
 def test_codex_gets_an_otel_exporter_override(tmp_path):
     text = _launcher_text(tmp_path, {"AGENTIHOOKS_OTEL_COLLECTOR": COLLECTOR}, "codex")
     assert "otel.exporter=" in text

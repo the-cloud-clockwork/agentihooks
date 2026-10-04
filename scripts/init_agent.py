@@ -100,6 +100,15 @@ def _telemetry_exports(name: str, environ: dict[str, str]) -> str:
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
 
 
+def _swarm_exports(environ: dict[str, str]) -> str:
+    if not environ.get("AGENTIHOOKS_SWARM"):
+        return ""
+    names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK")
+    exports = {name: environ[name] for name in names if environ.get(name)}
+    exports["OTEL_LANGFUSE_ENABLED"] = "1"
+    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
+
+
 def _codex_otel_args(environ: dict[str, str]) -> list[str]:
     collector = _collector(environ)
     if not collector:
@@ -208,6 +217,7 @@ def _write_launcher(
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{_telemetry_exports(name, environ)}"
+        f"{_swarm_exports(environ)}"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"

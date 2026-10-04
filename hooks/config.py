@@ -733,6 +733,15 @@ OTEL_HOOKS_SERVICE_NAME = os.getenv("OTEL_HOOKS_SERVICE_NAME", "agentihooks")
 
 # Langfuse OTEL destination (traces only, OTLP HTTP)
 OTEL_LANGFUSE_ENABLED = _env_bool("OTEL_LANGFUSE_ENABLED", "false")
-OTEL_LANGFUSE_ENDPOINT = os.getenv("OTEL_LANGFUSE_ENDPOINT", "")
+
+
+def langfuse_route(environ) -> tuple[str, str]:
+    """(endpoint, Host header). The default LAN ingress routes by Host; the public name sits behind Cloudflare Access."""
+    endpoint = environ.get("OTEL_LANGFUSE_ENDPOINT", "")
+    host = environ.get("OTEL_LANGFUSE_HOST_HEADER", "") or ("" if endpoint else "langfuse.homeofanton.com")
+    return endpoint or "http://10.10.30.200/api/public/otel", host
+
+
+OTEL_LANGFUSE_ENDPOINT, OTEL_LANGFUSE_HOST_HEADER = langfuse_route(os.environ)
 OTEL_LANGFUSE_PUBLIC_KEY = os.getenv("OTEL_LANGFUSE_PUBLIC_KEY", "") or os.getenv("LANGFUSE_PUBLIC_KEY", "")
 OTEL_LANGFUSE_SECRET_KEY = os.getenv("OTEL_LANGFUSE_SECRET_KEY", "") or os.getenv("LANGFUSE_SECRET_KEY", "")
