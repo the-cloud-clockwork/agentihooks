@@ -256,3 +256,10 @@ def test_handoff_refuses_a_missing_document(env, capsys):
     run("sw", "start")
     assert run("sw", "--as", "sw-eng-1", "handoff", "/no/such/doc.md") == 1
     assert "handoff" in capsys.readouterr().err
+
+
+def test_agent_prompt_starts_by_reading_the_ledger_json():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")

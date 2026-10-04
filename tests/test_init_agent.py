@@ -332,3 +332,55 @@ def test_the_shell_left_after_the_agent_exits_drops_the_agent_name(tmp_path):
     )
     text = launcher.read_text()
     assert text.index("unset AGENTIHOOKS_AGENT_NAME") < text.index("exec /bin/bash -l")
+
+
+COLLECTOR = "http://10.10.30.130:4318"
+
+
+def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4"):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path), **environ}
+    launcher, _ = init_agent._write_launcher(tmp_path, name, "", [], env, init_agent.AgentSpec(agent=agent))
+    return launcher.read_text()
+
+
+def test_collector_unset_leaves_the_launcher_without_telemetry(tmp_path):
+    for agent in ("claude", "codex"):
+        text = _launcher_text(tmp_path, {}, agent)
+        assert "OTEL" not in text
+        assert "CLAUDE_CODE_ENABLE_TELEMETRY" not in text
+
+
+def test_collector_set_exports_claude_native_telemetry(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_OTEL_COLLECTOR": COLLECTOR})
+    for line in (
+        "export CLAUDE_CODE_ENABLE_TELEMETRY=1\n",
+        "export OTEL_METRICS_EXPORTER=otlp\n",
+        "export OTEL_LOGS_EXPORTER=otlp\n",
+        "export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf\n",
+        f"export OTEL_EXPORTER_OTLP_ENDPOINT={COLLECTOR}\n",
+    ):
+        assert line in text
+    assert text.index("OTEL_EXPORTER_OTLP_ENDPOINT") < text.index(" claude ")
+
+
+def test_resource_attributes_carry_swarm_agent_lane_and_task(tmp_path):
+    env = {
+        "AGENTIHOOKS_OTEL_COLLECTOR": COLLECTOR,
+        "AGENTIHOOKS_SWARM": "swarm-buildout",
+        "AGENTIHOOKS_SWARM_LANE": "eng",
+        "AGENTIHOOKS_SWARM_TASK": "t4",
+    }
+    text = _launcher_text(tmp_path, env)
+    assert "export OTEL_RESOURCE_ATTRIBUTES=swarm=swarm-buildout,agent=swarm-buildout-eng-4,lane=eng,task=t4\n" in text
+
+
+def test_resource_attributes_skip_absent_swarm_values(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_OTEL_COLLECTOR": COLLECTOR})
+    assert "export OTEL_RESOURCE_ATTRIBUTES=agent=swarm-buildout-eng-4\n" in text
+
+
+def test_codex_gets_an_otel_exporter_override(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_OTEL_COLLECTOR": COLLECTOR}, "codex")
+    assert "otel.exporter=" in text
+    assert f"{COLLECTOR}/v1/logs" in text
+    assert text.index("otel.exporter=") > text.index("codex")
