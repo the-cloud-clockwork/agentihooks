@@ -28,7 +28,7 @@ interactive shell. With no directory, it lands in `$HOME`.
 ## Script Resolution
 
 ```bash
-SKILL_DIR="$(dirname "$(readlink -f ~/.claude/skills/run-in-terminal/SKILL.md)" 2>/dev/null || echo "$HOME/.claude/skills/run-terminal")"
+SKILL_DIR="$(dirname "$(readlink -f ~/.claude/skills/run-in-terminal/SKILL.md)" 2>/dev/null || echo "$HOME/.claude/skills/run-in-terminal")"
 ```
 
 ---
