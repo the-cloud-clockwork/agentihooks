@@ -3,7 +3,7 @@
 agentihooks swarm list | tick
 agentihooks swarm <id> create --repo DIR [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
-agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N      (or just: swarm <id> max-eng-agents=N)
+agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC | say TEXT [--to NAME|eng|ci]
