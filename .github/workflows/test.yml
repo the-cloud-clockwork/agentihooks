@@ -23,6 +23,9 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3, 4]
+        include:
+          - python-version: "3.12"
+            cov: --cov=hooks --cov-report=term-missing
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +52,9 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
-        run: python -m pytest tests/ -v -n auto --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration --cov=hooks --cov-report=term-missing --tb=short
+        env:
+          COVERAGE_CORE: sysmon
+        run: python -m pytest tests/ -v -n auto --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration ${{ matrix.cov }} --tb=short
 
   lint:
     runs-on: ubuntu-latest
