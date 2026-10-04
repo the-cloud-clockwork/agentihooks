@@ -64,18 +64,12 @@ def _unit_step_index(predicate) -> tuple[int, dict]:
     return index, steps[index]
 
 
-def test_unit_installs_extras_with_uv_cached_on_pyproject():
+def test_unit_installs_extras_with_uv_and_no_uv_cache():
     uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
-    assert uv["with"]["enable-cache"] is True
-    assert uv["with"]["cache-dependency-glob"] == "pyproject.toml"
+    assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
     assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
-
-
-def test_only_the_first_shard_saves_the_uv_cache():
-    _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
-    assert uv["with"]["save-cache"] == "${{ matrix.shard == 1 }}"
 
 
 def test_unit_matrix_runs_one_shard_per_split():
@@ -187,3 +181,8 @@ def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     assert "git/commits/$GITHUB_SHA" in tree["run"]
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
+
+
+def test_unit_pins_an_exact_uv_version():
+    _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
