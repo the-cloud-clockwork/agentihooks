@@ -76,7 +76,12 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
-    assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
+    assert install["run"].splitlines()[0] == 'uv pip install --system --compile-bytecode -e ".[dev,all]"'
+
+
+def test_unit_compiles_repo_bytecode_before_the_workers_import_it():
+    _, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
+    assert install["run"].strip().splitlines()[1] == "python -m compileall -q -j0 hooks scripts tests"
 
 
 def test_unit_matrix_runs_one_shard_per_split():
