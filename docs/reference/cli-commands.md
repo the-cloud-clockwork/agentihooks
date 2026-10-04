@@ -322,6 +322,21 @@ Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 
 ---
 
+## `agentihooks herdr`
+
+Install and configure herdr, the terminal host `init-agent` opens agents in.
+The first `agentihooks init` on a terminal asks once whether to use herdr and
+records the answer in `state.json` (`herdr.enabled`); agents pass
+`agentihooks init --herdr yes|no`. Later inits with herdr enabled install the
+binary when missing and (re)install the herdr integrations for Claude and Codex.
+
+```bash
+agentihooks herdr              # status; offers to install when herdr is missing
+agentihooks herdr install      # official installer, then configure
+agentihooks herdr configure    # herdr integration install claude|codex
+agentihooks herdr disable      # init-agent stops choosing herdr
+```
+
 ## `agentihooks quota`
 
 Quota left for every agent harness: one row per Claude account (router cache, or a
