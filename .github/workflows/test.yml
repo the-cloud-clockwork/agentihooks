@@ -72,7 +72,7 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
-        run: python -m pytest tests/ -v -n auto --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration --tb=short
+        run: python -m pytest tests/ -v -n auto --dist loadgroup --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration --tb=short
 
   lint:
     needs: already-tested
