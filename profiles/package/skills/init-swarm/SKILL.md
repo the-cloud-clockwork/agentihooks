@@ -2,8 +2,7 @@
 name: init-swarm
 description: >
   Turn an accepted plan into a running swarm: ledger content with phases, PR
-  sized tasks in the eng and ci lanes, then create and start the swarm. This
-  session stays the liaison and never claims a task. Use when the operator says
+  sized tasks in the eng and ci lanes, then create and start the swarm. Use when the operator says
   "init swarm", "init-swarm", "start a swarm for this plan", or hands over an
   accepted plan to run with agents.
 argument-hint: "<plan-file> --repo DIR [--max-eng-agents N] [--max-ci-agents N]"
@@ -57,8 +56,7 @@ agentihooks swarm <slug> status
 
 Done when `status` shows the swarm running with every task open.
 
-## 5. Stay liaison
+## Staying liaison
 
-- Operator messages for the swarm: `agentihooks swarm <slug> say "<text>" [--to eng|ci|<agent>]`.
+- Relay to the swarm chat: `agentihooks swarm <slug> send-message "<text>"`.
 - Caps change by `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
-- The liaison holds no claim, branch or worktree; agents claim and ship tasks.
