@@ -1,0 +1,24 @@
+import json
+
+from scripts.codex_context import CodexContext, codex_context
+
+
+def _token_count(total: int, window: int) -> str:
+    info = {"total_token_usage": {"total_tokens": total}, "model_context_window": window}
+    return json.dumps(
+        {"timestamp": "2026-10-04T10:00:00Z", "type": "event_msg", "payload": {"type": "token_count", "info": info}}
+    )
+
+
+def test_latest_token_count_wins(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / "2026" / "10" / "04"
+    day.mkdir(parents=True)
+    lines = [_token_count(100, 272000), '{"type": "event_msg"}', _token_count(5000, 272000), "not json"]
+    (day / "rollout-2026-10-04T10-00-00-abc123.jsonl").write_text("\n".join(lines) + "\n")
+    assert codex_context("abc123") == CodexContext(used=5000, window=272000)
+
+
+def test_missing_rollout_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    assert codex_context("nosuchsession") is None
