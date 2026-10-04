@@ -548,6 +548,25 @@ class TestCodexEnforcementFallback:
         assert calls == [("codex-local", "/project", "Unknown")]
         assert captured == ["local enforcement"]
 
+    def test_a_codex_swarm_agent_at_the_compact_limit_gets_the_recycle_directive(self, codex, monkeypatch, tmp_path):
+        import hooks.common as common
+        import hooks.context.broadcast as broadcast
+        import hooks.context.context_recycle as recycle
+        import hooks.context.enforcement as enforcement
+        import hooks.hook_manager as hm
+
+        captured = []
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+        monkeypatch.setattr(recycle, "AGENTIHOOKS_HOME", tmp_path)
+        monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 900_000)
+        monkeypatch.setattr(common, "inject_context", lambda message, **kwargs: captured.append(message))
+        monkeypatch.setattr(broadcast, "get_posttool_context", lambda session_id: None)
+        monkeypatch.setattr(enforcement, "get_posttool_enforcements", lambda session_id, cwd, **kw: None)
+        call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/p"}
+        hm.on_pre_tool_use({"hook_event_name": "PreToolUse", **call})
+        hm.on_post_tool_use({"hook_event_name": "PostToolUse", "tool_output": "ok", **call})
+        assert any("agentihooks swarm sw handoff" in text for text in captured)
+
 
 class TestSplitGlobal:
     """The one shape rule shared by the installer's migration and the hook

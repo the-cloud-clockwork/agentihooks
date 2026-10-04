@@ -1356,7 +1356,8 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from hooks.context.context_recycle import directive as _recycle_directive
 
-        _recycle_ctx = _recycle_directive(payload.get("session_id", ""))
+        if _can_inject_pretool:
+            _recycle_ctx = _recycle_directive(payload.get("session_id", ""))
     except Exception as e:
         log("context recycle pre-tool failed", {"error": str(e)})
     _tool_call_count = 0
@@ -1565,7 +1566,11 @@ def on_post_tool_use(payload: dict) -> None:
         if not can_inject_context("PreToolUse"):
             from hooks.common import inject_context
             from hooks.config import BROADCAST_ENABLED
+            from hooks.context.context_recycle import directive as _recycle_directive
 
+            recycle_context = _recycle_directive(_trace_session_id)
+            if recycle_context:
+                inject_context(recycle_context, also_log=False, skip_compression=True)
             if BROADCAST_ENABLED:
                 from hooks.context.broadcast import get_posttool_context
 

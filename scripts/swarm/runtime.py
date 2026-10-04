@@ -64,6 +64,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM": config.slug,
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task["id"],
+                    **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )
         except subprocess.TimeoutExpired as exc:

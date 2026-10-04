@@ -1,6 +1,7 @@
 /* The only file in the ledger front end that holds colour values. */
 :root {
   --ink-950: #0c0e15;
+  --ink-920: #12141b;
   --ink-900: rgba(12, 14, 21, .94);
   --lift-025: rgba(255, 255, 255, .025);
   --lift-050: rgba(255, 255, 255, .05);
@@ -19,6 +20,7 @@
   --canvas: var(--ink-950);
   --surface-1: var(--lift-025);
   --surface-2: var(--lift-050);
+  --panel: var(--ink-920);
   --hover: var(--lift-080);
   --overlay: var(--ink-900);
   --text: var(--slate-100);

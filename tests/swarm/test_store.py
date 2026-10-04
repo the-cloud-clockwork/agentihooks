@@ -85,3 +85,10 @@ def test_one_redis_for_every_caller_whatever_redis_url_says():
 
     assert redis_url({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://a", "REDIS_URL": "redis://b"}) == "redis://a"
     assert redis_url({"REDIS_URL": "redis://b"}) == DEFAULT_URL
+
+
+def test_compact_limit_round_trips_and_an_old_config_reads_as_unset(store):
+    store.create(config(compact_limit=40))
+    assert store.config("smoke").compact_limit == 40
+    store.redis.hdel(store.key("smoke", "config"), "compact_limit")
+    assert store.config("smoke").compact_limit == 0

@@ -42,6 +42,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> stop --now` | Kill every agent and reopen its unfinished task. |
 | `agentihooks swarm <id> status [--json]` | Config, task counts, and one row per agent. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
+| `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> send-message TEXT` | Operator message to the swarm chat. |
 
 A swarm is in one of five states: `running`, `paused`, `stopping`, `stopped`, `drained`. It drains when no
@@ -58,6 +59,14 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> handoff DOC` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Context recycle
+
+A swarm agent does not run its context to the end. When its context reaches `AGENTIHOOKS_COMPACT_LIMIT`
+thousand tokens (default 600), a hook tells it to write a handoff document and run
+`agentihooks swarm <id> handoff <doc>`, then stop. The task stays claimed, and the next tick starts a
+successor on the same task with the document in its opening prompt. `agentihooks swarm <id> set compact-limit=N`
+sets the limit for one swarm's next agents; 0 keeps the default.
 
 ## One task per agent life
 

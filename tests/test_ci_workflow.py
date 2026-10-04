@@ -56,3 +56,15 @@ def test_tests_run_on_pull_requests_into_dev_and_main():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
     assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
     assert triggers["push"]["branches"] == ["dev"]
+
+
+def test_ruff_runs_in_the_tests_workflow_only():
+    workflows = sorted((_ROOT / ".github/workflows").glob("*.yml"))
+    assert [w.name for w in workflows if "ruff" in w.read_text()] == ["test.yml"]
+
+
+@pytest.mark.parametrize("doc", ["README.md", "index.md"])
+def test_workflow_badges_point_at_existing_workflows(doc):
+    names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
+    assert names
+    assert all((_ROOT / ".github/workflows" / name).is_file() for name in names), names
