@@ -33,6 +33,10 @@ def test_workflow_runs_whole_suite_in_parallel():
     assert "-m unit" not in command
 
 
+def test_workflow_keeps_xdist_groups_on_one_worker():
+    assert "--dist loadgroup" in _pytest_command()
+
+
 def test_unit_shards_measure_no_coverage():
     command = _pytest_command()
     assert "--cov" not in command

@@ -159,6 +159,7 @@ def _hook_report(modules: tuple[str, ...]) -> dict:
     return _probe_modules("hooks", list(modules), _probe_env())
 
 
+@pytest.mark.xdist_group("import-probe")
 @pytest.mark.parametrize("module", _all_hook_modules())
 def test_module_import_does_not_write_to_stdout(module: str, request: pytest.FixtureRequest) -> None:
     if module in _ALLOWED_NOISY:
@@ -274,6 +275,11 @@ class TestProbeHarness:
         results = list(report["modules"].values())
         assert len({result["ppid"] for result in results}) == 1
         assert len({result["pid"] for result in results}) == 2
+
+    def test_every_module_probe_shares_one_xdist_group(self) -> None:
+        marks = getattr(test_module_import_does_not_write_to_stdout, "pytestmark", [])
+        groups = [mark.args for mark in marks if mark.name == "xdist_group"]
+        assert len(groups) == 1
 
     def test_a_worker_probes_only_the_modules_its_session_selected(self) -> None:
         def item(name: str, **params: str) -> SimpleNamespace:
