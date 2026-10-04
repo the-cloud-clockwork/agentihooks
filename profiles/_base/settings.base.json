@@ -29,6 +29,15 @@
             "command": "cd /app && __PYTHON__ -m hooks"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionEnd": [
@@ -59,6 +68,15 @@
             "command": "cd /app && __PYTHON__ -m hooks"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
@@ -67,6 +85,15 @@
           {
             "type": "command",
             "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "timeout": 10
           }
         ]
       }
@@ -97,6 +124,15 @@
           {
             "type": "command",
             "command": "cd /app && __PYTHON__ -m hooks"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__PYTHON__ /app/scripts/plan_ledger/ledger_hook.py",
+            "timeout": 10
           }
         ]
       }

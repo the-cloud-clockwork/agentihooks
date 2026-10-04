@@ -1,0 +1,168 @@
+import contextlib
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "plan_ledger"
+sys.path.insert(0, str(SCRIPTS))
+os.environ["LEDGER_DIR"] = tempfile.mkdtemp(prefix="ledger-time_left_minutes-test-")
+import ledger  # noqa: E402
+import ledger_core as core  # noqa: E402
+import new_ledger  # noqa: E402
+
+SLUG = "time_left_minutes-2026-01-01"
+
+
+class TimeLeft(unittest.TestCase):
+    def setUp(self):
+        content = {
+            "title": "Demo",
+            "overview": "o",
+            "sources": [],
+            "phases": [{"title": "one", "description": "d"}],
+            "questions": [],
+            "followups": [],
+        }
+        html_path, json_path = core.paths(SLUG)
+        core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+        json_path.unlink(missing_ok=True)
+        core.sync(SLUG)
+
+    def test_cli_persists_an_attributed_estimate_and_status_returns_it(self):
+        args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "time-left", "3h 20m"])
+
+        def call(slug, ops=None):
+            if ops:
+                core.check_body({"ops": ops})
+            state, rejected = core.sync(slug, ops=ops)
+            return {**state, "rejected": rejected}
+
+        with patch.object(ledger, "call", side_effect=call), contextlib.redirect_stdout(io.StringIO()) as output:
+            with patch.object(sys, "argv", ["ledger.py", "--slug", SLUG, "--as", "boss", "time-left", "3h 20m"]):
+                ledger.main()
+            output.seek(0)
+            output.truncate()
+            ledger.cmd_status(args)
+            self.assertEqual(json.loads(output.getvalue())["time_left_minutes"], 200)
+        state = core.sync(SLUG)[0]
+        self.assertEqual(state["time_left_minutes"], 200)
+        event = state["_meta"]["events"][-1]
+        self.assertEqual(
+            (event["by"], event["kind"], event["target"], event["text"]),
+            ("boss", "time left changed", "time_left_minutes", "200m"),
+        )
+        self.assertGreater(event["at"], 0)
+        seed = core.parse_seed(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+        self.assertEqual(seed["time_left_minutes"], 200)
+
+    def test_seed_edit_and_page_upgrade_preserve_the_estimate(self):
+        html_path, _ = core.paths(SLUG)
+        html = html_path.read_text(encoding="utf-8")
+        seed = core.parse_seed(html)
+        seed["time_left_minutes"] = 35
+        core.rewrite_seed(html_path, html, seed, seed["_rev"])
+        self.assertEqual(core.sync(SLUG)[0]["time_left_minutes"], 35)
+        self.assertEqual(new_ledger.upgrade_page(SLUG)["time_left_minutes"], 35)
+        with self.assertRaises(ValueError):
+            core.validate({"time_left_minutes": "State at 12:23Z. No ETA."})
+
+    def test_stale_seed_keeps_the_newer_estimate_when_it_did_not_edit_it(self):
+        html_path, _ = core.paths(SLUG)
+        stale = html_path.read_text(encoding="utf-8")
+        core.sync(SLUG, ops=[{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": 20}])
+        seed = core.parse_seed(stale)
+        seed["overview"] = "Updated overview"
+        core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
+        state = core.sync(SLUG)[0]
+        self.assertEqual(state["time_left_minutes"], 20)
+        self.assertEqual(state["overview"], "Updated overview")
+
+    def test_server_accepts_only_nonnegative_whole_minutes(self):
+        for value in (0, 20, 200, 1500):
+            core.check_body(
+                {"ops": [{"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": value}]}
+            )
+        for value in (False, True, -1, 20.5, None, [], "", "20%", "3h", "State at 12:23Z"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                core.check_body(
+                    {
+                        "ops": [
+                            {"op": "set", "id": "estimate", "by": "boss", "path": "time_left_minutes", "value": value}
+                        ]
+                    }
+                )
+        with self.assertRaises(ValueError):
+            core.check_body({"ops": [{"op": "set", "id": "estimate", "by": "boss", "path": "projection", "value": 85}]})
+
+    def test_cli_parses_durations_and_rejects_prose_and_percentages(self):
+        parser = ledger.build_parser()
+        for value, expected in (("20", 20), ("0m", 0), ("3h", 180), ("20m", 20), ("3h 20m", 200), ("25h", 1500)):
+            args = parser.parse_args(["--slug", SLUG, "--as", "boss", "time-left", value])
+            self.assertEqual(args.minutes, expected)
+        for value in ("State at 12:23Z", "-1", "85%", "20.5m", "20m done", "+20", "２０m", ""):
+            with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                parser.parse_args(["--slug", SLUG, "--as", "boss", "time-left", value])
+
+    def test_saved_projection_is_removed_without_becoming_a_duration(self):
+        html_path, json_path = core.paths(SLUG)
+        for old in (85, "85%", "State at 12:23Z. No ETA."):
+            state = core.sync(SLUG)[0]
+            state["projection"] = old
+            json_path.write_text(json.dumps(state), encoding="utf-8")
+            seed = core.parse_seed(html_path.read_text(encoding="utf-8"))
+            seed["projection"] = old
+            core.rewrite_seed(html_path, html_path.read_text(encoding="utf-8"), seed, seed["_rev"])
+            migrated = new_ledger.upgrade_page(SLUG)
+            self.assertNotIn("projection", migrated)
+            self.assertIsNone(migrated["time_left_minutes"])
+            self.assertEqual(migrated["phases"], state["phases"])
+            self.assertEqual(migrated["title"], state["title"])
+
+    def test_stats_show_one_duration_independent_of_time_and_completion(self):
+        template = core.TEMPLATE.read_text(encoding="utf-8")
+        defaults = template.split("  function withDefaults(d) {", 1)[1].split("  function itemOf", 1)[0]
+        stats = template.split("  function renderStats() {", 1)[1].split("  function renderCrew", 1)[0]
+        script = """
+const assert = require("node:assert/strict");
+const entries = (v) => Array.isArray(v) ? v : [];
+const h = (tag, attrs, ...kids) => ({tag, attrs, kids});
+let rows;
+const $ = () => ({replaceChildren: (...v) => { rows = v; }});
+const span = () => "elapsed";
+const when = () => "started";
+const activeAgents = () => 0;
+let meta = {created_at: Date.now() - 3600000};
+let doc;
+"""
+        script += "function withDefaults(d) {" + defaults + "function renderStats() {" + stats
+        script += """
+const timeLeft = () => { renderStats(); return rows.find(r => r.kids[0].attrs.text === "Time Left").kids[1].kids[0]; };
+doc = withDefaults({projection: 85, phases: [{done: true}, {done: false}]});
+assert.equal(timeLeft(), "—");
+doc = withDefaults({time_left_minutes: "State at 12:23Z"});
+assert.equal(timeLeft(), "—");
+doc = withDefaults({time_left_minutes: 200, phases: [{done: true}, {done: false}]});
+assert.equal(timeLeft(), "3h 20m");
+assert.equal(rows.some(r => r.kids[0].attrs.text === "Projection"), false);
+meta.created_at -= 86400000;
+doc.phases[1].done = true;
+assert.equal(timeLeft(), "3h 20m");
+doc.time_left_minutes = 0;
+assert.equal(timeLeft(), "0m");
+doc.time_left_minutes = 20;
+assert.equal(timeLeft(), "20m");
+doc.time_left_minutes = 1500;
+assert.equal(timeLeft(), "25h 0m");
+"""
+        subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+
+if __name__ == "__main__":
+    unittest.main()
