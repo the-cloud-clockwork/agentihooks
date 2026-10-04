@@ -59,7 +59,7 @@ class SwarmPanel(unittest.TestCase):
         cls.token = core.read_token(html_path.read_text(encoding="utf-8"))
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
