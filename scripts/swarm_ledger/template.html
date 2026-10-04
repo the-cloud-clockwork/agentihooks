@@ -820,9 +820,12 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
+  function crewShown(crew, sw) {
+    return crew.length > 0 && !sw;
+  }
+
   function renderCrew() {
     const crew = meta.crew || [];
-    $("crew-box").hidden = !crew.length;
     $("crew-count").textContent = crew.length ? `· ${crew.length}` : "";
     $("crew").replaceChildren(...crew.map((m) => h("div", { class: "crew-row" },
       m.unhandled ? h("span", { class: "dot" }) : null, h("span", { class: "who", text: m.name }),
@@ -948,6 +951,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   function renderSwarm(sw) {
     swarm = sw;
     $("swarm-box").hidden = !sw;
+    $("crew-box").hidden = !crewShown(meta.crew || [], sw);
     if (!sw) return;
     const c = sw.config, counts = { ...sw.tasks, agents: (sw.agents || []).length };
     $("swarm-state").className = `sw-state ${c.state}`;
