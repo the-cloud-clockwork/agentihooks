@@ -10,9 +10,11 @@ argument-hint: "<plan-file> --repo DIR [--max-eng-agents N] [--max-ci-agents N]"
 
 # Init Swarm
 
-The plan is accepted before this skill runs. This session is the **liaison**
-between the operator and the swarm: it writes the ledger, starts the swarm,
-relays, and never claims a task.
+The plan is accepted before this skill runs. This session writes the ledger
+and starts the swarm, then hands the operator to the swarm's **master**: the
+agent the swarm keeps online to answer the operator, keep the ledger current
+and steer the swarm. This session never claims a task and does not join the
+ledger as orchestrator; the master does.
 
 ## 1. Write the ledger content
 
@@ -54,9 +56,13 @@ agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
 
-Done when `status` shows the swarm running with every task open.
+Done when `status` shows the swarm running and a `<slug>-master-<n>` agent
+in the master lane.
 
-## Staying liaison
+## Hand over to the master
 
-- Relay to the swarm chat: `agentihooks swarm <slug> send-message "<text>"`.
-- Caps change by `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
+Tell the operator the ledger page and the master's name, then stop. From here
+the operator talks to the master in the ledger page chat or in its herdr pane;
+it turns requests into tasks, sets caps, pauses or stops the swarm. A message to
+the swarm from outside still works:
+`agentihooks swarm <slug> send-message "<text>"`.

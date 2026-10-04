@@ -1,7 +1,9 @@
+from dataclasses import replace
+
 import fakeredis
 import pytest
 
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, SpawnError, tick
 
 
@@ -25,7 +27,7 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
-        self.tasks = []
+        self.tasks, self.masters = [], []
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
 
     def has_capacity(self):
@@ -36,9 +38,12 @@ class FakeRuntime:
             raise self.crash
         if self.fail:
             raise SpawnError("herdr down")
+        self.live.add(name)
+        if lane == MASTER:
+            self.masters.append((name, dict(task)))
+            return Placed(pane_id=f"w1:m{len(self.masters)}", harness="claude")
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
-        self.live.add(name)
         return Placed(pane_id=f"w1:p{len(self.spawned)}", harness="claude", account="acct", model="opus", effort="high")
 
     def live_names(self):
@@ -67,6 +72,10 @@ def store():
     return s
 
 
+def workers(store):
+    return [a for a in store.agents("sw") if a.lane != MASTER]
+
+
 def tasks(*specs):
     return FakeLedger([{"id": i, "lane": lane} for i, lane in specs])
 
@@ -90,7 +99,7 @@ def test_a_finished_agent_is_retired_and_replaced_while_work_remains(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t1"]["state"] = "done"
-    first = store.agents("sw")[0]
+    first = workers(store)[0]
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert runtime.killed == ["sw-eng-1"]
@@ -102,7 +111,7 @@ def test_scale_down_waits_for_the_task_to_finish(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", max_eng=1)
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.killed == [] and len(store.agents("sw")) == 2
+    assert runtime.killed == [] and len(workers(store)) == 2
 
 
 def test_a_dead_agent_frees_its_task_after_the_startup_grace(store):
@@ -147,7 +156,7 @@ def test_drains_when_nothing_is_left_and_tells_the_operator_about_blocked_tasks(
 def test_a_failed_spawn_of_any_kind_reopens_the_task(store, runtime):
     ledger = tasks(("t1", "eng"))
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and store.agents("sw") == []
+    assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and workers(store) == []
 
 
 def test_no_free_session_slot_claims_nothing(store):
@@ -202,11 +211,11 @@ def test_a_busy_turn_resets_the_idle_count(store):
 def test_a_finished_agent_that_will_not_die_stays_registered(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    first = store.agents("sw")[0]
+    first = workers(store)[0]
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     runtime.stuck.add("sw-eng-1")
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [a.name for a in store.agents("sw")] == ["sw-eng-1"]
+    assert [a.name for a in workers(store)] == ["sw-eng-1"]
 
 
 def test_a_drained_swarm_wakes_up_for_new_tasks(store):
@@ -222,7 +231,7 @@ def test_a_drained_swarm_wakes_up_for_new_tasks(store):
 def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    first = store.agents("sw")[0]
+    first = workers(store)[0]
     store.put_handoff("sw", "t1", "seam 1 green, seam 2 red")
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     tick("sw", store, ledger, runtime, now_ms=2_000)
@@ -235,5 +244,82 @@ def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
 
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
-    (agent,) = store.agents("sw")
+    (agent,) = workers(store)
     assert (agent.model, agent.effort) == ("opus", "high")
+
+
+def masters(store):
+    return [a for a in store.agents("sw") if a.lane == MASTER]
+
+
+def test_a_running_swarm_spawns_one_master_that_claims_no_task(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    assert "spawned master sw-master-1" in tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    assert [name for name, _ in runtime.masters] == ["sw-master-1"]
+    assert [(a.name, a.task) for a in masters(store)] == [("sw-master-1", MASTER)]
+    assert len(runtime.spawned) == 2
+    assert {r["claimed_by"] for r in ledger.rows.values()} == {"sw-eng-1", "sw-eng-2", ""}
+    assert all(store.claimant("sw", t) != "sw-master-1" for t in ledger.rows)
+
+
+def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(store):
+    store.update("sw", state="paused")
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    assert [a.name for a in masters(store)] == ["sw-master-1"]
+    store.update("sw", state="running")
+    assert "drained" in tick("sw", store, tasks(), runtime, 2)
+    assert store.config("sw").state == "drained" and [a.name for a in masters(store)] == ["sw-master-1"]
+    store.update("sw", state="stopped")
+    store.drop_agent("sw", "sw-master-1")
+    assert tick("sw", store, tasks(), runtime, 3) == [] and len(runtime.masters) == 1
+
+
+def test_a_dead_master_is_respawned(store):
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    runtime.live.clear()
+    actions = tick("sw", store, tasks(), runtime, 1 + STARTUP_GRACE_MS + 1)
+    assert "lost sw-master-1" in actions and "spawned master sw-master-2" in actions
+    assert [a.name for a in masters(store)] == ["sw-master-2"]
+
+
+def test_an_idle_master_is_never_nudged_or_stalled(store):
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    runtime.statuses["sw-master-1"] = "idle"
+    for n in range(12):
+        tick("sw", store, tasks(), runtime, 2 + n)
+    assert runtime.nudged == [] and [a.name for a in masters(store)] == ["sw-master-1"]
+
+
+def test_a_master_handoff_retires_the_old_master_and_spawns_the_next_with_the_doc(store):
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    (old,) = masters(store)
+    store.put_handoff("sw", MASTER, "operator wants caps at four")
+    store.put_agent("sw", replace(old, state="finished"))
+    actions = tick("sw", store, tasks(), runtime, 2)
+    assert "retired sw-master-1" in actions and "spawned master sw-master-2" in actions
+    assert runtime.killed == ["sw-master-1"]
+    assert runtime.masters[-1][1]["handoff"] == "operator wants caps at four"
+    assert store.handoff("sw", MASTER) == ""
+    assert [a.name for a in masters(store)] == ["sw-master-2"]
+
+
+def test_a_full_house_waits_for_a_slot_before_starting_the_master(store):
+    assert "no session slot for the master, waiting" in tick("sw", store, tasks(), FakeRuntime(full=True), 1)
+    assert masters(store) == []
+
+
+def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, 1)
+    store.update("sw", state="stopping")
+    tick("sw", store, ledger, runtime, 2)
+    assert [a.name for a in masters(store)] == ["sw-master-1"]
+    store.put_agent("sw", replace(store.agents("sw")[0], state="finished"))
+    actions = tick("sw", store, ledger, runtime, 3)
+    assert "retired sw-master-1" in actions and actions[-1] == "stopped"
+    assert store.agents("sw") == [] and store.config("sw").state == "stopped"

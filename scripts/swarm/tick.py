@@ -1,12 +1,13 @@
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
+Every swarm that is not stopped keeps one master: an agent the operator talks to, which works no task.
 """
 
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -55,13 +56,12 @@ def tick(slug, store, ledger, runtime, now_ms):
         return []
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     actions = []
-    if config.state == "drained":
-        if not any(_claimable(slug, store, rows, lane) for lane in LANES):
-            return []
+    if config.state == "drained" and any(_claimable(slug, store, rows, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += _orphans(slug, store, ledger, rows)
+    actions += _master(slug, config, store, runtime, now_ms)
     if config.state == "running":
         actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
     return actions + _settle(slug, config, store, ledger, rows)
@@ -88,6 +88,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 actions.append(f"retired {agent.name}")
             else:
                 actions.append(f"could not retire {agent.name}, retrying next tick")
+        elif agent.name in live and agent.lane == MASTER:
+            continue
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent)
@@ -168,29 +170,64 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
-            store.put_agent(
-                slug,
-                replace(
-                    record,
-                    pane_id=placed.pane_id,
-                    harness=placed.harness,
-                    account=placed.account,
-                    model=placed.model,
-                    effort=placed.effort,
-                    state="working",
-                ),
-            )
+            store.put_agent(slug, _placed(record, placed))
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
 
 
-def _settle(slug, config, store, ledger, rows):
-    if store.agents(slug):
-        return []
+def _placed(record, placed):
+    return replace(
+        record,
+        pane_id=placed.pane_id,
+        harness=placed.harness,
+        account=placed.account,
+        model=placed.model,
+        effort=placed.effort,
+        state="working",
+    )
+
+
+def _master(slug, config, store, runtime, now_ms):
+    agents = store.agents(slug)
+    masters = [a for a in agents if a.lane == MASTER]
     if config.state == "stopping":
+        if any(a.lane != MASTER for a in agents):
+            return []
+        return [_retire_master(slug, store, runtime, m) for m in masters]
+    if any(m.state != "finished" for m in masters):
+        return []
+    if not runtime.has_capacity():
+        return ["no session slot for the master, waiting"]
+    name = store.next_name(slug, MASTER)
+    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting")
+    store.put_agent(slug, record)
+    try:
+        placed = runtime.spawn(config, MASTER, name, {"id": MASTER, "handoff": store.handoff(slug, MASTER)})
+    except Exception as exc:
+        store.drop_agent(slug, name)
+        return [f"master spawn failed: {exc}"]
+    store.put_agent(slug, _placed(record, placed))
+    store.clear_handoff(slug, MASTER)
+    return [f"spawned master {name}"]
+
+
+def _retire_master(slug, store, runtime, master):
+    if not runtime.retire(master, master.name in runtime.live_names()):
+        return f"could not retire {master.name}, retrying next tick"
+    store.drop_agent(slug, master.name)
+    return f"retired {master.name}"
+
+
+def _settle(slug, config, store, ledger, rows):
+    agents = store.agents(slug)
+    if config.state == "stopping":
+        if agents:
+            return []
         store.update(slug, state="stopped")
         return ["stopped"]
+    if any(a.lane != MASTER for a in agents):
+        return []
     if config.state != "running" or any(_claimable(slug, store, rows, lane) for lane in LANES):
         return []
     store.update(slug, state="drained")

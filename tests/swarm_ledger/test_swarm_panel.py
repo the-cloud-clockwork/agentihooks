@@ -300,6 +300,24 @@ class SwarmPanel(unittest.TestCase):
             ],
         )
 
+    def test_the_master_card_comes_first_and_says_it_answers_the_chat(self):
+        sw = {
+            "agents": [
+                {"name": "s-eng-1", "lane": "eng", "task": "t1", "status": "working"},
+                {"name": "s-master-2", "lane": "master", "task": "master", "status": "idle"},
+            ]
+        }
+        cards = self.run_js(["span", "swarmCards"], f"swarmCards({json.dumps(sw)}, [], {{}}, 5)")
+        self.assertEqual(
+            [(c["name"], c["lane"], c["task"]) for c in cards][0], ("s-master-2", "master", "Answers your chat")
+        )
+        self.assertEqual(cards[1]["name"], "s-eng-1")
+
+    def test_the_master_card_is_marked_for_its_own_style(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        self.assertIn('a.lane === "master" ? "sw-card master" : "sw-card"', page)
+        self.assertRegex(page, r"\.sw-card\.master \.sw-name\s*\{")
+
     def test_an_unknown_task_falls_back_to_its_id(self):
         sw = {"agents": [{"name": "a", "lane": "eng", "task": "gone", "status": "idle"}]}
         (card,) = self.run_js(["span", "swarmCards"], f"swarmCards({json.dumps(sw)}, [], {{}}, 5)")

@@ -55,3 +55,8 @@ def test_directive_is_given_once_per_session(monkeypatch):
     assert recycle.directive("s1", _swarm_env()) is not None
     assert recycle.directive("s1", _swarm_env()) is None
     assert recycle.directive("s2", _swarm_env()) is not None
+
+
+def test_the_swarm_master_gets_the_directive_too(monkeypatch):
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 600_000)
+    assert "agentihooks swarm my-swarm handoff" in recycle.directive("s1", _swarm_env("my-swarm-master-3"))

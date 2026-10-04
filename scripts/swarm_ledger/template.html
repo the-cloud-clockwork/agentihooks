@@ -261,6 +261,7 @@ details.crew { margin: 10px 0 0; }
 .sw-list { margin: 0; }
 .sw-card { padding: 8px 0; border-top: 1px solid var(--divider); }
 .sw-card:first-child { border-top: 0; }
+.sw-card.master .sw-name { color: var(--accent); text-shadow: 0 0 10px currentColor; }
 .sw-top { display: flex; gap: 8px; align-items: baseline; }
 .sw-name { font-weight: 700; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sw-status { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-meta); font-weight: 700;
@@ -842,8 +843,9 @@ a.sw-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
 
   function swarmCards(sw, tasks, seen, now) {
     const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
-    return (sw.agents || []).map((a) => {
-      const t = byId[a.task] || {};
+    const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
+    return agents.map((a) => {
+      const t = a.lane === "master" ? { title: "Answers your chat" } : byId[a.task] || {};
       const last = Math.max(seen[a.name] || 0, a.started_at || 0);
       return { name: a.name, lane: a.lane, model: a.model ? [a.model, a.effort].filter(Boolean).join(" ") : "unknown",
         account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
@@ -951,7 +953,7 @@ a.sw-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
     if (document.activeElement !== $("cap-ci")) $("cap-ci").value = c.max_ci;
     renderControls();
     const cards = swarmCards(sw, doc ? doc.tasks : [], doc ? lastSeen() : {}, Date.now());
-    $("swarm-agents").replaceChildren(...(cards.length ? cards.map((a) => h("li", { class: "sw-card" },
+    $("swarm-agents").replaceChildren(...(cards.length ? cards.map((a) => h("li", { class: a.lane === "master" ? "sw-card master" : "sw-card" },
       h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
         h("span", { class: `sw-status ${a.status}`, text: a.status })),
       a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: a.task, title: `${a.task}, open the pull request` })
