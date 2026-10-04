@@ -36,11 +36,30 @@ def _setup_python_steps(job: str) -> list[dict]:
     return [s for s in workflow["jobs"][job]["steps"] if s.get("uses", "").startswith("actions/setup-python")]
 
 
-@pytest.mark.parametrize("job", ["unit", "lint"])
-def test_setup_python_caches_pip_keyed_on_pyproject(job):
-    (step,) = _setup_python_steps(job)
+def test_lint_setup_python_caches_pip_keyed_on_pyproject():
+    (step,) = _setup_python_steps("lint")
     assert step["with"]["cache"] == "pip"
     assert step["with"]["cache-dependency-path"] == "pyproject.toml"
+
+
+def test_unit_setup_python_restores_no_pip_cache():
+    (step,) = _setup_python_steps("unit")
+    assert "cache" not in step["with"]
+
+
+def _unit_step_index(predicate) -> tuple[int, dict]:
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    (index,) = [i for i, s in enumerate(steps) if predicate(s)]
+    return index, steps[index]
+
+
+def test_unit_installs_extras_with_uv_cached_on_pyproject():
+    uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
+    assert uv["with"]["enable-cache"] is True
+    assert uv["with"]["cache-dependency-glob"] == "pyproject.toml"
+    assert uv_index < install_index
+    assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
 
 
 def test_unit_matrix_runs_one_shard_per_split():

@@ -223,7 +223,7 @@ class SwarmPanel(unittest.TestCase):
         head = re.search(r"\.sw-head \{([^}]*)\}", page).group(1)
         self.assertIn("position: sticky; top: 0", head)
         self.assertRegex(head, r"background: var\(--panel\)")
-        self.assertRegex(page, r"--panel: #[0-9a-f]{6};")
+        self.assertRegex((SCRIPTS / "palette.css").read_text(encoding="utf-8"), r"--panel: var\(--[a-z]+-\d{2,3}\);")
         box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
         header = box.split('<div class="sw-head">', 1)[1].split('<ul class="sw-list"', 1)[0]
         for part in ('id="swarm-state"', 'id="swarm-figs"', 'id="swarm-ctl"', 'id="cap-eng"', 'id="swarm-note"'):
@@ -317,6 +317,7 @@ class SwarmPanel(unittest.TestCase):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIn('a.lane === "master" ? "sw-card master" : "sw-card"', page)
         self.assertRegex(page, r"\.sw-card\.master \.sw-name\s*\{")
+        self.assertLess(page.index('id="swarm-master"'), page.index('<details class="sw-agents"'))
 
     def test_an_unknown_task_falls_back_to_its_id(self):
         sw = {"agents": [{"name": "a", "lane": "eng", "task": "gone", "status": "idle"}]}
