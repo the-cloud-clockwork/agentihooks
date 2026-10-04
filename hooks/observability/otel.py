@@ -168,31 +168,6 @@ def _init_sdk() -> None:
         trace.set_tracer_provider(tp)
         _tracer = trace.get_tracer("agentihooks")
 
-        # Langfuse — additional trace exporter (OTLP HTTP only, traces only)
-        from hooks.config import (
-            OTEL_LANGFUSE_ENABLED,
-            OTEL_LANGFUSE_ENDPOINT,
-            OTEL_LANGFUSE_PUBLIC_KEY,
-            OTEL_LANGFUSE_SECRET_KEY,
-        )
-
-        if OTEL_LANGFUSE_ENABLED and OTEL_LANGFUSE_ENDPOINT:
-            import base64
-
-            auth = base64.b64encode(f"{OTEL_LANGFUSE_PUBLIC_KEY}:{OTEL_LANGFUSE_SECRET_KEY}".encode()).decode()
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter as LangfuseSpanExporter,
-            )
-
-            langfuse_exporter = LangfuseSpanExporter(
-                endpoint=f"{OTEL_LANGFUSE_ENDPOINT}/v1/traces",
-                headers={
-                    "Authorization": f"Basic {auth}",
-                    "x-langfuse-ingestion-version": "4",
-                },
-            )
-            tp.add_span_processor(BatchSpanProcessor(langfuse_exporter))
-
         # Metrics — periodic export, flushed on atexit
         reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=60_000)
         mp = MeterProvider(resource=resource, metric_readers=[reader])
@@ -211,6 +186,32 @@ def _init_sdk() -> None:
 
     except Exception:
         pass  # OTEL SDK not installed or init failed — all functions remain no-ops
+
+
+def langfuse_exporter_config() -> dict | None:
+    """Endpoint and headers of the Langfuse trace exporter; None when disabled or a key is missing."""
+    import base64
+
+    from hooks import config
+
+    public_key, secret_key = config.OTEL_LANGFUSE_PUBLIC_KEY, config.OTEL_LANGFUSE_SECRET_KEY
+    if not (config.OTEL_LANGFUSE_ENABLED and config.OTEL_LANGFUSE_ENDPOINT and public_key and secret_key):
+        return None
+    auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "x-langfuse-ingestion-version": "4"}
+    if config.OTEL_LANGFUSE_HOST_HEADER:
+        headers["Host"] = config.OTEL_LANGFUSE_HOST_HEADER
+    return {"endpoint": f"{config.OTEL_LANGFUSE_ENDPOINT.rstrip('/')}/v1/traces", "headers": headers}
+
+
+def langfuse_exporter():
+    """OTLP HTTP span exporter for Langfuse, or None when it is not configured."""
+    settings = langfuse_exporter_config()
+    if settings is None:
+        return None
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    return OTLPSpanExporter(endpoint=settings["endpoint"], headers=settings["headers"], timeout=10)
 
 
 def get_tracer():

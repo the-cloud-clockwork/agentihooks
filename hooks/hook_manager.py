@@ -1869,6 +1869,15 @@ def on_stop(payload: dict) -> None:
     except Exception as e:
         log("brain_writer_hook dispatch failed", {"error": str(e)})
 
+    try:
+        if transcript_path and otel.langfuse_exporter_config() is not None:
+            from hooks._async import fork_and_call
+            from hooks.observability.agent_trace import export_session
+
+            fork_and_call(export_session, session_id, transcript_path, timeout_sec=60, task_name="agent_trace")
+    except Exception as e:
+        log("agent_trace dispatch failed", {"error": str(e)})
+
     # Emit a trace span for session end (visible in Langfuse)
     tracer = otel.get_tracer()
     if tracer:

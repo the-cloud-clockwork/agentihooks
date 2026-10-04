@@ -11,7 +11,7 @@ def _snapshot_path(session_id: str) -> Path:
     return AGENTIHOOKS_HOME / "context_usage" / f"{safe_id}.json"
 
 
-def record_context_usage(session_id: str, context_window: dict) -> None:
+def record_context_usage(session_id: str, context_window: dict, cost_usd: float | None = None) -> None:
     if not session_id or not isinstance(context_window, dict):
         return
     size = context_window.get("context_window_size")
@@ -27,6 +27,8 @@ def record_context_usage(session_id: str, context_window: dict) -> None:
         "used_pct": float(used_pct),
         "updated_at": time.time(),
     }
+    if isinstance(cost_usd, (int, float)):
+        snapshot["cost_usd"] = float(cost_usd)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(json.dumps(snapshot), encoding="utf-8")
     temporary.chmod(0o600)
@@ -38,5 +40,14 @@ def used_tokens(session_id: str) -> int | None:
         return None
     try:
         return int(json.loads(_snapshot_path(session_id).read_text(encoding="utf-8"))["used_tokens"])
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def session_cost(session_id: str) -> float | None:
+    if not session_id:
+        return None
+    try:
+        return float(json.loads(_snapshot_path(session_id).read_text(encoding="utf-8"))["cost_usd"])
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
