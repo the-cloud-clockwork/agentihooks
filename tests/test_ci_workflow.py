@@ -81,11 +81,11 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
 
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
-    splits = int(re.search(r"--splits (\d+)", command).group(1))
+    shards = int(re.search(r"--shard \$\{\{ matrix\.shard \}\}/(\d+)", command).group(1))
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    assert splits > 1
-    assert workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"] == list(range(1, splits + 1))
-    assert "--group ${{ matrix.shard }}" in command
+    assert shards > 1
+    assert workflow["jobs"]["unit"]["strategy"]["matrix"]["shard"] == list(range(1, shards + 1))
+    assert "--splits" not in command
 
 
 def test_tests_run_on_pull_requests_into_dev_and_main():

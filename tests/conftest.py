@@ -1,5 +1,6 @@
 """Shared test fixtures for agentihooks."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -7,13 +8,34 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.shards import assign_files, discover_test_files
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
+SHARD_FILES = pytest.StashKey[frozenset[str]]()
 
 
 def pytest_collection_modifyitems(config, items):
     config.stash[COLLECTED_NODEIDS] = [item.nodeid for item in items]
+
+
+def pytest_addoption(parser):
+    parser.addoption("--shard", default=None, metavar="N/M", help="collect only the test files of shard N of M")
+
+
+def pytest_ignore_collect(collection_path, config):
+    spec = config.getoption("shard")
+    if not spec or collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
+        return None
+    if SHARD_FILES not in config.stash:
+        index, shards = (int(part) for part in spec.split("/"))
+        durations = json.loads((config.rootpath / ".test_durations").read_text())
+        files = assign_files(durations, discover_test_files(config.rootpath), shards)[index - 1]
+        config.stash[SHARD_FILES] = frozenset(files)
+    if collection_path.relative_to(config.rootpath).as_posix() not in config.stash[SHARD_FILES]:
+        return True
+    return None
 
 
 @pytest.fixture(autouse=True)
