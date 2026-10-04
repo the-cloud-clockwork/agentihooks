@@ -8,9 +8,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import herdr_host
+from scripts import agent_choice, herdr_host
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -66,14 +67,42 @@ def _read_route_report(path: Path) -> dict[str, str]:
     return fields
 
 
+@dataclass(frozen=True)
+class AgentSpec:
+    agent: str = "claude"
+    exclude: str = ""
+    fallback_bare: bool = True
+
+
+def _agent_command(spec: AgentSpec, report: Path, name: str, agent_args: list[str]) -> tuple[list[str], str]:
+    """(command, line run before it): Claude routes through `agentihooks claude`; Codex runs directly."""
+    if spec.agent == "codex":
+        return [
+            shutil.which("codex") or "codex",
+            *agent_args,
+        ], f"printf 'status=direct\\n' > {shlex.quote(str(report))}\n"
+    agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
+    command = [
+        agentihooks_bin,
+        "claude",
+        *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
+        *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
+        "--agentihooks-report",
+        str(report),
+        "--name",
+        name,
+        *agent_args,
+    ]
+    return command, ""
+
+
 def _write_launcher(
     directory: Path,
     name: str,
     prompt: str,
     claude_args: list[str],
     environ: dict[str, str],
-    exclude: str = "",
-    fallback_bare: bool = True,
+    spec: AgentSpec = AgentSpec(),
 ) -> tuple[Path, Path | None]:
     root = _runtime_dir(environ)
     safe_name = "".join(character if character.isalnum() or character in "._-" else "_" for character in name)
@@ -84,18 +113,7 @@ def _write_launcher(
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
 
-    agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
-    command = [
-        agentihooks_bin,
-        "claude",
-        *(["--agentihooks-exclude", exclude] if exclude else []),
-        *(["--agentihooks-fallback-bare"] if fallback_bare else []),
-        "--agentihooks-report",
-        str(_route_report(launcher)),
-        "--name",
-        name,
-        *claude_args,
-    ]
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args)
     if prompt_file is not None:
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
     else:
@@ -112,7 +130,7 @@ def _write_launcher(
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
-        f"{command_text}\n"
+        f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         f"exec {shlex.quote(shell)} -l\n",
@@ -228,6 +246,12 @@ def _parser() -> argparse.ArgumentParser:
         help="herdr: a tab in the workspace (default), a split of the calling pane, or a new workspace",
     )
     parser.add_argument("--workspace", default="", help="herdr: workspace label to place the session in (crew)")
+    parser.add_argument(
+        "--agent",
+        choices=agent_choice.AGENTS,
+        default="",
+        help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
+    )
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
 
@@ -250,9 +274,9 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
     return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
 
 
-def _start_herdr(launcher: Path, directory: Path, name: str, args, environ: dict[str, str]) -> list[str]:
+def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": "claude"}
+    env = {"HERDR_AGENT": agent}
     placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
     herdr_host.run(placed.pane_id, launcher, environ)
     return [
@@ -272,6 +296,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
+        if args.handoff and args.agent == "codex":
+            raise ValueError("--handoff moves work to another Claude account; it cannot open codex")
+        agent, reason = ("claude", "handoff") if args.handoff else agent_choice.choose(args.agent, active_env)
         if args.handoff:
             from hooks.context.account_sessions import UNROUTED, environment_account
 
@@ -281,7 +308,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
-            directory, name, prompt, claude_args, active_env, exclude=exclude, fallback_bare=not args.handoff
+            directory,
+            name,
+            prompt,
+            claude_args,
+            active_env,
+            AgentSpec(agent=agent, exclude=exclude, fallback_bare=not args.handoff),
         )
         host, explicit = _select_host(args.host, active_env)
         command: list[str] = []
@@ -292,6 +324,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 2
 
     report = [
+        f"agent={agent}",
+        f"agent_reason={reason}",
         f"directory={directory}",
         f"name={name}",
         f"claude_args={shlex.join(claude_args)}",
@@ -311,7 +345,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     marker = _started_marker(launcher)
     if host == "herdr":
         try:
-            report += _start_herdr(launcher, directory, name, args, active_env)
+            report += _start_herdr(launcher, directory, name, args, agent, active_env)
         except (herdr_host.HerdrError, OSError, subprocess.TimeoutExpired) as exc:
             if explicit:
                 discard()
@@ -361,7 +395,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     if route.get("error"):
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
-    if pane and route.get("status") in ("routed", "bare"):
+    if pane and route.get("status") in ("routed", "bare", "direct"):
         renamed = herdr_host.rename_agent(pane, name, active_env)
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
     if not args.handoff:

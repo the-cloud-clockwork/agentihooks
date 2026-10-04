@@ -326,6 +326,11 @@ In herdr the session opens as a tab in the caller's workspace, in `--workspace
 <label>` (crew), or in the repository's workspace; `--placement split|workspace`
 changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_name`.
 
+Agents: `--agent claude|codex`; without it, the first agent in
+`AGENTIHOOKS_AGENT_PRIORITY` (default `claude,codex`) with quota left (Claude: a
+routable account in the router cache; Codex: below `AGENTIHOOKS_HANDOFF_WEEK_PCT`
+in its session logs). Codex runs directly (`route_status=direct`).
+
 ---
 
 ## `agentihooks herdr`
