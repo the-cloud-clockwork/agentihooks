@@ -180,6 +180,30 @@ def terminate(session: Session, members: list[Process], timeout: float, proc: Pa
     return escalated
 
 
+def herdr_pane(pid: int, proc: Path = Path("/proc")) -> tuple[str, str]:
+    """(HERDR_PANE_ID, HERDR_SOCKET_PATH) of an agent running in a herdr pane; empty outside herdr."""
+    try:
+        raw = (proc / str(pid) / "environ").read_bytes()
+    except OSError:
+        return "", ""
+    wanted = {b"HERDR_PANE_ID": "", b"HERDR_SOCKET_PATH": ""}
+    for item in raw.split(b"\0"):
+        key, _, value = item.partition(b"=")
+        if key in wanted:
+            wanted[key] = value.decode(errors="replace")
+    return wanted[b"HERDR_PANE_ID"], wanted[b"HERDR_SOCKET_PATH"]
+
+
+def _close_pane(pane: str, socket: str) -> str:
+    from scripts import herdr_host
+
+    try:
+        herdr_host._cli(["pane", "close", pane], {**os.environ, **({"HERDR_SOCKET_PATH": socket} if socket else {})})
+    except (herdr_host.HerdrError, OSError) as exc:
+        return "closed" if "not found" in str(exc) else f"close-failed ({exc})"
+    return "closed"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="List or terminate a Claude Code or Codex agent session")
     parser.add_argument("selector", nargs="?", default="", help="Exact session name, UUID, or PID")
@@ -190,6 +214,7 @@ def _parser() -> argparse.ArgumentParser:
         "--force-shared", action="store_true", help="Allow terminating a process shared by multiple UUIDs"
     )
     parser.add_argument("--term-timeout", type=float, default=3.0)
+    parser.add_argument("--keep-pane", action="store_true", help="Leave the agent's herdr pane open")
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -222,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
         "pgid": selected.process.pgid,
         "members": [item.pid for item in members],
     }
+    pane, socket = herdr_pane(selected.process.pid)
+    if pane:
+        report["pane_id"] = pane
     if args.json:
         print(json.dumps(report, sort_keys=True))
     else:
@@ -235,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")
+    if pane:
+        print(f"pane_id={pane} pane={'kept' if args.keep_pane else _close_pane(pane, socket)}")
     return 0
 
 

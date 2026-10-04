@@ -51,6 +51,12 @@ SIGKILL when required, and verifies every captured process exited. Exit zero
 with `result=terminated` is the completion criterion. Report whether SIGKILL
 was required.
 
+An agent running in a herdr pane also prints `pane_id=<id> pane=closed`: its
+pane (and the tab, when it was the only pane) is closed after the agent exits.
+Report the `pane_id`. When the operator wants the pane kept ("stop it but keep
+the terminal"), add `--keep-pane`; the line then reads `pane=kept`.
+`pane=close-failed (...)` means the agent is gone but the pane is still open.
+
 ## Extracted Scripts
 
 | Primitive | Purpose |
