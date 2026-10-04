@@ -234,13 +234,12 @@ def cmd_claim(args):
 
 
 def cmd_prompt(args):
-    me = HERE / "ledger.py"
-    watch = HERE / "watch_ledger.py"
+    me = "agentihooks ledger"
     print(
-        f"You are a member of crew ledger `{args.slug}` as `{args.name}`. Run once: python3 {me} --slug {args.slug} "
-        f"--as {args.name} join. Then keep a Monitor on: python3 {watch} {args.slug} --as {args.name}. Act on every OPERATOR "
-        f"line, then run `python3 {me} --slug {args.slug} --as {args.name} ack`. Record progress with the commands in "
-        f"`python3 {me} --help` (phase, followup, comment, scope, say, time-left). The orchestrator maintains Time Left as one remaining duration "
+        f"You are a member of crew ledger `{args.slug}` as `{args.name}`. Run once: {me} --slug {args.slug} "
+        f"--as {args.name} join. Then keep a Monitor on: {me} watch {args.slug} --as {args.name}. Act on every OPERATOR "
+        f"line, then run `{me} --slug {args.slug} --as {args.name} ack`. Record progress with the commands in "
+        f"`{me} --help` (phase, followup, comment, scope, say, time-left). The orchestrator maintains Time Left as one remaining duration "
         'with `time-left "3h 20m"` on joining and whenever progress or blockers change it. Write for the operator in plain words: '
         "one status comment per item saying what was done or why it was skipped, amended instead of repeated; evidence stays "
         "in PRs and notes. A hook blocks you from stopping while operator events are unhandled."
