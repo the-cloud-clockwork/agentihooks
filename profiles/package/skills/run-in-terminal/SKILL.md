@@ -1,11 +1,12 @@
 ---
 name: run-in-terminal
 description: >
-  Run any command in any directory in a new Windows Terminal tab from WSL2.
+  Run any command in any directory in a new herdr tab, or a native terminal tab
+  (Windows Terminal from WSL2, Terminal.app, Linux).
   Defaults to $HOME with an interactive shell, but accepts an arbitrary
   command (claude, npm run dev, a chained `a && b`, anything) and an optional
-  target directory. Checks WSL interop first; if disabled, prints the exact
-  command the operator must run. Use when the user says "run in terminal",
+  target directory. On a native-terminal failure it checks WSL interop and
+  prints the exact command the operator must run. Use when the user says "run in terminal",
   "run-in-terminal", "run terminal", "run <cmd> in <dir>", "run this in <dir>", "run command in
   directory", "open claude at <path>", "open a shell at <path>", or
   "launch terminal at <path>".
@@ -60,32 +61,31 @@ any handoff or session lookup; pass a fully-formed command.)
 
 ---
 
-## Step 2: Check WSL Interop
+## Step 2: Run
 
-<!-- DETERMINISTIC: verify wt.exe can execute from WSL2 -->
+<!-- DETERMINISTIC: agentihooks run-in-terminal picks the host and opens the tab -->
+```bash
+agentihooks run-in-terminal --dir "<directory>" --title "<title>" -- <command>
+```
+
+Omit `--dir` for `$HOME`, `--title` for the directory name, and the command
+for an interactive shell. The tab opens in herdr when herdr is installed and
+enabled (a tab in the caller's herdr workspace, else the directory's repository
+workspace; `--workspace <label>` picks one), otherwise in a native terminal tab
+through `scripts/02_run_terminal.sh`. `--host herdr|native` overrides.
+
+The output is `key=value` lines: `host`, `directory`, `title`, `command`, and in
+herdr `workspace_id`, `tab_id`, `pane_id`. Report them.
+
+## Step 3: Native failures
+
+When it exits non-zero with `host=native`, run the interop check and show its
+remediation output verbatim. Do NOT attempt `sudo` or modify system files — the
+operator must do it. After they confirm, run Step 2 again.
+
 ```bash
 "$SKILL_DIR"/scripts/01_check_interop.sh
 ```
-
-If this exits non-zero, **STOP**. Show the user the remediation output verbatim.
-Do NOT attempt to run `sudo` or modify system files — the operator must do it.
-After they confirm it's done, re-run this check.
-
----
-
-## Step 3: Run the Terminal
-
-<!-- DETERMINISTIC: launch wt.exe new-tab via the PowerShell bridge -->
-```bash
-"$SKILL_DIR"/scripts/02_run_terminal.sh "<directory>" "<title>" "<command>"
-```
-
-Positional args: arg1 = resolved directory (default `$HOME`), arg2 = tab title
-(default basename of the directory), arg3 = command (optional; omit for an
-interactive shell). To pass a command while keeping the default directory,
-pass `"$HOME"` explicitly as arg1.
-
-Report the result to the user: which directory, tab title, and command were used.
 
 ---
 

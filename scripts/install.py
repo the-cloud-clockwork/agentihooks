@@ -6294,6 +6294,10 @@ def main() -> None:
         from scripts.herdr_setup import main as herdr_main
 
         raise SystemExit(herdr_main(_argv[1:]))
+    if _argv and _argv[0] == "run-in-terminal":
+        from scripts.run_in_terminal import main as run_in_terminal_main
+
+        raise SystemExit(run_in_terminal_main(_argv[1:]))
     if _argv and _argv[0] == "terminate-agent":
         from scripts.terminate_agent import main as terminate_agent_main
 
@@ -6425,6 +6429,7 @@ def main() -> None:
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
+    sub.add_parser("run-in-terminal", help="Run a command in a new herdr tab or terminal")
     sub.add_parser(
         "herdr",
         help="Install and configure herdr, the terminal host for agents: status|install|configure|enable|disable",
