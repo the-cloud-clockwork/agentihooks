@@ -47,4 +47,7 @@ assert.equal(unreadCount([], 0), 0);
         page = TEMPLATE.read_text(encoding="utf-8")
         self.assertRegex(page, r"\.notif, \.chat-panel \{[^}]*width: min\(600px")
         self.assertRegex(page, r"\.notif-text:hover[^{]*\{[^}]*background")
-        self.assertRegex(page, r'(?s)class: "notif-text".{0,240}?on: \{ click: \(ev\) => \{ if \(!getSelection\(\)\.toString\(\)\) jumpToNotice\(ev, n\.item\)')
+        self.assertRegex(
+            page,
+            r'(?s)class: "notif-text".{0,240}?on: \{ click: \(ev\) => \{ if \(!getSelection\(\)\.toString\(\)\) jumpToNotice\(ev, n\.item\)',
+        )
