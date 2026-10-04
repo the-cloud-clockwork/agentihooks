@@ -103,7 +103,7 @@ jobs:
 
   record-pass:
     needs: [unit, lint]
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' && needs.lint.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Resolve the tested tree

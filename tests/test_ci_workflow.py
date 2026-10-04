@@ -175,7 +175,10 @@ def test_unit_and_lint_skip_when_the_tree_already_passed(job):
 def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
     job = _workflow()["jobs"]["record-pass"]
     assert job["needs"] == ["unit", "lint"]
-    assert job["if"] == "github.event_name == 'pull_request'"
+    assert job["if"] == (
+        "${{ !cancelled() && github.event_name == 'pull_request'"
+        " && needs.unit.result == 'success' && needs.lint.result == 'success' }}"
+    )
     tree, upload = job["steps"]
     assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert "git/commits/$GITHUB_SHA" in tree["run"]
