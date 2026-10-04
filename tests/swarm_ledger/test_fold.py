@@ -286,6 +286,9 @@ class OutlineFolds(unittest.TestCase):
         self.assertIn("id: `item-sources-${n}`", function_source("render"))
         self.assertIn("id: `item-priorities-${p.id}`", function_source("renderPriorities"))
         self.assertIn('id: path === "notes" ? `item-notes-${entry.id}` : false', function_source("entryView"))
+        self.assertIn("id: `item-${list}-${item.id}`", function_source("checkRow"))
+        self.assertIn("id: `item-questions-${item.id}`", function_source("questionRow"))
+        self.assertIn("id: `item-tasks-${item.id}`", function_source("taskRow"))
 
 
 if __name__ == "__main__":
