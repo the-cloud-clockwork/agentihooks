@@ -1,4 +1,7 @@
+import json
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -97,3 +100,84 @@ def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
     assert names
     assert all((_ROOT / ".github/workflows" / name).is_file() for name in names), names
+
+
+def _workflow() -> dict:
+    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+
+
+def _gate_job() -> dict:
+    return _workflow()["jobs"]["already-tested"]
+
+
+def _artifact(expired=False, fork=False) -> dict:
+    return {"expired": expired, "workflow_run": {"repository_id": 1, "head_repository_id": 2 if fork else 1}}
+
+
+def _run_gate(tmp_path, listing: dict | None) -> str:
+    (step,) = [s for s in _gate_job()["steps"] if "run" in s]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fixture = tmp_path / "listing.json"
+    fixture.write_text(json.dumps(listing))
+    fake_gh = bin_dir / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        f'[ "{listing is None}" = True ] && exit 1\n'
+        'while [ $# -gt 0 ]; do [ "$1" = --jq ] && f="$2"; shift; done\n'
+        f'jq -r "$f" "{fixture}"\n'
+    )
+    fake_gh.chmod(0o755)
+    out = tmp_path / "out"
+    out.touch()
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_REPOSITORY": "o/r",
+        **{k: "abc123" for k in step.get("env", {})},
+    }
+    subprocess.run(["bash", "-e", "-c", step["run"]], env=env, check=True)
+    return out.read_text()
+
+
+@pytest.mark.parametrize(
+    ("listing", "skip"),
+    [
+        ({"artifacts": [_artifact()]}, "true"),
+        ({"artifacts": [_artifact(expired=True)]}, "false"),
+        ({"artifacts": [_artifact(fork=True)]}, "false"),
+        ({"artifacts": []}, "false"),
+        (None, "false"),
+    ],
+)
+def test_gate_skips_only_for_a_live_same_repo_pass_of_the_tree(tmp_path, listing, skip):
+    assert _run_gate(tmp_path, listing) == f"skip={skip}\n"
+
+
+def test_gate_runs_on_dev_pushes_and_looks_up_the_pushed_tree():
+    job = _gate_job()
+    assert job["if"] == "github.event_name == 'push'"
+    assert job["permissions"]["actions"] == "read"
+    assert job["outputs"]["skip"] == "${{ steps.lookup.outputs.skip }}"
+    (step,) = [s for s in job["steps"] if "run" in s]
+    assert step["id"] == "lookup"
+    assert step["env"]["TREE"] == "${{ github.event.head_commit.tree_id }}"
+    assert "name=tests-passed-$TREE" in step["run"]
+
+
+@pytest.mark.parametrize("job", ["unit", "lint"])
+def test_unit_and_lint_skip_when_the_tree_already_passed(job):
+    spec = _workflow()["jobs"][job]
+    assert spec["needs"] == "already-tested"
+    assert spec["if"] == "${{ !cancelled() && needs.already-tested.outputs.skip != 'true' }}"
+
+
+def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
+    job = _workflow()["jobs"]["record-pass"]
+    assert job["needs"] == ["unit", "lint"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    tree, upload = job["steps"]
+    assert tree["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "git/commits/$GITHUB_SHA" in tree["run"]
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == "tests-passed-${{ steps.tree.outputs.sha }}"
