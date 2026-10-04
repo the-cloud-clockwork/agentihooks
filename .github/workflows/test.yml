@@ -17,18 +17,22 @@ permissions:
   contents: read
 
 jobs:
-  # A squash merge into an unmoved dev has the same tree as the merge commit
-  # its pull request tested, so the dev push run would repeat a passed run.
-  already-tested:
-    if: github.event_name == 'push'
+  unit:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       actions: read
-    outputs:
-      skip: ${{ steps.lookup.outputs.skip }}
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+        shard: [1, 2, 3, 4]
     steps:
-      - name: Look up a passed pull request run of this tree
+      # A squash merge into an unmoved dev has the same tree as the merge commit
+      # its pull request tested, so the dev push run would repeat a passed run.
+      - &lookup
+        name: Look up a passed pull request run of this tree
         id: lookup
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           TREE: ${{ github.event.head_commit.tree_id }}
@@ -37,23 +41,17 @@ jobs:
             --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | length') || n=0
           if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
 
-  unit:
-    needs: already-tested
-    if: ${{ !cancelled() && needs.already-tested.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-        shard: [1, 2, 3, 4]
-    steps:
       - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
 
       - name: Set up Python ${{ matrix.python-version }}
+        if: steps.lookup.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up uv
+        if: steps.lookup.outputs.skip != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -65,6 +63,7 @@ jobs:
       # (~/.local), whose bin dir is not on PATH, so `pytest` and `ruff`
       # resolved to "command not found" while the packages were installed fine.
       - name: Install dependencies
+        if: steps.lookup.outputs.skip != 'true'
         run: |
           uv pip install --system -e ".[dev,all]"
 
@@ -72,16 +71,22 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
+        if: steps.lookup.outputs.skip != 'true'
         run: python -m pytest tests/ -v -n auto --dist loadgroup --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration --tb=short
 
   lint:
-    needs: already-tested
-    if: ${{ !cancelled() && needs.already-tested.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - *lookup
+
       - uses: actions/checkout@v4
+        if: steps.lookup.outputs.skip != 'true'
 
       - name: Set up Python
+        if: steps.lookup.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -89,12 +94,15 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install ruff
+        if: steps.lookup.outputs.skip != 'true'
         run: python -m pip install ruff>=0.4
 
       - name: Lint check
+        if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff check hooks/ scripts/ tests/
 
       - name: Format check
+        if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
   record-pass:

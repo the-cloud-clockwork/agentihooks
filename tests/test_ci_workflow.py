@@ -110,8 +110,8 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def _gate_job() -> dict:
-    return _workflow()["jobs"]["already-tested"]
+def _lookup_step(job: str = "unit") -> dict:
+    return _workflow()["jobs"][job]["steps"][0]
 
 
 def _artifact(expired=False, fork=False) -> dict:
@@ -119,7 +119,7 @@ def _artifact(expired=False, fork=False) -> dict:
 
 
 def _run_gate(tmp_path, listing: dict | None) -> str:
-    (step,) = [s for s in _gate_job()["steps"] if "run" in s]
+    step = _lookup_step()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fixture = tmp_path / "listing.json"
@@ -158,22 +158,30 @@ def test_gate_skips_only_for_a_live_same_repo_pass_of_the_tree(tmp_path, listing
     assert _run_gate(tmp_path, listing) == f"skip={skip}\n"
 
 
-def test_gate_runs_on_dev_pushes_and_looks_up_the_pushed_tree():
-    job = _gate_job()
-    assert job["if"] == "github.event_name == 'push'"
-    assert job["permissions"]["actions"] == "read"
-    assert job["outputs"]["skip"] == "${{ steps.lookup.outputs.skip }}"
-    (step,) = [s for s in job["steps"] if "run" in s]
+def test_no_separate_gate_job_delays_the_shards():
+    jobs = _workflow()["jobs"]
+    assert "already-tested" not in jobs
+    assert "needs" not in jobs["unit"]
+    assert "needs" not in jobs["lint"]
+
+
+@pytest.mark.parametrize("job", ["unit", "lint"])
+def test_each_job_looks_up_the_pushed_tree_first(job):
+    spec = _workflow()["jobs"][job]
+    assert spec["permissions"] == {"contents": "read", "actions": "read"}
+    step = _lookup_step(job)
+    assert step == _lookup_step("unit")
     assert step["id"] == "lookup"
+    assert step["if"] == "github.event_name == 'push'"
     assert step["env"]["TREE"] == "${{ github.event.head_commit.tree_id }}"
     assert "name=tests-passed-$TREE" in step["run"]
 
 
 @pytest.mark.parametrize("job", ["unit", "lint"])
-def test_unit_and_lint_skip_when_the_tree_already_passed(job):
-    spec = _workflow()["jobs"][job]
-    assert spec["needs"] == "already-tested"
-    assert spec["if"] == "${{ !cancelled() && needs.already-tested.outputs.skip != 'true' }}"
+def test_every_later_step_skips_when_the_tree_already_passed(job):
+    later = _workflow()["jobs"][job]["steps"][1:]
+    assert later
+    assert all(s.get("if") == "steps.lookup.outputs.skip != 'true'" for s in later), later
 
 
 def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():
