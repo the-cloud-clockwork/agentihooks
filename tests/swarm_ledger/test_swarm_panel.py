@@ -152,6 +152,14 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 502)
         self.assertIn("no swarm x", text)
 
+    def test_unreadable_status_after_a_control_is_502(self):
+        with (
+            patch.object(server.shutil, "which", return_value="agentihooks"),
+            patch.object(server.subprocess, "run", side_effect=[completed(0), completed(1, "", "gone")]),
+        ):
+            code, _ = self.put({"action": "start"})
+        self.assertEqual(code, 502)
+
     def test_page_has_controls_wired_to_the_endpoint(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         for control in ("start", "pause", "stop", "stop_now", "max_eng", "max_ci"):

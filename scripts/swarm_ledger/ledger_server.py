@@ -140,7 +140,8 @@ def swarm_control(slug, argv):
         return None, str(exc)
     if done.returncode != 0:
         return None, (done.stderr or done.stdout).strip() or "swarm command failed"
-    return swarm_status(slug), ""
+    status = swarm_status(slug)
+    return status, "" if status else "swarm status unreadable after the command"
 
 
 class Handler(BaseHTTPRequestHandler):
