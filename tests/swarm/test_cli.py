@@ -235,3 +235,10 @@ def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
     )
     assert rt.retire(AgentRecord("sw-eng-1", "eng", "t1"), live=True)
     assert seen[0][1:] == ["terminate-agent", "sw-eng-1", "--force-shared"]
+
+
+def test_agent_prompt_starts_by_reading_the_ledger_json():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")

@@ -24,6 +24,9 @@ def build(slug, repo, lane, name, task):
         )
     lines += [
         "",
+        f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
+        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
+        "",
         "Work it end to end with the dev-cycle skill, then stop:",
         f"1. Open a GitHub issue naming the seams and record it: {me} issue <issue url>",
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
