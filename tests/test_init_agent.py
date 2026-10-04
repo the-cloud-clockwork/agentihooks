@@ -324,3 +324,11 @@ def test_the_launcher_exports_the_agent_name_so_codex_can_be_found_by_it(tmp_pat
     text = launcher.read_text()
     assert "export AGENTIHOOKS_AGENT_NAME='smoke codex'\n" in text
     assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("codex\n")
+
+
+def test_the_shell_left_after_the_agent_exits_drops_the_agent_name(tmp_path):
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "smoke", "", [], {"XDG_RUNTIME_DIR": str(tmp_path), "SHELL": "/bin/bash"}, init_agent.AgentSpec()
+    )
+    text = launcher.read_text()
+    assert text.index("unset AGENTIHOOKS_AGENT_NAME") < text.index("exec /bin/bash -l")

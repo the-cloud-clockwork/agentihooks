@@ -36,8 +36,12 @@ def _registry() -> dict[str, dict]:
         return {}
 
 
-def _name(process: Process, proc: Path) -> str:
-    return _argument(process.argv, "--name") or agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
+    named = _argument(process.argv, "--name")
+    parent = table.get(process.ppid)
+    if named or (parent and _target(parent)):
+        return named
+    return agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
 
 
 def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None) -> list[Session]:
@@ -61,7 +65,7 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
             Session(
                 session_id=session_id,
                 target=target,
-                name=_name(process, proc),
+                name=_name(process, proc, table),
                 process=process,
                 cwd=str(info.get("cwd", "")),
                 status=str(info.get("status", "alive")),
@@ -71,7 +75,7 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
         target = _target(process)
         if not target or process.pid in registered_pids:
             continue
-        name = _name(process, proc)
+        name = _name(process, proc, table)
         if target == "claude" and any(value in {"-p", "--print"} for value in process.argv[1:]):
             continue
         result.append(Session("", target, name, process, "", "unregistered"))

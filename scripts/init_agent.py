@@ -134,6 +134,7 @@ def _write_launcher(
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
+        "unset AGENTIHOOKS_AGENT_NAME\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )

@@ -170,3 +170,16 @@ def test_an_agent_without_a_name_argument_is_named_from_its_environment(tmp_path
         found = sessions(proc, registry={})
     assert [(s.target, s.name) for s in found] == [("codex", "smoke-codex")]
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
+
+
+def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    parent = process(300, comm="codex", argv=("/bin/codex",))
+    child = process(301, ppid=300, comm="codex-code-mode", argv=("codex-code-mode",))
+    proc = _herdr_env(tmp_path, 300, AGENTIHOOKS_AGENT_NAME="smoke-codex")
+    (proc / "301").mkdir()
+    (proc / "301" / "environ").write_bytes((proc / "300" / "environ").read_bytes())
+    with patch("scripts.terminate_agent.processes", return_value={300: parent, 301: child}):
+        found = sessions(proc, registry={})
+    assert resolve(found, "smoke-codex", "codex").process.pid == 300
