@@ -26,6 +26,7 @@
   --fs-item: 15px;
   --fs-body: 14px;
   --fs-meta: 12px;
+  --outline-w: 280px;
 }
 * { box-sizing: border-box; }
 html { color-scheme: dark; }
@@ -215,6 +216,31 @@ details.crew { margin: 10px 0 0; }
 .swarm-sum { font-size: var(--fs-meta); color: var(--muted); margin: 0 0 6px; }
 .crew-row .unhandled { margin-left: auto; color: var(--red); }
 #chat-input { max-height: 140px; overflow-y: auto; }
+.col > section, .item { scroll-margin-top: 24px; }
+.outline { position: fixed; z-index: 9; left: 16px; top: 24px; bottom: 252px; width: calc(var(--outline-w) - 32px); overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-width: thin; font-size: var(--fs-meta); }
+.outline li { min-width: 0; }
+.outline a { display: block; padding: 3px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; transition: color .15s, background .15s; }
+.outline .ol-sec { margin-top: 10px; }
+.outline .ol-sec:first-child { margin-top: 0; }
+.outline .ol-sec > a { font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.outline .ol-items a { position: relative; padding-left: 24px; }
+.outline .ol-items a::before { content: "•"; position: absolute; left: 11px; color: var(--red); }
+.outline a:hover { background: var(--glass-hi); color: var(--text); }
+.outline a:focus-visible { outline: 2px solid var(--blue-hi); outline-offset: -2px; }
+.outline a.in { color: var(--blue-hi); }
+.outline a.on { color: var(--blue-hi); text-shadow: 0 0 10px currentColor; }
+.fab-outline { bottom: 248px; }
+@media (min-width: 1280px) {
+  body { padding-left: var(--outline-w); }
+  .fab-outline { display: none; }
+}
+@media (max-width: 1279px) {
+  .outline { display: none; z-index: 12; top: 16px; bottom: 306px; width: min(320px, calc(100vw - 32px)); padding: 10px 6px; border-radius: 14px;
+    background: linear-gradient(180deg, var(--glass-hi), var(--glass)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+  .outline.open { display: block; }
+}
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; }
@@ -222,6 +248,7 @@ details.crew { margin: 10px 0 0; }
 </style>
 </head>
 <body>
+<nav class="outline" id="outline" aria-label="Outline"></nav>
 <main>
   <header>
     <div>
@@ -231,16 +258,16 @@ details.crew { margin: 10px 0 0; }
   </header>
   <div class="banner" id="banner"></div>
   <div class="layout"><div class="col">
-  <section><h2>Overview</h2><p id="overview"></p></section>
-  <section><details class="sources-box" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
-  <section><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
+  <section id="sec-overview" data-outline><h2>Overview</h2><p id="overview"></p></section>
+  <section id="sec-sources" data-outline><details class="sources-box" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
+  <section id="sec-priorities" data-outline><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
-  <section id="swarm-box" hidden><details class="sources-box" open><summary>Swarm <span class="count" id="swarm-count"></span></summary><p class="swarm-sum" id="swarm-sum"></p><div class="swarm-ctl" id="swarm-ctl"><button type="button" data-swarm="start">Start</button><button type="button" data-swarm="pause">Pause</button><button type="button" data-swarm="stop">Stop</button><button type="button" data-swarm="stop_now">Stop now</button><label>eng <input type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng"></label><label>ci <input type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci"></label><button type="button" data-swarm="set">Set caps</button></div><div id="swarm-agents"></div></details></section>
-  <section><h2>Plan phases</h2><ol id="phases"></ol></section>
-  <section><h2>Swarm tasks</h2><ol id="tasks"></ol></section>
-  <section><h2>Open questions</h2><ol id="questions"></ol></section>
-  <section><h2>Operator notes</h2><div id="notes"></div></section>
-  <section><h2>Follow-ups or blockers</h2><ul id="followups"></ul></section>
+  <section data-outline id="swarm-box" hidden><details class="sources-box" open><summary>Swarm <span class="count" id="swarm-count"></span></summary><p class="swarm-sum" id="swarm-sum"></p><div class="swarm-ctl" id="swarm-ctl"><button type="button" data-swarm="start">Start</button><button type="button" data-swarm="pause">Pause</button><button type="button" data-swarm="stop">Stop</button><button type="button" data-swarm="stop_now">Stop now</button><label>eng <input type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng"></label><label>ci <input type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci"></label><button type="button" data-swarm="set">Set caps</button></div><div id="swarm-agents"></div></details></section>
+  <section id="sec-phases" data-outline="phases"><h2>Plan phases</h2><ol id="phases"></ol></section>
+  <section id="sec-tasks" data-outline="tasks"><h2>Swarm tasks</h2><ol id="tasks"></ol></section>
+  <section id="sec-questions" data-outline="questions"><h2>Open questions</h2><ol id="questions"></ol></section>
+  <section id="sec-notes" data-outline><h2>Operator notes</h2><div id="notes"></div></section>
+  <section id="sec-followups" data-outline="followups"><h2>Follow-ups or blockers</h2><ul id="followups"></ul></section>
   </div>
   <aside class="side">
     <section><h2 class="chat-head"><span>Stats</span><button class="mini-sync" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></h2><dl id="stats" style="margin:0"></dl>
@@ -258,6 +285,9 @@ details.crew { margin: 10px 0 0; }
 <a class="sync fab-home" id="home" href="/" title="HOME" aria-label="HOME">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>
 </a>
+<button class="sync fab-outline" id="outline-toggle" type="button" title="Outline" aria-label="Outline" aria-expanded="false" aria-controls="outline">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/></svg>
+</button>
 <button class="sync fab-bell" id="bell" type="button" title="Notifications" aria-label="Notifications" aria-expanded="false" aria-controls="notif">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
   <span class="sync-badge" id="bell-badge" hidden></span>
@@ -304,6 +334,8 @@ details.crew { margin: 10px 0 0; }
   const openComments = new Set();
   const closedComments = new Set();
   let chatSeen = 0;
+  let outlinePick = null;
+  let outlineFrame = 0;
   const $ = (id) => document.getElementById(id);
 
   function h(tag, attrs, ...kids) {
@@ -557,6 +589,7 @@ details.crew { margin: 10px 0 0; }
     renderChatBadge();
     renderStats();
     renderCrew();
+    renderOutline();
     const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
     if (!again) return;
     again.focus();
@@ -747,6 +780,7 @@ details.crew { margin: 10px 0 0; }
 
   function renderSwarm(sw) {
     $("swarm-box").hidden = !sw;
+    renderOutline();
     if (!sw) return;
     const c = sw.config, t = sw.tasks, agents = sw.agents || [];
     $("swarm-count").textContent = `· ${c.state}`;
@@ -756,6 +790,52 @@ details.crew { margin: 10px 0 0; }
     $("swarm-agents").replaceChildren(...agents.map((a) => h("div", { class: "swarm-row" },
       h("span", { class: "who", text: a.name }), h("span", { text: a.lane }), h("span", { text: a.harness }),
       h("span", { text: a.account || "-" }), h("span", { text: a.task }), h("span", { text: a.state }))));
+  }
+
+  function outlineOf(doc, heads) {
+    return heads.map((head) => ({ id: head.id, title: head.title,
+      items: (head.list ? doc[head.list] || [] : []).map((i) => ({ id: `item-${head.list}-${i.id}`, title: i.title || i.text || i.id })) }));
+  }
+
+  function pageHeads() {
+    return [...document.querySelectorAll(".col > section[data-outline]")].filter((s) => !s.hidden).map((s) => ({
+      id: s.id, title: s.querySelector("h2, summary").firstChild.textContent.trim(), list: s.dataset.outline }));
+  }
+
+  function renderOutline() {
+    const tree = outlineOf(doc, pageHeads());
+    const nav = $("outline");
+    const sig = JSON.stringify(tree);
+    if (nav.dataset.sig !== sig) {
+      nav.dataset.sig = sig;
+      const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title });
+      nav.replaceChildren(h("ul", {}, ...tree.map((s) => h("li", { class: "ol-sec" }, link(s),
+        s.items.length ? h("ul", { class: "ol-items" }, ...s.items.map((i) => h("li", {}, link(i)))) : null))));
+    }
+    markOutline();
+  }
+
+  function markOutline() {
+    const nav = $("outline");
+    const links = [...nav.querySelectorAll("a[data-target]")];
+    let current = outlinePick && links.find((a) => a.dataset.target === outlinePick);
+    if (!current) for (const a of links) {
+      const el = document.getElementById(a.dataset.target);
+      if (el && el.getBoundingClientRect().top <= 120) current = a;
+    }
+    const section = current && current.closest(".ol-sec").firstChild;
+    for (const a of links) {
+      a.classList.toggle("on", a === current);
+      a.classList.toggle("in", a === section && a !== current);
+    }
+    if (current && (current.offsetTop < nav.scrollTop || current.offsetTop > nav.scrollTop + nav.clientHeight - 24)) {
+      nav.scrollTop = current.offsetTop - nav.clientHeight / 2;
+    }
+  }
+
+  function showOutline(open) {
+    $("outline").classList.toggle("open", open);
+    $("outline-toggle").setAttribute("aria-expanded", String(open));
   }
 
   function renderChat() {
@@ -925,9 +1005,26 @@ details.crew { margin: 10px 0 0; }
     });
     document.addEventListener("keydown", (ev) => {
       if (ev.key !== "Escape" || ev.defaultPrevented) return;
-      if (!$("notif").hidden) showNotifications(false);
+      if ($("outline").classList.contains("open")) showOutline(false);
+      else if (!$("notif").hidden) showNotifications(false);
       else if (!$("chat-panel").hidden) showChat(false);
     });
+    $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
+    $("outline").addEventListener("click", (ev) => {
+      const a = ev.target.closest("a[data-target]");
+      const el = a && document.getElementById(a.dataset.target);
+      if (!el) return;
+      ev.preventDefault();
+      outlinePick = a.dataset.target;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      showOutline(false);
+      markOutline();
+    });
+    const userScroll = () => { outlinePick = null; };
+    for (const ev of ["wheel", "touchstart", "keydown"]) window.addEventListener(ev, userScroll, { passive: true });
+    for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => {
+      if (!outlineFrame) outlineFrame = requestAnimationFrame(() => { outlineFrame = 0; markOutline(); });
+    }, { passive: true });
     const input = $("chat-input");
     $("chat-clear").addEventListener("click", () => {
       if (confirm("Clear the whole chat?")) queue({ op: "clear", thread: "chat", id: newId("clear") });
