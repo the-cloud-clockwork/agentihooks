@@ -61,6 +61,8 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
+          # On a miss every shard would upload the same key; one per Python is enough.
+          save-cache: ${{ matrix.shard == 1 }}
 
       # Everything below runs as `python -m <tool>`, never the bare console
       # script. pip on the self-hosted runner installs into the user site
