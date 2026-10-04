@@ -10,6 +10,7 @@ def _no_herdr(monkeypatch):
 
 def _quota(monkeypatch, **left):
     monkeypatch.setattr(agent_choice, "has_quota", lambda agent, environ: left.get(agent))
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: False)
 
 
 def test_an_explicit_agent_never_falls_through(monkeypatch):
@@ -111,3 +112,36 @@ def test_claude_quota_comes_from_routable_accounts_in_the_router_cache(monkeypat
     assert agent_choice.has_quota("claude", {}) is True
     monkeypatch.setattr("scripts.claude_quota_balancer.cached_observations", lambda: [])
     assert agent_choice.has_quota("claude", {}) is None
+
+
+def test_an_agent_at_its_session_cap_is_skipped(monkeypatch):
+    _quota(monkeypatch, claude=True, codex=True)
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: agent == "claude")
+    assert agent_choice.choose("", {}) == ("codex", "fallthrough: claude is at its session cap")
+
+
+def test_every_agent_at_cap_is_reported(monkeypatch):
+    _quota(monkeypatch, claude=True, codex=True)
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: True)
+    assert agent_choice.choose("", {})[1] == agent_choice.ALL_FULL
+
+
+def test_codex_cap_counts_live_codex_sessions(monkeypatch):
+    from hooks.context import account_sessions
+
+    monkeypatch.setattr(account_sessions, "live_codex_sessions", lambda: 3)
+    assert agent_choice.at_cap("codex", {}) is True
+    assert agent_choice.at_cap("codex", {"AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT": "4"}) is False
+
+
+def test_claude_is_full_only_when_every_routable_account_is(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as bal
+
+    monkeypatch.setattr(bal, "cached_observations", lambda: [(0, "a"), (0, "b")])
+    monkeypatch.setattr(bal, "is_routable", lambda r: True)
+    monkeypatch.setattr(agent_choice, "_account", lambda r: r)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"a": 3, "b": 2})
+    assert agent_choice.at_cap("claude", {}) is False
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"a": 3, "b": 3})
+    assert agent_choice.at_cap("claude", {}) is True

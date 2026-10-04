@@ -12,7 +12,7 @@ from pathlib import Path
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 UNROUTED = "unrouted"
 MAX_SESSIONS_ENV = "AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT"
-DEFAULT_MAX_SESSIONS = 2
+DEFAULT_MAX_SESSIONS = 3
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
 
@@ -119,6 +119,24 @@ def live_sessions(proc: Path = _PROC, exclude_pids: Iterable[int] = ()) -> dict[
         if pid not in skip and _is_interactive_claude(pid, proc):
             sessions[pid] = pid_account(pid, proc)
     return sessions
+
+
+def _is_interactive_codex(pid: int, proc: Path) -> bool:
+    argv = _cmdline(pid, proc)
+    if not argv or (_comm(pid, proc) != "codex" and Path(argv[0]).name != "codex"):
+        return False
+    if "app-server" in argv[0] or (len(argv) > 1 and argv[1] in ("exec", "app-server", "mcp-server")):
+        return False
+    return _comm(_ppid(pid, proc), proc) != "codex"
+
+
+def live_codex_sessions(proc: Path = _PROC) -> int:
+    """Interactive Codex sessions on this host; one CODEX_HOME is one account."""
+    try:
+        entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
+    except OSError:
+        return 0
+    return sum(1 for pid in entries if _is_interactive_codex(pid, proc))
 
 
 def handed_off_pids() -> set[int]:

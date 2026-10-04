@@ -1,10 +1,12 @@
 """Swarm agents as herdr panes: spawn through init-agent, find live ones by name, close through terminate-agent."""
 
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from scripts import agent_choice
 from scripts.swarm import prompt
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -21,15 +23,19 @@ def parse_fields(text):
 
 
 class HerdrRuntime:
-    def __init__(self, home=SWARM_HOME, run=subprocess.run):
-        self.home, self.run = home, run
+    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None):
+        self.home, self.run, self.choose = home, run, choose or agent_choice.choose
 
     def spawn(self, config, lane, name, task):
+        agent, reason = self.choose("", dict(os.environ))
+        if reason == agent_choice.ALL_FULL:
+            raise SpawnError(reason)
         path = self.home / config.slug / "prompts" / f"{name}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(prompt.build(config.slug, config.repo, lane, name, task), encoding="utf-8")
         path.chmod(0o600)
         argv = [_bin(), "init-agent", "--workspace", f"swarm-{config.slug}", "--dir", config.repo, "--name", name]
+        argv += ["--agent", agent]
         try:
             proc = self.run(
                 [*argv, "--prompt-file", str(path)], capture_output=True, text=True, timeout=SPAWN_TIMEOUT_S

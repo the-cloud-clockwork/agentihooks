@@ -93,7 +93,7 @@ Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
 - **Launch:** `agenti` (and `agentihooks init-agent`) picks the account
   with the most routing left (`min(5h left, 7d left)`) among accounts running
-  fewer than `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 2) live sessions.
+  fewer than `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 3) live sessions.
   When every account is at the cap, the least-loaded one takes the session
   (`placement=overflow`). `--route <slug>` forces one account and skips the cap.
 - **Status:** `agentihooks balance` shows `SESSIONS n/cap` per account from a

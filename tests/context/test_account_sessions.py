@@ -75,13 +75,23 @@ def test_handed_off_sessions_free_their_slot(tmp_path):
 
 
 def test_max_sessions_reads_the_env_var():
-    assert acc.max_sessions({}) == 2
-    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "3"}) == 3
+    assert acc.max_sessions({}) == 3
+    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "2"}) == 2
     assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "0"}) == 1
-    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "many"}) == 2
+    assert acc.max_sessions({acc.MAX_SESSIONS_ENV: "many"}) == 3
 
 
 def test_session_account_reads_the_agent_process(tmp_path):
     root = _tree(tmp_path)
 
     assert acc.session_account(102, root) == "beta"
+
+
+def test_live_codex_sessions_count_interactive_codex_only(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 200, "codex", 1, ["/home/u/.local/bin/codex"], {})
+    _proc(root, 201, "codex", 1, ["/home/u/.codex/packages/app-server-daemon/releases/1/bin/codex"], {})
+    _proc(root, 202, "codex-code-mode", 200, ["codex-code-mode"], {})
+    _proc(root, 203, "codex", 1, ["codex", "exec", "summarize"], {})
+    _proc(root, 204, "codex", 1, ["codex", "--yolo"], {})
+    assert acc.live_codex_sessions(root) == 2

@@ -38,7 +38,7 @@ account a session runs on. Token values are never printed or logged.
 1. Drop accounts with less than 5% **routing left**, where routing left is
    `100 − max(5h used, 7d used)`: the tighter of the two windows.
 2. Drop accounts already running `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` live
-   sessions (default 2), as long as another account is still below the cap.
+   sessions (default 3; Codex counts as one account with the same cap), as long as another account is still below the cap.
 3. Take the account with the most routing left.
 
 When every routable account is at the cap, the one with the fewest live sessions

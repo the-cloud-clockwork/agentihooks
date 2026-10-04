@@ -126,12 +126,22 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
             argv, 0, stdout="pane_id=w3:p1\nstatus=started\naccount=acct\nagent=codex\n", stderr=""
         )
 
-    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run)
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "sw-ci-1", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "sw-ci-1.md"
     assert placed == runtime.Placed("w3:p1", "codex", "acct")
-    assert seen[0][1:8] == ["init-agent", "--workspace", "swarm-sw", "--dir", "/repo", "--name", "sw-ci-1"]
+    assert seen[0][1:10] == [
+        "init-agent",
+        "--workspace",
+        "swarm-sw",
+        "--dir",
+        "/repo",
+        "--name",
+        "sw-ci-1",
+        "--agent",
+        "codex",
+    ]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
     text = prompt_path.read_text()
     assert "speed up the tests" in text and "CI speed" in text and "agentihooks swarm sw done --pr" in text
@@ -141,7 +151,7 @@ def test_runtime_spawn_failure_names_the_reason(tmp_path):
     def fail(argv, **kw):
         return subprocess.CompletedProcess(argv, 3, stdout="status=failed\n", stderr="herdr: no server\n")
 
-    rt = runtime.HerdrRuntime(home=tmp_path, run=fail)
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fail, choose=lambda r, e: ("claude", "priority"))
     with pytest.raises(runtime.SpawnError, match="no server"):
         rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
 
@@ -163,3 +173,15 @@ def test_agentihooks_dispatches_swarm(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         install.main()
     assert (exc.value.code, seen) == (0, [["list"]])
+
+
+def test_runtime_refuses_to_spawn_when_every_agent_is_full(tmp_path):
+    from scripts import agent_choice
+
+    calls = []
+    rt = runtime.HerdrRuntime(
+        home=tmp_path, run=lambda argv, **kw: calls.append(argv), choose=lambda r, e: ("claude", agent_choice.ALL_FULL)
+    )
+    with pytest.raises(runtime.SpawnError, match="session cap"):
+        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert calls == []
