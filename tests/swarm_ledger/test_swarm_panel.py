@@ -380,6 +380,12 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "max-ci-agents=2"])
 
+    def test_a_cap_label_targets_its_input_not_a_step_button(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        for lane in ("eng", "ci"):
+            label = re.search(rf"<label[^>]*>{lane} <button[^>]*data-swarm=\"{lane}_down\"", page).group(0)
+            self.assertIn(f'for="cap-{lane}"', label)
+
 
 if __name__ == "__main__":
     unittest.main()
