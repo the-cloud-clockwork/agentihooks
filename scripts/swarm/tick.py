@@ -164,8 +164,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting")
             store.put_agent(slug, record)
             try:
-                ledger.update_task(slug, task["id"], {"state": "claimed", "claimed_by": name})
-                task.update(state="claimed", claimed_by=name)
+                state = "pr" if task.get("pr_url") else "claimed"
+                ledger.update_task(slug, task["id"], {"state": state, "claimed_by": name})
+                task.update(state=state, claimed_by=name)
                 placed = runtime.spawn(config, lane, name, task)
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
