@@ -71,6 +71,14 @@ class Tasks(unittest.TestCase):
             ("done", "smoke-eng-1", "https://github.com/o/r/pull/2", True),
         )
 
+    def test_task_update_rewrites_the_description(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng", "description": "old spec"}])
+        update = op("task_update", 1, item="tasks/t1", fields={"description": "new spec"})
+        core.check_op(update)
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["tasks"][0]["description"], "new spec")
+
     def test_bad_lane_state_or_field_is_refused(self):
         make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
         for bad in (
