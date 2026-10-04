@@ -42,3 +42,9 @@ assert.equal(unreadCount([], 0), 0);
     def test_a_hidden_badge_is_not_drawn(self):
         page = TEMPLATE.read_text(encoding="utf-8")
         self.assertRegex(page, r"\.sync-badge\[hidden\][^{]*\{\s*display:\s*none;")
+
+    def test_notification_text_is_a_wide_clickable_target(self):
+        page = TEMPLATE.read_text(encoding="utf-8")
+        self.assertRegex(page, r"\.notif, \.chat-panel \{[^}]*width: min\(600px")
+        self.assertRegex(page, r"\.notif-text:hover[^{]*\{[^}]*background")
+        self.assertRegex(page, r'(?s)class: "notif-text".{0,240}?on: \{ click: \(ev\) => \{ if \(!getSelection\(\)\.toString\(\)\) jumpToNotice\(ev, n\.item\)')
