@@ -74,11 +74,47 @@ class AgentSpec:
     fallback_bare: bool = True
 
 
-def _agent_command(spec: AgentSpec, report: Path, name: str, agent_args: list[str]) -> tuple[list[str], str]:
+def _collector(environ: dict[str, str]) -> str:
+    return environ.get("AGENTIHOOKS_OTEL_COLLECTOR", "").rstrip("/")
+
+
+def _telemetry_exports(name: str, environ: dict[str, str]) -> str:
+    collector = _collector(environ)
+    if not collector:
+        return ""
+    attributes = [
+        ("swarm", environ.get("AGENTIHOOKS_SWARM", "")),
+        ("agent", name),
+        ("lane", environ.get("AGENTIHOOKS_SWARM_LANE", "")),
+        ("task", environ.get("AGENTIHOOKS_SWARM_TASK", "")),
+    ]
+    resource = ",".join(f"{key}={value}" for key, value in attributes if value)
+    exports = {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+        "OTEL_METRICS_EXPORTER": "otlp",
+        "OTEL_LOGS_EXPORTER": "otlp",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": collector,
+        "OTEL_RESOURCE_ATTRIBUTES": resource,
+    }
+    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
+
+
+def _codex_otel_args(environ: dict[str, str]) -> list[str]:
+    collector = _collector(environ)
+    if not collector:
+        return []
+    return ["-c", f'otel.exporter={{otlp-http={{endpoint="{collector}/v1/logs",protocol="binary"}}}}']
+
+
+def _agent_command(
+    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str]
+) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`; Codex runs directly."""
     if spec.agent == "codex":
         return [
             shutil.which("codex") or "codex",
+            *_codex_otel_args(environ),
             *agent_args,
         ], f"printf 'status=direct\\n' > {shlex.quote(str(report))}\n"
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
@@ -113,7 +149,7 @@ def _write_launcher(
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
 
-    command, before = _agent_command(spec, _route_report(launcher), name, claude_args)
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ)
     if prompt_file is not None:
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
     else:
@@ -131,6 +167,7 @@ def _write_launcher(
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"{_telemetry_exports(name, environ)}"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
