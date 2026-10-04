@@ -39,17 +39,40 @@ MAX_BODY = 1 << 20
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 
 
-def index_page():
-    rows = []
+def ledger_summaries():
+    found = []
     for path in sorted(core.LEDGER_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
-        slug = html.escape(path.stem)
-        rows.append(f'<li><a href="/{slug}">{slug}</a></li>')
+        json_path = core.paths(path.stem)[1]
+        try:
+            seed = core.parse_seed(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            seed = None
+        try:
+            doc, _, _ = core.load_state(json_path, seed)
+        except (ValueError, OSError):
+            continue
+        found.append({"slug": path.stem, "title": doc.get("title") or path.stem, "overview": doc.get("overview") or ""})
+    return found
+
+
+def index_page():
+    rows = [
+        f'<li><a href="/{html.escape(s["slug"])}">{html.escape(s["title"])}</a><p>{html.escape(s["overview"])}</p></li>'
+        for s in ledger_summaries()
+    ]
     body = "\n".join(rows) or "<li>No ledgers yet.</li>"
     return (
-        "<!doctype html><meta charset=utf-8><title>Ledgers</title>"
-        "<style>body{background:#04060d;color:#f8fafc;font:14px/1.6 system-ui,sans-serif;padding:32px}"
-        "a{color:#60a5fa}h1{font-size:22px;border-bottom:1px solid #ef4444;padding-bottom:8px}</style>"
-        f"<h1>Development ledgers</h1><ul>{body}</ul>"
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>HOME</title>"
+        "<style>html{color-scheme:dark}body{margin:0;min-height:100vh;color:#f8fafc;"
+        "font:14px/1.6 ui-sans-serif,system-ui,sans-serif;"
+        "background:radial-gradient(1100px 620px at 8% -12%,rgba(29,78,216,.42),transparent 62%),#03050b}"
+        "main{max-width:900px;margin:0 auto;padding:40px 16px 96px}"
+        "h1{font-size:30px;line-height:1.2;font-weight:650;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #ef4444}"
+        "ul{margin:0;padding-left:20px}li{padding:10px 0;border-top:1px solid rgba(255,255,255,.06)}"
+        "li:first-child{border-top:0}a{color:#60a5fa;font-size:15px;font-weight:600;text-decoration:none}"
+        "a:hover{text-decoration:underline}p{margin:2px 0 0;color:#9aa8bd;overflow-wrap:anywhere}</style>"
+        f"<main><h1>HOME</h1><ul>{body}</ul></main>"
     )
 
 
