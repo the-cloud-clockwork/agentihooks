@@ -1,0 +1,2 @@
+playwright
+opentelemetry-exporter-otlp-proto-grpc
