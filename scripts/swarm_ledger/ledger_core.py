@@ -24,6 +24,7 @@ import ledger_comments
 import ledger_notifications
 import ledger_priorities
 import ledger_tasks
+import ledger_title
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -78,7 +79,9 @@ MISSING = object()
 LOCK = threading.Lock()
 
 EXTENSION_OPS = {
-    name: module for module in (ledger_priorities, ledger_notifications, ledger_tasks) for name in module.OPS
+    name: module
+    for module in (ledger_priorities, ledger_notifications, ledger_tasks, ledger_title)
+    for name in module.OPS
 }
 
 
