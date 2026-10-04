@@ -107,6 +107,42 @@ def swarm_status(slug):
         return None
 
 
+CONTROLS = {"start": ["start"], "pause": ["pause"], "stop": ["stop"], "stop_now": ["stop", "--now"]}
+MAX_CAP = 50
+
+
+def control_argv(body):
+    action = body.get("action") if isinstance(body, dict) else None
+    if action in CONTROLS:
+        return CONTROLS[action]
+    if action != "set":
+        raise ValueError("action must be start, pause, stop, stop_now or set")
+    pairs = []
+    for key, flag in (("max_eng", "max-eng-agents"), ("max_ci", "max-ci-agents")):
+        value = body.get(key)
+        if value is None:
+            continue
+        if type(value) is not int or not 0 <= value <= MAX_CAP:
+            raise ValueError(f"{key} must be a whole number from 0 to {MAX_CAP}")
+        pairs.append(f"{flag}={value}")
+    if not pairs:
+        raise ValueError("set needs max_eng or max_ci")
+    return ["set", *pairs]
+
+
+def swarm_control(slug, argv):
+    exe = shutil.which("agentihooks")
+    if not exe:
+        return None, "agentihooks is not on PATH"
+    try:
+        done = subprocess.run([exe, "swarm", slug, *argv], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+    if done.returncode != 0:
+        return None, (done.stderr or done.stdout).strip() or "swarm command failed"
+    return swarm_status(slug), ""
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
@@ -183,10 +219,29 @@ class Handler(BaseHTTPRequestHandler):
             return None if self.refused(slug) else self.reply_state(slug)
         return self.send(200, page_for(slug), "text/html; charset=utf-8")
 
+    def put_swarm(self, slug):
+        if not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        if self.refused(slug):
+            return None
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= MAX_BODY:
+                raise ValueError("body size out of range")
+            argv = control_argv(core.loads(self.rfile.read(length) or b"{}"))
+        except ValueError as exc:
+            return self.send(400, str(exc), "text/plain")
+        status, error = swarm_control(slug, argv)
+        if error:
+            return self.send(502, error, "text/plain")
+        return self.send(200, json.dumps(status), "application/json")
+
     def do_PUT(self):
         slug = self.slug()
         if self.refused():
             return None
+        if slug.startswith("swarm/"):
+            return self.put_swarm(slug.removeprefix("swarm/"))
         if not self.path.startswith("/api/") or not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         if self.refused(slug):

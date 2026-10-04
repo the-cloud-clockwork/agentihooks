@@ -86,6 +86,78 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 403)
         run.assert_not_called()
 
+    def put(self, body, token=True):
+        headers = {"Host": f"127.0.0.1:{server.PORT}", "Content-Type": "application/json"}
+        if token:
+            headers["X-Ledger-Token"] = self.token
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/swarm/{SLUG}", json.dumps(body).encode(), headers, method="PUT"
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode()
+
+    def control(self, body, result=None):
+        result = result or completed(0, json.dumps(STATUS))
+        with (
+            patch.object(server.shutil, "which", return_value="agentihooks"),
+            patch.object(server.subprocess, "run", return_value=result) as run,
+        ):
+            code, text = self.put(body)
+        return code, text, run
+
+    def test_controls_run_the_matching_swarm_command(self):
+        cases = {
+            "start": ["start"],
+            "pause": ["pause"],
+            "stop": ["stop"],
+            "stop_now": ["stop", "--now"],
+        }
+        for action, argv in cases.items():
+            code, _, run = self.control({"action": action})
+            self.assertEqual(code, 200)
+            self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, *argv])
+
+    def test_set_passes_both_caps_and_returns_fresh_status(self):
+        code, text, run = self.control({"action": "set", "max_eng": 3, "max_ci": 0})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(text), STATUS)
+        self.assertEqual(
+            run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=0"]
+        )
+
+    def test_bad_requests_never_run_the_cli(self):
+        for body in (
+            {"action": "kill"},
+            {"action": "set"},
+            {"action": "set", "max_eng": -1},
+            {"action": "set", "max_eng": "x"},
+            {"action": "set", "max_ci": True},
+            {"action": "set", "max_eng": 999},
+        ):
+            code, _, run = self.control(body)
+            self.assertEqual(code, 400, body)
+            run.assert_not_called()
+
+    def test_control_needs_the_ledger_token(self):
+        with patch.object(server.subprocess, "run") as run:
+            code, _ = self.put({"action": "start"}, token=False)
+        self.assertEqual(code, 403)
+        run.assert_not_called()
+
+    def test_cli_failure_is_502_with_its_message(self):
+        code, text, _ = self.control({"action": "start"}, completed(1, "", "swarm: no swarm x"))
+        self.assertEqual(code, 502)
+        self.assertIn("no swarm x", text)
+
+    def test_page_has_controls_wired_to_the_endpoint(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        for control in ("start", "pause", "stop", "stop_now", "max_eng", "max_ci"):
+            self.assertIn(f'data-swarm="{control}"', page)
+        self.assertIn('method: "PUT"', page)
+
     def test_page_has_a_hidden_swarm_panel_filled_from_the_endpoint(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIn('id="swarm-box" hidden', page)
