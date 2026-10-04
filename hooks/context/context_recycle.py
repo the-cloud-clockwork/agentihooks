@@ -5,7 +5,7 @@ from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
 from hooks.context.context_usage import used_tokens
 from scripts.codex_context import codex_context
 
-_AGENT_NAME = re.compile(r"^(?P<slug>[a-z][a-z0-9-]*)-(?:eng|ci)-\d+$")
+_AGENT_NAME = re.compile(r"^(?P<slug>[a-z][a-z0-9-]*)-(?:eng|ci|master)-\d+$")
 
 _DIRECTIVE = (
     "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "

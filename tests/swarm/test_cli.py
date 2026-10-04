@@ -87,7 +87,7 @@ def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypa
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
     run("sw", "done", "--pr", "https://github.com/o/r/pull/4")
     assert run("sw", "stop", "--now") == 0
-    assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1"]
+    assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1", "sw-master-1"]
     assert store.config("sw").state == "stopped" and store.agents("sw") == []
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "done")
 
@@ -320,3 +320,50 @@ def test_set_compact_limit_stores_it_on_the_swarm(env, capsys):
     assert run("sw", "set", "compact-limit=40") == 0
     assert store.config("sw").compact_limit == 40
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["compact_limit"] == 40
+
+
+def test_the_master_takes_no_task_commands(env, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
+    for argv in (("issue", "https://x/issues/1"), ("pr", "https://x/pull/1"), ("done",), ("block", "why")):
+        assert run("sw", "--as", "sw-master-1", *argv) == 1
+        assert "master works no task" in capsys.readouterr().err
+    assert ledger.comments == [] and [a.state for a in store.agents("sw")] == ["working"]
+
+
+def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
+    doc = tmp_path / "handoff.md"
+    doc.write_text("operator asked for a docs task")
+    assert run("sw", "--as", "sw-master-1", "handoff", str(doc)) == 0
+    assert store.handoff("sw", "master") == "operator asked for a docs task"
+    assert [a.state for a in store.agents("sw")] == ["finished"]
+
+
+def test_master_prompt_runs_the_swarm_and_never_codes():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "master", "sw-master-2", {"id": "master", "handoff": "caps go to four"})
+    led = "agentihooks ledger --slug sw --as sw-master-2"
+    for needle in (
+        f"{led} join --role orchestrator",
+        "agentihooks ledger watch sw --as sw-master-2",
+        f"{led} ack",
+        f"{led} task add",
+        f"{led} time-left",
+        f"{led} followup add",
+        "agentihooks swarm sw say --to operator",
+        "agentihooks swarm sw send-message",
+        "agentihooks swarm sw set max-eng-agents=",
+        "agentihooks swarm sw pause",
+        "agentihooks swarm sw stop",
+        "agentihooks swarm sw handoff",
+        "browser_close",
+        "caps go to four",
+    ):
+        assert needle in text, needle
+    assert "never edit code, commit or merge" in text
+    assert "wt.sh new" not in text and "done --pr" not in text

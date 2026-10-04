@@ -7,6 +7,8 @@ import json
 import time
 import uuid
 
+from scripts.swarm.store import MASTER
+
 READY = ("idle", "done")
 EXPIRE_MS = 30 * 60 * 1000
 FLUSH_LOCK_MS = 120 * 1000
@@ -93,9 +95,17 @@ def start_cursor(store, slug, entries):
     store.redis.set(store.key(slug, "chat-cursor"), latest_at(entries))
 
 
+def master_name(store, slug):
+    return next((a.name for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"), "")
+
+
 def relay_operator_chat(store, slug, entries, herdr):
-    """Send every operator chat entry newer than the swarm's cursor; a leading @name, @eng or @ci addresses it."""
+    """Send every operator chat entry newer than the swarm's cursor; a leading @name, @eng or @ci addresses it.
+
+    An unaddressed entry, or one for an agent not in the swarm, goes to the master, or to everyone without one.
+    """
     cursor_key = store.key(slug, "chat-cursor")
+    master = master_name(store, slug)
     cursor = int(store.redis.get(cursor_key) or 0)
     fresh = [
         e for e in entries if e.get("by", "operator") == "operator" and e.get("at", 0) > cursor and not e.get("deleted")
@@ -104,7 +114,7 @@ def relay_operator_chat(store, slug, entries, herdr):
         text, to = entry.get("text", ""), ""
         if text.startswith("@") and " " in text:
             to, text = text[1:].split(" ", 1)
-        if not send(store, slug, text, sender="operator", to=to, herdr=herdr) and to:
-            send(store, slug, f"(to {to}, who is not in the swarm) {text}", sender="operator", to="", herdr=herdr)
+        if not send(store, slug, text, sender="operator", to=to or master, herdr=herdr) and to:
+            send(store, slug, f"(to {to}, who is not in the swarm) {text}", sender="operator", to=master, herdr=herdr)
         store.redis.set(cursor_key, entry["at"])
     return len(fresh)

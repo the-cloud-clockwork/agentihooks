@@ -24,8 +24,23 @@ A swarm is a herdr workspace named `swarm-<id>`. Its agents work the tasks of on
 |---|---|
 | `eng` | An engineer working a code task end to end with the dev-cycle skill. |
 | `ci` | A CI engineer whose only job is CI speed; it adds each further bottleneck as a new `ci` task. |
+| `master` | The one agent the operator talks to. It works no task and never edits code, commits or merges. |
 
-The session that starts the swarm stays out of the work and speaks for the operator.
+## The master
+
+Every swarm that is not stopped keeps exactly one master, named `<id>-master-<n>`. The tick spawns it when the
+swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
+does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
+
+Its opening prompt makes it join the ledger as orchestrator under a watch Monitor, answer every operator chat
+message on the page and in its herdr pane, keep phases, follow ups, time left and status comments current, turn
+operator requests into tasks with full specs, rewrite task descriptions, set caps, pause or stop the swarm,
+talk to agents, and check merged UI work in a real browser, closing the shared browser after.
+
+The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
+`agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
+so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
+ledger page shows the master as the first card.
 
 ## Commands
 
@@ -83,10 +98,11 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 1. Retire agents that finished.
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
 3. Reopen claimed tasks that have no agent.
-4. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
+4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left.
+5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap.
-5. Mark the swarm `stopped` or `drained` when no agent is left and nothing remains to do.
-6. Relay operator chat and deliver queued messages.
+6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
+7. Relay operator chat and deliver queued messages.
 
 A lock keeps two ticks from running at once.
 
@@ -104,7 +120,9 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
 
 ## Talking to the swarm
 
-- Operator: the chat on the ledger page, or `agentihooks swarm <id> send-message "@eng <text>"`.
+- Operator: the chat on the ledger page, or `agentihooks swarm <id> send-message "@eng <text>"`. A message with
+  no `@` address, or one for an agent not in the swarm, goes to the master; without a master, to everyone. The
+  master answers on the page with `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `eng` or `ci`.
 
 A message reaches an idle agent's pane at once. A busy agent's message waits in the Redis outbox, and every

@@ -97,3 +97,25 @@ def test_an_unknown_addressee_goes_to_everyone_with_a_note(store):
     herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
     delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "@nobody hi"}], herdr)
     assert len(herdr.prompts) == 3 and "not in the swarm" in herdr.prompts[0][1]
+
+
+def test_unaddressed_operator_chat_goes_to_the_master_when_one_is_online(store):
+    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle", "m1": "idle"})
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1"))
+    chat = [
+        {"id": "a", "by": "operator", "at": 5, "text": "how far along are we"},
+        {"id": "b", "by": "operator", "at": 6, "text": "@eng rebase on dev"},
+        {"id": "c", "by": "operator", "at": 7, "text": "@nobody hi"},
+    ]
+    delivery.relay_operator_chat(store, "sw", chat, herdr)
+    assert herdr.prompts[0] == ("m1", "[swarm chat] operator: how far along are we")
+    assert sorted(p for p, _ in herdr.prompts[1:3]) == ["p1", "p2"]
+    assert herdr.prompts[3][0] == "m1" and "not in the swarm" in herdr.prompts[3][1]
+    assert len(herdr.prompts) == 4
+
+
+def test_a_finished_master_does_not_take_the_chat(store):
+    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle", "m1": "idle"})
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", state="finished"))
+    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "hi"}], herdr)
+    assert sorted(p for p, _ in herdr.prompts) == ["p1", "p2", "p3"]

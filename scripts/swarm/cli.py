@@ -23,7 +23,7 @@ from pathlib import Path
 from scripts.swarm import delivery, timer
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
-from scripts.swarm.store import SwarmConfig, SwarmError, connect
+from scripts.swarm.store import MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, tick
 
 SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
@@ -176,20 +176,27 @@ def _me(store, args):
     return agent
 
 
-def cmd_issue(store, args):
+def _worker(store, args):
     agent = _me(store, args)
+    if agent.lane == MASTER:
+        raise SwarmError(f"{agent.name} is the swarm master; the master works no task")
+    return agent
+
+
+def cmd_issue(store, args):
+    agent = _worker(store, args)
     LedgerClient().update_task(args.slug, agent.task, {"issue_url": args.url}, by=agent.name)
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
 def cmd_pr(store, args):
-    agent = _me(store, args)
+    agent = _worker(store, args)
     LedgerClient().update_task(args.slug, agent.task, {"pr_url": args.url, "state": "pr"}, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url}))
 
 
 def cmd_done(store, args):
-    agent = _me(store, args)
+    agent = _worker(store, args)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {})}
     LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
     _retire(store, args.slug, agent)
@@ -197,7 +204,7 @@ def cmd_done(store, args):
 
 
 def cmd_block(store, args):
-    agent = _me(store, args)
+    agent = _worker(store, args)
     ledger = LedgerClient()
     ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
