@@ -419,3 +419,24 @@ def test_explicit_model_and_effort_flags_win_over_defaults(tmp_path):
     line = _command_line(tmp_path, {}, "claude", ["--model", "sonnet", "--effort", "low"])
     assert "opus" not in line and "--effort high" not in line
     assert "--model sonnet --effort low" in line
+
+
+def test_model_effort_names_what_the_launch_uses(tmp_path):
+    assert init_agent.model_effort("claude", [], {}) == ("opus", "high")
+    assert init_agent.model_effort("codex", [], {"AGENTIHOOKS_CODEX_EFFORT": "xhigh"}) == ("gpt-6.1-sol", "xhigh")
+    assert init_agent.model_effort("claude", ["--model", "sonnet", "--effort=low"], {}) == ("sonnet", "low")
+    assert init_agent.model_effort("codex", ["-m", "o3", "-c", 'model_reasoning_effort="low"'], {}) == ("o3", "low")
+
+
+def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    rc = init_agent.main(
+        ["--dir", str(tmp_path), "--dry-run", "--", "--model", "fable"],
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt"), "SHELL": "/bin/bash"},
+    )
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0 and "model=fable" in out and "effort=high" in out

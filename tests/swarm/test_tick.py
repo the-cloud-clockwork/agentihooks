@@ -39,7 +39,7 @@ class FakeRuntime:
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
         self.live.add(name)
-        return Placed(pane_id=f"w1:p{len(self.spawned)}", harness="claude", account="acct")
+        return Placed(pane_id=f"w1:p{len(self.spawned)}", harness="claude", account="acct", model="opus", effort="high")
 
     def live_names(self):
         return set(self.live)
@@ -231,3 +231,9 @@ def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
     assert runtime.tasks[-1]["handoff"] == "seam 1 green, seam 2 red"
     assert ledger.rows["t1"]["claimed_by"] == "sw-eng-2"
     assert store.handoff("sw", "t1") == ""
+
+
+def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+    (agent,) = store.agents("sw")
+    assert (agent.model, agent.effort) == ("opus", "high")

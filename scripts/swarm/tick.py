@@ -30,6 +30,8 @@ class Placed:
     pane_id: str
     harness: str
     account: str = ""
+    model: str = ""
+    effort: str = ""
 
 
 class Ledger(Protocol):
@@ -93,6 +95,14 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.retire(agent, False)
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
+
+
+def agent_status(agent):
+    if agent.state == "finished":
+        return "finished"
+    if agent.idle_ticks >= IDLE_NUDGE_TICKS:
+        return "stalled"
+    return "idle" if agent.idle_ticks else "working"
 
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent):
@@ -161,7 +171,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             store.put_agent(
                 slug,
                 replace(
-                    record, pane_id=placed.pane_id, harness=placed.harness, account=placed.account, state="working"
+                    record,
+                    pane_id=placed.pane_id,
+                    harness=placed.harness,
+                    account=placed.account,
+                    model=placed.model,
+                    effort=placed.effort,
+                    state="working",
                 ),
             )
             store.clear_handoff(slug, task["id"])
