@@ -208,6 +208,7 @@ def test_warm_cache_covers_every_unit_python_version():
     )
     (step,) = [s for s in jobs["warm-cache"]["steps"] if s.get("uses", "").startswith("actions/setup-python")]
     assert step["with"]["python-version"] == "${{ matrix.python-version }}"
+    assert step["uses"] == _setup_python_steps("unit")[0]["uses"]
 
 
 def test_warm_cache_writes_the_key_the_unit_shards_restore():
