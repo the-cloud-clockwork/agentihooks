@@ -13,8 +13,14 @@ argument-hint: "[--dir PATH] [--name NAME] [--prompt-file PATH] [-- <claude flag
 # Init Agent
 
 `agentihooks init-agent` owns host detection, terminal quoting, OAuth
-account routing, and the start check. Never build a `wt.exe`, `osascript`, or
-terminal command by hand.
+account routing, and the start check. Never build a `herdr`, `wt.exe`,
+`osascript`, or terminal command by hand.
+
+The session opens in herdr when herdr is installed and enabled, otherwise in a
+native terminal tab (Windows Terminal, macOS Terminal, a Linux emulator).
+`AGENTIHOOKS_TERMINAL_HOST=herdr|native` or `--host` overrides that. When herdr
+was chosen automatically and fails, the launch falls back to a native tab and
+reports `herdr_error`.
 
 ## 1. Map the request
 
@@ -27,11 +33,18 @@ terminal command by hand.
 | resume a session | `-- --resume <session-id>` |
 | fork a session | `-- --resume <session-id> --fork-session` |
 | any other Claude flag | after `--`, unchanged |
+| "next to me", "split" (caller runs inside herdr) | `--placement split` |
+| "in its own workspace" | `--placement workspace` |
+| a crew ("for crew alpha", "in the alpha workspace") | `--workspace <crew-label>` — every member gets a tab in that workspace |
+| "in Windows Terminal", "not in herdr" | `--host native` |
 
 Rules:
 
-- Launcher options (`--dir`, `--name`, `--prompt-file`, `--dry-run`,
-  `--start-timeout`) go before `--`. Everything after `--` reaches Claude
+- Default herdr placement: a new tab in the caller's herdr workspace; outside
+  herdr, a tab in the workspace named after the repository of `--dir`, created
+  when missing.
+- Launcher options (`--dir`, `--name`, `--prompt-file`, `--host`,
+  `--placement`, `--workspace`, `--dry-run`, `--start-timeout`) go before `--`. Everything after `--` reaches Claude
   verbatim; put nothing else there.
 - Write every opening prompt to a file with a quoted heredoc and pass
   `--prompt-file`. The quoted heredoc keeps apostrophes, quotes, `$`, and
@@ -92,8 +105,10 @@ handed off.
 The command waits until the new terminal has started the launcher and the new
 session has reported its route, then prints `key=value` lines: `status=started`,
 `route_status` (`routed`, `bare`, `failed` or `pending`), and `account` when
-routed. Exit zero is the completion criterion; report `directory`, `name`,
-`host`, `account`, and `claude_args` from its output.
+routed. In herdr it also prints `workspace_id`, `tab_id`, `pane_id` and
+`agent_name` (the name herdr's agent list shows). Exit zero is the completion
+criterion; report `directory`, `name`, `host`, `account`, `pane_id` when present,
+and `claude_args` from its output.
 
 On a non-zero exit, report stderr verbatim. A start timeout discards the
 launcher, so a late terminal cannot open a second session; relaunch at most

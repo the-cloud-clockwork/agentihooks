@@ -320,6 +320,12 @@ Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
 `--handoff`.
 
+Hosts: herdr when installed and not disabled (`state.json` `herdr.enabled`), else
+the native terminal. `--host herdr|native` or `AGENTIHOOKS_TERMINAL_HOST` overrides.
+In herdr the session opens as a tab in the caller's workspace, in `--workspace
+<label>` (crew), or in the repository's workspace; `--placement split|workspace`
+changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_name`.
+
 ---
 
 ## `agentihooks herdr`
