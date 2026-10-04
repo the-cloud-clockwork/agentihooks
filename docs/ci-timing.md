@@ -13,3 +13,5 @@ Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 3537946829
 Slowest step: Run tests in the unit job. The two matrix jobs already run in parallel, and lint finishes in under 10 seconds. Dependency install is the largest remaining cost and is recorded as ledger task ci-pip-cache.
 
 Run tests took 55 to 84 seconds per matrix job on a single process. The Tests workflow now runs pytest with `-n auto` (pytest-xdist); locally four workers take the suite from 82 to 34 seconds. Re-measure this table after the first runs on dev.
+
+The unit job now runs each Python version as four shards on four runners (pytest-split, `--splitting-algorithm least_duration`), each shard still on `-n auto`. Shards are balanced from `.test_durations`; refresh it with `python -m pytest tests/ -n 4 --store-durations` when the split drifts. Locally the four shards take 8.6 to 9.9 seconds each with two workers.
