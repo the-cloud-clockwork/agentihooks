@@ -37,7 +37,7 @@ Commands:
         --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the cap.
         Alias: agenti (added to ~/.bashrc by init)
 
-    agentihooks claude-terminal [launcher options] [--handoff] -- [claude flags]
+    agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
         Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
         --handoff moves this session's work to another account (quota handoff).
 
@@ -6267,8 +6267,8 @@ def main() -> None:
     if _argv and _argv[0] == "claude":
         cmd_claude(_argv[1:])
         return
-    if _argv and _argv[0] == "claude-terminal":
-        from scripts.claude_terminal import main as terminal_main
+    if _argv and _argv[0] == "init-agent":
+        from scripts.init_agent import main as terminal_main
 
         raise SystemExit(terminal_main(_argv[1:]))
     if _argv and _argv[0] == "serena":
@@ -6283,10 +6283,10 @@ def main() -> None:
         from scripts.deps_preflight import main as deps_main
 
         raise SystemExit(deps_main(_argv[1:]))
-    if _argv and _argv[0] == "kill-agent":
-        from scripts.kill_agent import main as kill_agent_main
+    if _argv and _argv[0] == "terminate-agent":
+        from scripts.terminate_agent import main as terminate_agent_main
 
-        raise SystemExit(kill_agent_main(_argv[1:]))
+        raise SystemExit(terminate_agent_main(_argv[1:]))
     if _argv and _argv[0] in ("gc", "lease", "scratch"):
         from scripts.gc_cli import main as gc_main
 
@@ -6405,8 +6405,8 @@ def main() -> None:
     )
 
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
-    sub.add_parser("claude-terminal", help="Open a routed Claude session in a new terminal")
-    sub.add_parser("kill-agent", help="List or terminate a Claude Code or Codex session")
+    sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
+    sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Plan ledger: agent CLI, or new|serve|watch|chat <args>")
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.kill_agent import Process, Session, main, resolve, validate
+from scripts.terminate_agent import Process, Session, main, resolve, validate
 
 
 def process(pid, *, ppid=1, pgid=None, sid=None, start=100, comm="claude", argv=()):
@@ -40,17 +40,19 @@ def test_validate_rejects_shared_process_without_override(monkeypatch):
         190: process(190, pgid=190, sid=190, comm="bash", argv=("bash", "launcher")),
         200: item.process,
     }
-    monkeypatch.setattr("scripts.kill_agent.processes", lambda proc=Path("/proc"): table)
-    monkeypatch.setattr("scripts.kill_agent.os.getpid", lambda: 100)
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.os.getpid", lambda: 100)
     with pytest.raises(ValueError, match="shared"):
         validate(item, [item, other])
 
 
 def test_main_dry_run_sends_no_signal(monkeypatch, capsys):
     item = session(name="engineer-270926-2337-b")
-    monkeypatch.setattr("scripts.kill_agent.sessions", lambda: [item])
-    monkeypatch.setattr("scripts.kill_agent.validate", lambda selected, items, force_shared=False: [selected.process])
-    with patch("scripts.kill_agent.os.killpg") as killpg:
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    with patch("scripts.terminate_agent.os.killpg") as killpg:
         assert main(["engineer-270926-2337-b", "--type", "claude", "--dry-run"]) == 0
     killpg.assert_not_called()
     assert "result=validated signal=none" in capsys.readouterr().out
@@ -58,26 +60,28 @@ def test_main_dry_run_sends_no_signal(monkeypatch, capsys):
 
 def test_main_terminates_after_validation(monkeypatch, capsys):
     item = session()
-    monkeypatch.setattr("scripts.kill_agent.sessions", lambda: [item])
-    monkeypatch.setattr("scripts.kill_agent.validate", lambda selected, items, force_shared=False: [selected.process])
-    monkeypatch.setattr("scripts.kill_agent.terminate", lambda selected, members, timeout: True)
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: True)
     assert main(["uuid-1", "--type", "claude"]) == 0
     assert "result=terminated escalation=SIGKILL" in capsys.readouterr().out
 
 
 def test_terminate_uses_process_group(monkeypatch):
-    from scripts.kill_agent import terminate
+    from scripts.terminate_agent import terminate
 
     item = session()
     calls = []
-    monkeypatch.setattr("scripts.kill_agent._alive", lambda identities, proc: [])
-    monkeypatch.setattr("scripts.kill_agent.os.killpg", lambda pgid, sig: calls.append((pgid, sig)))
+    monkeypatch.setattr("scripts.terminate_agent._alive", lambda identities, proc: [])
+    monkeypatch.setattr("scripts.terminate_agent.os.killpg", lambda pgid, sig: calls.append((pgid, sig)))
     assert terminate(item, [item.process], 0.1) is False
     assert calls == [(190, signal.SIGTERM)]
 
 
 def test_terminate_real_isolated_process_group():
-    from scripts.kill_agent import _process, terminate
+    from scripts.terminate_agent import _process, terminate
 
     child = subprocess.Popen(["sleep", "30"], start_new_session=True)
     try:

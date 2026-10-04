@@ -1,14 +1,14 @@
 ---
-name: get-current-balance
+name: get-agents-quota
 description: >
   Name the Claude OAuth account (the AH_CC_TOKEN_<slug>) the running session is
   routed to and show the quota table for every account. Use when the operator
-  says "get current balance", "get-current-balance", "which account am I on",
+  says "get agents quota", "get-agents-quota", "get current balance", "which account am I on",
   "what balance is this session using", or asks which slug or quota the current
   session runs on.
 ---
 
-# Get Current Balance
+# Get Agents Quota
 
 `agentihooks balance --current` owns detection, the probe, and the cache read.
 Never read `/proc`, dotenv files, or token variables by hand.

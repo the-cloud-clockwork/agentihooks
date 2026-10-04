@@ -299,13 +299,13 @@ The launch line reports `account`, `routing_left`, `sessions=n/cap`, and
 
 ---
 
-## `agentihooks claude-terminal`
+## `agentihooks init-agent`
 
 Open a routed Claude session in a new terminal (WSL, macOS, native Linux).
 
 ```bash
-agentihooks claude-terminal --dir ~/dev/repo --name fix-x --prompt-file task.md -- --model opus
-agentihooks claude-terminal --handoff --dir "$PWD" --name repo-handoff --prompt-file handoff.md
+agentihooks init-agent --dir ~/dev/repo --name fix-x --prompt-file task.md -- --model opus
+agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file handoff.md
 ```
 
 | Flag | Meaning |

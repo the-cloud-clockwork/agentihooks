@@ -45,7 +45,7 @@ for compliance.
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 | Serena refuses, or which worktrees hold a backend | `agentihooks serena status` (page http://127.0.0.1:8643/); router down → `agentihooks serena restart` |
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
-| A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `claude-terminal` sessions restart at their next stop |
+| A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
@@ -57,14 +57,16 @@ run when the operator uses one of their trigger phrases.
 
 | Skill | Use | Example |
 |---|---|---|
-| `get-current-balance` | Identify this Claude session's routed OAuth account and show every account's quota and live-session count. | `$get-current-balance` or "which account am I on?" |
-| `kill-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$kill-agent engineer-a`; list with `$kill-agent --list --type any` |
+| `get-agents-quota` | Identify this Claude session's routed OAuth account and show every account's quota and live-session count. | `$get-agents-quota` or "which account am I on?" |
+| `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
 | `multi-agent-chat` | Open or join a file-backed room when participants run under different agent harnesses. This skill is explicit-only. | `$multi-agent-chat --name codex-a --topic "review"`; join with `$multi-agent-chat --target <room-id> --name claude-b` |
-| `run-claude-terminal` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$run-claude-terminal --dir ~/dev/project --name engineer-a -- --model opus` |
+| `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
+| `run-in-terminal` | Run any command in a directory in a new terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
 
 The deterministic CLI primitives behind these skills are respectively
-`agentihooks balance --current`, `agentihooks kill-agent`, the scripts shipped
-with `multi-agent-chat`, and `agentihooks claude-terminal`. Follow each
+`agentihooks balance --current`, `agentihooks terminate-agent`, the scripts shipped
+with `multi-agent-chat`, `agentihooks init-agent`, and the scripts shipped with
+`run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
 ## Conditions
@@ -90,7 +92,7 @@ repository's own conditions folder (trusted repositories only).
 
 Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
-- **Launch:** `agenti` (and `agentihooks claude-terminal`) picks the account
+- **Launch:** `agenti` (and `agentihooks init-agent`) picks the account
   with the most routing left (`min(5h left, 7d left)`) among accounts running
   fewer than `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` (default 2) live sessions.
   When every account is at the cap, the least-loaded one takes the session
@@ -104,7 +106,7 @@ Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
 | Directive | Fires when | Do |
 |---|---|---|
-| `QUOTA HANDOFF REQUIRED` | 7d used ≥ 98%, or 5h used ≥ 99% while another account has room | Write the handoff document at the path given, run the `agentihooks claude-terminal --handoff …` command given, report where the work moved, stop |
+| `QUOTA HANDOFF REQUIRED` | 7d used ≥ 98%, or 5h used ≥ 99% while another account has room | Write the handoff document at the path given, run the `agentihooks init-agent --handoff …` command given, report where the work moved, stop |
 | `QUOTA WAIT` | 5h used ≥ 99%, the week has ≥ 10% left, and no other account qualifies | `CronCreate` the one-shot job given for the 5h reset, tell the operator when work resumes, stop |
 | `QUOTA STOP` | Nothing has room | Stop and tell the operator to add another account or say "keep pushing" |
 | `QUOTA PUSH` | The operator said "keep pushing" | Continue on this account until 100% |

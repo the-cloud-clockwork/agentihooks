@@ -56,7 +56,7 @@ AgentiHooks is organized around four pillars. When working on this codebase, und
 | **Identity** | `scripts/install.py`, `profiles/`, `settings.base.json`, `scripts/targets/` | Profile system, chaining, two-axis model, bundle merge, install targets |
 | **Guardrails** | `hooks/secrets.py`, `hooks/context/retry_breaker.py`, `hooks/context/branch_guard.py`, `hooks/context/prod_lockdown.py`, `hooks/context/ci_manifesto.py`, `hooks/context/dep_banner.py`, `hooks/context/_strip.py`, `hooks/context/version_guard.py`, `hooks/context/claude_md_sanity.py` | Two-tier secrets, retry breaker, branch/PR gating, prod lockdown, CI manifesto signal parsing, dep install banner, shared command stripping, version guard, CLAUDE.md bloat guard |
 | **Context Intelligence** | `hooks/context/preprocessor.py`, `hooks/context/brain_adapter.py`, `hooks/context/rules_refresh.py`, `hooks/tool_memory.py`, `hooks/context/conditions.py`, `hooks/context/tool_matcher.py` | Token compression, brain injection, one-shot rule refresh to running sessions, tool memory, bundle conditions and the tool matcher they share with enforcements |
-| **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py`, `scripts/claude_quota_balancer.py`, `scripts/claude_terminal.py`, `hooks/context/account_sessions.py`, `hooks/context/quota_policy.py` | Real-time messaging with channel-based targeting, brain adapter, Claude account load balancing and the quota handoff policy |
+| **Fleet Command** | `hooks/context/broadcast.py`, `hooks/mcp/channels.py`, broadcast sections in `hook_manager.py`, CLI in `install.py`, `scripts/claude_quota_balancer.py`, `scripts/init_agent.py`, `hooks/context/account_sessions.py`, `hooks/context/quota_policy.py` | Real-time messaging with channel-based targeting, brain adapter, Claude account load balancing and the quota handoff policy |
 
 ## Architecture
 
@@ -135,7 +135,7 @@ so the variable **name** identifies its account (never read the value out).
 `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT` live sessions, counted from `/proc` by
 `hooks/context/account_sessions.py`. `hooks/context/quota_policy.py` is pure code
 deciding HANDOFF / WAIT / STOP / PUSH from the session's statusline quota and the
-router cache; PreToolUse blocks on STOP and WAIT. `claude-terminal --handoff` runs
+router cache; PreToolUse blocks on STOP and WAIT. `init-agent --handoff` runs
 the handoff and marks the old session `handed_off`. Register the real agent PID
 (`agent_pid()`), never `os.getppid()` — that is the hook's short-lived shell.
 Docs: `docs/pillars/load-balancing.md`.

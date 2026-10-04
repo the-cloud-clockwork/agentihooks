@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         host, command = _launch_command(launcher, directory, name, active_env)
     except (OSError, RuntimeError, ValueError) as exc:
-        print(f"agentihooks claude-terminal: {exc}", file=sys.stderr)
+        print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 2
 
     report = [
@@ -264,14 +264,14 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         subprocess.Popen(command, env=active_env, start_new_session=True)
     except OSError as exc:
         discard()
-        print(f"agentihooks claude-terminal: {exc}", file=sys.stderr)
+        print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 2
     deadline = time.monotonic() + args.start_timeout
     while not marker.exists():
         if time.monotonic() >= deadline:
             discard()
             print(
-                f"agentihooks claude-terminal: the new terminal did not start the launcher within "
+                f"agentihooks init-agent: the new terminal did not start the launcher within "
                 f"{args.start_timeout:g}s; launch discarded\ncommand={shlex.join(command)}",
                 file=sys.stderr,
             )
@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     if route.get("status") != "routed":
         print("\n".join([*report, "handoff=failed"]))
         print(
-            "agentihooks claude-terminal: handoff failed; the new session was not routed to another account",
+            "agentihooks init-agent: handoff failed; the new session was not routed to another account",
             file=sys.stderr,
         )
         return 3

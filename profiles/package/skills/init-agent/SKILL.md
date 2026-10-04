@@ -1,18 +1,18 @@
 ---
-name: run-claude-terminal
+name: init-agent
 description: >
   Open a smart, quota-routed Claude Code session in a new terminal on WSL,
   macOS, or native Linux. Accept a target directory, session name, opening
   prompt, and arbitrary Claude flags including --resume, --fork-session, and
-  --model. Use when the operator says "run claude terminal",
-  "run-claude-terminal", "open a routed Claude session", or asks an agent to
+  --model. Use when the operator says "init agent", "init-agent",
+  "run claude terminal", "open a routed Claude session", or asks an agent to
   launch Claude in another terminal with a specific model or resumed session.
 argument-hint: "[--dir PATH] [--name NAME] [--prompt-file PATH] [-- <claude flags>]"
 ---
 
-# Run Claude Terminal
+# Init Agent
 
-`agentihooks claude-terminal` owns host detection, terminal quoting, OAuth
+`agentihooks init-agent` owns host detection, terminal quoting, OAuth
 account routing, and the start check. Never build a `wt.exe`, `osascript`, or
 terminal command by hand.
 
@@ -46,7 +46,7 @@ cat > "<scratch-dir>/opening-prompt.md" <<'PROMPT_EOF'
 <opening prompt, verbatim>
 PROMPT_EOF
 
-agentihooks claude-terminal \
+agentihooks init-agent \
   --dir "<directory>" \
   --name "<name>" \
   --prompt-file "<scratch-dir>/opening-prompt.md" \
@@ -74,7 +74,7 @@ next steps, repository / worktree / branch, open risks, the operator's standing
 instructions. Then:
 
 ```bash
-agentihooks claude-terminal --handoff \
+agentihooks init-agent --handoff \
   --dir "<directory>" --name "<name>" --prompt-file "<handoff document>"
 ```
 

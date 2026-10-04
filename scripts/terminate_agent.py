@@ -197,7 +197,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.term_timeout <= 0:
-        print("kill-agent: --term-timeout must be positive", file=sys.stderr)
+        print("terminate-agent: --term-timeout must be positive", file=sys.stderr)
         return 2
     items = sessions()
     scoped = [item for item in items if args.type == "any" or item.target == args.type]
@@ -205,13 +205,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_sessions(scoped)
         return 0
     if not args.selector:
-        print("kill-agent: selector is required unless --list is used", file=sys.stderr)
+        print("terminate-agent: selector is required unless --list is used", file=sys.stderr)
         return 2
     try:
         selected = resolve(items, args.selector, args.type)
         members = validate(selected, items, force_shared=args.force_shared)
     except ValueError as exc:
-        print(f"kill-agent: {exc}", file=sys.stderr)
+        print(f"terminate-agent: {exc}", file=sys.stderr)
         return 2
     report = {
         "action": "dry-run" if args.dry_run else "terminate",
@@ -232,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         escalated = terminate(selected, members, args.term_timeout)
     except (OSError, RuntimeError) as exc:
-        print(f"kill-agent: {exc}", file=sys.stderr)
+        print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")
     return 0
