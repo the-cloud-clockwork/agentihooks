@@ -319,7 +319,7 @@ def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store):
     store.update("sw", state="stopping")
     tick("sw", store, ledger, runtime, 2)
     assert [a.name for a in masters(store)] == ["sw-master-1"]
-    store.put_agent("sw", replace(store.agents("sw")[0], state="finished"))
+    store.put_agent("sw", replace(workers(store)[0], state="finished"))
     actions = tick("sw", store, ledger, runtime, 3)
     assert "retired sw-master-1" in actions and actions[-1] == "stopped"
     assert store.agents("sw") == [] and store.config("sw").state == "stopped"
