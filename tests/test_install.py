@@ -1062,6 +1062,7 @@ class TestInitProfileRecall:
         linked = [{"name": "brain", "path": "/home/test/brain", "linked_at": "2026-01-01T00:00:00Z"}]
         store = {"state": {**self._make_state("anton,brain", settings_profile="admin"), "bundle": bundle}}
         store["state"]["linked_profiles"] = linked
+        store["state"]["herdr"] = {"enabled": False, "decided_at": "2026-10-04T00:00:00+00:00"}
 
         def clean():
             store["state"] = {}
@@ -1095,6 +1096,7 @@ class TestInitProfileRecall:
         assert called_args.settings_profile == "admin"
         assert store["state"]["bundle"] == bundle
         assert store["state"]["linked_profiles"] == linked
+        assert store["state"]["herdr"]["enabled"] is False
 
     def test_recalls_settings_profile_from_state(self):
         """When no CLI flag or env var, init uses settings_profile from state.json."""

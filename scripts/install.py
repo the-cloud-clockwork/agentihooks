@@ -22,9 +22,6 @@ Commands:
         Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
         MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
 
-    agentihooks quota [auth|status|stop|logs]
-        Manage the Claude.ai console quota watcher.
-
     agentihooks prune [-v]
         Remove stale MCP entries from disabledMcpServers and known-mcp-servers.json.
 
@@ -40,6 +37,9 @@ Commands:
     agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
         Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
         --handoff moves this session's work to another account (quota handoff).
+
+    agentihooks herdr [status|install|configure|enable|disable]
+        Install and configure herdr, the terminal host init-agent opens agents in.
 
     agentihooks quota [--json] [--refresh]
         Quota left for every agent harness: each Claude account and Codex.
@@ -2061,7 +2061,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     if getattr(args, "force", False):
         _kept_state = _load_state()
         _clean_state_dir()
-        _identity = {k: _kept_state[k] for k in ("bundle", "linked_profiles") if _kept_state.get(k)}
+        _identity = {k: _kept_state[k] for k in ("bundle", "linked_profiles", "herdr") if _kept_state.get(k)}
         if _identity:
             _save_state(_identity)
     bundle_path = getattr(args, "bundle", None)
@@ -6290,6 +6290,10 @@ def main() -> None:
         from scripts.agents_quota import main as quota_main
 
         raise SystemExit(quota_main(_argv[1:]))
+    if _argv and _argv[0] == "herdr":
+        from scripts.herdr_setup import main as herdr_main
+
+        raise SystemExit(herdr_main(_argv[1:]))
     if _argv and _argv[0] == "terminate-agent":
         from scripts.terminate_agent import main as terminate_agent_main
 
@@ -6366,6 +6370,13 @@ def main() -> None:
         help="Register an external profile directory and append it to the chain. Repeatable (NAME=PATH).",
     )
     init_p.add_argument(
+        "--herdr",
+        dest="init_herdr",
+        choices=["yes", "no"],
+        default="",
+        help="Use herdr as the terminal host for agents (asked once on a terminal when omitted)",
+    )
+    init_p.add_argument(
         "--no-discover",
         action="store_true",
         default=False,
@@ -6414,6 +6425,10 @@ def main() -> None:
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
+    sub.add_parser(
+        "herdr",
+        help="Install and configure herdr, the terminal host for agents: status|install|configure|enable|disable",
+    )
     sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Plan ledger: agent CLI, or new|serve|watch|chat <args>")
@@ -6737,6 +6752,9 @@ notes:
                 target_args.bundle = None
                 target_args.link_profile = []
             cmd_init_unified(target_args)
+        from scripts.herdr_setup import init_step
+
+        init_step(args.init_herdr, sys.stdin.isatty())
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
     elif args.command == "ignore":
