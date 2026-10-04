@@ -61,7 +61,7 @@ def test_a_codex_launcher_runs_codex_and_reports_a_direct_route(monkeypatch, tmp
         tmp_path, "eng-c", "fix it", ["--model", "o3"], env, init_agent.AgentSpec(agent="codex")
     )
     text = launcher.read_text()
-    assert f'/usr/bin/codex --model o3 "$(cat {prompt_file})"' in text
+    assert f'/usr/bin/codex -c \'model_reasoning_effort="high"\' --model o3 "$(cat {prompt_file})"' in text
     assert "status=direct" in text and str(launcher.with_suffix(".route")) in text
     assert "agentihooks claude" not in text
 

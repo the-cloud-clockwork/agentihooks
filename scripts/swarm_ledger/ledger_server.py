@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
 import new_ledger  # noqa: E402
@@ -37,10 +38,11 @@ LOGFILE = core.LEDGER_DIR / ".server.log"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
 
 
-def ledger_summaries():
+def all_summaries():
     found = []
     for path in sorted(core.LEDGER_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
         json_path = core.paths(path.stem)[1]
@@ -56,24 +58,107 @@ def ledger_summaries():
     return found
 
 
-def index_page():
-    rows = [
-        f'<li><a href="/{html.escape(s["slug"])}">{html.escape(s["title"])}</a><p>{html.escape(s["overview"])}</p></li>'
-        for s in ledger_summaries()
+def ledger_summaries():
+    binned = ledger_bin.entries()
+    return [s for s in all_summaries() if s["slug"] not in binned]
+
+
+def bin_summaries(now=None):
+    now = core.now_ms() if now is None else now
+    binned = ledger_bin.entries()
+    found = [
+        {**s, "deleted_at": binned[s["slug"]], "days_left": ledger_bin.days_left(binned[s["slug"]], now)}
+        for s in all_summaries()
+        if s["slug"] in binned
     ]
-    body = "\n".join(rows) or "<li>No ledgers yet.</li>"
+    return sorted(found, key=lambda s: s["deleted_at"], reverse=True)
+
+
+HOME_STYLE = (
+    ":root{--bg:#03050b;--text:#f8fafc;--muted:#9aa8bd;--accent:#60a5fa;--destructive:#ef4444;"
+    "--rule:rgba(255,255,255,.06);--glass:rgba(255,255,255,.045);--glass-hi:rgba(255,255,255,.1);"
+    "--edge:rgba(255,255,255,.14);--shade:rgba(0,0,0,.45);--halo:rgba(29,78,216,.42)}"
+    "html{color-scheme:dark}body{margin:0;min-height:100vh;color:var(--text);"
+    "font:14px/1.6 ui-sans-serif,system-ui,sans-serif;"
+    "background:radial-gradient(1100px 620px at 8% -12%,var(--halo),transparent 62%),var(--bg)}"
+    "main{max-width:900px;margin:0 auto;padding:40px 16px 96px}"
+    "h1{font-size:30px;line-height:1.2;font-weight:650;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid var(--destructive)}"
+    "ul{margin:0;padding-left:20px}li{padding:10px 0;border-top:1px solid var(--rule)}"
+    "li:first-child{border-top:0}.row{display:flex;gap:12px;align-items:flex-start}.info{flex:1;min-width:0}"
+    "a{color:var(--accent);font-size:15px;font-weight:600;text-decoration:none}"
+    "a:hover{text-decoration:underline}p{margin:2px 0 0;color:var(--muted);overflow-wrap:anywhere}"
+    ".meta{display:flex;gap:14px;font-size:12px}.left{color:var(--accent);text-shadow:0 0 8px currentColor}"
+    ".act{flex:none;width:34px;height:34px;display:grid;place-content:center;border:1px solid transparent;"
+    "border-radius:10px;background:var(--glass);color:var(--muted);cursor:pointer;opacity:.6;"
+    "transition:opacity .15s,border-color .15s,box-shadow .15s,color .15s}"
+    ".act svg{width:18px;height:18px}.act:disabled{opacity:.3;cursor:wait}"
+    ".act:hover,.act:focus-visible{opacity:1;outline:none;background:var(--glass-hi);border-color:currentColor;"
+    "box-shadow:0 0 12px -2px currentColor}"
+    ".act.del:hover,.act.del:focus-visible{color:var(--destructive)}"
+    ".act.restore:hover,.act.restore:focus-visible{color:var(--accent)}"
+    ".fab{position:fixed;left:16px;bottom:16px;z-index:10;width:46px;height:46px;border-radius:50%;display:grid;"
+    "place-content:center;color:var(--destructive);background:var(--glass);border:1px solid transparent;"
+    "backdrop-filter:blur(12px);transition:border-color .15s,box-shadow .15s}"
+    ".fab svg{width:22px;height:22px}.fab:hover,.fab:focus-visible{text-decoration:none;outline:none;"
+    "background:var(--glass-hi);border-color:currentColor;box-shadow:0 0 14px -2px currentColor,0 10px 28px var(--shade)}"
+    ".count{position:absolute;top:-4px;right:-4px;font-size:11px;font-weight:700;color:var(--destructive);"
+    "text-shadow:0 0 6px currentColor}"
+)
+ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+    'stroke-linejoin="round" aria-hidden="true">{}</svg>'
+)
+TRASH = ICON.format(
+    '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>'
+)
+RESTORE = ICON.format('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>')
+HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
+BIN_SCRIPT = (
+    "<script>document.addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;"
+    "b.disabled=true;const r=await fetch('/api/bin',{method:'POST',headers:{'Content-Type':'application/json'},"
+    "body:JSON.stringify({action:b.dataset.act,slug:b.dataset.slug})});if(r.ok)return location.reload();"
+    "b.disabled=false;alert(await r.text())})</script>"
+)
+
+
+def ledger_row(s, control):
+    slug, title = html.escape(s["slug"]), html.escape(s["title"])
+    return (
+        f'<li><div class="row"><div class="info"><a href="/{slug}">{title}</a>'
+        f"<p>{html.escape(s['overview'])}</p>{s.get('meta', '')}</div>{control.format(slug=slug, title=title)}</div></li>"
+    )
+
+
+def bin_meta(s):
+    deleted = time.strftime("%Y-%m-%d", time.localtime(s["deleted_at"] / 1000))
+    days = s["days_left"]
+    return f'<p class="meta"><span>Deleted {deleted}</span><span class="left">{days} day{"" if days == 1 else "s"} left</span></p>'
+
+
+def index_page(view="home"):
+    if view == "bin":
+        heading, empty = "BIN", "The bin is empty."
+        control = (
+            '<button class="act restore" type="button" data-act="restore" data-slug="{slug}" '
+            f'title="Restore to HOME" aria-label="Restore {{title}} to HOME">{RESTORE}</button>'
+        )
+        rows = [ledger_row({**s, "meta": bin_meta(s)}, control) for s in bin_summaries()]
+        fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
+    else:
+        heading, empty = "HOME", "No ledgers yet."
+        control = (
+            '<button class="act del" type="button" data-act="delete" data-slug="{slug}" '
+            f'title="Move to the bin" aria-label="Move {{title}} to the bin">{TRASH}</button>'
+        )
+        rows = [ledger_row(s, control) for s in ledger_summaries()]
+        count = len(ledger_bin.entries())
+        badge = f'<span class="count">{count}</span>' if count else ""
+        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
+    body = "\n".join(rows) or f"<li>{empty}</li>"
     return (
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>HOME</title>"
-        "<style>html{color-scheme:dark}body{margin:0;min-height:100vh;color:#f8fafc;"
-        "font:14px/1.6 ui-sans-serif,system-ui,sans-serif;"
-        "background:radial-gradient(1100px 620px at 8% -12%,rgba(29,78,216,.42),transparent 62%),#03050b}"
-        "main{max-width:900px;margin:0 auto;padding:40px 16px 96px}"
-        "h1{font-size:30px;line-height:1.2;font-weight:650;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #ef4444}"
-        "ul{margin:0;padding-left:20px}li{padding:10px 0;border-top:1px solid rgba(255,255,255,.06)}"
-        "li:first-child{border-top:0}a{color:#60a5fa;font-size:15px;font-weight:600;text-decoration:none}"
-        "a:hover{text-decoration:underline}p{margin:2px 0 0;color:#9aa8bd;overflow-wrap:anywhere}</style>"
-        f"<main><h1>HOME</h1><ul>{body}</ul></main>"
+        f"<title>{heading}</title><style>{HOME_STYLE}</style>"
+        f"<main><h1>{heading}</h1><ul>{body}</ul></main>{fab}{BIN_SCRIPT}"
     )
 
 
@@ -129,6 +214,14 @@ def control_argv(body):
     if not pairs:
         raise ValueError("set needs max_eng or max_ci")
     return ["set", *pairs]
+
+
+def bin_request(body):
+    if not isinstance(body, dict) or body.get("action") not in ("delete", "restore"):
+        raise ValueError("action must be delete or restore")
+    if not isinstance(body.get("slug"), str):
+        raise ValueError("slug must be a string")
+    return body["action"], body["slug"]
 
 
 def swarm_control(slug, argv):
@@ -204,7 +297,9 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/healthz":
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
         if route == "/":
-            return self.send(200, index_page(), "text/html; charset=utf-8")
+            ledger_bin.purge_expired()
+            view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
+            return self.send(200, index_page(view), "text/html; charset=utf-8")
         if route.startswith("/api/swarm/"):
             slug = slug.removeprefix("swarm/")
             if not self.exists(slug):
@@ -237,6 +332,30 @@ class Handler(BaseHTTPRequestHandler):
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")
+
+    def do_POST(self):
+        if self.refused():
+            return None
+        if self.path.split("?", 1)[0] != "/api/bin":
+            return self.send(404, "not found", "text/plain")
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            return self.send(403, "origin not allowed", "text/plain")
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return self.send(415, "Content-Type must be application/json", "text/plain")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= MAX_BODY:
+                raise ValueError("body size out of range")
+            action, slug = bin_request(core.loads(self.rfile.read(length) or b"{}"))
+        except ValueError as exc:
+            return self.send(400, str(exc), "text/plain")
+        if not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        if action == "delete":
+            ledger_bin.delete(slug)
+        elif not ledger_bin.restore(slug):
+            return self.send(404, "not in the bin", "text/plain")
+        return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries())}), "application/json")
 
     def do_PUT(self):
         slug = self.slug()
@@ -276,6 +395,10 @@ def watch_seeds(interval=2.0):
     started = code_stamp()
     while True:
         reload_if_changed(started)
+        try:
+            ledger_bin.purge_expired()
+        except OSError as exc:
+            sys.stderr.write(f"bin purge: {exc}\n")
         for path in core.LEDGER_DIR.glob("*.html"):
             try:
                 mtime = path.stat().st_mtime
