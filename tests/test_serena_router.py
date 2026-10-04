@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import subprocess
 import sys
@@ -103,11 +104,11 @@ async def test_slow_backend_does_not_block_another(router, repo):
     async with connect(router) as a, connect(router) as b:
         await a.call_tool("activate_project", {"project": str(repo["a"])})
         await b.call_tool("activate_project", {"project": str(repo["b"])})
-        slow = asyncio.create_task(a.call_tool("slow", {"seconds": 1.5}))
-        await asyncio.sleep(0.2)
+        slow = asyncio.create_task(a.call_tool("slow", {"seconds": 0.6}))
+        await asyncio.sleep(0.1)
         started = time.monotonic()
         await b.call_tool("find_symbol", {})
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < 0.4
         assert not slow.done()
         await slow
 
@@ -152,3 +153,10 @@ async def test_worktree_inherits_the_primary_checkout_serena_config(router, repo
 def test_app_bounds_idle_sessions():
     app = build_app(Pool(BackendConfig(command=(sys.executable, str(FAKE)))), [])
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
+
+
+def test_fake_backend_imports_only_the_standard_library():
+    tree = ast.parse(FAKE.read_text())
+    modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    modules |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    assert {m.split(".")[0] for m in modules} <= sys.stdlib_module_names

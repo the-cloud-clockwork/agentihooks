@@ -1,45 +1,76 @@
-"""Stand-in for `serena start-mcp-server`: same CLI shape, tools that touch only --project."""
+"""Stand-in for `serena start-mcp-server`: same CLI shape, tools that touch only --project.
 
-import asyncio
+Speaks MCP JSON-RPC over stdio with the standard library alone, so a spawn costs no SDK import.
+"""
+
+import json
 import sys
+import time
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
-
-READ = ToolAnnotations(readOnlyHint=True)
-WRITE = ToolAnnotations(readOnlyHint=False)
-
 project = Path(sys.argv[sys.argv.index("--project") + 1]) if "--project" in sys.argv else None
-mcp = FastMCP("fake-serena")
 
 
-@mcp.tool(annotations=READ)
 def find_symbol(name_path_pattern: str = "") -> str:
     return f"root={project}"
 
 
-@mcp.tool(annotations=WRITE)
 def replace_content(relative_path: str, repl: str) -> str:
     (project / relative_path).write_text(repl)
     return "OK"
 
 
-@mcp.tool(annotations=READ)
-async def slow(seconds: float = 2.0) -> str:
-    await asyncio.sleep(seconds)
+def slow(seconds: float = 2.0) -> str:
+    time.sleep(seconds)
     return "slept"
 
 
-@mcp.tool()
 def mystery() -> str:
     return "unannotated"
 
 
-@mcp.tool(annotations=READ)
 def activate_project(project: str) -> str:
     return "the router must never forward this"
 
 
-if __name__ == "__main__":
-    mcp.run("stdio")
+TOOLS = {
+    "find_symbol": (find_symbol, {"name_path_pattern": "string"}, True),
+    "replace_content": (replace_content, {"relative_path": "string", "repl": "string"}, False),
+    "slow": (slow, {"seconds": "number"}, True),
+    "mystery": (mystery, {}, None),
+    "activate_project": (activate_project, {"project": "string"}, True),
+}
+
+
+def _tool(name: str, properties: dict, read_only: bool | None) -> dict:
+    tool = {
+        "name": name,
+        "inputSchema": {"type": "object", "properties": {k: {"type": v} for k, v in properties.items()}},
+    }
+    if read_only is not None:
+        tool["annotations"] = {"readOnlyHint": read_only}
+    return tool
+
+
+def handle(method: str, params: dict) -> dict:
+    if method == "initialize":
+        return {
+            "protocolVersion": params["protocolVersion"],
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fake-serena", "version": "0"},
+        }
+    if method == "tools/list":
+        return {"tools": [_tool(name, props, ro) for name, (_, props, ro) in TOOLS.items()]}
+    if method == "tools/call":
+        text = TOOLS[params["name"]][0](**params.get("arguments", {}))
+        return {"content": [{"type": "text", "text": text}], "isError": False}
+    return {}
+
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    result = handle(message["method"], message.get("params") or {})
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\n")
+    sys.stdout.flush()
