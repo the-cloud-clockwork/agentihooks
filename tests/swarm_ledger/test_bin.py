@@ -92,7 +92,7 @@ class BinEndpoint(unittest.TestCase):
         make_ledger("via-http")
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
