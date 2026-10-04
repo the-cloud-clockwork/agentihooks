@@ -95,3 +95,67 @@ def test_terminate_real_isolated_process_group():
         if child.poll() is None:
             child.kill()
             child.wait()
+
+
+def _herdr_env(tmp_path, pid: int, **env) -> Path:
+    proc = tmp_path / "proc"
+    (proc / str(pid)).mkdir(parents=True)
+    raw = b"\0".join(f"{k}={v}".encode() for k, v in {"SECRET_TOKEN": "x", **env}.items()) + b"\0"
+    (proc / str(pid) / "environ").write_bytes(raw)
+    return proc
+
+
+def test_the_herdr_pane_is_read_from_the_agent_environment(tmp_path):
+    from scripts.terminate_agent import herdr_pane
+
+    proc = _herdr_env(tmp_path, 200, HERDR_PANE_ID="w1:p7", HERDR_SOCKET_PATH="/s/herdr.sock")
+    assert herdr_pane(200, proc) == ("w1:p7", "/s/herdr.sock")
+    assert herdr_pane(201, proc) == ("", "")
+
+
+def _terminate_in_herdr(monkeypatch, *extra):
+    item = session()
+    closed = []
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: False)
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("w1:p7", "/s/herdr.sock"))
+    monkeypatch.setattr(
+        "scripts.herdr_host._cli", lambda args, environ: closed.append((args, environ["HERDR_SOCKET_PATH"])) or {}
+    )
+    return main(["uuid-1", "--type", "claude", *extra]), closed
+
+
+def test_terminating_an_agent_in_herdr_closes_its_pane(monkeypatch, capsys):
+    rc, closed = _terminate_in_herdr(monkeypatch)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert closed == [(["pane", "close", "w1:p7"], "/s/herdr.sock")]
+    assert "pane_id=w1:p7" in out and "pane=closed" in out
+
+
+def test_keep_pane_leaves_the_herdr_pane_open(monkeypatch, capsys):
+    rc, closed = _terminate_in_herdr(monkeypatch, "--keep-pane")
+    assert rc == 0 and closed == []
+    assert "pane=kept" in capsys.readouterr().out
+
+
+def test_a_pane_herdr_already_closed_counts_as_closed(monkeypatch, capsys):
+    from scripts import herdr_host
+
+    item = session()
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: False)
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("w1:p7", ""))
+
+    def gone(args, environ):
+        raise herdr_host.HerdrError("herdr pane close: pane w1:p7 not found")
+
+    monkeypatch.setattr("scripts.herdr_host._cli", gone)
+    assert main(["uuid-1", "--type", "claude"]) == 0
+    assert "pane_id=w1:p7 pane=closed" in capsys.readouterr().out
