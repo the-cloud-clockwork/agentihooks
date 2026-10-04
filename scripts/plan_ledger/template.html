@@ -118,7 +118,7 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
   background: linear-gradient(180deg, var(--glass-hi), var(--glass)); backdrop-filter: blur(12px); box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
 .notif[hidden], .chat-panel[hidden], .sync-badge[hidden] { display: none; }
 .fab-chat { left: auto; right: 16px; }
-.chat-panel { left: auto; right: 16px; bottom: 74px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100vh - 100px)); max-height: none; }
+.chat-panel { z-index: 12; left: auto; right: 16px; bottom: 74px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100vh - 100px)); max-height: none; }
 .chat-panel.big { width: min(760px, calc(100vw - 32px)); height: calc(100vh - 100px); }
 .chat-panel .chat-log { padding: 0 14px; }
 .chat-compose { padding: 10px 14px 12px; }
@@ -840,12 +840,16 @@ details.crew { margin: 10px 0 0; }
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
     $("notif-close").addEventListener("click", () => showNotifications(false));
     $("notif-clear-all").addEventListener("click", () => { if (confirm("Clear every notification?")) clearNotification("all"); });
-    try { chatSeen = Number(localStorage.getItem(CHAT_SEEN)) || lastChatAt(); } catch (e) { chatSeen = lastChatAt(); }
+    try {
+      chatSeen = Number(localStorage.getItem(CHAT_SEEN)) || lastChatAt();
+      localStorage.setItem(CHAT_SEEN, String(chatSeen));
+    } catch (e) { chatSeen = lastChatAt(); }
     $("chat-fab").addEventListener("click", () => showChat($("chat-panel").hidden));
     $("chat-close").addEventListener("click", () => showChat(false));
     $("chat-size").addEventListener("click", () => {
       const big = $("chat-panel").classList.toggle("big");
       $("chat-size").textContent = big ? "Shrink" : "Expand";
+      $("chat-log").scrollTop = $("chat-log").scrollHeight;
     });
     document.addEventListener("keydown", (ev) => {
       if (ev.key !== "Escape" || ev.defaultPrevented) return;
@@ -857,7 +861,7 @@ details.crew { margin: 10px 0 0; }
       if (confirm("Clear the whole chat?")) queue({ op: "clear", thread: "chat", id: newId("clear") });
     });
     input.addEventListener("input", () => grow(input));
-    wireKeys(input, sendChat, () => input.blur());
+    wireKeys(input, sendChat, () => showChat(false));
     render();
     poll();
     setInterval(poll, POLL_MS);
