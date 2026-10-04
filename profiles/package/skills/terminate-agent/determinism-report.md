@@ -1,4 +1,4 @@
-# Kill Agent Determinism Report
+# Terminate Agent Determinism Report
 
 ## Decomposition
 
