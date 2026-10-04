@@ -173,3 +173,21 @@ def test_a_server_error_is_raised_with_its_message(monkeypatch):
     )
     with pytest.raises(herdr_host.HerdrError, match="no pane w1:p9"):
         herdr_host._cli(["pane", "close", "w1:p9"], {})
+
+
+def test_the_agent_is_named_in_herdr_once_it_reports_its_route(monkeypatch, tmp_path, capsys):
+    renamed = []
+    monkeypatch.setattr(herdr_host, "open_pane", lambda *a: herdr_host.Placement("w1", "w1:t3", "w1:p7"))
+
+    def run(pane, launcher, environ):
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=routed\naccount=ncgma\n")
+
+    monkeypatch.setattr(herdr_host, "run", run)
+    monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: renamed.append((pane, name)) or True)
+
+    rc, _ = _main(monkeypatch, tmp_path)
+
+    out = capsys.readouterr().out
+    assert rc == 0 and renamed == [("w1:p7", "eng-a")]
+    assert "account=ncgma" in out and "agent_name=eng-a" in out

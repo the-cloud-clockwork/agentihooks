@@ -259,7 +259,7 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, environ: dict
         f"workspace_id={placed.workspace_id}",
         f"tab_id={placed.tab_id}",
         f"pane_id={placed.pane_id}",
-        *(["herdr_server=started attach=herdr"] if started else []),
+        *(["herdr_server=started", "attach=herdr"] if started else []),
     ]
 
 
@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             discard()
             print(
                 f"agentihooks init-agent: the new terminal did not start the launcher within "
-                f"{args.start_timeout:g}s; launch discarded\ncommand={shlex.join(command)}",
+                f"{args.start_timeout:g}s; launch discarded\n{report[-1] if host == 'herdr' else 'command=' + shlex.join(command)}",
                 file=sys.stderr,
             )
             return 2
