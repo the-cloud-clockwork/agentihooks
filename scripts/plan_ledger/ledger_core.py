@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 import ledger_comments
+import ledger_notifications
 import ledger_priorities
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
@@ -56,6 +57,8 @@ MAX_TEXT = 20000
 LOG_MAX_BYTES = 5 << 20
 MISSING = object()
 LOCK = threading.Lock()
+
+EXTENSION_OPS = {name: module for module in (ledger_priorities, ledger_notifications) for name in module.OPS}
 
 
 def now_ms():
@@ -119,6 +122,7 @@ def normalize(doc):
     doc.setdefault("notes", [])
     doc.setdefault("chat", [])
     doc.setdefault("priorities", [])
+    doc.setdefault("notifications", [])
     for name in LISTS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
@@ -476,8 +480,8 @@ def apply_op(doc, op, ctx):
         return ledger_agent_ops.apply(doc, op, ctx)
     if op["op"] in SYNC_KINDS:
         return record_sync(doc, op, ctx)
-    if op["op"] in ledger_priorities.OPS:
-        return ledger_priorities.apply(doc, op, ctx)
+    if op["op"] in EXTENSION_OPS:
+        return EXTENSION_OPS[op["op"]].apply(doc, op, ctx)
     thread = get_thread(doc, op["thread"])
     if thread is None:
         return False
@@ -520,7 +524,7 @@ def check_op(op):
         "delete",
         "clear",
         *SYNC_KINDS,
-        *ledger_priorities.OPS,
+        *EXTENSION_OPS,
         *AGENT_OPS,
     ):
         raise ValueError("each op needs op add, edit, delete, clear, sync or an agent op")
@@ -530,8 +534,8 @@ def check_op(op):
         if set(op) != {"op", "id"}:
             raise ValueError("sync is the operator's and takes only an id")
         return None
-    if op["op"] in ledger_priorities.OPS:
-        return ledger_priorities.check(op)
+    if op["op"] in EXTENSION_OPS:
+        return EXTENSION_OPS[op["op"]].check(op)
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
@@ -610,6 +614,7 @@ def sync(slug, changes=None, ops=None):
             reconcile_threads(doc, base, seed, ctx)
         rejected = apply_changes(doc, changes or [], ctx)
         rejected += [op["id"] for op in ops or [] if not apply_op(doc, op, ctx)]
+        ledger_notifications.derive(doc, ctx)
         del doc["chat"][:-CHAT_KEPT]
         found = warnings(doc) + ctx.refused
         if ctx.events or ctx.dirty or seed_error != meta.get("seed_error") or found != meta.get("warnings") or created:

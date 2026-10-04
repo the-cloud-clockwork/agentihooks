@@ -51,3 +51,11 @@ class Entry(unittest.TestCase):
         before = list(sys.argv)
         help_of(["watch"])
         self.assertEqual(sys.argv, before)
+
+    def test_the_join_paragraph_names_the_agentihooks_command(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run(["--slug", "demo-2026-01-01", "--as", "a1", "prompt"])
+        self.assertIn("agentihooks ledger --slug demo-2026-01-01 --as a1 join", out.getvalue())
+        self.assertIn("agentihooks ledger watch demo-2026-01-01 --as a1", out.getvalue())
+        self.assertNotIn("python3", out.getvalue())

@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -83,6 +84,40 @@ class Gate(unittest.TestCase):
     def test_join_command_binds_the_session(self):
         session = json.loads((core.LEDGER_DIR / ".sessions" / f"{SID}.json").read_text())
         self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "boss", "orchestrator"))
+
+    def test_session_start_brings_the_server_up(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(port)}
+        payload = json.dumps({"session_id": "fresh", "hook_event_name": "SessionStart"})
+        subprocess.run(
+            [sys.executable, str(SCRIPTS / "ledger_hook.py")],
+            input=payload,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        try:
+            for _ in range(100):
+                try:
+                    socket.create_connection(("127.0.0.1", port), 0.2).close()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                self.fail("the ledger server did not come up")
+        finally:
+            subprocess.run(
+                [sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, capture_output=True, timeout=20
+            )
+
+    def test_owed_events_name_the_agentihooks_command(self):
+        ask("where are we", 7)
+        text = hook("UserPromptSubmit")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"agentihooks ledger --slug {SLUG} --as boss ack", text)
+        self.assertNotIn("python3", text)
 
     def test_only_the_agent_cli_counts_as_a_ledger_command(self):
         import ledger_hook

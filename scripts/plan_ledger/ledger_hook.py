@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
 SHOWN = 5
+CLI = "agentihooks ledger"
 
 
 def log(message):
@@ -101,18 +102,17 @@ def bind(payload, sid):
 def context_text(session, owed, extra=""):
     import watch_ledger
 
-    me = HERE / "ledger.py"
     lines = [watch_ledger.line(e) for e in owed[:SHOWN]]
     if len(owed) > SHOWN:
         lines.append(
-            f"... and {len(owed) - SHOWN} more (run: python3 {me} --slug {session['slug']} --as {session['name']} events)"
+            f"... and {len(owed) - SHOWN} more (run: {CLI} --slug {session['slug']} --as {session['name']} events)"
         )
     head = (
         f"PLAN LEDGER {session['slug']}: {len(owed)} operator event(s) owe you a reaction."
         if owed
         else f"PLAN LEDGER {session['slug']}:"
     )
-    tail = f"Act on them, then run: python3 {me} --slug {session['slug']} --as {session['name']} ack" if owed else ""
+    tail = f"Act on them, then run: {CLI} --slug {session['slug']} --as {session['name']} ack" if owed else ""
     return "\n".join(x for x in [head, *lines, extra, tail] if x)
 
 
@@ -174,7 +174,7 @@ def stop_reasons(session, state):
         not beat.exists() or time.time() - beat.stat().st_mtime > ledger_gate.WATCH_STALE_SECONDS
     ):
         reasons.append(
-            f"your watcher is not running: start a Monitor on python3 {HERE / 'watch_ledger.py'} {session['slug']} --as {session['name']}"
+            f"your watcher is not running: start a Monitor on {CLI} watch {session['slug']} --as {session['name']}"
         )
     return reasons, len(owed), pol
 
@@ -208,15 +208,34 @@ def on_stop(payload, session, state, sfile):
         return
     session["blocks"] += 1
     write_session(sfile, session)
-    me = HERE / "ledger.py"
-    fix = f"Handle them and run: python3 {me} --slug {session['slug']} --as {session['name']} ack (or record progress with phase/followup/comment/say)."
+    fix = f"Handle them and run: {CLI} --slug {session['slug']} --as {session['name']} ack (or record progress with phase/followup/comment/say)."
     print(json.dumps({"decision": "block", "reason": f"PLAN LEDGER {session['slug']}: {'; '.join(reasons)}. {fix}"}))
 
 
 HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_stop}
 
 
+def serve_ledgers():
+    import socket
+    import subprocess
+
+    if not any(LEDGER_DIR.glob("*.json")):
+        return
+    try:
+        socket.create_connection(("127.0.0.1", int(os.environ.get("LEDGER_PORT", "8765"))), timeout=0.3).close()
+    except OSError:
+        subprocess.Popen(
+            [sys.executable, str(HERE / "ledger_server.py"), "--ensure"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+
 def dispatch(payload):
+    if payload.get("hook_event_name") == "SessionStart":
+        serve_ledgers()
     sid = payload.get("session_id")
     if not sid or not SESSIONS.exists() and payload.get("hook_event_name") not in ("SessionStart", "PostToolUse"):
         return

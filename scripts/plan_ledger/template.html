@@ -111,6 +111,20 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .sync-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
   background: var(--red); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-content: center; }
+.fab-top { bottom: 74px; }
+.fab-bell { bottom: 132px; }
+.notif { position: fixed; left: 74px; bottom: 16px; z-index: 11; width: min(400px, calc(100vw - 90px)); max-height: min(70vh, 560px);
+  display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--red-soft);
+  background: linear-gradient(180deg, var(--glass-hi), var(--glass)); backdrop-filter: blur(12px); box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
+.notif[hidden] { display: none; }
+.notif-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px 8px; }
+.notif-head h2 { margin: 0; padding: 0; border: 0; flex: 1; }
+.notif-list { list-style: none; margin: 0; padding: 0 14px 12px; overflow-y: auto; }
+.notif-row { padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+.notif-row:first-child { border-top: 0; }
+.notif-meta { display: flex; gap: 10px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); }
+.notif-meta .link { margin-left: auto; }
+.notif-text { margin-top: 2px; overflow-wrap: anywhere; }
 input[type=checkbox] {
   appearance: none; flex: none; width: 18px; height: 18px; margin: 2px 0 0; border-radius: 5px; cursor: pointer;
   border: 1.5px solid var(--blue-hi); background: var(--field); display: grid; place-content: center;
@@ -224,6 +238,17 @@ details.crew { margin: 10px 0 0; }
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
   <span class="sync-badge" id="sync-badge" hidden></span>
 </button>
+<button class="sync fab-top" id="to-top" type="button" title="Back to top" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+</button>
+<button class="sync fab-bell" id="bell" type="button" title="Notifications" aria-label="Notifications" aria-expanded="false" aria-controls="notif">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+  <span class="sync-badge" id="bell-badge" hidden></span>
+</button>
+<section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden>
+  <div class="notif-head"><h2>Notifications</h2><button class="link danger" id="notif-clear-all" type="button">Clear all</button><button class="link" id="notif-close" type="button">Close</button></div>
+  <ul class="notif-list" id="notifs"></ul>
+</section>
 <script id="ledger-data" type="application/json">__LEDGER_DATA__</script>
 <script>
 (() => {
@@ -280,6 +305,7 @@ details.crew { margin: 10px 0 0; }
       sources: Array.isArray(d.sources) ? d.sources : [],
       time_left_minutes: Number.isInteger(d.time_left_minutes) && d.time_left_minutes >= 0 ? d.time_left_minutes : null,
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
+      notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
       phases: list("phases", ["title", "description", "done", "out_of_scope"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
@@ -299,6 +325,10 @@ details.crew { margin: 10px 0 0; }
     if (op.op === "sync" || op.op === "stats_sync") return;
     if (op.op === "priority_clear") {
       d.priorities = op.target === "all" ? [] : d.priorities.filter((p) => p.id !== op.target);
+      return;
+    }
+    if (op.op === "notification_clear") {
+      d.notifications = op.target === "all" ? [] : d.notifications.filter((n) => n.id !== op.target);
       return;
     }
     const thread = threadOf(d, op.thread);
@@ -478,6 +508,7 @@ details.crew { margin: 10px 0 0; }
     listInto("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
     renderSync();
     renderPriorities();
+    renderNotifications();
     renderChat();
     renderStats();
     renderCrew();
@@ -555,6 +586,43 @@ details.crew { margin: 10px 0 0; }
       h("span", { class: "prio-text", text: p.text }),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }))));
     if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
+  }
+
+  function noticeTime(at) {
+    const t = new Date(at);
+    const time = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return t.toDateString() === new Date().toDateString() ? time : `${t.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  }
+
+  function jumpToNotice(ev, item) {
+    if (item !== "chat") return jumpTo(ev, item);
+    ev.preventDefault();
+    $("chat-log").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function clearNotification(target) {
+    queue({ op: "notification_clear", id: newId("notice"), target });
+  }
+
+  function renderNotifications() {
+    const list = [...doc.notifications].reverse();
+    $("bell-badge").hidden = !list.length;
+    $("bell-badge").textContent = String(list.length);
+    $("notif-clear-all").hidden = !list.length;
+    $("notifs").replaceChildren(...list.map((n) => h("li", { class: "notif-row" },
+      h("div", { class: "notif-meta" },
+        h("span", { text: noticeTime(n.at) }),
+        h("a", { class: "prio-link", href: n.item === "chat" ? "#chat-log" : `#item-${n.item.replace("/", "-")}`,
+          text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }),
+        h("span", { text: n.label === "Reply" ? `Reply from ${n.by}` : n.label }),
+        h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearNotification(n.id) } })),
+      h("div", { class: "notif-text", text: n.text }))));
+    if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
+  }
+
+  function showNotifications(open) {
+    $("notif").hidden = !open;
+    $("bell").setAttribute("aria-expanded", String(open));
   }
 
   function lastSync(kind) {
@@ -727,6 +795,13 @@ details.crew { margin: 10px 0 0; }
     $("sync").addEventListener("click", () => sendSync("sync", "sync"));
     $("stats-sync").addEventListener("click", () => sendSync("stats_sync", "stats-sync"));
     $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
+    $("to-top").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
+    $("notif-close").addEventListener("click", () => showNotifications(false));
+    $("notif-clear-all").addEventListener("click", () => { if (confirm("Clear every notification?")) clearNotification("all"); });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && !ev.defaultPrevented && !$("notif").hidden) showNotifications(false);
+    });
     const input = $("chat-input");
     $("chat-clear").addEventListener("click", () => {
       if (confirm("Clear the whole chat?")) queue({ op: "clear", thread: "chat", id: newId("clear") });

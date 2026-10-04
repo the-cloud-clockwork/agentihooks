@@ -76,7 +76,9 @@ prints `"created": true` or names the existing ledger.
 agentihooks ledger serve --ensure
 ```
 
-Give the operator `<printed base URL>/<slug>`; `/` lists every ledger. Done
+Give the operator `<printed base URL>/<slug>`; `/` lists every ledger. The gate hook starts
+the server at every session start while any ledger exists, so the page comes back on its own
+after a reboot. Done
 when `--ensure` printed the base URL.
 
 ### A4. Bind the crew and install the gate
@@ -163,7 +165,8 @@ Run `ack` after acting. Done when `events` prints nothing.
 | `retext <item> "<text>"` | rewrite a follow-up or question in plain words |
 | `edit <chat\|item> <entry> "<text>"` / `delete <chat\|item> <entry>...` | fix or remove entries: yours, or (orchestrator) any agent's |
 | `audit` | every agent text the filter refuses today: the cleanup worklist |
-| `priority add <item> "<text>"` / `priority clear <id>` / `priority clear --all` | ask the operator something only he can answer and that blocks the work, one line of at most 20 plain words per item; clear it once answered |
+| `priority add <item> "<text>"` / `priority clear <id>` / `priority clear --all` | ask the operator something only the operator can answer and that blocks the work, one line of at most 20 plain words per item; clear it once answered |
+| — | notifications: none to send. The page raises one by itself when you add a follow-up or question, or answer an operator comment or chat message; nothing you run creates or clears one |
 | `claim <item>` | take an item's operator events |
 | `say "<text>"` | chat (orchestrator); `--long` only after the operator asked to expand |
 | `time-left "<duration>"` | save remaining time; accepts `3h 20m`, `3h`, `20m`, or integer minutes |
@@ -244,6 +247,13 @@ Every change to `template.html` keeps these:
 - Priorities sit under Original sources, closed by default, with a red count when anything waits on
   the operator. Each row is a red `#id` link that jumps to and highlights its item, the one-line ask,
   and Clear; Clear all sits at the top. Only what blocks on the operator's answer goes there.
+- Above Sync sit a back-to-top arrow and a notifications bell, in the same round style. The bell's
+  red count is the number of notifications. It opens a panel beside the buttons that leaves the
+  page usable: newest first, each row with its time, a red `#id` link that jumps to the item (or
+  the chat) and keeps the panel open, what happened, the text, and Clear; Clear all at the top;
+  the list scrolls; Esc or Close hides it. The server raises a notification for a new follow-up,
+  a new open question, or an agent comment or chat message that answers the operator. A row stays
+  until the operator clears it; no agent op or seed edit can create or clear one.
 - A design change ships in the template and is rolled onto every existing
   ledger with `agentihooks ledger new --upgrade <slug>`.
 
@@ -271,6 +281,22 @@ Every change to `template.html` keeps these:
 - Every API call carries the page's ledger token and a local Host header;
   anything else gets 403.
 
+## HTTP contract (serving the page from another host)
+
+The page talks to its server only through these calls. Any host that answers them (a web UI, a
+hosted service) can serve the same page; the rules stay in `ledger_core.sync` and the op modules.
+
+| Call | Body and reply |
+|---|---|
+| `GET /<slug>` | the page |
+| `GET /api/<slug>` | the state: plan fields, `chat`, `notes`, `priorities`, `notifications`, and `_meta` (rev, events, crew, page_version) |
+| `PUT /api/<slug>` | `{"changes": [...], "ops": [...]}`: checkbox changes with their base, and ops (`add`, `edit`, `delete`, `clear`, `sync`, `stats_sync`, `priority_clear`, `notification_clear`, agent ops carrying `by`); the reply is the new state |
+| `GET /healthz` | `{"dir": "<ledger dir>"}` |
+
+Every call carries `X-Ledger-Token` (the page's `ledger-token` meta). A new kind of op is a module
+with `OPS`, `check(op)` and `apply(doc, op, ctx)`, registered in `ledger_core.EXTENSION_OPS`
+(priorities and notifications are built that way).
+
 ## Extracted Scripts
 
 In agentihooks `scripts/plan_ledger/`; `agentihooks ledger` dispatches to them (`__init__.py`).
@@ -281,6 +307,8 @@ In agentihooks `scripts/plan_ledger/`; `agentihooks ledger` dispatches to them (
 | `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; merges page saves and HTML seed edits | Yes |
 | `watch_ledger.py` | Monitor feed: operator changes, seed errors and word-limit warnings, replayable with `--since-rev` | Yes (read-only) |
 | `ledger.py` | Agent CLI: join, status, events, ack, say, comment, phase, followup, scope, retext, edit, delete, audit, time-left, claim, prompt | No (writes are attributed ops) |
+| `ledger_notifications.py` | Notifications derived from agent events each sync; `notification_clear` for the operator (library) | — |
+| `ledger_priorities.py` | Priorities: one-line asks agents add and anyone clears (library) | — |
 | `ledger_comments.py` | The agent text filter, one status comment per agent per item, entry permissions, `audit` (library) | — |
 | `ledger_hook.py` | Claude Code hook: binds sessions, injects owed events, blocks Stop | Yes |
 | `ledger_gate.py` | Routing of operator events to crew members (library) | — |
