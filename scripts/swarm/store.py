@@ -110,7 +110,7 @@ def _fields(config):
 
 
 def redis_url(environ):
-    return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or environ.get("REDIS_URL") or DEFAULT_URL
+    return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 
 def connect(environ=None):

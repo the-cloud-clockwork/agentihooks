@@ -73,9 +73,8 @@ def test_an_unreachable_redis_is_refused_with_a_clear_error():
         connect({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:1/0"})
 
 
-def test_the_swarm_url_wins_then_redis_url_then_local_default():
+def test_one_redis_for_every_caller_whatever_redis_url_says():
     from scripts.swarm.store import DEFAULT_URL, redis_url
 
     assert redis_url({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://a", "REDIS_URL": "redis://b"}) == "redis://a"
-    assert redis_url({"REDIS_URL": "redis://b"}) == "redis://b"
-    assert redis_url({}) == DEFAULT_URL
+    assert redis_url({"REDIS_URL": "redis://b"}) == DEFAULT_URL
