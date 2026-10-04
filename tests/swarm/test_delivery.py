@@ -9,11 +9,11 @@ class FakeHerdr:
     def __init__(self, status):
         self.status, self.prompts = dict(status), []
 
-    def agent_status(self, pane_id):
-        return self.status.get(pane_id, "unknown")
+    def agent_status(self, agent):
+        return self.status.get(agent.pane_id, "unknown")
 
-    def prompt(self, pane_id, text):
-        self.prompts.append((pane_id, text))
+    def prompt(self, agent, text):
+        self.prompts.append((agent.pane_id, text))
 
 
 @pytest.fixture
@@ -53,8 +53,8 @@ def test_messages_for_agents_that_left_are_dropped(store):
 
 def test_a_herdr_failure_keeps_the_message_queued(store):
     class Broken(FakeHerdr):
-        def prompt(self, pane_id, text):
-            raise delivery.HerdrError("agent_blocked")
+        def prompt(self, agent, text):
+            raise TimeoutError("herdr hung")
 
     herdr = Broken({"p3": "idle"})
     delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr)
@@ -70,3 +70,30 @@ def test_operator_page_messages_are_relayed_once_with_their_address(store):
     assert delivery.relay_operator_chat(store, "sw", chat, herdr) == 1
     assert herdr.prompts == [("p3", "[swarm chat] operator: please look at the slow job")]
     assert delivery.relay_operator_chat(store, "sw", chat, herdr) == 0
+
+
+def test_stale_messages_expire(store):
+    herdr = FakeHerdr({"p3": "working"})
+    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr, now_ms=1_000)
+    delivery.flush(store, "sw", herdr, now_ms=1_000 + delivery.EXPIRE_MS + 1)
+    assert store.redis.llen(store.key("sw", "outbox")) == 0
+
+
+def test_a_second_flusher_backs_off_while_one_runs(store):
+    herdr = FakeHerdr({"p3": "idle"})
+    store.redis.set(store.key("sw", "flush-lock"), "other")
+    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr)
+    assert herdr.prompts == [] and store.redis.llen(store.key("sw", "outbox")) == 1
+
+
+def test_a_new_swarm_does_not_replay_old_chat(store):
+    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
+    old = [{"id": "a", "by": "operator", "at": 10, "text": "old plan talk"}]
+    delivery.start_cursor(store, "sw", old)
+    assert delivery.relay_operator_chat(store, "sw", old, herdr) == 0 and herdr.prompts == []
+
+
+def test_an_unknown_addressee_goes_to_everyone_with_a_note(store):
+    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
+    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "@nobody hi"}], herdr)
+    assert len(herdr.prompts) == 3 and "not in the swarm" in herdr.prompts[0][1]

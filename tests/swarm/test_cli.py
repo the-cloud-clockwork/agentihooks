@@ -23,7 +23,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
-    ledger.chat = lambda slug: []
+    ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     return store, ledger, rt
 
@@ -80,14 +80,33 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert "not an agent" in capsys.readouterr().err
 
 
-def test_stop_now_terminates_and_reopens(env):
+def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
+    run("sw", "done", "--pr", "https://github.com/o/r/pull/4")
     assert run("sw", "stop", "--now") == 0
     assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1"]
     assert store.config("sw").state == "stopped" and store.agents("sw") == []
-    assert ledger.rows["t1"]["state"] == "open"
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "done")
+
+
+def test_create_refuses_ids_that_break_agent_names(env, capsys):
+    assert run("2026-q4", "create", "--repo", "/repo") == 1
+    assert "starting with a letter" in capsys.readouterr().err
+
+
+def test_create_starts_the_chat_cursor_at_the_latest_message(env):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert store.redis.get(store.key("sw", "chat-cursor")) == "50"
+
+
+def test_as_equals_is_not_mistaken_for_set(env, monkeypatch):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert run("sw", "--as=sw-eng-1", "issue", "https://github.com/o/r/issues/1") == 0
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
@@ -113,7 +132,10 @@ def test_timer_units_and_enable(tmp_path):
         "/bin/agentihooks", tmp_path, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
     )
     assert ok and (tmp_path / "agentihooks-swarm.timer").exists()
-    assert "ExecStart=/bin/agentihooks swarm tick" in (tmp_path / "agentihooks-swarm.service").read_text()
+    service = (tmp_path / "agentihooks-swarm.service").read_text()
+    assert 'ExecStart="/bin/agentihooks" swarm tick' in service
+    assert "Environment=PATH=%h/.local/bin" in service and "EnvironmentFile=-%h/.agentihooks/.env" in service
+    assert "KillMode=process" in service
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
 
 
@@ -123,7 +145,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     def fake_run(argv, **kw):
         seen.append(argv)
         return subprocess.CompletedProcess(
-            argv, 0, stdout="pane_id=w3:p1\nstatus=started\naccount=acct\nagent=codex\n", stderr=""
+            argv, 0, stdout="pane_id=w3:p1\nstatus=started\nroute_status=direct\naccount=acct\nagent=codex\n", stderr=""
         )
 
     rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
@@ -131,17 +153,8 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     placed = rt.spawn(config, "ci", "sw-ci-1", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "sw-ci-1.md"
     assert placed == runtime.Placed("w3:p1", "codex", "acct")
-    assert seen[0][1:10] == [
-        "init-agent",
-        "--workspace",
-        "swarm-sw",
-        "--dir",
-        "/repo",
-        "--name",
-        "sw-ci-1",
-        "--agent",
-        "codex",
-    ]
+    assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
+    assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["sw-ci-1", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
     text = prompt_path.read_text()
     assert "speed up the tests" in text and "CI speed" in text and "agentihooks swarm sw done --pr" in text
@@ -185,3 +198,29 @@ def test_runtime_refuses_to_spawn_when_every_agent_is_full(tmp_path):
     with pytest.raises(runtime.SpawnError, match="session cap"):
         rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
     assert calls == []
+
+
+def test_runtime_treats_a_failed_route_as_a_failed_spawn_and_cleans_up(tmp_path):
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv[1])
+        out = "pane_id=w3:p1\nstatus=started\nroute_status=failed\n" if argv[1] == "init-agent" else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+
+    rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("claude", "priority"))
+    with pytest.raises(runtime.SpawnError):
+        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert seen == ["init-agent", "terminate-agent"]
+
+
+def test_runtime_retire_reports_a_failed_terminate_and_closes_leftover_panes(tmp_path):
+    closed = []
+    rt = runtime.HerdrRuntime(
+        home=tmp_path,
+        run=lambda argv, **kw: subprocess.CompletedProcess(argv, 2, stdout="", stderr="ambiguous"),
+        herdr=lambda args: closed.append(args) or {},
+    )
+    agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="w3:p1")
+    assert rt.retire(agent, live=True) is False and closed == []
+    assert rt.retire(agent, live=False) is True and closed == [["pane", "close", "w3:p1"]]

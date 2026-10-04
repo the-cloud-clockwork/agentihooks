@@ -507,7 +507,7 @@ details.crew { margin: 10px 0 0; }
 
   function taskRow(item) {
     const key = `tasks/${item.id}`;
-    const link = (url, label) => url ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
+    const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
     const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), h("span", { text: item.state }),
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,

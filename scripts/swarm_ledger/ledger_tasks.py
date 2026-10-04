@@ -10,6 +10,8 @@ ITEM_RE = re.compile(r"^tasks/[^/]+$")
 LANES = ("eng", "ci")
 STATES = ("open", "claimed", "blocked", "pr", "done")
 UPDATABLE = ("state", "claimed_by", "issue_url", "pr_url")
+URL_FIELDS = ("issue_url", "pr_url")
+URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 
 
@@ -18,7 +20,12 @@ def check(op):
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("task ops need `by`, an agent name other than operator")
     if op["op"] == "task_add":
-        if not ID_RE.match(str(op.get("task"))) or not isinstance(op.get("title"), str) or not op["title"].strip():
+        if (
+            not isinstance(op.get("task"), str)
+            or not ID_RE.match(op["task"])
+            or not isinstance(op.get("title"), str)
+            or not op["title"].strip()
+        ):
             raise ValueError("task_add needs task <id> and title")
         if op.get("lane") not in LANES:
             raise ValueError(f"lane must be one of {LANES}")
@@ -33,6 +40,22 @@ def check(op):
         raise ValueError(f"task_update may set only {UPDATABLE}, as strings")
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
+    check_urls(fields)
+
+
+def check_urls(fields):
+    for key in URL_FIELDS:
+        if fields.get(key) and not URL_RE.match(fields[key]):
+            raise ValueError(f"{key} must be an http or https link")
+
+
+def check_task(task):
+    """Rules a task obeys however it arrives: op, seed edit or new ledger."""
+    if task.get("lane", "eng") not in LANES:
+        raise ValueError(f"tasks/{task.get('id')}/lane must be one of {LANES}")
+    if task.get("state", "open") not in STATES:
+        raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
+    check_urls(task)
 
 
 def _add(doc, op, ctx):

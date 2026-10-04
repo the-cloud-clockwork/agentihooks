@@ -23,10 +23,16 @@ class FakeLedger:
 
 
 class FakeRuntime:
-    def __init__(self, fail=False):
-        self.live, self.spawned, self.killed, self.fail = set(), [], [], fail
+    def __init__(self, fail=False, full=False, crash=None):
+        self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
+        self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
+
+    def has_capacity(self):
+        return not self.full
 
     def spawn(self, config, lane, name, task):
+        if self.crash:
+            raise self.crash
         if self.fail:
             raise SpawnError("herdr down")
         self.spawned.append((lane, name, task["id"]))
@@ -36,9 +42,20 @@ class FakeRuntime:
     def live_names(self):
         return set(self.live)
 
-    def terminate(self, name):
-        self.killed.append(name)
-        self.live.discard(name)
+    def retire(self, agent, live):
+        if agent.name in self.stuck:
+            return False
+        if live:
+            self.killed.append(agent.name)
+            self.live.discard(agent.name)
+        self.closed.append(agent.pane_id)
+        return True
+
+    def status(self, agent):
+        return self.statuses.get(agent.name, "working")
+
+    def nudge(self, agent, text):
+        self.nudged.append(agent.name)
 
 
 @pytest.fixture
@@ -124,7 +141,77 @@ def test_drains_when_nothing_is_left_and_tells_the_operator_about_blocked_tasks(
     assert ledger.notes and "blocked" in ledger.notes[0]
 
 
-def test_a_failed_spawn_reopens_the_task(store):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(fail=True)
+@pytest.mark.parametrize("runtime", [FakeRuntime(fail=True), FakeRuntime(crash=OSError("disk full"))])
+def test_a_failed_spawn_of_any_kind_reopens_the_task(store, runtime):
+    ledger = tasks(("t1", "eng"))
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and store.agents("sw") == []
+
+
+def test_no_free_session_slot_claims_nothing(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(full=True)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "open" and store.claimant("sw", "t1") is None and runtime.spawned == []
+
+
+def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/3")
+    runtime.live.clear()
+    tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
+    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1") and ledger.rows["t1"]["pr_url"].endswith("/3")
+    assert "w1:p1" in runtime.closed
+
+
+def test_a_claimed_task_without_an_agent_is_reopened(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused")
+    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-9")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "open"
+
+
+def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
+    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.statuses["sw-eng-1"] = "idle"
+    store.update("sw", state="paused")
+    for n in range(IDLE_KILL_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+        if n + 1 == IDLE_NUDGE_TICKS:
+            assert runtime.nudged == ["sw-eng-1"]
+    assert runtime.killed == ["sw-eng-1"] and ledger.rows["t1"]["state"] == "open"
+
+
+def test_a_busy_turn_resets_the_idle_count(store):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
+        runtime.statuses["sw-eng-1"] = status
+        tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.nudged == []
+
+
+def test_a_finished_agent_that_will_not_die_stays_registered(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = store.agents("sw")[0]
+    store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
+    runtime.stuck.add("sw-eng-1")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [a.name for a in store.agents("sw")] == ["sw-eng-1"]
+
+
+def test_a_drained_swarm_wakes_up_for_new_tasks(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.rows["t1"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.config("sw").state == "drained"
+    ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert store.config("sw").state == "running" and runtime.spawned == [("eng", "sw-eng-1", "t2")]

@@ -644,7 +644,7 @@ def select_credential(
     cache_file: Path | None = None,
     claude_bin: str = "claude",
     sessions: Mapping[str, int] | None = None,
-    max_sessions: int = 2,
+    max_sessions: int = 3,
     exclude: Iterable[str] = (),
 ) -> RouteDecision:
     """Pick the account with the most routing left among those below the per-account session cap.

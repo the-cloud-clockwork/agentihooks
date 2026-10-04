@@ -200,6 +200,8 @@ def validate(doc):
                     raise ValueError(f"{name}/{item['id']}/{field} must be {expected.__name__}")
             for thread in THREADS[name]:
                 validate_thread(f"{name}/{item['id']}/{thread}", item.get(thread, []))
+            if name == "tasks":
+                ledger_tasks.check_task(item)
 
 
 def flatten(doc):

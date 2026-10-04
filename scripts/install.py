@@ -30,7 +30,7 @@ Commands:
 
     agentihooks claude [--route SLUG] [extra flags]
         Route to the healthiest OAuth account that runs fewer than
-        AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 2) live sessions, and launch Claude.
+        AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 3) live sessions, and launch Claude.
         --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the cap.
         Alias: agenti (added to ~/.bashrc by init)
 

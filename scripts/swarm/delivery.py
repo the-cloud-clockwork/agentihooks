@@ -1,31 +1,35 @@
 """Swarm chat delivery: push each message into its recipients' herdr panes once they are idle.
 
-A busy agent's message waits in a Redis outbox; every tick flushes it, so no process watches for it.
+A busy agent's message waits in a Redis outbox that every tick flushes, so no process watches for it.
 """
 
 import json
-
-from scripts.herdr_host import HerdrError
+import time
+import uuid
 
 READY = ("idle", "done")
+EXPIRE_MS = 30 * 60 * 1000
+FLUSH_LOCK_MS = 120 * 1000
 
 
 class HerdrMessenger:
-    def agent_status(self, pane_id):
-        import os
+    def __init__(self, herdr=None):
+        from scripts.swarm import runtime
 
-        from scripts.herdr_host import _cli
+        self.herdr = herdr or runtime.herdr_call
+        self.target = runtime.herdr_target
 
-        result = _cli(["agent", "get", pane_id], dict(os.environ))
-        agent = result.get("agent", result)
-        return agent.get("agent_status") or agent.get("status") or "unknown"
+    def agent_status(self, agent):
+        result = self.herdr(["agent", "get", self.target(agent.name)])
+        found = result.get("agent", result)
+        return found.get("agent_status") or found.get("status") or "unknown"
 
-    def prompt(self, pane_id, text):
-        import os
+    def prompt(self, agent, text):
+        self.herdr(["agent", "prompt", self.target(agent.name), text])
 
-        from scripts.herdr_host import _cli
 
-        _cli(["agent", "prompt", pane_id, text], dict(os.environ))
+def _now():
+    return int(time.time() * 1000)
 
 
 def recipients(store, slug, to, sender):
@@ -35,50 +39,72 @@ def recipients(store, slug, to, sender):
     return [a for a in agents if to in (a.lane, a.name)]
 
 
-def send(store, slug, text, sender, to, herdr):
-    outbox = store.key(slug, "outbox")
-    for agent in recipients(store, slug, to, sender):
-        store.redis.rpush(outbox, json.dumps({"to": agent.name, "text": f"[swarm chat] {sender}: {text}"}))
-    return flush(store, slug, herdr)
+def send(store, slug, text, sender, to, herdr, now_ms=None):
+    outbox, at = store.key(slug, "outbox"), now_ms or _now()
+    found = recipients(store, slug, to, sender)
+    for agent in found:
+        store.redis.rpush(outbox, json.dumps({"to": agent.name, "at": at, "text": f"[swarm chat] {sender}: {text}"}))
+    flush(store, slug, herdr, now_ms=at)
+    return [a.name for a in found]
 
 
-def flush(store, slug, herdr):
+def flush(store, slug, herdr, now_ms=None):
+    """Deliver what can be delivered; one flusher at a time, each item taken atomically."""
+    lock, token = store.key(slug, "flush-lock"), uuid.uuid4().hex
+    if not store.redis.set(lock, token, nx=True, px=FLUSH_LOCK_MS):
+        return []
+    try:
+        return _drain(store, slug, herdr, now_ms or _now())
+    finally:
+        if store.redis.get(lock) == token:
+            store.redis.delete(lock)
+
+
+def _drain(store, slug, herdr, now_ms):
     outbox = store.key(slug, "outbox")
-    panes = {a.name: a.pane_id for a in store.agents(slug) if a.state != "finished"}
+    agents = {a.name: a for a in store.agents(slug) if a.state != "finished"}
     sent, keep = [], []
-    for raw in store.redis.lrange(outbox, 0, -1):
+    for _ in range(store.redis.llen(outbox)):
+        raw = store.redis.lpop(outbox)
+        if raw is None:
+            break
         item = json.loads(raw)
-        pane = panes.get(item["to"])
-        if not pane:
+        agent = agents.get(item["to"])
+        if agent is None or now_ms - item.get("at", now_ms) > EXPIRE_MS:
             continue
         try:
-            if herdr.agent_status(pane) in READY:
-                herdr.prompt(pane, item["text"])
-                sent.append(item["to"])
+            if herdr.agent_status(agent) in READY:
+                herdr.prompt(agent, item["text"])
+                sent.append(agent.name)
                 continue
-        except HerdrError:
+        except Exception:
             pass
         keep.append(raw)
-    with store.redis.pipeline() as pipe:
-        pipe.delete(outbox)
-        if keep:
-            pipe.rpush(outbox, *keep)
-        pipe.execute()
+    if keep:
+        store.redis.rpush(outbox, *keep)
     return sent
 
 
+def latest_at(entries):
+    return max((e.get("at", 0) for e in entries), default=0)
+
+
+def start_cursor(store, slug, entries):
+    store.redis.set(store.key(slug, "chat-cursor"), latest_at(entries))
+
+
 def relay_operator_chat(store, slug, entries, herdr):
-    """Queue every operator chat entry newer than the swarm's cursor; a leading @name, @eng or @ci addresses it."""
+    """Send every operator chat entry newer than the swarm's cursor; a leading @name, @eng or @ci addresses it."""
     cursor_key = store.key(slug, "chat-cursor")
     cursor = int(store.redis.get(cursor_key) or 0)
     fresh = [
         e for e in entries if e.get("by", "operator") == "operator" and e.get("at", 0) > cursor and not e.get("deleted")
     ]
-    for entry in fresh:
+    for entry in sorted(fresh, key=lambda e: e["at"]):
         text, to = entry.get("text", ""), ""
         if text.startswith("@") and " " in text:
             to, text = text[1:].split(" ", 1)
-        send(store, slug, text, sender="operator", to=to, herdr=herdr)
-    if fresh:
-        store.redis.set(cursor_key, max(e["at"] for e in fresh))
+        if not send(store, slug, text, sender="operator", to=to, herdr=herdr) and to:
+            send(store, slug, f"(to {to}, who is not in the swarm) {text}", sender="operator", to="", herdr=herdr)
+        store.redis.set(cursor_key, entry["at"])
     return len(fresh)

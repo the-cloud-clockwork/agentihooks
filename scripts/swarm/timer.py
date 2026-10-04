@@ -10,7 +10,11 @@ UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 def units(binary):
     service = (
         "[Unit]\nDescription=agentihooks swarm tick\n\n"
-        f"[Service]\nType=oneshot\nExecStart={binary} swarm tick\nTimeoutStartSec=900\n"
+        "[Service]\nType=oneshot\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm tick\n'
+        "TimeoutStartSec=540\nKillMode=process\n"
     )
     timer = (
         "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"

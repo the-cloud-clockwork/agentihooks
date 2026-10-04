@@ -15,6 +15,13 @@ def build(slug, repo, lane, name, task):
     ]
     if task.get("description"):
         lines.append(task["description"])
+    if task.get("pr_url"):
+        lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
+    if lane == "ci":
+        lines.append(
+            f"Add a further bottleneck as a ci task: agentihooks ledger --slug {slug} --as {name} task add <short id> "
+            f'"<plain title>" --lane ci --phase {task.get("phase") or "p1"}'
+        )
     lines += [
         "",
         "Work it end to end with the dev-cycle skill, then stop:",

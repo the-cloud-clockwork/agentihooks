@@ -31,6 +31,7 @@ class AgentRecord:
     account: str = ""
     started_at: int = 0
     state: str = "working"
+    idle_ticks: int = 0
 
 
 class RedisStore:
@@ -116,6 +117,8 @@ def connect(environ=None):
     import os
 
     import redis
+
+    import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
     url = redis_url(os.environ if environ is None else environ)
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)

@@ -63,6 +63,9 @@ def check_types(content):
             for f in fields
             if not isinstance(i.get(f, ""), str)
         ]
+    for n, task in enumerate(content.get("tasks", []) if isinstance(content.get("tasks", []), list) else [], 1):
+        if isinstance(task, dict) and task.get("lane", "eng") not in ("eng", "ci"):
+            errors.append(f"tasks[{n}].lane must be eng or ci")
     return errors
 
 

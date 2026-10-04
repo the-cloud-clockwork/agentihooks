@@ -118,3 +118,26 @@ class TaskCli(unittest.TestCase):
         self.assertEqual(
             sent[1], ("task_update", {"item": "tasks/t3", "fields": {"state": "claimed", "claimed_by": "smoke-ci-1"}})
         )
+
+
+class TaskRules(unittest.TestCase):
+    def test_links_must_be_http(self):
+        for bad in ("javascript:alert(1)", "data:text/html,x", "ftp://x"):
+            with self.assertRaises(ValueError):
+                core.check_op(op("task_update", 9, item="tasks/t1", fields={"pr_url": bad}))
+        core.check_op(op("task_update", 9, item="tasks/t1", fields={"pr_url": "https://github.com/o/r/pull/1"}))
+
+    def test_a_task_id_must_be_a_string(self):
+        with self.assertRaises(ValueError):
+            core.check_op(op("task_add", 8, task=5, title="x", lane="eng"))
+
+    def test_seed_tasks_obey_lane_state_and_link_rules(self):
+        base = {"title": "t", "phases": [], "questions": [], "followups": []}
+        for task in ({"lane": "ops"}, {"state": "finished"}, {"pr_url": "javascript:x"}):
+            with self.assertRaises(ValueError):
+                core.validate({**base, "tasks": [{"id": "t1", "title": "a", **task}]})
+        core.validate({**base, "tasks": [{"id": "t1", "title": "a", "lane": "ci", "state": "pr"}]})
+
+    def test_a_new_ledger_refuses_an_unknown_lane(self):
+        errors = new_ledger.check_types({"title": "t", "tasks": [{"title": "a", "lane": "ops"}]})
+        self.assertIn("tasks[1].lane must be eng or ci", errors)

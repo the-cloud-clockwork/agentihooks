@@ -1,16 +1,24 @@
-"""One reconcile pass over a swarm: retire finished agents, free dead agents' tasks, spawn up to the caps.
+"""One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from scripts.swarm.store import AgentRecord
 
 LEASE_MS = 10 * 60 * 1000
-STARTUP_GRACE_MS = 3 * 60 * 1000
+STARTUP_GRACE_MS = 6 * 60 * 1000
+IDLE_NUDGE_TICKS = 3
+IDLE_KILL_TICKS = 10
 LANES = ("eng", "ci")
+ACTIVE = ("claimed", "pr")
+NUDGE = (
+    "Swarm check: you are idle and your task is still open. If you are waiting on checks, say so with "
+    "agentihooks swarm {slug} say and keep waiting. Otherwise finish it with agentihooks swarm {slug} done "
+    "--pr <url>, or agentihooks swarm {slug} block with the reason."
+)
 
 
 class SpawnError(RuntimeError):
@@ -31,40 +39,80 @@ class Ledger(Protocol):
 
 
 class Runtime(Protocol):
+    def has_capacity(self) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict) -> Placed: ...
     def live_names(self) -> set[str]: ...
-    def terminate(self, name: str) -> None: ...
+    def retire(self, agent: AgentRecord, live: bool) -> bool: ...
+    def status(self, agent: AgentRecord) -> str: ...
+    def nudge(self, agent: AgentRecord, text: str) -> None: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.config(slug)
-    if config.state in ("stopped", "drained"):
+    if config.state == "stopped":
         return []
     rows = {t["id"]: t for t in ledger.tasks(slug)}
-    actions = _reap(slug, store, ledger, runtime, rows, now_ms)
+    actions = []
+    if config.state == "drained":
+        if not any(_claimable(slug, store, rows, lane) for lane in LANES):
+            return []
+        config = store.update(slug, state="running")
+        actions.append("new tasks, running again")
+    actions += _reap(slug, store, ledger, runtime, rows, now_ms)
+    actions += _orphans(slug, store, ledger, rows)
     if config.state == "running":
         actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
-    actions += _settle(slug, config, store, ledger, rows)
-    return actions
+    return actions + _settle(slug, config, store, ledger, rows)
+
+
+def _drop(slug, store, ledger, rows, agent):
+    store.release(slug, agent.task, agent.name)
+    store.drop_agent(slug, agent.name)
+    if rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name:
+        _reopen(slug, ledger, rows, agent.task)
+        return f", task {agent.task} reopened"
+    return ""
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
         if agent.state == "finished":
-            if agent.name in live:
-                runtime.terminate(agent.name)
-            store.release(slug, agent.task, agent.name)
-            store.drop_agent(slug, agent.name)
-            actions.append(f"retired {agent.name}")
+            if runtime.retire(agent, agent.name in live):
+                store.release(slug, agent.task, agent.name)
+                store.drop_agent(slug, agent.name)
+                actions.append(f"retired {agent.name}")
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            actions += _watch_idle(slug, store, ledger, runtime, rows, agent)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            store.release(slug, agent.task, agent.name)
-            store.drop_agent(slug, agent.name)
-            if rows.get(agent.task, {}).get("state") == "claimed":
-                _reopen(slug, ledger, rows, agent.task)
-            actions.append(f"lost {agent.name}, task {agent.task} reopened")
+            runtime.retire(agent, False)
+            actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
+    return actions
+
+
+def _watch_idle(slug, store, ledger, runtime, rows, agent):
+    if runtime.status(agent) not in ("idle", "done"):
+        if agent.idle_ticks:
+            store.put_agent(slug, replace(agent, idle_ticks=0))
+        return []
+    idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
+    store.put_agent(slug, idle)
+    if idle.idle_ticks == IDLE_NUDGE_TICKS:
+        runtime.nudge(idle, NUDGE.format(slug=slug))
+        return [f"nudged {agent.name}"]
+    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True):
+        return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
+    return []
+
+
+def _orphans(slug, store, ledger, rows):
+    known = {a.name for a in store.agents(slug)}
+    actions = []
+    for task_id, row in rows.items():
+        if row.get("state") in ACTIVE and row.get("claimed_by") not in known and store.claimant(slug, task_id) is None:
+            _reopen(slug, ledger, rows, task_id)
+            actions.append(f"task {task_id} had no agent, reopened")
     return actions
 
 
@@ -89,20 +137,25 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci)):
         busy = sum(1 for a in agents if a.lane == lane)
         for task in _claimable(slug, store, rows, lane)[: max(cap - busy, 0)]:
+            if not runtime.has_capacity():
+                return actions + ["every agent is at its session cap, waiting"]
             name = store.next_name(slug, lane)
             if not store.claim(slug, task["id"], name, LEASE_MS):
                 continue
-            ledger.update_task(slug, task["id"], {"state": "claimed", "claimed_by": name})
-            task.update(state="claimed", claimed_by=name)
+            record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting")
+            store.put_agent(slug, record)
             try:
+                ledger.update_task(slug, task["id"], {"state": "claimed", "claimed_by": name})
+                task.update(state="claimed", claimed_by=name)
                 placed = runtime.spawn(config, lane, name, task)
-            except SpawnError as exc:
-                store.release(slug, task["id"], name)
-                _reopen(slug, ledger, rows, task["id"])
-                actions.append(f"spawn failed for {task['id']}: {exc}")
+            except Exception as exc:
+                actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
             store.put_agent(
-                slug, AgentRecord(name, lane, task["id"], placed.pane_id, placed.harness, placed.account, now_ms)
+                slug,
+                replace(
+                    record, pane_id=placed.pane_id, harness=placed.harness, account=placed.account, state="working"
+                ),
             )
             actions.append(f"spawned {name} for {task['id']}")
     return actions
@@ -117,9 +170,7 @@ def _settle(slug, config, store, ledger, rows):
     if config.state != "running" or any(_claimable(slug, store, rows, lane) for lane in LANES):
         return []
     store.update(slug, state="drained")
-    blocked = [t["id"] for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope")]
-    ledger.notify(
-        slug,
-        "The swarm has no task left to start" + (f", {len(blocked)} blocked tasks wait for you" if blocked else ""),
-    )
+    blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))
+    waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
+    ledger.notify(slug, "The swarm has no task left to start" + waiting)
     return ["drained"]

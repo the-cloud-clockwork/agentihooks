@@ -12,8 +12,11 @@ agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | say T
 import argparse
 import json
 import os
+import re
+import signal
 import sys
 import time
+import uuid
 
 from scripts.swarm import delivery, timer
 from scripts.swarm.ledger_client import LedgerClient
@@ -22,7 +25,8 @@ from scripts.swarm.store import SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import tick
 
 SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci"}
-TICK_LOCK_MS = 15 * 60 * 1000
+TICK_LOCK_MS = 10 * 60 * 1000
+SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 
 
 def now_ms():
@@ -30,8 +34,8 @@ def now_ms():
 
 
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
-    lock = store.key(slug, "tick-lock")
-    if not store.redis.set(lock, "1", nx=True, px=TICK_LOCK_MS):
+    lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
+    if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     ledger = ledger or LedgerClient()
     try:
@@ -40,7 +44,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         delivery.relay_operator_chat(store, slug, ledger.chat(slug), herdr)
         return actions + [f"delivered to {name}" for name in delivery.flush(store, slug, herdr)]
     finally:
-        store.redis.delete(lock)
+        if store.redis.get(lock) == token:
+            store.redis.delete(lock)
 
 
 def cmd_list(store, args):
@@ -54,13 +59,18 @@ def cmd_tick(store, args):
         try:
             for action in run_tick(store, slug):
                 print(f"{slug}: {action}")
-        except SwarmError as exc:
-            print(f"{slug}: {exc}", file=sys.stderr)
+        except Exception as exc:
+            print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def cmd_create(store, args):
+    if not SLUG_RE.match(args.slug):
+        raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
     repo = os.path.abspath(os.path.expanduser(args.repo))
+    ledger = LedgerClient()
+    ledger.tasks(args.slug)
     store.create(SwarmConfig(args.slug, repo, args.max_eng_agents, args.max_ci_agents, state="paused"))
+    delivery.start_cursor(store, args.slug, ledger.chat(args.slug))
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused"}))
 
 
@@ -85,14 +95,21 @@ def cmd_stop(store, args):
     if not args.now:
         _state(store, args, "stopping")
         return
+    store.update(args.slug, state="stopping")
     runtime, ledger = HerdrRuntime(), LedgerClient()
+    rows = {t["id"]: t for t in ledger.tasks(args.slug)}
+    live, left = runtime.live_names(), []
     for agent in store.agents(args.slug):
-        runtime.terminate(agent.name)
+        if not runtime.retire(agent, agent.name in live):
+            left.append(agent.name)
+            continue
         store.release(args.slug, agent.task, agent.name)
         store.drop_agent(args.slug, agent.name)
-        ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
-    store.update(args.slug, state="stopped")
-    print(json.dumps({"swarm": args.slug, "state": "stopped"}))
+        row = rows.get(agent.task, {})
+        if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
+            ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
+    store.update(args.slug, state="stopping" if left else "stopped")
+    print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "still_running": left}))
 
 
 def cmd_set(store, args):
@@ -177,7 +194,7 @@ def _retire(store, slug, agent):
 
 def cmd_say(store, args):
     agent = _me(store, args)
-    text = f"@{args.to} {args.text}" if args.to else args.text
+    text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
     LedgerClient().say(args.slug, text, by=agent.name)
     delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, herdr=delivery.HerdrMessenger())
     print(json.dumps({"posted": True}))
@@ -214,10 +231,11 @@ def main(argv):
     if argv and argv[0] in ("list", "tick"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
-        if len(argv) > 1 and "=" in argv[1]:
+        if len(argv) > 1 and argv[1].partition("=")[0] in SETTABLE:
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         handler(connect(), args)
     except SwarmError as exc:

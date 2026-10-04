@@ -8,7 +8,20 @@ import re
 DEFAULT_POLICY = {"nudge_after_calls": 25, "stop_after_calls": 10, "stop_blocks": 3}
 MENTION_RE = re.compile(r"^@([A-Za-z][\w.-]{0,63})")
 IGNORED_KINDS = ("chat cleared",)
-WRITE_COMMANDS = ("say", "comment", "phase", "followup", "claim", "ack", "join", "edit", "delete", "scope", "retext")
+WRITE_COMMANDS = (
+    "say",
+    "comment",
+    "phase",
+    "followup",
+    "claim",
+    "ack",
+    "join",
+    "edit",
+    "delete",
+    "scope",
+    "retext",
+    "task",
+)
 WATCH_STALE_SECONDS = 20
 
 
