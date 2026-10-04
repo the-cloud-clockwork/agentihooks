@@ -208,6 +208,10 @@ details.crew { margin: 10px 0 0; }
 .crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: none; align-self: center; }
 .swarm-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; gap: 8px; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
 .swarm-row .who { color: #cbd5e1; }
+.swarm-ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 6px; font-size: var(--fs-meta); color: var(--muted); }
+.swarm-ctl button { background: transparent; border: 0; color: var(--blue-hi); cursor: pointer; font: inherit; }
+.swarm-ctl button:hover { background: rgba(255, 255, 255, .08); }
+.swarm-ctl input { width: 4em; }
 .swarm-sum { font-size: var(--fs-meta); color: var(--muted); margin: 0 0 6px; }
 .crew-row .unhandled { margin-left: auto; color: var(--red); }
 #chat-input { max-height: 140px; overflow-y: auto; }
@@ -231,7 +235,7 @@ details.crew { margin: 10px 0 0; }
   <section><details class="sources-box" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
   <section><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
-  <section id="swarm-box" hidden><details class="sources-box" open><summary>Swarm <span class="count" id="swarm-count"></span></summary><p class="swarm-sum" id="swarm-sum"></p><div id="swarm-agents"></div></details></section>
+  <section id="swarm-box" hidden><details class="sources-box" open><summary>Swarm <span class="count" id="swarm-count"></span></summary><p class="swarm-sum" id="swarm-sum"></p><div class="swarm-ctl" id="swarm-ctl"><button type="button" data-swarm="start">Start</button><button type="button" data-swarm="pause">Pause</button><button type="button" data-swarm="stop">Stop</button><button type="button" data-swarm="stop_now">Stop now</button><label>eng <input type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng"></label><label>ci <input type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci"></label><button type="button" data-swarm="set">Set caps</button></div><div id="swarm-agents"></div></details></section>
   <section><h2>Plan phases</h2><ol id="phases"></ol></section>
   <section><h2>Swarm tasks</h2><ol id="tasks"></ol></section>
   <section><h2>Open questions</h2><ol id="questions"></ol></section>
@@ -724,11 +728,30 @@ details.crew { margin: 10px 0 0; }
     renderSwarm(sw);
   }
 
+  async function swarmControl(body) {
+    try {
+      const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
+      if (resp.ok) return renderSwarm(await resp.json());
+      $("swarm-sum").textContent = `control failed: ${await resp.text()}`;
+    } catch (e) {
+      $("swarm-sum").textContent = "control failed: ledger server unreachable";
+    }
+  }
+
+  $("swarm-ctl").addEventListener("click", (event) => {
+    const action = event.target.dataset.swarm;
+    if (!action || event.target.tagName !== "BUTTON") return;
+    if (action === "set") return swarmControl({ action, max_eng: Number($("cap-eng").value), max_ci: Number($("cap-ci").value) });
+    swarmControl({ action });
+  });
+
   function renderSwarm(sw) {
     $("swarm-box").hidden = !sw;
     if (!sw) return;
     const c = sw.config, t = sw.tasks, agents = sw.agents || [];
     $("swarm-count").textContent = `· ${c.state}`;
+    if (document.activeElement !== $("cap-eng")) $("cap-eng").value = c.max_eng;
+    if (document.activeElement !== $("cap-ci")) $("cap-ci").value = c.max_ci;
     $("swarm-sum").textContent = `caps eng ${c.max_eng} · ci ${c.max_ci} · tasks ${Object.keys(t).map((k) => `${k} ${t[k]}`).join(" · ")}`;
     $("swarm-agents").replaceChildren(...agents.map((a) => h("div", { class: "swarm-row" },
       h("span", { class: "who", text: a.name }), h("span", { text: a.lane }), h("span", { text: a.harness }),
