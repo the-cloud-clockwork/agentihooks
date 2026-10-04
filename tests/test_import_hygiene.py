@@ -38,8 +38,10 @@ _ALLOWED_NOISY: frozenset[str] = frozenset()
 # One interpreter loads the third-party dependencies once, then forks a child
 # per module. Every child starts with none of the package loaded, so each
 # module's import side effects are observed alone, as in a fresh process.
+# The dependencies are read from the import statements that run at import
+# time, so no first-party module executes outside its own child.
 _PROBE_RUNNER = r"""
-import importlib, io, json, os, sys, tempfile, traceback
+import ast, importlib, importlib.machinery, io, json, os, sys, tempfile, traceback
 
 def import_quietly(name):
     real = sys.stdout, sys.stderr
@@ -56,43 +58,89 @@ def import_quietly(name):
 def first_party(name, package):
     return name == package or name.startswith(package + ".")
 
-def run_child(names, package):
-    baseline = set(sys.modules)
+def find_source(name):
+    path, spec = None, None
+    parts = name.split(".")
+    for end in range(1, len(parts) + 1):
+        spec = importlib.machinery.PathFinder.find_spec(".".join(parts[:end]), path)
+        if spec is None or (end < len(parts) and spec.submodule_search_locations is None):
+            return None, False
+        path = spec.submodule_search_locations
+    return spec.origin, path is not None
+
+def imports_run_on_import(tree):
+    pending = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
+        pending.extend(ast.iter_child_nodes(node))
+
+def imported_names(node, module, is_package):
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    base = node.module or ""
+    if node.level:
+        anchor = module.split(".")[: None if is_package else -1]
+        anchor = anchor[: len(anchor) - node.level + 1]
+        base = ".".join([*anchor, *filter(None, [node.module])])
+    return [base, *(f"{base}.{alias.name}" for alias in node.names if alias.name != "*")]
+
+def dependencies(modules, package):
+    seen, found, pending = set(), [], list(modules)
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        parts = name.split(".")
+        pending.extend(".".join(parts[:end]) for end in range(1, len(parts)))
+        origin, is_package = find_source(name)
+        if not origin or not origin.endswith(".py"):
+            continue
+        try:
+            with open(origin, "rb") as source:
+                tree = ast.parse(source.read())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for node in imports_run_on_import(tree):
+            for target in imported_names(node, name, is_package):
+                (pending if first_party(target, package) else found).append(target)
+    return list(dict.fromkeys(found))
+
+def run_child(name):
     with tempfile.TemporaryFile() as raw:
         os.dup2(raw.fileno(), 1)
-        results = [import_quietly(name) for name in names]
+        out, err, failed = import_quietly(name)
         raw.seek(0)
         fd_out = raw.read().decode(errors="replace")
-    out, err, failed = results[-1]
-    loaded = [m for m in sys.modules if m not in baseline and not first_party(m, package) and not m.startswith("__")]
-    return {"stdout": fd_out + out, "stderr": err, "failed": failed, "pid": os.getpid(), "ppid": os.getppid(), "loaded": loaded}
+    return {"stdout": fd_out + out, "stderr": err, "failed": failed, "pid": os.getpid(), "ppid": os.getppid()}
 
-def in_child(names, package):
+def in_child(name):
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid == 0:
         os.close(read_fd)
         with os.fdopen(write_fd, "wb") as pipe:
-            pipe.write(json.dumps(run_child(names, package)).encode())
+            pipe.write(json.dumps(run_child(name)).encode())
         os._exit(0)
     os.close(write_fd)
     with os.fdopen(read_fd, "rb") as pipe:
         payload = pipe.read()
     _, status = os.waitpid(pid, 0)
     if not payload:
-        return {"stdout": "", "stderr": f"probe child died (wait status {status})", "failed": True, "pid": pid, "ppid": os.getpid(), "loaded": []}
+        return {"stdout": "", "stderr": f"probe child died (wait status {status})", "failed": True, "pid": pid, "ppid": os.getpid()}
     return json.loads(payload)
 
 output, package, *modules = sys.argv[1:]
 shared_out = []
-for name in in_child(modules, package)["loaded"]:
-    out, _, _ = import_quietly(name)
-    shared_out.append(out)
-report = {"shared_stdout": "".join(shared_out), "modules": {}}
-for name in modules:
-    result = in_child([name], package)
-    del result["loaded"]
-    report["modules"][name] = result
+for name in dependencies(modules, package):
+    if name not in sys.modules:
+        out, _, _ = import_quietly(name)
+        shared_out.append(out)
+report = {"shared_stdout": "".join(shared_out), "modules": {name: in_child(name) for name in modules}}
 with open(output, "w") as handle:
     json.dump(report, handle)
 """
@@ -275,6 +323,33 @@ class TestProbeHarness:
         results = list(report["modules"].values())
         assert len({result["ppid"] for result in results}) == 1
         assert len({result["pid"] for result in results}) == 2
+
+    def test_modules_and_dependencies_execute_once_and_dependencies_load_before_the_fork(self, tmp_path: Path) -> None:
+        log = tmp_path / "imports.log"
+        record = (
+            f"import os\nwith open({str(log)!r}, 'a') as _log:\n    _log.write(f'{{__name__}} {{os.getpid()}}\\n')\n"
+        )
+        _write_package(tmp_path, "countdep", {"core": record})
+        _write_package(tmp_path, "stray", {"core": record})
+        (tmp_path / "stray" / "__init__.py").write_text("from stray import core\n")
+        _write_package(
+            tmp_path,
+            "countpkg",
+            {
+                "first": record + "from . import helper\nfrom countpkg.helper import stray\n",
+                "helper": record + "from countdep import core\nstray = None\n",
+                "second": record,
+            },
+        )
+        report = _probe_modules("countpkg", ["countpkg.first", "countpkg.second"], _probe_env(tmp_path))
+        executed = [line.split() for line in log.read_text().splitlines()]
+        assert sorted(name for name, _ in executed) == [
+            "countdep.core",
+            "countpkg.first",
+            "countpkg.helper",
+            "countpkg.second",
+        ]
+        assert dict(executed)["countdep.core"] == str(report["modules"]["countpkg.first"]["ppid"])
 
     def test_every_module_probe_shares_one_xdist_group(self) -> None:
         marks = getattr(test_module_import_does_not_write_to_stdout, "pytestmark", [])
