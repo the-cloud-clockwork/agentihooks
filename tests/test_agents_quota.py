@@ -87,3 +87,38 @@ def test_rows_list_every_claude_account_and_codex():
     assert table[1].split()[:6] == ["claude", "ncgma", "NORMAL", "2", "95%", "60%"]
     assert table[2].split()[:6] == ["codex", "pro", "NORMAL", "1", "?", "54%"]
     assert table[2].endswith("session-log 2m ago")
+
+
+def test_a_plan_with_only_a_five_hour_window_is_classified_on_it():
+    five = {"used_percent": 85.0, "window_minutes": 300, "resets_at": 1}
+    quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", five))
+    assert quota.seven_day.used is None
+    assert quota.state == "DRAIN_SOON"
+
+
+def test_quota_json_lists_every_row(monkeypatch, capsys):
+    row = agents_quota.QuotaRow("claude", "ncgma", "NORMAL", 1, 90.0, 40.0, 9000, "cached")
+    monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [row])
+    monkeypatch.setattr(agents_quota, "latest_codex_quota", lambda: None)
+    monkeypatch.setattr(agents_quota, "_codex_sessions", lambda: 0)
+    assert agents_quota.main(["--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {
+            "agent": "claude",
+            "account": "ncgma",
+            "state": "NORMAL",
+            "sessions": 1,
+            "five_hour_left": 90.0,
+            "seven_day_left": 40.0,
+            "seven_day_resets_at": 9000,
+            "source": "cached",
+        }
+    ]
+
+
+def test_no_agent_rows_exit_one(monkeypatch, capsys):
+    monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
+    monkeypatch.setattr(agents_quota, "latest_codex_quota", lambda: None)
+    monkeypatch.setattr(agents_quota, "_codex_sessions", lambda: 0)
+    assert agents_quota.main([]) == 1
+    assert "no Claude account and no Codex session log" in capsys.readouterr().err
