@@ -55,7 +55,16 @@ class HerdrRuntime:
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
         try:
             proc = self.run(
-                [*argv, "--prompt-file", str(path)], capture_output=True, text=True, timeout=SPAWN_TIMEOUT_S
+                [*argv, "--prompt-file", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=SPAWN_TIMEOUT_S,
+                env={
+                    **os.environ,
+                    "AGENTIHOOKS_SWARM": config.slug,
+                    "AGENTIHOOKS_SWARM_LANE": lane,
+                    "AGENTIHOOKS_SWARM_TASK": task["id"],
+                },
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
