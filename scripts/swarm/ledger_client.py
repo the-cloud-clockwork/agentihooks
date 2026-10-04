@@ -30,6 +30,9 @@ class LedgerClient:
     def tasks(self, slug):
         return self._call(slug).get("tasks", [])
 
+    def chat(self, slug):
+        return self._call(slug).get("chat", [])
+
     def update_task(self, slug, task_id, fields, by="swarm"):
         self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields)])
 

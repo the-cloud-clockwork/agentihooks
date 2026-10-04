@@ -257,7 +257,7 @@ details.crew { margin: 10px 0 0; }
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden>
   <div class="notif-head"><h2 id="chat-title">Chat</h2><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></div>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
-  <div class="chat-compose"><textarea class="line" id="chat-input" rows="1" placeholder="Message the orchestrator…" aria-label="Message the orchestrator"></textarea>
+  <div class="chat-compose"><textarea class="line" id="chat-input" rows="1" placeholder="Message the swarm…" aria-label="Message the swarm"></textarea>
     <div class="hint">Enter to send · Ctrl+Enter for a new line</div></div>
 </section>
 <section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden>
@@ -708,7 +708,7 @@ details.crew { margin: 10px 0 0; }
   }
 
   function renderChat() {
-    $("chat-title").textContent = `Chat · ${doc.orchestrator || "orchestrator"}`;
+    $("chat-title").textContent = `Chat · ${doc.orchestrator || "swarm"}`;
     const log = $("chat-log");
     const list = doc.chat.filter((e) => !e.deleted);
     $("chat-clear").hidden = !list.length;

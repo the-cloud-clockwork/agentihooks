@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-from scripts.swarm import timer
+from scripts.swarm import delivery, timer
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import SwarmConfig, SwarmError, connect
@@ -29,12 +29,16 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def run_tick(store, slug, ledger=None, runtime=None):
+def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     lock = store.key(slug, "tick-lock")
     if not store.redis.set(lock, "1", nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
+    ledger = ledger or LedgerClient()
     try:
-        return tick(slug, store, ledger or LedgerClient(), runtime or HerdrRuntime(), now_ms())
+        actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        herdr = messenger or delivery.HerdrMessenger()
+        delivery.relay_operator_chat(store, slug, ledger.chat(slug), herdr)
+        return actions + [f"delivered to {name}" for name in delivery.flush(store, slug, herdr)]
     finally:
         store.redis.delete(lock)
 
@@ -121,7 +125,9 @@ def cmd_status(store, args):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    LedgerClient().say(args.slug, args.text)
+    ledger = LedgerClient()
+    ledger.say(args.slug, args.text)
+    delivery.relay_operator_chat(store, args.slug, ledger.chat(args.slug), delivery.HerdrMessenger())
     print(json.dumps({"posted": True}))
 
 
@@ -173,6 +179,7 @@ def cmd_say(store, args):
     agent = _me(store, args)
     text = f"@{args.to} {args.text}" if args.to else args.text
     LedgerClient().say(args.slug, text, by=agent.name)
+    delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, herdr=delivery.HerdrMessenger())
     print(json.dumps({"posted": True}))
 
 

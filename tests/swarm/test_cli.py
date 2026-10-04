@@ -6,6 +6,7 @@ import pytest
 
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 
@@ -22,6 +23,8 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
+    ledger.chat = lambda slug: []
+    monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     return store, ledger, rt
 
 
@@ -101,7 +104,7 @@ def test_a_concurrent_tick_is_skipped(env):
     run("sw", "create", "--repo", "/repo")
     store.update("sw", state="running")
     store.redis.set(store.key("sw", "tick-lock"), "1")
-    assert cli.run_tick(store, "sw", ledger, rt) == ["another tick is running"]
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["another tick is running"]
 
 
 def test_timer_units_and_enable(tmp_path):
