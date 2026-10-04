@@ -211,6 +211,25 @@ For a bound session the hooks do the following; each is tunable in the ledger's 
 When every phase is done and every follow-up closed, `leave`, then stop your Monitor.
 Done when `status` no longer lists you.
 
+## Part C — Run a swarm over a ledger
+
+A swarm is a herdr workspace `swarm-<slug>` of Claude and Codex agents working the ledger's tasks, one task
+per agent life. Redis holds claims and the agent registry; a systemd user timer runs `agentihooks swarm tick`
+every minute, which retires finished agents, frees the tasks of dead ones and spawns up to the caps. No
+process runs between ticks.
+
+1. Tasks: put them in the content's `tasks` list (`title`, `description`, `phase`, `lane` eng or ci), or add
+   them later with `agentihooks ledger --slug <slug> --as <name> task add <id> <title> --lane eng --phase p1`.
+2. `agentihooks swarm <slug> create --repo <dir> --max-eng-agents 2 --max-ci-agents 1` (created paused).
+3. `agentihooks swarm <slug> start`: scales up at once; `pause` stops new spawns, `stop` drains, `stop --now`
+   kills every agent and reopens its task. Change caps with `agentihooks swarm <slug> max-eng-agents=3`.
+4. `agentihooks swarm <slug> status` and `agentihooks swarm list` show agents, tasks and state.
+5. Talk to the swarm from the page chat or `agentihooks swarm <slug> send-message "@eng <text>"`; idle agents
+   get it in their pane at once, busy ones when their turn ends.
+
+Agents are told their task in their opening prompt and close it with `agentihooks swarm <slug> issue|pr|done|block|say`.
+The session that started the swarm stays out of the work and speaks for the operator.
+
 ## Page design (operator rules)
 
 Every change to `template.html` keeps these:
