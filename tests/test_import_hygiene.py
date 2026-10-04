@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -136,8 +137,18 @@ def _all_hook_modules() -> list[str]:
     return sorted(modules)
 
 
+def _selected_hook_modules(items) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            item.callspec.params["module"]
+            for item in items
+            if item.originalname == test_module_import_does_not_write_to_stdout.__name__
+        )
+    )
+
+
 @functools.cache
-def _hook_report() -> dict:
+def _hook_report(modules: tuple[str, ...]) -> dict:
     # The suite-wide home-isolation fixture repoints $HOME. Where the
     # interpreter installs into the user site (~/.local/lib/pythonX/
     # site-packages — the layout on the self-hosted runner), that alone drops
@@ -145,23 +156,23 @@ def _hook_report() -> dict:
     # import failure that says more about the fixture than the module. Hand
     # the child the parent's resolved path so it imports exactly what pytest
     # imported.
-    return _probe_modules("hooks", _all_hook_modules(), _probe_env())
-
-
-def test_shared_dependencies_do_not_write_to_stdout() -> None:
-    report = _hook_report()
-    noise = report["shared_stdout"] + report["process_stdout"]
-    assert not noise, (
-        f"a dependency of hooks writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{noise}"
-    )
+    return _probe_modules("hooks", list(modules), _probe_env())
 
 
 @pytest.mark.parametrize("module", _all_hook_modules())
-def test_module_import_does_not_write_to_stdout(module: str) -> None:
+def test_module_import_does_not_write_to_stdout(module: str, request: pytest.FixtureRequest) -> None:
     if module in _ALLOWED_NOISY:
         pytest.skip(f"{module} is in _ALLOWED_NOISY quarantine")
 
-    result = _hook_report()["modules"][module]
+    # Probe only what this worker's shard selected, so splitting the suite
+    # splits the probe too.
+    report = _hook_report(_selected_hook_modules(request.session.items))
+    noise = report["shared_stdout"] + report["process_stdout"]
+    if noise:
+        pytest.fail(
+            f"a dependency of hooks writes to stdout on import — would corrupt hook JSON.\ncaptured stdout:\n{noise}"
+        )
+    result = report["modules"][module]
     if result["failed"]:
         pytest.fail(f"{module}: import failed\nstderr: {result['stderr']}\nstdout: {result['stdout']}")
     if result["stdout"]:
@@ -263,3 +274,15 @@ class TestProbeHarness:
         results = list(report["modules"].values())
         assert len({result["ppid"] for result in results}) == 1
         assert len({result["pid"] for result in results}) == 2
+
+    def test_a_worker_probes_only_the_modules_its_session_selected(self) -> None:
+        def item(name: str, **params: str) -> SimpleNamespace:
+            return SimpleNamespace(originalname=name, callspec=SimpleNamespace(params=params))
+
+        items = [
+            item("test_module_import_does_not_write_to_stdout", module="hooks.config"),
+            item("test_something_else", module="hooks.mcp"),
+            SimpleNamespace(originalname="test_without_params"),
+            item("test_module_import_does_not_write_to_stdout", module="hooks._redis"),
+        ]
+        assert _selected_hook_modules(items) == ("hooks._redis", "hooks.config")
