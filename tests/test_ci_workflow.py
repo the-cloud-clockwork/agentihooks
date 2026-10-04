@@ -73,6 +73,11 @@ def test_unit_installs_extras_with_uv_cached_on_pyproject():
     assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
 
 
+def test_only_the_first_shard_saves_the_uv_cache():
+    _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+    assert uv["with"]["save-cache"] == "${{ matrix.shard == 1 }}"
+
+
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
     splits = int(re.search(r"--splits (\d+)", command).group(1))
