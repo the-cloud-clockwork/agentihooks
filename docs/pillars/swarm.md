@@ -60,6 +60,14 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> handoff DOC` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
 
+## Context recycle
+
+A swarm agent does not run its context to the end. When its context reaches `AGENTIHOOKS_COMPACT_LIMIT`
+thousand tokens (default 600), a hook tells it to write a handoff document and run
+`agentihooks swarm <id> handoff <doc>`, then stop. The task stays claimed, and the next tick starts a
+successor on the same task with the document in its opening prompt. `agentihooks swarm <id> set compact-limit=N`
+sets the limit for one swarm's next agents; 0 keeps the default.
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
