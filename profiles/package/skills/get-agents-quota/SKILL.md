@@ -1,23 +1,32 @@
 ---
 name: get-agents-quota
 description: >
-  Name the Claude OAuth account (the AH_CC_TOKEN_<slug>) the running session is
-  routed to and show the quota table for every account. Use when the operator
-  says "get agents quota", "get-agents-quota", "get current balance", "which account am I on",
-  "what balance is this session using", or asks which slug or quota the current
-  session runs on.
+  Show the quota left for every configured agent harness (each Claude account
+  and Codex) and name the Claude account the running session is routed to. Use
+  when the operator says "get agents quota", "get-agents-quota", "get current
+  balance", "which account am I on", "how much Codex quota is left", "what
+  balance is this session using", or asks which agent has quota left.
 ---
 
 # Get Agents Quota
 
-`agentihooks balance --current` owns detection, the probe, and the cache read.
-Never read `/proc`, dotenv files, or token variables by hand.
+`agentihooks quota` and `agentihooks balance --current` own detection, the
+probe, the cache read and the Codex session-log read. Never read `/proc`,
+dotenv files, Codex session logs, or token variables by hand.
 
 ## 1. Run
 
 ```bash
+agentihooks quota
 agentihooks balance --current
 ```
+
+`agentihooks quota` prints one row per agent account:
+`AGENT ACCOUNT STATE SESSIONS 5H LEFT 7D LEFT 7D RESET SOURCE`. Claude rows come
+from the router cache or a live probe (`--refresh`); the Codex row comes from the
+newest rate-limit event in Codex's session logs, so `SOURCE` says how old it is.
+Codex plans that report only a weekly window show `?` under `5H LEFT`.
+`--json` prints the same rows as JSON.
 
 Add `--fable` when this session runs a Fable model. Add `--refresh` to skip the
 60-second cache for the current account.
@@ -43,6 +52,6 @@ under the table as `unrouted`.
 
 ## 3. Report
 
-Exit 0 means an account was identified. Report the slug, the method, and the
-table verbatim. Exit 1 means no account was identified; report the method line
+Report the `agentihooks quota` table verbatim, then the slug and method from
+`balance --current`. For that command, exit 0 means an account was identified. Exit 1 means no account was identified; report the method line
 as the answer.
