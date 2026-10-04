@@ -82,6 +82,10 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
 | Context reaches `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Write the handoff document, `agentihooks swarm <slug> handoff <doc>`, stop; a successor continues from it |
 
+- Each swarm keeps one master, `<slug>-master-<n>`: the tick starts it, respawns
+  it and recycles it through a handoff. It answers unaddressed page chat, keeps the
+  ledger, writes tasks and steers caps; it never claims a task, edits code,
+  commits or merges. Its card sits first in the swarm panel.
 - Every agent session is one Langfuse trace in the project `agent-swarm`,
   tagged with swarm, agent, lane, task and account.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
