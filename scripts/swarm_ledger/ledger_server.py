@@ -14,6 +14,7 @@ import argparse
 import html
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -70,6 +71,17 @@ def page_for(slug):
             lambda m: m.group(1) + core.seed_text(doc, state["_meta"]["rev"]) + m.group(3), page, count=1
         )
     return page
+
+
+def swarm_status(slug):
+    exe = shutil.which("agentihooks")
+    if not exe:
+        return None
+    try:
+        done = subprocess.run([exe, "swarm", slug, "status", "--json"], capture_output=True, text=True, timeout=20)
+        return json.loads(done.stdout) if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -132,6 +144,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
         if route == "/":
             return self.send(200, index_page(), "text/html; charset=utf-8")
+        if route.startswith("/api/swarm/"):
+            slug = slug.removeprefix("swarm/")
+            if not self.exists(slug):
+                return self.send(404, "no such ledger", "text/plain")
+            if self.refused(slug):
+                return None
+            status = swarm_status(slug)
+            if status is None:
+                return self.send(404, "no swarm for this ledger", "text/plain")
+            return self.send(200, json.dumps(status), "application/json")
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         if route.startswith("/api/"):

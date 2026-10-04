@@ -205,6 +205,9 @@ details.crew { margin: 10px 0 0; }
 .crew-row { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
 .crew-row .who { color: #cbd5e1; }
 .crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: none; align-self: center; }
+.swarm-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; gap: 8px; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
+.swarm-row .who { color: #cbd5e1; }
+.swarm-sum { font-size: var(--fs-meta); color: var(--muted); margin: 0 0 6px; }
 .crew-row .unhandled { margin-left: auto; color: var(--red); }
 #chat-input { max-height: 140px; overflow-y: auto; }
 @media (max-width: 1100px) {
@@ -227,6 +230,7 @@ details.crew { margin: 10px 0 0; }
   <section><details class="sources-box" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
   <section><details class="sources-box" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
+  <section id="swarm-box" hidden><details class="sources-box" open><summary>Swarm <span class="count" id="swarm-count"></span></summary><p class="swarm-sum" id="swarm-sum"></p><div id="swarm-agents"></div></details></section>
   <section><h2>Plan phases</h2><ol id="phases"></ol></section>
   <section><h2>Swarm tasks</h2><ol id="tasks"></ol></section>
   <section><h2>Open questions</h2><ol id="questions"></ol></section>
@@ -707,6 +711,26 @@ details.crew { margin: 10px 0 0; }
       m.unhandled ? h("span", { class: "unhandled", text: `${m.unhandled} open` }) : null)));
   }
 
+  async function pollSwarm() {
+    let sw = null;
+    try {
+      const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+      if (resp.ok) sw = await resp.json();
+    } catch (e) {}
+    renderSwarm(sw);
+  }
+
+  function renderSwarm(sw) {
+    $("swarm-box").hidden = !sw;
+    if (!sw) return;
+    const c = sw.config, t = sw.tasks, agents = sw.agents || [];
+    $("swarm-count").textContent = `· ${c.state}`;
+    $("swarm-sum").textContent = `caps eng ${c.max_eng} · ci ${c.max_ci} · tasks ${Object.keys(t).map((k) => `${k} ${t[k]}`).join(" · ")}`;
+    $("swarm-agents").replaceChildren(...agents.map((a) => h("div", { class: "swarm-row" },
+      h("span", { class: "who", text: a.name }), h("span", { text: a.lane }), h("span", { text: a.harness }),
+      h("span", { text: a.account || "-" }), h("span", { text: a.task }), h("span", { text: a.state }))));
+  }
+
   function renderChat() {
     $("chat-title").textContent = `Chat · ${doc.orchestrator || "swarm"}`;
     const log = $("chat-log");
@@ -885,7 +909,9 @@ details.crew { margin: 10px 0 0; }
     wireKeys(input, sendChat, () => showChat(false));
     render();
     poll();
+    pollSwarm();
     setInterval(poll, POLL_MS);
+    setInterval(pollSwarm, POLL_MS);
     setInterval(renderStats, 30000);
     setInterval(renderSync, 1000);
   }
