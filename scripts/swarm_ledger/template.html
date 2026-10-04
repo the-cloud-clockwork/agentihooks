@@ -190,7 +190,8 @@ textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent), 0 0 10px -4px va
 .side { position: sticky; top: 24px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 12px; }
 .side section { margin-bottom: 0; }
 .side > section:first-child { flex: none; }
-.chat-head { display: flex; justify-content: space-between; align-items: center; }
+.chat-head { display: flex; align-items: center; }
+.chat-head > :last-child { margin-left: auto; }
 .stat { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
 .stat:first-child { border-top: 0; padding-top: 0; }
 .stat dt { font-size: var(--fs-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
