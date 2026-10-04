@@ -16,9 +16,13 @@ import new_ledger  # noqa: E402
 
 SLUG = "hook-2026-01-01"
 SID = "sess-1"
-CLOSED_PORT = socket.socket()
-CLOSED_PORT.bind(("127.0.0.1", 0))
 JOIN = f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss join --role orchestrator"
+
+
+def setUpModule():
+    global CLOSED_PORT
+    CLOSED_PORT = socket.socket()
+    CLOSED_PORT.bind(("127.0.0.1", 0))
 
 
 def tearDownModule():
