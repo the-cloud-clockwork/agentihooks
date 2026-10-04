@@ -841,7 +841,7 @@ a.sw-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
     return (sw.agents || []).map((a) => {
       const t = byId[a.task] || {};
       const last = Math.max(seen[a.name] || 0, a.started_at || 0);
-      return { name: a.name, lane: a.lane, model: [a.model, a.effort].filter(Boolean).join(" · ") || a.harness || "",
+      return { name: a.name, lane: a.lane, model: a.model ? [a.model, a.effort].filter(Boolean).join(" ") : "unknown",
         account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
         ago: last ? span(now - last) : "" };
     });
