@@ -2,6 +2,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -26,3 +27,15 @@ def test_workflow_runs_whole_suite_in_parallel_with_coverage():
     assert "tests/" in command
     assert "--cov=hooks" in command
     assert "-m unit" not in command
+
+
+def _setup_python_steps(job: str) -> list[dict]:
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    return [s for s in workflow["jobs"][job]["steps"] if s.get("uses", "").startswith("actions/setup-python")]
+
+
+@pytest.mark.parametrize("job", ["unit", "lint"])
+def test_setup_python_caches_pip_keyed_on_pyproject(job):
+    (step,) = _setup_python_steps(job)
+    assert step["with"]["cache"] == "pip"
+    assert step["with"]["cache-dependency-path"] == "pyproject.toml"
