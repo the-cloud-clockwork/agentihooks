@@ -23,12 +23,22 @@ def test_dev_extra_declares_test_plugin(plugin):
     assert any(dep.startswith(plugin) for dep in dev)
 
 
-def test_workflow_runs_whole_suite_in_parallel_with_coverage():
+def test_workflow_runs_whole_suite_in_parallel_with_matrix_coverage():
     command = _pytest_command()
     assert "-n auto" in command
     assert "tests/" in command
-    assert "--cov=hooks" in command
+    assert "${{ matrix.cov }}" in command
     assert "-m unit" not in command
+
+
+def test_only_the_newest_python_shards_measure_coverage():
+    matrix = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["strategy"]["matrix"]
+    assert matrix["include"] == [{"python-version": "3.12", "cov": "--cov=hooks --cov-report=term-missing"}]
+
+
+def test_coverage_is_measured_with_the_sys_monitoring_core():
+    _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    assert step["env"]["COVERAGE_CORE"] == "sysmon"
 
 
 def _setup_python_steps(job: str) -> list[dict]:
