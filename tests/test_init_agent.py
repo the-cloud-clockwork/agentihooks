@@ -323,7 +323,7 @@ def test_the_launcher_exports_the_agent_name_so_codex_can_be_found_by_it(tmp_pat
     )
     text = launcher.read_text()
     assert "export AGENTIHOOKS_AGENT_NAME='smoke codex'\n" in text
-    assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("codex\n")
+    assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("codex -m ")
 
 
 def test_the_shell_left_after_the_agent_exits_drops_the_agent_name(tmp_path):
@@ -384,3 +384,38 @@ def test_codex_gets_an_otel_exporter_override(tmp_path):
     assert "otel.exporter=" in text
     assert f"{COLLECTOR}/v1/logs" in text
     assert text.index("otel.exporter=") > text.index("codex")
+
+
+def _command_line(tmp_path, environ, agent, agent_args=()):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path), **environ}
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "m", "", list(agent_args), env, init_agent.AgentSpec(agent=agent)
+    )
+    return next(line for line in launcher.read_text().splitlines() if " --name m" in line or "codex " in line)
+
+
+def test_claude_defaults_to_opus_at_high_effort(tmp_path):
+    assert "--model opus --effort high" in _command_line(tmp_path, {}, "claude")
+
+
+def test_codex_defaults_to_sol_at_high_effort(tmp_path):
+    line = _command_line(tmp_path, {}, "codex")
+    assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="high"' in line
+
+
+def test_model_and_effort_come_from_env_per_agent(tmp_path):
+    env = {
+        "AGENTIHOOKS_CLAUDE_MODEL": "fable",
+        "AGENTIHOOKS_CLAUDE_EFFORT": "max",
+        "AGENTIHOOKS_CODEX_MODEL": "gpt-x",
+        "AGENTIHOOKS_CODEX_EFFORT": "xhigh",
+    }
+    assert "--model fable --effort max" in _command_line(tmp_path, env, "claude")
+    codex = _command_line(tmp_path, env, "codex")
+    assert "-m gpt-x" in codex and 'model_reasoning_effort="xhigh"' in codex
+
+
+def test_explicit_model_and_effort_flags_win_over_defaults(tmp_path):
+    line = _command_line(tmp_path, {}, "claude", ["--model", "sonnet", "--effort", "low"])
+    assert "opus" not in line and "--effort high" not in line
+    assert "--model sonnet --effort low" in line

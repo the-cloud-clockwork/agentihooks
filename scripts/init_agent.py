@@ -107,6 +107,26 @@ def _codex_otel_args(environ: dict[str, str]) -> list[str]:
     return ["-c", f'otel.exporter={{otlp-http={{endpoint="{collector}/v1/logs",protocol="binary"}}}}']
 
 
+MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
+EFFORT_DEFAULT = "high"
+
+
+def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> list[str]:
+    prefix = f"AGENTIHOOKS_{agent.upper()}"
+    model = environ.get(f"{prefix}_MODEL") or MODEL_DEFAULTS[agent]
+    effort = environ.get(f"{prefix}_EFFORT") or EFFORT_DEFAULT
+    has_model = any(a in ("--model", "-m") or a.startswith("--model=") for a in agent_args)
+    if agent == "codex":
+        args = [] if has_model else ["-m", model]
+        if not any("model_reasoning_effort" in a for a in agent_args):
+            args += ["-c", f'model_reasoning_effort="{effort}"']
+        return args
+    args = [] if has_model else ["--model", model]
+    if not any(a == "--effort" or a.startswith("--effort=") for a in agent_args):
+        args += ["--effort", effort]
+    return args
+
+
 def _agent_command(
     spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str]
 ) -> tuple[list[str], str]:
@@ -115,6 +135,7 @@ def _agent_command(
         return [
             shutil.which("codex") or "codex",
             *_codex_otel_args(environ),
+            *_model_args("codex", agent_args, environ),
             *agent_args,
         ], f"printf 'status=direct\\n' > {shlex.quote(str(report))}\n"
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
@@ -127,6 +148,7 @@ def _agent_command(
         str(report),
         "--name",
         name,
+        *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
     return command, ""
