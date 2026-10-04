@@ -1,6 +1,6 @@
 """Drain then restart.
 
-A session launched by `agentihooks claude-terminal` that started before an install
+A session launched by `agentihooks init-agent` that started before an install
 affecting sessions (a plugin, an MCP registration) is restarted once its turn ends:
 killed, then resumed with the same id, name, account and directory.
 """
@@ -57,15 +57,15 @@ def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
 
 def restart_commands(session_id: str, name: str, cwd: str, account: str) -> list[list[str]]:
     exe = shutil.which("agentihooks") or "agentihooks"
-    launch = [exe, "claude-terminal", "--dir", cwd, "--name", name, "--prompt", NOTE, "--"]
+    launch = [exe, "init-agent", "--dir", cwd, "--name", name, "--prompt", NOTE, "--"]
     if account:
         launch += ["--route", account]
     launch += ["--resume", session_id]
-    return [[exe, "kill-agent", session_id, "--type", "claude"], launch]
+    return [[exe, "terminate-agent", session_id, "--type", "claude"], launch]
 
 
 def _closing_marker(pid: int, environ: dict) -> Path:
-    from scripts.claude_terminal import _runtime_dir
+    from scripts.init_agent import _runtime_dir
 
     with open(f"/proc/{pid}/stat") as fh:
         ppid = int(fh.read().rsplit(")", 1)[1].split()[1])

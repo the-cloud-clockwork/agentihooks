@@ -4,7 +4,7 @@ import json
 import os
 import time
 
-import claude_terminal
+import init_agent
 import pytest
 
 from hooks.lifecycle import refresh
@@ -53,10 +53,10 @@ def test_subagent_and_reentrant_stops_are_ignored(home, payload):
 def test_restart_kills_then_resumes_with_name_account_and_dir(monkeypatch):
     monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
     kill, launch = refresh.restart_commands("sid-1", "eng-a", "/work/wt", "acct2")
-    assert kill == ["/bin/agentihooks", "kill-agent", "sid-1", "--type", "claude"]
+    assert kill == ["/bin/agentihooks", "terminate-agent", "sid-1", "--type", "claude"]
     assert launch == [
         "/bin/agentihooks",
-        "claude-terminal",
+        "init-agent",
         "--dir",
         "/work/wt",
         "--name",
@@ -73,7 +73,7 @@ def test_restart_kills_then_resumes_with_name_account_and_dir(monkeypatch):
 
 def test_launcher_marks_the_launch_and_closes_its_tab_after_a_refresh(tmp_path):
     env = {"XDG_RUNTIME_DIR": str(tmp_path), "SHELL": "/bin/bash"}
-    launcher, _ = claude_terminal._write_launcher(tmp_path, "eng-a", "", [], env)
+    launcher, _ = init_agent._write_launcher(tmp_path, "eng-a", "", [], env)
     text = launcher.read_text()
     assert text.index("export AGENTIHOOKS_TERMINAL_LAUNCH=1") < text.index(" claude --")
     assert text.index("closing-$$") < text.index("exec /bin/bash -l")

@@ -93,7 +93,7 @@ def test_handoff_directive_names_the_command_and_the_document():
     text = qp.render(d, "sess-1", "/home/u/dev/repo")
 
     assert text.startswith("QUOTA HANDOFF REQUIRED")
-    assert "agentihooks claude-terminal --handoff" in text
+    assert "agentihooks init-agent --handoff" in text
     assert "sess-1.md" in text
     assert "beta has 60% left" in text
 
