@@ -41,6 +41,9 @@ Commands:
         Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
         --handoff moves this session's work to another account (quota handoff).
 
+    agentihooks quota [--json] [--refresh]
+        Quota left for every agent harness: each Claude account and Codex.
+
     agentihooks balance --dry-run [--fable] [--refresh]
         Show ranked OAuth account capacity without launching Claude.
 
@@ -6283,6 +6286,10 @@ def main() -> None:
         from scripts.deps_preflight import main as deps_main
 
         raise SystemExit(deps_main(_argv[1:]))
+    if _argv and _argv[0] == "quota":
+        from scripts.agents_quota import main as quota_main
+
+        raise SystemExit(quota_main(_argv[1:]))
     if _argv and _argv[0] == "terminate-agent":
         from scripts.terminate_agent import main as terminate_agent_main
 
@@ -6407,6 +6414,7 @@ def main() -> None:
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
+    sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Plan ledger: agent CLI, or new|serve|watch|chat <args>")
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")

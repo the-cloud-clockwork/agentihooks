@@ -322,6 +322,17 @@ Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 
 ---
 
+## `agentihooks quota`
+
+Quota left for every agent harness: one row per Claude account (router cache, or a
+live probe with `--refresh`) and one for Codex, read from the newest rate-limit
+event in Codex's session logs.
+
+```bash
+agentihooks quota            # AGENT ACCOUNT STATE SESSIONS 5H LEFT 7D LEFT 7D RESET SOURCE
+agentihooks quota --json
+```
+
 ## `agentihooks balance`
 
 ```bash

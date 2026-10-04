@@ -57,14 +57,14 @@ run when the operator uses one of their trigger phrases.
 
 | Skill | Use | Example |
 |---|---|---|
-| `get-agents-quota` | Identify this Claude session's routed OAuth account and show every account's quota and live-session count. | `$get-agents-quota` or "which account am I on?" |
+| `get-agents-quota` | Show quota left for every agent harness (each Claude account and Codex) and name this session's routed Claude account. | `$get-agents-quota` or "which agent has quota left?" |
 | `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
 | `multi-agent-chat` | Open or join a file-backed room when participants run under different agent harnesses. This skill is explicit-only. | `$multi-agent-chat --name codex-a --topic "review"`; join with `$multi-agent-chat --target <room-id> --name claude-b` |
 | `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
 | `run-in-terminal` | Run any command in a directory in a new terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
 
 The deterministic CLI primitives behind these skills are respectively
-`agentihooks balance --current`, `agentihooks terminate-agent`, the scripts shipped
+`agentihooks quota` with `agentihooks balance --current`, `agentihooks terminate-agent`, the scripts shipped
 with `multi-agent-chat`, `agentihooks init-agent`, and the scripts shipped with
 `run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
