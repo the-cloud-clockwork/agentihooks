@@ -70,6 +70,7 @@ class InboxStore:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
             pipe.zadd(self.key("pending", address), {item.id: at})
+            pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             pipe.execute()
         return item
@@ -126,16 +127,44 @@ class InboxStore:
             return None
 
     def pending(self):
-        prefix = self.key("address", "")
-        addresses = [key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")]
+        if not self.redis.exists(self.key("waiting", "built")):
+            self._build_waiting()
+        addresses = sorted(self.redis.smembers(self.key("waiting")))
         return [item for address in addresses for item in self.pending_items(address)]
 
     def pending_items(self, address):
+        return [self.get(item_id) for item_id in self._pending_ids(address)]
+
+    def _pending_ids(self, address):
         if self.redis.sismember(self.key("indexed"), address):
-            ids = self.redis.zrange(self.key("pending", address), 0, -1)
-        else:
-            ids = self._back_fill(address)
-        return [self.get(item_id) for item_id in ids]
+            return self.redis.zrange(self.key("pending", address), 0, -1)
+        return self._back_fill(address)
+
+    def _build_waiting(self):
+        prefix = self.key("address", "")
+        for key in self.redis.scan_iter(match=prefix + "*"):
+            address = key[len(prefix) :]
+            self._pending_ids(address)
+            self._mark_waiting(address)
+        self.redis.set(self.key("waiting", "built"), 1)
+
+    def _mark_waiting(self, address):
+        from redis.exceptions import WatchError
+
+        pending = self.key("pending", address)
+        for _ in range(MOVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(pending)
+                    if not pipe.zcard(pending):
+                        return
+                    pipe.multi()
+                    pipe.sadd(self.key("waiting"), address)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        self.redis.sadd(self.key("waiting"), address)
 
     def _back_fill(self, address):
         from redis.exceptions import WatchError
@@ -158,6 +187,7 @@ class InboxStore:
             pipe.multi()
             if pending:
                 pipe.zadd(self.key("pending", address), pending)
+                pipe.sadd(self.key("waiting"), address)
             pipe.sadd(self.key("indexed"), address)
             pipe.execute()
         return list(pending)
@@ -202,9 +232,14 @@ class InboxStore:
             if item.state == state:
                 return item
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
+            pending = self.key("pending", item.address)
+            pipe.watch(pending)
+            last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
-            pipe.zrem(self.key("pending", item.address), item_id)
+            pipe.zrem(pending, item_id)
+            if last:
+                pipe.srem(self.key("waiting"), item.address)
             pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
