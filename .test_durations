@@ -241,6 +241,7 @@
     "tests/context/test_ledger_decision.py::test_the_acceptance_signal_follows_the_harness": 0.00264632300240919,
     "tests/context/test_ledger_decision.py::test_the_decline_command_reports_the_decline": 0.006249345955438912,
     "tests/context/test_ledger_decision.py::test_the_fourth_created_task_directs_a_small_ledger": 0.013188618962885812,
+    "tests/context/test_ledger_decision.py::test_the_small_ledger_directive_leaves_no_size_judgement": 0.011203973990632221,
     "tests/context/test_ledger_decision.py::test_the_toolbelt_rule_states_the_three_outcomes": 0.005626539990771562,
     "tests/context/test_preprocessor.py::TestCompressionRatio::test_ratio_calculation": 0.002344926993828267,
     "tests/context/test_preprocessor.py::TestCompressionRatio::test_ratio_zero_length_original": 0.0024395530053880066,

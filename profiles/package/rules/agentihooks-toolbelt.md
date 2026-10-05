@@ -81,8 +81,9 @@ directive once per session for each trigger. Act on it at once, without asking:
   This session does not implement the plan; the swarm's master never edits code.
 - **Small ledger** — work beyond a trivial edit with no accepted plan: the
   session's task list reaches four items, or the operator asks to troubleshoot,
-  debug, investigate or refactor. Create a small ledger with `swarm-ledger`, join
-  it as its worker and keep it current.
+  debug, investigate or refactor, however small the fix turns out to be. Create
+  the small ledger before any other tool call (`agentihooks ledger new --size
+  small`), join it as its worker and keep it current.
 - **Nothing** — a trivial request gets no directive and no ledger.
 
 Swarm agents and sessions already bound to a ledger never get a directive. When
