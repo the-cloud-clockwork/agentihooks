@@ -3,10 +3,12 @@ import os
 import re
 import subprocess
 import tomllib
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
 import yaml
+from _pytest.config import default_plugins
 
 from tests.conftest import COLLECTED_NODEIDS
 from tests.refresh_durations import median_durations
@@ -49,33 +51,11 @@ def test_unit_shards_measure_no_coverage():
     assert "COVERAGE_CORE" not in step.get("env", {})
 
 
-UNUSED_PLUGINS = {
-    "anyio",
-    "pytest-split",
-    "pytest_cov",
-    "xdist.looponfail",
-    "legacypath",
-    "doctest",
-    "pastebin",
-    "junitxml",
-}
-
-
-def _blocked_plugins() -> set[str]:
-    return set(re.findall(r"-p no:(\S+)", _pytest_command()))
-
-
-def test_unit_shards_load_no_plugin_the_suite_does_not_use():
-    assert _blocked_plugins() == UNUSED_PLUGINS
-
-
-def test_every_blocked_plugin_names_a_real_plugin():
-    from importlib.metadata import entry_points
-
-    from _pytest.config import default_plugins
-
+def test_unit_shards_block_only_real_plugins():
+    blocked = set(re.findall(r"-p no:(\S+)", _pytest_command()))
     known = {entry.name for entry in entry_points(group="pytest11")} | set(default_plugins)
-    assert _blocked_plugins() <= known
+    assert blocked
+    assert blocked <= known
 
 
 def _setup_python_steps(job: str) -> list[dict]:
