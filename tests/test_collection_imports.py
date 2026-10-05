@@ -20,8 +20,6 @@ _IMPORT_BODY = (
 _IMPORT = re.compile(r"(?:^|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
 _ANY_IMPORT = re.compile(r"(?:^[ \t]*|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
 SDK_GROUP = 'xdist_group("mcp-sdk")'
-# build_server imports FastMCP inside the function, out of reach of an import scan.
-SDK_CALLS = {"hooks.mcp.build_server"}
 
 
 @cache
@@ -63,9 +61,33 @@ def loads_heavy(name: str, seen: set[str]) -> bool:
     return path is not None and any(loads_heavy(dep, seen) for dep in parents | _module_level_imports(path))
 
 
+@cache
+def _function_imports(path: Path, function: str) -> frozenset[str]:
+    lines = path.read_text().splitlines(keepends=True)
+    head = re.compile(rf"([ \t]*)(?:async[ \t]+)?def[ \t]+{re.escape(function)}\b")
+    for i, line in enumerate(lines):
+        if match := head.match(line):
+            body = []
+            for rest in lines[i + 1 :]:
+                stripped = rest.lstrip()
+                if stripped and len(rest) - len(stripped) <= len(match[1]) and not stripped.startswith(")"):
+                    break
+                body.append(rest)
+            return frozenset(_import_names("".join(body), _ANY_IMPORT))
+    return frozenset()
+
+
+def calls_heavy(name: str, seen: set[str]) -> bool:
+    module, _, function = name.rpartition(".")
+    path = _module_file(module) if module else None
+    if path is None or _module_file(name) is not None:
+        return False
+    return any(loads_heavy(dep, seen) for dep in _function_imports(path, function))
+
+
 def loads_sdk_when_run(source: str) -> bool:
     seen: set[str] = set()
-    return any(name in SDK_CALLS or loads_heavy(name, seen) for name in _import_names(source, _ANY_IMPORT))
+    return any(loads_heavy(name, seen) or calls_heavy(name, seen) for name in _import_names(source, _ANY_IMPORT))
 
 
 def test_the_check_follows_a_package_init_to_a_heavy_module(monkeypatch):
@@ -145,6 +167,7 @@ def test_the_run_check_reads_imports_inside_functions():
     assert loads_sdk_when_run("def f():\n    from mcp.types import Tool\n")
     assert loads_sdk_when_run("def f():\n    from hooks.mcp import build_server\n")
     assert not loads_sdk_when_run("def f():\n    from hooks.mcp._session import resolve_session_id\n")
+    assert not loads_sdk_when_run("def f():\n    from hooks.mcp import resolve_transport\n")
 
 
 def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker():
