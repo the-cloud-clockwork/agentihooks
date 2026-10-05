@@ -210,6 +210,28 @@ def test_exporter_config_is_none_when_disabled_or_keys_missing(override):
         assert otel.langfuse_exporter_config() is None
 
 
+@pytest.mark.parametrize(
+    ("environ", "enabled"),
+    [
+        ({}, False),
+        ({"AGENTIHOOKS_LANGFUSE_ENABLED": "1"}, True),
+        ({"OTEL_LANGFUSE_ENABLED": "true"}, True),
+        ({"AGENTIHOOKS_LANGFUSE_ENABLED": "0"}, False),
+    ],
+)
+def test_langfuse_switch_reads_a_name_claude_code_passes_to_hooks(environ, enabled):
+    from hooks.config import langfuse_enabled
+
+    assert langfuse_enabled(environ) is enabled
+
+
+def test_profile_langfuse_block_sets_the_switch_hooks_receive():
+    from scripts.install import _build_otel_env
+
+    env = _build_otel_env({"otel": {"langfuse": {"enabled": True}}})
+    assert env["AGENTIHOOKS_LANGFUSE_ENABLED"] == "1"
+
+
 def test_route_defaults_to_the_lan_ingress_with_its_host_header():
 
     from hooks.config import langfuse_route
