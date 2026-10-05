@@ -1,0 +1,26 @@
+[
+  {
+    "query": "rig-doctor my-working-ledger",
+    "files": [],
+    "expected_behavior": [
+      "Runs Doctor start on the named ledger without touching the demo app.",
+      "Reports the Doctor status and ledger link."
+    ]
+  },
+  {
+    "query": "rig-doctor",
+    "files": [],
+    "expected_behavior": [
+      "Refuses before any mutation when no bundle is linked.",
+      "Preserves the previous demo copy, recreates the private dev repository, writes the stored dating app plan, initializes its swarm, then starts its Doctor."
+    ]
+  },
+  {
+    "query": "rig doctor stop",
+    "files": [],
+    "expected_behavior": [
+      "Uses the saved active ledger and calls Doctor stop.",
+      "Doctor closes with the lifecycle command summary; the watched swarm stays running."
+    ]
+  }
+]
