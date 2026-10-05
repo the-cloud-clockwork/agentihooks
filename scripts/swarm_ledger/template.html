@@ -77,6 +77,10 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .task-meta .claimed { color: var(--accent); text-shadow: var(--glow); }
 .task-meta a { color: inherit; }
 .task-meta a:hover, .task-meta a:focus-visible { color: var(--accent); }
+.task-meta .kind { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--glow); }
+.task-proof dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; }
+.task-proof dt { font-size: var(--fs-meta); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.task-proof dd { margin: 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .done .item-title, .done .text { color: var(--muted); }
 .row > .scope { margin-left: auto; }
 .scope { flex: none; display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 2px 0; font: inherit;
@@ -654,11 +658,27 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     return reasons.length ? `Waiting until ${reasons.join(", and ")}` : "";
   }
 
+  function taskProof(key, item) {
+    const rows = [...Object.entries(item.contract || {}), ...Object.entries(item.proof || {})].filter(([, v]) => String(v).trim());
+    if (!rows.length) return null;
+    const label = (k) => k[0].toUpperCase() + k.slice(1).replace("_", " ");
+    const value = (v) => /^https?:\/\//.test(v) ? h("dd", {}, h("a", { href: v, target: "_blank", rel: "noopener", text: v })) : h("dd", { text: v });
+    const box = h("details", { class: "task-proof", "data-key": key }, h("summary", {}, "Contract and proof"),
+      h("dl", {}, ...rows.flatMap(([k, v]) => [h("dt", { text: label(k) }), value(v)])));
+    box.open = openComments.has(key);
+    box.addEventListener("toggle", () => {
+      (box.open ? openComments : closedComments).add(key);
+      (box.open ? closedComments : openComments).delete(key);
+    });
+    return box;
+  }
+
   function taskRow(item, tasks) {
     const key = `tasks/${item.id}`;
     const waits = taskBlockers(item, tasks || []);
     const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
-    const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), h("span", { text: item.state }),
+    const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
+      h("span", { text: item.state }),
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
       link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
@@ -666,7 +686,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
       waits ? h("p", { class: "desc", text: waits }) : null);
     const row = h("div", { class: "row" }, body, scopeDot(key, item));
-    return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, commentsView(key, item.comments));
+    return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
   }
 
   function taskCounts(tasks) {
