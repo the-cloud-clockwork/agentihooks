@@ -16,9 +16,9 @@ def page():
 
 @pytest.fixture
 def page_script():
-    functions = "\n".join(function_source(n) for n in ("renderChatTo", "chatText", "sendChat"))
+    functions = "\n".join(function_source(n) for n in ("renderChatTo", "chatText", "withAttachments", "sendChat"))
     return (
-        "const nodes = {}; let sent = [];"
+        "const nodes = {}; let sent = []; const attaching = {}; const attachNote = {}; const refreshTray = () => {};"
         "const $ = id => nodes[id] ||= {value: '', kids: [], replaceChildren(...k) { this.kids = k; }};"
         "const h = (tag, attrs) => ({tag, ...attrs}); const document = {activeElement: null};"
         "const grow = () => {}; const newId = () => 'm-1'; const queue = op => sent.push(op.text);"

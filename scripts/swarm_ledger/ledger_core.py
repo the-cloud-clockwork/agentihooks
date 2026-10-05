@@ -523,10 +523,12 @@ def apply_op(doc, op, ctx):
         return done
     entry = next((e for e in thread if e["id"] == op["id"]), None)
     if op["op"] == "add":
-        if entry is not None or not text.strip():
+        if entry is not None or not (text.strip() or op.get("attachments")):
             return entry is not None
         by = op.get("by", "operator")
         thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+        if op.get("attachments"):
+            thread[-1]["attachments"] = op["attachments"]
         if by != "operator" and by in ctx.meta["members"]:
             ctx.meta["members"][by]["last_seen"] = ctx.at
         ctx.record(by, f"{noun} added", target, id=op["id"], text=text)
@@ -574,6 +576,13 @@ def check_op(op):
     chat_add = op["op"] == "add" and op["thread"] == "chat" and "by" in op
     if "long" in op and not chat_add:
         raise ValueError("long is allowed only on an agent chat message")
+    if "attachments" in op:
+        import ledger_media
+
+        talks = op["thread"] == "chat" or op["thread"].endswith("/comments")
+        if op["op"] != "add" or "by" in op or not talks:
+            raise ValueError("attachments ride only on an operator add to chat or a comment thread")
+        ledger_media.check(op["attachments"])
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":

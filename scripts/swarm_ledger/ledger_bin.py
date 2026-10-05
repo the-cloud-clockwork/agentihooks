@@ -4,6 +4,7 @@ import json
 import threading
 
 import ledger_core as core
+import ledger_media
 
 KEEP_DAYS = 30
 DAY_MS = 24 * 60 * 60 * 1000
@@ -54,6 +55,7 @@ def purge_expired(now=None):
         for slug in expired:
             for path in core.paths(slug):
                 path.unlink(missing_ok=True)
+            ledger_media.purge(slug)
             del found[slug]
         if expired:
             _save(found)

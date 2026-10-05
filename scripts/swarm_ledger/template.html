@@ -310,6 +310,17 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .hl-pick:hover, .hl-note:hover, .hl-pick:focus, .hl-note:focus { outline: none; border-bottom-color: var(--accent); }
 .crew-row .unhandled { margin-left: auto; color: var(--destructive); text-shadow: var(--glow); }
 #chat-input { max-height: 140px; overflow-y: auto; }
+.attach-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 6px; }
+.attach-tray { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.attach-tray:empty { display: none; }
+.attach-pre { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.attach-note { font-size: var(--fs-meta); color: var(--destructive); text-shadow: var(--glow); overflow-wrap: anywhere; }
+.attach-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.thumb { display: block; padding: 2px; border: 1px solid transparent; border-radius: 6px; line-height: 0; transition: background .15s, border-color .15s, box-shadow .15s; }
+.thumb:hover, .thumb:active { background: var(--hover); border-color: var(--edge); box-shadow: 0 0 12px -4px var(--accent); }
+.thumb:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.thumb img { display: block; max-width: 160px; max-height: 120px; width: auto; height: auto; border-radius: 4px; }
+.dropping { box-shadow: inset 0 0 0 1px var(--accent); }
 .col > section, .item { scroll-margin-top: 24px; }
 .outline { position: fixed; z-index: 9; left: 16px; top: 32px; bottom: 244px; width: calc(var(--outline-w) - 32px); overflow-y: auto;
   overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; font-size: var(--fs-meta); }
@@ -436,6 +447,11 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   const sentAt = { sync: 0, stats_sync: 0 };
   const OFFLINE = "saved in this browser only — ledger server offline";
   const NOUN = { comments: "comment", answers: "answer", notes: "note" };
+  const MEDIA_API = API.replace(`/api/${SLUG}`, `/api/media/${SLUG}`);
+  const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+  const MAX_ATTACH = 6;
+  const attaching = {};
+  const attachNote = {};
   let doc;
   let meta = {};
   let rev = -1;
@@ -516,7 +532,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const thread = threadOf(d, op.thread);
     if (!thread) return;
     const entry = thread.find((e) => e.id === op.id);
-    if (op.op === "add" && !entry) thread.push({ id: op.id, by: "operator", at: Date.now(), text: op.text, sending: true });
+    if (op.op === "add" && !entry) thread.push({ id: op.id, by: "operator", at: Date.now(), text: op.text, sending: true, ...(op.attachments ? { attachments: op.attachments } : {}) });
     else if (op.op === "edit" && entry) Object.assign(entry, { text: op.text, edited_at: Date.now(), sending: true });
     else if (op.op === "delete" && entry) Object.assign(entry, { deleted: true, text: "" });
     else if (op.op === "clear") thread.length = 0;
@@ -573,13 +589,16 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     return `${noun[0]}-${rand}`;
   }
 
-  function wireKeys(box, onSubmit, onCancel) {
+  function wireKeys(box, onSubmit, onCancel, key) {
     box.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
         ev.preventDefault();
         box.setRangeText("\n", box.selectionStart, box.selectionEnd, "end");
         box.dispatchEvent(new Event("input", { bubbles: true }));
-      } else if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); if (box.value.trim()) onSubmit(box.value.trim()); }
+      } else if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+        ev.preventDefault();
+        if (box.value.trim() || (attaching[key] || []).length) onSubmit(box.value.trim());
+      }
       else if (ev.key === "Escape") { ev.preventDefault(); onCancel(); }
     });
   }
@@ -588,8 +607,89 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const box = h("textarea", { class: "line", rows: "1", placeholder, "data-focus": key, "aria-label": placeholder });
     box.value = value;
     box.addEventListener("input", () => { grow(box); (key.startsWith("edit:") ? editing : composing)[key.slice(key.indexOf(":") + 1)] = box.value; });
-    wireKeys(box, onSubmit, onCancel);
+    wireKeys(box, onSubmit, onCancel, key.slice(key.indexOf(":") + 1));
     return h("div", {}, box, h("div", { class: "hint", text: "Enter to send · Ctrl+Enter for a new line · Esc to cancel" }));
+  }
+
+  function mediaUrl(id) {
+    return `${API.replace(`/api/${SLUG}`, `/media/${SLUG}`)}/${id}`;
+  }
+
+  function thumb(att) {
+    const url = mediaUrl(att.id);
+    return h("a", { class: "thumb", href: url, target: "_blank", rel: "noopener", title: "Open full size" },
+      h("img", { src: url, alt: "Screenshot", loading: "lazy", width: att.width, height: att.height }));
+  }
+
+  function attachmentsView(list) {
+    return list && list.length ? h("div", { class: "attach-row" }, ...list.map(thumb)) : null;
+  }
+
+  function withAttachments(op, key) {
+    const list = attaching[key] || [];
+    delete attaching[key];
+    delete attachNote[key];
+    return list.length ? { ...op, attachments: list } : op;
+  }
+
+  async function addImages(key, files) {
+    for (const file of [...files]) {
+      try {
+        const list = attaching[key] || [];
+        if (list.length >= MAX_ATTACH) throw new Error(`At most ${MAX_ATTACH} images per line`);
+        const resp = await fetch(MEDIA_API, { method: "POST", headers: { "X-Ledger-Token": TOKEN }, body: file });
+        if (!resp.ok) throw new Error(await resp.text());
+        const att = await resp.json();
+        if (!list.some((a) => a.id === att.id)) attaching[key] = [...list, att];
+        delete attachNote[key];
+      } catch (e) {
+        attachNote[key] = (e && e.message) || "Upload failed";
+      }
+      refreshTray(key);
+    }
+  }
+
+  function trayView(key) {
+    const list = attaching[key] || [];
+    return h("div", { class: "attach-tray", "data-tray": key },
+      ...list.map((att) => h("span", { class: "attach-pre" }, thumb(att),
+        h("button", { class: "link danger", type: "button", text: "Remove", "aria-label": "Remove this image", on: { click: () => {
+          attaching[key] = (attaching[key] || []).filter((a) => a.id !== att.id);
+          refreshTray(key);
+        } } }))),
+      attachNote[key] ? h("span", { class: "attach-note", text: attachNote[key] }) : null);
+  }
+
+  function refreshTray(key) {
+    const old = [...document.querySelectorAll("[data-tray]")].find((el) => el.dataset.tray === key);
+    if (old) old.replaceWith(trayView(key));
+  }
+
+  function attachable(key, box, zone) {
+    const pick = h("input", { type: "file", accept: ACCEPT, multiple: "", hidden: "", "aria-label": "Pick images", on: { change: () => {
+      addImages(key, pick.files);
+      pick.value = "";
+    } } });
+    box.addEventListener("paste", (ev) => {
+      const files = ev.clipboardData ? [...ev.clipboardData.files] : [];
+      if (!files.length) return;
+      if (!ev.clipboardData.getData("text/plain")) ev.preventDefault();
+      addImages(key, files);
+    });
+    zone.addEventListener("dragover", (ev) => {
+      if (![...ev.dataTransfer.types].includes("Files")) return;
+      ev.preventDefault();
+      zone.classList.add("dropping");
+    });
+    zone.addEventListener("dragleave", (ev) => { if (!zone.contains(ev.relatedTarget)) zone.classList.remove("dropping"); });
+    zone.addEventListener("drop", (ev) => {
+      zone.classList.remove("dropping");
+      if (!ev.dataTransfer.files.length) return;
+      ev.preventDefault();
+      addImages(key, ev.dataTransfer.files);
+    });
+    return h("div", { class: "attach-bar" }, pick,
+      h("button", { class: "link", type: "button", text: "Add image", title: "Pick, paste or drop images", on: { click: () => pick.click() } }), trayView(key));
   }
 
   function entryView(path, entry, noun) {
@@ -606,7 +706,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       } } }));
     const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
       h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }));
+    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }), attachmentsView(entry.attachments));
   }
 
   function threadView(path, list, cls) {
@@ -615,10 +715,12 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     for (const entry of list.filter((e) => !e.deleted)) box.append(entryView(path, entry, noun));
     if (path in composing) {
       const close = () => { delete composing[path]; render(); };
-      box.append(lineBox(`compose:${path}`, composing[path], `Write a ${noun}…`, (text) => {
+      const line = lineBox(`compose:${path}`, composing[path], `Write a ${noun}…`, (text) => {
         delete composing[path];
-        queue({ op: "add", thread: path, id: newId(noun), text });
-      }, close));
+        queue(withAttachments({ op: "add", thread: path, id: newId(noun), text }, path));
+      }, close);
+      if (path.endsWith("/comments")) line.insertBefore(attachable(path, line.firstChild, line), line.lastChild);
+      box.append(line);
     } else {
       box.append(h("button", { class: "add", type: "button", text: `Add ${noun}`, on: { click: () => { composing[path] = ""; render(`compose:${path}`); } } }));
     }
@@ -1345,7 +1447,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     log.dataset.sig = sig;
     log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
       h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
-      h("div", { class: "entry-body", text: e.text }))));
+      h("div", { class: "entry-body", text: e.text }), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
     if (stick) {
       log.scrollTop = log.scrollHeight;
@@ -1398,7 +1500,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const box = $("chat-input");
     box.value = "";
     grow(box);
-    queue({ op: "add", thread: "chat", id: newId("message"), text: chatText(text, $("chat-to").value) });
+    queue(withAttachments({ op: "add", thread: "chat", id: newId("message"), text: chatText(text, $("chat-to").value) }, "chat"));
+    refreshTray("chat");
   }
 
   function queue(op) {
@@ -1457,7 +1560,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function staleAndIdle(version) {
     if (!PAGE || !version || version === PAGE) return false;
-    const draft = Object.keys(composing).length || Object.keys(editing).length || $("chat-input").value;
+    const draft = Object.keys(composing).length || Object.keys(editing).length || $("chat-input").value || Object.keys(attaching).length;
     if (ops.length || Object.keys(checks).length || draft) return false;
     try {
       if (sessionStorage.getItem("ledger-reloaded") === version) return false;
@@ -1548,7 +1651,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       if (confirm("Clear the whole chat?")) queue({ op: "clear", thread: "chat", id: newId("clear") });
     });
     input.addEventListener("input", () => grow(input));
-    wireKeys(input, sendChat, () => showChat(false));
+    wireKeys(input, sendChat, () => showChat(false), "chat");
+    input.after(attachable("chat", input, input.closest(".chat-compose")));
     for (const box of document.querySelectorAll("details.fold")) collapsible(box);
     for (const btn of document.querySelectorAll("button[data-comments]")) {
       const section = btn.closest("section");
