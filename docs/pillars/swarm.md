@@ -37,6 +37,10 @@ message on the page and in its herdr pane, keep phases, follow ups, time left an
 operator requests into tasks with full specs, rewrite task descriptions, set caps, pause or stop the swarm,
 talk to agents, and check merged UI work in a real browser, closing the shared browser after.
 
+The master learns what agents do without watching for it: the minute tick sends it an inbox item for each agent
+follow up, question, blocked task and done task, each phase it ticks or reopens, and each new health finding
+(see [The minute tick](#the-minute-tick)), and the wake ladder carries every item to it asleep or awake.
+
 The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
 so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
@@ -168,23 +172,66 @@ checked, who judges it) that the agent's prompt carries.
 A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute; nothing runs
 between ticks. `start` installs and enables it. Each tick, per swarm:
 
-1. Retire agents that finished.
+1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
-   A tick counts as idle only when the agent's herdr pane, read by its pane id, reads idle, its session heartbeat
-   (hooks write `working` on each prompt and tool call, `idle` at Stop; a `working` beat older than 20 minutes no
-   longer counts) does not say working, and no wait it declared with `wait` still holds.
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left.
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap.
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
-7. Turn new operator chat lines into inbox items, post inbox replies to the operator on the page, and wake
-   idle panes holding unread items.
-8. Tick a phase whose tasks are all done, and reopen a ticked phase when a task that is not done lands in it.
-   Each change leaves a status comment from `swarm` on the phase and an item for the master. A phase with no task,
-   or out of scope, is left to the master.
+7. Post inbox replies to the operator on the page chat.
+8. Run the [ledger event pass](#ledger-event-pass): agent writes and time rules become inbox items.
+9. Tick a phase whose tasks are all done, and reopen a ticked phase when a task that is not done lands in it.
+   Each change leaves a status comment from `swarm` on the phase and an information item for the master. A phase
+   with no task, or out of scope, is left to the master.
+10. Send each new health finding to the master with the `verdict` command to judge it.
+11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
+12. Write the automatic snapshot when it is due.
 
 A lock keeps two ticks from running at once.
+
+### Ledger event pass
+
+Each swarm keeps a cursor on the ledger's event list. The tick reads the events written since it and sends one
+inbox item from `swarm` per agent event; writes by the operator or by a master are skipped. The first pass after
+the cursor is created (a new swarm, or Redis lost) only sets it. Every item is sent once, so replaying the same
+ledger sends nothing.
+
+| Event or rule | Goes to |
+|---|---|
+| An agent adds a follow up | The master, asked to turn it into a task, close it with a status or flag it for the operator |
+| An agent adds a question | The master, asked to answer it or raise it to the operator |
+| An agent blocks a task | The master, asked to read its last comment and unblock, rewrite or raise it |
+| An agent closes a task as done | The master, with the pull request and proof to check |
+| A follow up not added by the operator, still open 15 minutes after it was added | The master again; at 30 minutes the operator's Priorities |
+| A task still in `pr` 10 minutes after its pull request merged | Its engineer, told to run `done`; at 20 minutes the master |
+| A task's pull request closed without merging | Its engineer |
+| A task's pull request with red checks and no push for 20 minutes | Its engineer, once per push |
+
+A follow up already closed or flagged for the operator is not raised. Pull request state comes from `gh pr view`;
+a pull request `gh` cannot read is skipped until a later tick. An engineer that is gone falls back to the master.
+
+These items ride the same wake ladder as any other (see [Talking to the swarm](#talking-to-the-swarm)). Before
+it wakes anyone, the tick closes an event item whose follow up, question or task was already decided on the
+ledger (follow up closed or flagged, question answered or out of scope, task done), so the master never handles
+a decision twice.
+
+### Safe retire
+
+The tick retires an agent for idleness only after 10 idle ticks, and a tick counts as idle only when all three
+say idle:
+
+- its herdr pane, read by its pane id, never by its name, reads idle;
+- its session heartbeat does not say `working` (hooks write `working` on each prompt and tool call and `idle` at
+  Stop; a `working` beat older than 20 minutes no longer counts);
+- no wait it declared with `agentihooks swarm <id> wait` still holds. A declared wait stops idle counting until its
+  end time, so an agent waiting on checks, a deploy or a reply is neither nudged nor retired.
+
+When an agent leaves, retired, stalled, lost or exited on its own, its open inbox items are settled. If its task
+goes on (a handoff, or a task reopened for a successor), each item moves to its seat for the next occupant. If
+nobody takes the task up (it is done or blocked, for example), each item is withdrawn and its sender gets an
+item naming the agent and the message; a sender that has itself left is told through the master. Agents that
+exited between ticks are settled at the start of the next tick.
 
 ## Redis
 

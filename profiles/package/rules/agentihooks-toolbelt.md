@@ -110,6 +110,18 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   it and recycles it through a handoff. It answers unaddressed page chat, keeps the
   ledger, writes tasks and steers caps; it never claims a task, edits code,
   commits or merges. Its card sits first in the swarm panel.
+- The minute tick tells the master what agents do, through inbox items on the
+  wake ladder: each agent follow-up, question, blocked task and done task; a
+  follow-up still undecided after 15 minutes (the operator's Priorities at 30);
+  each new health finding; each phase it ticks because all its tasks are done,
+  or reopens for a task that is not. It tells an engineer when its task sits in
+  pr 10 minutes after the merge (the master at 20), or its pull request closed
+  unmerged or sat red with no push for 20 minutes. An item whose ledger item
+  is already decided closes itself before a wake.
+- The tick counts an agent idle only when its pane reads idle, its heartbeat
+  does not say working and no declared wait holds; nudge at 3 idle ticks,
+  retire at 10. A leaving agent's open items move to its seat when its task
+  goes on, else they are withdrawn and each sender told.
 - A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
   receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
   arrives on the first prompt, after a compaction, when the block changes and
