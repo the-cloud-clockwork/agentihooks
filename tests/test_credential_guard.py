@@ -41,6 +41,12 @@ CASES = [
     ("env names", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1"}}, True),
     ("env count", {"tool_name": "Bash", "tool_input": {"command": "env | wc -l"}}, False),
     ("env grep value", {"tool_name": "Bash", "tool_input": {"command": "env | grep REDIS"}}, True),
+    ("env grep count", {"tool_name": "Bash", "tool_input": {"command": "env | grep -c REDIS"}}, False),
+    ("env grep color", {"tool_name": "Bash", "tool_input": {"command": "env | grep --color=never ."}}, True),
+    ("env grep long option", {"tool_name": "Bash", "tool_input": {"command": "env | grep --line-buffered ."}}, True),
+    ("env grep pattern c", {"tool_name": "Bash", "tool_input": {"command": "env | grep -ec ."}}, True),
+    ("env grep list", {"tool_name": "Bash", "tool_input": {"command": "env | grep -l ."}}, True),
+    ("env wc names from input", {"tool_name": "Bash", "tool_input": {"command": "env | wc --files0-from=-"}}, True),
     ("env names then head", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | head -3"}}, True),
     ("env sorted names", {"tool_name": "Bash", "tool_input": {"command": "env | sort | cut -d= -f1"}}, True),
     ("env awk names", {"tool_name": "Bash", "tool_input": {"command": "env | awk -F= '{print $1}'"}}, True),
@@ -51,7 +57,7 @@ CASES = [
     (
         "env names filtered to identifiers",
         {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | grep -xE '[A-Za-z_][A-Za-z0-9_]*'"}},
-        False,
+        True,
     ),
     (
         "env names filtered anchored",
@@ -59,7 +65,7 @@ CASES = [
             "tool_name": "Bash",
             "tool_input": {"command": "env | sort | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | head -3"},
         },
-        False,
+        True,
     ),
     (
         "env malformed names printed",
@@ -275,6 +281,56 @@ class TestMultilineEnvValues:
         assert "FAKE_MULTI_0001" in r.stdout.splitlines()
         assert self.FAKE_FIRST not in r.stdout + r.stderr
         assert self.FAKE_REST not in r.stdout + r.stderr
+
+
+class TestIdentifierShapedSecondLine:
+    """A value's later line can look like a name, so no identifier filter makes a listing safe."""
+
+    FAKE_FIRST = "fake-first-line-0000"
+    FAKE_REST = "FAKE_REST_LINE_0000"
+    FILTERED = "env | cut -d= -f1 | grep -xE '[A-Za-z_][A-Za-z0-9_]*'"
+
+    def _run(self, command):
+        import os
+        import subprocess
+
+        env = {"PATH": os.environ.get("PATH", ""), "FAKE_MULTI_0002": self.FAKE_FIRST + "\n" + self.FAKE_REST}
+        return subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
+
+    def test_unguarded_filtered_listing_would_print_the_second_line(self):
+        assert self.FAKE_REST in self._run(self.FILTERED).stdout.splitlines()
+
+    def test_guard_blocks_the_filtered_listing(self):
+        assert decide(_bash(self.FILTERED))
+
+    def test_safe_form_never_prints_the_second_line(self):
+        r = self._run(ENV_NAMES_SAFE)
+        assert "FAKE_MULTI_0002" in r.stdout.splitlines()
+        assert self.FAKE_REST not in r.stdout + r.stderr
+
+    def test_block_message_offers_only_the_awk_form_and_counts(self):
+        reason = decide(_bash(self.FILTERED))
+        assert ENV_NAMES_SAFE in reason
+        assert "grep -c" in reason
+        assert "grep -x" not in reason
+
+
+class TestGrepLongOptionIsNotACount:
+    """A long grep option holding c, l or q once passed as a count and printed values."""
+
+    FAKE_VALUE = "fake-value-long-option-0000"
+    COMMAND = "env | grep --color=never ."
+
+    def test_unguarded_command_would_print_the_value(self):
+        import os
+        import subprocess
+
+        env = {"PATH": os.environ.get("PATH", ""), "FAKE_TOKEN_0003": self.FAKE_VALUE}
+        r = subprocess.run(["bash", "-c", self.COMMAND], env=env, capture_output=True, text=True)
+        assert "FAKE_TOKEN_0003=" + self.FAKE_VALUE in r.stdout.splitlines()
+
+    def test_guard_blocks_it(self):
+        assert decide(_bash(self.COMMAND))
 
 
 class TestRecursiveRewrite:

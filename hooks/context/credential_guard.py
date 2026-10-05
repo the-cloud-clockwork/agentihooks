@@ -181,23 +181,13 @@ SENSITIVE_FRAGMENT = re.compile(
     r")"
 )
 
-COUNT_STAGE = (
-    re.compile(r"^\s*wc(\s|$)"),
-    re.compile(r"^\s*grep\s+.*-[A-Za-z]*[clLq]"),
-)
+GREP_VERBS = ("grep", "egrep", "fgrep")
+GREP_ARG_FLAGS = set("efABCmdD")
 NAME_STAGE = (
     re.compile(r"^\s*cut\s+.*-f\s*1(\s|$)"),
     re.compile(r"^\s*sed\s+.*s/=\.\*//"),
     re.compile(r"^\s*awk\s+.*-F.*print\s+\$1"),
 )
-# A name that is not a valid identifier can carry a secret, so a name listing
-# is safe only after a grep keeps whole lines matching one of these.
-IDENTIFIER_CLASSES = {
-    "[A-Za-z_][A-Za-z0-9_]*",
-    "[a-zA-Z_][a-zA-Z0-9_]*",
-    "[_A-Za-z][_A-Za-z0-9]*",
-    "[[:alpha:]_][[:alnum:]_]*",
-}
 NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 
@@ -324,9 +314,10 @@ ALTERNATIVE = {
     ),
     KIND_ENVIRONMENT: (
         "A variable name that is not a valid identifier can hold a secret, and a value that "
-        "spans several lines prints its later lines as if they were names. List valid names "
-        "and only a count of malformed ones:\n  " + ENV_NAMES_SAFE + "\n"
-        "Count only:  env | wc -l\n"
+        "spans several lines prints its later lines as if they were names, even through an "
+        "identifier filter. Only two listings pass. Valid names and only a count of malformed "
+        "ones:\n  " + ENV_NAMES_SAFE + "\n"
+        "A count (wc, or grep -c):  env | wc -l\n"
         'To test one variable:  test -n "${VAR:-}" && echo set || echo unset\n'
         'To use a value, reference the variable ("$VAR") so the shell expands it at '
         "execution instead of printing it."
@@ -403,20 +394,33 @@ def decide_grep(tool_input, ctx=None):
     return ALLOW
 
 
-def identifier_filter(stage):
+def counts_only(stage):
     toks = tokens_of(stage)
-    if verb_of(toks) not in ("grep", "egrep"):
+    verb = verb_of(toks)
+    if verb == "wc":
+        return not any(t.startswith("--files0-from") for t in toks)
+    if verb not in GREP_VERBS:
         return False
-    rest = toks[verb_index(toks) + 1 :]
-    if any(t.startswith("--") for t in rest):
-        return False
-    flags = "".join(t[1:] for t in rest if t.startswith("-"))
-    patterns = [t for t in rest if not t.startswith("-")]
-    if "v" in flags or "e" in flags or "f" in flags or len(patterns) != 1:
-        return False
-    pattern = patterns[0]
-    anchored = "x" in flags or (pattern.startswith("^") and pattern.endswith("$"))
-    return anchored and pattern.removeprefix("^").removesuffix("$") in IDENTIFIER_CLASSES
+    skip = False
+    for tok in toks[verb_index(toks) + 1 :]:
+        if skip:
+            skip = False
+            continue
+        if tok == "--":
+            return False
+        if tok.startswith("--"):
+            # A long option may take the next word as its argument.
+            skip = "=" not in tok
+            continue
+        if not tok.startswith("-"):
+            continue
+        for i, ch in enumerate(tok[1:]):
+            if ch == "c":
+                return True
+            if ch in GREP_ARG_FLAGS:
+                skip = i == len(tok) - 2
+                break
+    return False
 
 
 def env_dump_verdict(command):
@@ -446,15 +450,10 @@ def env_dump_verdict(command):
     if not dump:
         return None
 
-    named = False
     for stage in stages[1:]:
-        if any(p.search(stage) for p in COUNT_STAGE):
+        if counts_only(stage):
             return None
-        if named and identifier_filter(stage):
-            return None
-        if any(p.search(stage) for p in NAME_STAGE):
-            named = True
-        elif not NEUTRAL_STAGE.search(stage):
+        if not any(p.search(stage) for p in NAME_STAGE) and not NEUTRAL_STAGE.search(stage):
             break
     return block(
         "dumping the whole environment ({})".format(verb),
