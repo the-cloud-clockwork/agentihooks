@@ -1,5 +1,7 @@
 import os
 import re
+import shlex
+from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
 from hooks.context.context_usage import used_tokens
@@ -13,6 +15,18 @@ _DIRECTIVE = (
     "`agentihooks swarm {slug} handoff <doc>` and stop. A successor continues the task from the document."
 )
 
+_ALLOWED = (
+    " Until the handoff every tool call is denied except reading files, writing the handoff document under "
+    "~/scratchpad, `agentihooks swarm {slug} handoff <doc>` and `agentihooks ledger` comment, say, leave and ack, "
+    "each as one command."
+)
+
+_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
+_WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
+_LEDGER_STEPS = frozenset({"comment", "say", "leave", "ack"})
+_SUBSTITUTION = ("`", "$(", "<(", ">(", "\n")
+_PATCH_TARGET = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.MULTILINE)
+
 
 def _used(session_id: str) -> int | None:
     used = used_tokens(session_id)
@@ -22,14 +36,78 @@ def _used(session_id: str) -> int | None:
     return used
 
 
-def directive(session_id: str, environ=None) -> str | None:
+def _overrun(session_id: str, environ) -> tuple[str, int] | None:
     match = _AGENT_NAME.match((os.environ if environ is None else environ).get("AGENTIHOOKS_AGENT_NAME", ""))
     used = _used(session_id) if match and session_id else None
     if used is None or used < COMPACT_LIMIT * 1000:
+        return None
+    return match["slug"], used
+
+
+def over_limit(session_id: str, environ=None) -> str | None:
+    overrun = _overrun(session_id, environ)
+    return overrun[0] if overrun else None
+
+
+def directive(session_id: str, environ=None) -> str | None:
+    overrun = _overrun(session_id, environ)
+    if overrun is None:
         return None
     marker = AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.recycle"
     if marker.exists():
         return None
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    return _DIRECTIVE.format(used=used // 1000, limit=COMPACT_LIMIT, slug=match["slug"])
+    slug, used = overrun
+    return _DIRECTIVE.format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+
+
+def _in_scratchpad(path: str) -> bool:
+    root = os.path.realpath(Path.home() / "scratchpad")
+    return os.path.realpath(os.path.expanduser(path)).startswith(root + os.sep)
+
+
+def _handoff_write(tool_input: dict) -> bool:
+    paths = [str(tool_input.get("file_path") or "")]
+    paths += [added or moved for added, moved in _PATCH_TARGET.findall(str(tool_input.get("content") or ""))]
+    return all(path and _in_scratchpad(path.strip()) for path in paths)
+
+
+def _ledger_step(args: list[str]) -> str | None:
+    rest = iter(args)
+    for token in rest:
+        if not token.startswith("--"):
+            return token
+        if "=" not in token:
+            next(rest, None)
+    return None
+
+
+def _handoff_command(command: str, slug: str) -> bool:
+    if any(mark in command for mark in _SUBSTITUTION):
+        return False
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
+        return False
+    if any(set(token) <= set(lexer.punctuation_chars) for token in tokens):
+        return False
+    if tokens[1] == "swarm":
+        return len(tokens) == 5 and tokens[2:4] == [slug, "handoff"]
+    return tokens[1] == "ledger" and _ledger_step(tokens[2:]) in _LEDGER_STEPS
+
+
+def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str | None:
+    overrun = _overrun(session_id, environ)
+    if overrun is None or tool_name in _READ_TOOLS:
+        return None
+    slug, used = overrun
+    if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
+        return None
+    if tool_name == "Bash" and _handoff_command(str(tool_input.get("command") or ""), slug):
+        return None
+    return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)

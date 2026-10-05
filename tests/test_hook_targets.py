@@ -562,10 +562,20 @@ class TestCodexEnforcementFallback:
         monkeypatch.setattr(common, "inject_context", lambda message, **kwargs: captured.append(message))
         monkeypatch.setattr(broadcast, "get_posttool_context", lambda session_id: None)
         monkeypatch.setattr(enforcement, "get_posttool_enforcements", lambda session_id, cwd, **kw: None)
-        call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/p"}
+        call = {"session_id": "codex-recycle", "tool_name": "Read", "tool_input": {"file_path": "/p/a"}, "cwd": "/p"}
         hm.on_pre_tool_use({"hook_event_name": "PreToolUse", **call})
         hm.on_post_tool_use({"hook_event_name": "PostToolUse", "tool_output": "ok", **call})
         assert any("agentihooks swarm sw handoff" in text for text in captured)
+
+    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch):
+        import hooks.context.context_recycle as recycle
+        import hooks.hook_manager as hm
+
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+        monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 900_000)
+        call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
+        with pytest.raises(hm.BlockAction, match="agentihooks swarm sw handoff"):
+            hm.on_pre_tool_use({"hook_event_name": "PreToolUse", "cwd": "/p", **call})
 
 
 class TestSplitGlobal:
