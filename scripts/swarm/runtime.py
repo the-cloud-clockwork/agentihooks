@@ -51,6 +51,20 @@ def herdr_target(name):
     return agent_name(name)
 
 
+def pane_target(agent):
+    return agent.pane_id or herdr_target(agent.name)
+
+
+def _owns(found, agent):
+    """A pane belongs to the agent when it carries the agent's herdr name or its 32 character cut, or is unnamed and
+    holds no other conversation."""
+    name = found.get("name")
+    if name:
+        return name in (herdr_target(agent.name), agent.name[:32])
+    own = _conversation_id(found.get("agent_session"))
+    return not own or not agent.conversation_id or own == agent.conversation_id
+
+
 def _conversation_id(session):
     if not isinstance(session, dict) or session.get("kind") != "id":
         return ""
@@ -173,11 +187,11 @@ class HerdrRuntime:
         return True
 
     def status(self, agent):
-        found = self._get(herdr_target(agent.name))
-        if found is None and self.name_pane(agent):
-            found = self._get(herdr_target(agent.name))
-        if found is None:
+        found = self._get(pane_target(agent))
+        if found is None or not _owns(found, agent):
             return "unknown"
+        if agent.pane_id and found.get("name") != herdr_target(agent.name):
+            self.name_pane(agent)
         return found.get("agent_status") or found.get("status") or "unknown"
 
     def _get(self, target):
@@ -214,6 +228,6 @@ class HerdrRuntime:
 
     def nudge(self, agent, text):
         try:
-            self.herdr(["agent", "prompt", herdr_target(agent.name), text])
+            self.herdr(["agent", "prompt", pane_target(agent), text])
         except Exception:
             pass

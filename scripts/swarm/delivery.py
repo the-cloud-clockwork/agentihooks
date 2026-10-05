@@ -19,15 +19,15 @@ class HerdrMessenger:
         from scripts.swarm import runtime
 
         self.herdr = herdr or runtime.herdr_call
-        self.target = runtime.herdr_target
+        self.target = runtime.pane_target
 
     def agent_status(self, agent):
-        result = self.herdr(["agent", "get", self.target(agent.name)])
+        result = self.herdr(["agent", "get", self.target(agent)])
         found = result.get("agent", result)
         return found.get("agent_status") or found.get("status") or "unknown"
 
     def prompt(self, agent, text):
-        self.herdr(["agent", "prompt", self.target(agent.name), text])
+        self.herdr(["agent", "prompt", self.target(agent), text])
 
 
 def recipients(store, slug, to, sender):

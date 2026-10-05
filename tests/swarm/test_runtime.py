@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import AgentRecord
 
 
 def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
@@ -26,11 +27,24 @@ def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_maste
     calls = []
     runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {"agent_status": "idle"})
     slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
-    eng, master = SimpleNamespace(name=f"{slug}-eng-4"), SimpleNamespace(name=f"{slug}-master-1")
+    eng, master = AgentRecord(f"{slug}-eng-4", "eng", "t"), AgentRecord(f"{slug}-master-1", "master", "")
     runtime.status(eng), runtime.nudge(eng, "wake"), runtime.status(master), runtime.nudge(master, "wake")
     assert [c[:2] for c in calls] == [["agent", "get"], ["agent", "prompt"]] * 2
     assert calls[0][2] == calls[1][2] != calls[2][2] == calls[3][2]
     assert calls[0][2].endswith("-eng-4")
+
+
+def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
+    herdr = NamedPanes({"w:p9": {"name": "sw-eng-1", "agent_status": "idle"}, "w:p1": {"name": "sw-eng-1"}})
+    prompts = []
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        herdr=lambda args: prompts.append(args) or {} if args[:2] == ["agent", "prompt"] else herdr(args),
+    )
+    eng = AgentRecord("sw-eng-1", "eng", "t", pane_id="w:p9")
+    assert runtime.status(eng) == "idle"
+    runtime.nudge(eng, "wake")
+    assert prompts == [["agent", "prompt", "w:p9", "wake"]]
 
 
 class NamedPanes:
