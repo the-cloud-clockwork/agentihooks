@@ -27,14 +27,22 @@ _gauges: dict[str, Any] = {}
 
 
 def _can_init() -> bool:
-    """Check if OTEL endpoint is configured and hooks telemetry is enabled."""
-    from hooks.config import OTEL_HOOKS_ENABLED
+    """Check if a collector is configured and hooks telemetry is enabled."""
+    from hooks.config import OTEL_HOOKS_ENABLED, hook_collector
 
-    return (
-        OTEL_HOOKS_ENABLED
-        and bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
-        and bool(os.environ.get("CLAUDE_CODE_ENABLE_TELEMETRY"))
-    )
+    return OTEL_HOOKS_ENABLED and bool(hook_collector(os.environ)[0])
+
+
+def _collector_endpoints() -> tuple[str, dict[str, str]]:
+    """Protocol and per-signal exporter endpoint; an HTTP exporter given an endpoint posts to it verbatim."""
+    from hooks.config import hook_collector
+
+    endpoint, protocol = hook_collector(os.environ)
+    protocol = protocol or "grpc"
+    signals = ("traces", "metrics", "logs")
+    if protocol == "grpc":
+        return protocol, dict.fromkeys(signals, endpoint)
+    return protocol, {signal: f"{endpoint.rstrip('/')}/v1/{signal}" for signal in signals}
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +103,14 @@ def _dispatch_op(op: tuple) -> None:
         _, name, attrs = op
         if _log_emitter is None:
             return
-        from opentelemetry._logs import SeverityNumber
-        from opentelemetry.sdk._logs import LogRecord
+        from opentelemetry._logs import LogRecord, SeverityNumber
 
         attrs = dict(attrs)
         attrs["event.name"] = name
         attrs["event.timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        _log_emitter.emit(LogRecord(body=name, severity_number=SeverityNumber.INFO, attributes=attrs))
+        _log_emitter.emit(
+            LogRecord(timestamp=time.time_ns(), body=name, severity_number=SeverityNumber.INFO, attributes=attrs)
+        )
     elif kind == "gauge":
         _, name, value, attrs = op
         if _meter is None:
@@ -117,8 +126,7 @@ def init() -> None:
     No-op if:
       - OTEL SDK is not installed (ImportError)
       - OTEL_HOOKS_ENABLED is false
-      - OTEL_EXPORTER_OTLP_ENDPOINT is not set
-      - CLAUDE_CODE_ENABLE_TELEMETRY is not set
+      - no collector is set (AGENTIHOOKS_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT)
     """
     # init() is now just "ensure worker thread is running". The worker
     # does the actual SDK bootstrap off the main thread so exporter hangs
@@ -150,7 +158,7 @@ def _init_sdk() -> None:
 
         from hooks.config import OTEL_HOOKS_SERVICE_NAME
 
-        protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+        protocol, endpoints = _collector_endpoints()
         if protocol == "grpc":
             from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
             from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
@@ -164,19 +172,21 @@ def _init_sdk() -> None:
 
         # Traces — immediate export (safe for short-lived processes)
         tp = TracerProvider(resource=resource)
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoints["traces"])))
         trace.set_tracer_provider(tp)
         _tracer = trace.get_tracer("agentihooks")
 
         # Metrics — periodic export, flushed on atexit
-        reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=60_000)
+        reader = PeriodicExportingMetricReader(
+            OTLPMetricExporter(endpoint=endpoints["metrics"]), export_interval_millis=60_000
+        )
         mp = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(mp)
         _meter = metrics.get_meter("agentihooks")
 
         # Logs/Events — immediate export (matches Claude Code's event pattern)
         lp = LoggerProvider(resource=resource)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoints["logs"])))
         _log_emitter = lp.get_logger("agentihooks")
 
         # No atexit flush — both our worker and OTEL's internal batch threads
