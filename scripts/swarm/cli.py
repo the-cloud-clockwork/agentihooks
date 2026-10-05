@@ -42,7 +42,7 @@ from scripts.inbox import wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, prompt, snapshot, take_master, templates, timer
+from scripts.swarm import delivery, ledger_events, prompt, snapshot, take_master, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -89,6 +89,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         delivery.migrate_outbox(store, slug, inbox)
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
+        doc, config = ledger.state(slug), store.config(slug)
+        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
+        found = _findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
+        actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
         actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
         taken = snapshot.auto(store, slug, now_ms(), os.environ)
@@ -372,24 +376,7 @@ def cmd_status(store, args):
     ledger = LedgerClient()
     tasks = ledger.tasks(args.slug)
     counts = {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
-    rows, limits = [a.__dict__ for a in agents], health.limits()
-    found = _verdicts(store, args.slug).visible(
-        health.findings(
-            {"tasks": tasks, "_meta": {"events": ledger.events(args.slug)}},
-            rows,
-            activity.counts(args.slug),
-            now_ms(),
-            limits,
-            checks.waiting(
-                rows,
-                tasks,
-                limits,
-                checks.cached(store.redis, store.key(args.slug, "checks"), approval=config.autonomy == ASSIST),
-            ),
-        ),
-        now_ms(),
-        limits.cooldown_minutes * 60_000,
-    )
+    found = _findings(store, args.slug, config, tasks, ledger.events(args.slug))
     if args.json:
         print(
             json.dumps(
@@ -424,6 +411,27 @@ def cmd_status(store, args):
             print(f"  - {entry}")
         print(f"  threshold {f['threshold']}")
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+
+
+def _findings(store, slug, config, tasks, events):
+    rows, limits = [a.__dict__ for a in store.agents(slug)], health.limits()
+    return _verdicts(store, slug).visible(
+        health.findings(
+            {"tasks": tasks, "_meta": {"events": events}},
+            rows,
+            activity.counts(slug),
+            now_ms(),
+            limits,
+            checks.waiting(
+                rows,
+                tasks,
+                limits,
+                checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
+            ),
+        ),
+        now_ms(),
+        limits.cooldown_minutes * 60_000,
+    )
 
 
 def _verdicts(store, slug):

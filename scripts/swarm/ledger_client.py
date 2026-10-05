@@ -60,6 +60,9 @@ class LedgerClient:
     def followup(self, slug, text):
         self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
 
+    def priority(self, slug, item, text):
+        self._call(slug, [_op("priority", "swarm", item=item, text=text)])
+
     def add_source(self, slug, source, by):
         self._call(slug, [_op("source_add", by, source=source)])
 

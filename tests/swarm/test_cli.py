@@ -409,6 +409,21 @@ def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     assert f"woke sw-eng-1 for message {item.id}" in actions
 
 
+def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", seat="master@sw"))
+    rt.live.add("sw-master-1")
+    ledger.log = []
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
+    added = {"rev": 1, "at": 1, "by": "sw-eng-1", "kind": "added", "target": "followups/f1", "text": "cap retries"}
+    ledger.log = [added]
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
+    [item] = InboxStore(store.redis).inbox("master@sw")
+    assert (item.sender, item.state) == ("swarm", "pending") and "cap retries" in item.text
+    assert any("followups/f1" in action for action in actions)
+
+
 def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monkeypatch, tmp_path):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
