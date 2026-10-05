@@ -162,6 +162,30 @@ def test_stop_closes_the_doctor_ledger_with_every_fix_and_removes_its_agents(env
     assert store.config(WATCHED).state == "paused"
 
 
+def test_stop_cancels_the_pending_peer_messages_and_tells_the_watched_master(env):
+    store, _, _ = env
+    doctor.main([WATCHED, "start"])
+    inbox = InboxStore(store.redis)
+    sent = inbox.send(f"master@{WATCHED}", f"master@{DOCTOR}", "the watched swarm merged a fix")
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert inbox.pending_items(f"master@{DOCTOR}") == []
+    assert inbox.get(sent.id).state == "cancelled"
+    notice = [i for i in inbox.pending_items(f"master@{WATCHED}") if "closed" in i.text]
+    assert notice and notice[0].fyi and f"master@{DOCTOR}" in notice[0].text
+
+
+def test_a_message_to_a_closed_doctors_master_does_not_restart_it(env):
+    store, rt, _ = env
+    doctor.main([WATCHED, "start"])
+    assert doctor.main([WATCHED, "stop"]) == 0
+    masters = len(rt.masters)
+    sent = InboxStore(store.redis).send(f"master@{WATCHED}", f"master@{DOCTOR}", "still syncing with my peer")
+    tick(store, rt)
+    assert store.config(DOCTOR).state == "stopped" and store.agents(DOCTOR) == []
+    assert len(rt.masters) == masters
+    assert InboxStore(store.redis).get(sent.id).state == "cancelled"
+
+
 def test_status_names_the_link_and_the_doctor_swarm(env, capsys):
     doctor.main([WATCHED, "start"])
     capsys.readouterr()
