@@ -165,16 +165,23 @@ def workspace_lines(task):
     ]
 
 
+def issue_step(me, what):
+    return (
+        "1. If the repo has GitHub issues (gh repo view --json hasIssuesEnabled), open an issue naming "
+        f"{what} and record it: {me} issue <issue url>. Without issues the ledger task is the spec: skip this step."
+    )
+
+
 def code_steps(me, led, name, phase):
     return [
         "Work it end to end with the dev-cycle skill, then stop:",
-        f"1. Open a GitHub issue naming the seams and record it: {me} issue <issue url>",
+        issue_step(me, "the seams"),
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
         "3. Red test, least code to green.",
         "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
-        f"5. Push, open the pull request into dev with Closes #<n>, record it: {me} pr <pr url>",
+        f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
         "6. Merge on green checks, then wt.sh done.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
     ]
@@ -192,7 +199,7 @@ def ci_steps(me, led, name, phase):
 def ops_steps(me, led, name, phase):
     return [
         "Work it end to end, then stop:",
-        f"1. Open a GitHub issue naming the system state this task must reach and record it: {me} issue <issue url>",
+        issue_step(me, "the system state this task must reach"),
         f"2. {THROUGH_CODE.format(name=name)}",
         "3. Verify the state against the live system with one read only command and keep its output.",
         f'4. Leave the crew with {led} leave, then close the task with the proof: {me} done --command "<command>" '
@@ -203,7 +210,7 @@ def ops_steps(me, led, name, phase):
 def tune_steps(me, led, name, phase):
     return [
         "Work it end to end, then stop:",
-        f"1. Open a GitHub issue naming the setting and the number it must reach, and record it: {me} issue <issue url>",
+        issue_step(me, "the setting and the number it must reach"),
         "2. Measure the current value with one read only command before changing anything.",
         f"3. {THROUGH_CODE.format(name=name)}",
         "4. Once the change runs, measure again with the same command.",
@@ -216,7 +223,7 @@ def tune_steps(me, led, name, phase):
 def troubleshoot_steps(me, led, name, phase):
     return [
         "Work it end to end, then stop:",
-        f"1. Open a GitHub issue naming the symptom and record it: {me} issue <issue url>",
+        issue_step(me, "the symptom"),
         "2. Reproduce the failure before any theory, then test ranked hypotheses one at a time with the "
         "quick-troubleshoot skill. Diagnostics stay read only.",
         "3. Show the root cause by evidence: a command and its output, a log line or a failing test.",
@@ -231,9 +238,9 @@ def troubleshoot_steps(me, led, name, phase):
 def research_steps(me, led, name, phase):
     return [
         "Work it end to end, then stop:",
-        f"1. Open a GitHub issue naming the question and record it: {me} issue <issue url>",
+        issue_step(me, "the question"),
         "2. Answer it from sources you read yourself: code, docs, runs and their output. Name each source.",
-        "3. Write the finding where others can read it later: a comment on the issue, or a document merged into dev "
+        "3. Write the finding where others can read it later: a comment on the issue or the ledger task, or a document merged into dev "
         "by pull request.",
         f"4. Leave the crew with {led} leave, then close the task with the proof: {me} done --finding <link>. The "
         f"ledger refuses done without a link to the finding. {CLOSES}",

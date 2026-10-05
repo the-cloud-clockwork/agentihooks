@@ -69,3 +69,11 @@ def test_troubleshoot_and_research_close_with_their_own_proof(env, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
     assert run("sw", "done", "--finding", "my notes") == 1
     assert run("sw", "done", "--finding", "https://github.com/o/r/issues/4#issuecomment-1") == 0
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_issue_step_applies_only_where_the_repo_has_issues(kind):
+    text = build(kind=kind)
+    assert "hasIssuesEnabled" in text
+    assert "the ledger task is the spec" in text
+    assert "1. Open a GitHub issue" not in text
