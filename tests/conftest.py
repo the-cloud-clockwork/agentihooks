@@ -127,6 +127,26 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
         monkeypatch.delenv(_adopted, raising=False)
     # Every PreToolUse delivers the running session's inbox from the swarm Redis.
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:1/0")
+    # The workbench shell and ~/.agentihooks/*.env carry the live collector and
+    # Langfuse settings; only real sessions may report to them.
+    for _telemetry in (
+        "AGENTIHOOKS_OTLP_ENDPOINT",
+        "AGENTIHOOKS_OTLP_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "AGENTIHOOKS_OTEL_COLLECTOR",
+        "AGENTIHOOKS_LANGFUSE_ENABLED",
+        "OTEL_LANGFUSE_ENABLED",
+        "OTEL_LANGFUSE_ENDPOINT",
+        "OTEL_LANGFUSE_HOST_HEADER",
+        "OTEL_LANGFUSE_PUBLIC_KEY",
+        "OTEL_LANGFUSE_SECRET_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_HOST",
+    ):
+        monkeypatch.delenv(_telemetry, raising=False)
+    monkeypatch.setattr("hooks.config.OTEL_LANGFUSE_ENABLED", False)
 
     # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
     # the operator's real condition scripts and write the real cache and counters.
