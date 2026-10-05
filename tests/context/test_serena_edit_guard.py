@@ -51,6 +51,9 @@ def test_serena_tools_are_allowed(trees):
     "command",
     [
         "sed -i 's/1/2/' pkg/mod.py",
+        "sed --in-place 's/1/2/' pkg/mod.py",
+        "cp other.py pkg/mod.py",
+        "mv /tmp/new.py pkg/mod.py && echo moved",
         "echo 'y = 2' >> pkg/mod.py",
         "cat > pkg/mod.py <<'EOF'\nx = 2\nEOF",
         "printf 'x' | tee pkg/mod.py",

@@ -11,7 +11,8 @@ from hooks.hook_manager import BlockAction
 _FILE_TOOLS = frozenset({"Edit", "MultiEdit", "Write"})
 _PY = r"""['"]?([^\s'";|&<>()]+\.py)['"]?"""
 _SHELL_WRITES = (
-    re.compile(r"\bsed\b[^|;&\n]*\s-i\S*\s[^|;&\n]*?" + _PY),
+    re.compile(r"\bsed\b[^|;&\n]*\s(?:-i|--in-place)\S*\s[^|;&\n]*?" + _PY),
+    re.compile(r"\b(?:cp|mv|install)\b[^|;&\n]*\s" + _PY + r"\s*(?:$|[;&|\n])"),
     re.compile(r">>?\s*" + _PY),
     re.compile(r"\btee\b(?:\s+-\S+)*\s+" + _PY),
     re.compile(r"""\bopen\(\s*""" + _PY + r"""\s*,\s*['"][wa]"""),
