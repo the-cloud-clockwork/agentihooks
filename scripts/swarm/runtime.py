@@ -145,6 +145,7 @@ class HerdrRuntime:
             fields.get("account", ""),
             fields.get("model", ""),
             fields.get("effort", ""),
+            fields.get("placement", ""),
         )
 
     def live_names(self):
