@@ -614,7 +614,7 @@ def cmd_say(store, args):
     agent = _me(store, args)
     text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
     if args.to:
-        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to)
+        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
     LedgerClient().say(args.slug, text, by=agent.name)
     print(json.dumps({"posted": True}))
 
@@ -674,6 +674,7 @@ def build_parser():
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")
+    say.add_argument("--fyi", action="store_true")
     return parser
 
 

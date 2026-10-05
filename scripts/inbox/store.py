@@ -34,6 +34,7 @@ class Item:
     reason: str = ""
     ref: str = ""
     sequence: int = 0
+    fyi: bool = False
 
 
 def now_ms():
@@ -63,8 +64,9 @@ class InboxStore:
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
 
-    def send(self, sender, address, text, ref=""):
-        """ref names the ledger write an operator item carries, for the seen marks."""
+    def send(self, sender, address, text, ref="", fyi=False):
+        """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
+        work, so a bare close names no outcome."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         at = now_ms()
@@ -78,6 +80,7 @@ class InboxStore:
             at,
             ref=ref,
             sequence=self.redis.incr(self.key("sequence", address)),
+            fyi=fyi,
         )
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
@@ -187,13 +190,13 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def reply(self, item_id, replier, text):
+    def reply(self, item_id, replier, text, fyi=False):
         item = self.get(item_id)
         if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
         if item.state in CLOSED:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
-        answer = self.send(replier, item.sender, text)
+        answer = self.send(replier, item.sender, text, fyi=fyi)
         self.close(item_id, replier, "done", f"replied with message {answer.id}")
         return answer
 
@@ -341,6 +344,7 @@ def _item(raw, item_id):
             "created_at": int(raw["created_at"]),
             "updated_at": int(raw["updated_at"]),
             "sequence": int(raw.get("sequence", 0)),
+            "fyi": raw.get("fyi") == "True",
         }
     )
 

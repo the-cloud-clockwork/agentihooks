@@ -66,3 +66,11 @@ def test_planted_fault_a_close_that_names_no_outcome_is_raised():
     [found] = inbox.no_outcome([planted])
     assert found.id == f"inbox-no-outcome/{planted['id']}"
     assert "closed cancelled with no outcome named" in found.evidence
+
+
+def test_an_informational_item_closed_bare_is_not_raised_and_a_work_item_still_is():
+    rec = recorded()
+    work = copy.deepcopy(by_id(rec["items"], rec["replied"]))
+    work.update(state="done", reason="done")
+    fyi = {**copy.deepcopy(work), "id": "fyi1", "fyi": True}
+    assert [f.id for f in inbox.no_outcome([work, fyi])] == [f"inbox-no-outcome/{work['id']}"]

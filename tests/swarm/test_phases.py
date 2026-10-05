@@ -101,3 +101,12 @@ def test_a_ticked_phase_is_not_ticked_again_on_the_next_tick(env):
     run(store, ledger)
     run(store, ledger)
     assert sum("Build" in t for t in master_texts(store)) == 1
+
+
+def test_phase_notices_to_the_master_are_informational(env):
+    store, ledger = env
+    finish(ledger, "t1", "t2")
+    run(store, ledger)
+    ledger.update_task(SLUG, "t2", {"state": "claimed"})
+    run(store, ledger)
+    assert [i.fyi for i in InboxStore(store.redis).inbox(MASTER_SEAT) if "phase p1" in i.text] == [True, True]

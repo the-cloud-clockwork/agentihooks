@@ -23,7 +23,7 @@ def settle(inbox, name, seat, exit_text):
         elif (
             inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
         ):
-            inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text))
+            inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
 
 
 def notice_address(inbox: "InboxStore", sender: str) -> str:

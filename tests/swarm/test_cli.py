@@ -120,6 +120,18 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert "not an agent" in capsys.readouterr().err
 
 
+def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert run("sw", "--as", "sw-eng-1", "say", "thanks for the review", "--to", "ci", "--fyi") == 0
+    assert run("sw", "--as", "sw-eng-1", "say", "please rerun the checks", "--to", "ci") == 0
+    assert [(i.text, i.fyi) for i in InboxStore(store.redis).inbox("sw-ci-1")] == [
+        ("thanks for the review", True),
+        ("please rerun the checks", False),
+    ]
+
+
 def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypatch):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -545,6 +557,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} followup add",
         "agentihooks swarm sw --as sw-master-2 say --to operator",
         "agentihooks msg reply",
+        "--fyi",
         "agentihooks swarm sw --as sw-master-2 send-message",
         "agentihooks swarm sw --as sw-master-2 set max-eng-agents=",
         "agentihooks swarm sw --as sw-master-2 pause",

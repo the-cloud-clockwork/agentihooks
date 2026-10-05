@@ -74,8 +74,8 @@ class Mail:
         self.store.redis.set(marker, 1, ex=SENT_TTL_S)
         return True
 
-    def send(self, key, address, text):
-        if self.once(key, lambda: self.inbox.send(SENDER, address, text)):
+    def send(self, key, address, text, fyi=False):
+        if self.once(key, lambda: self.inbox.send(SENDER, address, text, fyi=fyi)):
             return [f"told {address}: {key}"]
         return []
 
@@ -124,7 +124,8 @@ def _events(mail, events, tasks):
     for event in filter(lambda e: _by_agent(mail, e), events):
         text = _describe(mail.slug, event, tasks)
         if text:
-            sent += mail.send(f"event:{event['rev']}:{event['kind']}:{event['target']}", mail.master, text)
+            key = f"event:{event['rev']}:{event['kind']}:{event['target']}"
+            sent += mail.send(key, mail.master, text, fyi=event["kind"] == "task done")
     return sent
 
 
