@@ -90,10 +90,13 @@ def build(slug, repo, lane, name, task):
         "Work it end to end with the dev-cycle skill, then stop:",
         f"1. Open a GitHub issue naming the seams and record it: {me} issue <issue url>",
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
-        "3. Red test, least code to green, ruff check and ruff format --check clean.",
-        f"4. Push, open the pull request into dev with Closes #<n>, record it: {me} pr <pr url>",
-        "5. Merge on green checks, then wt.sh done.",
-        f"6. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. The swarm then closes "
+        "3. Red test, least code to green.",
+        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
+        "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
+        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
+        f"5. Push, open the pull request into dev with Closes #<n>, record it: {me} pr <pr url>",
+        "6. Merge on green checks, then wt.sh done.",
+        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. The swarm then closes "
         "this session; stop working.",
         "",
         f"If your context nears its limit a hook tells you to write a handoff document: then run {me} handoff <doc> "
