@@ -6,6 +6,8 @@ import ledger_server
 import new_ledger
 import pytest
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 SLUG = "note-comments-2026-01-01"
 
 
