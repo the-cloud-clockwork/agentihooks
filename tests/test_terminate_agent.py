@@ -230,6 +230,19 @@ def test_a_codex_memory_helper_without_a_main_thread_record_lists_as_itself(tmp_
     assert [(s.session_id, s.cwd) for s in found] == [("memory-helper", str(memories))]
 
 
+def test_a_registered_codex_main_thread_lists_from_its_own_record(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    registry = _codex_registry(tmp_path / "codex" / "memories")
+    del registry["memory-helper"]
+    registry["main-thread"]["status"] = "alive"
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.cwd) for s in found] == [("main-thread", "/work/repo")]
+
+
 def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     from scripts.terminate_agent import sessions
 
