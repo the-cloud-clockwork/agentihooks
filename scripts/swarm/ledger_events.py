@@ -74,8 +74,8 @@ class Mail:
         self.store.redis.set(marker, 1, ex=SENT_TTL_S)
         return True
 
-    def send(self, key, address, text, fyi=False):
-        if self.once(key, lambda: self.inbox.send(SENDER, address, text, fyi=fyi)):
+    def send(self, key, address, text, ref="", fyi=False):
+        if self.once(key, lambda: self.inbox.send(SENDER, address, text, ref=ref, fyi=fyi)):
             return [f"told {address}: {key}"]
         return []
 
@@ -124,8 +124,13 @@ def _events(mail, events, tasks):
     for event in filter(lambda e: _by_agent(mail, e), events):
         text = _describe(mail.slug, event, tasks)
         if text:
-            key = f"event:{event['rev']}:{event['kind']}:{event['target']}"
-            sent += mail.send(key, mail.master, text, fyi=event["kind"] == "task done")
+            sent += mail.send(
+                f"event:{event['rev']}:{event['kind']}:{event['target']}",
+                mail.master,
+                text,
+                ref=f"{mail.slug}:event:{event['target']}",
+                fyi=event["kind"] == "task done",
+            )
     return sent
 
 
@@ -165,7 +170,7 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up on ledger {mail.slug} is still open fifteen minutes after {event['by']} added it: "
                 f"{followup['text']}\nDecide it now, or it goes to the operator's Priorities."
             )
-            sent += mail.send(f"{target}:raised", mail.master, text)
+            sent += mail.send(f"{target}:raised", mail.master, text, ref=f"{mail.slug}:event:{target}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):

@@ -515,3 +515,16 @@ def test_reserve_account_is_chosen_only_when_no_other_is_routable(monkeypatch, t
 
     assert reserved.result.account == "MID"
     assert everything.result.account == "BEST"
+
+
+def test_reserve_account_below_the_cap_is_chosen_before_overflow(monkeypatch, tmp_path):
+    env = {**_three(monkeypatch), "AGENTIHOOKS_RESERVE_ACCOUNTS": "LOW"}
+
+    def pick(sessions):
+        return balancer.select_credential(env, cache_file=tmp_path / "c.json", sessions=sessions, max_sessions=3)
+
+    opened = pick({"BEST": 4, "MID": 3, "LOW": 0})
+    assert (opened.result.account, opened.placement) == ("LOW", "open")
+    assert pick({"BEST": 4, "MID": 2, "LOW": 0}).result.account == "MID"
+    full = pick({"BEST": 4, "MID": 3, "LOW": 3})
+    assert (full.result.account, full.placement) == ("MID", "overflow")
