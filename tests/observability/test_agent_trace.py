@@ -327,7 +327,7 @@ def test_export_to_an_otlp_endpoint_writes_the_cursor(otlp, tmp_path, mode, caps
     assert "export failed" not in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(("mode", "status", "reason"), [("401", "401", "Unauthorized"), ("hang", "None", "Timeout")])
+@pytest.mark.parametrize(("mode", "status", "reason"), [("401", "401", "Unauthorized"), ("hang", "None", "timed out")])
 def test_failed_export_logs_time_endpoint_status_and_reason(otlp, tmp_path, mode, status, reason, capsys):
     from hooks.observability import agent_trace
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ from hooks.config import AGENTIHOOKS_HOME
 
 CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
-_EXPORTER_LOGGER = "opentelemetry.exporter.otlp.proto.http.trace_exporter"
+_EXPORTER_LOGGER = "opentelemetry"
 
 
 @dataclass(frozen=True)
@@ -272,9 +273,9 @@ class _ExportErrors(logging.Handler):
         self.reason = "exporter returned failure"
 
     def emit(self, record: logging.LogRecord) -> None:
-        if "code: %s, reason: %s" in str(record.msg) and len(record.args or ()) == 2:
-            self.status, reason = record.args
-            self.reason = f"{type(reason).__name__}: {reason}" if isinstance(reason, BaseException) else str(reason)
+        found = re.search(r"code: (\S+), reason: (.*)", record.getMessage(), re.S)
+        if found:
+            self.status, self.reason = found.groups()
         elif record.levelno >= logging.ERROR:
             self.reason = record.getMessage()
 
