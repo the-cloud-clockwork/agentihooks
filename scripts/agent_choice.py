@@ -12,12 +12,16 @@ def priority(environ: dict[str, str]) -> list[str]:
 def has_quota(agent: str, environ: dict[str, str]) -> bool | None:
     """True or False from the last known quota; None when nothing is known."""
     if agent == "codex":
-        from scripts.codex_quota import latest_codex_quota
+        from scripts import codex_router
 
-        quota = latest_codex_quota(environ)
-        used = quota.highest_used if quota else None
+        pool = codex_router.routing_pool(environ)
+        seen = codex_router.quotas(pool, environ)
+        used = [quota.highest_used for quota in seen.values() if quota and quota.highest_used is not None]
+        if not used:
+            return None
         threshold = float(environ.get("AGENTIHOOKS_HANDOFF_WEEK_PCT") or 98)
-        return None if used is None else used < threshold
+        unknown = any(account.signed_in and seen.get(account.name) is None for account in pool)
+        return unknown or any(value < threshold for value in used)
     from scripts.claude_quota_balancer import cached_observations, is_routable
 
     results = [result for _, result in cached_observations()]
@@ -34,7 +38,11 @@ def at_cap(agent: str, environ: dict[str, str]) -> bool:
 
     cap = account_sessions.max_sessions(environ)
     if agent == "codex":
-        return account_sessions.live_codex_sessions() >= cap
+        from scripts import codex_router
+
+        counts = account_sessions.codex_sessions_by_account()
+        pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
+        return all(counts.get(account.name, 0) >= cap for account in pool)
     from scripts import claude_quota_balancer as balancer
 
     accounts = {_account(result) for _, result in balancer.cached_observations() if balancer.is_routable(result)}

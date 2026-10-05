@@ -121,6 +121,32 @@ agentihooks init-agent --handoff \
 After `handoff=done` every tool call in the old session is blocked with a message
 naming the account that took over.
 
+## Codex accounts
+
+Codex routes the same way. Its accounts are the default `codex login` on this
+machine (named `default`, detected with `codex login status`) and one ChatGPT
+workspace access token per `AH_CX_TOKEN_<slug>`.
+
+- `agentihooks codex [--route <slug>] [codex args]` picks the account with the
+  most routing left below `AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT`, the least
+  loaded when every account is full; `--route` forces one. `init-agent --agent
+  codex` and the swarm tick launch through it, and the route report names the
+  account for the swarm panel.
+- A token account's child keeps only its `AH_CX_TOKEN_<slug>`, loses every
+  `AH_CC_TOKEN_*`, and runs `codex --no-daemon` with the token in
+  `CODEX_ACCESS_TOKEN`. Codex keeps one app-server daemon per Codex home and that
+  daemon answers with its own login, so a token session must not attach to it.
+  The Codex home, config and hooks stay the shared ones.
+- The default account runs plain `codex` with no token variables. With no
+  `AH_CX_TOKEN_*` set, every launch takes this path without checking the login.
+- Live sessions are counted per account from `/proc`: a Codex process with
+  exactly one `AH_CX_TOKEN_<slug>` is on that account, any other on `default`.
+  Quota per account is the newest rate-limit event in the session logs the
+  session registry attributes to it; a token with no session yet shows no quota
+  and still routes.
+- `agentihooks balance` and `agentihooks quota` list every Codex account with its
+  sessions and quota; a signed-out default login shows `SIGNED_OUT`.
+
 ## Configuration
 
 | Variable | Default | Meaning |

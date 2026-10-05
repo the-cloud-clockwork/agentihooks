@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ from scripts.claude_quota_balancer import QuotaWindow, _state
 FIVE_HOUR_MINUTES = 300
 TAIL_BYTES = 512 * 1024
 RECENT_ROLLOUTS = 8
+SESSION_ID_LENGTH = 36
 
 
 @dataclass(frozen=True)
@@ -78,11 +80,20 @@ def _last_in(path: Path) -> CodexQuota | None:
     return None
 
 
-def latest_codex_quota(environ: dict[str, str] | None = None) -> CodexQuota | None:
+def rollout_session_id(path: Path) -> str:
+    return path.stem[-SESSION_ID_LENGTH:]
+
+
+def latest_codex_quota(
+    environ: dict[str, str] | None = None, keep: Callable[[str], bool] | None = None
+) -> CodexQuota | None:
+    """Newest rate-limit event among the recent rollouts whose session id ``keep`` accepts."""
     sessions = codex_home(dict(os.environ if environ is None else environ)) / "sessions"
     try:
         rollouts = sorted(sessions.glob("*/*/*/rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
         return None
+    if keep is not None:
+        rollouts = [path for path in rollouts if keep(rollout_session_id(path))]
     found = [q for path in rollouts[:RECENT_ROLLOUTS] if (q := _last_in(path)) is not None]
     return max(found, key=lambda q: q.observed_at, default=None)

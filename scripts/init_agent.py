@@ -159,15 +159,18 @@ def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> l
 def _agent_command(
     spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str]
 ) -> tuple[list[str], str]:
-    """(command, line run before it): Claude routes through `agentihooks claude`; Codex runs directly."""
+    """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
+    agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
     if spec.agent == "codex":
         return [
-            shutil.which("codex") or "codex",
+            agentihooks_bin,
+            "codex",
+            "--agentihooks-report",
+            str(report),
             *_codex_otel_args(environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
-        ], f"printf 'status=direct\\n' > {shlex.quote(str(report))}\n"
-    agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
+        ], ""
     command = [
         agentihooks_bin,
         "claude",

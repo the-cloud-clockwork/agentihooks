@@ -7,7 +7,6 @@ import time
 from dataclasses import asdict, dataclass
 
 from scripts.claude_quota_balancer import _duration, _percent, _span
-from scripts.codex_quota import latest_codex_quota
 
 
 @dataclass(frozen=True)
@@ -42,20 +41,24 @@ def claude_rows(results: list, sessions: dict[str, int], source: str) -> list[Qu
     ]
 
 
-def codex_row(quota, sessions: int, now: float) -> QuotaRow | None:
-    if quota is None:
-        return None
-    age = int(now - quota.observed_at)
-    return QuotaRow(
-        agent="codex",
-        account=quota.plan_type,
-        state=quota.state,
-        sessions=sessions,
-        five_hour_left=_left(quota.five_hour.used),
-        seven_day_left=_left(quota.seven_day.used),
-        seven_day_resets_at=quota.seven_day.resets_at,
-        source=f"session-log {_span(max(0, age))} ago",
-    )
+def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
+    rows = []
+    for account in accounts:
+        quota = quotas.get(account.name)
+        state = "SIGNED_OUT" if not account.signed_in else quota.state if quota else "UNKNOWN"
+        rows.append(
+            QuotaRow(
+                agent="codex",
+                account=account.name,
+                state=state,
+                sessions=sessions.get(account.name, 0),
+                five_hour_left=_left(quota.five_hour.used) if quota else None,
+                seven_day_left=_left(quota.seven_day.used) if quota else None,
+                seven_day_resets_at=quota.seven_day.resets_at if quota else None,
+                source=f"session-log {_span(max(0, int(now - quota.observed_at)))} ago" if quota else "no session log",
+            )
+        )
+    return rows
 
 
 def render(rows: list[QuotaRow], now: int) -> str:
@@ -95,10 +98,17 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     return claude_rows([result for _, result in cached_observations()], sessions, "cached")
 
 
-def _codex_sessions() -> int:
-    from scripts.terminate_agent import sessions
+def _codex(now: float) -> list[QuotaRow]:
+    from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts import codex_router
 
-    return len({session.process.pid for session in sessions() if session.target == "codex"})
+    pool = codex_router.accounts(os.environ)
+    return codex_rows(pool, codex_router.quotas(pool, os.environ), codex_sessions_by_account(), now)
+
+
+def codex_table() -> str:
+    now = time.time()
+    return render(_codex(now), int(now))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,9 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=60.0, help="Seconds per Claude account probe")
     args = parser.parse_args(argv)
     now = time.time()
-    rows = _claude(args.refresh, args.timeout)
-    codex = codex_row(latest_codex_quota(), _codex_sessions(), now)
-    rows += [codex] if codex else []
+    rows = _claude(args.refresh, args.timeout) + _codex(now)
     if args.json:
         print(json.dumps([asdict(row) for row in rows], indent=2))
     elif rows:
