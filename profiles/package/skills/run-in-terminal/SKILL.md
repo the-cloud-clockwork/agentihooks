@@ -73,6 +73,8 @@ for an interactive shell. The tab opens in herdr when herdr is installed and
 enabled (a tab in the caller's herdr workspace, else the directory's repository
 workspace; `--workspace <label>` picks one), otherwise in a native terminal tab
 through `scripts/02_run_terminal.sh`. `--host herdr|native` overrides.
+A single argument after `--` runs as a raw shell string; several arguments are
+shell-quoted, so each one, a quoted prompt included, arrives whole.
 
 The output is `key=value` lines: `host`, `directory`, `title`, `command`, and in
 herdr `workspace_id`, `tab_id`, `pane_id`. Report them.

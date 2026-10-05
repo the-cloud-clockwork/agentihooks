@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 
 import pytest
@@ -79,3 +80,29 @@ def test_an_explicit_herdr_failure_fails_without_a_native_terminal(monkeypatch, 
     monkeypatch.setattr(run_in_terminal.subprocess, "run", lambda *a, **k: pytest.fail("native terminal opened"))
     assert run_in_terminal.main(["--dir", str(tmp_path), "--host", "herdr"], {"HOME": str(tmp_path)}) == 2
     assert "server gone" in capsys.readouterr().err
+
+
+PROMPT = 'fix the bug in Bob\'s "auth" flow\nthen report  back'
+
+
+def test_a_quoted_opening_prompt_reaches_herdr_as_one_argument(herdr, tmp_path):
+    argv = ["agentihooks", "claude", "--name", "probe", PROMPT]
+    assert run_in_terminal.main(["--dir", str(tmp_path), "--", *argv], {"HOME": str(tmp_path)}) == 0
+    ran = [call for call in herdr if call[:2] == ("pane", "run")]
+    assert shlex.split(ran[0][3]) == argv
+
+
+def test_a_quoted_opening_prompt_reaches_the_native_terminal_as_one_argument(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(herdr_host, "binary", lambda: None)
+    monkeypatch.setattr(
+        run_in_terminal.subprocess, "run", lambda argv, **k: ran.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    argv = ["agentihooks", "claude", PROMPT]
+    assert run_in_terminal.main(["--dir", str(tmp_path), "--", *argv], {"HOME": str(tmp_path)}) == 0
+    assert shlex.split(ran[0][3]) == argv
+
+
+def test_a_single_command_string_stays_raw_shell(herdr, tmp_path):
+    assert run_in_terminal.main(["--dir", str(tmp_path), "--", "git pull && make"], {"HOME": str(tmp_path)}) == 0
+    assert ("pane", "run", "w1:p3", "git pull && make") in herdr
