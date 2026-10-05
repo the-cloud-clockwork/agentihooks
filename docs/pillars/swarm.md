@@ -229,9 +229,9 @@ say idle:
 
 When an agent leaves, retired, stalled, lost or exited on its own, its open inbox items are settled. If its task
 goes on (a handoff, or a task reopened for a successor), each item moves to its seat for the next occupant. If
-nobody takes the task up (it is done or blocked, for example), each item is withdrawn and its sender gets an item naming the agent and the
-message; a sender that has itself left is told through the master. Agents that exited between ticks are settled
-at the start of the next tick.
+nobody takes the task up (it is done or blocked, for example), each item is withdrawn and its sender gets an
+item naming the agent and the message; a sender that has itself left is told through the master. Agents that
+exited between ticks are settled at the start of the next tick.
 
 ## Redis
 
