@@ -276,7 +276,12 @@ def _master(slug, config, store, runtime, now_ms):
             config,
             MASTER,
             name,
-            primed(store, slug, record.seat, {"id": MASTER, "handoff": store.handoff(slug, MASTER)}),
+            primed(
+                store,
+                slug,
+                record.seat,
+                {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug)},
+            ),
         )
     except Exception as exc:
         store.drop_agent(slug, name)

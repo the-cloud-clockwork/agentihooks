@@ -164,6 +164,23 @@ def upgrade(slug):
     print(json.dumps({"slug": slug, "html": str(core.paths(slug)[0]), "upgraded": True, "rev": state["_meta"]["rev"]}))
 
 
+def create(slug, content):
+    html_path, json_path = core.paths(slug)
+    if html_path.exists():
+        return False
+    if json_path.exists():
+        sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
+    errors = check(content)
+    if errors:
+        sys.exit("content rejected:\n  " + "\n  ".join(errors))
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    doc = build_doc(content)
+    core.validate(doc)
+    core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
+    core.sync(slug)
+    return True
+
+
 def main():
     if sys.argv[1:2] == ["--upgrade"] and len(sys.argv) == 3:
         return upgrade(sys.argv[2])
@@ -177,22 +194,8 @@ def main():
 
     slug = args.slug or slugify(args.plan, args.date)
     html_path, json_path = core.paths(slug)
-    if html_path.exists():
-        print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))
-        print(ledger_link.page_line(slug))
-        return
-    if json_path.exists():
-        sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
-    content = json.loads(Path(args.content).read_text(encoding="utf-8"))
-    errors = check(content)
-    if errors:
-        sys.exit("content rejected:\n  " + "\n  ".join(errors))
-    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    doc = build_doc(content)
-    core.validate(doc)
-    core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
-    core.sync(slug)
-    print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": True}))
+    created = not html_path.exists() and create(slug, json.loads(Path(args.content).read_text(encoding="utf-8")))
+    print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": created}))
     print(ledger_link.page_line(slug))
 
 

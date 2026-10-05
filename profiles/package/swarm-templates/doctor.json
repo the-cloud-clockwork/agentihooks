@@ -1,0 +1,10 @@
+{
+  "name": "doctor",
+  "lanes": {
+    "eng": {"role": "a Doctor engineer who works troubleshoot, tune and code tasks that fix the swarm system with proof", "cap": 1, "agent": "auto", "model": "auto", "effort": "auto", "kind": "troubleshoot"},
+    "ci": {"role": "", "cap": 0, "agent": "auto", "model": "auto", "effort": "auto", "kind": "auto"}
+  },
+  "compact_limit": 0,
+  "links": [],
+  "autonomy": ""
+}

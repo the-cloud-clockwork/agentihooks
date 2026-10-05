@@ -242,6 +242,8 @@ CONTROLS = {
     "close": ["close"],
     "reopen": ["reopen"],
 }
+DOCTOR = {"doctor_start": ["start"], "doctor_stop": ["stop"]}
+DOCTOR_PHRASE = "rig doctor stop"
 MAX_CAP = 50
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
@@ -293,12 +295,12 @@ def bin_request(body):
     return body["action"], body["slug"]
 
 
-def swarm_control(slug, argv):
+def swarm_control(slug, argv, command="swarm"):
     exe = shutil.which("agentihooks")
     if not exe:
         return None, "agentihooks is not on PATH"
     try:
-        done = subprocess.run([exe, "swarm", slug, *argv], capture_output=True, text=True, timeout=60)
+        done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
     if done.returncode != 0:
@@ -325,6 +327,19 @@ def relay_to_inbox(slug, state):
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
         return []
+
+
+def doctor_phrase(slug, state):
+    """The operator's chat line rig doctor stop stops the Doctor of this ledger, in the background."""
+    meta = state["_meta"]
+    said = [
+        e
+        for e in meta.get("events", [])
+        if e.get("rev") == meta["rev"] and e.get("by") == "operator" and e.get("target") == "chat"
+    ]
+    exe = shutil.which("agentihooks")
+    if exe and any(e.get("text", "").strip().lower() == DOCTOR_PHRASE for e in said):
+        subprocess.Popen([exe, "doctor", slug, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def with_workspaces(slug, state):
@@ -373,6 +388,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
         if changes or ops:
             relay_to_inbox(slug, state)
+            doctor_phrase(slug, state)
         state["_meta"] = {
             **state["_meta"],
             "page_version": core.page_version(),
@@ -428,10 +444,12 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
-            argv = control_argv(core.loads(self.rfile.read(length) or b"{}"))
+            body = core.loads(self.rfile.read(length) or b"{}")
+            action = body.get("action") if isinstance(body, dict) else None
+            command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
-        status, error = swarm_control(slug, argv)
+        status, error = swarm_control(slug, argv, command)
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")

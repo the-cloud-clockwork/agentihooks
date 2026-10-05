@@ -60,6 +60,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
+        *peer_lines(task.get("peer", "")),
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
         '--phase <phase id> --description "<seams and done condition>". Rewrite a task description with '
         f'{led} task set <id> description="<text>".',
@@ -94,6 +95,16 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "Write chat and comments in plain words for the operator: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def peer_lines(peer):
+    if not peer:
+        return []
+    return [
+        f"- Your peer is the master of swarm {peer}, seat master@{peer}, on the linked ledger {peer}. Keep each "
+        f'other in sync through the inbox: agentihooks msg send master@{peer} "<text>" for every change it needs '
+        "to know, and answer each of its items with agentihooks msg reply."
+    ]
 
 
 def summary_lines(slug):
