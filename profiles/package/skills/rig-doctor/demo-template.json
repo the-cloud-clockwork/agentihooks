@@ -5,7 +5,8 @@
     ".gitignore": ".venv/\n__pycache__/\n.pytest_cache/\n.ruff_cache/\nnode_modules/\n.next/\n*.db\n.env\n",
     ".gitattributes": "* text=auto\n",
     "README.md": "# Doctor demo dating app\n\nNext.js frontend and FastAPI backend, localhost only. The swarm builds this seed from the stored rig-doctor plan.\n",
-    "CLAUDE.md": "# Doctor demo\n\nRead the ledger overview for the application spec. Use frontend/ for Next.js and backend/ for FastAPI. Work in a worktree off origin/dev and return by a reviewed PR into dev. Keep the app local, use fictional adult profiles, test the real API, and document startup commands.\n"
+    "CLAUDE.md": "# Doctor demo\n\nRead the ledger overview for the application spec. Use frontend/ for Next.js and backend/ for FastAPI. Work in a worktree off origin/dev and return by a reviewed PR into dev. Keep the app local, use fictional adult profiles, test the real API, and document startup commands.\n\nCI runs backend pytest and frontend lint, typecheck and test in parallel on pull requests into dev. Backend must declare dependencies in backend/requirements.txt. Frontend must commit package-lock.json and npm scripts named lint, typecheck and test; test must exit after one run. Checks activate when each directory first lands and fail on incomplete scaffolds.\n",
+    ".github/workflows/ci.yml": "name: Demo CI\n\non:\n  pull_request:\n    branches: [dev]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: demo-ci-${{ github.event.pull_request.number }}\n  cancel-in-progress: true\n\njobs:\n  backend:\n    name: Backend pytest\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        if: hashFiles('backend/**') != ''\n        with:\n          python-version: '3.12'\n      - uses: astral-sh/setup-uv@v10.2.0\n        if: hashFiles('backend/**') != ''\n        with:\n          version: '0.12.23'\n          enable-cache: true\n          cache-dependency-glob: backend/requirements.txt\n      - name: Install backend dependencies\n        if: hashFiles('backend/**') != ''\n        run: uv pip install --system -r backend/requirements.txt pytest==9.0.2\n      - name: Run backend tests\n        if: hashFiles('backend/**') != ''\n        working-directory: backend\n        run: python -m pytest -q\n      - name: Await backend scaffold\n        if: hashFiles('backend/**') == ''\n        run: echo 'Backend scaffold has not landed yet.'\n\n  frontend:\n    name: Frontend ${{ matrix.check }}\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    strategy:\n      fail-fast: false\n      matrix:\n        check: [lint, typecheck, test]\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v6\n        if: hashFiles('frontend/**') != ''\n        with:\n          node-version: '22'\n          cache: npm\n          cache-dependency-path: frontend/package-lock.json\n      - name: Install frontend dependencies\n        if: hashFiles('frontend/**') != ''\n        working-directory: frontend\n        run: npm ci --no-audit --no-fund\n      - name: Run frontend check\n        if: hashFiles('frontend/**') != ''\n        working-directory: frontend\n        run: npm run ${{ matrix.check }}\n        env:\n          CI: 'true'\n          NEXT_TELEMETRY_DISABLED: '1'\n      - name: Await frontend scaffold\n        if: hashFiles('frontend/**') == ''\n        run: echo 'Frontend scaffold has not landed yet.'\n"
   },
   "phases": [
     {
@@ -31,7 +32,7 @@
       "lane": "eng",
       "phase": "p1",
       "territory": "backend",
-      "description": "Create backend/ with FastAPI, SQLite models and fictional adult profile seeds. Seams: health, paginated profile discovery and invalid input response. Red then green API tests, Ruff and formatting. Done when reviewed PR merges into dev and discovery returns seeded profiles."
+      "description": "Create backend/ with FastAPI, SQLite models and fictional adult profile seeds. Seams: health, paginated profile discovery and invalid input response. Red then green API tests, Ruff and formatting. Done when reviewed PR merges into dev and discovery returns seeded profiles. Commit backend/requirements.txt for CI, with application and test dependencies."
     },
     {
       "id": "web-base",
@@ -39,7 +40,7 @@
       "lane": "eng",
       "phase": "p2",
       "territory": "frontend",
-      "description": "Create frontend/ with Next.js and TypeScript. Seams: profile card rendering, loading, empty and API error states. Configurable backend URL, accessible like and pass controls. Red then green interaction tests, lint and type check. Done when reviewed PR merges into dev."
+      "description": "Create frontend/ with Next.js and TypeScript. Seams: profile card rendering, loading, empty and API error states. Configurable backend URL, accessible like and pass controls. Red then green interaction tests, lint and type check. Done when reviewed PR merges into dev. Commit package-lock.json and npm scripts lint, typecheck and test (one run, no watch) for CI."
     },
     {
       "id": "api-match",
