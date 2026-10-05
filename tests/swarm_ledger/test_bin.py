@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -98,6 +99,9 @@ class BinEndpoint(unittest.TestCase):
 
     def setUp(self):
         ledger_bin.bin_path().unlink(missing_ok=True)
+        no_swarm = patch.object(server, "swarm_status", return_value=None)
+        no_swarm.start()
+        self.addCleanup(no_swarm.stop)
 
     def post(self, body, origin=None, host=None):
         headers = {"Host": host or f"127.0.0.1:{server.PORT}", "Content-Type": "application/json"}
@@ -116,6 +120,26 @@ class BinEndpoint(unittest.TestCase):
         self.assertIn("via-http", ledger_bin.entries())
         self.assertEqual(self.post({"action": "restore", "slug": "via-http"})[0], 200)
         self.assertNotIn("via-http", ledger_bin.entries())
+
+    def test_delete_stops_the_ledgers_swarm_and_restore_does_not_start_it(self):
+        with (
+            patch.object(server, "swarm_status", return_value={"state": "running"}),
+            patch.object(server, "swarm_control", return_value=({"state": "stopped"}, "")) as control,
+        ):
+            self.assertEqual(self.post({"action": "delete", "slug": "via-http"})[0], 200)
+            control.assert_called_once_with("via-http", ["stop", "--now"])
+            self.assertIn("via-http", ledger_bin.entries())
+            self.assertEqual(self.post({"action": "restore", "slug": "via-http"})[0], 200)
+            control.assert_called_once()
+
+    def test_a_ledger_without_a_swarm_bins_as_before(self):
+        with (
+            patch.object(server, "swarm_status", return_value=None),
+            patch.object(server, "swarm_control") as control,
+        ):
+            self.assertEqual(self.post({"action": "delete", "slug": "via-http"})[0], 200)
+        control.assert_not_called()
+        self.assertIn("via-http", ledger_bin.entries())
 
     def test_forged_origin_is_refused(self):
         code, _ = self.post({"action": "delete", "slug": "via-http"}, origin="http://evil.example")
