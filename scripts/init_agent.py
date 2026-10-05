@@ -140,18 +140,20 @@ def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> 
     return model, effort or environ.get(f"{prefix}_EFFORT") or EFFORT_DEFAULT
 
 
+def model_flags(agent: str, model: str = "", effort: str = "") -> list[str]:
+    if agent == "codex":
+        return (["-m", model] if model else []) + (["-c", f'model_reasoning_effort="{effort}"'] if effort else [])
+    return (["--model", model] if model else []) + (["--effort", effort] if effort else [])
+
+
 def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> list[str]:
     model, effort = model_effort(agent, agent_args, environ)
     has_model = any(a in ("--model", "-m") or a.startswith("--model=") for a in agent_args)
     if agent == "codex":
-        args = [] if has_model else ["-m", model]
-        if not any("model_reasoning_effort" in a for a in agent_args):
-            args += ["-c", f'model_reasoning_effort="{effort}"']
-        return args
-    args = [] if has_model else ["--model", model]
-    if not any(a == "--effort" or a.startswith("--effort=") for a in agent_args):
-        args += ["--effort", effort]
-    return args
+        has_effort = any("model_reasoning_effort" in a for a in agent_args)
+    else:
+        has_effort = any(a == "--effort" or a.startswith("--effort=") for a in agent_args)
+    return model_flags(agent, "" if has_model else model, "" if has_effort else effort)
 
 
 def _agent_command(

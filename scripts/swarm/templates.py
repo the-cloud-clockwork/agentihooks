@@ -60,10 +60,14 @@ def lane(name, data):
     return found
 
 
-def parse(data):
-    name = data.get("name", "")
+def _checked(name):
     if not NAME_RE.match(name):
         raise SwarmError("a template name is lowercase letters, digits and dashes, starting with a letter")
+    return name
+
+
+def parse(data):
+    name = _checked(data.get("name", ""))
     lanes = data.get("lanes") or {}
     custom = set(lanes) - set(LANES)
     if custom:
@@ -86,7 +90,7 @@ def _read(path):
 
 def load(name, environ):
     for folder in (user_dir(environ), BUILT_IN):
-        path = folder / f"{name}.json"
+        path = folder / f"{_checked(name)}.json"
         if path.is_file():
             return _read(path)
     raise SwarmError(f"no swarm template {name}; agentihooks swarm templates lists them")

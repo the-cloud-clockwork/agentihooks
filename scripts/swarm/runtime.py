@@ -28,13 +28,11 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
-def _model_args(agent, lane):
-    model, effort = _set(lane.get("model")), _set(lane.get("effort"))
-    if agent == "codex":
-        args = (["-m", model] if model else []) + (["-c", f'model_reasoning_effort="{effort}"'] if effort else [])
-    else:
-        args = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
-    return ["--", *args] if args else []
+def _model_args(agent, chosen):
+    from scripts.init_agent import model_flags
+
+    flags = model_flags(agent, _set(chosen.get("model")), _set(chosen.get("effort")))
+    return ["--", *flags] if flags else []
 
 
 def herdr_call(args):

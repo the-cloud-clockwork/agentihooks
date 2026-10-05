@@ -63,3 +63,10 @@ def test_a_config_becomes_a_template_with_its_caps_and_lanes():
     t = templates.from_config("mine", config)
     assert (t.lanes["eng"].cap, t.lanes["ci"].cap, t.compact_limit) == (3, 0, 200)
     assert (t.lanes["eng"].agent, t.lanes["eng"].model, t.lanes["eng"].effort) == ("codex", "m", "auto")
+
+
+@pytest.mark.parametrize("name", ["../escape", "/etc/escape", "Upper"])
+def test_a_lookup_name_outside_the_template_folders_is_refused(environ, tmp_path, name):
+    (tmp_path / "escape.json").write_text(json.dumps({"name": "escape", "lanes": {}}))
+    with pytest.raises(SwarmError, match="template name"):
+        templates.load(name, environ)
