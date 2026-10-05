@@ -96,11 +96,20 @@ def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab)
 
 
 def test_newly_added_note_immediately_has_a_comments_dropdown(tab):
+    errors = []
+    tab.on("pageerror", lambda error: errors.append(str(error)))
     tab.locator("#notes > .thread > button.add").click()
     tab.locator("#notes textarea").fill("Another operator note")
     tab.locator("#notes textarea").press("Enter")
     assert tab.locator("#notes .entry-body", has_text="Another operator note").count() == 1
     assert tab.locator("#notes details[data-key]").count() == 3
+    note = tab.locator("#notes > .thread > .entry").last
+    note.locator("details summary").click()
+    note.locator("button.add").click()
+    note.locator("textarea").fill("A reply under the new note")
+    note.locator("textarea").press("Enter")
+    assert note.locator(".entry-body").all_text_contents() == ["Another operator note", "A reply under the new note"]
+    assert errors == []
 
 
 def test_comment_control_label_flips_with_state_and_survives_a_reload(tab):

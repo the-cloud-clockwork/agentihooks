@@ -542,7 +542,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const thread = threadOf(d, op.thread);
     if (!thread) return;
     const entry = thread.find((e) => e.id === op.id);
-    if (op.op === "add" && !entry) thread.push({ id: op.id, by: "operator", at: Date.now(), text: op.text, sending: true, ...(op.attachments ? { attachments: op.attachments } : {}) });
+    if (op.op === "add" && !entry) thread.push({ id: op.id, by: "operator", at: Date.now(), text: op.text, sending: true, ...(op.thread === "notes" ? { comments: [] } : {}), ...(op.attachments ? { attachments: op.attachments } : {}) });
     else if (op.op === "edit" && entry) Object.assign(entry, { text: op.text, edited_at: Date.now(), sending: true });
     else if (op.op === "delete" && entry) Object.assign(entry, { deleted: true, text: "" });
     else if (op.op === "clear") thread.length = 0;
