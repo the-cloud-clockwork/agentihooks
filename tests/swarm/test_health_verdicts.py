@@ -127,6 +127,6 @@ def test_the_master_prompt_gives_every_new_finding_a_verdict():
     text = prompt.build("sw", "/repo", MASTER, "sw-master-1", {"id": MASTER})
     duty = next(line for line in text.splitlines() if "verdict" in line)
     assert "every new health finding" in duty
-    assert "agentihooks swarm sw verdict <finding id>" in duty
+    assert "agentihooks swarm sw --as sw-master-1 verdict <finding id>" in duty
     for value in verdicts.VERDICTS:
         assert value in duty

@@ -18,6 +18,6 @@ def test_the_master_prompt_keeps_answering_every_chat_line():
 
 def test_the_master_hands_the_operator_the_ledger_link_first_and_on_request():
     master = prompt.build_master("sw", "/repo", "sw-master-1", {})
-    assert "agentihooks swarm sw url" in master
+    assert "agentihooks swarm sw --as sw-master-1 url" in master
     assert "first message" in master and "what is my ledger link" in master
     assert "http://127.0.0.1:8765/sw" not in master

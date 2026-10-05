@@ -64,6 +64,7 @@ run when the operator uses one of their trigger phrases.
 | `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
 | `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
 | `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
+| `take-master` | Make this session, Claude or Codex, the master of a swarm ledger and read the master priming it prints. | `$take-master <slug>` or "you are the master of ledger <slug>" |
 
 The deterministic CLI primitives behind these skills are respectively
 `agentihooks quota` with `agentihooks balance --current`, `agentihooks terminate-agent`,

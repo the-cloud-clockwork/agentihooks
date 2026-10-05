@@ -14,6 +14,7 @@ def store(monkeypatch):
 
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "registered_name", lambda: "", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "alice")
     return store
@@ -58,6 +59,14 @@ def test_the_session_id_is_the_sender_without_an_agent_name(store, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
     run("send", "bob", "hi")
     assert store.inbox("bob")[0].sender == "sess-1"
+
+
+def test_a_session_named_on_its_record_speaks_under_that_name(store, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
+    monkeypatch.setattr(cli, "registered_name", lambda: "sw-master-1")
+    run("send", "bob", "hi")
+    assert store.inbox("bob")[0].sender == "sw-master-1"
 
 
 def test_a_session_without_identity_is_refused(store, monkeypatch, capsys):

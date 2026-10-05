@@ -257,3 +257,13 @@ def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     assert [(s.target, s.name, s.session_id, s.cwd, s.status) for s in found] == [
         ("claude", "engineer", "uuid-1", "/repo", "alive")
     ]
+
+
+def test_sessions_name_a_registered_session_from_its_record(monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    table = {300: process(300, comm="claude", argv=("claude",))}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=None: ("",))
+    registry = {"uuid-9": {"status": "alive", "pid": 300, "cwd": "/repo", "name": "sw-master-1"}}
+    assert [s.name for s in sessions(registry=registry)] == ["sw-master-1"]
