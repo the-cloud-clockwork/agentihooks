@@ -396,6 +396,30 @@ class TestHookInjectionProbe:
                 "Stop",
             }
 
+    def test_check_hook_injection_starts_the_five_events_side_by_side(self):
+        import subprocess
+        import threading
+
+        from scripts.status_checker import check_hook_injection
+
+        barrier = threading.Barrier(5, timeout=5)
+
+        def fake_run(cmd, **kwargs):
+            barrier.wait()
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = check_hook_injection()
+
+        assert [ev["event"] for ev in result["events"]] == [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+        ]
+        assert result["ok"] is True
+
 
 class TestFormatterTargetLines:
     """The per-target lines and the `targets` JSON key are the whole point of

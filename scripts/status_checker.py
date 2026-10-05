@@ -804,6 +804,7 @@ def check_hook_injection() -> dict:
     import os
     import subprocess
     import sys
+    from concurrent.futures import ThreadPoolExecutor
 
     repo_root = Path(__file__).resolve().parent.parent
     events = [
@@ -816,11 +817,12 @@ def check_hook_injection() -> dict:
     results: list[dict] = []
     warnings: list[str] = []
 
-    for event in events:
+    env = {**os.environ, "CLAUDE_HOOK_LOG_ENABLED": "false", "BROADCAST_ENABLED": "false"}
+
+    def _run(event: str):
         payload = _synthetic_payload(event)
-        env = {**os.environ, "CLAUDE_HOOK_LOG_ENABLED": "false", "BROADCAST_ENABLED": "false"}
         try:
-            proc = subprocess.run(
+            return subprocess.run(
                 [sys.executable, "-m", "hooks"],
                 cwd=repo_root,
                 input=_json.dumps(payload),
@@ -830,6 +832,13 @@ def check_hook_injection() -> dict:
                 timeout=30,
             )
         except subprocess.TimeoutExpired:
+            return None
+
+    with ThreadPoolExecutor(max_workers=len(events)) as pool:
+        procs = list(pool.map(_run, events))
+
+    for event, proc in zip(events, procs):
+        if proc is None:
             results.append({"event": event, "ok": False, "reason": "timeout >30s"})
             warnings.append(f"{event}: hook timed out (>30s)")
             continue
