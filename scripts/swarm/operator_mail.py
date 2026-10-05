@@ -22,7 +22,9 @@ def addresses(slug, event, doc, agents):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    return [a.seat or a.name for a in found] or [seat_address(slug, MASTER)]
+    boss = next((a for a in live if a.lane == MASTER), None)
+    master = (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
+    return [a.seat or a.name for a in found] or [master]
 
 
 def relay(inbox, store, slug, doc, events, line):

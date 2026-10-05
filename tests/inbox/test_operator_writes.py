@@ -124,6 +124,13 @@ def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):
     assert len(pending(inbox, MASTER_SEAT)) == 2
 
 
+def test_a_live_master_without_a_seat_gets_the_item_by_name(swarm):
+    store, inbox = swarm
+    store.put_agent(SLUG, AgentRecord(BOSS.name, MASTER, MASTER, pane_id="pm"))
+    relay(swarm, write(5, "phases/p1"))
+    assert pending(inbox, MASTER_SEAT) == [] and len(pending(inbox, BOSS.name)) == 1
+
+
 def test_agent_writes_and_cleared_chat_are_not_relayed(swarm):
     _, inbox = swarm
     relay(swarm, {**write(5, "tasks/t1"), "by": "sw-eng-1"}, write(6, "chat", kind="chat cleared"))
