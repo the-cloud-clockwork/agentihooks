@@ -16,7 +16,8 @@ _DIRECTIVE = (
 )
 
 _ALLOWED = (
-    " Until the handoff every tool call is denied except reading files, writing the handoff document under "
+    " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
+    "log, diff, show in the shell), writing the handoff document under "
     "~/scratchpad, `agentihooks swarm {slug} handoff <doc>` and `agentihooks ledger` comment, say, leave and ack, "
     "each as one command."
 )
@@ -24,6 +25,8 @@ _ALLOWED = (
 _READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
 _WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
 _LEDGER_STEPS = frozenset({"comment", "say", "leave", "ack"})
+_READ_COMMANDS = frozenset({"cat", "head", "tail", "ls", "wc", "grep"})
+_READ_GIT = frozenset({"status", "log", "diff", "show"})
 _SUBSTITUTION = ("`", "$(", "<(", ">(", "\n")
 _PATCH_TARGET = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.MULTILINE)
 
@@ -83,18 +86,38 @@ def _ledger_step(args: list[str]) -> str | None:
     return None
 
 
-def _handoff_command(command: str, slug: str) -> bool:
+def _single_command(command: str) -> list[str] | None:
     if any(mark in command for mark in _SUBSTITUTION):
-        return False
+        return None
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
+        return None
+    if not tokens or any(set(token) <= set(lexer.punctuation_chars) for token in tokens):
+        return None
+    return tokens
+
+
+def _shell_read(tokens: list[str]) -> bool:
+    if tokens[0] in _READ_COMMANDS:
+        return True
+    return (
+        tokens[0] == "git"
+        and len(tokens) > 1
+        and tokens[1] in _READ_GIT
+        and not any(token.startswith("--output") for token in tokens)
+    )
+
+
+def _allowed_command(command: str, slug: str) -> bool:
+    tokens = _single_command(command)
+    if tokens is None:
         return False
+    if _shell_read(tokens):
+        return True
     if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
-        return False
-    if any(set(token) <= set(lexer.punctuation_chars) for token in tokens):
         return False
     if tokens[1] == "swarm":
         return len(tokens) == 5 and tokens[2:4] == [slug, "handoff"]
@@ -108,6 +131,6 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     slug, used = overrun
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
         return None
-    if tool_name == "Bash" and _handoff_command(str(tool_input.get("command") or ""), slug):
+    if tool_name == "Bash" and _allowed_command(str(tool_input.get("command") or ""), slug):
         return None
     return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)

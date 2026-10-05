@@ -160,3 +160,25 @@ def test_a_codex_patch_that_also_touches_code_is_denied(monkeypatch):
     assert _gate("Edit", tool_input)
     tool_input["content"] = patch.split("*** Update File")[0] + "*** End Patch\n"
     assert _gate("Edit", tool_input) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat hooks/a.py",
+        "head -n 40 hooks/a.py",
+        "git status --short",
+        "git log --oneline -5",
+        "grep -rn handoff hooks",
+        "ls",
+    ],
+)
+def test_over_the_limit_a_codex_agent_can_still_read_through_its_shell(monkeypatch, command):
+    _over(monkeypatch)
+    assert _gate("Bash", {"command": command}) is None
+
+
+@pytest.mark.parametrize("command", ["cat a.py > b.py", "cat a.py | tee b.py", "git push", "git diff --output=x"])
+def test_over_the_limit_a_shell_read_that_writes_is_denied(monkeypatch, command):
+    _over(monkeypatch)
+    assert _gate("Bash", {"command": command})
