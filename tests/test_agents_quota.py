@@ -167,3 +167,14 @@ def test_no_agent_rows_exit_one(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
     assert agents_quota.main([]) == 1
     assert "no Claude account and no Codex session log" in capsys.readouterr().err
+
+
+def test_without_registry_entries_the_default_login_keeps_every_session_log(tmp_path, monkeypatch):
+    from scripts import codex_router
+
+    session = "44444444-4444-4444-4444-444444444444"
+    _rollout(tmp_path, "04", f"2026-10-04T10-00-00-{session}", [_event("2026-10-04T10:00:00Z", WEEK)], 100)
+    monkeypatch.setattr(codex_router, "_registry", lambda: {})
+    quotas = codex_router.quotas([CodexAccount("default")], {"HOME": str(tmp_path)})
+    assert quotas["default"] == codex_quota.latest_codex_quota({"HOME": str(tmp_path)})
+    assert quotas["default"].seven_day.used == 46.0

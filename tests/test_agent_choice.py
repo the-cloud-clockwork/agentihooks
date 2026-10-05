@@ -158,3 +158,17 @@ def test_claude_is_full_only_when_every_routable_account_is(monkeypatch):
     assert agent_choice.at_cap("claude", {}) is False
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"a": 3, "b": 3})
     assert agent_choice.at_cap("claude", {}) is True
+
+
+def test_a_fresh_token_account_keeps_codex_available_when_the_default_is_spent(monkeypatch):
+    from scripts import codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.codex_quota import CodexQuota
+
+    spent = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=99.0))
+    environ = {"AH_CX_TOKEN_alpha": "cx-a"}
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": spent, "alpha": None})
+    assert agent_choice.has_quota("codex", environ) is True
+    pool = codex_router.routing_pool(environ)
+    assert codex_router.select(pool, {"default": spent, "alpha": None}, {}, cap=3)[0].name == "alpha"

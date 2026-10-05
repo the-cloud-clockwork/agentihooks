@@ -28,6 +28,7 @@ def max_sessions(environ: Mapping[str, str] | None = None) -> int:
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
+    """The one slug among names carrying ``prefix``; UNROUTED when there is none or more than one."""
     slugs = {name.removeprefix(prefix) for name in names if name.startswith(prefix) and name != prefix}
     return slugs.pop() if len(slugs) == 1 else UNROUTED
 
