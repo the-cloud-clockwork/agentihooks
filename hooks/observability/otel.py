@@ -15,8 +15,11 @@ Design constraints:
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 _tracer = None
@@ -26,6 +29,7 @@ _initialized = False
 _gauges: dict[str, Any] = {}
 _providers: list = []
 FLUSH_TIMEOUT_SEC = 1.0
+FLUSH_COOLDOWN_SEC = 60
 
 
 def _can_init() -> bool:
@@ -122,8 +126,11 @@ def _dispatch_op(op: tuple) -> None:
         _gauges[name].set(value, dict(attrs))
     elif kind == "flush":
         try:
+            succeeded = True
             for provider in _providers:
-                provider.force_flush(int(FLUSH_TIMEOUT_SEC * 1000))
+                if provider.force_flush(int(FLUSH_TIMEOUT_SEC * 1000)) is False:
+                    succeeded = False
+            op[2][0] = succeeded
         finally:
             op[1].set()
 
@@ -287,16 +294,44 @@ def record_gauge(name: str, value: float, attributes: dict[str, str] | None = No
         pass
 
 
-def flush() -> None:
-    """Export queued events and gauges; the hook exits with os._exit, which skips the SDK's own flush.
+def _flush_pending() -> bool:
+    done = _threading.Event()
+    result = [False]
+    try:
+        _q.put_nowait(("flush", done, result))
+    except _queue.Full:
+        return False
+    return done.wait(FLUSH_TIMEOUT_SEC) and result[0]
 
-    Gives up after FLUSH_TIMEOUT_SEC so an unreachable collector never holds the hook.
-    """
+
+def flush() -> None:
     if _q is None:
         return
-    done = _threading.Event()
-    try:
-        _q.put_nowait(("flush", done))
-    except _queue.Full:
+    from hooks.config import AGENTIHOOKS_HOME, hook_collector
+
+    endpoint, protocol = hook_collector(os.environ)
+    if not endpoint:
+        _flush_pending()
         return
-    done.wait(FLUSH_TIMEOUT_SEC)
+    key = hashlib.sha256(f"{endpoint}|{protocol}".encode()).hexdigest()
+    state = Path(AGENTIHOOKS_HOME) / "telemetry" / f"flush-{key}"
+    try:
+        if state.exists() and time.time() < state.stat().st_mtime + FLUSH_COOLDOWN_SEC:
+            return
+        if _flush_pending():
+            state.unlink(missing_ok=True)
+            return
+        state.parent.mkdir(parents=True, exist_ok=True)
+        with state.with_suffix(".lock").open("w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return
+            if state.exists() and time.time() < state.stat().st_mtime + FLUSH_COOLDOWN_SEC:
+                return
+            state.touch()
+            from hooks.common import log
+
+            log(f"Telemetry flush failed; skipping flush waits for {FLUSH_COOLDOWN_SEC}s")
+    except OSError:
+        return
