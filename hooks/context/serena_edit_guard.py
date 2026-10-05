@@ -15,7 +15,11 @@ _CD = re.compile(r"(?:^|&&|;|\()\s*cd\s+(\S+)\s*(?=&&|;)")
 _PY = r"""['"]?([^\s'";|&<>()]+\.py)['"]?"""
 _SHELL_WRITES = (
     re.compile(r"\bsed\b[^|;&\n]*\s(?:-i|--in-place)\S*\s[^|;&\n]*?" + _PY),
-    re.compile(r"(?:^|[;&|\n])\s*(?:sudo\s+)?(?:cp|mv|install)\s[^|;&\n]*\s" + _PY + r"\s*(?:$|[;&|\n])"),
+    re.compile(
+        r"(?:^|[;&|\n(])\s*(?:(?:sudo|env|xargs|nohup)(?:\s+\S+)*?\s+)?(?:cp|mv|install)\s[^|;&\n]*\s"
+        + _PY
+        + r"\s*(?:$|[;&|\n])"
+    ),
     re.compile(r"(?:^|\s)[12&]?>>?\s*" + _PY),
     re.compile(r"\bperl\b[^|;&\n]*\s-\w*i\S*\s[^|;&\n]*?" + _PY),
     re.compile(r"\bdd\b[^|;&\n]*\sof=" + _PY),

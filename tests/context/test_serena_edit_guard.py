@@ -57,6 +57,10 @@ def test_serena_tools_are_allowed(trees):
         "install -m 644 other.py pkg/mod.py",
         "sudo install -m 644 other.py pkg/mod.py",
         "echo copying && cp other.py pkg/mod.py",
+        "sudo -u dev cp other.py pkg/mod.py",
+        "env LC_ALL=C cp other.py pkg/mod.py",
+        "echo other.py | xargs -I{} cp {} pkg/mod.py",
+        "(cp other.py pkg/mod.py && echo copied)",
         "cd pkg && sed -i s/1/2/ mod.py",
         "(cd pkg && sed -i s/1/2/ mod.py)",
         "perl -pi -e 's/1/2/' pkg/mod.py",
@@ -86,6 +90,7 @@ def test_shell_rewrites_of_worktree_python_are_blocked(trees, command):
         "ruff format pkg/mod.py",
         "git add scripts/install.py pkg/mod.py",
         "git add scripts/cp.py lib/mv.py pkg/mod.py",
+        "sudo git add scripts/install.py pkg/mod.py",
     ],
 )
 def test_shell_reads_and_new_files_are_allowed(trees, command):
