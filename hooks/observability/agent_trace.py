@@ -18,6 +18,7 @@ from hooks.config import AGENTIHOOKS_HOME
 CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
 _EXPORTER_LOGGER = "opentelemetry"
+BATCH_CHARS = 2_000_000
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,9 @@ class Identity:
             ("account", self.account),
         )
         return tuple(f"{key}:{value}" for key, value in pairs if value)
+
+    def user_id(self) -> str:
+        return self.account or os.environ.get("USER", "")
 
 
 @dataclass
@@ -116,6 +120,45 @@ def _usage_attributes(usage: dict) -> dict:
     return {f"gen_ai.usage.{key}": int(usage.get(key) or 0) for key in keys}
 
 
+def _field(text: str) -> str:
+    from hooks import config
+    from hooks.secrets import redact
+
+    text = redact(text, mode="strict")
+    cap = config.LANGFUSE_FIELD_MAX_CHARS
+    return text if len(text) <= cap else f"{text[:cap]}…[truncated {len(text) - cap} chars]"
+
+
+def _io(input_text: str = "", output_text: str = "") -> dict:
+    fields = {"langfuse.observation.input": input_text, "langfuse.observation.output": output_text}
+    return {key: _field(value) for key, value in fields.items() if value}
+
+
+def _text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    labels = {"text": lambda b: b.get("text", ""), "image": lambda b: "[image]"}
+    return "\n".join(labels[b["type"]](b) for b in content if isinstance(b, dict) and b.get("type") in labels)
+
+
+def _prompt_text(turn: list[dict]) -> str:
+    message = turn[0].get("message")
+    return _text(message.get("content")) if isinstance(message, dict) else ""
+
+
+def _assistant_text(entries: list[dict]) -> str:
+    texts = [
+        b.get("text", "")
+        for entry in entries
+        if entry.get("type") == "assistant"
+        for b in _blocks(entry)
+        if isinstance(b, dict) and b.get("type") == "text"
+    ]
+    return "\n\n".join(t for t in texts if t)
+
+
 def _generations(turn: list[dict]) -> dict[str, tuple[int, dict]]:
     """message id -> (start ns, last entry carrying it); start is the entry before its first block."""
     found: dict[str, tuple[int, dict]] = {}
@@ -138,12 +181,17 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
             root,
             _ns(turn[0]),
             _ns(turn[-1]),
-            {"langfuse.observation.type": "span", "agent.turn": number},
+            {
+                "langfuse.observation.type": "span",
+                "agent.turn": number,
+                **_io(_prompt_text(turn), _assistant_text(turn)),
+            },
         )
     ]
     for message_id, (start, entry) in _generations(turn).items():
         message = entry["message"]
         model = message.get("model", "")
+        same_message = [e for e in turn if isinstance(e.get("message"), dict) and e["message"].get("id") == message_id]
         attributes = {
             "langfuse.observation.type": "generation",
             "gen_ai.operation.name": "chat",
@@ -152,6 +200,7 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
             "gen_ai.response.model": model,
             "gen_ai.response.id": message_id,
             **_usage_attributes(message.get("usage") or {}),
+            **_io(output_text=_assistant_text(same_message)),
         }
         spans.append(
             SpanSpec(model or "generation", _span_id(session_id, message_id), turn_id, start, _ns(entry), attributes)
@@ -173,6 +222,7 @@ def _turn_spans(session_id: str, number: int, turn: list[dict], root: int) -> li
                 "gen_ai.tool.name": block.get("name", ""),
                 "gen_ai.tool.call.id": block.get("id", ""),
                 "error": bool(result.get("is_error")),
+                **_io(json.dumps(block.get("input", {}), ensure_ascii=False), _text(result.get("content"))),
             }
             span_id = _span_id(session_id, block.get("id", ""))
             spans.append(SpanSpec(block.get("name", "tool"), span_id, turn_id, _ns(entry), _ns(done), attributes))
@@ -211,9 +261,17 @@ def session_spans(
     }
     if cost is not None:
         attributes["gen_ai.usage.cost"] = float(cost)
+    trace_io = {
+        "langfuse.trace.input": _prompt_text(all_turns[0]),
+        "langfuse.trace.output": _assistant_text(all_turns[-1]),
+    }
+    attributes.update({key: _field(value) for key, value in trace_io.items() if value})
     spans = [SpanSpec(name, root_id, None, _ns(all_turns[0][0]), _ns(all_turns[-1][-1]), attributes)]
     for number, turn in enumerate(all_turns[first_turn:], start=first_turn + 1):
         spans.extend(_turn_spans(session_id, number, turn, root_id))
+    shared = {"langfuse.session.id": session_id, "langfuse.user.id": identity.user_id()}
+    for span in spans:
+        span.attributes.update({key: value for key, value in shared.items() if value})
     return spans
 
 
@@ -264,6 +322,19 @@ def _readable(spec: SpanSpec, trace: int):
     )
 
 
+def _batches(spans: list[SpanSpec]):
+    batch: list[SpanSpec] = []
+    size = 0
+    for spec in spans:
+        weight = sum(len(value) for value in spec.attributes.values() if isinstance(value, str))
+        if batch and size + weight > BATCH_CHARS:
+            yield batch
+            batch, size = [], 0
+        batch.append(spec)
+        size += weight
+    yield batch
+
+
 class _ExportErrors(logging.Handler):
     """Collects the HTTP status and reason the OTLP exporter logs when it gives up."""
 
@@ -307,7 +378,10 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
     errors = _ExportErrors()
     logging.getLogger(_EXPORTER_LOGGER).addHandler(errors)
     try:
-        result = exporter.export([_readable(spec, trace) for spec in spans])
+        for batch in _batches(spans):
+            result = exporter.export([_readable(spec, trace) for spec in batch])
+            if result is not SpanExportResult.SUCCESS:
+                break
     except Exception as e:  # noqa: BLE001
         errors.reason = f"{type(e).__name__}: {e}"
         result = SpanExportResult.FAILURE
