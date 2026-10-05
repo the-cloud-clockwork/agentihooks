@@ -10,7 +10,6 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-LAYERS = ("bundle", "profile", "enforcement", "condition", "broadcast", "brain")
 _TEXT_MAX = 300
 _ENFORCEMENT_LAYER = {"bundle": "bundle", "profile": "profile"}
 
