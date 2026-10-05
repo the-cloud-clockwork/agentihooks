@@ -28,7 +28,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts.inbox import wake
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import delivery, snapshot, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
@@ -99,6 +99,7 @@ def cmd_create(store, args):
         compact_limit=template.compact_limit,
         template=args.template,
         lanes=templates.lane_map(template),
+        links=template.links,
     )
     store.create(config)
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
@@ -372,9 +373,9 @@ def _retire(store, slug, agent):
 def cmd_say(store, args):
     agent = _me(store, args)
     text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
-    LedgerClient().say(args.slug, text, by=agent.name)
     if args.to:
         delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to)
+    LedgerClient().say(args.slug, text, by=agent.name)
     print(json.dumps({"posted": True}))
 
 
@@ -429,7 +430,7 @@ def main(argv):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         handler(connect(), args)
-    except SwarmError as exc:
+    except (SwarmError, InboxError) as exc:
         print(f"swarm: {exc}", file=sys.stderr)
         return 1
     return 0

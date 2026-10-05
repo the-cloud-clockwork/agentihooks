@@ -50,12 +50,13 @@ def test_an_unknown_template_is_refused(environ):
 
 
 def test_a_user_template_wins_over_a_built_in_of_the_same_name(environ, tmp_path):
-    t = templates.parse({"name": "default", "lanes": {"eng": {"cap": 7}}, "links": ["a"], "autonomy": "manual"})
+    link = {"from": "eng", "to": "ci", "kind": "delegates-to"}
+    t = templates.parse({"name": "default", "lanes": {"eng": {"cap": 7}}, "links": [link], "autonomy": "manual"})
     path = templates.save(t, environ)
     assert path == tmp_path / "swarm-templates" / "default.json"
     assert templates.load("default", environ) == t
     assert dict((x.name, s) for x, s in templates.available(environ))["default"] == "user"
-    assert json.loads(path.read_text())["links"] == ["a"]
+    assert json.loads(path.read_text())["links"] == [link]
 
 
 def test_a_config_becomes_a_template_with_its_caps_and_lanes():
@@ -70,3 +71,23 @@ def test_a_lookup_name_outside_the_template_folders_is_refused(environ, tmp_path
     (tmp_path / "escape.json").write_text(json.dumps({"name": "escape", "lanes": {}}))
     with pytest.raises(SwarmError, match="template name"):
         templates.load(name, environ)
+
+
+def test_template_links_are_kept_and_checked():
+    link = {"from": "eng", "to": "ci-1", "kind": "can-observe"}
+    assert templates.parse({"name": "x", "links": [link]}).links == [link]
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        {"from": "eng", "to": "ci", "kind": "owns"},
+        {"from": "", "to": "ci", "kind": "delegates-to"},
+        {"from": "eng", "to": "ci"},
+        {"from": "eng", "to": "ci", "kind": "delegates-to", "why": "x"},
+        "eng->ci",
+    ],
+)
+def test_a_bad_link_is_refused(link):
+    with pytest.raises(SwarmError):
+        templates.parse({"name": "x", "links": [link]})

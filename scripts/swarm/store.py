@@ -26,6 +26,7 @@ class SwarmConfig:
     compact_limit: int = 0
     template: str = ""
     lanes: dict = field(default_factory=dict)
+    links: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ class RedisStore:
             int(raw.get("compact_limit", 0)),
             raw.get("template", ""),
             json.loads(raw.get("lanes") or "{}"),
+            json.loads(raw.get("links") or "[]"),
         )
 
     def update(self, slug, **changes):
@@ -171,7 +173,7 @@ class RedisStore:
 
 
 def _fields(config):
-    return {k: json.dumps(v) if isinstance(v, dict) else str(v) for k, v in asdict(config).items()}
+    return {k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) for k, v in asdict(config).items()}
 
 
 _READ = {
