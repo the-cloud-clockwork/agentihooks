@@ -286,7 +286,9 @@ def cmd_status(store, args):
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
-        print(f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
+        print(
+            f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}"
+        )
     for f in found:
         print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
         for entry in f["evidence"]:

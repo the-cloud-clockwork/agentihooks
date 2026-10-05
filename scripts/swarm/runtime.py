@@ -48,6 +48,12 @@ def herdr_target(name):
     return agent_name(name)
 
 
+def _conversation_id(session):
+    if not isinstance(session, dict) or session.get("kind") != "id":
+        return ""
+    return session.get("value") or ""
+
+
 class HerdrRuntime:
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
@@ -138,6 +144,14 @@ class HerdrRuntime:
             return "unknown"
         found = result.get("agent", result)
         return found.get("agent_status") or found.get("status") or "unknown"
+
+    def conversations(self):
+        """Each herdr pane's resumable conversation id, empty when herdr reports none; None when herdr cannot answer."""
+        try:
+            listed = self.herdr(["agent", "list"]).get("agents", [])
+        except Exception:
+            return None
+        return {row["pane_id"]: _conversation_id(row.get("agent_session")) for row in listed if row.get("pane_id")}
 
     def nudge(self, agent, text):
         try:
