@@ -21,6 +21,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts.swarm import delivery, timer
+from scripts.swarm.health import activity
+from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import MASTER, SwarmConfig, SwarmError, connect
@@ -140,8 +142,16 @@ def cmd_set(store, args):
 def cmd_status(store, args):
     config = store.config(args.slug)
     agents = store.agents(args.slug)
-    tasks = LedgerClient().tasks(args.slug)
+    ledger = LedgerClient()
+    tasks = ledger.tasks(args.slug)
     counts = {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
+    found = health.findings(
+        {"tasks": tasks, "_meta": {"events": ledger.events(args.slug)}},
+        [a.__dict__ for a in agents],
+        activity.counts(args.slug),
+        now_ms(),
+        health.limits(),
+    )
     if args.json:
         print(
             json.dumps(
@@ -149,6 +159,7 @@ def cmd_status(store, args):
                     "config": config.__dict__,
                     "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
                     "tasks": counts,
+                    "findings": [f.as_dict() for f in found],
                 }
             )
         )
@@ -158,6 +169,8 @@ def cmd_status(store, args):
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
+    for f in found:
+        print(f"finding  {f.kind}  {f.subject}: {f.evidence}; threshold {f.threshold}")
 
 
 def cmd_send_message(store, args):

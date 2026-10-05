@@ -17,6 +17,7 @@ SECTIONS = {
     "Follow-ups or blockers": True,
     "Stats": True,
     "Swarm": True,
+    "Swarm health": True,
     "Chat": True,
     "Notifications": True,
 }

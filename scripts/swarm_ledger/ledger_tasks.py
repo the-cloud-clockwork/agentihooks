@@ -33,6 +33,9 @@ def check(op):
         if not isinstance(op.get("phase", ""), str) or not isinstance(op.get("description", ""), str):
             raise ValueError("phase and description must be strings")
         check_lists(op)
+        gain = op.get("gain", 0)
+        if isinstance(gain, bool) or not isinstance(gain, (int, float)) or gain < 0:
+            raise ValueError("gain must be a nonnegative number")
         ledger_comments.check(op["title"], "item")
         return
     fields = op.get("fields")
@@ -91,6 +94,8 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
+    if "gain" in op:
+        task["gain"] = op["gain"]
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True

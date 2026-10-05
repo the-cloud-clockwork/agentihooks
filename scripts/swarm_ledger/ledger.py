@@ -21,7 +21,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   priority clear ID... | --all        clear priorities once answered
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
-  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS]
+  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
                                       add a swarm task; IDS and AREAS are comma separated
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on or territory of a task
   prompt                              print the join paragraph for a launch prompt
@@ -240,6 +240,8 @@ def cmd_task(args):
     if args.action == "add":
         title = " ".join(args.values)
         lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
+        if args.gain is not None:
+            lists["gain"] = args.gain
         send(
             args,
             "task_add",
@@ -329,6 +331,9 @@ def build_parser():
     task.add_argument("--description", default="")
     task.add_argument("--depends-on", default="", help="comma separated task ids that must be done first")
     task.add_argument("--territory", default="", help="comma separated files, folders or areas the task touches")
+    task.add_argument(
+        "--gain", type=float, help="what the task is expected to win, as a number the health check compares"
+    )
     return parser
 
 

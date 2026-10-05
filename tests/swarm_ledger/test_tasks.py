@@ -210,6 +210,26 @@ class TaskDependencies(unittest.TestCase):
         self.assertEqual(sent[0][1]["territory"], ["scripts/swarm", "ledger page"])
         self.assertEqual(sent[1][1]["fields"], {"depends_on": ["t1"], "territory": []})
 
+    def test_task_add_keeps_the_gain_a_task_promises(self):
+        make_ledger()
+        add = op("task_add", 1, task="t2", title="b", lane="ci", gain=0.2)
+        core.check_op(add)
+        state, rejected = core.sync(SLUG, ops=[add, op("task_add", 2, task="t3", title="c", lane="ci")])
+        self.assertEqual(rejected, [])
+        self.assertEqual([t.get("gain") for t in state["tasks"]], [0.2, None])
+        for bad in (-1, "fast", True):
+            with self.assertRaises(ValueError):
+                core.check_op(op("task_add", 3, task="t4", title="d", lane="ci", gain=bad))
+
+    def test_task_cli_sends_the_gain(self):
+        import ledger
+
+        sent = []
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, **f: sent.append((kind, f))):
+            for argv in (["task", "add", "t3", "b", "--gain", "1.5"], ["task", "add", "t4", "c"]):
+                ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
+        self.assertEqual([f.get("gain") for _, f in sent], [1.5, None])
+
 
 class TaskBlockersOnThePage(unittest.TestCase):
     def blockers(self, tasks):

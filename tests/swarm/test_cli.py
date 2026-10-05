@@ -383,3 +383,19 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         assert needle in text, needle
     assert "never edit code, commit or merge" in text
     assert "wt.sh new" not in text and "done --pr" not in text
+
+
+def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
+    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1")
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+    run("sw", "status", "--json")
+    found = json.loads(capsys.readouterr().out.splitlines()[-1])["findings"]
+    assert [(f["kind"], f["subject"]) for f in found] == [("idle with claim", "sw-eng-1")]
+    run("sw", "status")
+    assert (
+        "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding task t1 (claimed); threshold 3 idle ticks"
+        in (capsys.readouterr().out)
+    )

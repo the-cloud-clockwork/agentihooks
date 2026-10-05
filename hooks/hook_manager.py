@@ -1044,6 +1044,13 @@ def on_pre_tool_use(payload: dict) -> None:
     if _quota_policy_block:
         raise BlockAction(_quota_policy_block)
 
+    try:
+        from scripts.swarm.health.activity import record as _record_swarm_activity
+
+        _record_swarm_activity(tool_name, tool_input)
+    except Exception as e:
+        log("swarm activity record failed", {"error": str(e)})
+
     _recycle_block = None
     try:
         from hooks.context.context_recycle import gate as _recycle_gate

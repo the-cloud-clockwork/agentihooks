@@ -286,6 +286,9 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .sw-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: var(--fs-meta); color: var(--muted); }
 .sw-meta .sw-ago { margin-left: auto; color: var(--dim); }
 .sw-empty { padding: 10px 0; font-size: var(--fs-meta); color: var(--dim); }
+.hl-kind { margin-left: auto; flex: none; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--warn); text-shadow: var(--glow); }
+.hl-evidence { margin: 2px 0 0; font-size: var(--fs-body); color: var(--text-2); overflow-wrap: anywhere; }
+.hl-threshold { margin: 2px 0 0; font-size: var(--fs-meta); color: var(--muted); }
 .crew-row .unhandled { margin-left: auto; color: var(--destructive); text-shadow: var(--glow); }
 #chat-input { max-height: 140px; overflow-y: auto; }
 .col > section, .item { scroll-margin-top: 24px; }
@@ -354,6 +357,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
       <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
       </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details></details></section>
+    <section id="health-box" aria-label="Swarm health" hidden><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
   </aside>
   </div>
 </main>
@@ -1011,7 +1015,9 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     swarm = sw;
     $("swarm-box").hidden = !sw;
     $("crew-box").hidden = !crewShown(meta.crew || [], sw);
+    $("health-box").hidden = !sw;
     if (!sw) return;
+    renderHealth(sw.findings);
     const c = sw.config, counts = { ...sw.tasks, agents: (sw.agents || []).length };
     $("swarm-state").className = `sw-state ${c.state}`;
     $("swarm-state").textContent = c.state;
@@ -1036,6 +1042,20 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
         : h("span", { class: "sw-task", text: a.task, title: a.task }),
       h("div", { class: "sw-meta" }, h("span", { text: a.lane }), a.model ? h("span", { text: a.model }) : null,
         a.account ? h("span", { text: a.account }) : null, a.ago ? h("span", { class: "sw-ago", text: `${a.ago} ago` }) : null));
+  }
+
+  function renderHealth(findings) {
+    const list = findings || [];
+    $("health-count").textContent = list.length ? `· ${list.length}` : "";
+    $("health").replaceChildren(...(list.length ? list.map(healthCard) : [h("li", { class: "sw-empty", text: "No findings" })]));
+  }
+
+  function healthCard(f) {
+    return h("li", { class: "sw-card" },
+      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: f.subject, title: f.subject }),
+        h("span", { class: "hl-kind", text: f.kind })),
+      h("p", { class: "hl-evidence", text: f.evidence }),
+      h("p", { class: "hl-threshold", text: `threshold ${f.threshold}` }));
   }
 
   function outlineOf(doc, heads) {

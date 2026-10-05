@@ -18,6 +18,9 @@ class FakeLedger:
     def tasks(self, slug):
         return list(self.rows.values())
 
+    def events(self, slug):
+        return []
+
     def update_task(self, slug, task_id, fields, by="swarm"):
         self.rows[task_id].update(fields)
 
