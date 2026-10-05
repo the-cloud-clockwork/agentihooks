@@ -1,0 +1,126 @@
+import copy
+
+import pytest
+
+from scripts.doctor import spawns
+from tests.doctor.recorded import load
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+def test_recorded_spawns_and_planted_failed_spawn():
+    record = load("spawns")
+    assert spawns.failed(record) == []
+    planted = copy.deepcopy(record)
+    planted["actions"].append(f"{record['slug']}: spawn failed for dt2: init-agent timed out")
+    [found] = spawns.failed(planted)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert "init-agent timed out" in found.evidence[0]
+    assert record["actions"] == []
+
+
+def test_recorded_share_and_planted_drift():
+    record = load("spawns")
+    assert spawns.share_drift(record) == []
+    planted = copy.deepcopy(record)
+    planted["spawns"] = {"codex": 0, "claude": 10}
+    [found] = spawns.share_drift(planted)
+    assert found.id == f"codex-share-drift/{record['slug']}"
+    assert found.measure == 30
+    assert "codex 0/10 spawns, 0.0%, target 30%" in found.evidence
+
+
+def test_discrete_share_and_empty_counts_do_not_raise():
+    record = load("spawns")
+    for counts in ({}, {"codex": 0, "claude": 1}, {"codex": 3, "claude": 7}):
+        record["spawns"] = counts
+        assert spawns.share_drift(record) == []
+
+
+def test_recorded_placements_and_planted_overflow():
+    record = load("spawns")
+    assert spawns.overflow(record) == []
+    planted = copy.deepcopy(record)
+    planted["agents"][0]["placement"] = "overflow"
+    [found] = spawns.overflow(planted)
+    assert found.id == f"account-overflow/{record['agents'][0]['name']}"
+    assert found.measure == 1
+    assert f"account {record['agents'][0]['account']}" in found.evidence
+
+
+def test_runtime_records_the_launcher_overflow_placement(tmp_path):
+    import subprocess
+
+    import fakeredis
+
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import tick
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
+    store.create(config)
+    launched = []
+
+    def run(argv, **kwargs):
+        launched.append(argv)
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
+            "",
+        )
+
+    runtime = HerdrRuntime(run=run, choose=lambda *args: ("codex", "fixture"))
+    runtime.live_names = lambda: set()
+    runtime.conversations = lambda: {}
+    runtime.has_capacity = lambda: True
+
+    class Ledger:
+        def tasks(self, slug):
+            return [
+                {
+                    "id": "task",
+                    "title": "Task",
+                    "description": "",
+                    "lane": "eng",
+                    "state": "open",
+                    "depends_on": [],
+                    "territory": [],
+                }
+            ]
+
+        def update_task(self, *args, **kwargs):
+            pass
+
+        def notify(self, *args):
+            pass
+
+    actions = tick("sw", store, Ledger(), runtime, 1000)
+    agents = store.agents("sw")
+    assert len(agents) == 2, actions
+    assert all(a.placement == "overflow" for a in agents)
+
+
+def test_recorded_restores_and_planted_fresh_fallback():
+    record = load("spawns")
+    assert spawns.fresh_restores(record) == []
+    planted = copy.deepcopy(record)
+    planted["restored"] = [
+        {
+            "name": "agent",
+            "task": "dt2",
+            "lane": "eng",
+            "outcome": "fresh",
+            "reason": "conversation is unavailable",
+            "conversation_id": "prior",
+            "at": 1000,
+        }
+    ]
+    [found] = spawns.fresh_restores(planted)
+    assert found.id == "fresh-restore/agent"
+    assert found.measure == 1
+    assert "conversation is unavailable" in found.evidence
+    planted["restored"][0]["outcome"] = "resumed"
+    assert spawns.fresh_restores(planted) == []
