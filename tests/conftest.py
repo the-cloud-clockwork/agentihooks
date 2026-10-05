@@ -59,15 +59,6 @@ def pytest_ignore_collect(collection_path, config):
     if collection_path.relative_to(config.rootpath).as_posix() not in _shard_files(config):
         return True
     return None
-    if SHARD_FILES not in config.stash:
-        index, shards = (int(part) for part in spec.split("/"))
-        durations = json.loads((config.rootpath / ".test_durations").read_text())
-        files = discover_test_files(config.rootpath)
-        files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
-        config.stash[SHARD_FILES] = frozenset(files)
-    if collection_path.relative_to(config.rootpath).as_posix() not in config.stash[SHARD_FILES]:
-        return True
-    return None
 
 
 @pytest.fixture(autouse=True)

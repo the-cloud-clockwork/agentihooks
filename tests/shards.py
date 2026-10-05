@@ -40,11 +40,13 @@ def warm_imports(modules: list[str], workers: int) -> list[int]:
     for start in range(workers):
         pid = os.fork()
         if pid == 0:
-            for module in modules[start::workers]:
-                try:
-                    importlib.import_module(module)
-                except BaseException:
-                    pass
-            os._exit(0)
+            try:
+                for module in modules[start::workers]:
+                    try:
+                        importlib.import_module(module)
+                    except BaseException:
+                        pass
+            finally:
+                os._exit(0)
         pids.append(pid)
     return pids

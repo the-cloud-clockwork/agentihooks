@@ -1,11 +1,13 @@
 import json
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tests import conftest
-from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes
+from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes, warm_imports
 
 pytestmark = pytest.mark.unit
 
@@ -101,3 +103,59 @@ def test_a_run_without_workers_keeps_file_order(tmp_path):
 
 def _stored_durations():
     return json.loads((_ROOT / ".test_durations").read_text())
+
+
+def _warm_package(tmp_path, monkeypatch, files):
+    package = tmp_path / "warmpkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    for name, body in files.items():
+        (package / f"{name}.py").write_text(body)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    return package
+
+
+def test_warm_imports_leave_the_rewritten_bytecode_for_the_workers(tmp_path, monkeypatch):
+    package = _warm_package(tmp_path, monkeypatch, {"test_one": "assert 1\n", "test_two": "assert 2\n"})
+    statuses = [os.waitpid(pid, 0)[1] for pid in warm_imports(["warmpkg.test_one", "warmpkg.test_two"], 2)]
+    assert statuses == [0, 0]
+    assert "warmpkg.test_one" not in sys.modules
+    for name in ("test_one", "test_two"):
+        assert list((package / "__pycache__").glob(f"{name}.*-pytest-*.pyc"))
+
+
+def test_a_module_that_fails_to_import_leaves_the_rest_of_its_stride_warmed(tmp_path, monkeypatch):
+    package = _warm_package(tmp_path, monkeypatch, {"test_bad": "raise SystemExit(3)\n", "test_ok": "assert 1\n"})
+    statuses = [os.waitpid(pid, 0)[1] for pid in warm_imports(["warmpkg.test_bad", "warmpkg.test_ok"], 1)]
+    assert statuses == [0]
+    assert list((package / "__pycache__").glob("test_ok.*-pytest-*.pyc"))
+
+
+def _configured(monkeypatch, numprocesses, **extra):
+    calls = []
+    monkeypatch.setattr(conftest, "warm_imports", lambda modules, workers: calls.append((modules, workers)) or [7])
+    config = SimpleNamespace(
+        option=SimpleNamespace(numprocesses=numprocesses),
+        getoption=lambda name: "2/4",
+        stash=pytest.Stash(),
+        rootpath=_ROOT,
+        **extra,
+    )
+    conftest.pytest_configure(config)
+    return calls, config
+
+
+def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatch):
+    calls, config = _configured(monkeypatch, 4)
+    files = discover_test_files(_ROOT)
+    shard = sorted(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[1])
+    assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
+    reaped = []
+    monkeypatch.setattr(conftest.os, "waitpid", lambda pid, flags: reaped.append(pid))
+    conftest.pytest_unconfigure(config)
+    assert reaped == [7]
+
+
+def test_workers_and_runs_without_workers_warm_nothing(monkeypatch):
+    assert _configured(monkeypatch, 4, workerinput={})[0] == []
+    assert _configured(monkeypatch, None)[0] == []
