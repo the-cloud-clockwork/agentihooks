@@ -88,9 +88,12 @@ class SeatRegistry:
     def occupant(self, address):
         return _occupancy(self.redis.hgetall(self.key(address)))
 
-    def seat_of(self, name):
-        address = self.redis.get(f"{PREFIX}-of:{name}") or ""
-        return address if address and self.occupant(address).occupant == name else ""
+    def seat_of(self, name, reader=None):
+        reader = reader if reader is not None else self.redis
+        name = naming.NameRegistry(self.redis).resolve(name, reader)
+        address = reader.get(f"{PREFIX}-of:{name}") or ""
+        occupant = _occupancy(reader.hgetall(self.key(address))) if address else None
+        return address if occupant and occupant.occupant == name else ""
 
     def known_seat(self, name: str) -> str:
         return self.redis.get(f"{PREFIX}-of:{name}") or ""

@@ -383,7 +383,10 @@ def build_parser():
 
 
 def main():
+    from scripts.swarm.naming import resolve_name
+
     args = build_parser().parse_args()
+    args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command == "url"):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)

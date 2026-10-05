@@ -270,6 +270,10 @@ def dispatch(payload):
         serve_ledgers()
     sfile = SESSIONS / f"{sid}.json"
     session = read_json(sfile)
+    if session is not None:
+        from scripts.swarm.naming import resolve_name
+
+        session["name"] = resolve_name(session["name"])
     handler = HANDLERS.get(payload.get("hook_event_name"))
     if session is None or handler is None:
         return
