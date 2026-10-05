@@ -181,14 +181,23 @@ SENSITIVE_FRAGMENT = re.compile(
     r")"
 )
 
-STRIPPER_STAGE = (
+COUNT_STAGE = (
     re.compile(r"^\s*wc(\s|$)"),
     re.compile(r"^\s*grep\s+.*-[A-Za-z]*[clLq]"),
+)
+NAME_STAGE = (
     re.compile(r"^\s*cut\s+.*-f\s*1(\s|$)"),
     re.compile(r"^\s*sed\s+.*s/=\.\*//"),
     re.compile(r"^\s*awk\s+.*-F.*print\s+\$1"),
-    re.compile(r"^\s*compgen\b"),
 )
+# A name that is not a valid identifier can carry a secret, so a name listing
+# is safe only after a grep keeps whole lines matching one of these.
+IDENTIFIER_CLASSES = {
+    "[A-Za-z_][A-Za-z0-9_]*",
+    "[a-zA-Z_][a-zA-Z0-9_]*",
+    "[_A-Za-z][_A-Za-z0-9]*",
+    "[[:alpha:]_][[:alnum:]_]*",
+}
 NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 
@@ -295,6 +304,11 @@ EXCLUDE_BASENAMES = [".env", ".env.*", "*.env"] + sorted(CREDENTIAL_FILES)
 GREP_EXCLUDES = " ".join("--exclude=" + shlex.quote(b) for b in EXCLUDE_BASENAMES)
 RG_EXCLUDES = " ".join("-g " + shlex.quote("!" + b) for b in EXCLUDE_BASENAMES)
 
+ENV_NAMES_SAFE = (
+    "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print k; else n++; "
+    'print "malformed names: " n+0}\''
+)
+
 ALTERNATIVE = {
     KIND_DOTENV: (
         "To learn what a project configures, read its .env.example / .env.sample.\n"
@@ -309,7 +323,9 @@ ALTERNATIVE = {
         "variable or its secret store; never open the file."
     ),
     KIND_ENVIRONMENT: (
-        "Name-only views carry no values:  env | cut -d= -f1  ·  env | wc -l\n"
+        "A variable name that is not a valid identifier can hold a secret. List valid names "
+        "and only a count of malformed ones:\n  " + ENV_NAMES_SAFE + "\n"
+        "Count only:  env | wc -l\n"
         'To test one variable:  test -n "${VAR:-}" && echo set || echo unset\n'
         'To use a value, reference the variable ("$VAR") so the shell expands it at '
         "execution instead of printing it."
@@ -386,6 +402,22 @@ def decide_grep(tool_input, ctx=None):
     return ALLOW
 
 
+def identifier_filter(stage):
+    toks = tokens_of(stage)
+    if verb_of(toks) not in ("grep", "egrep"):
+        return False
+    rest = toks[verb_index(toks) + 1 :]
+    if any(t.startswith("--") for t in rest):
+        return False
+    flags = "".join(t[1:] for t in rest if t.startswith("-"))
+    patterns = [t for t in rest if not t.startswith("-")]
+    if "v" in flags or "e" in flags or "f" in flags or len(patterns) != 1:
+        return False
+    pattern = patterns[0]
+    anchored = "x" in flags or (pattern.startswith("^") and pattern.endswith("$"))
+    return anchored and pattern.removeprefix("^").removesuffix("$") in IDENTIFIER_CLASSES
+
+
 def env_dump_verdict(command):
     stages = split_stages(command)
     if not stages:
@@ -413,12 +445,15 @@ def env_dump_verdict(command):
     if not dump:
         return None
 
-    # Walk the pipeline in order: once a stage strips values, everything after it
-    # only ever sees key names, so the rest of the pipeline is harmless.
+    named = False
     for stage in stages[1:]:
-        if any(p.search(stage) for p in STRIPPER_STAGE):
+        if any(p.search(stage) for p in COUNT_STAGE):
             return None
-        if not NEUTRAL_STAGE.search(stage):
+        if named and identifier_filter(stage):
+            return None
+        if any(p.search(stage) for p in NAME_STAGE):
+            named = True
+        elif not NEUTRAL_STAGE.search(stage):
             break
     return block(
         "dumping the whole environment ({})".format(verb),

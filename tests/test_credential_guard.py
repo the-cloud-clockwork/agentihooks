@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from hooks.context.credential_guard import GREP_EXCLUDES, RG_EXCLUDES, decide, evaluate
+from hooks.context.credential_guard import ENV_NAMES_SAFE, GREP_EXCLUDES, RG_EXCLUDES, decide, evaluate
 
 pytestmark = pytest.mark.unit
 
@@ -38,11 +38,51 @@ CASES = [
     ("bare env", {"tool_name": "Bash", "tool_input": {"command": "env"}}, True),
     ("bare printenv", {"tool_name": "Bash", "tool_input": {"command": "printenv"}}, True),
     ("export -p", {"tool_name": "Bash", "tool_input": {"command": "export -p"}}, True),
-    ("env names", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1"}}, False),
+    ("env names", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1"}}, True),
     ("env count", {"tool_name": "Bash", "tool_input": {"command": "env | wc -l"}}, False),
     ("env grep value", {"tool_name": "Bash", "tool_input": {"command": "env | grep REDIS"}}, True),
-    ("env names then head", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | head -3"}}, False),
-    ("env sorted names", {"tool_name": "Bash", "tool_input": {"command": "env | sort | cut -d= -f1"}}, False),
+    ("env names then head", {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | head -3"}}, True),
+    ("env sorted names", {"tool_name": "Bash", "tool_input": {"command": "env | sort | cut -d= -f1"}}, True),
+    ("env awk names", {"tool_name": "Bash", "tool_input": {"command": "env | awk -F= '{print $1}'"}}, True),
+    ("printenv names", {"tool_name": "Bash", "tool_input": {"command": "printenv | sed 's/=.*//'"}}, True),
+    ("set names", {"tool_name": "Bash", "tool_input": {"command": "set | cut -d= -f1"}}, True),
+    ("export -p names", {"tool_name": "Bash", "tool_input": {"command": "export -p | cut -d= -f1"}}, True),
+    ("declare -x names", {"tool_name": "Bash", "tool_input": {"command": "declare -x | cut -d= -f1"}}, True),
+    (
+        "env names filtered to identifiers",
+        {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | grep -xE '[A-Za-z_][A-Za-z0-9_]*'"}},
+        False,
+    ),
+    (
+        "env names filtered anchored",
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "env | sort | cut -d= -f1 | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | head -3"},
+        },
+        False,
+    ),
+    (
+        "env malformed names printed",
+        {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | grep -vxE '[A-Za-z_][A-Za-z0-9_]*'"}},
+        True,
+    ),
+    (
+        "env malformed names counted",
+        {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | grep -cvxE '[A-Za-z_][A-Za-z0-9_]*'"}},
+        False,
+    ),
+    (
+        "env identifier lines without name stage",
+        {"tool_name": "Bash", "tool_input": {"command": "env | grep -xE '[A-Za-z_][A-Za-z0-9_]*'"}},
+        True,
+    ),
+    (
+        "env names loose filter",
+        {"tool_name": "Bash", "tool_input": {"command": "env | cut -d= -f1 | grep -E '[A-Za-z_]+'"}},
+        True,
+    ),
+    ("compgen exported names", {"tool_name": "Bash", "tool_input": {"command": "compgen -e"}}, False),
+    ("safe env names form", {"tool_name": "Bash", "tool_input": {"command": ENV_NAMES_SAFE}}, False),
     ("env head raw", {"tool_name": "Bash", "tool_input": {"command": "env | head -3"}}, True),
     ("printenv PATH", {"tool_name": "Bash", "tool_input": {"command": "printenv PATH"}}, False),
     ("printenv secret", {"tool_name": "Bash", "tool_input": {"command": "printenv DB_PASSWORD"}}, True),
@@ -174,6 +214,37 @@ def test_guard_never_raises_on_garbage():
 
 def _bash(command, cwd=""):
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+
+
+class TestEnvironmentNames:
+    """A malformed variable name can hold a secret, so a name listing must drop it."""
+
+    FAKE_NAME = "fake-leaked-name-0000"
+    FAKE_VALUE = "fake-value-0000"
+
+    def _run_safe_form(self):
+        import os
+        import subprocess
+
+        env = {"PATH": os.environ.get("PATH", ""), "VALID_NAME": "x", self.FAKE_NAME: self.FAKE_VALUE}
+        return subprocess.run(["bash", "-c", ENV_NAMES_SAFE], env=env, capture_output=True, text=True)
+
+    def test_block_message_gives_the_safe_form(self):
+        reason = decide(_bash("env | cut -d= -f1"))
+        assert ENV_NAMES_SAFE in reason
+        assert "env | cut -d= -f1  " not in reason
+
+    def test_safe_form_lists_valid_names_and_counts_malformed(self):
+        r = self._run_safe_form()
+        lines = r.stdout.splitlines()
+        assert r.returncode == 0
+        assert "VALID_NAME" in lines
+        assert "malformed names: 1" in lines
+
+    def test_safe_form_never_prints_the_malformed_name_or_value(self):
+        r = self._run_safe_form()
+        assert self.FAKE_NAME not in r.stdout + r.stderr
+        assert self.FAKE_VALUE not in r.stdout + r.stderr
 
 
 class TestRecursiveRewrite:
