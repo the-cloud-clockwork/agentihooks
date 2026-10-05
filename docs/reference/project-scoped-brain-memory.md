@@ -318,11 +318,11 @@ Every hook event is a fresh `python -m hooks` process, so the cache cannot live 
   than `BRAIN_PROJECT_MEMORY_TTL` (default 600 seconds). The TTL bounds how long a lesson
   appended to today's log can be missed, since lesson logs sit outside the feed hash.
 - **Cold path cost.** One `/feed` call (already made today), at most
-  `BRAIN_HOT_ARCS_TOP_N` arc reads (10), and one lesson log read per day of
-  `BRAIN_STALE_LESSON_DAYS` (14). That is at most 25 requests.
+  `BRAIN_HOT_ARCS_TOP_N` arc path lookups and reads (20), and one lesson log read per day of
+  `BRAIN_STALE_LESSON_DAYS` (14). That is at most 35 requests. A path lookup is necessary because an arc can live in a different folder than its region label.
 - **Off the hot path.** SessionStart and the tool call cadence inject from the cache when
   one exists. When it is stale they start the refresh with `fork_and_call`, as the brain
-  writer already does, so a hook never waits on the 24 extra reads. A session in a repo
+  writer already does, so a hook never waits on the 34 extra requests. A session in a repo
   with no cache yet gets its block at the next refresh cadence.
 - **Hot path cost.** No network call beyond today's `/feed`.
 

@@ -103,7 +103,7 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
         payload = {
             "type": marker["type"],
             "content": marker["content"],
-            "attrs": marker["attrs"],
+            "attrs": _marker_request(marker, session_id)[0]["attrs"],
             "session_id": session_id,
             "agent_name": os.getenv("AGENTICORE_AGENT_NAME", os.getenv("USER", "unknown")),
             "project": os.getenv("CLAUDE_PROJECT_DIR", ""),
@@ -122,13 +122,21 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
 # ── HTTP publish ─────────────────────────────────────────────────────
 
 
-def _marker_request(marker: dict, session_id: str) -> tuple[dict, str]:
+def _marker_request(marker: dict, session_id: str, cwd: str | None = None) -> tuple[dict, str]:
     """Build the /marker POST body + idempotency key for one marker.
 
     The key hashes session_id + type + content, so a marker replayed from the
     outbox dedupes server-side against its original (possibly partial) POST.
     """
+    from hooks.context.project_identity import resolve_project
+    from hooks.context.project_sessions import lookup
+
     attrs = dict(marker.get("attrs") or {})
+    folder = os.getenv("CLAUDE_PROJECT_DIR", str(Path.cwd())) if cwd is None else cwd
+    identity = lookup(session_id) or resolve_project(attrs.get("cwd") or folder, {} if cwd is not None else None)
+    if identity:
+        for name, value in identity.attributes().items():
+            attrs.setdefault(name, value)
     attrs.setdefault("session_id", session_id)
     attrs.setdefault("source", attrs.get("source") or os.getenv("AGENTICORE_AGENT_NAME", "agent"))
 
@@ -211,7 +219,9 @@ def _drain_outbox(outbox_dir: str) -> int:
                 pass  # vanished mid-quarantine — a concurrent drain got it
             continue
 
-        body, idem = _marker_request(marker, payload.get("session_id", ""))
+        body, idem = _marker_request(
+            marker, payload.get("session_id", ""), payload.get("cwd") or payload.get("project", "")
+        )
         response = post("/marker", body=body, idempotency_key=idem, surface_http_errors=True)
         status = (response or {}).get("__http_status__")
         if status in (400, 404, 422):
