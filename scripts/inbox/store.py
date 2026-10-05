@@ -69,6 +69,7 @@ class InboxStore:
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
+            pipe.zadd(self.key("pending", address), {item.id: at})
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             pipe.execute()
         return item
@@ -80,8 +81,14 @@ class InboxStore:
         return [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
 
     def mailbox(self, me):
+        return self._with_seat(me, self.inbox)
+
+    def pending_mail(self, me):
+        return self._with_seat(me, self.pending_items)
+
+    def _with_seat(self, me, read):
         seat = self.seats.seat_of(me)
-        items = self.inbox(me) + (self.inbox(seat) if seat else [])
+        items = read(me) + (read(seat) if seat else [])
         return sorted(items, key=lambda item: item.created_at)
 
     def acts_for(self, by, address, pipe=None):
@@ -119,9 +126,36 @@ class InboxStore:
             return None
 
     def pending(self):
-        addresses = self.redis.scan_iter(match=self.key("address", "*"))
-        items = [self.get(i) for key in addresses for i in self.redis.zrange(key, 0, -1)]
-        return [item for item in items if item.state == "pending"]
+        prefix = self.key("address", "")
+        addresses = [key[len(prefix) :] for key in self.redis.scan_iter(match=prefix + "*")]
+        return [item for address in addresses for item in self.pending_items(address)]
+
+    def pending_items(self, address):
+        if self.redis.sismember(self.key("indexed"), address):
+            ids = self.redis.zrange(self.key("pending", address), 0, -1)
+        else:
+            ids = self._back_fill(address)
+        return [self.get(item_id) for item_id in ids]
+
+    def _back_fill(self, address):
+        from redis.exceptions import WatchError
+
+        with self.redis.pipeline() as pipe:
+            pipe.watch(self.key("address", address))
+            ids = pipe.zrange(self.key("address", address), 0, -1)
+            if ids:
+                pipe.watch(*(self.key("item", item_id) for item_id in ids))
+            items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
+            pending = {item.id: item.created_at for item in items if item.state == "pending"}
+            try:
+                pipe.multi()
+                if pending:
+                    pipe.zadd(self.key("pending", address), pending)
+                pipe.sadd(self.key("indexed"), address)
+                pipe.execute()
+            except WatchError:
+                pass
+        return list(pending)
 
     def note(self, item_id, event, by, detail, at, held=None):
         """held=(seat address, generation): write nothing and return False once that seat has a new occupant."""
@@ -165,6 +199,7 @@ class InboxStore:
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            pipe.zrem(self.key("pending", item.address), item_id)
             pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
             pipe.execute()
             return moved

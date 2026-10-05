@@ -112,5 +112,5 @@ def test_a_redis_failure_mid_call_lets_the_tool_call_through_silently(store, mon
         raise redis.ConnectionError("gone")
 
     store.send("alice", "bob", "review my branch")
-    monkeypatch.setattr(store, "inbox", broken)
+    monkeypatch.setattr(store, "pending_mail", broken)
     assert "review my branch" not in _pre(capsys)
