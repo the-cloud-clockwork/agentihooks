@@ -1098,6 +1098,87 @@ class TestInitProfileRecall:
         assert store["state"]["linked_profiles"] == linked
         assert store["state"]["herdr"]["enabled"] is False
 
+    def _init_with(self, profile, previous_chain, env_profile=None):
+        import argparse
+        import os
+
+        record = {"path": "/home/test/.claude", "profile": previous_chain, "installed_at": "2026-01-01T00:00:00Z"}
+        state = {
+            "targets": {"global": {"claude": dict(record), "codex": dict(record, path="/home/test/.codex")}},
+            "linked_profiles": [{"name": "brain", "path": "/home/test/brain", "linked_at": "2026-01-01T00:00:00Z"}],
+        }
+        args = argparse.Namespace(
+            profile=profile,
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
+        )
+        env = {"AGENTIHOOKS_PROFILE": env_profile} if env_profile else {}
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", env, clear=False),
+        ):
+            if not env_profile:
+                os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(args)
+        return mock_install.call_args[0][0].profile
+
+    def test_explicit_profile_keeps_a_linked_profile_from_the_previous_chain(self):
+        assert self._init_with("anton", "anton,brain") == "anton,brain"
+
+    def test_env_profile_keeps_a_linked_profile_from_the_previous_chain(self):
+        assert self._init_with(None, "anton,brain", env_profile="anton") == "anton,brain"
+
+    def test_switching_the_bundle_profile_still_keeps_the_linked_one(self):
+        assert self._init_with("smith", "anton,brain") == "smith,brain"
+
+    def test_a_chain_that_already_names_the_linked_profile_is_unchanged(self):
+        assert self._init_with("brain,anton", "anton,brain") == "brain,anton"
+
+    def test_a_linked_profile_outside_the_previous_chain_is_not_added(self):
+        assert self._init_with("anton", "anton") == "anton"
+
+    def test_force_with_an_explicit_profile_keeps_the_linked_one(self):
+        import argparse
+        import copy
+        import os
+
+        linked = [{"name": "brain", "path": "/home/test/brain", "linked_at": "2026-01-01T00:00:00Z"}]
+        record = {"path": "/home/test/.claude", "profile": "anton,brain", "installed_at": "2026-01-01T00:00:00Z"}
+        store = {"state": {"targets": {"global": {"claude": record}}, "linked_profiles": linked}}
+
+        def clean():
+            store["state"] = {}
+
+        def save(state):
+            store["state"] = copy.deepcopy(state)
+
+        args = argparse.Namespace(
+            profile="anton",
+            init_settings_profile=None,
+            bundle=None,
+            force=True,
+            repo=None,
+            query=False,
+            list_profiles=False,
+        )
+        with (
+            patch.object(install, "_load_state", side_effect=lambda: copy.deepcopy(store["state"])),
+            patch.object(install, "_save_state", side_effect=save),
+            patch.object(install, "_clean_state_dir", side_effect=clean),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(args)
+
+        assert mock_install.call_args[0][0].profile == "anton,brain"
+
     def test_recalls_settings_profile_from_state(self):
         """When no CLI flag or env var, init uses settings_profile from state.json."""
         import argparse
