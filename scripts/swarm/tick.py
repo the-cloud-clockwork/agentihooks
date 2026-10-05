@@ -15,6 +15,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications, lifetime
 from scripts.swarm import idle as idle_state
+from scripts.swarm.naming import parse
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
 
@@ -56,6 +57,7 @@ class Runtime(Protocol):
     def has_capacity(self) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
+    def recover(self, name: str) -> Placed: ...
     def retire(self, agent: AgentRecord, live: bool) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
     def nudge(self, agent: AgentRecord, text: str) -> None: ...
@@ -68,6 +70,8 @@ class Runtime(Protocol):
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     actions = []
+    if config.state != "stopped" or _woken(slug, config, store, ledger):
+        actions = _recover_master(slug, config, store, runtime, now_ms)
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
@@ -297,6 +301,34 @@ def _placed(record, placed):
         placement=placed.placement,
         state="working",
     )
+
+
+def _recover_master(slug, config, store, runtime, now_ms):
+    agents = [a for a in store.agents(slug) if a.lane == MASTER]
+    live = runtime.live_names()
+    if any(a.state != "finished" and a.name in live for a in agents):
+        return []
+    finished = {a.name for a in agents if a.state == "finished"}
+    seat = seat_address(slug, MASTER)
+    occupant = store.seats.occupant(seat).occupant
+    candidates = []
+    for name in sorted(live - finished):
+        parsed = parse(name)
+        if name == occupant or (parsed and parsed.kind == MASTER and parsed.code == config.code):
+            candidates.append(name)
+        elif name.startswith(f"{slug}-master-"):
+            candidates.append(name)
+    if not candidates:
+        return []
+    name = occupant if occupant in candidates else candidates[0]
+    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
+    store.put_agent(slug, _placed(record, runtime.recover(name)))
+    for agent in agents:
+        if agent.name not in live and agent.state != "finished":
+            store.drop_agent(slug, agent.name)
+    if occupant != name:
+        store.seats.occupy(seat, name, now_ms)
+    return [f"adopted live master {name}"]
 
 
 def _master(slug, config, store, runtime, now_ms):

@@ -171,6 +171,10 @@ class HerdrRuntime:
             fields.get("placement", ""),
         )
 
+    def recover(self, name: str) -> Placed:
+        found = self._get(herdr_target(name)) or {}
+        return Placed(pane_id=found.get("pane_id", ""), harness=found.get("agent", ""))
+
     def live_names(self):
         from scripts.terminate_agent import sessions
 

@@ -117,6 +117,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         window = wake.window_ms(os.environ)
         actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
         taken = snapshot.auto(store, slug, now_ms(), os.environ)
+        store.redis.set(store.key(slug, "last-tick"), now_ms())
         return actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         if store.redis.get(lock) == token:
@@ -411,7 +412,20 @@ def cmd_status(store, args):
             json.dumps(
                 {
                     "config": {**config.__dict__, "codex_share": codex_split(config, os.environ)[0]},
-                    "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
+                    "agents": [
+                        {
+                            **a.__dict__,
+                            "status": agent_status(a),
+                            "state_since": int(store.redis.hget(store.key(args.slug, "state-since"), a.name) or 0),
+                            "inbox": [
+                                {"text": item.text, "sender": item.sender, "state": item.state}
+                                for item in InboxStore(store.redis).pending_mail(a.name)
+                            ],
+                        }
+                        for a in agents
+                    ],
+                    "last_tick": int(store.redis.get(store.key(args.slug, "last-tick")) or 0),
+                    "history": [json.loads(row) for row in store.redis.lrange(store.key(args.slug, "history"), 0, -1)],
                     "tasks": counts,
                     "spawns": store.spawns(args.slug),
                     "findings": found,

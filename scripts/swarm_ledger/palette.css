@@ -45,4 +45,5 @@
   --warn-2: var(--yellow-200);
   --destructive: var(--red-500);
   --pending: var(--slate-050);
+  --selection: var(--blue-700);
 }

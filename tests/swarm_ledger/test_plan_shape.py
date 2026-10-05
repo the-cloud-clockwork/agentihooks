@@ -35,7 +35,7 @@ def test_recorded_plan_reports_the_longest_chain_and_parallel_width():
             3,
         ),
         ([{"id": "a"}, {"id": "b", "lane": "ci", "depends_on": ["a"]}, {"id": "c", "depends_on": ["b"]}], 3, 1, 1),
-        ([{"id": "a", "done": True}, {"id": "b", "depends_on": ["a"]}, {"id": "c", "out_of_scope": True}], 2, 1, 1),
+        ([{"id": "a", "done": True}, {"id": "b", "depends_on": ["a"]}, {"id": "c", "out_of_scope": True}], 1, 1, 1),
         ([{"id": "a", "out_of_scope": True}, {"id": "b", "depends_on": ["a"]}], 1, 1, 1),
     ],
 )
@@ -68,3 +68,20 @@ def test_invalid_dependencies_are_reported(tasks, message):
 
     with pytest.raises(SwarmError, match=message):
         analyze(tasks)
+
+
+def test_plan_shape_counts_remaining_work_and_completed_dependencies_do_not_extend_chain():
+    tasks = [
+        {"id": "done", "state": "done", "done": True},
+        {"id": "first", "state": "claimed", "depends_on": ["done"]},
+        {"id": "second", "state": "open", "depends_on": ["first"]},
+        {"id": "parallel", "state": "blocked"},
+        {"id": "deleted", "state": "open", "out_of_scope": True},
+    ]
+    shape = analyze(tasks)
+    assert shape["chain_length"] == 2
+    assert shape["parallel_width"] == 2
+    assert shape["critical_path"] == ["first", "second"]
+    assert shape["has_dependencies"] is True
+    assert analyze([tasks[0]])["chain_length"] == 0
+    assert analyze([tasks[0]])["has_dependencies"] is False

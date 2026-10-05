@@ -101,12 +101,12 @@ def clear(tab, text):
 
 
 def test_a_pending_notification_puts_the_plus_on_its_item_only(tab):
-    assert sorted(marked(tab)) == ["item-followups-f1", "item-phases-p2"]
+    assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
 
 
 def test_an_item_keeps_the_plus_until_its_last_notification_is_cleared(tab):
     clear(tab, "first on the follow up")
-    assert sorted(marked(tab)) == ["item-followups-f1", "item-phases-p2"]
+    assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
     clear(tab, "second on the follow up")
     assert marked(tab) == ["item-phases-p2"]
 
@@ -125,7 +125,7 @@ def test_a_notification_from_a_page_update_adds_the_plus_live(tab, server):
         """() => getComputedStyle(document.querySelector('#outline a[data-target="item-questions-q1"]'), "::after").content === '"+"'""",
         timeout=6000,
     )
-    assert sorted(marked(tab)) == ["item-followups-f1", "item-phases-p2", "item-questions-q1"]
+    assert sorted(marked(tab)) == ["item-phases-p2", "item-questions-q1", "sec-followups"]
 
 
 def test_the_plus_takes_a_palette_colour_and_keeps_the_state_dot(tab):
@@ -136,7 +136,7 @@ def test_the_plus_takes_a_palette_colour_and_keeps_the_state_dot(tab):
         }"""
     )
     page = TEMPLATE.read_text(encoding="utf-8")
-    rule = re.search(r"\.outline \.ol-items a\.pending::after\s*\{([^}]*)\}", page)
+    rule = re.search(r"\.outline a\.pending::after\s*\{([^}]*)\}", page)
     assert rule and "color: var(--pending)" in rule.group(1)
     assert re.search(r"--pending:\s*var\(--[\w-]+\);", (SCRIPTS / "palette.css").read_text(encoding="utf-8"))
     assert colours == {"plus": "rgb(248, 250, 252)", "dot": "rgb(74, 222, 128)"}
