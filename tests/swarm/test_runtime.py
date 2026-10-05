@@ -22,6 +22,69 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
+def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_master(tmp_path):
+    calls = []
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {"agent_status": "idle"})
+    slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
+    eng, master = SimpleNamespace(name=f"{slug}-eng-4"), SimpleNamespace(name=f"{slug}-master-1")
+    runtime.status(eng), runtime.nudge(eng, "wake"), runtime.status(master), runtime.nudge(master, "wake")
+    assert [c[:2] for c in calls] == [["agent", "get"], ["agent", "prompt"]] * 2
+    assert calls[0][2] == calls[1][2] != calls[2][2] == calls[3][2]
+    assert calls[0][2].endswith("-eng-4")
+
+
+class NamedPanes:
+    def __init__(self, panes):
+        self.panes, self.renamed = panes, []
+
+    def __call__(self, args):
+        if args[:2] == ["agent", "rename"]:
+            self.panes[args[2]]["name"] = args[3]
+            self.renamed.append(args[2:])
+            return {}
+        target = args[2]
+        for pane_id, pane in self.panes.items():
+            if target in (pane_id, pane.get("name")):
+                return {"agent": {**pane, "pane_id": pane_id}}
+        raise RuntimeError("agent_not_found")
+
+
+def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
+    from scripts.swarm.runtime import herdr_target
+
+    slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
+    herdr = NamedPanes(
+        {
+            "w:p1": {"name": slug[:32], "agent_status": "idle"},
+            "w:p4": {"agent_status": "working", "agent_session": {"kind": "id", "value": "c3"}},
+            "w:p5": {"name": "someone-else", "agent_status": "idle"},
+            "w:p6": {"name": "okay", "agent_status": "idle"},
+            "w:p7": {"agent_status": "idle", "agent_session": {"kind": "id", "value": "other"}},
+        }
+    )
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+
+    def agent(seat, pane, conversation=""):
+        return SimpleNamespace(name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation)
+
+    assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
+    assert runtime.status(agent("master-1", "w:p1")) == "idle"
+    assert runtime.status(agent("eng-4", "w:p5")) == "unknown"
+    assert runtime.status(agent("eng-5", "w:p6")) == "unknown"
+    assert runtime.status(agent("eng-6", "w:p7", "c6")) == "unknown"
+    assert herdr.renamed == [
+        ["w:p4", herdr_target(f"{slug}-eng-3")],
+        ["w:p1", herdr_target(f"{slug}-master-1")],
+    ]
+
+
+def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
+    herdr = NamedPanes({"w:p1": {"name": "sw-master-1", "agent_status": "idle"}})
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.name_pane(SimpleNamespace(name="sw-master-1", pane_id="w:p1", conversation_id="")) is False
+    assert herdr.renamed == []
+
+
 def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
     out = "status=started\nroute_status=routed\npane_id=w1:p2\naccount=a\nmodel=opus\neffort=high\n"
     runtime = HerdrRuntime(

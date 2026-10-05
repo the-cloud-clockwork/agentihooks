@@ -37,7 +37,7 @@ class FakeRuntime:
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
-        self.conversation_ids = {}
+        self.conversation_ids, self.named = {}, []
 
     def has_capacity(self):
         return not self.full
@@ -75,6 +75,10 @@ class FakeRuntime:
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
+
+    def name_pane(self, agent):
+        self.named.append(agent.name)
+        return False
 
     def conversations(self):
         return None if self.conversation_ids is None else dict(self.conversation_ids)
@@ -359,6 +363,13 @@ def test_an_idle_master_is_never_nudged_or_stalled(store):
     for n in range(12):
         tick("sw", store, tasks(), runtime, 2 + n)
     assert runtime.nudged == [] and [a.name for a in masters(store)] == ["sw-master-1"]
+
+
+def test_the_tick_names_a_live_masters_pane(store):
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    tick("sw", store, tasks(), runtime, 2)
+    assert runtime.named == ["sw-master-1"]
 
 
 def test_a_master_handoff_retires_the_old_master_and_spawns_the_next_with_the_doc(store):
