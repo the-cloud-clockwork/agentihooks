@@ -11,9 +11,11 @@ pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
 HEAVY = "mcp"
-_TRIPLE_QUOTED = re.compile(r"(\"\"\"|''')[\s\S]*?\1")
+_COMMENTS_STRINGS_CONTINUATIONS = re.compile(
+    r"#[^\n]*|(\"\"\"|''')(?:\\.|[\s\S])*?\1|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\\\n"
+)
 _IMPORT = re.compile(
-    r"^(?:import\s+(?P<modules>[^\n#;]+)|from\s+(?P<module>\w[\w.]*)\s+import\s+(?P<members>\([^)]*\)|[^\n#;]+))",
+    r"(?:^|;[ \t]*)(?:import\s+(?P<modules>[^\n;]+)|from\s+(?P<module>\w[\w.]*)\s+import\s*(?P<members>\([^)]*\)|[^\n;]+))",
     re.MULTILINE,
 )
 
@@ -29,7 +31,7 @@ def _module_file(name: str) -> Path | None:
 
 def _import_names(source: str) -> set[str]:
     names = set()
-    for match in _IMPORT.finditer(_TRIPLE_QUOTED.sub("", source)):
+    for match in _IMPORT.finditer(_COMMENTS_STRINGS_CONTINUATIONS.sub(" ", source)):
         if match["modules"]:
             names |= {alias.split()[0] for alias in match["modules"].split(",")}
         else:
@@ -90,6 +92,18 @@ except ImportError:
 
 def f():
     from mcp import types
+# a """ in a comment
+QUOTE = '"""'
+ESCAPED = "a\\"b"
+import sys; import shutil
+import glob, \\
+    fnmatch
+from m1 \\
+    import n1
+from m2 import(n2)
+from m3 import (
+    n3,  # n4, n5
+)
 '''
     assert _import_names(source) == {
         "__future__",
@@ -100,6 +114,16 @@ def f():
         "x.y",
         "x.y.p",
         "x.y.q",
+        "sys",
+        "shutil",
+        "glob",
+        "fnmatch",
+        "m1",
+        "m1.n1",
+        "m2",
+        "m2.n2",
+        "m3",
+        "m3.n3",
     }
 
 
