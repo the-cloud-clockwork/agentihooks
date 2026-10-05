@@ -34,5 +34,14 @@
       "its --judge is operator because accepting the recommendation is the operator's decision",
       "its --check names that the linked finding cites its sources"
     ]
+  },
+  {
+    "query": "init swarm: the operator marked the qitp refactor rule wrong for agentihooks sessions; clean it out wherever it lives.",
+    "files": [],
+    "expected_behavior": [
+      "the cleanup is one task with --kind troubleshoot in the eng lane, taken from the sweep template",
+      "its description runs agentihooks trace sweep and then agentihooks trace sweep --apply with the ledger slug",
+      "its --must is a fresh sweep that closes the correction, and its --check is agentihooks trace sweep"
+    ]
   }
 ]

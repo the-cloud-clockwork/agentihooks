@@ -4,6 +4,9 @@ agentihooks trace [SESSION]                                   time, layer, sourc
 agentihooks trace [SESSION] --wrong SOURCE --repo PATH --reason TEXT
                                                               mark a directive wrong for a repository
 agentihooks trace --corrections                               the whole corrections log
+agentihooks trace sweep [--apply] [--root DIR] [--ledger SLUG]
+                                                              every place an open correction's directive
+                                                              still lives, and the action for each
 
 SESSION defaults to CLAUDE_CODE_SESSION_ID. Layers: bundle, profile,
 enforcement, condition, broadcast, brain. SOURCE is the enforcement id, the
@@ -15,8 +18,9 @@ its layer, the broadcast id, or the brain entry id and the file it came from.
 import argparse
 import os
 import sys
+from pathlib import Path
 
-from hooks.context import injection_trace
+from hooks.context import injection_trace, trace_sweep
 
 
 def _print_corrections(rows):
@@ -40,7 +44,27 @@ def build_parser():
     return parser
 
 
+def build_sweep_parser():
+    parser = argparse.ArgumentParser(prog="agentihooks trace sweep", description=trace_sweep.__doc__)
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--root", default=str(Path.home() / "dev"))
+    parser.add_argument("--ledger", default=os.environ.get("AGENTIHOOKS_SWARM", ""))
+    parser.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+    return parser
+
+
+def sweep(argv):
+    args = build_sweep_parser().parse_args(argv)
+    report = trace_sweep.sweep(args.root, apply=args.apply, session_id=args.session, ledger=args.ledger)
+    for row in trace_sweep.plan_rows(report):
+        print(row)
+    return 0
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "sweep":
+        return sweep(argv[1:])
     args = build_parser().parse_args(argv)
     if args.corrections:
         _print_corrections(injection_trace.corrections())

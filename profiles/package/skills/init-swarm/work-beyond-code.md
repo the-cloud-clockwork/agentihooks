@@ -66,3 +66,21 @@ agentihooks ledger --slug <slug> task add t5 "Compare the queue library with two
 
 `t2` is a code task: no `--kind`, no contract, written exactly as in a plan
 that is all code.
+
+## Template: sweep a corrected directive
+
+When the operator marks a directive wrong (`agentihooks trace <session> --wrong
+<source>`), one `troubleshoot` task cleans it out of every layer:
+
+```bash
+agentihooks ledger --slug <slug> task add <id> "Sweep the corrected directive <source> out of every layer" --lane eng --phase <phase> \
+  --description "Symptom: directive <source> still reaches sessions it is wrong for. Run agentihooks trace sweep, then agentihooks trace sweep --apply --ledger <slug>; open each pull request the plan names with the dev cycle. Done when a fresh sweep closes the correction." \
+  --kind troubleshoot --must "A fresh agentihooks trace sweep prints a closed row for the correction and no plan row for it" \
+  --check "agentihooks trace sweep" --judge master
+```
+
+`--apply` clears runtime enforcements, conditions (only while the operator's
+condition prompt has armed the gate) and broadcasts, files a follow-up on the
+ledger for each brain entry, and prints a pull request plan for every file
+tracked by git; it never edits those files. Each planned pull request is its
+own code task when it needs review on its own.

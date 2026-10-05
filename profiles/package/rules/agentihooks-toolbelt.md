@@ -45,6 +45,7 @@ for compliance.
 | Runtime doctrine is complete or obsolete | `enforcement_clear` by ID or tag |
 | Which layer (bundle, profile, enforcement, condition, broadcast, brain) put a directive into a session | `agentihooks trace [<session_id>]`: time, layer, source, locator (the store or file to clear it in), text, recorded as each hook injected it |
 | A directive is wrong for this repository | `agentihooks trace <session_id> --wrong <source> --repo <path> --reason <why>` logs a correction carrying that locator; `agentihooks trace --corrections` lists them for clearing at the source |
+| A correction is open | `agentihooks trace sweep` prints every place its directive still lives and the action; `--apply` clears runtime enforcements, conditions and broadcasts, files a ledger follow-up per brain entry (`--ledger <slug>`) and prints a pull request plan for files under git, never editing them. A fresh sweep that finds nothing closes the correction |
 | Serena refuses, or which worktrees hold a backend | `agentihooks serena status` (page http://127.0.0.1:8643/); router down → `agentihooks serena restart` |
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
 | A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
