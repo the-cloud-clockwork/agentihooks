@@ -1,7 +1,7 @@
 """Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry
 
@@ -23,6 +23,8 @@ class SwarmConfig:
     max_ci: int
     state: str = "running"
     compact_limit: int = 0
+    template: str = ""
+    lanes: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class RedisStore:
             int(raw["max_ci"]),
             raw["state"],
             int(raw.get("compact_limit", 0)),
+            raw.get("template", ""),
+            json.loads(raw.get("lanes") or "{}"),
         )
 
     def update(self, slug, **changes):
@@ -146,7 +150,7 @@ class RedisStore:
 
 
 def _fields(config):
-    return {k: str(v) for k, v in asdict(config).items()}
+    return {k: json.dumps(v) if isinstance(v, dict) else str(v) for k, v in asdict(config).items()}
 
 
 def redis_url(environ):

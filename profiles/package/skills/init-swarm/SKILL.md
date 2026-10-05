@@ -7,7 +7,7 @@ description: >
   tasks carry a kind and a proof contract. Use when the operator says
   "init swarm", "init-swarm", "start a swarm for this plan", or hands over an
   accepted plan to run with agents.
-argument-hint: "<plan-file> --repo DIR [--max-eng-agents N] [--max-ci-agents N]"
+argument-hint: "<plan-file> --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]"
 ---
 
 # Init Swarm
@@ -69,10 +69,17 @@ and `--judge`.
 ## 4. Create and start
 
 ```bash
-agentihooks swarm <slug> create --repo <dir> --max-eng-agents N --max-ci-agents N
+agentihooks swarm <slug> create --repo <dir> [--template <name>] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
+
+A template sets the caps, compact limit and per lane agent, model, effort,
+role and default task kind. Use the one the operator names; list them with
+`agentihooks swarm templates`. A cap flag wins over the template's cap. With
+neither, the caps are 2 eng and 1 ci and init-agent picks agent and model.
+Change one lane later with `agentihooks swarm <slug> set eng-model=<model>`;
+`agentihooks swarm <slug> save-template <name>` keeps the result for the next plan.
 
 Done when `status` shows the swarm running and a `<slug>-master-<n>` agent
 in the master lane.

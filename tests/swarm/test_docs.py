@@ -19,7 +19,7 @@ def test_page_has_front_matter_under_the_pillars():
 def test_every_cli_command_is_documented():
     commands = next(a for a in build_parser()._actions if a.dest == "command").choices
     text = _text()
-    for name in [*commands, "list", "tick"]:
+    for name in [*commands, "list", "tick", "templates"]:
         assert re.search(rf"agentihooks swarm (<id> )?{name}\b", text), name
 
 

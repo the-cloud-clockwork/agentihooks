@@ -13,6 +13,7 @@ from scripts.swarm.tick import Placed, SpawnError
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
 SPAWN_TIMEOUT_S = 300
 STARTED_ROUTES = ("routed", "bare", "direct")
+AUTO = "auto"
 
 
 def _bin():
@@ -21,6 +22,19 @@ def _bin():
 
 def parse_fields(text):
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line and not line.startswith(" "))
+
+
+def _set(value):
+    return "" if value in (None, "", AUTO) else value
+
+
+def _model_args(agent, lane):
+    model, effort = _set(lane.get("model")), _set(lane.get("effort"))
+    if agent == "codex":
+        args = (["-m", model] if model else []) + (["-c", f'model_reasoning_effort="{effort}"'] if effort else [])
+    else:
+        args = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
+    return ["--", *args] if args else []
 
 
 def herdr_call(args):
@@ -44,18 +58,20 @@ class HerdrRuntime:
         return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
 
     def spawn(self, config, lane, name, task):
-        agent, reason = self.choose("", dict(os.environ))
+        chosen = config.lanes.get(lane, {})
+        agent, reason = self.choose(_set(chosen.get("agent")), dict(os.environ))
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
         path = self.home / config.slug / "prompts" / f"{name}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(prompt.build(config.slug, config.repo, lane, name, task), encoding="utf-8")
+        text = prompt.build(config.slug, config.repo, lane, name, task, role=chosen.get("role", ""))
+        path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
         argv = [_bin(), "init-agent", "--host", "herdr", "--workspace", f"swarm-{config.slug}", "--dir", config.repo]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
         try:
             proc = self.run(
-                [*argv, "--prompt-file", str(path)],
+                [*argv, "--prompt-file", str(path), *_model_args(agent, chosen)],
                 capture_output=True,
                 text=True,
                 timeout=SPAWN_TIMEOUT_S,

@@ -1,0 +1,10 @@
+{
+  "name": "default",
+  "lanes": {
+    "eng": {"role": "", "cap": 2, "agent": "auto", "model": "auto", "effort": "auto", "kind": "auto"},
+    "ci": {"role": "", "cap": 1, "agent": "auto", "model": "auto", "effort": "auto", "kind": "auto"}
+  },
+  "compact_limit": 0,
+  "links": [],
+  "autonomy": ""
+}

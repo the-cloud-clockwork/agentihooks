@@ -50,7 +50,8 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 |---|---|
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
-| `agentihooks swarm <id> create --repo DIR [--max-eng-agents N] [--max-ci-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci. |
+| `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
+| `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. |
 | `agentihooks swarm <id> pause` | Stop new spawns; running agents continue. |
 | `agentihooks swarm <id> stop` | Drain: no new spawns, the swarm stops when its agents finish. |
@@ -59,8 +60,27 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> status [--json]` | Config, task counts, one row per agent, and the health findings. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
+| `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
+| `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Operator message to the swarm chat. |
 | `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew. |
+
+### Templates
+
+A template is a JSON file: a `name`, a `compact_limit`, optional `links` and `autonomy` kept for later
+use, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
+
+| Field | Meaning |
+|---|---|
+| `role` | Replaces the lane's default role text in the agent's opening prompt; empty keeps the default. |
+| `cap` | The lane cap the swarm is created with. |
+| `agent` | `claude`, `codex` or `auto`; `auto` lets init-agent choose by quota and session caps. |
+| `model`, `effort` | Passed to init-agent for the lane's agents; `auto` keeps init-agent's default. |
+| `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
+
+Built-in templates (`default`, `codex-ci`) ship with agentihooks. User templates live in
+`$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores
+the template name and lane map in the swarm config.
 
 A swarm is in one of five states: `running`, `paused`, `stopping`, `stopped`, `drained`. It drains when no
 task is left to start and returns to `running` when a new task opens. Lowering a cap never kills work; the

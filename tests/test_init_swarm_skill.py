@@ -42,3 +42,12 @@ def test_every_command_exists():
     assert {"new", "task"} <= ledger
     assert all(re.search(rf"\b{c}\b", swarm_help) for c in swarm)
     assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger - {"new"})
+
+
+def test_create_names_the_template_flag_the_parser_accepts():
+    from scripts.swarm.cli import build_parser
+
+    text = SKILL.read_text()
+    assert re.search(r"agentihooks swarm <slug> create .*--template <name>", text)
+    assert "agentihooks swarm templates" in text
+    assert build_parser().parse_args(["sw", "create", "--repo", "/r", "--template", "codex-ci"]).template == "codex-ci"

@@ -95,3 +95,11 @@ def test_compact_limit_round_trips_and_an_old_config_reads_as_unset(store):
     assert store.config("smoke").compact_limit == 40
     store.redis.hdel(store.key("smoke", "config"), "compact_limit")
     assert store.config("smoke").compact_limit == 0
+
+
+def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(store):
+    lanes = {"eng": {"role": "r", "agent": "codex", "model": "m", "effort": "high", "kind": "code"}}
+    store.create(config(template="t", lanes=lanes))
+    assert (store.config("smoke").template, store.config("smoke").lanes) == ("t", lanes)
+    store.redis.hdel(store.key("smoke", "config"), "template", "lanes")
+    assert (store.config("smoke").template, store.config("smoke").lanes) == ("", {})
