@@ -121,10 +121,11 @@ def _entry(state, by, reason, at):
 
 
 def connect(environ=None):
-    from scripts.swarm.store import SwarmError
-    from scripts.swarm.store import connect as swarm_connect
+    import redis
+
+    from scripts.swarm.store import redis_client
 
     try:
-        return InboxStore(swarm_connect(environ).redis)
-    except SwarmError as exc:
-        raise InboxError(str(exc).replace("the swarm refuses", "the inbox refuses")) from exc
+        return InboxStore(redis_client(environ))
+    except redis.RedisError as exc:
+        raise InboxError(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc

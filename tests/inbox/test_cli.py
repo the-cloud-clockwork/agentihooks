@@ -44,6 +44,7 @@ def test_a_forged_sender_argument_is_ignored(store, argv):
     assert run(*argv) == 0
     [item] = store.inbox("bob")
     assert item.sender == "alice"
+    assert item.text == " ".join(argv[2:])
 
 
 def test_a_sender_option_before_the_address_sends_nothing(store):
