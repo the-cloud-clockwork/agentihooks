@@ -18,6 +18,7 @@ def runner(monkeypatch, tmp_path):
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "HOME", tmp_path)
     monkeypatch.setattr(module, "linked_bundle", lambda: tmp_path)
+    monkeypatch.setenv("RIG_DOCTOR_DEMO_REPO", "owner/demo")
     calls = []
     monkeypatch.setattr(module, "run", lambda *args, **kwargs: calls.append(args) or "")
     return module, calls
@@ -75,7 +76,7 @@ def test_demo_reset_preserves_previous_copy_and_seeds_dev(runner, monkeypatch):
     repo.mkdir()
     (repo / "old.py").write_text("old application")
     (repo / ".rig-doctor-demo").write_text("owned\n")
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", False))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", False))
     module.reset_demo()
     assert not (repo / "old.py").exists()
     archives = list((module.HOME / "doctor-demo-archives").iterdir())
@@ -87,7 +88,7 @@ def test_demo_reset_preserves_previous_copy_and_seeds_dev(runner, monkeypatch):
 
 def test_existing_remote_uses_dev_history_without_force_push(runner, monkeypatch):
     module, calls = runner
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", True))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", True))
     monkeypatch.setattr(module, "run", lambda *args, **kwargs: calls.append(args) or "existing dev")
     module.reset_demo()
     assert ("git", "fetch", "origin", "dev") in calls
@@ -100,7 +101,7 @@ def test_unowned_demo_copy_is_refused(runner, monkeypatch):
     repo = module.HOME / "doctor-demo-app"
     repo.mkdir()
     (repo / "unrelated.txt").write_text("preserve me")
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", False))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", False))
     with pytest.raises(ValueError, match="owned"):
         module.reset_demo()
     assert (repo / "unrelated.txt").read_text() == "preserve me"
@@ -139,7 +140,7 @@ def test_demo_reset_really_pushes_clean_seed_on_existing_dev(runner, monkeypatch
     module, _ = runner
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", False))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", False))
 
     def local_run(*args, cwd=None):
         if args[:3] == ("git", "remote", "add"):
@@ -158,7 +159,7 @@ def test_demo_reset_really_pushes_clean_seed_on_existing_dev(runner, monkeypatch
     local_run("git", "commit", "-m", "Build old app", cwd=repo)
     local_run("git", "push", "origin", "dev", cwd=repo)
     old_head = local_run("git", "rev-parse", "HEAD", cwd=repo)
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", True))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", True))
     module.reset_demo()
     assert not (repo / "old.py").exists()
     assert local_run("git", "rev-parse", "HEAD^", cwd=repo) == old_head
@@ -170,7 +171,37 @@ def test_demo_reset_really_pushes_clean_seed_on_existing_dev(runner, monkeypatch
 
 def test_existing_empty_private_remote_gets_dev_branch(runner, monkeypatch):
     module, calls = runner
-    monkeypatch.setattr(module, "ensure_remote", lambda: ("owner/demo", True))
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", True))
     module.reset_demo()
     assert ("git", "fetch", "origin", "dev") not in calls
     assert ("git", "commit", "-m", "Reset rig-doctor demo seed") in calls
+
+
+def test_reset_plan_is_written_before_remote_mutations(runner, monkeypatch):
+    module, _ = runner
+    monkeypatch.setenv("RIG_DOCTOR_DEMO_REPO", "owner/demo")
+
+    def remote(*args):
+        plan = json.loads((module.HOME / "doctor-demo-reset-plan.json").read_text())
+        assert plan["repo"] == str(module.HOME / "doctor-demo-app")
+        assert plan["branch"] == "dev"
+        assert plan["remote"] == "owner/demo"
+        module.validate_reset_plan(plan)
+        return "owner/demo", False
+
+    monkeypatch.setattr(module, "ensure_remote", remote)
+    module.reset_demo()
+
+
+def test_reset_plan_refuses_seed_paths_outside_demo(runner):
+    module, _ = runner
+    with pytest.raises(ValueError, match="seed"):
+        module.validate_reset_plan(
+            {
+                "repo": str(module.HOME / "doctor-demo-app"),
+                "seed": ["../outside"],
+                "archive": str(module.HOME / "doctor-demo-archives" / "copy"),
+                "remote": "owner/demo",
+                "branch": "dev",
+            }
+        )

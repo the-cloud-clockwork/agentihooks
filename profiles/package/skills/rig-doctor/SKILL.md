@@ -9,8 +9,9 @@ argument-hint: "[LEDGER] [stop]"
 1. Run the script with the operator's arguments. Resolve this skill's directory
    from the loaded SKILL.md. Use the Python interpreter that has agentihooks
    installed; requires Python, agentihooks, git, authenticated gh, and a linked
-   bundle. Install agentihooks with `uv tool install agentihooks`; the bundle's
-   `agentihooks deps ensure` supplies git and gh.
+   bundle. Install agentihooks with `uv tool install agentihooks`. Run
+   `agentihooks deps check` for missing git or gh; their system installation
+   requires operator approval. Authenticate gh with `gh auth login`.
 
    ```bash
    python3 "$SKILL_DIR/scripts/rig_doctor.py" LEDGER
@@ -29,7 +30,9 @@ argument-hint: "[LEDGER] [stop]"
 
 The demo is owned by this skill under `$AGENTIHOOKS_HOME/doctor-demo-app`
 (default `~/.agentihooks/doctor-demo-app`). Its previous copy is preserved in
-`doctor-demo-archives`. The script refuses reset while its prior demo swarm
+`doctor-demo-archives`. Reset writes and validates `doctor-demo-reset-plan.json`
+before changing the copy, then verifies the pushed dev commit. The script
+refuses reset while its prior demo swarm
 is running; finish or stop that swarm before repeating the demo. `stop`
 closes only the Doctor, so the working swarm keeps running.
 

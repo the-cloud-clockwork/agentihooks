@@ -49,12 +49,17 @@ def stop(ledger: str) -> None:
         save_state(state)
 
 
-def ensure_remote() -> tuple[str, bool]:
+def demo_remote() -> str:
     remote = os.environ.get("RIG_DOCTOR_DEMO_REPO", "")
     if not remote:
         remote = run("gh", "api", "user", "--jq", ".login") + "/rig-doctor-demo"
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", remote):
         raise ValueError("RIG_DOCTOR_DEMO_REPO must be OWNER/REPO.")
+    return remote
+
+
+def ensure_remote(remote: str | None = None) -> tuple[str, bool]:
+    remote = remote or demo_remote()
     try:
         info = json.loads(run("gh", "repo", "view", remote, "--json", "isPrivate,description"))
     except subprocess.CalledProcessError as error:
@@ -69,15 +74,42 @@ def ensure_remote() -> tuple[str, bool]:
     return remote, True
 
 
+def validate_reset_plan(plan: dict) -> None:
+    repo = Path(plan["repo"])
+    if repo != HOME / "doctor-demo-app" or repo.is_symlink():
+        raise ValueError("Reset plan must target the owned doctor-demo-app copy.")
+    if repo.exists() and not (repo / ".rig-doctor-demo").is_file():
+        raise ValueError("doctor-demo-app is not an owned demo copy; move it aside before running rig-doctor.")
+    if Path(plan["archive"]).parent != HOME / "doctor-demo-archives":
+        raise ValueError("Reset plan archive must stay in doctor-demo-archives.")
+    for name in plan["seed"]:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or path.parts[0] == ".git":
+            raise ValueError(f"Invalid demo seed path: {name}")
+    if plan["branch"] != "dev" or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", plan["remote"]):
+        raise ValueError("Reset plan needs an OWNER/REPO remote and dev branch.")
+
+
 def reset_demo() -> Path:
     repo = HOME / "doctor-demo-app"
-    if repo.is_symlink() or (repo.exists() and not (repo / ".rig-doctor-demo").is_file()):
-        raise ValueError("doctor-demo-app is not an owned demo copy; move it aside before running rig-doctor.")
-    remote, exists = ensure_remote()
+    template = json.loads((ASSETS / "demo-template.json").read_text())
+    seed = {**template["seed"], "plan.md": template["prompt"] + "\n"}
+    plan = {
+        "repo": str(repo),
+        "archive": str(HOME / "doctor-demo-archives" / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")),
+        "remote": demo_remote(),
+        "branch": "dev",
+        "seed": sorted(seed),
+        "actions": ["archive old copy", "seed dev", "commit", "push dev", "verify remote"],
+    }
+    HOME.mkdir(parents=True, exist_ok=True)
+    (HOME / "doctor-demo-reset-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    validate_reset_plan(plan)
+    remote, exists = ensure_remote(plan["remote"])
     if repo.exists():
         archives = HOME / "doctor-demo-archives"
         archives.mkdir(parents=True, exist_ok=True)
-        repo.rename(archives / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f"))
+        repo.rename(Path(plan["archive"]))
     repo.mkdir(parents=True)
     run("git", "init", "--initial-branch", "dev", cwd=repo)
     run("git", "remote", "add", "origin", f"https://github.com/{remote}.git", cwd=repo)
@@ -92,8 +124,6 @@ def reset_demo() -> Path:
                 shutil.rmtree(child)
             else:
                 child.unlink()
-    template = json.loads((ASSETS / "demo-template.json").read_text())
-    seed = {**template["seed"], "plan.md": template["prompt"] + "\n"}
     for name, content in seed.items():
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,6 +133,9 @@ def reset_demo() -> Path:
     if not has_dev or run("git", "diff", "--cached", "--name-only", cwd=repo):
         run("git", "commit", "-m", "Reset rig-doctor demo seed", cwd=repo)
     run("git", "push", "--set-upstream", "origin", "dev", cwd=repo)
+    head = run("git", "rev-parse", "HEAD", cwd=repo)
+    if head != run("git", "ls-remote", "--heads", "origin", "dev", cwd=repo).partition("\t")[0]:
+        raise ValueError("Demo remote dev does not match the reset commit; inspect the reset plan and retry.")
     return repo
 
 
