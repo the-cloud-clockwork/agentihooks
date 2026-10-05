@@ -170,6 +170,23 @@ def upgrade(slug):
     print(json.dumps({"slug": slug, "html": str(core.paths(slug)[0]), "upgraded": True, "rev": state["_meta"]["rev"]}))
 
 
+def create(slug, content, size="small"):
+    html_path, json_path = core.paths(slug)
+    if html_path.exists():
+        return False
+    if json_path.exists():
+        sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
+    errors = check(content)
+    if errors:
+        sys.exit("content rejected:\n  " + "\n  ".join(errors))
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    doc = build_doc(content, size)
+    core.validate(doc)
+    core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
+    core.sync(slug)
+    return True
+
+
 def main():
     if sys.argv[1:2] == ["--upgrade"] and len(sys.argv) == 3:
         return upgrade(sys.argv[2])
@@ -189,20 +206,10 @@ def main():
         print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))
         print(ledger_link.page_line(slug))
         return
-    if json_path.exists():
-        sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
     small = args.size == "small"
     if small and not ledger_size.AUTHOR_RE.match(args.name):
         sys.exit("a small ledger needs --as NAME: the session that creates it joins it as its worker")
-    content = json.loads(Path(args.content).read_text(encoding="utf-8"))
-    errors = check(content)
-    if errors:
-        sys.exit("content rejected:\n  " + "\n  ".join(errors))
-    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    doc = build_doc(content, args.size)
-    core.validate(doc)
-    core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
-    core.sync(slug)
+    create(slug, json.loads(Path(args.content).read_text(encoding="utf-8")), args.size)
     out = {"slug": slug, "html": str(html_path), "json": str(json_path), "created": True, "size": args.size}
     if small:
         core.sync(slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}])

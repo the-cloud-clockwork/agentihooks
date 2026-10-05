@@ -27,6 +27,9 @@ class LedgerClient:
             raise SwarmError(f"ledger {slug} refused: {state['rejected']}")
         return state
 
+    def state(self, slug):
+        return self._call(slug)
+
     def tasks(self, slug):
         return self._call(slug).get("tasks", [])
 
@@ -53,6 +56,9 @@ class LedgerClient:
 
     def followup(self, slug, text):
         self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
+
+    def add_source(self, slug, source, by):
+        self._call(slug, [_op("source_add", by, source=source)])
 
     def summarize(self, slug, note, by):
         self._call(slug, [_op("summary_set", by, note=note)])
