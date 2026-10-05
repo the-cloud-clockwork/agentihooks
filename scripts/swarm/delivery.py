@@ -61,12 +61,13 @@ def migrate_outbox(store, slug, inbox):
     """Move what the retired herdr outbox still holds into the inbox."""
     outbox = store.key(slug, "outbox")
     moved = 0
-    while (raw := store.redis.lpop(outbox)) is not None:
+    while (raw := store.redis.lindex(outbox, 0)) is not None:
         entry = json.loads(raw)
         sender, text = "swarm", entry["text"]
         if text.startswith(LEGACY_PREFIX) and ": " in text:
             sender, text = text[len(LEGACY_PREFIX) :].split(": ", 1)
         inbox.send(sender, entry["to"], text)
+        store.redis.lpop(outbox)
         moved += 1
     return moved
 

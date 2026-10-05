@@ -125,3 +125,15 @@ def test_messages_left_in_the_old_outbox_move_into_the_inbox(store):
     assert inbox(store, "sw-ci-1") == [("operator", "rerun the job", "pending")]
     assert inbox(store, "sw-eng-1") == [("swarm", "no prefix here", "pending")]
     assert not store.redis.exists(outbox)
+
+
+def test_an_outbox_entry_stays_when_moving_it_fails(store):
+    class Down:
+        def send(self, sender, address, text):
+            raise ConnectionError("redis went away")
+
+    outbox = store.key("sw", "outbox")
+    store.redis.rpush(outbox, json.dumps({"to": "sw-ci-1", "at": 5, "text": "[swarm chat] operator: rerun the job"}))
+    with pytest.raises(ConnectionError):
+        delivery.migrate_outbox(store, "sw", Down())
+    assert store.redis.llen(outbox) == 1
