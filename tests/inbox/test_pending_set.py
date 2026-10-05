@@ -110,14 +110,64 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store):
     assert store.redis.sismember(store.key("indexed"), "bob")
 
 
-def test_back_fill_runs_once_and_keeps_items_sent_before_it(store):
+def test_back_fill_runs_once_and_keeps_items_sent_before_it(store, monkeypatch):
+    from scripts.inbox import store as inbox_store
+
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: 1000)
+    ids = iter([inbox_store.uuid.UUID(int=2 << 80), inbox_store.uuid.UUID(int=1 << 80)])
+    monkeypatch.setattr(inbox_store.uuid, "uuid4", lambda: next(ids))
     old = store.send("alice", "bob", "before the change")
     store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
     new = store.send("alice", "bob", "after the change")
 
-    assert [i.id for i in store.pending_items("bob")] == [old.id, new.id]
+    for _ in range(5):
+        assert [i.id for i in store.pending_items("bob")] == [old.id, new.id]
     store.deliver(old.id, "bob")
     assert [i.id for i in store.pending_items("bob")] == [new.id]
+
+
+@pytest.mark.parametrize("read", ["inbox", "pending_items", "pending_mail", "pending"])
+def test_reads_keep_send_order_at_equal_times_across_connections(store, monkeypatch, read):
+    from scripts.inbox import store as inbox_store
+
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: 1000)
+    ids = iter([inbox_store.uuid.UUID(int=2 << 80), inbox_store.uuid.UUID(int=1 << 80)])
+    monkeypatch.setattr(inbox_store.uuid, "uuid4", lambda: next(ids))
+    store.pending_items("bob")
+    old = store.send("alice", "bob", "first")
+    new = store.send("alice", "bob", "second")
+    for _ in range(5):
+        fresh = inbox_store.InboxStore(store.redis)
+        items = fresh.pending() if read == "pending" else getattr(fresh, read)("bob")
+        assert [item.id for item in items] == [old.id, new.id]
+
+
+@pytest.mark.parametrize("read", ["pending", "pending_mail"])
+def test_pending_reads_merge_addresses_oldest_first(store, monkeypatch, read):
+    from scripts.inbox import store as inbox_store
+
+    times = iter([1000, 2000, 3000])
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: next(times))
+    store.seats.occupy("eng-1@demo", "bob", 500)
+    old = store.send("alice", "eng-1@demo", "first")
+    middle = store.send("alice", "bob", "second")
+    new = store.send("alice", "bob", "third")
+    for _ in range(5):
+        items = store.pending() if read == "pending" else store.pending_mail("bob")
+        assert [item.id for item in items] == [old.id, middle.id, new.id]
+
+
+def test_legacy_pending_items_without_sequence_stay_oldest_first(store, monkeypatch):
+    from scripts.inbox import store as inbox_store
+
+    times = iter([1000, 2000])
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: next(times))
+    old = store.send("alice", "bob", "legacy")
+    store.redis.hdel(store.key("item", old.id), "sequence")
+    new = store.send("alice", "bob", "new")
+    store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
+    for _ in range(5):
+        assert [item.id for item in store.pending_items("bob")] == [old.id, new.id]
 
 
 def test_a_failed_transition_leaves_the_item_and_the_pending_set_consistent(store, monkeypatch):
