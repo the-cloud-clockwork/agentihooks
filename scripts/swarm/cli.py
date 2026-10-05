@@ -146,6 +146,8 @@ def cmd_create(store, args):
 
 
 def _state(store, args, state):
+    if state == "running":
+        store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(_bin()):
         print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
