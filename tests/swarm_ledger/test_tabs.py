@@ -187,3 +187,7 @@ def test_failed_status_read_keeps_the_observed_state_and_reports_the_failure(tab
     tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Could not read swarm status')")
     assert tab.locator("#swarm-state").text_content() == "unavailable"
     assert "null" not in tab.locator("#tab-swarm").text_content()
+    tab.get_by_role("tab", name="Ledger").click()
+    tab.locator("#phases input[type=checkbox]").first.check()
+    assert tab.locator("#swarm-status-box").get_attribute("hidden") is None
+    assert "Could not read swarm status" in tab.locator("#swarm-note").text_content()

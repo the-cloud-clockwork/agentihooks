@@ -1403,7 +1403,7 @@ input, textarea { caret-color: var(--accent-2); }
 
   function renderSwarm(sw) {
     swarm = sw;
-    $("swarm-status-box").hidden = !sw;
+    $("swarm-status-box").hidden = !sw && !swarmReadError;
     $("swarm-state").className = `sw-state ${sw ? sw.config.state : "unavailable"}`;
     $("swarm-state").textContent = sw ? sw.config.state : "unavailable";
     $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: $("swarm-state").textContent }),
