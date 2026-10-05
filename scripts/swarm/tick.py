@@ -11,6 +11,7 @@ from typing import Protocol
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm_ledger import ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -197,8 +198,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             store.put_agent(slug, record)
             try:
                 state = "pr" if task.get("pr_url") else "claimed"
-                ledger.update_task(slug, task["id"], {"state": state, "claimed_by": name})
-                task.update(state=state, claimed_by=name)
+                fields = {"state": state, "claimed_by": name, "workspace": str(ledger_workspace.scaffold(slug, task))}
+                ledger.update_task(slug, task["id"], fields)
+                task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
                 placed = runtime.spawn(config, lane, name, _primed(store, seat, task))
             except Exception as exc:

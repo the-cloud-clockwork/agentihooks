@@ -30,6 +30,7 @@ sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
+import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
 HOST = os.environ.get("LEDGER_HOST", "127.0.0.1")
@@ -283,6 +284,15 @@ def relay_to_inbox(slug, state):
         return []
 
 
+def with_workspaces(slug, state):
+    """The latest progress and proof lines of each task's work folder, read at reply time and never stored."""
+    tasks = [
+        {**t, "workspace_tail": ledger_workspace.tails(slug, t["id"])} if t.get("workspace") else t
+        for t in state.get("tasks", [])
+    ]
+    return {**state, "tasks": tasks}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
@@ -325,7 +335,8 @@ class Handler(BaseHTTPRequestHandler):
             "page_version": core.page_version(),
             "crew": ledger_gate.crew(state["_meta"]),
         }
-        return self.send(200, json.dumps({**state, "rejected": rejected}, ensure_ascii=False), "application/json")
+        reply = {**with_workspaces(slug, state), "rejected": rejected}
+        return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
     def do_OPTIONS(self):
         self.send_response(204)
