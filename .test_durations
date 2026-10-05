@@ -387,6 +387,7 @@
     "tests/doctor/test_ci.py::test_recorded_tests_and_planted_flake_on_the_same_commit": 0.0016138829960254952,
     "tests/doctor/test_ci_read.py::test_gh_error_propagates_instead_of_reporting_healthy": 0.001452148993848823,
     "tests/doctor/test_ci_read.py::test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs": 0.0017468349979026243,
+    "tests/doctor/test_ci_read.py::test_parameter_names_with_spaces_keep_their_identity": 0.001719815016258508,
     "tests/doctor/test_spawn_read.py::test_spawn_reader_is_read_only_and_uses_the_swarm_target": 0.14705564898031298,
     "tests/doctor/test_spawns.py::test_discrete_share_and_empty_counts_do_not_raise": 0.0016939940105658025,
     "tests/doctor/test_spawns.py::test_recorded_placements_and_planted_overflow": 0.0017050469905370846,

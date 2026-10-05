@@ -3,7 +3,9 @@ import re
 import subprocess
 from collections.abc import Callable
 
-TEST = re.compile(r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::\S+)|(tests/\S+::\S+) (PASSED|FAILED|SKIPPED))")
+TEST = re.compile(
+    r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::.+?)|(tests/\S+::.+?) (PASSED|FAILED|SKIPPED))(?:\s+\[\s*\d+%\])?\s*$"
+)
 
 
 def test_results(log: str, job: str = "") -> list[dict]:

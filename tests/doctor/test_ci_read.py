@@ -53,3 +53,22 @@ def test_gh_error_propagates_instead_of_reporting_healthy():
 
     with pytest.raises(subprocess.CalledProcessError):
         ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=unavailable)
+
+
+def test_parameter_names_with_spaces_keep_their_identity():
+    record = load("ci")
+    sha = record["pr"]["head"]["sha"]
+    first = "tests/test_example.py::test_case[case one]"
+    second = "tests/test_example.py::test_case[case two]"
+    failed = ci_read.test_results(f"2026-10-05T00:00:00Z [gw0] FAILED {first}\n", "unit")
+    passed = ci_read.test_results(f"2026-10-05T00:00:00Z {second} PASSED [100%]\n", "unit")
+    assert failed[0]["nodeid"] == first
+    assert passed[0]["nodeid"] == second
+    record["attempts"] = [
+        {"run_id": 1, "attempt": 1, "head_sha": sha, "tests": failed},
+        {"run_id": 1, "attempt": 2, "head_sha": sha, "tests": passed},
+    ]
+    assert ci.flaky_tests(record) == []
+    record["attempts"][1]["tests"] = ci_read.test_results(f"{first} PASSED [100%]\n", "unit")
+    [found] = ci.flaky_tests(record)
+    assert first in found.evidence
