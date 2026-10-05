@@ -21,7 +21,7 @@ def config(**kw):
 
 def test_create_then_read_config_and_list(store):
     store.create(config())
-    assert store.config("smoke") == config(state="running")
+    assert store.config("smoke") == config(state="running", code="a1b2c3")
     assert store.slugs() == ["smoke"]
 
 
@@ -39,31 +39,33 @@ def test_set_updates_caps_and_state(store):
 
 def test_a_task_claim_is_exclusive_until_released(store):
     store.create(config())
-    assert store.claim("smoke", "t1", "smoke-eng-1", lease_ms=60_000)
-    assert not store.claim("smoke", "t1", "smoke-eng-2", lease_ms=60_000)
-    assert store.claimant("smoke", "t1") == "smoke-eng-1"
-    store.release("smoke", "t1", "smoke-eng-2")
-    assert store.claimant("smoke", "t1") == "smoke-eng-1"
-    store.release("smoke", "t1", "smoke-eng-1")
-    assert store.claim("smoke", "t1", "smoke-eng-2", lease_ms=60_000)
+    assert store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)
+    assert not store.claim("smoke", "t1", "engineer@a1b2c3-0002", lease_ms=60_000)
+    assert store.claimant("smoke", "t1") == "engineer@a1b2c3-0001"
+    store.release("smoke", "t1", "engineer@a1b2c3-0002")
+    assert store.claimant("smoke", "t1") == "engineer@a1b2c3-0001"
+    store.release("smoke", "t1", "engineer@a1b2c3-0001")
+    assert store.claim("smoke", "t1", "engineer@a1b2c3-0002", lease_ms=60_000)
 
 
 def test_a_lapsed_lease_frees_the_claim(store):
     store.create(config())
-    store.claim("smoke", "t1", "smoke-eng-1", lease_ms=60_000)
+    store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)
     store.redis.delete(store.key("smoke", "claim", "t1"))
     assert store.claimant("smoke", "t1") is None
-    assert store.refresh("smoke", "t1", "smoke-eng-1", lease_ms=60_000) is False
+    assert store.refresh("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000) is False
 
 
 def test_agent_registry_and_sequence(store):
     store.create(config())
-    assert [store.next_name("smoke", "eng") for _ in range(2)] == ["smoke-eng-1", "smoke-eng-2"]
-    agent = AgentRecord(name="smoke-eng-1", lane="eng", task="t1", pane_id="w1:p1", harness="claude", started_at=5)
+    assert [store.next_name("smoke", "eng") for _ in range(2)] == ["engineer@a1b2c3-0001", "engineer@a1b2c3-0002"]
+    agent = AgentRecord(
+        name="engineer@a1b2c3-0001", lane="eng", task="t1", pane_id="w1:p1", harness="claude", started_at=5
+    )
     store.put_agent("smoke", agent)
     store.put_agent("smoke", AgentRecord(**{**agent.__dict__, "state": "finished"}))
     assert store.agents("smoke") == [AgentRecord(**{**agent.__dict__, "state": "finished"})]
-    store.drop_agent("smoke", "smoke-eng-1")
+    store.drop_agent("smoke", "engineer@a1b2c3-0001")
     assert store.agents("smoke") == []
 
 

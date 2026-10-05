@@ -124,7 +124,7 @@ def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(env, 
     run("sw", "create", "--repo", "/repo")
     run("sw", "set", f"autonomy={level}")
     run("sw", "start")
-    assert run("sw", "--as", "sw-eng-1", "pr", "https://github.com/o/r/pull/3") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", "https://github.com/o/r/pull/3") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["awaiting"]) == ("pr", awaiting)
 
 

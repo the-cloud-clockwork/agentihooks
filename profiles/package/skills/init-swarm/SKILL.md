@@ -87,7 +87,7 @@ neither, the caps are 2 eng and 1 ci and init-agent picks agent and model.
 Change one lane later with `agentihooks swarm <slug> set eng-model=<model>`;
 `agentihooks swarm <slug> save-template <name>` keeps the result for the next plan.
 
-Done when `status` shows the swarm running and a `<slug>-master-<n>` agent
+Done when `status` shows the swarm running and a `master@<code>-<n>` agent
 in the master lane.
 
 ## Hand over to the master

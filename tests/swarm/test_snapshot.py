@@ -87,7 +87,7 @@ def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_p
     seed(store, "sw")
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     (tmp_path / "sw.json").write_text(json.dumps({"tasks": [{"id": "t1"}]}))
-    listing = "worktree /repo\nbranch refs/heads/dev\n\nworktree /wt/sw-eng-1\nbranch refs/heads/sw-eng-1\n"
+    listing = "worktree /repo\nbranch refs/heads/dev\n\nworktree /wt/engineer-a1b2c3-0001\nbranch refs/heads/engineer-a1b2c3-0001\n"
 
     def git(argv, **kw):
         return subprocess.CompletedProcess(argv, 0, listing, "")
@@ -96,7 +96,7 @@ def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_p
     doc = json.loads(path.read_text())
     assert path == snapshot.path("sw") and path.parent.name == "sw"
     assert doc["ledger"] == {"tasks": [{"id": "t1"}]}
-    assert doc["worktrees"] == {"sw-eng-1": "/wt/sw-eng-1", "sw-master-1": ""}
+    assert doc["worktrees"] == {"engineer@a1b2c3-0001": "/wt/engineer-a1b2c3-0001", "master@a1b2c3-0001": ""}
     assert _values(doc["state"]) == _values(json.loads(json.dumps(store.export("sw"))))
 
 
@@ -104,8 +104,8 @@ def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):
     seed(store, "sw")
     snapshot.take(store, "sw", 99, run=_no_git)
     before = everything(store.redis)
-    with pytest.raises(SwarmError, match="sw-eng-1"):
-        snapshot.restore(store, "sw", live={"sw-eng-1"})
+    with pytest.raises(SwarmError, match="engineer@a1b2c3-0001"):
+        snapshot.restore(store, "sw", live={"engineer@a1b2c3-0001"})
     assert everything(store.redis) == before
 
 
@@ -127,18 +127,18 @@ def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     store.redis.flushall()
     outcomes = snapshot.restore(store, "sw", live=set())
     assert [(o.name, o.outcome, o.reason) for o in outcomes] == [
-        ("sw-eng-1", "fresh", "no conversation id"),
-        ("sw-master-1", "fresh", "no conversation id"),
+        ("engineer@a1b2c3-0001", "fresh", "no conversation id"),
+        ("master@a1b2c3-0001", "fresh", "no conversation id"),
     ]
     assert store.config("sw").state == "paused"
     assert {a.state for a in store.agents("sw")} == {"finished"}
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}])
-    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1")
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0001")
     rt = FakeRuntime()
     actions = tick("sw", store, ledger, rt, 10_000)
-    assert rt.spawned == [] and [m[0] for m in rt.masters] == ["sw-master-2"]
-    assert ledger.rows["t1"]["state"] == "open" and "retired sw-eng-1" in actions
-    assert store.seats.occupant("master@sw").occupant == "sw-master-2"
+    assert rt.spawned == [] and [m[0] for m in rt.masters] == ["master@a1b2c3-0002"]
+    assert ledger.rows["t1"]["state"] == "open" and "retired engineer@a1b2c3-0001" in actions
+    assert store.seats.occupant("master@sw").occupant == "master@a1b2c3-0002"
     store.update("sw", state="running")
     tick("sw", store, ledger, rt, 20_000)
     successor = next(t for t in rt.tasks if t["id"] == "t2")
@@ -154,17 +154,22 @@ def test_restore_without_a_snapshot_names_the_missing_document(store):
 
 def test_each_agent_conversation_id_survives_a_snapshot_and_a_lost_redis(store):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
-    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", pane_id="w1:p2"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w1:p2"))
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
-    assert {a.name: a.conversation_id for a in store.agents("sw")} == {"sw-eng-1": "5c90d80c", "sw-eng-2": ""}
+    assert {a.name: a.conversation_id for a in store.agents("sw")} == {
+        "engineer@a1b2c3-0001": "5c90d80c",
+        "engineer@a1b2c3-0002": "",
+    }
 
 
 def test_an_agent_record_saved_before_conversation_ids_loads_with_an_empty_id(store):
     store.redis.hset(
-        store.key("sw", "agents"), "sw-eng-1", json.dumps({"name": "sw-eng-1", "lane": "eng", "task": "t1"})
+        store.key("sw", "agents"),
+        "engineer@a1b2c3-0001",
+        json.dumps({"name": "engineer@a1b2c3-0001", "lane": "eng", "task": "t1"}),
     )
     assert store.agents("sw")[0].conversation_id == ""
 
@@ -197,7 +202,7 @@ def test_stop_takes_a_snapshot_before_it_retires_anyone(env):
     assert cli.main(["sw", "stop", "--now"]) == 0
     doc = json.loads(snapshot.path("sw").read_text())
     agents = doc["state"]["keys"][store.key("sw", "agents")]["value"]
-    assert sorted(agents) == ["sw-eng-1", "sw-master-1"]
+    assert sorted(agents) == ["engineer@a1b2c3-0001", "master@a1b2c3-0001"]
 
 
 def test_snapshot_and_restore_commands_bring_the_swarm_back_paused(env, capsys):
@@ -211,7 +216,7 @@ def test_snapshot_and_restore_commands_bring_the_swarm_back_paused(env, capsys):
     store.redis.flushall()
     assert cli.main(["sw", "restore"]) == 0
     assert store.config("sw").state == "paused"
-    assert [m[0] for m in rt.masters] == ["sw-master-1", "sw-master-2"]
+    assert [m[0] for m in rt.masters] == ["master@a1b2c3-0001", "master@a1b2c3-0002"]
 
 
 MINUTE = 60_000

@@ -108,9 +108,18 @@ def tasks(*specs):
 def test_scale_up_is_immediate_and_capped_per_lane(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng"), ("t4", "ci"), ("t5", "ci")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert runtime.spawned == [("eng", "sw-eng-1", "t1"), ("eng", "sw-eng-2", "t2"), ("ci", "sw-ci-1", "t4")]
-    assert [ledger.rows[t]["claimed_by"] for t in ("t1", "t2", "t3", "t4")] == ["sw-eng-1", "sw-eng-2", "", "sw-ci-1"]
-    assert store.claimant("sw", "t1") == "sw-eng-1"
+    assert runtime.spawned == [
+        ("eng", "engineer@a1b2c3-0001", "t1"),
+        ("eng", "engineer@a1b2c3-0002", "t2"),
+        ("ci", "ci@a1b2c3-0001", "t4"),
+    ]
+    assert [ledger.rows[t]["claimed_by"] for t in ("t1", "t2", "t3", "t4")] == [
+        "engineer@a1b2c3-0001",
+        "engineer@a1b2c3-0002",
+        "",
+        "ci@a1b2c3-0001",
+    ]
+    assert store.claimant("sw", "t1") == "engineer@a1b2c3-0001"
 
 
 def test_a_second_tick_does_not_overspawn(store):
@@ -127,8 +136,8 @@ def test_a_finished_agent_is_retired_and_replaced_while_work_remains(store):
     first = workers(store)[0]
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.killed == ["sw-eng-1"]
-    assert runtime.spawned[-1] == ("eng", "sw-eng-3", "t3")
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0003", "t3")
 
 
 def test_scale_down_waits_for_the_task_to_finish(store):
@@ -144,10 +153,10 @@ def test_a_dead_agent_frees_its_task_after_the_startup_grace(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     runtime.live.clear()
     tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS - 1)
-    assert ledger.rows["t1"]["claimed_by"] == "sw-eng-1" and len(runtime.spawned) == 1
+    assert ledger.rows["t1"]["claimed_by"] == "engineer@a1b2c3-0001" and len(runtime.spawned) == 1
     tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
-    assert ledger.rows["t1"]["state"] == "claimed" and ledger.rows["t1"]["claimed_by"] == "sw-eng-2"
-    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1")
+    assert ledger.rows["t1"]["state"] == "claimed" and ledger.rows["t1"]["claimed_by"] == "engineer@a1b2c3-0002"
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
 
 
 def test_paused_spawns_nothing_and_stopping_ends_stopped_when_empty(store):
@@ -196,7 +205,7 @@ def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/3")
     runtime.live.clear()
     tick("sw", store, ledger, runtime, now_ms=1_000 + STARTUP_GRACE_MS + 1)
-    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1") and ledger.rows["t1"]["pr_url"].endswith("/3")
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1") and ledger.rows["t1"]["pr_url"].endswith("/3")
     assert "w1:p1" in runtime.closed
 
 
@@ -219,14 +228,14 @@ def test_a_reclaimed_task_is_in_pr_state_only_when_it_has_a_pull_request(store, 
     store.put_handoff("sw", "t1", "pushed, waiting on checks")
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1")
-    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == (state, "sw-eng-2")
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == (state, "engineer@a1b2c3-0002")
 
 
 def test_a_claimed_task_without_an_agent_is_reopened(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
-    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-9")
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
 
@@ -236,13 +245,13 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    runtime.statuses["sw-eng-1"] = "idle"
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
         if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == ["sw-eng-1"]
-    assert runtime.killed == ["sw-eng-1"] and ledger.rows["t1"]["state"] == "open"
+            assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
 
 @pytest.mark.parametrize("state", ["pending", "delivered", "read"])
@@ -253,14 +262,14 @@ def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     inbox = InboxStore(store.redis)
-    item = inbox.send("sw-ci-9", "sw-eng-1", "contract confirmed")
+    item = inbox.send("ci@a1b2c3-0009", "engineer@a1b2c3-0001", "contract confirmed")
     if state != "pending":
-        getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "sw-eng-1")
-    runtime.statuses["sw-eng-1"] = "idle"
+        getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "engineer@a1b2c3-0001")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-    assert runtime.killed == ["sw-eng-1"]
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
 
 
@@ -270,7 +279,7 @@ def test_a_busy_turn_resets_the_idle_count(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
-        runtime.statuses["sw-eng-1"] = status
+        runtime.statuses["engineer@a1b2c3-0001"] = status
         tick("sw", store, ledger, runtime, now_ms=2_000)
     assert runtime.nudged == []
 
@@ -280,9 +289,9 @@ def test_a_finished_agent_that_will_not_die_stays_registered(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = workers(store)[0]
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
-    runtime.stuck.add("sw-eng-1")
+    runtime.stuck.add("engineer@a1b2c3-0001")
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [a.name for a in workers(store)] == ["sw-eng-1"]
+    assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0001"]
 
 
 def test_a_drained_swarm_wakes_up_for_new_tasks(store):
@@ -292,7 +301,7 @@ def test_a_drained_swarm_wakes_up_for_new_tasks(store):
     assert store.config("sw").state == "drained"
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert store.config("sw").state == "running" and runtime.spawned == [("eng", "sw-eng-1", "t2")]
+    assert store.config("sw").state == "running" and runtime.spawned == [("eng", "engineer@a1b2c3-0001", "t2")]
 
 
 def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
@@ -302,10 +311,10 @@ def test_a_handed_off_task_is_reopened_and_respawned_with_the_doc(store):
     store.put_handoff("sw", "t1", "seam 1 green, seam 2 red")
     store.put_agent("sw", AgentRecord(**{**first.__dict__, "state": "finished"}))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.killed == ["sw-eng-1"]
-    assert runtime.spawned[-1] == ("eng", "sw-eng-2", "t1")
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t1")
     assert runtime.tasks[-1]["handoff"] == "seam 1 green, seam 2 red"
-    assert ledger.rows["t1"]["claimed_by"] == "sw-eng-2"
+    assert ledger.rows["t1"]["claimed_by"] == "engineer@a1b2c3-0002"
     assert store.handoff("sw", "t1") == ""
 
 
@@ -321,25 +330,25 @@ def masters(store):
 
 def test_a_running_swarm_spawns_one_master_that_claims_no_task(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
-    assert "spawned master sw-master-1" in tick("sw", store, ledger, runtime, 1)
+    assert "spawned master master@a1b2c3-0001" in tick("sw", store, ledger, runtime, 1)
     tick("sw", store, ledger, runtime, 2)
-    assert [name for name, _ in runtime.masters] == ["sw-master-1"]
-    assert [(a.name, a.task) for a in masters(store)] == [("sw-master-1", MASTER)]
+    assert [name for name, _ in runtime.masters] == ["master@a1b2c3-0001"]
+    assert [(a.name, a.task) for a in masters(store)] == [("master@a1b2c3-0001", MASTER)]
     assert len(runtime.spawned) == 2
-    assert {r["claimed_by"] for r in ledger.rows.values()} == {"sw-eng-1", "sw-eng-2", ""}
-    assert all(store.claimant("sw", t) != "sw-master-1" for t in ledger.rows)
+    assert {r["claimed_by"] for r in ledger.rows.values()} == {"engineer@a1b2c3-0001", "engineer@a1b2c3-0002", ""}
+    assert all(store.claimant("sw", t) != "master@a1b2c3-0001" for t in ledger.rows)
 
 
 def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(store):
     store.update("sw", state="paused")
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
-    assert [a.name for a in masters(store)] == ["sw-master-1"]
+    assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
     store.update("sw", state="running")
     assert "drained" in tick("sw", store, tasks(), runtime, 2)
-    assert store.config("sw").state == "drained" and [a.name for a in masters(store)] == ["sw-master-1"]
+    assert store.config("sw").state == "drained" and [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
     store.update("sw", state="stopped")
-    store.drop_agent("sw", "sw-master-1")
+    store.drop_agent("sw", "master@a1b2c3-0001")
     assert tick("sw", store, tasks(), runtime, 3) == [] and len(runtime.masters) == 1
 
 
@@ -350,8 +359,8 @@ def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers
     InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, 1)
-    assert "spawned master sw-master-1" in actions
-    assert [a.name for a in masters(store)] == ["sw-master-1"] and workers(store) == []
+    assert "spawned master master@a1b2c3-0001" in actions
+    assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"] and workers(store) == []
     assert runtime.spawned == [] and store.config("sw").state == "paused"
 
 
@@ -359,7 +368,7 @@ def test_a_drained_swarm_without_a_master_starts_one_and_no_engineers(store):
     store.update("sw", state="drained")
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(), runtime, 1)
-    assert "spawned master sw-master-1" in actions and runtime.spawned == []
+    assert "spawned master master@a1b2c3-0001" in actions and runtime.spawned == []
     assert store.config("sw").state == "drained"
 
 
@@ -375,24 +384,24 @@ def test_a_dead_master_is_respawned(store):
     tick("sw", store, tasks(), runtime, 1)
     runtime.live.clear()
     actions = tick("sw", store, tasks(), runtime, 1 + STARTUP_GRACE_MS + 1)
-    assert "lost sw-master-1" in actions and "spawned master sw-master-2" in actions
-    assert [a.name for a in masters(store)] == ["sw-master-2"]
+    assert "lost master@a1b2c3-0001" in actions and "spawned master master@a1b2c3-0002" in actions
+    assert [a.name for a in masters(store)] == ["master@a1b2c3-0002"]
 
 
 def test_an_idle_master_is_never_nudged_or_stalled(store):
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
-    runtime.statuses["sw-master-1"] = "idle"
+    runtime.statuses["master@a1b2c3-0001"] = "idle"
     for n in range(12):
         tick("sw", store, tasks(), runtime, 2 + n)
-    assert runtime.nudged == [] and [a.name for a in masters(store)] == ["sw-master-1"]
+    assert runtime.nudged == [] and [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
 
 
 def test_the_tick_names_a_live_masters_pane(store):
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
     tick("sw", store, tasks(), runtime, 2)
-    assert runtime.named == ["sw-master-1"]
+    assert runtime.named == ["master@a1b2c3-0001"]
 
 
 def test_a_master_handoff_retires_the_old_master_and_spawns_the_next_with_the_doc(store):
@@ -402,11 +411,11 @@ def test_a_master_handoff_retires_the_old_master_and_spawns_the_next_with_the_do
     store.put_handoff("sw", MASTER, "operator wants caps at four")
     store.put_agent("sw", replace(old, state="finished"))
     actions = tick("sw", store, tasks(), runtime, 2)
-    assert "retired sw-master-1" in actions and "spawned master sw-master-2" in actions
-    assert runtime.killed == ["sw-master-1"]
+    assert "retired master@a1b2c3-0001" in actions and "spawned master master@a1b2c3-0002" in actions
+    assert runtime.killed == ["master@a1b2c3-0001"]
     assert runtime.masters[-1][1]["handoff"] == "operator wants caps at four"
     assert store.handoff("sw", MASTER) == ""
-    assert [a.name for a in masters(store)] == ["sw-master-2"]
+    assert [a.name for a in masters(store)] == ["master@a1b2c3-0002"]
 
 
 def test_a_full_house_waits_for_a_slot_before_starting_the_master(store):
@@ -419,10 +428,10 @@ def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store):
     tick("sw", store, ledger, runtime, 1)
     store.update("sw", state="stopping")
     tick("sw", store, ledger, runtime, 2)
-    assert [a.name for a in masters(store)] == ["sw-master-1"]
+    assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
     store.put_agent("sw", replace(workers(store)[0], state="finished"))
     actions = tick("sw", store, ledger, runtime, 3)
-    assert "retired sw-master-1" in actions and actions[-1] == "stopped"
+    assert "retired master@a1b2c3-0001" in actions and actions[-1] == "stopped"
     assert store.agents("sw") == [] and store.config("sw").state == "stopped"
 
 
@@ -492,12 +501,12 @@ def test_the_master_and_lane_agents_are_seated_in_free_slots(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t4", "ci")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert seats_of(store) == {
-        "sw-master-1": "master@sw",
-        "sw-eng-1": "eng-1@sw",
-        "sw-eng-2": "eng-2@sw",
-        "sw-ci-1": "ci-1@sw",
+        "master@a1b2c3-0001": "master@sw",
+        "engineer@a1b2c3-0001": "eng-1@sw",
+        "engineer@a1b2c3-0002": "eng-2@sw",
+        "ci@a1b2c3-0001": "ci-1@sw",
     }
-    assert store.seats.occupant("eng-2@sw").occupant == "sw-eng-2"
+    assert store.seats.occupant("eng-2@sw").occupant == "engineer@a1b2c3-0002"
 
 
 def test_a_freed_slot_is_taken_by_the_next_agent_with_a_new_generation(store):
@@ -507,10 +516,10 @@ def test_a_freed_slot_is_taken_by_the_next_agent_with_a_new_generation(store):
     first = workers(store)[0]
     store.put_agent("sw", replace(first, state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert seats_of(store)["sw-eng-3"] == "eng-1@sw"
+    assert seats_of(store)["engineer@a1b2c3-0003"] == "eng-1@sw"
     assert [(e["generation"], e["occupant"]) for e in store.seats.history("eng-1@sw")] == [
-        (1, "sw-eng-1"),
-        (2, "sw-eng-3"),
+        (1, "engineer@a1b2c3-0001"),
+        (2, "engineer@a1b2c3-0003"),
     ]
 
 
@@ -523,8 +532,8 @@ def test_a_handoff_successor_takes_its_predecessors_seat(store):
     store.put_handoff("sw", "t2", "halfway", seat=two.seat)
     store.put_agent("sw", replace(two, state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.spawned[-1] == ("eng", "sw-eng-3", "t2")
-    assert seats_of(store)["sw-eng-3"] == "eng-2@sw"
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0003", "t2")
+    assert seats_of(store)["engineer@a1b2c3-0003"] == "eng-2@sw"
     assert store.handoff_seat("sw", "t2") == ""
 
 
@@ -535,7 +544,7 @@ def test_a_master_handoff_keeps_the_master_seat_and_bumps_its_generation(store):
     store.put_handoff("sw", MASTER, "doc", seat=old.seat)
     store.put_agent("sw", replace(old, state="finished"))
     tick("sw", store, tasks(), runtime, 2)
-    assert store.seats.occupant("master@sw").occupant == "sw-master-2"
+    assert store.seats.occupant("master@sw").occupant == "master@a1b2c3-0002"
     assert [e["generation"] for e in store.seats.history("master@sw")] == [1, 2]
 
 
@@ -552,14 +561,17 @@ def test_a_successor_waits_for_a_stuck_predecessor_then_takes_its_seat(store):
     assert [s[2] for s in runtime.spawned] == ["t1", "t2"]
     runtime.stuck.clear()
     tick("sw", store, ledger, runtime, now_ms=3_000)
-    assert runtime.spawned[-1] == ("eng", "sw-eng-3", "t2") and seats_of(store)["sw-eng-3"] == "eng-2@sw"
+    assert (
+        runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0003", "t2")
+        and seats_of(store)["engineer@a1b2c3-0003"] == "eng-2@sw"
+    )
 
 
 def test_a_failed_spawn_leaves_the_seat_with_a_new_generation_and_the_task_open(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(fail=True)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
-    assert [e["occupant"] for e in store.seats.history("eng-1@sw")] == ["sw-eng-1"]
+    assert [e["occupant"] for e in store.seats.history("eng-1@sw")] == ["engineer@a1b2c3-0001"]
 
 
 def test_a_task_without_a_kind_takes_its_lane_default_kind_when_claimed(store):
@@ -593,23 +605,31 @@ def test_a_spawned_agent_gets_the_conversation_id_herdr_reports_for_its_pane(sto
     rt = FakeRuntime()
     rt.conversation_ids = {"w1:p1": "5c90d80c", "w1:m1": "15e33356"}
     tick("sw", store, FakeLedger([{"id": "t1"}]), rt, 1000)
-    assert _conversations(store) == {"sw-eng-1": "5c90d80c", "sw-master-1": "15e33356"}
+    assert _conversations(store) == {"engineer@a1b2c3-0001": "5c90d80c", "master@a1b2c3-0001": "15e33356"}
 
 
 def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(store):
     rt = FakeRuntime()
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}])
     tick("sw", store, ledger, rt, 1000)
-    assert _conversations(store) == {"sw-eng-1": "", "sw-eng-2": "", "sw-master-1": ""}
+    assert _conversations(store) == {"engineer@a1b2c3-0001": "", "engineer@a1b2c3-0002": "", "master@a1b2c3-0001": ""}
     rt.conversation_ids = {"w1:p1": "first", "w1:p2": "other"}
     tick("sw", store, ledger, rt, 2000)
-    assert _conversations(store) == {"sw-eng-1": "first", "sw-eng-2": "other", "sw-master-1": ""}
+    assert _conversations(store) == {
+        "engineer@a1b2c3-0001": "first",
+        "engineer@a1b2c3-0002": "other",
+        "master@a1b2c3-0001": "",
+    }
     rt.conversation_ids = {"w1:p1": "resumed", "w1:p2": ""}
     tick("sw", store, ledger, rt, 3000)
-    assert _conversations(store) == {"sw-eng-1": "resumed", "sw-eng-2": "", "sw-master-1": ""}
+    assert _conversations(store) == {
+        "engineer@a1b2c3-0001": "resumed",
+        "engineer@a1b2c3-0002": "",
+        "master@a1b2c3-0001": "",
+    }
     del rt.conversation_ids["w1:p1"]
     tick("sw", store, ledger, rt, 4000)
-    assert _conversations(store)["sw-eng-1"] == ""
+    assert _conversations(store)["engineer@a1b2c3-0001"] == ""
 
 
 def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(store):
@@ -619,7 +639,7 @@ def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(st
     tick("sw", store, ledger, rt, 1000)
     rt.conversation_ids = None
     tick("sw", store, ledger, rt, 2000)
-    assert _conversations(store)["sw-eng-1"] == "5c90d80c"
+    assert _conversations(store)["engineer@a1b2c3-0001"] == "5c90d80c"
 
 
 def idle_for(store, ledger, runtime, ticks, start):
@@ -634,8 +654,10 @@ def test_an_idle_agent_under_a_declared_wait_is_never_nudged_or_retired(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
-    runtime.statuses["sw-eng-1"] = "idle"
-    idle.declare_wait(store.redis, "sw", "sw-eng-1", 1_000 + 15 * 60_000 + IDLE_KILL_TICKS * 60_000, "deploy", 1_000)
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle.declare_wait(
+        store.redis, "sw", "engineer@a1b2c3-0001", 1_000 + 15 * 60_000 + IDLE_KILL_TICKS * 60_000, "deploy", 1_000
+    )
     idle_for(store, ledger, runtime, 15 + IDLE_KILL_TICKS, start=2_000)
     assert runtime.nudged == [] and runtime.killed == [] and ledger.rows["t1"]["state"] == "claimed"
 
@@ -647,11 +669,11 @@ def test_a_wait_that_ended_lets_the_idle_count_run_again(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
-    runtime.statuses["sw-eng-1"] = "idle"
-    idle.declare_wait(store.redis, "sw", "sw-eng-1", 2_000, "deploy", 1_000)
-    store.redis.persist(idle.key("sw", "wait", "sw-eng-1"))
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle.declare_wait(store.redis, "sw", "engineer@a1b2c3-0001", 2_000, "deploy", 1_000)
+    store.redis.persist(idle.key("sw", "wait", "engineer@a1b2c3-0001"))
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=3_000)
-    assert runtime.killed == ["sw-eng-1"]
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
 
 
 def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_reads_idle(store):
@@ -661,9 +683,9 @@ def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_r
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
-    runtime.statuses["sw-eng-1"] = "idle"
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     for n in range(IDLE_KILL_TICKS + 2):
-        idle.beat(store.redis, "sw", "sw-eng-1", idle.WORKING, 2_000 + n * 60_000)
+        idle.beat(store.redis, "sw", "engineer@a1b2c3-0001", idle.WORKING, 2_000 + n * 60_000)
         tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.nudged == [] and runtime.killed == []
 
@@ -676,11 +698,11 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
     inbox = InboxStore(store.redis)
-    open_item = inbox.send("sw-master-1", "sw-eng-1", "your pull request has a red check")
-    closed = inbox.send("sw-master-1", "sw-eng-1", "old news")
-    inbox.close(closed.id, "sw-eng-1", "done")
-    runtime.statuses["sw-eng-1"] = "idle"
+    open_item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
+    closed = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "old news")
+    inbox.close(closed.id, "engineer@a1b2c3-0001", "done")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
-    assert runtime.killed == ["sw-eng-1"]
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
     assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
-    assert [i.id for i in inbox.inbox("sw-eng-1")] == [closed.id]
+    assert [i.id for i in inbox.inbox("engineer@a1b2c3-0001")] == [closed.id]

@@ -5,7 +5,7 @@ import re
 OPS = ("summary_set", "close", "reopen")
 HEAD = "Summary"
 MARK = f"\n\n{HEAD}\n"
-AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 MAX_NOTE = 4000
 
 

@@ -1,10 +1,12 @@
 """Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
+import time
 from dataclasses import asdict, dataclass, field, replace
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
+from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -34,6 +36,7 @@ class SwarmConfig:
     codex_share: int | None = None
     codex_min_week_left: int | None = None
     snapshot_minutes: int | None = None
+    code: str = ""
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class RedisStore:
         self.seats = SeatRegistry(redis)
         self.memory = SeatMemory(redis)
         self.culture = SwarmCulture(redis)
+        self.names = NameRegistry(redis)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
@@ -72,6 +76,7 @@ class RedisStore:
     def create(self, config):
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
+        config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
@@ -93,6 +98,7 @@ class RedisStore:
             _whole(raw.get("codex_share")),
             _whole(raw.get("codex_min_week_left")),
             _whole(raw.get("snapshot_minutes")),
+            raw.get("code", ""),
         )
 
     def update(self, slug, **changes):
@@ -148,8 +154,16 @@ class RedisStore:
     def clear_handoff(self, slug, task):
         self.redis.delete(self.key(slug, "handoff", task), self.key(slug, "handoff-seat", task))
 
-    def next_name(self, slug, lane):
-        return f"{slug}-{lane}-{self.redis.incr(self.key(slug, 'seq', lane))}"
+    def ensure_code(self, slug):
+        config = self.config(slug)
+        if config.code:
+            self.names.adopt(slug, config.code, slug, config.repo)
+            return config
+        return self.update(slug, code=self.names.mint_code(slug, slug, config.repo))
+
+    def next_name(self, slug, lane, at=0):
+        self.ensure_code(slug)
+        return self.names.next(slug, lane, at)
 
     def put_agent(self, slug, agent):
         self.redis.hset(self.key(slug, "agents"), agent.name, json.dumps(asdict(agent)))
@@ -157,8 +171,9 @@ class RedisStore:
     def agents(self, slug):
         return [AgentRecord(**json.loads(v)) for _, v in sorted(self.redis.hgetall(self.key(slug, "agents")).items())]
 
-    def drop_agent(self, slug, name):
+    def drop_agent(self, slug, name, at=None):
         self.redis.hdel(self.key(slug, "agents"), name)
+        self.names.retire(name, int(time.time() * 1000) if at is None else at)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
@@ -189,13 +204,16 @@ class RedisStore:
         if keys:
             self.redis.delete(*keys)
         self.redis.srem(f"{PREFIX}:index", slug)
+        self.names.release(slug)
 
     def export(self, slug):
         """Everything the swarm holds in Redis: its own keys, its seats and their memory, its inbox addresses."""
         self.config(slug)
         own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
-        inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug))
-        keys = sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox
+        inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug, self.names))
+        keys = (
+            sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
+        )
         return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
 
     def restore(self, slug, state):
@@ -209,6 +227,7 @@ class RedisStore:
             for key, found in state["members"].items():
                 pipe.sadd(key, *found)
             pipe.execute()
+        self.ensure_code(slug)
 
 
 def _fields(config):

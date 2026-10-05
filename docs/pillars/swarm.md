@@ -17,8 +17,8 @@ Run a crew of Claude and Codex agents over the tasks of a swarm ledger, each in 
 
 ## What a swarm is
 
-A swarm is a herdr workspace named `swarm-<id>`. Its agents work the tasks of one swarm ledger
-(`agentihooks ledger`), and every task belongs to a lane:
+A swarm is a herdr workspace named `<repo>-<code>`, after its repo folder and its swarm code. Its agents work the
+tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a lane:
 
 | Lane | Agent |
 |---|---|
@@ -26,9 +26,24 @@ A swarm is a herdr workspace named `swarm-<id>`. Its agents work the tasks of on
 | `ci` | A CI engineer whose only job is CI speed; it proposes each further bottleneck as a follow up. |
 | `master` | The one agent the operator talks to. It works no task and never edits code, commits or merges. |
 
+## Agent names
+
+Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
+`ci@a1b2c3-0001`. The type is `master`, `engineer` or `ci`. The code is six lowercase hex characters minted once
+when the swarm is created, kept on the swarm record and in a global registry that maps it to its swarm, ledger and
+repo; a code another swarm holds is minted again. A swarm created before this scheme gets its code at its next
+tick. The number has four digits and counts each type on its own within the swarm, never reused, so a successor
+master takes the next master number. A removed swarm's code stays taken; created again, the swarm gets a new one.
+
+That name is the Claude or Codex session name, the inbox address, the ledger crew name, the `status` row and the
+`terminate-agent` target. herdr refuses an at sign in agent names, so the herdr agent name carries a dash in its
+place (`engineer-a1b2c3-0002`). An inbox item left for a retired agent passes to the next agent of the same type in
+that swarm; a master's waits for its successor. `scripts/swarm/naming.py` is the only code that builds or parses an
+agent name, and a test walks `scripts/` and `hooks/` to keep it so.
+
 ## The master
 
-Every swarm that is not stopped keeps exactly one master, named `<id>-master-<n>`. The tick spawns it when the
+Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
 swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
@@ -63,11 +78,12 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> stop --now` | Kill every agent and reopen its unfinished task. |
 | `agentihooks swarm <id> close [--note TEXT] [--now]` | Close the ledger, with open tasks, follow ups or questions left or not: write a Summary section into the ledger overview, built from the ledger (merged tasks with their pull request links, tasks still open, follow ups still open, questions unanswered, phases done out of total, `--note` as a plain words paragraph on top), take a snapshot, retire every agent with the master last, put claimed tasks back to open, mark the ledger closed with `closed_at` and leave the swarm stopped. Settings, culture, seats and learned notes stay. While a master is live, `close` (and the ledger page's Close button, which runs the same command) hands the close to it as an inbox item instead; the master writes its paragraph and runs `close --note`. Without a live master, run by the master itself or with `--now`, it closes at once. The page then shows a Closed banner and HOME lists the ledger under Closed. |
 | `agentihooks swarm <id> reopen` | Reopen a closed ledger, retaining its Summary as history and running with the kept settings. A removed swarm is recreated from its newest snapshot. The tick starts a fresh master in the master seat; its prompt carries the summary and asks it to name that summary in its first ledger chat line. Engineers start only for eligible open tasks. The Closed banner and closed HOME card both run this command. A master still retiring must exit first. With no task left to start, the swarm drains and the master stays online. |
-| `agentihooks swarm <id> take-master [--replace]` | Run inside any Claude or Codex session to make it the swarm's master; the `take-master` skill runs it when the operator types "you are the master of ledger <id>". Refuses while another master is live; `--replace` retires that master first, and a dead master record is dropped. A session without `AGENTIHOOKS_AGENT_NAME` is named `<id>-master-<n>` on its session registry record, so `terminate-agent`, the tick and the inbox see it under that name. The session occupies the `master@<id>` seat and its agent record keeps the tick from spawning a second master. A closed ledger is reopened and a stopped or stopping swarm set running. Prints the full master priming: seat handoff, culture, recaps, learned notes, ledger summary and standing duties. |
+| `agentihooks swarm <id> take-master [--replace]` | Run inside any Claude or Codex session to make it the swarm's master; the `take-master` skill runs it when the operator types "you are the master of ledger <id>". Refuses while another master is live; `--replace` retires that master first, and a dead master record is dropped. A session without `AGENTIHOOKS_AGENT_NAME` is named `master@<code>-<n>` on its session registry record, so `terminate-agent`, the tick and the inbox see it under that name. The session occupies the `master@<id>` seat and its agent record keeps the tick from spawning a second master. A closed ledger is reopened and a stopped or stopping swarm set running. Prints the full master priming: seat handoff, culture, recaps, learned notes, ledger summary and standing duties. |
 | `agentihooks swarm <id> remove` | Delete a swarm with no agents left: its records and its watch and action counts, so a swarm created again under the same id starts from zero. |
 | `agentihooks swarm <id> snapshot` | Write `~/.agentihooks/swarm/<id>/snapshot.json`: the swarm's Redis keys (config and template, agents, claims with their lease, handoffs, name counters), its seats with their history, recaps and learned notes, its culture, the inbox items, pending sets and histories of its seats and agents, a copy of the ledger and each agent's worktree path. |
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task, model and account (`--route`); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every other agent is marked finished: the tick retires it and reopens its task, the master comes back fresh with its inbox waiting, and `start` hands reopened tasks to successors primed with seat memory and handoffs. Each agent's outcome, resumed or fresh with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> status [--json]` | Config with the Codex share of work-lane spawns against its target (`codex 2/7 spawns 28%  target 30%  min week left 5%`), task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. |
+| `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |

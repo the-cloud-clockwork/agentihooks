@@ -3,7 +3,7 @@
 import re
 
 OPS = ("source_add",)
-AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 MAX_SOURCE = 1000
 
 

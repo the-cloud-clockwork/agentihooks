@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.doctor import priming
 from scripts.inbox.seats import MATURITIES
+from scripts.swarm import naming
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds
@@ -378,7 +379,7 @@ GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 
 
 def kind_steps(kind, me, led, name, phase, autonomy):
-    steps = STEPS[kind](me, led, name, phase)
+    steps = STEPS[kind](me, led, naming.plain(name), phase)
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
     return steps[:5] + GATED_SHIP[autonomy](me, led, phase)

@@ -6,8 +6,7 @@ from pathlib import Path
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
 from hooks.context.context_usage import used_tokens
 from scripts.codex_context import codex_context
-
-_AGENT_NAME = re.compile(r"^(?P<slug>[a-z][a-z0-9-]*)-(?:eng|ci|master)-\d+$")
+from scripts.swarm import naming
 
 _DIRECTIVE = (
     "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
@@ -43,11 +42,18 @@ def _used(session_id: str) -> int | None:
 
 
 def _overrun(session_id: str, environ) -> tuple[str, int] | None:
-    match = _AGENT_NAME.match((os.environ if environ is None else environ).get("AGENTIHOOKS_AGENT_NAME", ""))
-    used = _used(session_id) if match and session_id else None
+    slug = _swarm_of(os.environ if environ is None else environ)
+    used = _used(session_id) if slug and session_id else None
     if used is None or used < COMPACT_LIMIT * 1000:
         return None
-    return match["slug"], used
+    return slug, used
+
+
+def _swarm_of(environ) -> str:
+    name = environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    if not naming.lane_of(name):
+        return ""
+    return naming.legacy_slug(name) or environ.get("AGENTIHOOKS_SWARM", "")
 
 
 def over_limit(session_id: str, environ=None) -> str | None:

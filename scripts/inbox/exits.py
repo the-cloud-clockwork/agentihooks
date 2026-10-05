@@ -11,15 +11,23 @@ BY = "swarm"
 
 
 def settle(inbox, name, seat, exit_text):
-    """seat is where the work goes on, '' when nobody takes it up."""
+    """seat is where the work goes on, '' when nobody takes it up. A registered name's mail passes to its successor of
+    the same type; a master's waits for its successor while none is spawned yet."""
     from scripts.inbox.store import CLOSED
+    from scripts.swarm.naming import NameRegistry
 
     inbox.seats.record_exit(name, seat, exit_text)
+    names = NameRegistry(inbox.redis)
+    successor = names.successor(name)
     for item in inbox.inbox(name):
         if item.state in CLOSED:
             continue
-        if seat:
+        if successor:
+            inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
+        elif seat:
             inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
+        elif names.entry(name).get("type") == "master":
+            continue
         elif (
             inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
         ):
@@ -30,7 +38,8 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
     from scripts.inbox.seats import is_seat, master_of
     from scripts.swarm.store import RedisStore
 
-    master = master_of(sender)
+    store = RedisStore(inbox.redis)
+    master = master_of(sender, store.names)
     if not master or is_seat(sender):
         return sender
     slug = master.split("@", 1)[1]

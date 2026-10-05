@@ -93,7 +93,7 @@ def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(e
     opening = InboxStore(store.redis).inbox(f"master@{WATCHED}")
     assert [item.sender for item in opening] == [f"master@{DOCTOR}"]
     name, task = rt.masters[-1]
-    assert name.startswith(f"{DOCTOR}-master") and task["peer"] == WATCHED
+    assert store.names.slug_of(name) == DOCTOR and task["peer"] == WATCHED
     assert f"master@{WATCHED}" in prompt.build_master(DOCTOR, "/repo", name, task)
 
 
@@ -127,7 +127,7 @@ def test_start_on_a_ledger_name_at_the_swarm_name_limit_builds_a_valid_unique_do
     assert store.peer(long_doctor) == LONG
     assert state(long_doctor)["sources"] == [str(tmp / f"{LONG}.json")]
     assert state(LONG)["sources"] == [str(tmp / f"{long_doctor}.json")]
-    [(name, task)] = [(n, t) for n, t in rt.masters if n.startswith(f"{long_doctor}-master")]
+    [(name, task)] = [(n, t) for n, t in rt.masters if store.names.slug_of(n) == long_doctor]
     assert f"agentihooks doctor {LONG} verdict" in prompt.build_master(long_doctor, "/repo", name, task)
     capsys.readouterr()
     assert doctor.main([long_doctor, "status"]) == 0
@@ -187,13 +187,14 @@ def test_a_message_to_a_closed_doctors_master_does_not_restart_it(env):
 
 
 def test_status_names_the_link_and_the_doctor_swarm(env, capsys):
+    store = env[0]
     doctor.main([WATCHED, "start"])
     capsys.readouterr()
     assert doctor.main([WATCHED, "status"]) == 0
     out = capsys.readouterr().out
     assert f"doctor {DOCTOR} watches {WATCHED}" in out
     assert "peers registered" in out and "ledger open" in out
-    assert f"{DOCTOR}-master-1" in out
+    assert f"master@{store.config(DOCTOR).code}-0001" in out
 
 
 def test_status_without_a_doctor_says_so(env, capsys):

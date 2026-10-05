@@ -63,7 +63,7 @@ class Runtime(Protocol):
 
 
 def tick(slug, store, ledger, runtime, now_ms):
-    config = store.config(slug)
+    config = store.ensure_code(slug)
     actions = []
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
@@ -174,6 +174,7 @@ def _conversations(slug, store, runtime):
         current = found.get(agent.pane_id, "")
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
+            store.names.note(agent.name, session_id=current)
 
 
 def _reopen(slug, ledger, rows, task_id):
@@ -223,7 +224,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
         for task in _claimable(slug, store, rows, lane)[: max(cap - busy, 0)]:
             if not runtime.has_capacity():
                 return actions + ["every agent is at its session cap, waiting"]
-            name = store.next_name(slug, lane)
+            name = store.next_name(slug, lane, now_ms)
             if not store.claim(slug, task["id"], name, LEASE_MS):
                 continue
             handoff = store.handoff(slug, task["id"])
@@ -288,7 +289,7 @@ def _master(slug, config, store, runtime, now_ms):
         return []
     if not runtime.has_capacity():
         return ["no session slot for the master, waiting"]
-    name = store.next_name(slug, MASTER)
+    name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
     store.put_agent(slug, record)
     try:

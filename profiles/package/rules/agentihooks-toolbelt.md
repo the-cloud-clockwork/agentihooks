@@ -97,7 +97,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 
 | Trigger | Action |
 |---|---|
-| Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `<slug>-master-<n>`, which the operator talks to on the page chat or in its pane |
+| Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full codex-share=PCT codex-min-week-left=PCT`; the ledger page swarm panel writes the same ops. An `auto` lane sends `codex-share` percent (default 30) of the swarm's spawns to Codex while Codex has `codex-min-week-left` percent (default 5) of its week left; `status` shows the share |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, a `Monitor` on `agentihooks ledger watch <slug> --as <name>`, act on every OPERATOR line, then `ack` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
@@ -106,7 +106,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
 | Context reaches `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Write the handoff document and a recap, `agentihooks swarm <slug> handoff <doc> --recap <recap>`, stop; a successor continues from them, primed with the seat's handoff, the swarm culture, latest recap, learned notes and older recaps. A lesson for every later occupant of the seat: `agentihooks swarm <slug> learned "<text>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the limit on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
 
-- Each swarm keeps one master, `<slug>-master-<n>`: the tick starts it, respawns
+- Each swarm keeps one master, `master@<code>-<n>`: the tick starts it, respawns
   it and recycles it through a handoff. It answers unaddressed page chat, keeps the
   ledger, writes tasks and steers caps; it never claims a task, edits code,
   commits or merges. Its card sits first in the swarm panel.
