@@ -206,6 +206,11 @@ def _write_launcher(
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
 
+    from scripts.profile_telemetry import installed_langfuse_env
+
+    environ = {**installed_langfuse_env(spec.agent), **environ}
+    langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
+    langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ)
     if prompt_file is not None:
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
@@ -226,6 +231,7 @@ def _write_launcher(
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{_telemetry_exports(name, environ)}"
         f"{_swarm_exports(environ)}"
+        f"{langfuse_export}"
         f"{before}{command_text}\n"
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"

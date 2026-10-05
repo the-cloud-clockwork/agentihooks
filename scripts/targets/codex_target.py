@@ -174,10 +174,10 @@ class CodexAdapter:
         self._dump_toml(config_path, doc)
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
-        self._write_hooks_json(home)
+        self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
         return config_path
 
-    def _write_hooks_json(self, home: Path) -> None:
+    def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
         _i = _install_module()
         wrapper = home / "agentihooks-hook.sh"
         python_bin = str(_i._detect_venv() or sys.executable)
@@ -186,7 +186,10 @@ class CodexAdapter:
             "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
             "set -euo pipefail\n"
             f"cd {shlex.quote(str(_i.AGENTIHOOKS_ROOT))}\n"
-            f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
+            + "".join(
+                f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in (profile_env or {}).items()
+            )
+            + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
         )
         wrapper.chmod(0o755)
 
