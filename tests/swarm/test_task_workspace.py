@@ -44,8 +44,8 @@ def test_a_reclaim_reuses_the_folder_and_keeps_what_is_there(store):
     folder = Path(rows.rows["t1"]["workspace"])
     (folder / "progress.md").write_text("tests red\n", encoding="utf-8")
     (folder / "steering.md").write_text("operator steer\n", encoding="utf-8")
-    store.release("sw", "t1", "sw-eng-1")
-    store.drop_agent("sw", "sw-eng-1")
+    store.release("sw", "t1", "engineer@a1b2c3-0001")
+    store.drop_agent("sw", "engineer@a1b2c3-0001")
     rows.rows["t1"].update(state="open", claimed_by="", description="changed")
     tick("sw", store, rows, runtime, now_ms=2_000)
     assert [t["workspace"] for t in runtime.tasks] == [str(folder), str(folder)]
@@ -55,14 +55,16 @@ def test_a_reclaim_reuses_the_folder_and_keeps_what_is_there(store):
 
 def test_the_prompt_names_the_work_folder():
     task = {"id": "t1", "title": "Build it", "workspace": "/w/sw/tasks/t1"}
-    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", task)
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", task)
     assert "/w/sw/tasks/t1" in text
     for name in ("steering.md", "progress.md", "proof.md"):
         assert name in text
 
 
 def test_a_prompt_without_a_work_folder_says_nothing_about_one():
-    assert "steering.md" not in prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "Build it"})
+    assert "steering.md" not in prompt.build(
+        "sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "Build it"}
+    )
 
 
 def test_tails_return_the_latest_progress_and_proof_lines():

@@ -9,6 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, replace
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
+from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:inbox"
 MOVE_ATTEMPTS = 3
@@ -142,7 +143,11 @@ class InboxStore:
     def close(self, item_id, closer, kind, detail=""):
         state, reason = close_reason(kind, detail)
         return self._move(
-            item_id, closer, lambda item: (item.address, item.sender, master_of(item.address)), state, reason
+            item_id,
+            closer,
+            lambda item: (item.address, item.sender, master_of(item.address, NameRegistry(self.redis))),
+            state,
+            reason,
         )
 
     def withdraw(self, item_id: str, by: str, reason: str, expected_address: str = "") -> Item | None:

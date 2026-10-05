@@ -42,9 +42,9 @@ def test_create_is_paused_then_start_spawns_and_status_lists(env, capsys):
     assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "1") == 0
     assert store.config("sw").state == "paused" and rt.spawned == []
     assert run("sw", "start") == 0
-    assert [s[1] for s in rt.spawned] == ["sw-eng-1", "sw-ci-1"]
+    assert [s[1] for s in rt.spawned] == ["engineer@a1b2c3-0001", "ci@a1b2c3-0001"]
     run("sw", "status")
-    assert "sw-eng-1" in capsys.readouterr().out
+    assert "engineer@a1b2c3-0001" in capsys.readouterr().out
 
 
 def test_start_reports_plan_shape_and_warns_before_spawning(env, capsys, monkeypatch):
@@ -89,10 +89,10 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("done", "https://github.com/o/r/pull/9")
-    assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] == ["finished"]
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
     assert store.claimant("sw", "t1") is None
 
 
@@ -100,9 +100,9 @@ def test_block_comments_parks_and_finishes(env):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "sw-ci-1", "block", "waiting on a token only the operator can create") == 0
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token only the operator can create") == 0
     assert ledger.rows["t2"]["state"] == "blocked"
-    assert ledger.comments == [("t2", "waiting on a token only the operator can create", "sw-ci-1")]
+    assert ledger.comments == [("t2", "waiting on a token only the operator can create", "ci@a1b2c3-0001")]
 
 
 def test_say_addresses_and_strangers_are_refused(env, capsys):
@@ -110,13 +110,14 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
-    assert run("sw", "--as", "sw-eng-1", "say", "the docs task is merged", "--to", "ci") == 0
-    assert ledger.said == [("@ci the docs task is merged", "sw-eng-1")]
-    [item] = InboxStore(store.redis).inbox("sw-ci-1")
-    assert (item.sender, item.text, item.state) == ("sw-eng-1", "the docs task is merged", "pending")
-    assert run("sw", "--as", "sw-eng-1", "say", "status for the page only") == 0
-    assert ledger.said[-1] == ("status for the page only", "sw-eng-1")
-    assert [i.text for i in InboxStore(store.redis).inbox("sw-ci-1")] == ["the docs task is merged"]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "the docs task is merged", "--to", "ci") == 0
+    assert ledger.said == [("@ci the docs task is merged", "engineer@a1b2c3-0001")]
+    [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
+    assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
+    assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
+    assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
+
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
 
@@ -125,9 +126,9 @@ def test_say_with_fyi_marks_each_item_as_needing_no_work(env):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "sw-eng-1", "say", "thanks for the review", "--to", "ci", "--fyi") == 0
-    assert run("sw", "--as", "sw-eng-1", "say", "please rerun the checks", "--to", "ci") == 0
-    assert [(i.text, i.fyi) for i in InboxStore(store.redis).inbox("sw-ci-1")] == [
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "thanks for the review", "--to", "ci", "--fyi") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "please rerun the checks", "--to", "ci") == 0
+    assert [(i.text, i.fyi) for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == [
         ("thanks for the review", True),
         ("please rerun the checks", False),
     ]
@@ -137,10 +138,10 @@ def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypa
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@a1b2c3-0001")
     run("sw", "done", "--pr", "https://github.com/o/r/pull/4")
     assert run("sw", "stop", "--now") == 0
-    assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1", "sw-master-1"]
+    assert sorted(rt.killed) == ["ci@a1b2c3-0001", "engineer@a1b2c3-0001", "master@a1b2c3-0001"]
     assert store.config("sw").state == "stopped" and store.agents("sw") == []
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "done")
 
@@ -153,7 +154,7 @@ def test_create_refuses_ids_that_break_agent_names(env, capsys):
 def test_as_equals_is_not_mistaken_for_set(env, monkeypatch):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as=sw-eng-1", "issue", "https://github.com/o/r/issues/1") == 0
+    assert run("sw", "--as=engineer@a1b2c3-0001", "issue", "https://github.com/o/r/issues/1") == 0
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
@@ -197,11 +198,11 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
 
     rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("codex", "priority"))
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
-    placed = rt.spawn(config, "ci", "sw-ci-1", {"id": "t2", "title": "speed up the tests"})
-    prompt_path = tmp_path / "sw" / "prompts" / "sw-ci-1.md"
+    placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
+    prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
     assert placed == runtime.Placed("w3:p1", "codex", "acct")
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
-    assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["sw-ci-1", "--agent", "codex"]
+    assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
     text = prompt_path.read_text()
     assert "speed up the tests" in text and "CI speed" in text and "agentihooks swarm sw done --pr" in text
@@ -213,15 +214,15 @@ def test_runtime_spawn_failure_names_the_reason(tmp_path):
 
     rt = runtime.HerdrRuntime(home=tmp_path, run=fail, choose=lambda r, e: ("claude", "priority"))
     with pytest.raises(runtime.SpawnError, match="no server"):
-        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
 
 
 def test_agent_record_round_trips_through_status_json(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-eng-9", "eng", "t1"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1"))
     run("sw", "status", "--json")
-    assert json.loads(capsys.readouterr().out.splitlines()[-1])["agents"][0]["name"] == "sw-eng-9"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["agents"][0]["name"] == "engineer@a1b2c3-0009"
 
 
 def test_agentihooks_dispatches_swarm(monkeypatch):
@@ -243,7 +244,7 @@ def test_runtime_refuses_to_spawn_when_every_agent_is_full(tmp_path):
         home=tmp_path, run=lambda argv, **kw: calls.append(argv), choose=lambda r, e: ("claude", agent_choice.ALL_FULL)
     )
     with pytest.raises(runtime.SpawnError, match="session cap"):
-        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert calls == []
 
 
@@ -257,7 +258,7 @@ def test_runtime_treats_a_failed_route_as_a_failed_spawn_and_cleans_up(tmp_path)
 
     rt = runtime.HerdrRuntime(home=tmp_path, run=fake_run, choose=lambda r, e: ("claude", "priority"))
     with pytest.raises(runtime.SpawnError):
-        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+        rt.spawn(cli.SwarmConfig("sw", "/repo", 1, 1), "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert seen == ["init-agent", "terminate-agent"]
 
 
@@ -268,7 +269,7 @@ def test_runtime_retire_reports_a_failed_terminate_and_closes_leftover_panes(tmp
         run=lambda argv, **kw: subprocess.CompletedProcess(argv, 2, stdout="", stderr="ambiguous"),
         herdr=lambda args: closed.append(args) or {},
     )
-    agent = AgentRecord("sw-eng-1", "eng", "t1", pane_id="w3:p1")
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent, live=True) is False and closed == []
     assert rt.retire(agent, live=False) is True and closed == [["pane", "close", "w3:p1"]]
 
@@ -280,8 +281,8 @@ def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
         run=lambda argv, **kw: seen.append(argv) or subprocess.CompletedProcess(argv, 0),
         herdr=lambda a: {},
     )
-    assert rt.retire(AgentRecord("sw-eng-1", "eng", "t1"), live=True)
-    assert seen[0][1:] == ["terminate-agent", "sw-eng-1", "--force-shared"]
+    assert rt.retire(AgentRecord("engineer@a1b2c3-0001", "eng", "t1"), live=True)
+    assert seen[0][1:] == ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
 
 
 def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_path, capsys):
@@ -290,9 +291,9 @@ def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_
     run("sw", "start")
     doc = tmp_path / "handoff.md"
     doc.write_text("issue 7 is open, tests red on seam 2")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
-    assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] == ["finished"]
-    assert store.claimant("sw", "t1") == "sw-eng-1"
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
+    assert store.claimant("sw", "t1") == "engineer@a1b2c3-0001"
     assert store.handoff("sw", "t1") == "issue 7 is open, tests red on seam 2"
     assert store.handoff_seat("sw", "t1") == "eng-1@sw"
     assert ledger.rows["t1"]["state"] == "claimed"
@@ -306,20 +307,20 @@ def test_wait_declares_an_end_time_for_the_calling_agent(env, capsys, monkeypatc
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
-    assert run("sw", "--as", "sw-eng-1", "wait", "15", "--reason", "deploy run") == 0
-    assert idle.wait(store.redis, "sw", "sw-eng-1") == {
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "wait", "15", "--reason", "deploy run") == 0
+    assert idle.wait(store.redis, "sw", "engineer@a1b2c3-0001") == {
         "until": 1_000 + 15 * 60_000,
         "reason": "deploy run",
         "at": 1_000,
     }
     assert '"until"' in capsys.readouterr().out
-    assert run("sw", "--as", "sw-eng-1", "wait", "0") == 1
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "wait", "0") == 1
 
 
 def test_handoff_refuses_a_missing_document(env, capsys):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "sw-eng-1", "handoff", "/no/such/doc.md") == 1
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", "/no/such/doc.md") == 1
     assert "handoff" in capsys.readouterr().err
 
 
@@ -328,14 +329,14 @@ def test_done_closes_items_left_for_the_agent_and_tells_their_sender(env, monkey
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     closed = inbox.get(item.id)
-    assert closed.state == "cancelled" and "sw-eng-1 finished its task and exited" in closed.reason
+    assert closed.state == "cancelled" and "engineer@a1b2c3-0001 finished its task and exited" in closed.reason
     assert [entry["state"] for entry in inbox.history(item.id)] == ["pending", "cancelled"]
-    assert inbox.pending_items("sw-eng-1") == []
-    [told] = inbox.pending_items("sw-ci-1")
+    assert inbox.pending_items("engineer@a1b2c3-0001") == []
+    [told] = inbox.pending_items("ci@a1b2c3-0001")
     assert told.sender == "swarm" and item.id in told.text
 
 
@@ -344,13 +345,13 @@ def test_handoff_moves_items_left_for_the_agent_to_its_seat(env, tmp_path):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
     doc = tmp_path / "handoff.md"
     doc.write_text("issue 7 is open")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     moved = inbox.get(item.id)
     assert (moved.address, moved.state) == ("eng-1@sw", "pending")
-    assert inbox.pending_items("sw-eng-1") == []
+    assert inbox.pending_items("engineer@a1b2c3-0001") == []
     assert [i.id for i in inbox.pending_items("eng-1@sw")] == [item.id]
     assert "moved to eng-1@sw" in inbox.history(item.id)[-1]["reason"]
 
@@ -360,13 +361,13 @@ def test_done_also_closes_an_item_delivered_but_never_closed(env, monkeypatch):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    seen = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
-    unseen = inbox.send("sw-ci-1", "sw-eng-1", "schema confirmed")
-    inbox.deliver(seen.id, "sw-eng-1")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    seen = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    unseen = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "schema confirmed")
+    inbox.deliver(seen.id, "engineer@a1b2c3-0001")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     assert [inbox.get(i.id).state for i in (seen, unseen)] == ["cancelled", "cancelled"]
-    assert len(inbox.pending_items("sw-ci-1")) == 2
+    assert len(inbox.pending_items("ci@a1b2c3-0001")) == 2
 
 
 def test_handoff_puts_an_item_delivered_but_never_closed_back_on_the_seat_pending(env, tmp_path):
@@ -374,11 +375,11 @@ def test_handoff_puts_an_item_delivered_but_never_closed_back_on_the_seat_pendin
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    seen = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
-    inbox.read(seen.id, "sw-eng-1")
+    seen = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    inbox.read(seen.id, "engineer@a1b2c3-0001")
     doc = tmp_path / "handoff.md"
     doc.write_text("issue 7 is open")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     moved = inbox.get(seen.id)
     assert (moved.address, moved.state) == ("eng-1@sw", "pending")
     assert [i.id for i in inbox.pending_items("eng-1@sw")] == [seen.id]
@@ -390,11 +391,12 @@ def test_exit_notice_for_an_exited_sender_goes_to_the_master_seat(env):
     run("sw", "start")
     inbox = InboxStore(store.redis)
     for notice in inbox.pending_items("master@sw"):
-        inbox.close(notice.id, "sw-master-1", "done")
-    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
-    assert run("sw", "--as", "sw-ci-1", "done", "--pr", "https://github.com/o/r/pull/8") == 0
-    assert run("sw", "--as", "sw-eng-1", "done", "--pr", "https://github.com/o/r/pull/9") == 0
-    assert inbox.pending_items("sw-ci-1") == []
+        inbox.close(notice.id, "master@a1b2c3-0001", "done")
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/8") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    assert inbox.pending_items("ci@a1b2c3-0001") == []
+
     [notice] = inbox.pending_items("master@sw")
     assert item.id in notice.text
 
@@ -404,14 +406,14 @@ def test_next_tick_settles_messages_sent_after_done(env):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    assert run("sw", "--as", "sw-eng-1", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     cli.run_tick(store, "sw")
-    item = inbox.send("sw-ci-1", "sw-eng-1", "late contract")
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "late contract")
     cli.run_tick(store, "sw")
     closed = inbox.get(item.id)
     assert closed.state == "cancelled"
     assert "finished its task and exited" in closed.reason
-    [notice] = inbox.pending_items("sw-ci-1")
+    [notice] = inbox.pending_items("ci@a1b2c3-0001")
     assert item.id in notice.text
 
 
@@ -421,14 +423,14 @@ def test_block_closes_open_items_once_and_tells_the_sender(env, state):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
-    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
-    getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "sw-eng-1")
-    assert run("sw", "--as", "sw-eng-1", "block", "missing dependency") == 0
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "engineer@a1b2c3-0001")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "block", "missing dependency") == 0
     closed = inbox.get(item.id)
     assert closed.state == "cancelled"
     assert "blocked its task and exited" in closed.reason
     cli.run_tick(store, "sw")
-    assert len(inbox.pending_items("sw-ci-1")) == 1
+    assert len(inbox.pending_items("ci@a1b2c3-0001")) == 1
 
 
 def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
@@ -437,14 +439,14 @@ def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
     run("sw", "start")
     doc = tmp_path / "handoff.md"
     doc.write_text("keep working")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     cli.run_tick(store, "sw")
     inbox = InboxStore(store.redis)
-    item = inbox.send("sw-ci-1", "sw-eng-1", "late contract")
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "late contract")
     cli.run_tick(store, "sw")
-    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
     successor = store.seats.occupant("eng-1@sw").occupant
-    assert successor != "sw-eng-1"
+    assert successor == "engineer@a1b2c3-0002"
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (successor, "pending")
     assert inbox.deliver(item.id, successor).state == "delivered"
 
 
@@ -461,7 +463,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
-    item = InboxStore(store.redis).send("sw-eng-1", "operator", "the job finished at 18:45")
+    item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
     assert ran == ["event_pass", "phase_pass", "wake_pass"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
@@ -470,7 +472,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
 def test_agent_prompt_starts_by_reading_the_ledger_json():
     from scripts.swarm import prompt
 
-    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")
 
 
@@ -478,44 +480,48 @@ def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     records = {
-        "sw-eng-1": AgentRecord("sw-eng-1", "eng", "t1", state="starting", model="opus", effort="high"),
-        "sw-eng-2": AgentRecord("sw-eng-2", "eng", "t1", idle_ticks=1),
-        "sw-eng-3": AgentRecord("sw-eng-3", "eng", "t1", idle_ticks=3),
-        "sw-eng-4": AgentRecord("sw-eng-4", "eng", "t1", state="finished", idle_ticks=5),
-        "sw-eng-5": AgentRecord("sw-eng-5", "eng", "t1"),
+        "engineer@a1b2c3-0001": AgentRecord(
+            "engineer@a1b2c3-0001", "eng", "t1", state="starting", model="opus", effort="high"
+        ),
+        "engineer@a1b2c3-0002": AgentRecord("engineer@a1b2c3-0002", "eng", "t1", idle_ticks=1),
+        "engineer@a1b2c3-0003": AgentRecord("engineer@a1b2c3-0003", "eng", "t1", idle_ticks=3),
+        "engineer@a1b2c3-0004": AgentRecord("engineer@a1b2c3-0004", "eng", "t1", state="finished", idle_ticks=5),
+        "engineer@a1b2c3-0005": AgentRecord("engineer@a1b2c3-0005", "eng", "t1"),
     }
     for record in records.values():
         store.put_agent("sw", record)
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert {n: a["status"] for n, a in agents.items()} == {
-        "sw-eng-1": "working",
-        "sw-eng-2": "idle",
-        "sw-eng-3": "stalled",
-        "sw-eng-4": "finished",
-        "sw-eng-5": "working",
+        "engineer@a1b2c3-0001": "working",
+        "engineer@a1b2c3-0002": "idle",
+        "engineer@a1b2c3-0003": "stalled",
+        "engineer@a1b2c3-0004": "finished",
+        "engineer@a1b2c3-0005": "working",
     }
-    assert (agents["sw-eng-1"]["model"], agents["sw-eng-1"]["effort"]) == ("opus", "high")
+    assert (agents["engineer@a1b2c3-0001"]["model"], agents["engineer@a1b2c3-0001"]["effort"]) == ("opus", "high")
 
 
 def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", harness="codex", model="gpt-6.1-sol", effort="high"))
-    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", harness="claude"))
+    store.put_agent(
+        "sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", harness="codex", model="gpt-6.1-sol", effort="high")
+    )
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", harness="claude"))
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert "gpt-6.1-sol high" in lines["sw-eng-1"]
-    assert "unknown" in lines["sw-eng-2"]
+    assert "gpt-6.1-sol high" in lines["engineer@a1b2c3-0001"]
+    assert "unknown" in lines["engineer@a1b2c3-0002"]
 
 
 def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
     from scripts.swarm import prompt
 
-    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1"})
-    led = "agentihooks ledger --slug sw --as sw-eng-1"
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
+    led = "agentihooks ledger --slug sw --as engineer@a1b2c3-0001"
     assert f"{led} join" in text
-    assert "agentihooks ledger watch sw --as sw-eng-1" in text
+    assert "agentihooks ledger watch sw --as engineer@a1b2c3-0001" in text
     assert f"{led} ack" in text
     assert f"{led} comment phases/p1" in text
     assert f"{led} followup add" in text
@@ -526,14 +532,16 @@ def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
 def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave_then_done():
     from scripts.swarm import prompt
 
-    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1"})
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     steps = [line for line in text.splitlines() if line[:1].isdigit() and line[1:3] == ". "]
     review = next(i for i, s in enumerate(steps) if "Gates green" in s and "review per the dev-cycle skill" in s)
     merge = next(i for i, s in enumerate(steps) if "Merge on green checks" in s)
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
-    assert last.index("agentihooks ledger --slug sw --as sw-eng-1 leave") < last.index("agentihooks swarm sw done --pr")
+    assert last.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
+        "agentihooks swarm sw done --pr"
+    )
 
 
 def test_set_compact_limit_stores_it_on_the_swarm(env, capsys):
@@ -547,9 +555,9 @@ def test_set_compact_limit_stores_it_on_the_swarm(env, capsys):
 def test_the_master_takes_no_task_commands(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
     for argv in (("issue", "https://x/issues/1"), ("pr", "https://x/pull/1"), ("done",), ("block", "why")):
-        assert run("sw", "--as", "sw-master-1", *argv) == 1
+        assert run("sw", "--as", "master@a1b2c3-0001", *argv) == 1
         assert "master works no task" in capsys.readouterr().err
     assert ledger.comments == [] and [a.state for a in store.agents("sw")] == ["working"]
 
@@ -557,10 +565,10 @@ def test_the_master_takes_no_task_commands(env, capsys):
 def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
     doc = tmp_path / "handoff.md"
     doc.write_text("operator asked for a docs task")
-    assert run("sw", "--as", "sw-master-1", "handoff", str(doc)) == 0
+    assert run("sw", "--as", "master@a1b2c3-0001", "handoff", str(doc)) == 0
     assert store.handoff("sw", "master") == "operator asked for a docs task"
     assert [a.state for a in store.agents("sw")] == ["finished"]
 
@@ -568,23 +576,23 @@ def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
 def test_master_prompt_runs_the_swarm_and_never_codes():
     from scripts.swarm import prompt
 
-    text = prompt.build("sw", "/repo", "master", "sw-master-2", {"id": "master", "handoff": "caps go to four"})
-    led = "agentihooks ledger --slug sw --as sw-master-2"
+    text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master", "handoff": "caps go to four"})
+    led = "agentihooks ledger --slug sw --as master@a1b2c3-0002"
     for needle in (
         f"{led} join --role orchestrator",
-        "agentihooks ledger watch sw --as sw-master-2",
+        "agentihooks ledger watch sw --as master@a1b2c3-0002",
         f"{led} ack",
         f"{led} task add",
         f"{led} time-left",
         f"{led} followup add",
-        "agentihooks swarm sw --as sw-master-2 say --to operator",
+        "agentihooks swarm sw --as master@a1b2c3-0002 say --to operator",
         "agentihooks msg reply",
         "--fyi",
-        "agentihooks swarm sw --as sw-master-2 send-message",
-        "agentihooks swarm sw --as sw-master-2 set max-eng-agents=",
-        "agentihooks swarm sw --as sw-master-2 pause",
-        "agentihooks swarm sw --as sw-master-2 stop",
-        "agentihooks swarm sw --as sw-master-2 handoff",
+        "agentihooks swarm sw --as master@a1b2c3-0002 send-message",
+        "agentihooks swarm sw --as master@a1b2c3-0002 set max-eng-agents=",
+        "agentihooks swarm sw --as master@a1b2c3-0002 pause",
+        "agentihooks swarm sw --as master@a1b2c3-0002 stop",
+        "agentihooks swarm sw --as master@a1b2c3-0002 handoff",
         "browser_close",
         "caps go to four",
     ):
@@ -599,23 +607,30 @@ def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1"))
-    rt.live.add("sw-eng-1")
-    item = InboxStore(store.redis).send("operator", "sw-eng-1", "look at the failing check")
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="p1"))
+    rt.live.add("engineer@a1b2c3-0001")
+    item = InboxStore(store.redis).send("operator", "engineer@a1b2c3-0001", "look at the failing check")
     herdr = FakeHerdr({"p1": "idle"})
     actions = cli.run_tick(store, "sw", ledger, rt, herdr)
     assert herdr.prompts == [("p1", WAKE_TEXT)]
-    assert f"woke sw-eng-1 for message {item.id}" in actions
+    assert f"woke engineer@a1b2c3-0001 for message {item.id}" in actions
 
 
 def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", seat="master@sw"))
-    rt.live.add("sw-master-1")
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master", pane_id="m1", seat="master@sw"))
+    rt.live.add("master@a1b2c3-0001")
     ledger.log = []
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
-    added = {"rev": 1, "at": 1, "by": "sw-eng-1", "kind": "added", "target": "followups/f1", "text": "cap retries"}
+    added = {
+        "rev": 1,
+        "at": 1,
+        "by": "engineer@a1b2c3-0001",
+        "kind": "added",
+        "target": "followups/f1",
+        "text": "cap retries",
+    }
     ledger.log = [added]
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
     [item] = InboxStore(store.redis).inbox("master@sw")
@@ -626,36 +641,38 @@ def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):
 def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monkeypatch, tmp_path):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
-    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1", title="Fold the chat panel")
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", idle_ticks=4))
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0001", title="Fold the chat panel")
     monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
     run("sw", "status", "--json")
     found = json.loads(capsys.readouterr().out.splitlines()[-1])["findings"]
     assert [(f["kind"], f["subject"], f["evidence"]) for f in found] == [
-        ("idle with claim", "sw-eng-1", ["task Fold the chat panel (claimed)"])
+        ("idle with claim", "engineer@a1b2c3-0001", ["task Fold the chat panel (claimed)"])
     ]
     run("sw", "status")
     assert capsys.readouterr().out.splitlines()[-4:] == [
-        "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding a task",
+        "finding  idle with claim  engineer@a1b2c3-0001: idle for 4 ticks while holding a task",
         "  - task Fold the chat panel (claimed)",
         "  threshold 3 idle ticks",
-        "  id idle-with-claim/sw-eng-1",
+        "  id idle-with-claim/engineer@a1b2c3-0001",
     ]
 
 
 def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypatch):
     run("sw", "create", "--repo", "/repo")
     entries = ("Split the parser, gain 4", "Cache the index, gain 1.5", "q2, no gain stated")
-    finding = cli.health.Finding("scope inflation", "sw-eng-1", "queued 3 tasks for its own lane", entries, "3 tasks")
+    finding = cli.health.Finding(
+        "scope inflation", "engineer@a1b2c3-0001", "queued 3 tasks for its own lane", entries, "3 tasks"
+    )
     monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
     run("sw", "status")
     assert capsys.readouterr().out.splitlines()[-6:] == [
-        "finding  scope inflation  sw-eng-1: queued 3 tasks for its own lane",
+        "finding  scope inflation  engineer@a1b2c3-0001: queued 3 tasks for its own lane",
         "  - Split the parser, gain 4",
         "  - Cache the index, gain 1.5",
         "  - q2, no gain stated",
         "  threshold 3 tasks",
-        "  id scope-inflation/sw-eng-1",
+        "  id scope-inflation/engineer@a1b2c3-0001",
     ]
 
 
@@ -665,9 +682,9 @@ def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", seat="master@sw"))
-    store.seats.occupy("master@sw", "sw-master-1", 1)
-    rt.live.add("sw-master-1")
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master", pane_id="m1", seat="master@sw"))
+    store.seats.occupy("master@sw", "master@a1b2c3-0001", 1)
+    rt.live.add("master@a1b2c3-0001")
     box = InboxStore(store.redis)
     said = {
         "rev": 7,
@@ -682,9 +699,9 @@ def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
     [item] = box.inbox("master@sw")
     assert (item.sender, item.state) == ("operator", "pending") and "how far" in item.text
-    answer = box.reply(item.id, "sw-master-1", "two tasks left")
+    answer = box.reply(item.id, "master@a1b2c3-0001", "two tasks left")
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
-    assert ("two tasks left", "sw-master-1") in ledger.said
+    assert ("two tasks left", "master@a1b2c3-0001") in ledger.said
     assert box.get(item.id).state == "done" and box.get(answer.id).state == "done"
 
 
@@ -697,26 +714,26 @@ def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_z
         cli.activity.record("Monitor", {}, {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_AGENT_NAME": f"{slug}-eng-1"})
         store.next_name(slug, "eng")
     assert run("missing", "remove") == 1
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1"))
     assert run("sw", "remove") == 1
     assert store.slugs() == ["other", "sw"]
-    store.drop_agent("sw", "sw-eng-1")
+    store.drop_agent("sw", "engineer@a1b2c3-0001")
     assert run("sw", "remove") == 0
     assert store.slugs() == ["other"]
     assert cli.activity.counts("sw") == {}
     assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0}}
     run("sw", "create", "--repo", "/repo")
     assert cli.activity.counts("sw") == {}
-    assert store.next_name("sw", "eng") == "sw-eng-1"
-    assert store.next_name("other", "eng") == "other-eng-2"
+    assert store.next_name("sw", "eng") == "engineer@a1b2c5-0001"
+    assert store.next_name("other", "eng") == "engineer@a1b2c4-0002"
 
 
 def _idle_finding(env, monkeypatch, tmp_path):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
-    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1", title="Fold the chat panel")
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", idle_ticks=4))
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0001", title="Fold the chat panel")
     monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
 
 
@@ -728,8 +745,8 @@ def _findings(capsys):
 def test_a_master_verdict_hides_the_finding_from_status(env, capsys, monkeypatch, tmp_path):
     _idle_finding(env, monkeypatch, tmp_path)
     [found] = _findings(capsys)
-    assert (found["id"], found["verdict"]) == ("idle-with-claim/sw-eng-1", None)
-    assert run("sw", "--as", "sw-master-1", "verdict", found["id"], "false-positive", "--note", "on checks") == 0
+    assert (found["id"], found["verdict"]) == ("idle-with-claim/engineer@a1b2c3-0001", None)
+    assert run("sw", "--as", "master@a1b2c3-0001", "verdict", found["id"], "false-positive", "--note", "on checks") == 0
     assert json.loads(capsys.readouterr().out)["verdict"] == "false-positive"
     assert _findings(capsys) == []
 
@@ -737,9 +754,9 @@ def test_a_master_verdict_hides_the_finding_from_status(env, capsys, monkeypatch
 def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monkeypatch, tmp_path):
     _idle_finding(env, monkeypatch, tmp_path)
     _findings(capsys)
-    assert run("sw", "--as", "sw-eng-1", "verdict", "idle-with-claim/sw-eng-1", "resolved") == 1
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 1
     assert "only the master or the operator" in capsys.readouterr().err
-    assert run("sw", "--as", "operator", "verdict", "idle-with-claim/sw-eng-1", "resolved") == 0
+    assert run("sw", "--as", "operator", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 0
 
 
 def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env, capsys, monkeypatch, tmp_path):
@@ -864,9 +881,10 @@ def test_say_refused_by_a_link_posts_nothing_and_names_why(env, capsys):
     store.update("sw", links=[{"from": "ci", "to": "eng", "kind": "can-observe"}])
     run("sw", "start")
     ledger.said.clear()
-    assert run("sw", "--as", "sw-ci-1", "say", "take my task", "--to", "eng") == 1
+    assert run("sw", "--as", "ci@a1b2c3-0001", "say", "take my task", "--to", "eng") == 1
+
     assert "can only observe" in capsys.readouterr().err
-    assert ledger.said == [] and InboxStore(store.redis).inbox("sw-eng-1") == []
+    assert ledger.said == [] and InboxStore(store.redis).inbox("engineer@a1b2c3-0001") == []
 
 
 def test_set_codex_share_and_status_shows_the_share_against_the_target(env, capsys):
@@ -910,32 +928,35 @@ def test_set_refuses_a_codex_share_over_one_hundred(env):
 def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
-    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", pane_id="w1:p2"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w1:p2"))
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["sw-eng-1"][-1] == "5c90d80c" and lines["sw-eng-2"][-1] == "-"
+    assert lines["engineer@a1b2c3-0001"][-1] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-1] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
-    assert (agents["sw-eng-1"]["conversation_id"], agents["sw-eng-2"]["conversation_id"]) == ("5c90d80c", "")
+    assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (
+        "5c90d80c",
+        "",
+    )
 
 
 def test_status_shows_each_restored_agent_outcome_with_its_reason(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     resumed = {
-        "name": "sw-eng-1",
+        "name": "engineer@a1b2c3-0001",
         "lane": "eng",
         "task": "t1",
         "outcome": "resumed",
         "reason": "own conversation reopened",
     }
-    fresh = {"name": "sw-eng-2", "lane": "eng", "task": "t2", "outcome": "fresh", "reason": "worktree gone"}
+    fresh = {"name": "engineer@a1b2c3-0002", "lane": "eng", "task": "t2", "outcome": "fresh", "reason": "worktree gone"}
     store.put_restored("sw", [resumed, fresh])
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
-    assert "restored  sw-eng-1  resumed  own conversation reopened" in out
-    assert "restored  sw-eng-2  fresh  worktree gone" in out
+    assert "restored  engineer@a1b2c3-0001  resumed  own conversation reopened" in out
+    assert "restored  engineer@a1b2c3-0002  fresh  worktree gone" in out
     run("sw", "status", "--json")
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["restored"] == [resumed, fresh]
 
@@ -946,7 +967,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
 
     def restore(store, slug, live, source, runtime):
         seen["runtime"] = runtime
-        return [Outcome("sw-eng-1", "eng", "t1", "fresh", "no conversation id")]
+        return [Outcome("engineer@a1b2c3-0001", "eng", "t1", "fresh", "no conversation id")]
 
     run("sw", "create", "--repo", "/repo")
     monkeypatch.setattr(cli.snapshot, "newest", lambda slug: "/snap.json")
@@ -954,7 +975,7 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
     run("sw", "restore")
     printed = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert [(r["name"], r["outcome"], r["reason"]) for r in printed["restored"]] == [
-        ("sw-eng-1", "fresh", "no conversation id")
+        ("engineer@a1b2c3-0001", "fresh", "no conversation id")
     ]
     assert seen["runtime"] is rt
 

@@ -30,5 +30,5 @@ def test_settable_caps_are_documented():
 
 def test_runtime_facts_are_documented():
     text = _text()
-    for fact in ("AGENTIHOOKS_SWARM_REDIS_URL", "every minute", "one task", "eng", "ci", "<id>-master-<n>"):
+    for fact in ("AGENTIHOOKS_SWARM_REDIS_URL", "every minute", "one task", "eng", "ci", "master@<code>-<n>"):
         assert fact in text, fact

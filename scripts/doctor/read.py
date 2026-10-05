@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from scripts.inbox.seats import of_swarm
+from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import MASTER, PREFIX
 
 HANDOFF_START = "1. Handoff document: a previous agent ran out of context and left it. Continue from it:"
@@ -21,10 +22,10 @@ def health_records(redis, slug):
 
 def inbox_items(inbox, slug):
     prefix = inbox.key("address", "")
-    rows = []
+    rows, names = [], NameRegistry(inbox.redis)
     for key in sorted(inbox.redis.scan_iter(match=prefix + "*")):
         for item in inbox.inbox(key[len(prefix) :]):
-            if of_swarm(item.address, slug) or of_swarm(item.sender, slug):
+            if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names):
                 rows.append({**asdict(item), "history": inbox.history(item.id)})
     return rows
 

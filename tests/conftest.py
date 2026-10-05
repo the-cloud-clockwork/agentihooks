@@ -233,6 +233,17 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _swarm_codes_in_order(monkeypatch):
+    """Each test's swarms get codes a1b2c3, a1b2c4, ... in creation order, so agent names are known in advance."""
+    from itertools import count
+
+    from scripts.swarm import naming
+
+    codes = count(0xA1B2C3)
+    monkeypatch.setattr(naming, "_mint", lambda: f"{next(codes):06x}")
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""

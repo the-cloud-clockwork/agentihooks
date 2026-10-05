@@ -9,7 +9,7 @@ import re
 import ledger_comments
 
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
-AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("priority", "priority_clear")
 DERIVED_WORDS = 16
 

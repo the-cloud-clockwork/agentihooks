@@ -12,6 +12,7 @@ from datetime import datetime
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm.health.verdicts import VERDICTS
+from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER
 
 MINUTE_MS = 60_000
@@ -116,7 +117,10 @@ def _new(store, slug, doc):
 
 
 def _by_agent(mail, event):
-    return event.get("by") != OPERATOR and not event.get("by", "").startswith(f"{mail.slug}-{MASTER}-")
+    by = event.get("by", "")
+    if by == OPERATOR:
+        return False
+    return not (lane_of(by) == MASTER and mail.store.names.slug_of(by) == mail.slug)
 
 
 def _events(mail, events, tasks):

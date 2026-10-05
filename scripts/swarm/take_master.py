@@ -23,7 +23,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
         raise SwarmError(f"{running[0]} is the live master of {slug}; run take-master --replace to retire it first")
     pid = agent_pid()
     if not name:
-        name = store.next_name(slug, MASTER)
+        name = store.next_name(slug, MASTER, now_ms)
         if not name_session(pid, name):
             raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")
     for agent in others:

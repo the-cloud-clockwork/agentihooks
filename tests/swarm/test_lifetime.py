@@ -137,7 +137,7 @@ def test_start_after_master_retirement_runs_workers_only_with_claimable_work(env
     monkeypatch.setattr(cli, "now_ms", lambda: 6 * HOUR + 3)
     assert run("sw", "start") == 0
     assert len(rt.masters) == 1
-    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["sw-master-2"]
+    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["master@a1b2c3-0002"]
     assert len(rt.spawned) == (1 if task_state == "open" else 0)
     assert store.config("sw").state == ("running" if task_state == "open" else "drained")
 
@@ -162,18 +162,20 @@ def test_space_with_a_master_stays_open(store):
     assert rt.closed_spaces == []
 
 
+@pytest.mark.parametrize("label", ["swarm-sw", "space"])
 @pytest.mark.parametrize("occupied", [False, True])
-def test_runtime_closes_only_the_empty_swarm_space(store, occupied):
+def test_runtime_closes_only_the_empty_swarm_space(store, occupied, label):
+    from scripts.swarm import naming
     from scripts.swarm.runtime import HerdrRuntime
 
     calls = []
+    config = store.ensure_code("sw")
+    label = naming.space(config.repo, config.code) if label == "space" else label
 
     def herdr(argv):
         calls.append(argv)
         if argv == ["workspace", "list"]:
-            return {
-                "workspaces": [{"workspace_id": "w2", "label": "swarm-sw"}, {"workspace_id": "w3", "label": "other"}]
-            }
+            return {"workspaces": [{"workspace_id": "w2", "label": label}, {"workspace_id": "w3", "label": "other"}]}
         if argv == ["agent", "list"]:
             return {
                 "agents": [{"workspace_id": "w2", "pane_id": "w2:p1"}]
@@ -229,7 +231,7 @@ def test_reopen_after_idle_retirement_starts_a_fresh_master(env, monkeypatch):
     monkeypatch.setattr(cli, "now_ms", lambda: 6 * HOUR + 3)
     assert run("sw", "reopen") == 0
     assert len(rt.masters) == 1
-    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["sw-master-2"]
+    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["master@a1b2c3-0002"]
     assert rt.spawned == []
 
 

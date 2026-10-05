@@ -9,6 +9,8 @@ import json
 import re
 from dataclasses import dataclass
 
+from scripts.swarm import naming
+
 PREFIX = "agentihooks:seat"
 OCCUPY_ATTEMPTS = 5
 MEMORY_KINDS = ("history", "recaps", "learned")
@@ -33,20 +35,24 @@ def seat_address(slug, seat):
 
 
 def is_seat(address):
-    return "@" in address
+    return "@" in address and naming.parse(address) is None
 
 
-def of_swarm(address, slug):
-    """A seat of the swarm, or the name the swarm gave one of its agents."""
-    return address.endswith(f"@{slug}") or re.fullmatch(rf"{re.escape(slug)}-(eng|ci|master)-\d+", address) is not None
+def of_swarm(address, slug, names=None):
+    """A seat of the swarm, or the name the swarm gave one of its agents; names (the registry) resolves a name's code."""
+    if is_seat(address):
+        return address.endswith(f"@{slug}")
+    if naming.legacy_slug(address) == slug:
+        return True
+    return names is not None and names.slug_of(address) == slug
 
 
-def master_of(address):
+def master_of(address, names=None):
     """The master seat of the swarm a seat or a swarm agent's name belongs to, '' for any other address."""
     if is_seat(address):
         return seat_address(address.split("@", 1)[1], "master")
-    found = re.fullmatch(r"(.+)-(?:eng|ci|master)-\d+", address)
-    return seat_address(found.group(1), "master") if found else ""
+    slug = names.slug_of(address) if names is not None else naming.legacy_slug(address)
+    return seat_address(slug, "master") if slug else ""
 
 
 class SeatRegistry:
@@ -89,13 +95,16 @@ class SeatRegistry:
     def known_seat(self, name: str) -> str:
         return self.redis.get(f"{PREFIX}-of:{name}") or ""
 
-    def agent_seats(self, slug: str) -> list[tuple[str, str]]:
+    def agent_names(self, slug: str) -> list[str]:
+        """Every agent the swarm seated: its registered names, and names from before the registry."""
         prefix = f"{PREFIX}-of:"
-        return [
-            (name, self.known_seat(name))
-            for key in self.redis.scan_iter(match=f"{prefix}{slug}-*")
-            if of_swarm(name := key[len(prefix) :], slug)
-        ]
+        legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*")
+        old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
+        named = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
+        return old + [name for name in named if self.known_seat(name)]
+
+    def agent_seats(self, slug: str) -> list[tuple[str, str]]:
+        return [(name, self.known_seat(name)) for name in self.agent_names(slug)]
 
     def record_exit(self, name: str, seat: str, reason: str) -> None:
         self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps({"seat": seat, "reason": reason}), nx=True)
@@ -110,8 +119,7 @@ class SeatRegistry:
         """The swarm's seats with their history and memory, and the seat pointers of its agents."""
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
         keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
-        pointers = self.redis.scan_iter(match=f"{PREFIX}-of:{slug}-*")
-        agents = sorted(key for key in pointers if of_swarm(key.split(":", 2)[2], slug))
+        agents = sorted(f"{PREFIX}-of:{name}" for name in self.agent_names(slug))
         return sorted(keys) + agents + [f"{key}:exit" for key in agents if self.redis.exists(f"{key}:exit")]
 
 
