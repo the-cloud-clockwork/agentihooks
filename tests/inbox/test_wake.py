@@ -221,3 +221,17 @@ def test_escalation_goes_to_the_master_seat(inbox):
     run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [outside, SEATED[2]])
     [raised] = inbox.inbox("master@sw")
     assert item.id in raised.text
+
+
+def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
+
+    class HandoverOnStatus(FakeHerdr):
+        def agent_status(self, agent):
+            inbox.seats.occupy("eng-1@sw", "sw-eng-4")
+            return super().agent_status(agent)
+
+    herdr = HandoverOnStatus({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
+    assert herdr.prompts == [] and events(inbox, item.id) == []

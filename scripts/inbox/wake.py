@@ -52,7 +52,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
         if agent and agent.name not in statuses:
             statuses[agent.name] = _status(herdr, agent)
         step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window)
-        if step == WOKEN and _wake(herdr, agent, prompted):
+        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name:
@@ -72,6 +72,10 @@ def _receiver(inbox, address):
         return address, None
     held = inbox.seats.occupant(address)
     return held.occupant, (address, held.generation)
+
+
+def _still_held(inbox, held):
+    return held is None or inbox.seats.occupant(held[0]).generation == held[1]
 
 
 def _status(herdr, agent):
