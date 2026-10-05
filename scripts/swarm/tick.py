@@ -1,7 +1,7 @@
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
-Every swarm that is not stopped keeps one master: an agent the operator talks to, which works no task.
+Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
 from dataclasses import dataclass, replace

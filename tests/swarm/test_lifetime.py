@@ -17,7 +17,8 @@ HOUR = 60 * 60 * 1000
 
 def idle_master(store, state):
     store.update("sw", state=state)
-    agent = AgentRecord("sw-master-1", MASTER, MASTER, pane_id="w1:p1", started_at=1, seat="master@sw")
+    name = store.next_name("sw", MASTER)
+    agent = AgentRecord(name, MASTER, MASTER, pane_id="w1:p1", started_at=1, seat="master@sw")
     store.put_agent("sw", agent)
     store.seats.occupy(agent.seat, agent.name, 1)
     rt = FakeRuntime()
@@ -136,6 +137,7 @@ def test_start_after_master_retirement_runs_workers_only_with_claimable_work(env
     monkeypatch.setattr(cli, "now_ms", lambda: 6 * HOUR + 3)
     assert run("sw", "start") == 0
     assert len(rt.masters) == 1
+    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["sw-master-2"]
     assert len(rt.spawned) == (1 if task_state == "open" else 0)
     assert store.config("sw").state == ("running" if task_state == "open" else "drained")
 
@@ -213,6 +215,22 @@ def test_runtime_reports_failed_pane_close_so_next_tick_retries():
     agent = AgentRecord("worker", "eng", "t1", pane_id="w1:p2")
     assert not HerdrRuntime(herdr=herdr).retire(agent, False)
     assert calls == [["pane", "close", agent.pane_id]]
+
+
+def test_reopen_after_idle_retirement_starts_a_fresh_master(env, monkeypatch):
+    store, ledger, rt = env
+    assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "0", "--max-ci-agents", "0") == 0
+    agent, idle_rt = idle_master(store, "paused")
+    rt.live, rt.statuses = idle_rt.live, idle_rt.statuses
+    ledger.rows = {}
+    ledger.reopen = lambda slug, by: None
+    tick("sw", store, ledger, rt, 6 * HOUR + 2)
+    assert store.agents("sw") == [] and agent.name in rt.killed
+    monkeypatch.setattr(cli, "now_ms", lambda: 6 * HOUR + 3)
+    assert run("sw", "reopen") == 0
+    assert len(rt.masters) == 1
+    assert [a.name for a in store.agents("sw") if a.lane == MASTER] == ["sw-master-2"]
+    assert rt.spawned == []
 
 
 def test_runtime_accepts_pane_already_closed_by_terminate_agent():
