@@ -5,8 +5,10 @@ Every swarm that is not stopped keeps one master: an agent the operator talks to
 """
 
 from dataclasses import dataclass, replace
+from itertools import count
 from typing import Protocol
 
+from scripts.inbox.seats import seat_address
 from scripts.swarm.store import MASTER, AgentRecord
 
 LEASE_MS = 10 * 60 * 1000
@@ -173,6 +175,7 @@ def _nested(outer, inner):
 
 def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
     agents, actions = store.agents(slug), []
+    taken = {a.seat for a in agents}
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci)):
         busy = sum(1 for a in agents if a.lane == lane)
         for task in _claimable(slug, store, rows, lane)[: max(cap - busy, 0)]:
@@ -184,12 +187,15 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             handoff = store.handoff(slug, task["id"])
             if handoff:
                 task["handoff"] = handoff
-            record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting")
+            seat = _free_seat(slug, lane, taken, store.handoff_seat(slug, task["id"]))
+            taken.add(seat)
+            record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
             store.put_agent(slug, record)
             try:
                 state = "pr" if task.get("pr_url") else "claimed"
                 ledger.update_task(slug, task["id"], {"state": state, "claimed_by": name})
                 task.update(state=state, claimed_by=name)
+                store.seats.occupy(seat, name, now_ms)
                 placed = runtime.spawn(config, lane, name, task)
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
@@ -198,6 +204,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
+
+
+def _free_seat(slug, lane, taken, preferred):
+    if preferred and preferred not in taken:
+        return preferred
+    return next(seat for k in count(1) if (seat := seat_address(slug, f"{lane}-{k}")) not in taken)
 
 
 def _placed(record, placed):
@@ -224,9 +236,10 @@ def _master(slug, config, store, runtime, now_ms):
     if not runtime.has_capacity():
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER)
-    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting")
+    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
     store.put_agent(slug, record)
     try:
+        store.seats.occupy(record.seat, name, now_ms)
         placed = runtime.spawn(config, MASTER, name, {"id": MASTER, "handoff": store.handoff(slug, MASTER)})
     except Exception as exc:
         store.drop_agent(slug, name)

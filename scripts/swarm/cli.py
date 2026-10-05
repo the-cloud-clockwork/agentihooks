@@ -248,7 +248,7 @@ def cmd_handoff(store, args):
         text = Path(args.doc).expanduser().read_text(encoding="utf-8")
     except OSError as exc:
         raise SwarmError(f"cannot read the handoff document {args.doc}: {exc.strerror}") from exc
-    store.put_handoff(args.slug, agent.task, text)
+    store.put_handoff(args.slug, agent.task, text, seat=agent.seat)
     store.put_agent(args.slug, replace(agent, state="finished"))
     print(
         json.dumps(

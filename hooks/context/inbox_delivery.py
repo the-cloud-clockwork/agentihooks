@@ -17,7 +17,7 @@ def pending_context(session_id, environ=None, cwd=""):
         store = connect(env)
     except InboxError:
         return ""
-    delivered = [store.deliver(item.id, me) for item in store.inbox(me) if item.state == "pending"]
+    delivered = [store.deliver(item.id, me) for item in store.mailbox(me) if item.state == "pending"]
     return "\n\n".join(_render(item) for item in delivered if item)
 
 

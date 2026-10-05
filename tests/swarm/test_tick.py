@@ -410,3 +410,81 @@ def test_a_swarm_whose_only_open_task_waits_on_a_blocked_one_drains(store):
     runtime = FakeRuntime()
     assert "drained" in tick("sw", store, ledger, runtime, now_ms=1_000)
     assert runtime.spawned == []
+
+
+def seats_of(store):
+    return {a.name: a.seat for a in store.agents("sw")}
+
+
+def test_the_master_and_lane_agents_are_seated_in_free_slots(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t4", "ci")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert seats_of(store) == {
+        "sw-master-1": "master@sw",
+        "sw-eng-1": "eng-1@sw",
+        "sw-eng-2": "eng-2@sw",
+        "sw-ci-1": "ci-1@sw",
+    }
+    assert store.seats.occupant("eng-2@sw").occupant == "sw-eng-2"
+
+
+def test_a_freed_slot_is_taken_by_the_next_agent_with_a_new_generation(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["state"] = "done"
+    first = workers(store)[0]
+    store.put_agent("sw", replace(first, state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert seats_of(store)["sw-eng-3"] == "eng-1@sw"
+    assert [(e["generation"], e["occupant"]) for e in store.seats.history("eng-1@sw")] == [
+        (1, "sw-eng-1"),
+        (2, "sw-eng-3"),
+    ]
+
+
+def test_a_handoff_successor_takes_its_predecessors_seat(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    one, two = workers(store)
+    ledger.rows["t1"]["state"] = "done"
+    store.put_agent("sw", replace(one, state="finished"))
+    store.put_handoff("sw", "t2", "halfway", seat=two.seat)
+    store.put_agent("sw", replace(two, state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.spawned[-1] == ("eng", "sw-eng-3", "t2")
+    assert seats_of(store)["sw-eng-3"] == "eng-2@sw"
+    assert store.handoff_seat("sw", "t2") == ""
+
+
+def test_a_master_handoff_keeps_the_master_seat_and_bumps_its_generation(store):
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    (old,) = masters(store)
+    store.put_handoff("sw", MASTER, "doc", seat=old.seat)
+    store.put_agent("sw", replace(old, state="finished"))
+    tick("sw", store, tasks(), runtime, 2)
+    assert store.seats.occupant("master@sw").occupant == "sw-master-2"
+    assert [e["generation"] for e in store.seats.history("master@sw")] == [1, 2]
+
+
+def test_a_successor_waits_for_a_stuck_predecessor_then_takes_its_seat(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    one, two = workers(store)
+    ledger.rows["t1"]["state"] = "done"
+    store.put_agent("sw", replace(one, state="finished"))
+    store.put_handoff("sw", "t2", "halfway", seat=two.seat)
+    store.put_agent("sw", replace(two, state="finished"))
+    runtime.stuck.add(two.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [s[2] for s in runtime.spawned] == ["t1", "t2"]
+    runtime.stuck.clear()
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert runtime.spawned[-1] == ("eng", "sw-eng-3", "t2") and seats_of(store)["sw-eng-3"] == "eng-2@sw"
+
+
+def test_a_failed_spawn_leaves_the_seat_with_a_new_generation_and_the_task_open(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(fail=True)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "open"
+    assert [e["occupant"] for e in store.seats.history("eng-1@sw")] == ["sw-eng-1"]
