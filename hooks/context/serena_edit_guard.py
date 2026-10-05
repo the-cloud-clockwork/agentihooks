@@ -11,7 +11,7 @@ from pathlib import Path
 from hooks.hook_manager import BlockAction
 
 _FILE_TOOLS = frozenset({"Edit", "MultiEdit", "Write"})
-_CD = re.compile(r"(?:^|&&|;)\s*cd\s+(\S+)\s*(?=&&|;)")
+_CD = re.compile(r"(?:^|&&|;|\()\s*cd\s+(\S+)\s*(?=&&|;)")
 _PY = r"""['"]?([^\s'";|&<>()]+\.py)['"]?"""
 _SHELL_WRITES = (
     re.compile(r"\bsed\b[^|;&\n]*\s(?:-i|--in-place)\S*\s[^|;&\n]*?" + _PY),
