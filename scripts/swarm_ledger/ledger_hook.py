@@ -145,7 +145,7 @@ def on_tool(payload, session, state, sfile):
     else:
         session["calls"] += 1
     pol = ledger_gate.policy(state)
-    owed = ledger_gate.unhandled_for(state["_meta"], session["name"])
+    owed = ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", []))
     top = max((e["rev"] for e in owed), default=0)
     idle = session["calls"] - session["nudge_calls"] >= pol["nudge_after_calls"]
     if owed and top > session["nudged_rev"]:
@@ -163,7 +163,7 @@ def on_tool(payload, session, state, sfile):
 def on_prompt(payload, session, state, sfile):
     import ledger_gate
 
-    owed = first_shown(session, ledger_gate.unhandled_for(state["_meta"], session["name"]))
+    owed = first_shown(session, ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", [])))
     if owed:
         emit("UserPromptSubmit", context_text(session, owed))
 
@@ -173,7 +173,7 @@ def stop_reasons(session, state):
     import ledger_gate
 
     pol = ledger_gate.policy(state)
-    owed = ledger_gate.unhandled_for(state["_meta"], session["name"])
+    owed = ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", []))
     reasons = []
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")

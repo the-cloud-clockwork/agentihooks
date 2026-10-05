@@ -34,20 +34,28 @@ def orchestrator(members):
     return next((name for name, member in members.items() if member.get("role") == "orchestrator"), None)
 
 
-def owner(event, members):
+def owner(event, members, tasks=()):
     boss = orchestrator(members)
     target = event.get("target", "")
     if target == "chat":
         mention = MENTION_RE.match(event.get("text", ""))
         named = mention.group(1) if mention else None
         return named if named in members else boss
+    claimer = next((t.get("claimed_by") for t in tasks if f"tasks/{t.get('id')}" == target), None)
+    if claimer in members:
+        return claimer
     for name, member in members.items():
         if target in member.get("claims", []):
             return name
     return boss
 
 
-def unhandled_for(meta, name):
+def owes(event, members, name, tasks=()):
+    who = owner(event, members, tasks)
+    return event.get("kind") == "sync requested" or who == name or who is None
+
+
+def unhandled_for(meta, name, tasks=()):
     members = meta.get("members", {})
     me = members.get(name)
     if me is None:
@@ -57,8 +65,7 @@ def unhandled_for(meta, name):
     for event in meta.get("events", []):
         if event.get("rev", 0) <= since or event.get("by") != "operator" or event.get("kind") in IGNORED_KINDS:
             continue
-        who = owner(event, members)
-        if event.get("kind") == "sync requested" or who == name or who is None:
+        if owes(event, members, name, tasks):
             mine.append(event)
     return mine
 

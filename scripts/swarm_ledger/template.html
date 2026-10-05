@@ -128,6 +128,11 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .chat-panel.big { width: min(760px, calc(100vw - 32px)); height: calc(100vh - 100px); }
 .chat-panel .chat-log { padding: 0 14px; }
 .chat-compose { padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
+.chat-to { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+.chat-to select { background: transparent; border: 0; color: var(--accent); text-shadow: var(--glow); font: inherit; letter-spacing: normal; text-transform: none; cursor: pointer; }
+.chat-to select:hover { background: var(--hover); }
+.chat-to select:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.chat-to option { background: var(--surface-2); color: var(--text); }
 .notif-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px 10px; border-bottom: 1px solid var(--rule); }
 .notif-list { list-style: none; margin: 0; padding: 0 14px 12px; overflow-y: auto; }
 .notif-row { padding: 8px 0; border-top: 1px solid var(--rule); }
@@ -405,7 +410,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
   <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
-  <div class="chat-compose"><textarea class="line" id="chat-input" rows="1" placeholder="Message the swarm…" aria-label="Message the swarm"></textarea>
+  <div class="chat-compose"><div class="chat-to"><label for="chat-to">To</label><select id="chat-to"><option value="">master</option></select></div><textarea class="line" id="chat-input" rows="1" placeholder="Message…" aria-label="Chat message"></textarea>
     <div class="hint">Enter to send · Ctrl+Enter for a new line</div></div>
 </details></section>
 <section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
@@ -986,6 +991,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       if (resp.ok) sw = await resp.json();
     } catch (e) {}
     renderSwarm(sw);
+    renderChatTo(sw);
   }
 
   function swarmCards(sw, tasks, seen, now) {
@@ -1375,11 +1381,24 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("chat-input").focus();
   }
 
+  function renderChatTo(sw) {
+    const pick = $("chat-to");
+    if (document.activeElement === pick) return;
+    const live = ((sw && sw.agents) || []).filter((a) => a.lane !== "master" && a.state !== "finished").map((a) => a.name);
+    const keep = live.includes(pick.value) ? pick.value : "";
+    pick.replaceChildren(h("option", { value: "", text: "master" }), ...live.map((name) => h("option", { value: name, text: name })));
+    pick.value = keep;
+  }
+
+  function chatText(text, to) {
+    return to && !text.startsWith("@") ? `@${to} ${text}` : text;
+  }
+
   function sendChat(text) {
     const box = $("chat-input");
     box.value = "";
     grow(box);
-    queue({ op: "add", thread: "chat", id: newId("message"), text });
+    queue({ op: "add", thread: "chat", id: newId("message"), text: chatText(text, $("chat-to").value) });
   }
 
   function queue(op) {
