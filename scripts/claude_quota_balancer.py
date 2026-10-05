@@ -670,13 +670,14 @@ def select_credential(
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
     reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
-    eligible = [result for result in eligible if result.account not in reserve] or eligible
     counts = sessions or {}
-    below_cap = [result for result in eligible if counts.get(result.account, 0) < max_sessions]
-    if below_cap or sessions is None:
-        winner, placement = rank_results(below_cap or eligible, include_fable)[0], "open"
+    below_cap = [result for result in eligible if sessions is None or counts.get(result.account, 0) < max_sessions]
+    pool = below_cap or eligible
+    pool = [result for result in pool if result.account not in reserve] or pool
+    if below_cap:
+        winner, placement = rank_results(pool, include_fable)[0], "open"
     else:
-        winner = min(rank_results(eligible, include_fable), key=lambda result: counts.get(result.account, 0))
+        winner = min(rank_results(pool, include_fable), key=lambda result: counts.get(result.account, 0))
         placement = "overflow"
     by_account = {credential.account: credential for credential in credentials}
     return RouteDecision(
