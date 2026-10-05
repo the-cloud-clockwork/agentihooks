@@ -43,7 +43,7 @@ from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, idle, ledger_events, prompt, snapshot, take_master, templates, timer
+from scripts.swarm import delivery, idle, ledger_events, phases, prompt, snapshot, take_master, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -92,6 +92,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
+        actions += phases.phase_pass(inbox, store, slug, doc, ledger)
         found = _findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
