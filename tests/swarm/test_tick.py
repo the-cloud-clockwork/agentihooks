@@ -349,3 +349,61 @@ def test_a_stopping_swarm_keeps_its_master_until_the_last_worker_leaves(store):
     actions = tick("sw", store, ledger, runtime, 3)
     assert "retired sw-master-1" in actions and actions[-1] == "stopped"
     assert store.agents("sw") == [] and store.config("sw").state == "stopped"
+
+
+def spawned_ids(runtime):
+    return [task_id for _, _, task_id in runtime.spawned]
+
+
+def test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done(store):
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t2"]["state"] == "open"
+    ledger.rows["t1"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+
+
+def test_overlapping_territories_are_never_claimed_together(store):
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "territory": ["scripts/swarm"]},
+            {"id": "t2", "territory": ["scripts/swarm/tick.py"]},
+            {"id": "t3", "lane": "ci", "territory": ["scripts/swarm/"]},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1"]
+    ledger.rows["t1"]["state"] = "pr"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1"]
+    ledger.rows["t1"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+
+
+def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
+    ledger = FakeLedger(
+        [{"id": "t1", "territory": ["scripts/swarm"]}, {"id": "t2", "territory": ["scripts/swarm_ledger"]}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+
+
+def test_a_task_without_territory_is_claimed_alongside_anything(store):
+    ledger = FakeLedger(
+        [{"id": "t1", "territory": ["hooks"]}, {"id": "t2"}, {"id": "t3", "lane": "ci", "territory": []}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1", "t2", "t3"]
+
+
+def test_a_swarm_whose_only_open_task_waits_on_a_blocked_one_drains(store):
+    ledger = FakeLedger([{"id": "t1", "state": "blocked"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    assert "drained" in tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []

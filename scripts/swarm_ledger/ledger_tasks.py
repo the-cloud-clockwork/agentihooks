@@ -9,7 +9,8 @@ ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 LANES = ("eng", "ci")
 STATES = ("open", "claimed", "blocked", "pr", "done")
-UPDATABLE = ("state", "claimed_by", "issue_url", "pr_url", "description")
+UPDATABLE = ("state", "claimed_by", "issue_url", "pr_url", "description", "depends_on", "territory")
+LIST_FIELDS = ("depends_on", "territory")
 URL_FIELDS = ("issue_url", "pr_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -31,16 +32,26 @@ def check(op):
             raise ValueError(f"lane must be one of {LANES}")
         if not isinstance(op.get("phase", ""), str) or not isinstance(op.get("description", ""), str):
             raise ValueError("phase and description must be strings")
+        check_lists(op)
         ledger_comments.check(op["title"], "item")
         return
     fields = op.get("fields")
     if not ITEM_RE.match(str(op.get("item"))) or not isinstance(fields, dict) or not fields:
         raise ValueError("task_update needs item tasks/<id> and fields")
-    if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in fields.values()):
-        raise ValueError(f"task_update may set only {UPDATABLE}, as strings")
+    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS}
+    if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in strings.values()):
+        raise ValueError(f"task_update may set only {UPDATABLE}, as strings or {LIST_FIELDS} as lists")
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
+    check_lists(fields)
     check_urls(fields)
+
+
+def check_lists(fields):
+    for key in LIST_FIELDS:
+        value = fields.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+            raise ValueError(f"{key} must be a list of nonempty strings")
 
 
 def check_urls(fields):
@@ -55,6 +66,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')}/lane must be one of {LANES}")
     if task.get("state", "open") not in STATES:
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
+    check_lists(task)
     check_urls(task)
 
 
@@ -62,6 +74,8 @@ def _add(doc, op, ctx):
     tasks = doc.setdefault("tasks", [])
     if any(t["id"] == op["task"] for t in tasks):
         return True
+    if not _known(tasks, op.get("depends_on", [])):
+        return False
     task = {
         "id": op["task"],
         "title": op["title"].strip(),
@@ -72,6 +86,8 @@ def _add(doc, op, ctx):
         "claimed_by": "",
         "issue_url": "",
         "pr_url": "",
+        "depends_on": op.get("depends_on", []),
+        "territory": op.get("territory", []),
         "done": False,
         "comments": [],
     }
@@ -80,10 +96,14 @@ def _add(doc, op, ctx):
     return True
 
 
+def _known(tasks, ids):
+    return set(ids) <= {t["id"] for t in tasks}
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
-    if task is None:
+    if task is None or not _known(doc["tasks"], op["fields"].get("depends_on", [])):
         return False
     changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
     task.update(changed)
