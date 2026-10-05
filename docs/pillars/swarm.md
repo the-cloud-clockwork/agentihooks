@@ -54,9 +54,11 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. |
 | `agentihooks swarm <id> pause` | Stop new spawns; running agents continue. |
-| `agentihooks swarm <id> stop` | Drain: no new spawns, the swarm stops when its agents finish. |
+| `agentihooks swarm <id> stop` | Drain: no new spawns, the swarm stops when its agents finish. Both forms of stop take a snapshot first. |
 | `agentihooks swarm <id> stop --now` | Kill every agent and reopen its unfinished task. |
 | `agentihooks swarm <id> remove` | Delete a swarm with no agents left: its records and its watch and action counts, so a swarm created again under the same id starts from zero. |
+| `agentihooks swarm <id> snapshot` | Write `~/.agentihooks/swarm/<id>/snapshot.json`: the swarm's Redis keys (config and template, agents, claims with their lease, handoffs, name counters), its seats with their history, recaps and learned notes, the inbox items, pending sets and histories of its seats and agents, a copy of the ledger and each agent's worktree path. |
+| `agentihooks swarm <id> restore` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the snapshot back, mark every agent finished and leave the swarm paused. The tick then retires those agents, reopens their tasks and brings up only the master, which finds its inbox waiting; `start` hands the reopened tasks to successors primed with seat memory and handoffs. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> status [--json]` | Config, task counts, one row per agent, and the health findings. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |

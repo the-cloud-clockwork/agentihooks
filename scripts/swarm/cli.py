@@ -4,6 +4,7 @@ agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
+agentihooks swarm <id> snapshot | restore                         save the swarm's state to its folder (stop does too); restore it paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
@@ -28,7 +29,7 @@ from pathlib import Path
 
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import delivery, templates, timer
+from scripts.swarm import delivery, snapshot, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -121,6 +122,7 @@ def cmd_pause(store, args):
 
 
 def cmd_stop(store, args):
+    _snapshot(store, args.slug)
     if not args.now:
         _state(store, args, "stopping")
         return
@@ -193,6 +195,23 @@ def cmd_remove(store, args):
     store.remove(args.slug)
     activity.clear(args.slug)
     print(json.dumps({"removed": args.slug}))
+
+
+def _snapshot(store, slug):
+    names = [a.name for a in store.agents(slug)]
+    path = snapshot.take(store, slug, now_ms())
+    return {"swarm": slug, "snapshot": str(path), "agents": names}
+
+
+def cmd_snapshot(store, args):
+    print(json.dumps(_snapshot(store, args.slug)))
+
+
+def cmd_restore(store, args):
+    finished = snapshot.restore(store, args.slug, HerdrRuntime().live_names())
+    for action in run_tick(store, args.slug):
+        print(action)
+    print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "finished": finished}))
 
 
 def cmd_status(store, args):
@@ -371,7 +390,7 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
-    for plain in ("start", "pause", "remove"):
+    for plain in ("start", "pause", "remove", "snapshot", "restore"):
         sub.add_parser(plain)
     sub.add_parser("stop").add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
