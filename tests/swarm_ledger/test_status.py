@@ -70,6 +70,16 @@ class Style(unittest.TestCase):
             comments.check("word " * 101, "chat")
         comments.check("word " * 101, "chat", long=True)
 
+    def test_a_ledger_link_whose_name_carries_a_date_passes(self):
+        link = "http://127.0.0.1:8765/okay-we-re-going-to-mossy-rabin-2026-10-05"
+        comments.check(f"The swarm is running, follow it at {link}", "chat")
+        comments.check(f"Ledger page {link}/ is open.", "chat")
+
+    def test_a_bare_date_next_to_a_ledger_link_is_refused(self):
+        link = "http://127.0.0.1:8765/okay-we-re-going-to-mossy-rabin-2026-10-05"
+        with self.assertRaises(ValueError):
+            comments.check(f"Merged on 2026-10-05, see {link}", "chat")
+
 
 class Comments(unittest.TestCase):
     def setUp(self):

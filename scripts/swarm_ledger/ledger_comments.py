@@ -36,12 +36,14 @@ RULES = (
     ),
 )
 PUNCTUATION = (("parentheses", "(", 1), ("semicolons", ";", 1))
+LEDGER_LINK = re.compile(r"\bhttps?://[\w.-]+(?::\d+)?/[a-z0-9-]+\b/?")
 
 
 def problems(text, kind, long=False):
     found = []
+    prose = LEDGER_LINK.sub(" ", text)
     for name, pattern in RULES:
-        match = pattern.search(text)
+        match = pattern.search(prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
