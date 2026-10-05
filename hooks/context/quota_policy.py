@@ -86,7 +86,8 @@ def decide(
         return None
 
     pool = [c for c in others if c.account != account and c.five_used < five_pct and c.week_used < week_pct]
-    unreserved = [c for c in pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
+    open_slots = [c for c in pool if c.sessions < max_sessions and c.routing_left >= MIN_ROUTING_LEFT]
+    unreserved = [c for c in open_slots or pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
     pool = unreserved or pool
     good = [c for c in pool if c.routing_left >= min_left]
     viable = [c for c in pool if c.routing_left >= MIN_ROUTING_LEFT]

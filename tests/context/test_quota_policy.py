@@ -249,3 +249,23 @@ def test_reserve_account_is_the_last_handoff_target():
         ).target.account
         == "big"
     )
+
+
+def test_reserve_account_below_the_cap_takes_the_handoff_before_full_accounts():
+    def pick(others):
+        return qp.decide(
+            account="alpha",
+            five_used=10,
+            week_used=97.5,
+            five_reset=None,
+            week_reset=None,
+            others=others,
+            max_sessions=3,
+            push=False,
+            week_pct=97,
+            min_left=20,
+            reserve=frozenset({"spare"}),
+        ).target.account
+
+    assert pick([_c("big", 0, 12, 8), _c("mid", 0, 44, 7), _c("spare", 0, 62, 0)]) == "spare"
+    assert pick([_c("big", 0, 12, 8), _c("mid", 0, 44, 2), _c("spare", 0, 62, 0)]) == "mid"
