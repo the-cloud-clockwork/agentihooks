@@ -27,14 +27,13 @@ from argparse import Namespace
 from pathlib import Path
 
 from scripts.doctor import detect, interventions, loop
-from scripts.doctor.priming import SUFFIX, doctor_slug
+from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
 
-TEMPLATE = "doctor"
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
 NOTE_MAX = 4000
@@ -59,6 +58,10 @@ POINTER = (
 OPENING = (
     "The Doctor crew on the linked ledger {doctor} now watches your swarm. Keep me in sync through the inbox: "
     "send me what changes in your swarm, and I send you each fix I apply and each intervention I make."
+)
+CLOSED_NOTICE = (
+    "The Doctor crew on the linked ledger {doctor} is closed. Stop messaging master@{doctor}: it is no longer "
+    "your peer and messages to it are cancelled."
 )
 
 
@@ -155,6 +158,9 @@ def _close(store, slug, doctor, lead=""):
     swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name="operator"))
     store.clear_peer(slug)
     store.clear_peer(doctor)
+    inbox = InboxStore(store.redis)
+    cancel_master_items(inbox, doctor)
+    inbox.send(f"master@{doctor}", f"master@{slug}", CLOSED_NOTICE.format(doctor=doctor), fyi=True)
 
 
 def cmd_stop(store, args):
