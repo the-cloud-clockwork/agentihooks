@@ -167,3 +167,49 @@ def test_a_send_racing_the_back_fill_is_in_the_result_and_the_set(store, monkeyp
     assert [i.id for i in store.pending_items("bob")] == [old.id, raced[0].id]
     assert pending_ids(store, "bob") == [old.id, raced[0].id]
     assert store.redis.sismember(store.key("indexed"), "bob")
+
+
+def waiting(store):
+    return store.redis.smembers(store.key("waiting"))
+
+
+def test_a_send_adds_its_address_to_the_waiting_set(store):
+    store.send("alice", "bob", "hi")
+    assert waiting(store) == {"bob"}
+
+
+def test_emptying_a_pending_list_removes_its_address_from_the_waiting_set(store):
+    first = store.send("alice", "bob", "one")
+    second = store.send("alice", "bob", "two")
+    store.deliver(first.id, "bob")
+    assert waiting(store) == {"bob"}
+    store.close(second.id, "bob", "done")
+    assert waiting(store) == set()
+
+
+def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis):
+    seed = InboxStore(redis)
+    for n in range(300):
+        seed.close(seed.send("alice", f"idle-{n}", "old").id, f"idle-{n}", "done")
+    item = seed.send("alice", "carol", "new work")
+    counting = CountingRedis(redis)
+    store = InboxStore(counting)
+    store.pending()
+    counting.calls.clear()
+
+    assert [i.id for i in store.pending()] == [item.id]
+    assert "scan_iter" not in counting.calls and "scan" not in counting.calls, counting.calls
+    assert len(counting.calls) <= 5, counting.calls
+
+
+def test_back_fill_rebuilds_the_waiting_set_once(store):
+    first = store.send("alice", "bob", "one")
+    store.close(store.send("alice", "carol", "old").id, "carol", "done")
+    second = store.send("alice", "dave", "two")
+    store.redis.delete(store.key("waiting"), store.key("waiting", "built"), store.key("indexed"))
+    store.redis.delete(store.key("pending", "bob"), store.key("pending", "dave"))
+
+    assert sorted(i.id for i in store.pending()) == sorted([first.id, second.id])
+    assert waiting(store) == {"bob", "dave"}
+    store.redis.srem(store.key("waiting"), "dave")
+    assert [i.id for i in store.pending()] == [first.id]
