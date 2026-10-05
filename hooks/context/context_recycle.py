@@ -1,6 +1,7 @@
 import os
 import re
 import shlex
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
@@ -67,17 +68,26 @@ def over_limit(session_id: str, environ=None) -> str | None:
     return overrun[0] if overrun else None
 
 
-def directive(session_id: str, environ=None) -> str | None:
-    overrun = _overrun(session_id, environ)
-    if overrun is None:
+def directive(session_id: str, environ=None, now: datetime | None = None) -> str | None:
+    slug = _swarm_of(os.environ if environ is None else environ)
+    used = _used(session_id) if slug and session_id else None
+    if used is None or used < COMPACT_LIMIT * 800:
         return None
-    marker = AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.recycle"
+    hard = used >= COMPACT_LIMIT * 1000
+    stage = "recycle" if hard else "prepare"
+    marker = AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.{stage}"
     if marker.exists():
         return None
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    slug, used = overrun
-    return _DIRECTIVE.format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+    if hard:
+        return _DIRECTIVE.format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+    deadline = (now or datetime.now(timezone.utc)) + timedelta(minutes=25)
+    return (
+        f"HANDOFF PREPARATION — this session holds {used // 1000}k tokens. Write your handoff now. "
+        f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {COMPACT_LIMIT}k hard gate, whichever comes first. "
+        + _DIRECTIVE.split("Write a handoff document ", 1)[1].format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+    )
 
 
 def _in_scratchpad(path: str) -> bool:

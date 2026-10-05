@@ -521,7 +521,7 @@ class SwarmPanel(unittest.TestCase):
             " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
-            "const restoreCards = () => []; const restoreCard = () => ({});"
+            "const restoreCards = () => []; const restoreCard = () => ({}); const transferCard = () => ({});"
             'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
         )
         script = (
@@ -680,7 +680,7 @@ class HealthPanel(unittest.TestCase):
             " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
-            "const restoreCards = () => []; const restoreCard = () => ({});"
+            "const restoreCards = () => []; const restoreCard = () => ({}); const transferCard = () => ({});"
             "const crewShown = () => false; const meta = {}; let shown = null;"
             "const renderHealth = (f) => { shown = f; };"
         )

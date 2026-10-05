@@ -85,14 +85,14 @@ def test_restore_reopens_an_agent_in_its_own_conversation_and_forces_one_without
     outcomes = restore(store, rt)
     assert [(o.name, o.outcome, o.reason) for o in outcomes] == [
         ("sw-eng-1", "resumed", "own conversation reopened"),
-        ("sw-master-1", "fresh", "no conversation id"),
+        ("sw-master-1", "awaiting-decision", "no conversation id"),
     ]
     ((name, conversation, _),) = rt.resumed
     assert (name, conversation) == ("sw-eng-1", ID)
     eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
     assert (eng.state, eng.pane_id, eng.seat, eng.task, eng.started_at) == ("working", "w2:p9", "eng-1@sw", "t1", 1_000)
     assert store.claimant("sw", "t1") == "sw-eng-1"
-    assert next(a for a in store.agents("sw") if a.lane == MASTER).state == "finished"
+    assert next(a for a in store.agents("sw") if a.lane == MASTER).state == "awaiting-decision"
     assert store.config("sw").state == "paused"
 
 
@@ -111,17 +111,17 @@ def test_a_resume_that_fails_to_start_leaves_the_agent_to_start_fresh_with_the_r
     saved(store, tmp_path)
     outcomes = restore(store, ResumingRuntime(fail="herdr never reported the conversation"))
     assert (outcomes[0].outcome, outcomes[0].reason) == (
-        "fresh",
+        "awaiting-decision",
         "resume failed to start: herdr never reported the conversation",
     )
-    assert {a.state for a in store.agents("sw")} == {"finished"}
+    assert {a.state for a in store.agents("sw")} == {"awaiting-decision"}
 
 
 def test_a_gone_worktree_forces_fresh_without_trying_to_resume(store, tmp_path):
     saved(store, tmp_path, worktree=False)
     rt = ResumingRuntime()
     outcomes = restore(store, rt)
-    assert (outcomes[0].outcome, outcomes[0].reason) == ("fresh", "no worktree")
+    assert (outcomes[0].outcome, outcomes[0].reason) == ("awaiting-decision", "no worktree")
     assert rt.resumed == []
 
 
@@ -130,5 +130,5 @@ def test_the_outcomes_are_kept_on_the_swarm(store, tmp_path):
     restore(store, ResumingRuntime())
     assert [(r["name"], r["outcome"], r["reason"], r["task"]) for r in store.restored("sw")] == [
         ("sw-eng-1", "resumed", "own conversation reopened", "t1"),
-        ("sw-master-1", "fresh", "no conversation id", MASTER),
+        ("sw-master-1", "awaiting-decision", "no conversation id", MASTER),
     ]

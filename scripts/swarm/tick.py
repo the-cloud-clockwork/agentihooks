@@ -9,6 +9,7 @@ from itertools import count
 from typing import Protocol
 
 from scripts.doctor import priming
+from scripts.handoff import transfers
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -87,6 +88,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         if config.state == "running":
             actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
     _conversations(slug, store, runtime)
+    transfers.observe(store, slug, runtime.live_names(), now_ms)
     return actions + _settle(slug, config, store, ledger, rows) + _close_space(slug, config, store, runtime)
 
 
@@ -118,6 +120,8 @@ def _drop(slug, store, ledger, rows, agent):
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
+        if agent.state == "awaiting-decision":
+            continue
         task = rows.get(agent.task, {})
         ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
         if agent.state == "finished" or ended:
@@ -143,8 +147,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 
 
 def agent_status(agent):
-    if agent.state == "finished":
-        return "finished"
+    if agent.state in {"finished", "awaiting-decision"}:
+        return agent.state
     if agent.idle_ticks >= IDLE_NUDGE_TICKS:
         return "stalled"
     return "idle" if agent.idle_ticks else "working"
@@ -183,7 +187,7 @@ def _conversations(slug, store, runtime):
     if found is None:
         return
     for agent in store.agents(slug):
-        if agent.state == "finished" or not agent.pane_id:
+        if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
         current = found.get(agent.pane_id, "")
         if current != agent.conversation_id:
@@ -197,12 +201,14 @@ def _reopen(slug, ledger, rows, task_id):
 
 
 def _claimable(slug, store, rows, lane):
+    awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     picked = []
     for t in rows.values():
         if (
             t.get("lane") == lane
             and t.get("state") == "open"
+            and t["id"] not in awaiting
             and not t.get("out_of_scope")
             and store.claimant(slug, t["id"]) is None
             and _unblocked(t, rows, held)
@@ -257,6 +263,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 ledger.update_task(slug, task["id"], fields)
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
+                task["transfer"] = transfers.attach(store, slug, record, now_ms)
                 placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
@@ -308,6 +315,7 @@ def _master(slug, config, store, runtime, now_ms):
     store.put_agent(slug, record)
     try:
         store.seats.occupy(record.seat, name, now_ms)
+        transfer = transfers.attach(store, slug, record, now_ms)
         placed = runtime.spawn(
             config,
             MASTER,
@@ -316,7 +324,7 @@ def _master(slug, config, store, runtime, now_ms):
                 store,
                 slug,
                 record.seat,
-                {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug)},
+                {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
             ),
         )
     except Exception as exc:
