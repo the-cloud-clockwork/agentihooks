@@ -88,6 +88,16 @@ class InboxStore:
         except InboxError:
             return None
 
+    def pending(self):
+        addresses = self.redis.scan_iter(match=self.key("address", "*"))
+        items = [self.get(i) for key in addresses for i in self.redis.zrange(key, 0, -1)]
+        return [item for item in items if item.state == "pending"]
+
+    def note(self, item_id, event, by, detail, at):
+        self.redis.rpush(
+            self.key("history", item_id), json.dumps({"event": event, "by": by, "reason": detail, "at": at})
+        )
+
     def _move(self, item_id, by, actors, state, reason, only_from=None):
         from redis.exceptions import WatchError
 

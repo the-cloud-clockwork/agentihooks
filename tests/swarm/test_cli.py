@@ -383,3 +383,18 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         assert needle in text, needle
     assert "never edit code, commit or merge" in text
     assert "wt.sh new" not in text and "done --pr" not in text
+
+
+def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
+    from scripts.inbox.store import InboxStore
+    from scripts.inbox.wake import WAKE_TEXT
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1"))
+    rt.live.add("sw-eng-1")
+    item = InboxStore(store.redis).send("operator", "sw-eng-1", "look at the failing check")
+    herdr = FakeHerdr({"p1": "idle"})
+    actions = cli.run_tick(store, "sw", ledger, rt, herdr)
+    assert herdr.prompts == [("p1", WAKE_TEXT)]
+    assert f"woke sw-eng-1 for message {item.id}" in actions
