@@ -3021,9 +3021,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         rendered["disabledMcpjsonServers"] = merged_disabled
         _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
 
-    from scripts.profile_telemetry import apply_langfuse_env
+    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
+    apply_collector_env(rendered)
 
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)

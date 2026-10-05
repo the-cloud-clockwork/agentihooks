@@ -26,6 +26,16 @@ def apply_langfuse_env(settings: dict, profiles: list[tuple[str, Path]], overlay
     settings.setdefault("_agentihooks", {}).setdefault("env", {}).update(langfuse_env(profiles, overlay))
 
 
+def apply_collector_env(settings: dict) -> None:
+    env = settings.get("env", {})
+    aliases = {
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "AGENTIHOOKS_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "AGENTIHOOKS_OTLP_PROTOCOL",
+    }
+    mirrored = {alias: env[name] for name, alias in aliases.items() if env.get(name)}
+    settings.setdefault("_agentihooks", {}).setdefault("env", {}).update(mirrored)
+
+
 def installed_langfuse_env(target: str) -> dict[str, str]:
     from scripts import install
 

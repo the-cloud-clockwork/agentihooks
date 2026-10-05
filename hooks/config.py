@@ -787,6 +787,13 @@ def langfuse_route(environ) -> tuple[str, str]:
     return endpoint or "http://10.10.30.200/api/public/otel", host
 
 
+def hook_collector(environ) -> tuple[str, str]:
+    """(endpoint, protocol) of the hook telemetry collector; Claude Code strips every OTEL_* variable from hook processes."""
+    endpoint = environ.get("AGENTIHOOKS_OTLP_ENDPOINT", "") or environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    protocol = environ.get("AGENTIHOOKS_OTLP_PROTOCOL", "") or environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "")
+    return endpoint, protocol
+
+
 OTEL_LANGFUSE_ENDPOINT, OTEL_LANGFUSE_HOST_HEADER = langfuse_route(os.environ)
 OTEL_LANGFUSE_PUBLIC_KEY = os.getenv("OTEL_LANGFUSE_PUBLIC_KEY", "") or os.getenv("LANGFUSE_PUBLIC_KEY", "")
 OTEL_LANGFUSE_SECRET_KEY = os.getenv("OTEL_LANGFUSE_SECRET_KEY", "") or os.getenv("LANGFUSE_SECRET_KEY", "")
