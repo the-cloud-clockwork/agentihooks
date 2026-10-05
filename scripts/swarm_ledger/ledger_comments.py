@@ -4,8 +4,9 @@ Agent text is for the operator: plain words saying what was done or why it was s
 `check` refuses machine noise and AI-slop markers with every reason at once.
 """
 
-import os
 import re
+
+from scripts.swarm_ledger import ledger_link as links
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 RULES = (
@@ -40,8 +41,8 @@ PUNCTUATION = (("parentheses", "(", 1), ("semicolons", ";", 1))
 
 
 def ledger_link():
-    host = re.escape(os.environ.get("LEDGER_HOST", "127.0.0.1"))
-    port = re.escape(os.environ.get("LEDGER_PORT", "8765"))
+    address, number = links.address()
+    host, port = re.escape(address), re.escape(str(number))
     return re.compile(rf"\bhttps?://{host}:{port}/[a-z0-9-]+\b/?")
 
 

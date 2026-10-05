@@ -43,7 +43,6 @@ Env: LEDGER_DIR, LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765).
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import urllib.error
@@ -61,7 +60,7 @@ import ledger_link  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
-BASE = f"http://{os.environ.get('LEDGER_HOST', '127.0.0.1')}:{os.environ.get('LEDGER_PORT', '8765')}"
+BASE = ledger_link.base()
 
 
 def request(slug, ops=None):

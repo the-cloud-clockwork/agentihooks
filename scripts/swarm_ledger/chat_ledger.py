@@ -17,8 +17,9 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ledger_core as core  # noqa: E402
+import ledger_link  # noqa: E402
 
-BASE = f"http://{os.environ.get('LEDGER_HOST', '127.0.0.1')}:{os.environ.get('LEDGER_PORT', '8765')}"
+BASE = ledger_link.base()
 
 
 def main():

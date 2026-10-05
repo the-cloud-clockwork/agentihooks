@@ -208,12 +208,13 @@ def stop_reasons(session, state):
 
 def post_bypass(session, unhandled):
     import ledger_core as core
+    import ledger_link
 
     try:
         token = core.read_token(core.paths(session["slug"])[0].read_text(encoding="utf-8")) or ""
         op = {"op": "gate_bypass", "id": f"gb-{uuid.uuid4().hex[:8]}", "by": session["name"], "unhandled": unhandled}
         req = urllib.request.Request(
-            f"http://{os.environ.get('LEDGER_HOST', '127.0.0.1')}:{os.environ.get('LEDGER_PORT', '8765')}/api/{session['slug']}",
+            f"{ledger_link.base()}/api/{session['slug']}",
             data=json.dumps({"ops": [op]}).encode(),
             method="PUT",
             headers={"Content-Type": "application/json", "X-Ledger-Token": token},
@@ -243,10 +244,12 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 
 
 def serve_ledgers():
+    import ledger_link
+
     if not any(LEDGER_DIR.glob("*.json")):
         return
     try:
-        address = (os.environ.get("LEDGER_HOST", "127.0.0.1"), int(os.environ.get("LEDGER_PORT", "8765")))
+        address = ledger_link.address()
         socket.create_connection(address, timeout=0.3).close()
     except OSError:
         subprocess.Popen(
