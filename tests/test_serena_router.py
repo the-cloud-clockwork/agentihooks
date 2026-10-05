@@ -4,7 +4,6 @@ import ast
 import asyncio
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -108,16 +107,21 @@ async def test_unannotated_tool_counts_as_edit(router):
     assert "find_symbol" not in edits
 
 
-async def test_slow_backend_does_not_block_another(router, repo):
+async def _appears(path: Path) -> None:
+    while not path.exists():
+        await asyncio.sleep(0.005)
+
+
+async def test_slow_backend_does_not_block_another(router, repo, tmp_path):
+    started, release = tmp_path / "started", tmp_path / "release"
     async with connect(router) as a, connect(router) as b:
         await a.call_tool("activate_project", {"project": str(repo["a"])})
         await b.call_tool("activate_project", {"project": str(repo["b"])})
-        slow = asyncio.create_task(a.call_tool("slow", {"seconds": 0.6}))
-        await asyncio.sleep(0.1)
-        started = time.monotonic()
-        await b.call_tool("find_symbol", {})
-        assert time.monotonic() - started < 0.4
+        slow = asyncio.create_task(a.call_tool("slow", {"started": str(started), "release": str(release)}))
+        await asyncio.wait_for(_appears(started), timeout=5)
+        await asyncio.wait_for(b.call_tool("find_symbol", {}), timeout=5)
         assert not slow.done()
+        release.touch()
         await slow
 
 

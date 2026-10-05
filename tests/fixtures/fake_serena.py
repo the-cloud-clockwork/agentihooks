@@ -20,9 +20,11 @@ def replace_content(relative_path: str, repl: str) -> str:
     return "OK"
 
 
-def slow(seconds: float = 2.0) -> str:
-    time.sleep(seconds)
-    return "slept"
+def slow(started: str, release: str) -> str:
+    Path(started).touch()
+    while not Path(release).exists():
+        time.sleep(0.005)
+    return "released"
 
 
 def mystery() -> str:
@@ -36,7 +38,7 @@ def activate_project(project: str) -> str:
 TOOLS = {
     "find_symbol": (find_symbol, {"name_path_pattern": "string"}, True),
     "replace_content": (replace_content, {"relative_path": "string", "repl": "string"}, False),
-    "slow": (slow, {"seconds": "number"}, True),
+    "slow": (slow, {"started": "string", "release": "string"}, True),
     "mystery": (mystery, {}, None),
     "activate_project": (activate_project, {"project": "string"}, True),
 }
