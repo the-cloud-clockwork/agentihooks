@@ -48,6 +48,9 @@ class LedgerClient:
     def notify(self, slug, text):
         self.say(slug, text, by="swarm")
 
+    def followup(self, slug, text):
+        self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
+
 
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}
