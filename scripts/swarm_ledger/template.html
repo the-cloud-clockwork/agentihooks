@@ -291,6 +291,8 @@ details.sw-agents { margin: 0; }
 .sw-status.stalled { color: var(--destructive); }
 .sw-status.finished { color: var(--muted); text-shadow: none; }
 .sw-status.finished::before { box-shadow: none; }
+.sw-status.resumed { color: var(--accent); }
+.sw-status.fresh { color: var(--warn); }
 .sw-task { display: block; margin-top: 1px; font-size: var(--fs-body); color: var(--text-2); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 a.sw-task:hover, a.sw-task:focus-visible { color: var(--accent); text-decoration: underline; }
 a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
@@ -381,7 +383,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       <dl class="sw-figs" id="swarm-figs"></dl>
       <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
       <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><label for="cap-codex">codex <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label><span id="codex-split" aria-live="polite"></span><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
-      </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details></details></section>
+      </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details><details class="sw-agents fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><ul class="sw-list" id="swarm-restore"></ul></details></details></section>
     <section id="health-box" aria-label="Swarm health" hidden><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
   </aside>
   </div>
@@ -1128,6 +1130,24 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("swarm-master").replaceChildren(...cards.filter((a) => a.lane === "master").map(swarmCard));
     $("swarm-agents-count").textContent = `· ${workers.length}`;
     $("swarm-agents").replaceChildren(...(workers.length ? workers.map(swarmCard) : [h("li", { class: "sw-empty", text: "No agents running" })]));
+    const restored = restoreCards(sw.restored, doc ? doc.tasks : []);
+    $("swarm-restore-box").hidden = !restored.length;
+    $("swarm-restore-count").textContent = `· ${restored.length}`;
+    $("swarm-restore").replaceChildren(...restored.map(restoreCard));
+  }
+
+  function restoreCards(restored, tasks) {
+    const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+    return (restored || []).map((r) => ({ name: r.name, outcome: r.outcome, reason: r.reason,
+      task: (byId[r.task] || {}).title || r.task }));
+  }
+
+  function restoreCard(r) {
+    return h("li", { class: "sw-card" },
+      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: r.name, title: r.name }),
+        h("span", { class: `sw-status ${r.outcome}`, text: r.outcome })),
+      h("span", { class: "sw-task", text: r.task, title: r.task }),
+      h("div", { class: "sw-meta" }, h("span", { text: r.reason })));
   }
 
   function autonomyText(config) {

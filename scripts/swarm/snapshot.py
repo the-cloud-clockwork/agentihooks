@@ -3,16 +3,17 @@
 Stop and the snapshot command write snapshot.json; while the swarm runs, the tick writes one automatic snapshot per
 interval into the snapshots folder and keeps the newest ten. Restore takes the newest of them all unless pointed at one.
 
-A restore marks every agent whose pane is gone as finished, so the next tick retires it, reopens its task and
-primes the successor with seat memory and handoffs, and leaves the swarm paused so only the master comes up.
+A restore reopens each agent in its own conversation where it can and leaves the swarm paused. Every other agent is
+marked finished, so the next tick retires it, reopens its task and primes the successor with seat memory and handoffs.
 """
 
 import json
 import os
 import subprocess
-from dataclasses import replace
+import time
 from pathlib import Path
 
+from scripts.swarm import resume
 from scripts.swarm.store import SwarmError
 
 VERSION = 1
@@ -105,8 +106,8 @@ def take(store, slug, now_ms, run=subprocess.run, target=None):
     return target
 
 
-def restore(store, slug, live, source=None):
-    """Write the snapshot back, the newest unless a source file is given; returns the agents it marked finished."""
+def restore(store, slug, live, source=None, runtime=None, has_quota=resume.account_quota, now_ms=None):
+    """Write the snapshot back, the newest unless a source file is given; returns each agent's restore outcome."""
     source = Path(source) if source else newest(slug)
     try:
         doc = json.loads(source.read_text(encoding="utf-8"))
@@ -117,14 +118,10 @@ def restore(store, slug, live, source=None):
     if running:
         raise SwarmError(f"swarm {slug} still has live agents ({', '.join(running)}); stop it with stop --now first")
     store.restore(slug, doc["state"])
-    finished = []
-    for agent in store.agents(slug):
-        if agent.state != "finished":
-            store.put_agent(slug, replace(agent, state="finished"))
-            finished.append(agent.name)
     store.update(slug, state="paused")
     ledger = ledger_path(slug)
     if doc["ledger"] is not None and not ledger.exists():
         ledger.parent.mkdir(parents=True, exist_ok=True)
         ledger.write_text(json.dumps(doc["ledger"]), encoding="utf-8")
-    return finished
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    return resume.reopen(store, slug, doc["worktrees"], runtime, now_ms, ledger, has_quota)

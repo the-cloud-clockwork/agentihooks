@@ -430,6 +430,40 @@ def test_codex_defaults_to_sol_at_high_effort(tmp_path):
     assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="high"' in line
 
 
+def _resume_line(tmp_path, agent):
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent=agent, resume="c0ffee")
+    )
+    return next(line for line in launcher.read_text().splitlines() if " --name m" in line or "codex " in line)
+
+
+def test_a_claude_resume_reopens_that_conversation(tmp_path):
+    assert "--name m --resume c0ffee" in _resume_line(tmp_path, "claude")
+
+
+def test_a_codex_resume_runs_the_resume_subcommand_before_any_flag(tmp_path):
+    words = _resume_line(tmp_path, "codex").split()
+    at = words.index("resume")
+    assert words[at + 1] == "c0ffee"
+    assert words[at - 1] != "--agentihooks-report" and words.index("-m") > at
+
+
+def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(
+        init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal"])
+    )
+    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    args = ["--dir", str(tmp_path), "--name", "m", "--agent", "codex", "--resume", "c0ffee", "--dry-run"]
+    assert init_agent.main(args, env) == 0
+    launcher = next(
+        line.split("=", 1)[1] for line in capsys.readouterr().out.splitlines() if line.startswith("launcher=")
+    )
+    assert "resume c0ffee" in Path(launcher).read_text()
+
+
 def test_model_and_effort_come_from_env_per_agent(tmp_path):
     env = {
         "AGENTIHOOKS_CLAUDE_MODEL": "fable",
