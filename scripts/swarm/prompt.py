@@ -109,6 +109,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "",
         f"You are a member of the ledger crew. Run once: {led} join. Then keep a Monitor on: "
         f"agentihooks ledger watch {slug} --as {name}. Act on every OPERATOR line about your work, then run {led} ack.",
+        "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",

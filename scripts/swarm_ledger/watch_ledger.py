@@ -4,7 +4,7 @@
 Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
 Reads <LEDGER_DIR>/<slug>.json every interval and prints each event logged after rev N
-(default: the rev at start; --all: agent events too):
+(default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents' too):
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
   OPERATOR rev=13 comment edited on phases/p1 [c-1a2b] diff: "-old line\\n+new line"
@@ -29,6 +29,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import ledger_core as core  # noqa: E402
+import ledger_gate as gate  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
 
@@ -84,8 +85,12 @@ def main():
             beat.parent.mkdir(parents=True, exist_ok=True)
             beat.touch()
         meta = state["_meta"]
+        members, tasks = meta.get("members", {}), state.get("tasks", [])
         fresh = [
-            e for e in meta.get("events", []) if e.get("rev", 0) > since and (e.get("by") == "operator" or args.all)
+            e
+            for e in meta.get("events", [])
+            if e.get("rev", 0) > since
+            and (args.all or (e.get("by") == "operator" and (not args.name or gate.owes(e, members, args.name, tasks))))
         ]
         for event in seen.first_showing(marks, args.name, args.slug, fresh):
             print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
