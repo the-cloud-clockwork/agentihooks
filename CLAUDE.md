@@ -142,7 +142,7 @@ Docs: `docs/pillars/load-balancing.md`.
 
 ### Testing patterns
 
-Tests mock Redis via `patch("hooks._redis.get_redis", return_value=None)`. Use `uv run` for all test/lint commands.
+Tests mock Redis via `patch("hooks._redis.get_redis", return_value=None)`. Run tests and lint with the workspace venv binaries as shown under Commands.
 
 `tests/conftest.py::_isolate_real_user_paths` is autouse and refuses to run if
 any target's config home still resolves under the real `$HOME` — add a new
