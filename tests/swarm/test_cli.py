@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
@@ -74,11 +75,16 @@ def test_block_comments_parks_and_finishes(env):
 
 
 def test_say_addresses_and_strangers_are_refused(env, capsys):
-    _, ledger, _ = env
+    store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     assert run("sw", "--as", "sw-eng-1", "say", "the docs task is merged", "--to", "ci") == 0
     assert ledger.said == [("@ci the docs task is merged", "sw-eng-1")]
+    [item] = InboxStore(store.redis).inbox("sw-ci-1")
+    assert (item.sender, item.text, item.state) == ("sw-eng-1", "the docs task is merged", "pending")
+    assert run("sw", "--as", "sw-eng-1", "say", "status for the page only") == 0
+    assert ledger.said[-1] == ("status for the page only", "sw-eng-1")
+    assert [i.text for i in InboxStore(store.redis).inbox("sw-ci-1")] == ["the docs task is merged"]
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
 
@@ -372,6 +378,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} time-left",
         f"{led} followup add",
         "agentihooks swarm sw say --to operator",
+        "agentihooks msg reply",
         "agentihooks swarm sw send-message",
         "agentihooks swarm sw set max-eng-agents=",
         "agentihooks swarm sw pause",
@@ -414,3 +421,22 @@ def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monk
         "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding task t1 (claimed); threshold 3 idle ticks"
         in (capsys.readouterr().out)
     )
+
+
+def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1"))
+    rt.live.add("sw-master-1")
+    line = {"id": "new", "by": "operator", "at": 60, "text": "how far along are we"}
+    chat = [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}, line]
+    ledger.chat = lambda slug: chat
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
+    box = InboxStore(store.redis)
+    [item] = box.inbox("sw-master-1")
+    assert (item.sender, item.text, item.state) == ("operator", "how far along are we", "pending")
+    assert line in ledger.chat("sw")
+    answer = box.reply(item.id, "sw-master-1", "two tasks left")
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
+    assert ("two tasks left", "sw-master-1") in ledger.said
+    assert box.get(item.id).state == "done" and box.get(answer.id).state == "done"

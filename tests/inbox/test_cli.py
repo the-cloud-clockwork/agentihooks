@@ -96,3 +96,25 @@ def test_another_sessions_item_is_refused(store, capsys):
     item = store.send("bob", "carol", "hi")
     assert run("read", item.id) == 1
     assert "belongs to carol" in capsys.readouterr().err
+
+
+def test_reply_answers_the_sender_and_closes_the_item(store, monkeypatch, capsys):
+    item = store.send("bob", "alice", "is the branch ready")
+    assert run("reply", item.id, "yes,", "pushed") == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["to"], out["closed"]) == ("bob", item.id)
+    [answer] = store.inbox("bob")
+    assert (answer.sender, answer.text) == ("alice", "yes, pushed")
+    assert store.get(item.id).state == "done"
+
+
+def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    assert not (root / "profiles" / "package" / "skills" / "multi-agent-chat").exists()
+    tracked = subprocess.run(
+        ["git", "grep", "-l", "multi-agent-chat"], cwd=root, capture_output=True, text=True
+    ).stdout.split()
+    assert set(tracked) <= {"CHANGELOG.md", "profiles/_base/lifecycle.json", "tests/inbox/test_cli.py"}

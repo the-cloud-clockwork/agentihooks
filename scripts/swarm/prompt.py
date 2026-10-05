@@ -28,9 +28,10 @@ def build_master(slug, repo, name, handoff=""):
         f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
         "",
         "Your standing duties:",
-        f"- Answer every operator chat message. Messages from the page reach this session as [swarm chat] lines: "
-        f'answer them on the page with {me} say --to operator "<text>". Answer what the operator types in this '
-        "pane here.",
+        "- Answer every operator chat message. Messages from the page reach this session as inbox messages from "
+        'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
+        f'closes the message. Post your own updates with {me} say --to operator "<text>". Answer what the operator '
+        "types in this pane here.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
@@ -105,7 +106,8 @@ def build(slug, repo, lane, name, task):
         f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
         "",
         f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
-        "Messages for you arrive in this session. Write chat and comments in plain words for the operator: no ids, "
+        'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
+        "Write chat and comments in plain words for the operator: no ids, "
         "paths, hashes or dashes.",
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]

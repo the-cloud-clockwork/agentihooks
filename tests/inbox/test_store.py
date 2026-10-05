@@ -169,3 +169,23 @@ def test_two_racing_deliveries_have_one_winner(server, monkeypatch):
     assert first.deliver(item.id, "bob") is None
     assert raced[0].state == "delivered"
     assert [e["state"] for e in first.history(item.id)] == ["pending", "delivered"]
+
+
+def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
+    item = store.send("operator", "master", "how far along are we")
+    answer = store.reply(item.id, "master", "two tasks left")
+    assert (answer.sender, answer.address, answer.text, answer.state) == (
+        "master",
+        "operator",
+        "two tasks left",
+        "pending",
+    )
+    closed = store.get(item.id)
+    assert closed.state == "done" and answer.id in closed.reason
+
+
+def test_only_the_addressee_can_reply(store):
+    item = store.send("alice", "bob", "hi")
+    with pytest.raises(InboxError):
+        store.reply(item.id, "mallory", "me too")
+    assert store.inbox("alice") == []
