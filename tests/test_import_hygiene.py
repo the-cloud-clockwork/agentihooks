@@ -313,8 +313,9 @@ class TestProbeHarness:
         alone strips every dependency from the child's path, and every module
         importing one fails for a reason that has nothing to do with the module.
         """
-        report = _probe_modules("hooks", ["hooks.mcp"], _probe_env(HOME=str(tmp_path / "elsewhere")))
-        result = report["modules"]["hooks.mcp"]
+        _write_package(tmp_path, "homepkg", {"light": "import tomlkit\n"})
+        report = _probe_modules("homepkg", ["homepkg.light"], _probe_env(tmp_path, HOME=str(tmp_path / "elsewhere")))
+        result = report["modules"]["homepkg.light"]
         assert not result["failed"], f"import broke under a rewritten $HOME:\n{result['stderr']}"
 
     def test_every_module_is_probed_from_one_interpreter(self, tmp_path: Path) -> None:
