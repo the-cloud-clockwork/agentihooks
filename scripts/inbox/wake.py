@@ -4,6 +4,8 @@ Ladder per pending item: up to three wakes one retry window apart, then an inbox
 then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
 """
 
+from dataclasses import replace
+
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.swarm.delivery import READY, post
@@ -48,6 +50,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
     statuses, prompted, actions = {}, set(), []
     doc = None
     for item in inbox.pending():
+        item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
         if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
             continue
         receiver, held = _receiver(inbox, item.address)

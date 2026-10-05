@@ -39,7 +39,9 @@ def owner(event, members, tasks=()):
     target = event.get("target", "")
     if target == "chat":
         mention = MENTION_RE.match(event.get("text", ""))
-        named = mention.group(1) if mention else None
+        from scripts.swarm.naming import resolve_name
+
+        named = resolve_name(mention.group(1)) if mention else None
         return named if named in members else boss
     claimer = next((t.get("claimed_by") for t in tasks if f"tasks/{t.get('id')}" == target), None)
     if claimer in members:
@@ -51,11 +53,17 @@ def owner(event, members, tasks=()):
 
 
 def owes(event, members, name, tasks=()):
+    from scripts.swarm.naming import resolve_name
+
+    name = resolve_name(name)
     who = owner(event, members, tasks)
     return event.get("kind") == "sync requested" or who == name or who is None
 
 
 def unhandled_for(meta, name, tasks=()):
+    from scripts.swarm.naming import resolve_name
+
+    name = resolve_name(name)
     members = meta.get("members", {})
     me = members.get(name)
     if me is None:

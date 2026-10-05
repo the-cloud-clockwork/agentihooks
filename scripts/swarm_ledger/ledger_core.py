@@ -22,6 +22,7 @@ from typing import Optional
 
 import ledger_close
 import ledger_comments
+import ledger_names
 import ledger_notifications
 import ledger_priorities
 import ledger_size
@@ -88,6 +89,7 @@ EXTENSION_OPS = {
         ledger_notifications,
         ledger_tasks,
         ledger_title,
+        ledger_names,
         ledger_close,
         ledger_size,
         ledger_sources,
@@ -264,7 +266,10 @@ def parse_seed(html):
 
 
 def watch_path(slug, name):
-    return LEDGER_DIR / ".sessions" / f"{slug}.{name}.watch"
+    from scripts.swarm.naming import addresses
+
+    paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
+    return next((path for path in paths if path.exists()), paths[0])
 
 
 def page_version():
@@ -513,6 +518,10 @@ def record_sync(doc, op, ctx):
 
 
 def apply_op(doc, op, ctx):
+    if "by" in op:
+        from scripts.swarm.naming import resolve_name
+
+        op = {**op, "by": resolve_name(op["by"])}
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 

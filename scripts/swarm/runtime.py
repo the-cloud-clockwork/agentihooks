@@ -60,7 +60,7 @@ def _owns(found, agent):
     holds no other conversation."""
     name = found.get("name")
     if name:
-        return name in (herdr_target(agent.name), agent.name[:32])
+        return name in (agent.name, herdr_target(agent.name), agent.name[:32])
     own = _conversation_id(found.get("agent_session"))
     return not own or not agent.conversation_id or own == agent.conversation_id
 
@@ -219,7 +219,7 @@ class HerdrRuntime:
         found = self._get(pane_target(agent))
         if found is None or not _owns(found, agent):
             return "unknown"
-        if agent.pane_id and found.get("name") != herdr_target(agent.name):
+        if agent.pane_id and found.get("name") not in (agent.name, herdr_target(agent.name)):
             self.name_pane(agent)
         return found.get("agent_status") or found.get("status") or "unknown"
 

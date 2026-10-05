@@ -438,6 +438,18 @@ def cmd_names(store, args):
         )
 
 
+def cmd_rename(store, args):
+    from scripts.swarm.rename import rename_swarm
+
+    slugs = [args.slug] if getattr(args, "slug", "") else store.slugs()
+    ledger, runtime = LedgerClient(), HerdrRuntime()
+    for slug in slugs:
+        if not store.agents(slug):
+            continue
+        for action in rename_swarm(store, slug, ledger, runtime, now_ms()):
+            print(f"{slug}: {action}")
+
+
 def _findings(store, slug, config, tasks, events):
     rows, limits = [a.__dict__ for a in store.agents(slug)], health.limits()
     return _verdicts(store, slug).visible(
@@ -481,7 +493,7 @@ def cmd_send_message(store, args):
 
 
 def _me(store, args):
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = store.names.resolve(args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is None:
         raise SwarmError(f"{name or 'this session'} is not an agent of swarm {args.slug}")
@@ -648,7 +660,7 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
-    for plain in ("start", "pause", "remove", "snapshot", "url", "reopen"):
+    for plain in ("start", "pause", "remove", "snapshot", "url", "reopen", "rename"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
@@ -697,7 +709,7 @@ def build_parser():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, "autonomy"):

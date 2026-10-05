@@ -4,7 +4,7 @@ import os
 import signal
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hooks.proc import Process, _process, _target, processes
@@ -99,6 +99,9 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
         if target == "claude" and any(value in {"-p", "--print"} for value in process.argv[1:]):
             continue
         result.append(Session("", target, name, process, "", "unregistered"))
+    from scripts.swarm.naming import resolve_name
+
+    result = [replace(item, name=resolve_name(item.name)) for item in result]
     return sorted(result, key=lambda item: (item.target, item.name, item.session_id, item.process.pid))
 
 
@@ -115,9 +118,13 @@ def _print_sessions(items: list[Session]) -> None:
         )
 
 
-def resolve(items: list[Session], selector: str, target: str) -> Session:
+def resolve(items: list[Session], selector: str, target: str, names=None) -> Session:
+    from scripts.swarm.naming import resolve_name
+
+    canonical = names.resolve if names is not None else resolve_name
+    selector = canonical(selector)
     scoped = [item for item in items if target == "any" or item.target == target]
-    matches = [item for item in scoped if selector in {item.name, item.session_id, str(item.process.pid)}]
+    matches = [item for item in scoped if selector in {canonical(item.name), item.session_id, str(item.process.pid)}]
     unique = {(item.process.pid, item.session_id): item for item in matches}
     matches = list(unique.values())
     if not matches:

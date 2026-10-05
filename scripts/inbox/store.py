@@ -61,6 +61,7 @@ class InboxStore:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
         self.seats = SeatRegistry(redis)
+        self.names = NameRegistry(redis)
 
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
@@ -70,6 +71,7 @@ class InboxStore:
         work, so a bare close names no outcome."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
+        sender, address = self.names.resolve(sender), self.names.resolve(address)
         at = now_ms()
         item = Item(
             uuid.uuid4().hex[:12],
@@ -106,17 +108,22 @@ class InboxStore:
         return self._with_seat(me, self.pending_items)
 
     def _with_seat(self, me, read):
-        seat = self.seats.seat_of(me)
-        items = read(me) + (read(seat) if seat else [])
-        return sorted(items, key=_order)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(self.names.key("alias", me))
+            me = self.names.resolve(me, pipe)
+            addresses = [me, *self.names.aliases(me, pipe)]
+            seat = self.seats.seat_of(me, pipe)
+        items = [item for address in addresses + ([seat] if seat else []) for item in read(address)]
+        return sorted({item.id: item for item in items}.values(), key=_order)
 
     def acts_for(self, by, address, pipe=None):
+        by, address = self.names.resolve(by, pipe), self.names.resolve(address, pipe)
         if by == address:
             return True
         if not is_seat(address):
             return False
         held = self.seats.watch(pipe, address) if pipe is not None else self.seats.occupant(address)
-        return held.occupant == by
+        return self.names.resolve(held.occupant, pipe) == by
 
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
@@ -215,7 +222,7 @@ class InboxStore:
         if not self.redis.exists(self.key("waiting", "built")):
             self._build_waiting()
         addresses = sorted(self.redis.smembers(self.key("waiting")))
-        items = [item for address in addresses for item in self.pending_items(address)]
+        items = list({item.id: item for address in addresses for item in self.pending_items(address)}.values())
         return sorted(items, key=_order)
 
     def pending_items(self, address):
