@@ -112,7 +112,7 @@ def test_rename_is_idempotent_and_preserves_claim_seat_and_crew(store):
     actions = rename_swarm(store, "sw", ledger, runtime, 10)
     new = store.agents("sw")[0].name
     assert new != old
-    assert pane["name"] == new
+    assert pane["name"] == new.replace("@", "-")
     assert workspace["label"] == f"agentihooks-{store.config('sw').code}"
     assert store.claimant("sw", "t1") == new
     assert store.seats.occupant(seat).occupant == new

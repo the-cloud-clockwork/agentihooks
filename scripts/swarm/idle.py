@@ -19,15 +19,24 @@ def key(slug, kind, name):
 
 
 def beat(redis, slug, name, state, at):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
     redis.set(key(slug, "heartbeat", name), json.dumps({"state": state, "at": at}), ex=BEAT_TTL_S)
 
 
 def heartbeat(redis, slug, name):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
     raw = redis.get(key(slug, "heartbeat", name))
     return json.loads(raw) if raw else None
 
 
 def declare_wait(redis, slug, name, until, reason, at):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
     if until <= at:
         raise SwarmError("a wait needs an end time in the future")
     entry = {"until": until, "reason": reason, "at": at}
@@ -35,6 +44,9 @@ def declare_wait(redis, slug, name, until, reason, at):
 
 
 def wait(redis, slug, name):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
     raw = redis.get(key(slug, "wait", name))
     return json.loads(raw) if raw else None
 

@@ -439,15 +439,21 @@ def cmd_names(store, args):
 
 
 def cmd_rename(store, args):
+    from scripts.herdr_host import HerdrError
     from scripts.swarm.rename import rename_swarm
 
     slugs = [args.slug] if getattr(args, "slug", "") else store.slugs()
-    ledger, runtime = LedgerClient(), HerdrRuntime()
+    ledger, runtime, failed = LedgerClient(), HerdrRuntime(), []
     for slug in slugs:
         if not store.agents(slug):
             continue
-        for action in rename_swarm(store, slug, ledger, runtime, now_ms()):
-            print(f"{slug}: {action}")
+        try:
+            for action in rename_swarm(store, slug, ledger, runtime, now_ms()):
+                print(f"{slug}: {action}")
+        except (SwarmError, HerdrError) as exc:
+            failed.append(f"{slug}: {exc}")
+    if failed:
+        raise SwarmError("; ".join(failed))
 
 
 def _findings(store, slug, config, tasks, events):

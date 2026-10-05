@@ -108,11 +108,25 @@ class InboxStore:
         return self._with_seat(me, self.pending_items)
 
     def _with_seat(self, me, read):
-        with self.redis.pipeline() as pipe:
-            pipe.watch(self.names.key("alias", me))
-            me = self.names.resolve(me, pipe)
-            addresses = [me, *self.names.aliases(me, pipe)]
-            seat = self.seats.seat_of(me, pipe)
+        from redis.exceptions import WatchError
+
+        original = me
+        for _ in range(MOVE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.names.key("alias", original))
+                    me = self.names.resolve(original, pipe)
+                    pipe.watch(self.names.key("aliases-of", me))
+                    addresses = [me, *self.names.aliases(me, pipe)]
+                    seat = self.seats.seat_of(me, pipe)
+                    pipe.multi()
+                    pipe.ping()
+                    pipe.execute()
+                    break
+                except WatchError:
+                    continue
+        else:
+            raise InboxError(f"aliases for {original} changed meanwhile")
         items = [item for address in addresses + ([seat] if seat else []) for item in read(address)]
         return sorted({item.id: item for item in items}.values(), key=_order)
 

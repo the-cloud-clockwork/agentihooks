@@ -37,6 +37,7 @@ class HerdrMessenger:
 
 
 def recipients(store, slug, to, sender):
+    to, sender = store.names.resolve(to), store.names.resolve(sender)
     agents = [a for a in store.agents(slug) if a.name != sender and a.state != "finished"]
     if to in ("", "all"):
         return agents
@@ -57,9 +58,10 @@ def relay_to_page(inbox, slug, agents, ledger):
     names = {a.name for a in agents}
     shown = 0
     for item in inbox.inbox(OPERATOR):
-        if item.state != "pending" or item.sender not in names:
+        sender = inbox.names.resolve(item.sender)
+        if item.state != "pending" or sender not in names:
             continue
-        if not post(inbox, item, lambda: ledger.say(slug, item.text, by=item.sender)):
+        if not post(inbox, item, lambda: ledger.say(slug, item.text, by=sender)):
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1

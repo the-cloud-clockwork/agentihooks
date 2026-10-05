@@ -3,6 +3,7 @@ import uuid
 from dataclasses import asdict, replace
 
 from scripts.swarm import naming
+from scripts.swarm.runtime import herdr_target
 from scripts.swarm.store import MASTER, SwarmError
 
 LOCK_MS = 600_000
@@ -23,8 +24,8 @@ def rename_swarm(store, slug, ledger, runtime, at):
             reserved = store.redis.get(store.key(slug, "rename-to", agent.name)) or ""
             _check_pane(store.names, agent, pane, reserved)
             new = _new_name(store, slug, agent, at)
-            if pane.get("name") != new:
-                runtime.herdr(["agent", "rename", agent.pane_id, new])
+            if pane.get("name") != herdr_target(new):
+                runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
@@ -70,15 +71,22 @@ def _new_name(store, slug, agent, at):
 
 
 def _move_agent(store, slug, agent, new, at):
-    if agent.name == new:
-        return
-    key = store.key(slug, "agents")
-    claim = store.key(slug, "claim", agent.task)
-    with store.redis.pipeline() as pipe:
-        pipe.hset(key, new, json.dumps(asdict(replace(agent, name=new))))
-        pipe.hdel(key, agent.name)
-        if agent.task != MASTER and store.claimant(slug, agent.task) == agent.name:
-            pipe.set(claim, new, keepttl=True)
-        pipe.execute()
-    if agent.seat and store.seats.occupant(agent.seat).occupant == agent.name:
-        store.seats.occupy(agent.seat, new, at)
+    if agent.name != new:
+        key = store.key(slug, "agents")
+        claim = store.key(slug, "claim", agent.task)
+        with store.redis.pipeline() as pipe:
+            pipe.hset(key, new, json.dumps(asdict(replace(agent, name=new))))
+            pipe.hdel(key, agent.name)
+            if agent.task != MASTER and store.claimant(slug, agent.task) == agent.name:
+                pipe.set(claim, new, keepttl=True)
+            pipe.execute()
+    if agent.seat:
+        occupant = store.seats.occupant(agent.seat).occupant
+        if occupant != new and store.names.resolve(occupant) == new:
+            store.seats.occupy(agent.seat, new, at)
+    for old in store.names.aliases(new):
+        for kind in ("heartbeat", "wait"):
+            key = store.key(slug, kind, old)
+            if store.redis.exists(key):
+                store.redis.renamenx(key, store.key(slug, kind, new))
+                store.redis.delete(key)

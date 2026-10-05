@@ -108,19 +108,31 @@ class NameRegistry:
         return (reader if reader is not None else self.redis).get(self.key("alias", name)) or name
 
     def alias(self, old, new):
+        from redis.exceptions import WatchError
+
         new = self.resolve(new)
         if old == new:
             return
         if not self.entry(new):
             raise NamingError(f"no registered agent {new}")
-        held = self.redis.get(self.key("alias", old))
-        if held and held != new:
-            raise NamingError(f"alias {old} already belongs to {held}")
-        if self.redis.exists(self.key("name", old)):
-            raise NamingError(f"registered name {old} cannot be an alias")
-        if not self.redis.set(self.key("alias", old), new, nx=True) and self.resolve(old) != new:
-            raise NamingError(f"alias {old} changed meanwhile")
-        self.redis.sadd(self.key("aliases-of", new), old)
+        key = self.key("alias", old)
+        for _ in range(4):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    held = pipe.get(key)
+                    if held and held != new:
+                        raise NamingError(f"alias {old} already belongs to {held}")
+                    if pipe.exists(self.key("name", old)):
+                        raise NamingError(f"registered name {old} cannot be an alias")
+                    pipe.multi()
+                    pipe.set(key, new)
+                    pipe.sadd(self.key("aliases-of", new), old)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise NamingError(f"alias {old} changed meanwhile")
 
     def aliases(self, name, reader=None):
         reader = reader if reader is not None else self.redis
