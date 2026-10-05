@@ -226,6 +226,7 @@ class Gate(unittest.TestCase):
             del os.environ["PLAN_LEDGER_HOOKS"]
         make_ledger(done=True)
         core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": "boss", "role": "orchestrator"}])
+        ask("pending", 6)
         self.assertIsNone(hook("Stop"))
 
     def test_unreadable_ledger_fails_open(self):
