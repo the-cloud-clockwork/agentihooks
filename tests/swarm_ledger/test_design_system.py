@@ -1,4 +1,3 @@
-import os
 import re
 import sys
 import tempfile
@@ -10,7 +9,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-os.environ.setdefault("LEDGER_DIR", tempfile.mkdtemp(prefix="ledger-design-test-"))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402

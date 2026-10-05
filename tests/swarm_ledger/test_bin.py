@@ -1,7 +1,5 @@
 import json
-import os
 import sys
-import tempfile
 import threading
 import unittest
 import urllib.error
@@ -11,7 +9,6 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-os.environ["LEDGER_DIR"] = tempfile.mkdtemp(prefix="ledger-bin-test-")
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
