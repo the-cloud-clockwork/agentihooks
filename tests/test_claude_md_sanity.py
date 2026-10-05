@@ -34,7 +34,7 @@ out.write(json.dumps(results))
 
 @pytest.fixture(autouse=True)
 def _disable_redis():
-    with patch("hooks._redis.get_redis", return_value=None):
+    with patch("hooks.context.claude_md_sanity.get_redis", return_value=None):
         yield
 
 
