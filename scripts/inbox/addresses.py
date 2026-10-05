@@ -1,9 +1,9 @@
 from hooks.context.broadcast import get_active_sessions
 from scripts.inbox.seats import is_seat, of_swarm
-from scripts.inbox.store import InboxError
+from scripts.inbox.store import InboxError, InboxStore
 
 
-def check_address(inbox, sender: str, address: str) -> None:
+def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     resolved = inbox.names.resolve(address)
     if resolved == "operator" or inbox.names.entry(resolved):
         return
