@@ -139,6 +139,7 @@ class BrainEntry:
     ttl: int = 3600
     severity: str = "info"
     metadata: dict = field(default_factory=dict)
+    file: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +184,7 @@ class FileBrainSource(BrainSource):
                         ttl=int(fm.get("ttl", 3600)),
                         severity=fm.get("severity", "info"),
                         metadata=fm,
+                        file=str(md_file),
                     )
                 )
             except Exception as e:
@@ -206,6 +208,7 @@ class HttpBrainSource(BrainSource):
 
     def fetch(self) -> list[BrainEntry]:
         from hooks._brain_http import get
+        from hooks.config import BRAIN_URL
 
         payload = get("/feed")
         if not isinstance(payload, dict) or not any(key in payload for key in ("hot_arcs", "inject_blocks", "entries")):
@@ -246,6 +249,7 @@ class HttpBrainSource(BrainSource):
                         ttl=ttl,
                         severity=str(item.get("severity") or "info"),
                         metadata=item.get("metadata") or {},
+                        file=f"{BRAIN_URL}/feed",
                     )
                 )
         entries.sort(key=lambda e: e.priority, reverse=True)
@@ -398,6 +402,7 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
                     "ttl_seconds": entry.ttl,
                     "source": "brain-adapter",
                     "persistent": True,
+                    "origin": {"id": entry.id, "file": entry.file},
                 }
                 for entry in new_hashes.values()
             ],
@@ -432,6 +437,7 @@ def _compute_hash(entries: list[BrainEntry]) -> str:
                     "ttl": e.ttl,
                     "severity": e.severity,
                     "metadata": e.metadata,
+                    "file": e.file,
                 }
                 for e in entries
             ],

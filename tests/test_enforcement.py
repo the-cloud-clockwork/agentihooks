@@ -491,6 +491,7 @@ class TestLocalEnforcement:
                 "tag": "canary",
                 "created_at": entries[0]["created_at"],
                 "source": "local",
+                "store": str(store),
             }
         ]
 

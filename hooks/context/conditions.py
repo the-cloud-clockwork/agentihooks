@@ -450,7 +450,8 @@ def merge(step: str, payload: dict, runs: list[tuple[dict, dict]]) -> StepResult
         out = _parse_stdout(run.get("stdout", ""))
         if out.get("context"):
             result.contexts.append(f"[condition {label}]\n{out['context']}")
-            injection_trace.record(str(payload.get("session_id") or ""), "condition", label, out["context"])
+            locator = {"layer": entry.get("source", ""), "file": entry.get("path", "")}
+            injection_trace.record(str(payload.get("session_id") or ""), "condition", label, out["context"], locator)
         if step == "pre" and isinstance(out.get("tool_input"), dict):
             result.input_patch.update(out["tool_input"])
             result.input_writers.append(label)

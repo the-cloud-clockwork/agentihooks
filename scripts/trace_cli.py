@@ -1,6 +1,6 @@
 """agentihooks trace: the directives a session received and the layer behind each.
 
-agentihooks trace [SESSION]                                   time, layer, source, text per directive
+agentihooks trace [SESSION]                                   time, layer, source, locator, text per directive
 agentihooks trace [SESSION] --wrong SOURCE --repo PATH --reason TEXT
                                                               mark a directive wrong for a repository
 agentihooks trace --corrections                               the whole corrections log
@@ -8,6 +8,8 @@ agentihooks trace --corrections                               the whole correcti
 SESSION defaults to CLAUDE_CODE_SESSION_ID. Layers: bundle, profile,
 enforcement, condition, broadcast, brain. SOURCE is the enforcement id, the
 condition file or the broadcast id: the key that clears it at its source.
+LOCATOR finds that source: the enforcement store file, the condition file and
+its layer, the broadcast id, or the brain entry id and the file it came from.
 """
 
 import argparse
@@ -22,7 +24,8 @@ def _print_corrections(rows):
         return
     print("corrections")
     for row in rows:
-        print("\t".join((row["at"], row["layer"], row["source"], row["repo"], row["reason"])))
+        locator = injection_trace.format_locator(row.get("locator"))
+        print("\t".join((row["at"], row["layer"], row["source"], locator, row["repo"], row["reason"])))
 
 
 def build_parser():
@@ -55,7 +58,8 @@ def main(argv=None):
         return 0
     rows = injection_trace.trace(args.session)
     for row in rows:
-        print("\t".join((row["at"], row["layer"], row["source"], row["text"])))
+        locator = injection_trace.format_locator(row.get("locator"))
+        print("\t".join((row["at"], row["layer"], row["source"], locator, row["text"])))
     sources = {row["source"] for row in rows}
     _print_corrections([row for row in injection_trace.corrections() if row["source"] in sources])
     return 0

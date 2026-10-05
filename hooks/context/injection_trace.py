@@ -50,11 +50,17 @@ def _read(path: Path) -> list[dict]:
     return rows
 
 
-def record(session_id: str, layer: str, source: str, text: str) -> None:
+def record(session_id: str, layer: str, source: str, text: str, locator: dict | None = None) -> None:
     if not session_id:
         return
     try:
-        row = {"at": _now(), "layer": layer, "source": source, "text": " ".join(str(text).split())[:_TEXT_MAX]}
+        row = {
+            "at": _now(),
+            "layer": layer,
+            "source": source,
+            "locator": locator or {},
+            "text": " ".join(str(text).split())[:_TEXT_MAX],
+        }
         _append(_session_path(session_id), row)
     except Exception as e:
         from hooks.common import log
@@ -65,12 +71,21 @@ def record(session_id: str, layer: str, source: str, text: str) -> None:
 def record_enforcements(session_id: str, entries: list[dict]) -> None:
     for entry in entries:
         layer = _ENFORCEMENT_LAYER.get(entry.get("source", ""), "enforcement")
-        record(session_id, layer, entry.get("id", ""), entry.get("message") or entry.get("path", ""))
+        locator = {"store": entry.get("store", ""), "id": entry.get("id", "")}
+        record(session_id, layer, entry.get("id", ""), entry.get("message") or entry.get("path", ""), locator)
 
 
 def record_broadcast(session_id: str, msg: dict) -> None:
-    layer = "brain" if msg.get("source") == "brain-adapter" else "broadcast"
-    record(session_id, layer, msg.get("id", ""), f"From {msg.get('source', 'unknown')}: {msg.get('message', '')}")
+    if msg.get("source") == "brain-adapter":
+        layer, locator = "brain", msg.get("origin") or {}
+    else:
+        layer, locator = "broadcast", {"id": msg.get("id", "")}
+    text = f"From {msg.get('source', 'unknown')}: {msg.get('message', '')}"
+    record(session_id, layer, msg.get("id", ""), text, locator)
+
+
+def format_locator(locator: dict | None) -> str:
+    return " ".join(f"{key}={value}" for key, value in (locator or {}).items())
 
 
 def trace(session_id: str) -> list[dict]:
@@ -86,6 +101,7 @@ def correct(session_id: str, source: str, repo: str, reason: str) -> dict:
         "session": session_id,
         "layer": received[-1]["layer"],
         "source": source,
+        "locator": received[-1].get("locator") or {},
         "repo": repo,
         "reason": reason,
     }

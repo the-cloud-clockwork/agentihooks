@@ -455,6 +455,8 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
             channel,
         )
         if entry is not None:
+            if item.get("origin"):
+                entry["origin"] = item["origin"]
             built.append(entry)
 
     path = _broadcast_path()
@@ -480,6 +482,8 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
             )
             if match is not None:
                 kept_ids.add(match["id"])
+                if "origin" in entry:
+                    match = {**match, "origin": entry["origin"]}
                 resolved.append(match)
             else:
                 resolved.append(entry)
