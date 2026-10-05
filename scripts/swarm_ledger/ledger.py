@@ -190,8 +190,13 @@ def cmd_priority(args):
         print(json.dumps({"priority": args.values[0]}))
         return
     targets = ["all"] if args.all else args.values
-    state = call(args.slug, [op("priority_clear", args, target=t) for t in targets])
-    print(json.dumps({"cleared": targets, "rejected": state.get("rejected", [])}))
+    ops = [op("priority_clear", args, target=t) for t in targets]
+    state = call(args.slug, ops)
+    rejected = state.get("rejected", [])
+    cleared = [o["target"] for o in ops if o["id"] not in rejected]
+    print(json.dumps({"cleared": cleared, "rejected": rejected}))
+    if rejected:
+        sys.exit(1)
 
 
 def cmd_scope(args):
