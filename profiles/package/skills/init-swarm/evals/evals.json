@@ -43,5 +43,14 @@
       "its description runs agentihooks trace sweep and then agentihooks trace sweep --apply with the ledger slug",
       "its --must is a fresh sweep that closes the correction, and its --check is agentihooks trace sweep"
     ]
+  },
+  {
+    "query": "init swarm for this accepted plan with the codex-ci template, but run three engineers.",
+    "files": [],
+    "expected_behavior": [
+      "the create command carries --template codex-ci and --max-eng-agents 3",
+      "no --max-ci-agents flag is added, so the ci cap comes from the template",
+      "status is run after start to show the swarm running with its master"
+    ]
   }
 ]

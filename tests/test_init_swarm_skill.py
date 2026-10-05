@@ -54,3 +54,12 @@ def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():
     assert {"", " --apply --ledger <slug>"} <= set(runs)
     for run in runs:
         build_sweep_parser().parse_args(run.replace("<slug>", "s").split())
+
+
+def test_create_names_the_template_flag_the_parser_accepts():
+    from scripts.swarm.cli import build_parser
+
+    text = SKILL.read_text()
+    assert re.search(r"agentihooks swarm <slug> create .*--template <name>", text)
+    assert "agentihooks swarm templates" in text
+    assert build_parser().parse_args(["sw", "create", "--repo", "/r", "--template", "codex-ci"]).template == "codex-ci"

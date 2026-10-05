@@ -199,6 +199,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             try:
                 state = "pr" if task.get("pr_url") else "claimed"
                 fields = {"state": state, "claimed_by": name, "workspace": str(ledger_workspace.scaffold(slug, task))}
+                kind = config.lanes.get(lane, {}).get("kind", "")
+                if kind not in ("", "auto") and not task.get("kind"):
+                    fields["kind"] = kind
                 ledger.update_task(slug, task["id"], fields)
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)

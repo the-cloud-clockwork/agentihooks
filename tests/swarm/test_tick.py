@@ -515,3 +515,10 @@ def test_a_failed_spawn_leaves_the_seat_with_a_new_generation_and_the_task_open(
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
     assert [e["occupant"] for e in store.seats.history("eng-1@sw")] == ["sw-eng-1"]
+
+
+def test_a_task_without_a_kind_takes_its_lane_default_kind_when_claimed(store):
+    store.update("sw", lanes={"eng": {"kind": "research"}, "ci": {"kind": "auto"}})
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "kind": "ops"}, {"id": "t3", "lane": "ci"}])
+    tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert [ledger.rows[t].get("kind") for t in ("t1", "t2", "t3")] == ["research", "ops", None]

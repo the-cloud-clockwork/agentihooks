@@ -1,10 +1,12 @@
 """agentihooks swarm: run a swarm of Claude and Codex agents over a swarm ledger in herdr.
 
-agentihooks swarm list | tick
-agentihooks swarm <id> create --repo DIR [--max-eng-agents N] [--max-ci-agents N]
+agentihooks swarm list | tick | templates
+agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
+agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
+agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
@@ -26,7 +28,7 @@ from pathlib import Path
 
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import delivery, timer
+from scripts.swarm import delivery, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -36,6 +38,7 @@ from scripts.swarm.tick import agent_status, tick
 from scripts.swarm_ledger import ledger_kinds
 
 SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
+LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 
@@ -82,10 +85,22 @@ def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
     repo = os.path.abspath(os.path.expanduser(args.repo))
+    template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
     ledger.tasks(args.slug)
-    store.create(SwarmConfig(args.slug, repo, args.max_eng_agents, args.max_ci_agents, state="paused"))
-    print(json.dumps({"created": args.slug, "repo": repo, "state": "paused"}))
+    caps = {key: value.cap for key, value in template.lanes.items()}
+    config = SwarmConfig(
+        args.slug,
+        repo,
+        caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
+        caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
+        state="paused",
+        compact_limit=template.compact_limit,
+        template=args.template,
+        lanes=templates.lane_map(template),
+    )
+    store.create(config)
+    print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
 
 
 def _state(store, args, state):
@@ -127,11 +142,16 @@ def cmd_stop(store, args):
 
 
 def cmd_set(store, args):
-    changes = {}
+    changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     for pair in args.pairs:
         key, _, value = pair.partition("=")
+        if key in LANE_KEYS:
+            lane, field = LANE_KEYS[key]
+            lanes.setdefault(lane, {})[field] = value
+            changes["lanes"] = templates.lane_map(templates.parse({"name": "set", "lanes": lanes}))
+            continue
         if key not in SETTABLE or not value.isdigit():
-            raise SwarmError(f"set takes {', '.join(SETTABLE)}=<whole number>")
+            raise SwarmError(f"set takes {', '.join(SETTABLE)}=<whole number> or {', '.join(LANE_KEYS)}=<value>")
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
     if config.state == "running":
@@ -144,9 +164,29 @@ def cmd_set(store, args):
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "compact_limit": config.compact_limit,
+                "lanes": config.lanes,
             }
         )
     )
+
+
+def cmd_templates(store, args):
+    for template, source in templates.available(os.environ):
+        lanes = "\t".join(
+            f"{key} {lane.cap} {lane.agent} {lane.model} {lane.effort} {lane.kind}"
+            for key, lane in template.lanes.items()
+        )
+        print(f"{template.name}\t{source}\t{lanes}\tcompact {template.compact_limit}")
+
+
+def cmd_save_template(store, args):
+    config = store.config(args.slug)
+    try:
+        source = templates.load(config.template, os.environ) if config.template else None
+    except SwarmError:
+        source = None
+    path = templates.save(templates.from_config(args.template_name, config, source), os.environ)
+    print(json.dumps({"swarm": args.slug, "template": args.template_name, "path": str(path)}))
 
 
 def cmd_remove(store, args):
@@ -328,12 +368,14 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
     create = sub.add_parser("create")
     create.add_argument("--repo", required=True)
-    create.add_argument("--max-eng-agents", type=int, default=2)
-    create.add_argument("--max-ci-agents", type=int, default=1)
+    create.add_argument("--template", default="")
+    create.add_argument("--max-eng-agents", type=int, default=None)
+    create.add_argument("--max-ci-agents", type=int, default=None)
     for plain in ("start", "pause", "remove"):
         sub.add_parser(plain)
     sub.add_parser("stop").add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
+    sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
@@ -358,10 +400,10 @@ def build_parser():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick"):
+    if argv and argv[0] in ("list", "tick", "templates"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
-        if len(argv) > 1 and argv[1].partition("=")[0] in SETTABLE:
+        if len(argv) > 1 and (argv[1].partition("=")[0] in SETTABLE or argv[1].partition("=")[0] in LANE_KEYS):
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]

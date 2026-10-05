@@ -66,14 +66,14 @@ def build_master(slug, repo, name, task):
     return "\n".join(lines) + "\n"
 
 
-def build(slug, repo, lane, name, task):
+def build(slug, repo, lane, name, task, role=""):
     if lane == MASTER:
         return build_master(slug, repo, name, task)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
     lines = [
-        f"You are {name}, {LANE_ROLE[lane]} in swarm {slug}, working in the repo {repo}.",
+        f"You are {name}, {role or LANE_ROLE[lane]} in swarm {slug}, working in the repo {repo}.",
         f"Your one task for this session is {task['id']}: {task['title']}",
     ]
     if task.get("description"):
