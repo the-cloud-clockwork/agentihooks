@@ -52,6 +52,7 @@ class Runtime(Protocol):
     def retire(self, agent: AgentRecord, live: bool) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
     def nudge(self, agent: AgentRecord, text: str) -> None: ...
+    def conversations(self) -> dict[str, str] | None: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
@@ -71,6 +72,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += _master(slug, config, store, runtime, now_ms)
     if config.state == "running":
         actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
+    _conversations(slug, store, runtime)
     return actions + _settle(slug, config, store, ledger, rows)
 
 
@@ -137,6 +139,18 @@ def _orphans(slug, store, ledger, rows):
             _reopen(slug, ledger, rows, task_id)
             actions.append(f"task {task_id} had no agent, reopened")
     return actions
+
+
+def _conversations(slug, store, runtime):
+    found = runtime.conversations()
+    if found is None:
+        return
+    for agent in store.agents(slug):
+        if agent.state == "finished" or not agent.pane_id:
+            continue
+        current = found.get(agent.pane_id, "")
+        if current != agent.conversation_id:
+            store.put_agent(slug, replace(agent, conversation_id=current))
 
 
 def _reopen(slug, ledger, rows, task_id):

@@ -149,6 +149,23 @@ def test_restore_without_a_snapshot_names_the_missing_document(store):
         snapshot.restore(store, "sw", live=set())
 
 
+def test_each_agent_conversation_id_survives_a_snapshot_and_a_lost_redis(store):
+    store.create(SwarmConfig("sw", "/repo", 2, 1))
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", pane_id="w1:p2"))
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    assert {a.name: a.conversation_id for a in store.agents("sw")} == {"sw-eng-1": "5c90d80c", "sw-eng-2": ""}
+
+
+def test_an_agent_record_saved_before_conversation_ids_loads_with_an_empty_id(store):
+    store.redis.hset(
+        store.key("sw", "agents"), "sw-eng-1", json.dumps({"name": "sw-eng-1", "lane": "eng", "task": "t1"})
+    )
+    assert store.agents("sw")[0].conversation_id == ""
+
+
 def _values(state):
     return {key: (entry["type"], entry["value"]) for key, entry in state["keys"].items()}, state["members"]
 

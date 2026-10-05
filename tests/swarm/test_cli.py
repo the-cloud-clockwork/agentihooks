@@ -683,3 +683,16 @@ def test_status_json_reports_the_effective_codex_target(env, capsys, monkeypatch
 def test_set_refuses_a_codex_share_over_one_hundred(env):
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "codex-share=101") == 1
+
+
+def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", pane_id="w1:p2"))
+    run("sw", "status")
+    lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
+    assert lines["sw-eng-1"][-1] == "5c90d80c" and lines["sw-eng-2"][-1] == "-"
+    run("sw", "status", "--json")
+    agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
+    assert (agents["sw-eng-1"]["conversation_id"], agents["sw-eng-2"]["conversation_id"]) == ("5c90d80c", "")

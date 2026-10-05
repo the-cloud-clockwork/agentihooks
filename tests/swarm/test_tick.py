@@ -33,6 +33,7 @@ class FakeRuntime:
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
+        self.conversation_ids = {}
 
     def has_capacity(self):
         return not self.full
@@ -70,6 +71,9 @@ class FakeRuntime:
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
+
+    def conversations(self):
+        return None if self.conversation_ids is None else dict(self.conversation_ids)
 
 
 @pytest.fixture
@@ -541,3 +545,40 @@ def test_a_master_spawn_is_not_counted_in_the_codex_share(store):
     store.update("sw", max_eng=0, max_ci=0)
     tick("sw", store, FakeLedger([]), FakeRuntime(), 1000)
     assert store.spawns("sw") == {}
+
+
+def _conversations(store):
+    return {a.name: a.conversation_id for a in store.agents("sw")}
+
+
+def test_a_spawned_agent_gets_the_conversation_id_herdr_reports_for_its_pane(store):
+    rt = FakeRuntime()
+    rt.conversation_ids = {"w1:p1": "5c90d80c", "w1:m1": "15e33356"}
+    tick("sw", store, FakeLedger([{"id": "t1"}]), rt, 1000)
+    assert _conversations(store) == {"sw-eng-1": "5c90d80c", "sw-master-1": "15e33356"}
+
+
+def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(store):
+    rt = FakeRuntime()
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}])
+    tick("sw", store, ledger, rt, 1000)
+    assert _conversations(store) == {"sw-eng-1": "", "sw-eng-2": "", "sw-master-1": ""}
+    rt.conversation_ids = {"w1:p1": "first", "w1:p2": "other"}
+    tick("sw", store, ledger, rt, 2000)
+    assert _conversations(store) == {"sw-eng-1": "first", "sw-eng-2": "other", "sw-master-1": ""}
+    rt.conversation_ids = {"w1:p1": "resumed", "w1:p2": ""}
+    tick("sw", store, ledger, rt, 3000)
+    assert _conversations(store) == {"sw-eng-1": "resumed", "sw-eng-2": "", "sw-master-1": ""}
+    del rt.conversation_ids["w1:p1"]
+    tick("sw", store, ledger, rt, 4000)
+    assert _conversations(store)["sw-eng-1"] == ""
+
+
+def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(store):
+    rt = FakeRuntime()
+    rt.conversation_ids = {"w1:p1": "5c90d80c"}
+    ledger = FakeLedger([{"id": "t1"}])
+    tick("sw", store, ledger, rt, 1000)
+    rt.conversation_ids = None
+    tick("sw", store, ledger, rt, 2000)
+    assert _conversations(store)["sw-eng-1"] == "5c90d80c"

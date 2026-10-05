@@ -49,6 +49,7 @@ class AgentRecord:
     model: str = ""
     effort: str = ""
     seat: str = ""
+    conversation_id: str = ""
 
 
 class RedisStore:
