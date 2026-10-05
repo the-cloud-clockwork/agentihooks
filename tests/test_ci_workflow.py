@@ -3,10 +3,12 @@ import os
 import re
 import subprocess
 import tomllib
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
 import yaml
+from _pytest.config import default_plugins
 
 from tests.conftest import COLLECTED_NODEIDS
 from tests.refresh_durations import median_durations
@@ -47,6 +49,13 @@ def test_unit_shards_measure_no_coverage():
     assert "include" not in _workflow()["jobs"]["unit"]["strategy"]["matrix"]
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
+
+
+def test_unit_shards_block_only_real_plugins():
+    blocked = set(re.findall(r"-p no:(\S+)", _pytest_command()))
+    known = {entry.name for entry in entry_points(group="pytest11")} | set(default_plugins)
+    assert blocked
+    assert blocked <= known
 
 
 def _setup_python_steps(job: str) -> list[dict]:
