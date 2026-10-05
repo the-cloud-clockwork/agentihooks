@@ -2497,6 +2497,7 @@ def main() -> None:
         except Exception:  # NOSONAR — a block must never be weakened by this
             pass
         print(str(e), file=sys.stderr, flush=True)  # Claude Code reads stderr for hook messages
+        otel.flush()
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(2)  # blocks the action — skip Python shutdown (OTEL threads)
@@ -2544,6 +2545,7 @@ def main() -> None:
         sys.stderr.flush()
         os._exit(1)
 
+    otel.flush()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(0)
