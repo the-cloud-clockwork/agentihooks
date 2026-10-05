@@ -118,10 +118,12 @@ async def test_slow_backend_does_not_block_another(router, repo, tmp_path):
         await a.call_tool("activate_project", {"project": str(repo["a"])})
         await b.call_tool("activate_project", {"project": str(repo["b"])})
         slow = asyncio.create_task(a.call_tool("slow", {"started": str(started), "release": str(release)}))
-        await asyncio.wait_for(_appears(started), timeout=5)
-        await asyncio.wait_for(b.call_tool("find_symbol", {}), timeout=5)
-        assert not slow.done()
-        release.touch()
+        try:
+            await asyncio.wait_for(_appears(started), timeout=5)
+            await asyncio.wait_for(b.call_tool("find_symbol", {}), timeout=5)
+            assert not slow.done()
+        finally:
+            release.touch()
         await slow
 
 
