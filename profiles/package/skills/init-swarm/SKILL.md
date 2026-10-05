@@ -86,7 +86,10 @@ in the master lane.
 
 ## Hand over to the master
 
-Tell the operator the ledger page and the master's name, then stop. From here
+`create` and `start` end with a `Ledger page: <link>` line; `agentihooks swarm <slug> url`
+prints it again. Your final message gives the operator that line as printed and the
+master's name, then stop. When the line says the ledger server is not answering, run
+the command it names first and print the link again. From here
 the operator talks to the master in the ledger page chat or in its herdr pane;
 it turns requests into tasks, sets caps, pauses or stops the swarm. A message to
 the swarm from outside still works:
