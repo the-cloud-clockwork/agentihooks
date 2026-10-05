@@ -176,6 +176,9 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
 7. Turn new operator chat lines into inbox items, post inbox replies to the operator on the page, and wake
    idle panes holding unread items.
+8. Tick a phase whose tasks are all done, and reopen a ticked phase when a task that is not done lands in it.
+   Each change leaves a status comment from `swarm` on the phase and an item for the master. A phase with no task,
+   or out of scope, is left to the master.
 
 A lock keeps two ticks from running at once.
 
