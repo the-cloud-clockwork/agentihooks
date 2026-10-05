@@ -126,7 +126,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     for _adopted in ("KB_ROUTER_TOKEN", "BRAIN_URL", "BRAIN_HTTP_TOKEN"):
         monkeypatch.delenv(_adopted, raising=False)
     # Every PreToolUse delivers the running session's inbox from the swarm Redis.
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:1/0")
+    # A missing socket file fails at once; some hosts drop a connect to an unbound port until the timeout.
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", f"unix://{tmp_path / 'no-swarm-redis.sock'}")
     # The workbench shell and ~/.agentihooks/*.env carry the live collector and
     # Langfuse settings; only real sessions may report to them.
     for _telemetry in (

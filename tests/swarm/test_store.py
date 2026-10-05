@@ -85,6 +85,15 @@ def test_an_unreachable_redis_is_refused_with_a_clear_error():
     assert time.monotonic() - start < 1
 
 
+def test_the_suite_swarm_redis_is_refused_at_once():
+    from scripts.swarm.store import connect
+
+    start = time.monotonic()
+    with pytest.raises(SwarmError, match="refuses to run"):
+        connect()
+    assert time.monotonic() - start < 1
+
+
 def test_one_redis_for_every_caller_whatever_redis_url_says():
     from scripts.swarm.store import DEFAULT_URL, redis_url
 
