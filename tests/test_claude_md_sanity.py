@@ -10,6 +10,27 @@ import pytest
 
 from hooks.hook_manager import BlockAction
 
+_MANY_HOOKS = """
+import io, json, os, sys
+from hooks.hook_manager import main
+
+class Exit(BaseException):
+    pass
+
+def fake_exit(code):
+    raise Exit(code)
+
+os._exit = fake_exit
+out, results = sys.stdout, []
+for payload in json.load(sys.stdin):
+    sys.stdin, sys.stdout, sys.stderr = io.StringIO(json.dumps(payload)), io.StringIO(), io.StringIO()
+    try:
+        main()
+    except Exit as done:
+        results.append({"returncode": done.args[0], "stdout": sys.stdout.getvalue(), "stderr": sys.stderr.getvalue()})
+out.write(json.dumps(results))
+"""
+
 
 @pytest.fixture(autouse=True)
 def _disable_redis():
@@ -170,42 +191,41 @@ class TestClaudeMdSanity:
             "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
             "AGENTIHOOKS_SECRETS_MODE": "off",
         }
-
-        def run(payload):
-            return subprocess.run(
-                [sys.executable, "-m", "hooks"],
-                input=json.dumps(payload),
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-
         session_id = "claude-md-cap-integration"
-        result = run(
-            {
-                "hook_event_name": "UserPromptSubmit",
-                "session_id": session_id,
-                "prompt": "Continue with claude-md-max-lines=600",
-            }
-        )
-        assert result.returncode == 0
-        assert "CLAUDE.md line cap raised to 600 for this session." in result.stdout
-
-        payload = {
+        write = {
             "hook_event_name": "PreToolUse",
             "session_id": session_id,
             "tool_name": "Write",
             "tool_input": {"file_path": "/tmp/CLAUDE.md", "content": "line\n" * 600},
         }
-        assert run(payload).returncode == 0
+        over = {**write, "tool_input": {**write["tool_input"], "content": "line\n" * 601}}
+        reset = {**write, "tool_input": {**write["tool_input"], "content": "line\n" * 201}}
+        payloads = [
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": session_id,
+                "prompt": "Continue with claude-md-max-lines=600",
+            },
+            write,
+            over,
+            {"hook_event_name": "SessionEnd", "session_id": session_id},
+            reset,
+        ]
+        proc = subprocess.run(
+            [sys.executable, "-c", _MANY_HOOKS],
+            input=json.dumps(payloads),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        prompt, allowed, blocked, ended, after_end = json.loads(proc.stdout)
 
-        payload["tool_input"]["content"] += "line\n"
-        blocked = run(payload)
-        assert blocked.returncode == 2
-        assert "cap of 600 lines" in blocked.stderr
-
-        assert run({"hook_event_name": "SessionEnd", "session_id": session_id}).returncode == 0
-        payload["tool_input"]["content"] = "line\n" * 201
-        reset = run(payload)
-        assert reset.returncode == 2
-        assert "cap of 200 lines" in reset.stderr
+        assert prompt["returncode"] == 0
+        assert "CLAUDE.md line cap raised to 600 for this session." in prompt["stdout"]
+        assert allowed["returncode"] == 0
+        assert blocked["returncode"] == 2
+        assert "cap of 600 lines" in blocked["stderr"]
+        assert ended["returncode"] == 0
+        assert after_end["returncode"] == 2
+        assert "cap of 200 lines" in after_end["stderr"]
