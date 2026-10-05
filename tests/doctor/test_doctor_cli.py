@@ -210,6 +210,7 @@ def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
     assert any("no new finding" in action for action in tick(store, rt))
     closed = state(DOCTOR)
     assert closed["closed_at"] and "two hours with no new finding" in closed["overview"]
+    assert store.agents(DOCTOR) == [] and store.config(DOCTOR).state == "stopped"
     assert (store.peer(WATCHED), store.peer(DOCTOR)) == ("", "")
     assert not any("no new finding" in action for action in tick(store, rt))
 
