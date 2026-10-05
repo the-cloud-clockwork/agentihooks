@@ -22,14 +22,15 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
-def test_a_nudge_in_a_long_named_swarm_reaches_the_engineer_not_the_master(tmp_path):
+def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_master(tmp_path):
     calls = []
-    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {})
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {"agent_status": "idle"})
     slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
-    runtime.nudge(SimpleNamespace(name=f"{slug}-eng-4"), "wake")
-    runtime.nudge(SimpleNamespace(name=f"{slug}-master-1"), "wake")
-    eng, master = calls[0][2], calls[1][2]
-    assert calls[0][:2] == ["agent", "prompt"] and eng != master and eng.endswith("-eng-4")
+    eng, master = SimpleNamespace(name=f"{slug}-eng-4"), SimpleNamespace(name=f"{slug}-master-1")
+    runtime.status(eng), runtime.nudge(eng, "wake"), runtime.status(master), runtime.nudge(master, "wake")
+    assert [c[:2] for c in calls] == [["agent", "get"], ["agent", "prompt"]] * 2
+    assert calls[0][2] == calls[1][2] != calls[2][2] == calls[3][2]
+    assert calls[0][2].endswith("-eng-4")
 
 
 def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
