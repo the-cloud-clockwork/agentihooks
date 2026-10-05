@@ -39,6 +39,16 @@ def store():
     return s
 
 
+def test_inbox_wakes_in_a_long_named_swarm_read_and_prompt_the_engineer_pane():
+    calls = []
+    messenger = delivery.HerdrMessenger(herdr=lambda args: calls.append(args) or {"agent_status": "idle"})
+    slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
+    eng, master = AgentRecord(f"{slug}-eng-4", "eng", "t"), AgentRecord(f"{slug}-master-1", "master", "")
+    messenger.agent_status(eng), messenger.prompt(eng, "inbox"), messenger.agent_status(master)
+    assert calls[0][2] == calls[1][2] != calls[2][2]
+    assert calls[0][2].endswith("-eng-4")
+
+
 def inbox(store, address):
     return [(i.sender, i.text, i.state) for i in InboxStore(store.redis).inbox(address)]
 
