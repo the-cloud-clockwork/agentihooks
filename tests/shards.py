@@ -1,5 +1,6 @@
 import importlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
@@ -50,3 +51,9 @@ def warm_imports(modules: list[str], workers: int) -> list[int]:
                 os._exit(0)
         pids.append(pid)
     return pids
+
+
+def setup_nodes_in_parallel(manager, putevent) -> list:
+    manager.config.hook.pytest_xdist_setupnodes(config=manager.config, specs=manager.specs)
+    with ThreadPoolExecutor(len(manager.specs)) as pool:
+        return list(pool.map(lambda spec: manager.setup_node(spec, putevent), manager.specs))
