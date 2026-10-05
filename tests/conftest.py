@@ -1,7 +1,9 @@
 """Shared test fixtures for agentihooks."""
 
+import errno
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +20,25 @@ from tests.shards import (
 )
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+REDIS_PORT = 6379
+_real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+
+
+def _is_redis(address):
+    return isinstance(address, tuple) and address[1:2] == (REDIS_PORT,)
+
+
+def _refuse_redis_connect(sock, address):
+    if _is_redis(address):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, f"the test suite refuses Redis at {address[0]}:{REDIS_PORT}")
+    return _real_connect(sock, address)
+
+
+def _refuse_redis_connect_ex(sock, address):
+    return errno.ECONNREFUSED if _is_redis(address) else _real_connect_ex(sock, address)
+
 
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
@@ -128,6 +149,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # Every PreToolUse delivers the running session's inbox from the swarm Redis.
     # A missing socket file fails at once; some hosts drop a connect to an unbound port until the timeout.
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", f"unix://{tmp_path / 'no-swarm-redis.sock'}")
+    # The workbench Redis on the default port holds live swarms and inboxes, and the shell's
+    # REDIS_URL names a remote one; a test that reaches either can wipe real state.
+    monkeypatch.setattr(socket.socket, "connect", _refuse_redis_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", _refuse_redis_connect_ex)
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setattr("hooks._redis._redis_client", None)
+    monkeypatch.setattr("hooks._redis._redis_checked", False)
     # The workbench shell and ~/.agentihooks/*.env carry the live collector and
     # Langfuse settings; only real sessions may report to them.
     for _telemetry in (
