@@ -20,12 +20,24 @@ JOIN = f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss join --role orchest
 
 
 def setUpModule():
-    global CLOSED_PORT
+    global CLOSED_PORT, RUNNER, RUNNER_ERR
     CLOSED_PORT = socket.socket()
     CLOSED_PORT.bind(("127.0.0.1", 0))
+    RUNNER_ERR = tempfile.TemporaryFile()
+    RUNNER = subprocess.Popen(
+        [sys.executable, "-c", RUN_HOOKS, str(SCRIPTS)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=RUNNER_ERR,
+        env=hook_env(),
+        text=True,
+    )
 
 
 def tearDownModule():
+    RUNNER.stdin.close()
+    RUNNER.wait(timeout=20)
+    RUNNER_ERR.close()
     CLOSED_PORT.close()
 
 
@@ -54,16 +66,20 @@ def make_ledger(done=False):
         )
 
 
-MANY_HOOKS = """
-import io, json, sys
+RUN_HOOKS = """
+import io, json, os, sys
 sys.path.insert(0, sys.argv[1])
 import ledger_hook
-out, results = sys.stdout, []
-for payload in json.load(sys.stdin):
-    sys.stdin, sys.stdout = io.StringIO(json.dumps(payload)), io.StringIO()
-    assert ledger_hook.main() == 0
-    results.append(json.loads(sys.stdout.getvalue()) if sys.stdout.getvalue().strip() else None)
-out.write(json.dumps(results))
+requests, out = sys.stdin, sys.stdout
+for line in requests:
+    request = json.loads(line)
+    os.environ.clear()
+    os.environ.update(request["env"])
+    sys.stdin, sys.stdout = io.StringIO(json.dumps(request["payload"])), io.StringIO()
+    code = ledger_hook.main()
+    text = sys.stdout.getvalue()
+    out.write(json.dumps([code, json.loads(text) if text.strip() else None]) + "\\n")
+    out.flush()
 """
 
 
@@ -71,31 +87,21 @@ def hook_env():
     return {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(CLOSED_PORT.getsockname()[1])}
 
 
-def hooks(*payloads):
-    run = subprocess.run(
-        [sys.executable, "-c", MANY_HOOKS, str(SCRIPTS)],
-        input=json.dumps([{"session_id": SID, **payload} for payload in payloads]),
-        env=hook_env(),
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert run.returncode == 0, run.stderr
-    return json.loads(run.stdout)
-
-
 def hook(event, **fields):
-    payload = {"session_id": SID, "hook_event_name": event, **fields}
-    run = subprocess.run(
-        [sys.executable, str(SCRIPTS / "ledger_hook.py")],
-        input=json.dumps(payload),
-        env=hook_env(),
-        capture_output=True,
-        text=True,
-        timeout=20,
+    RUNNER.stdin.write(
+        json.dumps({"env": hook_env(), "payload": {"session_id": SID, "hook_event_name": event, **fields}}) + "\n"
     )
-    assert run.returncode == 0, run.stderr
-    return json.loads(run.stdout) if run.stdout.strip() else None
+    RUNNER.stdin.flush()
+    line = RUNNER.stdout.readline()
+    RUNNER_ERR.seek(0)
+    assert line, RUNNER_ERR.read().decode()
+    code, result = json.loads(line)
+    assert code == 0
+    return result
+
+
+def hooks(*payloads):
+    return [hook(**payload) for payload in payloads]
 
 
 def bash(command, output=""):
@@ -195,9 +201,9 @@ class Gate(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 2)
 
     def test_work_without_recording_blocks_stop(self):
-        ls = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
+        ls = {"event": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
         say = {**ls, "tool_input": {"command": f"python3 {SCRIPTS}/ledger.py --slug {SLUG} --as boss say hi"}}
-        stop = {"hook_event_name": "Stop"}
+        stop = {"event": "Stop"}
         results = hooks(*[ls] * 10, stop, say, stop)
         self.assertEqual(len(results), 13)
         self.assertIn("tool calls since you last recorded", results[10]["reason"])
