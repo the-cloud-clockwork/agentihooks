@@ -1,7 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.inbox.seats import seat_address
@@ -10,11 +9,13 @@ from scripts.swarm.naming import NamingError
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.terminate_agent import Session, resolve
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/home/x/agentihooks", 2, 1))
     return store

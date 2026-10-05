@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.inbox.seats import seat_address
@@ -9,11 +8,13 @@ from scripts.swarm import delivery, idle
 from scripts.swarm.rename import _move_agent
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 1, 0))
     return store
