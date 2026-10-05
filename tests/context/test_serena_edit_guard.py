@@ -54,6 +54,9 @@ def test_serena_tools_are_allowed(trees):
         "sed --in-place 's/1/2/' pkg/mod.py",
         "cp other.py pkg/mod.py",
         "mv /tmp/new.py pkg/mod.py && echo moved",
+        "cd pkg && sed -i s/1/2/ mod.py",
+        "perl -pi -e 's/1/2/' pkg/mod.py",
+        "dd if=/dev/null of=pkg/mod.py",
         "echo 'y = 2' >> pkg/mod.py",
         "cat > pkg/mod.py <<'EOF'\nx = 2\nEOF",
         "printf 'x' | tee pkg/mod.py",
@@ -74,6 +77,9 @@ def test_shell_rewrites_of_worktree_python_are_blocked(trees, command):
         "cat pkg/mod.py",
         "echo 'x' > pkg/new.py",
         "python3 -m pytest -q",
+        'git commit -m "move helper -> pkg/mod.py"',
+        'echo "renamed a -> pkg/mod.py" >> notes.md',
+        "ruff format pkg/mod.py",
     ],
 )
 def test_shell_reads_and_new_files_are_allowed(trees, command):

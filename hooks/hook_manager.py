@@ -1254,6 +1254,11 @@ def on_pre_tool_use(payload: dict) -> None:
             raise
         except Exception as e:
             log("serena_edit_guard check failed", {"error": str(e)})
+            print(
+                f"WARNING: serena_edit_guard check failed ({e}) — guard bypassed",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":

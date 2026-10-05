@@ -1,6 +1,8 @@
 """Serena Edit Guard — Python in a linked worktree is edited by symbol, never by built-in or shell rewrites.
 
 Development Manifesto §7. Primary checkouts (dev-direct work) and new files stay open.
+Formatters (ruff format, black) and patch / git apply stay open: they rewrite mechanically
+and the gates require formatted code.
 """
 
 import re
@@ -9,11 +11,14 @@ from pathlib import Path
 from hooks.hook_manager import BlockAction
 
 _FILE_TOOLS = frozenset({"Edit", "MultiEdit", "Write"})
+_CD = re.compile(r"(?:^|&&|;)\s*cd\s+(\S+)\s*(?=&&|;)")
 _PY = r"""['"]?([^\s'";|&<>()]+\.py)['"]?"""
 _SHELL_WRITES = (
     re.compile(r"\bsed\b[^|;&\n]*\s(?:-i|--in-place)\S*\s[^|;&\n]*?" + _PY),
     re.compile(r"\b(?:cp|mv|install)\b[^|;&\n]*\s" + _PY + r"\s*(?:$|[;&|\n])"),
-    re.compile(r">>?\s*" + _PY),
+    re.compile(r"(?:^|\s)[12&]?>>?\s*" + _PY),
+    re.compile(r"\bperl\b[^|;&\n]*\s-\w*i\S*\s[^|;&\n]*?" + _PY),
+    re.compile(r"\bdd\b[^|;&\n]*\sof=" + _PY),
     re.compile(r"\btee\b(?:\s+-\S+)*\s+" + _PY),
     re.compile(r"""\bopen\(\s*""" + _PY + r"""\s*,\s*['"][wa]"""),
     re.compile(r"""Path\(\s*""" + _PY + r"""\s*\)\.write_(?:text|bytes)"""),
@@ -64,10 +69,10 @@ def check(payload: dict) -> None:
 
     if tool_name != "Bash":
         return
-    from hooks.context.branch_guard import _resolve_cwd
-
     command = tool_input.get("command", "")
-    base = Path(_resolve_cwd(command, str(cwd)))
+    base = cwd
+    for target in _CD.findall(command):
+        base = base / Path(target.strip("'\"")).expanduser()
     for pattern in _SHELL_WRITES:
         for match in pattern.finditer(command):
             path = Path(match.group(1)).expanduser()
