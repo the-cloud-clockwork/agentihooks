@@ -56,7 +56,12 @@ def test_codex_has_quota_below_the_handoff_threshold(monkeypatch):
 
 def test_a_codex_launcher_runs_through_the_codex_router(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: f"/usr/bin/{name}")
-    env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt"), "SHELL": "/bin/bash"}
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "rt"),
+        "SHELL": "/bin/bash",
+        "AGENTIHOOKS_TRUST_LAUNCH_DIR": "0",
+    }
     launcher, prompt_file = init_agent._write_launcher(
         tmp_path, "eng-c", "fix it", ["--model", "o3"], env, init_agent.AgentSpec(agent="codex")
     )

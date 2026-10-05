@@ -7,6 +7,7 @@ from dataclasses import asdict
 from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
+from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
@@ -25,6 +26,9 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
         "inbox": lambda: inbox.findings(read.inbox_items(mail, slug), now_ms, wake.window_ms(env)),
         "handoff": lambda: handoffs.findings(read.handoffs(store, mail, home, slug)),
         "spawn": lambda: spawns.findings(spawn_read.records(store, slug)),
+        "startup": lambda: spawns.silent_starts(
+            [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
+        ),
         "ci": lambda: [
             f
             for repo, number in open_pulls(ledger.tasks(slug))
