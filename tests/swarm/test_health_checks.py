@@ -45,5 +45,15 @@ def test_only_idle_holders_of_a_pull_request_task_are_probed():
         {"name": "sw-eng-3", "lane": "eng", "task": "t3", "idle_ticks": 9},
     ]
     seen = []
-    assert checks.waiting(agents, tasks, Limits(), runner(PENDING, 8, seen)) == {"t1"}
+    assert checks.waiting(agents, tasks, Limits(), lambda url: seen.append(url) or True) == {"t1"}
+    assert seen == [URL]
+
+
+def test_a_cached_probe_asks_github_once_per_ttl():
+    import fakeredis
+
+    redis, seen = fakeredis.FakeRedis(decode_responses=True), []
+    probe = checks.cached(redis, "agentihooks:swarm:sw:checks", run=runner(PENDING, 8, seen))
+    assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
+    assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS

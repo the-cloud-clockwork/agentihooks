@@ -169,7 +169,7 @@ def cmd_status(store, args):
             activity.counts(args.slug),
             now_ms(),
             limits,
-            checks.waiting(rows, tasks, limits),
+            checks.waiting(rows, tasks, limits, checks.cached(store.redis, store.key(args.slug, "checks"))),
         ),
         now_ms(),
         limits.cooldown_minutes * 60_000,
