@@ -79,7 +79,7 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["run"].strip() == 'uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"'
 
 
-def test_unit_install_excludes_only_packages_no_test_imports():
+def test_unit_install_excludes_playwright_and_the_grpc_exporter():
     excludes = (_ROOT / ".github/test-excludes.txt").read_text().split()
     assert excludes == ["playwright", "opentelemetry-exporter-otlp-proto-grpc"]
 
