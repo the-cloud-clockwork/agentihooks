@@ -1161,6 +1161,41 @@ class TestInitProfileRecall:
             install.cmd_init_unified(args)
         assert mock_install.call_args[0][0].profile == "anton"
 
+    def test_a_profile_linked_for_another_target_stays_out_of_this_one(self):
+        import argparse
+        import os
+
+        def record(path, profile):
+            return {"path": path, "profile": profile, "installed_at": "2026-01-01T00:00:00Z"}
+
+        state = {
+            "targets": {
+                "global": {
+                    "claude": record("/home/test/.claude", "anton"),
+                    "codex": record("/home/test/.codex", "smith,brain"),
+                }
+            },
+            "linked_profiles": [{"name": "brain", "path": "/home/test/brain", "linked_at": "2026-01-01T00:00:00Z"}],
+        }
+        args = argparse.Namespace(
+            profile="anton",
+            init_settings_profile=None,
+            bundle=None,
+            repo=None,
+            query=False,
+            list_profiles=False,
+            install_target="claude",
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(args)
+        assert mock_install.call_args[0][0].profile == "anton"
+
     def test_force_with_an_explicit_profile_keeps_the_linked_one(self):
         import argparse
         import copy

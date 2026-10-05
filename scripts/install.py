@@ -2032,17 +2032,11 @@ def _clean_claude_home() -> int:
     return removed
 
 
-def _keep_chained_linked_profiles(profile_name: str, state: dict) -> str:
-    """A linked profile in any target's previous chain leaves it only through `link-profile unlink`."""
+def _keep_chained_linked_profiles(profile_name: str, previous_record: dict, state: dict) -> str:
+    """A linked profile in this target's previous chain leaves it only through `link-profile unlink`."""
     chain = [p.strip() for p in profile_name.split(",") if p.strip()]
     linked = {e.get("name") for e in state.get("linked_profiles", []) if isinstance(e, dict)}
-    previous = [
-        p.strip()
-        for target in _installed_targets(state, default=())
-        for p in _global_record(state, target).get("profile", "").split(",")
-        if p.strip()
-    ]
-    for name in previous:
+    for name in (p.strip() for p in previous_record.get("profile", "").split(",")):
         if name in linked and name not in chain:
             chain.append(name)
     return ",".join(chain)
@@ -2185,7 +2179,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
                 existing_chain.append(lname)
         profile_name = ",".join(existing_chain)
 
-    profile_name = _keep_chained_linked_profiles(profile_name, _kept_state if _is_force else _prev_state)
+    profile_name = _keep_chained_linked_profiles(profile_name, _prev_global, _kept_state if _is_force else _prev_state)
 
     # Guard: a bare `init` that resolved to 'default' while the managed
     # CLAUDE.md on disk was installed from a different profile means state.json
