@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.context.inbox_delivery import _is_codex_memory_thread
 from hooks.proc import Process, _process, _target, processes
 
 
@@ -44,6 +45,24 @@ def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
     return agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
 
 
+def _main_thread(target: str, session_id: str, info: dict, records: dict[str, dict]) -> tuple[str, str]:
+    cwd = str(info.get("cwd", ""))
+    if target != "codex" or not cwd or not _is_codex_memory_thread(cwd):
+        return session_id, cwd
+    threads = [
+        (str(other.get("started_at", "")), other_id, str(other["cwd"]))
+        for other_id, other in records.items()
+        if other.get("pid") == info.get("pid")
+        and other.get("status") in {"alive", "handed_off", "superseded"}
+        and other.get("cwd")
+        and not _is_codex_memory_thread(str(other["cwd"]))
+    ]
+    if not threads:
+        return session_id, cwd
+    _, main_id, main_cwd = max(threads)
+    return main_id, main_cwd
+
+
 def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None) -> list[Session]:
     table = processes(proc)
     records = _registry() if registry is None else registry
@@ -61,13 +80,14 @@ def sessions(proc: Path = Path("/proc"), registry: dict[str, dict] | None = None
         if not process or not target:
             continue
         registered_pids.add(pid)
+        session_id, cwd = _main_thread(target, session_id, info, records)
         result.append(
             Session(
                 session_id=session_id,
                 target=target,
                 name=_name(process, proc, table),
                 process=process,
-                cwd=str(info.get("cwd", "")),
+                cwd=cwd,
                 status=str(info.get("status", "alive")),
             )
         )
