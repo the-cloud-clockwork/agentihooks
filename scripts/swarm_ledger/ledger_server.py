@@ -31,13 +31,13 @@ import ledger_bin  # noqa: E402
 import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
+import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 import ledger_size  # noqa: E402
 import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
-HOST = os.environ.get("LEDGER_HOST", "127.0.0.1")
-PORT = int(os.environ.get("LEDGER_PORT", "8765"))
+HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
@@ -588,7 +588,13 @@ def serving_dir():
         return None
 
 
+def check_address() -> None:
+    if PORT == 8765 and not ledger_link.shared_directory(core.LEDGER_DIR):
+        sys.exit("port 8765 is reserved for the shared ledger folder; proof folders require a spare LEDGER_PORT")
+
+
 def serve():
+    check_address()
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=watch_seeds, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
@@ -598,9 +604,10 @@ def serve():
 
 
 def ensure():
+    check_address()
     running = serving_dir()
     if running and running != str(core.LEDGER_DIR):
-        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; set LEDGER_PORT to another port")
+        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; stop that ledger server first")
     if not running:
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         core.rotate_if_full(LOGFILE)
