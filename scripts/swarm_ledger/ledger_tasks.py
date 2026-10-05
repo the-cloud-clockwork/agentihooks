@@ -21,6 +21,7 @@ UPDATABLE = (
     "kind",
     "contract",
     "proof",
+    "workspace",
 )
 LIST_FIELDS = ("depends_on", "territory")
 OBJECT_FIELDS = ("contract", "proof")
@@ -43,8 +44,8 @@ def check(op):
             raise ValueError("task_add needs task <id> and title")
         if op.get("lane") not in LANES:
             raise ValueError(f"lane must be one of {LANES}")
-        if not isinstance(op.get("phase", ""), str) or not isinstance(op.get("description", ""), str):
-            raise ValueError("phase and description must be strings")
+        if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
+            raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
         ledger_kinds.check(op)
         gain = op.get("gain", 0)
@@ -115,7 +116,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract"):
+    for key in ("gain", "contract", "workspace"):
         if key in op:
             task[key] = op[key]
     tasks.append(task)

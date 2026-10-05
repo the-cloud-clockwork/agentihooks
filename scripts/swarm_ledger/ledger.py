@@ -22,9 +22,10 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
-           [--kind K] [--must M --check C --judge J]
+           [--kind K] [--must M --check C --judge J] [--scaffold]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
-                                      ops, troubleshoot, tune or research; M, C, J form its proof contract
+                                      ops, troubleshoot, tune or research; M, C, J form its proof contract;
+                                      --scaffold creates its work folder (steering, progress, proof) in the same call
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task
   prompt                              print the join paragraph for a launch prompt
 
@@ -51,6 +52,7 @@ import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_kinds  # noqa: E402
+import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 BASE = f"http://{os.environ.get('LEDGER_HOST', '127.0.0.1')}:{os.environ.get('LEDGER_PORT', '8765')}"
@@ -250,6 +252,9 @@ def cmd_task(args):
             lists["contract"] = contract
         if args.kind:
             lists["kind"] = args.kind
+        if args.scaffold:
+            task = {"id": args.id, "title": title, "description": args.description, **lists}
+            lists["workspace"] = str(ledger_workspace.scaffold(args.slug, task))
         send(
             args,
             "task_add",
@@ -348,6 +353,9 @@ def build_parser():
     task.add_argument("--must", default="", help="contract: what must be true when the task is done")
     task.add_argument("--check", default="", help="contract: how it is checked")
     task.add_argument("--judge", default="", help="contract: who judges it")
+    task.add_argument(
+        "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
+    )
     return parser
 
 

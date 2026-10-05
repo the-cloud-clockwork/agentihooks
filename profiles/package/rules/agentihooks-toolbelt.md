@@ -93,6 +93,12 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   arrives on the first prompt, after a compaction, when the block changes and
   every `AGENTIHOOKS_REFOCUS_EVERY` tool calls (default 40), capped at
   `AGENTIHOOKS_REFOCUS_MAX_CHARS` (default 1500).
+- The tick gives each claimed task a work folder, its `workspace` field and
+  named in the opening prompt: `steering.md` seeded from the task, and
+  `progress.md` and `proof.md`, where the agent appends a line per step and per
+  piece of evidence. A reclaim reuses it, so a successor reads it cold.
+  `ledger task add --scaffold` creates it with the task. The ledger page shows
+  its latest lines in the task's Contract and proof fold.
 - Every agent session is one Langfuse trace in the project `agent-swarm`,
   tagged with swarm, agent, lane, task and account.
 - `agentihooks swarm <slug> status` and the ledger page's Swarm health panel

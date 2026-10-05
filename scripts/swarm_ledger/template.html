@@ -673,7 +673,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function taskProof(key, item) {
-    const rows = [...Object.entries(item.contract || {}), ...Object.entries(item.proof || {})].filter(([, v]) => String(v).trim());
+    const rows = [item.contract, item.proof, item.workspace_tail].flatMap((o) => Object.entries(o || {})).filter(([, v]) => String(v).trim());
     if (!rows.length) return null;
     const label = (k) => k[0].toUpperCase() + k.slice(1).replace("_", " ");
     const value = (v) => /^https?:\/\//.test(v) ? h("dd", {}, h("a", { href: v, target: "_blank", rel: "noopener", text: v })) : h("dd", { text: v });
