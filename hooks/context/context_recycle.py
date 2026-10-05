@@ -129,7 +129,7 @@ def _allowed_command(command: str, slug: str) -> bool:
 
 def _swarm_step(args: list[str], slug: str) -> bool:
     if args[:2] == [slug, "learned"]:
-        return len(args) == 3
+        return len(args) == 3 or (len(args) == 5 and args[3] == "--maturity")
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 

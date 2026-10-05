@@ -57,7 +57,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> stop` | Drain: no new spawns, the swarm stops when its agents finish. Both forms of stop take a snapshot first. |
 | `agentihooks swarm <id> stop --now` | Kill every agent and reopen its unfinished task. |
 | `agentihooks swarm <id> remove` | Delete a swarm with no agents left: its records and its watch and action counts, so a swarm created again under the same id starts from zero. |
-| `agentihooks swarm <id> snapshot` | Write `~/.agentihooks/swarm/<id>/snapshot.json`: the swarm's Redis keys (config and template, agents, claims with their lease, handoffs, name counters), its seats with their history, recaps and learned notes, the inbox items, pending sets and histories of its seats and agents, a copy of the ledger and each agent's worktree path. |
+| `agentihooks swarm <id> snapshot` | Write `~/.agentihooks/swarm/<id>/snapshot.json`: the swarm's Redis keys (config and template, agents, claims with their lease, handoffs, name counters), its seats with their history, recaps and learned notes, its culture, the inbox items, pending sets and histories of its seats and agents, a copy of the ledger and each agent's worktree path. |
 | `agentihooks swarm <id> restore` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the snapshot back, mark every agent finished and leave the swarm paused. The tick then retires those agents, reopens their tasks and brings up only the master, which finds its inbox waiting; `start` hands the reopened tasks to successors primed with seat memory and handoffs. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> status [--json]` | Config, task counts, one row per agent, and the health findings. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
@@ -66,6 +66,10 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Operator message to the swarm chat. |
 | `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew. |
+| `agentihooks swarm <id> learned` | List every seat's learned notes, one line each: seat, number, maturity, text. |
+| `agentihooks swarm <id> promote SEAT NUMBER MATURITY --reason TEXT` | Raise learned note NUMBER on SEAT (`eng-1` or `eng-1@<id>`) to a higher maturity, keeping who promoted it and why. Any agent of the swarm or the operator may promote to `insight`; only the master or the operator to `canon`. |
+| `agentihooks swarm <id> culture set FILE` | Replace the swarm's culture with the file's text. Every new occupant of every seat, the master included, reads it in its priming chain. |
+| `agentihooks swarm <id> culture show` | Print the swarm's culture. |
 
 ### Templates
 
@@ -104,7 +108,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
-| `agentihooks swarm <id> learned TEXT` | Add a lesson to your seat's learned notes, kept for every later occupant. |
+| `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
 
 ## Context recycle
@@ -114,16 +118,22 @@ thousand tokens (default 600), a hook tells it to write a handoff document and a
 `agentihooks swarm <id> handoff <doc> --recap <recap>`, then stop. From that point PreToolUse denies every tool call except
 reading files (in the shell too: cat, head, tail, ls, wc, grep, git status, log, diff, show), writing or
 editing files under `~/scratchpad`, `agentihooks swarm <id> handoff <doc> [--recap <recap>]`,
-`agentihooks swarm <id> learned <text>` and the `agentihooks ledger` comment, say, leave and ack commands, each as one command with no chaining; the deny
+`agentihooks swarm <id> learned <text> [--maturity <level>]` and the `agentihooks ledger` comment, say, leave and ack commands, each as one command with no chaining; the deny
 reason repeats the handoff command. The task stays claimed, and the next tick starts a
 successor on the same task with the document in its opening prompt. A task that already has a pull request
 keeps it and stays in `pr` state under its successor. `agentihooks swarm <id> set compact-limit=N`
 sets the limit for one swarm's next agents; 0 keeps the default.
 
-Every agent's opening prompt carries its seat's priming chain, in order: the handoff document, the latest
-recap, the learned notes, then up to three older recaps (the count of any further ones is stated). A missing
-piece is named, not skipped; a seat with no history gets a prompt that says so. Recaps and learned notes live
-in Redis under the seat and are append-only.
+Every agent's opening prompt carries its seat's priming chain, in order: the handoff document, the swarm
+culture, the latest recap, the learned notes, then up to three older recaps (the count of any further ones is
+stated). A missing piece is named, not skipped; a seat with no history and a swarm with no culture get a prompt
+that says so. Recaps and learned notes live in Redis under the seat and are append-only.
+
+Each learned note has a maturity: `data`, `note`, `insight` or `canon`, ranked in that order; notes written
+before maturity existed read as `note`. The priming chain lists canon first, then insights, then notes, and
+shows data only as a count. `promote` only raises a note, never lowers it, and records each step with its
+reason. The culture is one text per swarm, kept in Redis outside the swarm's own keys, so like seat memory it
+survives `remove` and a swarm created again under the same id reads it.
 
 ## One task per agent life
 

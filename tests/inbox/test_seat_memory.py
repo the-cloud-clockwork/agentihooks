@@ -1,6 +1,8 @@
+import json
+
 import pytest
 
-from scripts.inbox.seats import SeatMemory
+from scripts.inbox.seats import SeatError, SeatMemory, SwarmCulture
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -35,3 +37,56 @@ def test_learned_notes_accumulate_in_order_per_seat(memory):
         "fakeredis needs the xdist group",
     ]
     assert memory.learned("eng-1@rig")[0]["occupant"] == "rig-eng-1"
+
+
+def test_a_learned_note_is_a_note_unless_told_otherwise(memory):
+    memory.learn("eng-1@rig", "rig-eng-1", "plain lesson", at=10)
+    memory.learn("eng-1@rig", "rig-eng-1", "raw figure", at=11, maturity="data")
+    assert [n["maturity"] for n in memory.learned("eng-1@rig")] == ["note", "data"]
+
+
+def test_an_entry_written_before_maturity_reads_as_a_note(memory):
+    memory.redis.rpush(memory.key("eng-1@rig", "learned"), json.dumps({"occupant": "a", "text": "old", "at": 1}))
+    assert memory.learned("eng-1@rig")[0]["maturity"] == "note"
+
+
+def test_learn_refuses_an_unknown_maturity(memory):
+    with pytest.raises(SeatError):
+        memory.learn("eng-1@rig", "rig-eng-1", "x", at=1, maturity="gospel")
+
+
+def test_promote_raises_an_entry_and_keeps_the_reason(memory):
+    memory.learn("eng-1@rig", "rig-eng-1", "first", at=1)
+    memory.learn("eng-1@rig", "rig-eng-1", "second", at=2)
+    memory.promote("eng-1@rig", 2, "insight", "rig-eng-3", "held on three tasks", at=5)
+    first, second = memory.learned("eng-1@rig")
+    assert (first["maturity"], second["maturity"]) == ("note", "insight")
+    assert second["promotions"] == [
+        {"from": "note", "to": "insight", "by": "rig-eng-3", "reason": "held on three tasks", "at": 5}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("number", "maturity", "reason"),
+    [
+        (1, "note", "same level"),
+        (1, "data", "lower"),
+        (1, "insight", "  "),
+        (2, "insight", "no entry 2"),
+        (0, "canon", "x"),
+    ],
+)
+def test_promote_refuses_anything_but_a_raise_with_a_reason(memory, number, maturity, reason):
+    memory.learn("eng-1@rig", "rig-eng-1", "only", at=1)
+    with pytest.raises(SeatError):
+        memory.promote("eng-1@rig", number, maturity, "rig-eng-1", reason, at=2)
+    assert memory.learned("eng-1@rig")[0]["maturity"] == "note"
+
+
+def test_a_swarm_culture_is_empty_until_set_and_kept_per_swarm():
+    import fakeredis
+
+    culture = SwarmCulture(fakeredis.FakeRedis(decode_responses=True))
+    assert culture.get("rig") == ""
+    culture.set("rig", "plain words on the page")
+    assert (culture.get("rig"), culture.get("other")) == ("plain words on the page", "")

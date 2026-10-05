@@ -10,8 +10,12 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
+agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
+agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
+agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | learned TEXT | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
 --evidence E with --fix URL or --filed TASK; research --finding URL
 """
@@ -28,6 +32,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts.inbox import wake
+from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
+from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import delivery, snapshot, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
@@ -42,6 +48,7 @@ SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-lim
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 
 
 def now_ms():
@@ -347,9 +354,52 @@ def cmd_handoff(store, args):
 
 
 def cmd_learned(store, args):
+    if not args.text:
+        _list_learned(store, args.slug)
+        return
     agent = _me(store, args)
-    store.memory.learn(_seat(agent), agent.name, args.text, now_ms())
-    print(json.dumps({"seat": agent.seat, "learned": args.text}))
+    if args.maturity == CANON and agent.lane != MASTER:
+        raise SwarmError(ONLY_MASTER_CANON)
+    store.memory.learn(_seat(agent), agent.name, args.text, now_ms(), args.maturity)
+    print(json.dumps({"seat": agent.seat, "learned": args.text, "maturity": args.maturity}))
+
+
+def _list_learned(store, slug):
+    store.config(slug)
+    for key in store.seats.swarm_keys(slug):
+        seat, _, kind = key.removeprefix(f"{SEAT_PREFIX}:").partition(":")
+        if kind != "learned":
+            continue
+        for number, note in enumerate(store.memory.learned(seat), 1):
+            print(f"{seat}\t{number}\t{note['maturity']}\t{note['text']}")
+
+
+def cmd_promote(store, args):
+    store.config(args.slug)
+    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    if args.maturity == CANON and agent is not None and agent.lane != MASTER:
+        raise SwarmError(ONLY_MASTER_CANON)
+    seat = args.seat if is_seat(args.seat) else seat_address(args.slug, args.seat)
+    if not seat.endswith(f"@{args.slug}"):
+        raise SwarmError(f"{args.seat} is not a seat of swarm {args.slug}")
+    try:
+        entry = store.memory.promote(seat, args.number, args.maturity, name or "operator", args.reason, now_ms())
+    except SeatError as exc:
+        raise SwarmError(str(exc)) from exc
+    print(json.dumps({"seat": seat, "number": args.number, "maturity": entry["maturity"]}))
+
+
+def cmd_culture(store, args):
+    store.config(args.slug)
+    if args.action == "set":
+        store.culture.set(args.slug, _read(args.file, "culture file"))
+        print(json.dumps({"swarm": args.slug, "culture": "set"}))
+        return
+    text = store.culture.get(args.slug)
+    if not text:
+        print(f"swarm {args.slug} has no culture yet; write one with culture set FILE", file=sys.stderr)
+    print(text, end="")
 
 
 def _read(path, what):
@@ -412,7 +462,17 @@ def build_parser():
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
-    sub.add_parser("learned").add_argument("text")
+    learned = sub.add_parser("learned")
+    learned.add_argument("text", nargs="?", default="")
+    learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)
+    promote = sub.add_parser("promote")
+    promote.add_argument("seat")
+    promote.add_argument("number", type=int)
+    promote.add_argument("maturity", choices=MATURITIES)
+    promote.add_argument("--reason", required=True)
+    culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
+    culture.add_parser("set").add_argument("file")
+    culture.add_parser("show")
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")

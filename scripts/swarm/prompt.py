@@ -1,5 +1,6 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
+from scripts.inbox.seats import MATURITIES
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import ledger_kinds
@@ -57,6 +58,11 @@ def build_master(slug, repo, name, task):
         f"(http://127.0.0.1:8765/{slug} for the ledger) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
         f'- Record a lesson the next master should know with {me} learned "<lesson>".',
+        f"- Raise a learned note that has held up: {me} learned lists every seat's notes with their numbers, and "
+        f'{me} promote <seat> <number> insight|canon --reason "<why>" raises one. Only you and the operator make '
+        "a note canon.",
+        f"- Keep the swarm culture current: {me} culture show prints it, {me} culture set <file> replaces it. Every "
+        "new occupant of every seat reads it.",
         "",
         f"If your context nears its limit a hook tells you to write a handoff document: write what the operator "
         f"asked for, what is pending and what you promised, and a recap of what you did and where you stopped, "
@@ -98,7 +104,8 @@ def build(slug, repo, lane, name, task, role=""):
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
-        f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>".',
+        f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>" (a note; add '
+        "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
         *STEPS[ledger_kinds.kind(task)](me, led, name, phase),
         "",
@@ -120,30 +127,48 @@ def build(slug, repo, lane, name, task, role=""):
 def priming_lines(task):
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
     handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
-    if not (handoff or recaps or learned):
+    culture = task.get("culture", "")
+    if not (handoff or culture or recaps or learned):
         return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
     lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
     if handoff:
         lines += ["1. Handoff document: a previous agent ran out of context and left it. Continue from it:", handoff]
     else:
         lines.append("1. Handoff document: none was left for this task.")
+    if culture:
+        lines += ["2. Swarm culture, shared by every seat of this swarm:", culture]
+    else:
+        lines.append("2. Swarm culture: none written for this swarm yet.")
     if recaps:
-        lines += [f"2. Latest recap, {_by(recaps[0])}:", recaps[0]["text"]]
+        lines += [f"3. Latest recap, {_by(recaps[0])}:", recaps[0]["text"]]
     else:
-        lines.append("2. Latest recap: missing, no occupant of this seat left one.")
-    if learned:
-        lines += ["3. Learned notes:", *(f"- {note['text']}" for note in learned)]
-    else:
-        lines.append("3. Learned notes: none recorded on this seat yet.")
+        lines.append("3. Latest recap: missing, no occupant of this seat left one.")
+    lines += learned_lines(learned)
     older = recaps[1:]
     if not older:
-        return [*lines, "4. Older recaps: none."]
-    lines.append("4. Older recaps, newest first:")
+        return [*lines, "5. Older recaps: none."]
+    lines.append("5. Older recaps, newest first:")
     for recap in older[:OLDER_RECAPS]:
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
     if len(older) > OLDER_RECAPS:
         lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
     return lines
+
+
+def learned_lines(learned):
+    rank = {maturity: -level for level, maturity in enumerate(MATURITIES)}
+    shown = sorted((note for note in learned if note["maturity"] != "data"), key=lambda note: rank[note["maturity"]])
+    data = len(learned) - len(shown)
+    counted = [f"{data} data entries are kept on the seat and not shown."] if data else []
+    if shown:
+        return [
+            "4. Learned notes, canon first:",
+            *(f"- {note['maturity']}: {note['text']}" for note in shown),
+            *counted,
+        ]
+    if data:
+        return ["4. Learned notes: only data so far.", *counted]
+    return ["4. Learned notes: none recorded on this seat yet."]
 
 
 def _by(recap):
