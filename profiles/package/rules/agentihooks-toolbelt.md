@@ -125,6 +125,14 @@ else the Claude session id), never an argument. An address is a session name;
 seats (`name@slug`) arrive later. Every state change is kept in the item's history.
 A pending item is delivered once, into this session's context at its next tool call
 (PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
+An idle session never makes that call, so the swarm tick wakes it: an idle herdr pane
+holding a pending item gets one prompt to run `agentihooks msg inbox` (a busy pane or
+one waiting on input never), retried every `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default
+300) up to three times. Still unread one window later, the swarm master gets an item;
+one more window, the operator gets a follow-up on the ledger page. A session outside
+herdr skips the wakes and is escalated one window after the send. An item for the
+master, or in a swarm without one, goes from the wakes straight to the operator. Each
+wake and escalation is kept in the item's history.
 
 | Trigger | Action |
 |---|---|

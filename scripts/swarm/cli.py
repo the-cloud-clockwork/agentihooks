@@ -20,6 +20,8 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
+from scripts.inbox import wake
+from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, timer
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
@@ -46,7 +48,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         herdr = messenger or delivery.HerdrMessenger()
         delivery.relay_operator_chat(store, slug, ledger.chat(slug), herdr)
-        return actions + [f"delivered to {name}" for name in delivery.flush(store, slug, herdr)]
+        actions += [f"delivered to {name}" for name in delivery.flush(store, slug, herdr)]
+        agents = [a for a in store.agents(slug) if a.state != "finished"]
+        window = wake.window_ms(os.environ)
+        return actions + wake.wake_pass(InboxStore(store.redis), slug, agents, herdr, ledger, now_ms(), window)
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
