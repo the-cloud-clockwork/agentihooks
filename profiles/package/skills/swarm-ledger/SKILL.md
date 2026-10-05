@@ -252,6 +252,10 @@ Every change to `template.html` keeps these:
   browser). It opens a panel above it that leaves the page usable: plain message rows that scroll,
   one input line at its foot, Expand (wide, full height) or Shrink, Clear (empties it, one logged
   event), and Close or Esc. A notification for a chat reply opens it.
+- Screenshots: the chat line and every comment line take a pasted, dropped or picked PNG, JPEG,
+  WebP or GIF of at most 8 MB, previewed with Remove before sending. The server keeps one copy per
+  image in `<slug>.media` beside the ledger and the entry only its id, type, size and dimensions;
+  the line shows a thumbnail that opens full size. The bin keeps the images; the purge deletes them.
 - Out of scope: a yellow dot and "out of scope" at the right end of the item row; the item text is
   dimmed, never struck, its checkbox disabled. Clicking the dot brings it back in scope. Every open
   item shows the dot faintly at all times, brighter on hover, to mark it out of scope (with a confirm).
