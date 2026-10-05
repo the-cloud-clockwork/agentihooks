@@ -249,7 +249,7 @@ def dispatch(payload):
     import ledger_gate
 
     state = read_json(core.paths(session["slug"])[1])
-    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
+    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict):
         return
     if session["name"] not in state["_meta"].get("members", {}):
         return
