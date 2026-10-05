@@ -6,6 +6,7 @@ agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
+agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | learned TEXT | say TEXT [--to NAME|eng|ci]
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
@@ -26,7 +27,7 @@ from pathlib import Path
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, timer
-from scripts.swarm.health import activity
+from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
@@ -160,12 +161,18 @@ def cmd_status(store, args):
     ledger = LedgerClient()
     tasks = ledger.tasks(args.slug)
     counts = {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
-    found = health.findings(
-        {"tasks": tasks, "_meta": {"events": ledger.events(args.slug)}},
-        [a.__dict__ for a in agents],
-        activity.counts(args.slug),
+    rows, limits = [a.__dict__ for a in agents], health.limits()
+    found = _verdicts(store, args.slug).visible(
+        health.findings(
+            {"tasks": tasks, "_meta": {"events": ledger.events(args.slug)}},
+            rows,
+            activity.counts(args.slug),
+            now_ms(),
+            limits,
+            checks.waiting(rows, tasks, limits, checks.cached(store.redis, store.key(args.slug, "checks"))),
+        ),
         now_ms(),
-        health.limits(),
+        limits.cooldown_minutes * 60_000,
     )
     if args.json:
         print(
@@ -174,7 +181,7 @@ def cmd_status(store, args):
                     "config": config.__dict__,
                     "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
                     "tasks": counts,
-                    "findings": [f.as_dict() for f in found],
+                    "findings": found,
                 }
             )
         )
@@ -185,10 +192,26 @@ def cmd_status(store, args):
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
     for f in found:
-        print(f"finding  {f.kind}  {f.subject}: {f.summary}")
-        for entry in f.evidence:
+        print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
+        for entry in f["evidence"]:
             print(f"  - {entry}")
-        print(f"  threshold {f.threshold}")
+        print(f"  threshold {f['threshold']}")
+        print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+
+
+def _verdicts(store, slug):
+    return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
+
+
+def cmd_verdict(store, args):
+    store.config(args.slug)
+    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    if agent is not None and agent.lane != MASTER:
+        raise SwarmError("only the master or the operator gives a finding a verdict")
+    verdict = _verdicts(store, args.slug).judge(args.finding, args.verdict, args.note, name or "operator", now_ms())
+    minutes = health.limits().cooldown_minutes
+    print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
 def cmd_send_message(store, args):
@@ -312,6 +335,10 @@ def build_parser():
     sub.add_parser("stop").add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    verdict = sub.add_parser("verdict")
+    verdict.add_argument("finding")
+    verdict.add_argument("verdict")
+    verdict.add_argument("--note", default="")
     sub.add_parser("send-message").add_argument("text")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")

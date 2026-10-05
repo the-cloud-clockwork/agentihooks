@@ -11,7 +11,21 @@ BOUND = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-eng-1"}
         ("Bash", {"command": "agentihooks ledger watch sw --as sw-eng-1"}, "watch"),
         ("Bash", {"command": "gh pr checks 12 --json name,bucket"}, "watch"),
         ("Bash", {"command": "gh run watch 991"}, "watch"),
-        ("Bash", {"command": "agentihooks swarm sw status --json"}, "watch"),
+        ("Bash", {"command": "agentihooks swarm sw status --json"}, ""),
+        ("Bash", {"command": "agentihooks swarm sw verdict over-monitoring/sw-master-1 resolved"}, ""),
+        ("Bash", {"command": "agentihooks swarm sw status; sleep 5"}, ""),
+        ("Bash", {"command": 'agentihooks ledger --slug sw --as sw-eng-1 comment phases/p1 "x"'}, "act"),
+        ("Bash", {"command": 'agentihooks ledger --slug sw --as sw-eng-1 say "x"'}, "act"),
+        ("Bash", {"command": "agentihooks ledger --slug sw --as sw-master-1 phase p1 done"}, "act"),
+        ("Bash", {"command": 'agentihooks ledger --slug sw --as sw-master-1 task add g9 "t"'}, "act"),
+        ("Bash", {"command": 'agentihooks ledger --slug sw --as sw-eng-1 followup add "x"'}, "act"),
+        ("Bash", {"command": 'agentihooks swarm sw say "x" --to eng'}, "act"),
+        ("Bash", {"command": 'agentihooks swarm sw learned "x"'}, "act"),
+        ("Bash", {"command": "agentihooks swarm sw done --pr https://x/pull/1"}, "act"),
+        ("Bash", {"command": "agentihooks swarm sw --as sw-eng-1 pr https://x/pull/1"}, "act"),
+        ("Bash", {"command": 'agentihooks msg reply abc "x"'}, "act"),
+        ("Bash", {"command": "agentihooks ledger --slug sw --as sw-eng-1 ack"}, ""),
+        ("Monitor", {"command": "agentihooks ledger watch sw --as sw-master-1"}, "watch"),
         ("Bash", {"command": "sleep 30"}, "watch"),
         ("Monitor", {"command": "tail -f x"}, "watch"),
         ("Edit", {"file_path": "a.py"}, "act"),
@@ -71,3 +85,38 @@ def test_an_unbound_session_never_classifies(monkeypatch, tmp_path):
     monkeypatch.setattr(activity, "classify", boom)
     activity.record("Bash", {"command": "sleep 1"}, {}, tmp_path)
     assert activity.counts("sw", tmp_path) == {}
+
+
+WINDOW = activity.REARM_WINDOW_MS
+REARM = {"command": "agentihooks ledger watch sw --as sw-master-1"}
+
+
+def test_re_arming_a_ledger_watch_counts_one_watch_per_expiry_window(tmp_path):
+    for minute in (0, 1, 2, 29, 30, 31, 61):
+        activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=minute * 60_000)
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 3, "act": 0}}
+
+
+def test_other_watches_count_every_call(tmp_path):
+    for second in range(4):
+        activity.record("Bash", {"command": "gh pr checks 3"}, BOUND, tmp_path, now_ms=second * 1000)
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 4, "act": 0}}
+
+
+def test_a_master_doing_ledger_writes_and_watches_does_not_trip_over_monitoring(tmp_path):
+    from scripts.swarm.health import findings as health
+
+    master = {**BOUND, "AGENTIHOOKS_AGENT_NAME": "sw-master-1"}
+    at = 0
+    for hour in range(8):
+        for minute in range(0, 60, 2):
+            at = (hour * 60 + minute) * 60_000
+            activity.record("Monitor", REARM, master, tmp_path, now_ms=at)
+            activity.record("Bash", {"command": "agentihooks swarm sw status"}, master, tmp_path, now_ms=at)
+        activity.record(
+            "Bash", {"command": 'agentihooks swarm sw say "progress" --to operator'}, master, tmp_path, now_ms=at
+        )
+        activity.record("Bash", {"command": 'agentihooks msg reply m1 "done"'}, master, tmp_path, now_ms=at)
+    counts = activity.counts("sw", tmp_path)
+    assert counts == {"sw-master-1": {"watch": 16, "act": 16}}
+    assert health.over_monitoring(counts, health.Limits()) == []

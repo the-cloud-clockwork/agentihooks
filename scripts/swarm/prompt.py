@@ -1,5 +1,6 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
+from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import ledger_kinds
 
@@ -47,6 +48,9 @@ def build_master(slug, repo, name, task):
         f'{led} task set <id> description="<text>".',
         f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N, {me} pause, {me} start, "
         f"{me} stop, {me} status.",
+        f"- Give every new health finding a verdict once you have checked its evidence: {me} verdict <finding id> "
+        f'{"|".join(VERDICTS)} --note "<why>". {me} status lists each finding with its id. A verdicted finding '
+        "stays hidden for its cooldown, an hour by default, and comes back once only if its evidence grew.",
         f'- Talk to agents with {me} say "<text>" --to <agent name>, eng or ci, and relay operator words with '
         f'{me} send-message "<text>".',
         "- When an engineer merges work that changes a page, check it in a real browser on localhost "

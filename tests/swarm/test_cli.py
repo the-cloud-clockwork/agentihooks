@@ -414,10 +414,11 @@ def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monk
         ("idle with claim", "sw-eng-1", ["task Fold the chat panel (claimed)"])
     ]
     run("sw", "status")
-    assert capsys.readouterr().out.splitlines()[-3:] == [
+    assert capsys.readouterr().out.splitlines()[-4:] == [
         "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding a task",
         "  - task Fold the chat panel (claimed)",
         "  threshold 3 idle ticks",
+        "  id idle-with-claim/sw-eng-1",
     ]
 
 
@@ -427,12 +428,13 @@ def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypa
     finding = cli.health.Finding("scope inflation", "sw-eng-1", "queued 3 tasks for its own lane", entries, "3 tasks")
     monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
     run("sw", "status")
-    assert capsys.readouterr().out.splitlines()[-5:] == [
+    assert capsys.readouterr().out.splitlines()[-6:] == [
         "finding  scope inflation  sw-eng-1: queued 3 tasks for its own lane",
         "  - Split the parser, gain 4",
         "  - Cache the index, gain 1.5",
         "  - q2, no gain stated",
         "  threshold 3 tasks",
+        "  id scope-inflation/sw-eng-1",
     ]
 
 
@@ -486,3 +488,42 @@ def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_z
     assert cli.activity.counts("sw") == {}
     assert store.next_name("sw", "eng") == "sw-eng-1"
     assert store.next_name("other", "eng") == "other-eng-2"
+
+
+def _idle_finding(env, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master"))
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
+    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1", title="Fold the chat panel")
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+
+
+def _findings(capsys):
+    run("sw", "status", "--json")
+    return json.loads(capsys.readouterr().out.splitlines()[-1])["findings"]
+
+
+def test_a_master_verdict_hides_the_finding_from_status(env, capsys, monkeypatch, tmp_path):
+    _idle_finding(env, monkeypatch, tmp_path)
+    [found] = _findings(capsys)
+    assert (found["id"], found["verdict"]) == ("idle-with-claim/sw-eng-1", None)
+    assert run("sw", "--as", "sw-master-1", "verdict", found["id"], "false-positive", "--note", "on checks") == 0
+    assert json.loads(capsys.readouterr().out)["verdict"] == "false-positive"
+    assert _findings(capsys) == []
+
+
+def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monkeypatch, tmp_path):
+    _idle_finding(env, monkeypatch, tmp_path)
+    _findings(capsys)
+    assert run("sw", "--as", "sw-eng-1", "verdict", "idle-with-claim/sw-eng-1", "resolved") == 1
+    assert "only the master or the operator" in capsys.readouterr().err
+    assert run("sw", "--as", "operator", "verdict", "idle-with-claim/sw-eng-1", "resolved") == 0
+
+
+def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    _idle_finding(env, monkeypatch, tmp_path)
+    ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
+    monkeypatch.setattr(cli.checks, "pending", lambda url, run=None: url.endswith("/7"))
+    assert _findings(capsys) == []

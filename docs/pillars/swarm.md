@@ -60,6 +60,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> send-message TEXT` | Operator message to the swarm chat. |
+| `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew. |
 
 A swarm is in one of five states: `running`, `paused`, `stopping`, `stopped`, `drained`. It drains when no
 task is left to start and returns to `running` when a new task opens. Lowering a cap never kills work; the

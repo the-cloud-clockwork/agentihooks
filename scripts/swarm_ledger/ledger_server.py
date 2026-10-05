@@ -14,6 +14,7 @@ import argparse
 import html
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -203,14 +204,18 @@ def swarm_status(slug):
 
 CONTROLS = {"start": ["start"], "pause": ["pause"], "stop": ["stop"], "stop_now": ["stop", "--now"]}
 MAX_CAP = 50
+MAX_NOTE = 500
+FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
 def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
         return CONTROLS[action]
+    if action == "verdict":
+        return verdict_argv(body)
     if action != "set":
-        raise ValueError("action must be start, pause, stop, stop_now or set")
+        raise ValueError("action must be start, pause, stop, stop_now, set or verdict")
     pairs = []
     for key, flag in (("max_eng", "max-eng-agents"), ("max_ci", "max-ci-agents")):
         value = body.get(key)
@@ -222,6 +227,19 @@ def control_argv(body):
     if not pairs:
         raise ValueError("set needs max_eng or max_ci")
     return ["set", *pairs]
+
+
+def verdict_argv(body):
+    from scripts.swarm.health.verdicts import VERDICTS
+
+    finding, value, note = body.get("id"), body.get("verdict"), body.get("note", "")
+    if not (isinstance(finding, str) and FINDING_RE.match(finding)):
+        raise ValueError("id must name a finding, kind/subject")
+    if value not in VERDICTS:
+        raise ValueError(f"verdict must be one of {', '.join(VERDICTS)}")
+    if not isinstance(note, str) or len(note) > MAX_NOTE:
+        raise ValueError(f"note must be text of at most {MAX_NOTE} characters")
+    return ["--as", "operator", "verdict", finding, value, f"--note={note}"]
 
 
 def bin_request(body):

@@ -111,7 +111,14 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   reruns or `REVIEW_ROUNDS` (3) moves to pr; idle with claim, `IDLE_TICKS` (3)
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
   over monitoring, at least `WATCH_MIN` (20) watch calls and over `WATCH_RATIO`
-  (5) per action, counted at each swarm agent's tool calls.
+  (5) per action, counted at each swarm agent's tool calls. Ledger and swarm
+  writes and `msg reply` count as actions, a re-armed ledger watch as one watch
+  per 30 minutes, `status` and `verdict` as neither; idle ticks do not count
+  while the task's pull request waits on checks.
+- Each finding has an id, `<kind>/<subject>`. The master gives every new one a
+  verdict: `agentihooks swarm <slug> verdict <id> false-positive|early-real|established|insufficient-evidence|resolved --note "<why>"`,
+  or the operator with the page's Give verdict button. It hides for
+  `COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
   panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
   collapsed until clicked. HOME lists every ledger; a deleted ledger sits in the
