@@ -25,6 +25,8 @@ ENV = {
     "stale_minutes": "AGENTIHOOKS_HEALTH_STALE_MINUTES",
     "watch_min": "AGENTIHOOKS_HEALTH_WATCH_MIN",
     "watch_ratio": "AGENTIHOOKS_HEALTH_WATCH_RATIO",
+    "master_watch_min": "AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN",
+    "master_watch_ratio": "AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO",
     "cooldown_minutes": "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES",
 }
 
@@ -40,6 +42,8 @@ class Limits:
     stale_minutes: int = 30
     watch_min: int = 20
     watch_ratio: int = 5
+    master_watch_min: int = 60
+    master_watch_ratio: int = 15
     cooldown_minutes: int = 60
 
 
@@ -232,14 +236,18 @@ def over_monitoring(activity, limits):
     found = []
     for by, counts in sorted(activity.items()):
         watch, act = counts.get("watch", 0), counts.get("act", 0)
-        if watch >= limits.watch_min and watch / max(act, 1) > limits.watch_ratio:
+        if MASTER_RE.search(by):
+            least, ratio = limits.master_watch_min, limits.master_watch_ratio
+        else:
+            least, ratio = limits.watch_min, limits.watch_ratio
+        if watch >= least and watch / max(act, 1) > ratio:
             found.append(
                 Finding(
                     "over monitoring",
                     by,
                     "more watch calls than actions",
                     (f"{watch} watch calls", _plural(act, "action")),
-                    f"at least {limits.watch_min} watch calls and more than {limits.watch_ratio} per action",
+                    f"at least {least} watch calls and more than {ratio} per action",
                     watch,
                 )
             )
