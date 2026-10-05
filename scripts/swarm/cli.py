@@ -248,7 +248,7 @@ def cmd_take_master(store, args):
         store.update(args.slug, state="running")
         timer.ensure(_bin())
     config = store.config(args.slug)
-    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER)}
+    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)}
     print(
         prompt.build_master(
             args.slug, config.repo, record.name, primed(store, args.slug, record.seat, task), config.autonomy
@@ -397,6 +397,7 @@ def cmd_status(store, args):
                     "findings": found,
                     "auto_snapshot": _auto_snapshot(config),
                     "restored": store.restored(args.slug),
+                    "peer": store.peer(args.slug),
                 }
             )
         )

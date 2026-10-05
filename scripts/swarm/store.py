@@ -172,6 +172,15 @@ class RedisStore:
     def restored(self, slug):
         return json.loads(self.redis.get(self.key(slug, "restored")) or "[]")
 
+    def set_peer(self, slug, peer):
+        self.redis.set(self.key(slug, "peer"), peer)
+
+    def peer(self, slug):
+        return self.redis.get(self.key(slug, "peer")) or ""
+
+    def clear_peer(self, slug):
+        self.redis.delete(self.key(slug, "peer"))
+
     def remove(self, slug):
         self.config(slug)
         if self.agents(slug):

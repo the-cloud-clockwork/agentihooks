@@ -6293,6 +6293,15 @@ def cmd_migrate(args) -> None:
             print(f"  {name}: {reason}")
 
 
+def _crew_doctor(argv: list[str]) -> bool:
+    return (
+        len(argv) >= 3
+        and argv[0] == "doctor"
+        and not argv[1].startswith("-")
+        and argv[2] in ("start", "stop", "status")
+    )
+
+
 def main() -> None:
     _argv = sys.argv[1:]
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
@@ -6332,6 +6341,10 @@ def main() -> None:
         from scripts.swarm.cli import main as swarm_main
 
         raise SystemExit(swarm_main(_argv[1:]))
+    if _crew_doctor(_argv):
+        from scripts.doctor.cli import main as doctor_main
+
+        raise SystemExit(doctor_main(_argv[1:]))
     if _argv and _argv[0] == "msg":
         from scripts.inbox.cli import main as msg_main
 
@@ -6558,7 +6571,8 @@ def main() -> None:
 
     doctor_p = sub.add_parser(
         "doctor",
-        help="Diagnose hook health: simulate every event, validate stdout JSON, surface broken hooks",
+        help="Diagnose hook health: simulate every event, validate stdout JSON, surface broken hooks; "
+        "doctor <id> start|stop|status runs a Doctor crew over the swarm on ledger <id>",
     )
     doctor_p.add_argument(
         "--debug-hook",
