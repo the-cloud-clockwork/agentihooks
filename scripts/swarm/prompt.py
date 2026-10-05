@@ -75,6 +75,7 @@ def build(slug, repo, lane, name, task):
     if task.get("description"):
         lines.append(task["description"])
     lines += contract_lines(task.get("contract") or {})
+    lines += workspace_lines(task)
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
     lines += priming_lines(task)
@@ -148,6 +149,16 @@ def _by(recap):
 def contract_lines(contract):
     parts = [f"{label}: {contract[key]}." for key, label in CONTRACT_LABELS if contract.get(key)]
     return ["Proof contract. " + " ".join(parts)] if parts else []
+
+
+def workspace_lines(task):
+    if not task.get("workspace"):
+        return []
+    return [
+        f"Your work folder is {task['workspace']}. Read steering.md there first. Append a line to progress.md each "
+        "time a step lands and to proof.md for each piece of evidence (a test run, a check link, a command and its "
+        "output), so a successor can continue from the folder alone."
+    ]
 
 
 def code_steps(me, led, name, phase):
