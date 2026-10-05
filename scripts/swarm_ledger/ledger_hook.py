@@ -18,6 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(1, str(HERE.parents[1]))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
 SHOWN = 5
@@ -115,6 +116,15 @@ def context_text(session, owed, extra=""):
     return "\n".join(x for x in [head, *lines, extra, tail] if x)
 
 
+def first_shown(session, owed):
+    """The owed events no other path (inbox, watch) has shown this agent yet; all of them when that is unknown."""
+    try:
+        from scripts.inbox import seen
+    except ImportError:
+        return owed
+    return seen.first_showing(seen.marks_for(session["slug"]), session["name"], session["slug"], owed)
+
+
 def emit(event, text):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 
@@ -140,18 +150,20 @@ def on_tool(payload, session, state, sfile):
     idle = session["calls"] - session["nudge_calls"] >= pol["nudge_after_calls"]
     if owed and top > session["nudged_rev"]:
         session["nudged_rev"] = top
-        emit("PostToolUse", context_text(session, owed))
+        fresh = first_shown(session, owed)
+        if fresh:
+            emit("PostToolUse", context_text(session, fresh))
     elif idle:
         session["nudge_calls"] = session["calls"]
         note = f"You have made {session['calls']} tool calls without recording progress: update phases, follow-ups, comments or chat."
-        emit("PostToolUse", context_text(session, owed, note))
+        emit("PostToolUse", context_text(session, first_shown(session, owed), note))
     write_session(sfile, session)
 
 
 def on_prompt(payload, session, state, sfile):
     import ledger_gate
 
-    owed = ledger_gate.unhandled_for(state["_meta"], session["name"])
+    owed = first_shown(session, ledger_gate.unhandled_for(state["_meta"], session["name"]))
     if owed:
         emit("UserPromptSubmit", context_text(session, owed))
 

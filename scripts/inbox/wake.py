@@ -5,6 +5,7 @@ then a follow-up on the ledger page. Every step is appended to the item's histor
 """
 
 from scripts.inbox.seats import is_seat
+from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.swarm.delivery import READY
 from scripts.swarm.store import MASTER
 
@@ -43,11 +44,15 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
     panes = {a.name: a for a in agents if a.pane_id}
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
+    marks = SeenMarks(inbox.redis)
     statuses, prompted, actions = {}, set(), []
     for item in inbox.pending():
         if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
             continue
         receiver, held = _receiver(inbox, item.address)
+        if item.ref and receiver and marks.seen(receiver, item.ref):
+            inbox.close(item.id, receiver, "done", SEEN_ON_LEDGER)
+            continue
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _status(herdr, agent)

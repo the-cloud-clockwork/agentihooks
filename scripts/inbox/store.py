@@ -32,6 +32,7 @@ class Item:
     created_at: int
     updated_at: int
     reason: str = ""
+    ref: str = ""
 
 
 def now_ms():
@@ -61,11 +62,12 @@ class InboxStore:
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
 
-    def send(self, sender, address, text):
+    def send(self, sender, address, text, ref=""):
+        """ref names the ledger write an operator item carries, for the seen marks."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         at = now_ms()
-        item = Item(uuid.uuid4().hex[:12], sender, address, text, "pending", at, at)
+        item = Item(uuid.uuid4().hex[:12], sender, address, text, "pending", at, at, ref=ref)
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})

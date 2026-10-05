@@ -57,53 +57,6 @@ def test_send_leaves_one_pending_inbox_item_per_recipient_from_the_real_sender(s
     assert inbox(store, "sw-ci-1") == []
 
 
-def test_operator_page_messages_become_inbox_items_once(store):
-    chat = [
-        {"id": "a", "by": "operator", "at": 10, "text": "@ci please look at the slow job"},
-        {"id": "b", "by": "sw-eng-1", "at": 11, "text": "an agent line is not relayed"},
-    ]
-    assert delivery.relay_operator_chat(store, "sw", chat) == 1
-    assert inbox(store, "sw-ci-1") == [("operator", "please look at the slow job", "pending")]
-    assert delivery.relay_operator_chat(store, "sw", chat) == 0
-    assert len(inbox(store, "sw-ci-1")) == 1
-
-
-def test_a_new_swarm_does_not_replay_old_chat(store):
-    old = [{"id": "a", "by": "operator", "at": 10, "text": "old plan talk"}]
-    delivery.start_cursor(store, "sw", old)
-    assert delivery.relay_operator_chat(store, "sw", old) == 0
-    assert all(inbox(store, a.name) == [] for a in store.agents("sw"))
-
-
-def test_an_unknown_addressee_goes_to_everyone_with_a_note(store):
-    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "@nobody hi"}])
-    for agent in store.agents("sw"):
-        [(sender, text, _)] = inbox(store, agent.name)
-        assert sender == "operator" and "not in the swarm" in text
-
-
-def test_unaddressed_operator_chat_goes_to_the_master_when_one_is_online(store):
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1"))
-    chat = [
-        {"id": "a", "by": "operator", "at": 5, "text": "how far along are we"},
-        {"id": "b", "by": "operator", "at": 6, "text": "@eng rebase on dev"},
-        {"id": "c", "by": "operator", "at": 7, "text": "@nobody hi"},
-    ]
-    delivery.relay_operator_chat(store, "sw", chat)
-    master = inbox(store, "sw-master-1")
-    assert master[0] == ("operator", "how far along are we", "pending")
-    assert len(master) == 2 and "not in the swarm" in master[1][1]
-    assert inbox(store, "sw-eng-1") == inbox(store, "sw-eng-2") == [("operator", "rebase on dev", "pending")]
-    assert inbox(store, "sw-ci-1") == []
-
-
-def test_a_finished_master_does_not_take_the_chat(store):
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", state="finished"))
-    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "hi"}])
-    assert inbox(store, "sw-master-1") == []
-    assert all(inbox(store, n) == [("operator", "hi", "pending")] for n in ("sw-eng-1", "sw-eng-2", "sw-ci-1"))
-
-
 def test_items_for_the_operator_from_swarm_agents_are_shown_on_the_page_and_closed(store):
     box = InboxStore(store.redis)
     reply = box.send("sw-eng-1", "operator", "the slow job is fixed")

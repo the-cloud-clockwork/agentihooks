@@ -1,4 +1,4 @@
-"""Swarm chat over the inbox: addressed swarm chat and operator page lines become inbox items.
+"""Swarm chat over the inbox: addressed swarm chat becomes inbox items.
 
 The inbox hooks deliver an item at the receiver's next tool call and the tick's wake pass prompts idle panes.
 Replies addressed to the operator are posted on the ledger page chat.
@@ -7,7 +7,6 @@ Replies addressed to the operator are posted on the ledger page chat.
 import json
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import MASTER
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -70,36 +69,3 @@ def migrate_outbox(store, slug, inbox):
         store.redis.lpop(outbox)
         moved += 1
     return moved
-
-
-def latest_at(entries):
-    return max((e.get("at", 0) for e in entries), default=0)
-
-
-def start_cursor(store, slug, entries):
-    store.redis.set(store.key(slug, "chat-cursor"), latest_at(entries))
-
-
-def master_name(store, slug):
-    return next((a.name for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"), "")
-
-
-def relay_operator_chat(store, slug, entries):
-    """Send every operator chat entry newer than the swarm's cursor; a leading @name, @eng or @ci addresses it.
-
-    An unaddressed entry, or one for an agent not in the swarm, goes to the master, or to everyone without one.
-    """
-    cursor_key = store.key(slug, "chat-cursor")
-    master = master_name(store, slug)
-    cursor = int(store.redis.get(cursor_key) or 0)
-    fresh = [
-        e for e in entries if e.get("by", OPERATOR) == OPERATOR and e.get("at", 0) > cursor and not e.get("deleted")
-    ]
-    for entry in sorted(fresh, key=lambda e: e["at"]):
-        text, to = entry.get("text", ""), ""
-        if text.startswith("@") and " " in text:
-            to, text = text[1:].split(" ", 1)
-        if not send(store, slug, text, sender=OPERATOR, to=to or master) and to:
-            send(store, slug, f"(to {to}, who is not in the swarm) {text}", sender=OPERATOR, to=master)
-        store.redis.set(cursor_key, entry["at"])
-    return len(fresh)
