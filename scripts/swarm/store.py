@@ -139,11 +139,19 @@ class RedisStore:
             except WatchError:
                 return False
 
-    def put_handoff(self, slug, task, text, seat=""):
+    def put_handoff(self, slug, task, text, seat="", envelope=None):
         with self.redis.pipeline() as pipe:
             pipe.set(self.key(slug, "handoff", task), text)
             pipe.set(self.key(slug, "handoff-seat", task), seat)
+            if envelope is None:
+                pipe.delete(self.key(slug, "handoff-envelope", task))
+            else:
+                pipe.set(self.key(slug, "handoff-envelope", task), json.dumps(envelope))
             pipe.execute()
+
+    def handoff_envelope(self, slug, task):
+        raw = self.redis.get(self.key(slug, "handoff-envelope", task))
+        return json.loads(raw) if raw else None
 
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""
@@ -152,7 +160,11 @@ class RedisStore:
         return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
 
     def clear_handoff(self, slug, task):
-        self.redis.delete(self.key(slug, "handoff", task), self.key(slug, "handoff-seat", task))
+        self.redis.delete(
+            self.key(slug, "handoff", task),
+            self.key(slug, "handoff-seat", task),
+            self.key(slug, "handoff-envelope", task),
+        )
 
     def ensure_code(self, slug):
         config = self.config(slug)

@@ -188,3 +188,43 @@ def test_over_the_limit_a_codex_agent_can_still_read_through_its_shell(monkeypat
 def test_over_the_limit_a_shell_read_that_writes_is_denied(monkeypatch, command):
     _over(monkeypatch)
     assert _gate("Bash", {"command": command})
+
+
+def test_the_directive_names_the_handoff_v2_headings_and_marker(monkeypatch):
+    _over(monkeypatch)
+    text = recycle.directive("s1", _swarm_env("my-swarm-eng-4"))
+    for heading in ("# Handoff v2", "## Intent", "## Done", "## Stopped at", "## Decisions and promises", "## Next"):
+        assert heading in text
+    assert "## Read first" in text and "<!-- handoff complete -->" in text
+
+
+def _handoff_command(tmp_path, body):
+    doc = tmp_path / "handoff.md"
+    doc.write_text(body)
+    return {"command": f"agentihooks swarm my-swarm handoff {doc}"}
+
+
+def test_over_the_limit_a_malformed_handoff_is_denied_with_its_problems(monkeypatch, tmp_path):
+    _over(monkeypatch)
+    monkeypatch.setattr(recycle, "_resolver", lambda slug: lambda address: True)
+    reason = _gate("Bash", _handoff_command(tmp_path, "tests red on seam 2, see hooks/context/context_recycle.py"))
+    assert reason.startswith("BLOCKED: handoff refused")
+    assert "## Intent is missing" in reason and "file path" in reason and "last line" in reason
+
+
+def test_over_the_limit_a_conforming_handoff_passes_the_gate(monkeypatch, tmp_path):
+    from tests.handoff.test_check import VALID
+
+    _over(monkeypatch)
+    monkeypatch.setattr(recycle, "_resolver", lambda slug: lambda address: True)
+    assert _gate("Bash", _handoff_command(tmp_path, VALID)) is None
+
+
+def test_the_gate_resolves_read_first_addresses_in_the_agents_swarm(monkeypatch, tmp_path):
+    from tests.handoff.test_check import VALID
+
+    _over(monkeypatch)
+    asked = []
+    monkeypatch.setattr(recycle, "_resolver", lambda slug: asked.append(slug) or (lambda address: False))
+    reason = _gate("Bash", _handoff_command(tmp_path, VALID))
+    assert asked == ["my-swarm"] and "does not resolve" in reason

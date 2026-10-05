@@ -6,11 +6,17 @@ from pathlib import Path
 from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
 from hooks.context.context_usage import used_tokens
 from scripts.codex_context import codex_context
+from scripts.handoff import check as handoff_check
 from scripts.swarm import naming
 
 _DIRECTIVE = (
     "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
-    "(task state, what is done, what is red, the next step) and a recap (what you did, where you stopped, what you "
+    "in Handoff v2 form: the line # Handoff v2, then ## Intent, ## Done, ## Stopped at, ## Decisions and promises, "
+    "## Next and ## Read first, each once and in that order, None under a heading with nothing to say, and "
+    "<!-- handoff complete --> as the last line. Every Done bullet carries its evidence or the word hypothesis; "
+    "Read first lists addresses (an issue or pull request link, ledger:<slug>/<kind>/<id>, workspace:<task>/progress, "
+    "recap:<seat>, inbox:<id>), each with the question it answers; no file paths, line numbers or credential values. "
+    "Write it and a recap (what you did, where you stopped, what you "
     "promised) to files under ~/scratchpad, record any lesson for your seat with "
     '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc> --recap <recap>` '
     "and stop. A successor continues the task from them."
@@ -146,6 +152,30 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     slug, used = overrun
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
         return None
-    if tool_name == "Bash" and _allowed_command(str(tool_input.get("command") or ""), slug):
-        return None
+    command = str(tool_input.get("command") or "")
+    if tool_name == "Bash" and _allowed_command(command, slug):
+        return _handoff_refusal(command, slug)
     return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+
+
+def _resolver(slug: str):
+    from scripts.handoff.resolve import Resolver
+    from scripts.swarm.store import SwarmError, connect
+
+    try:
+        redis = connect().redis
+    except SwarmError:
+        redis = None
+    return Resolver(slug, redis)
+
+
+def _handoff_refusal(command: str, slug: str) -> str | None:
+    tokens = _single_command(command) or []
+    if tokens[1:2] != ["swarm"] or tokens[3:4] != ["handoff"]:
+        return None
+    try:
+        text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
+    except OSError:
+        return None
+    found = handoff_check.problems(text, _resolver(slug))
+    return "BLOCKED: " + handoff_check.refusal(found) if found else None
