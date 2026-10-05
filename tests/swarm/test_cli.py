@@ -433,6 +433,25 @@ def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
     assert inbox.deliver(item.id, successor).state == "delivered"
 
 
+def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+
+    def refuse(slug, text, by=None):
+        raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
+
+    ledger.say = refuse
+    ran = []
+    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
+        real = getattr(module, name)
+        monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
+    item = InboxStore(store.redis).send("sw-eng-1", "operator", "the job finished at 18:45")
+    cli.run_tick(store, "sw")
+    assert ran == ["event_pass", "phase_pass", "wake_pass"]
+    assert InboxStore(store.redis).get(item.id).state == "cancelled"
+
+
 def test_agent_prompt_starts_by_reading_the_ledger_json():
     from scripts.swarm import prompt
 

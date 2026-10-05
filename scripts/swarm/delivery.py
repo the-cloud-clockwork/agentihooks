@@ -8,10 +8,16 @@ import json
 
 from scripts.inbox import links
 from scripts.inbox.store import InboxStore
+from scripts.swarm.store import SwarmError
 
 READY = ("idle", "done")
 OPERATOR = "operator"
+BY = "swarm"
 LEGACY_PREFIX = "[swarm chat] "
+REFUSED = (
+    "The ledger page refused to show your message {id} to the operator: {reason}. "
+    "Rewrite it in plain words and send it again."
+)
 
 
 class HerdrMessenger:
@@ -53,10 +59,23 @@ def relay_to_page(inbox, slug, agents, ledger):
     for item in inbox.inbox(OPERATOR):
         if item.state != "pending" or item.sender not in names:
             continue
-        ledger.say(slug, item.text, by=item.sender)
+        if not post(inbox, item, lambda: ledger.say(slug, item.text, by=item.sender)):
+            continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
     return shown
+
+
+def post(inbox, item, write):
+    """Run the ledger write that shows an inbox item; a refusal closes only that item and tells its sender why."""
+    try:
+        write()
+    except SwarmError as exc:
+        inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {exc}")
+        if item.sender != BY:
+            inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=exc))
+        return False
+    return True
 
 
 def migrate_outbox(store, slug, inbox):

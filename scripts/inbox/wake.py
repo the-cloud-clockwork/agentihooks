@@ -6,7 +6,7 @@ then a follow-up on the ledger page. Every step is appended to the item's histor
 
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.swarm.delivery import READY
+from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import ledger_comments
 
@@ -72,7 +72,9 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
             inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            ledger.followup(slug, _operator_text(item))
+            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item))):
+                actions.append(f"the ledger page refused message {item.id}, closed it")
+                continue
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
