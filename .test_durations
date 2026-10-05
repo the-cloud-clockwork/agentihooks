@@ -2479,7 +2479,7 @@
     "tests/test_session_refresh.py::test_subagent_and_reentrant_stops_are_ignored[payload1]": 0.0024712919985176995,
     "tests/test_settings_hook_paths.py::test_every_script_a_settings_hook_runs_exists": 0.0024998689768835902,
     "tests/test_settings_hook_paths.py::test_the_old_plan_ledger_hook_path_still_runs_the_swarm_ledger_hook": 0.0029519320087274536,
-    "tests/test_shards.py::test_shard_option_collects_only_that_shards_files": 0.78,
+    "tests/test_shards.py::test_shard_option_collects_only_that_shards_files": 0.01,
     "tests/test_status_checker.py::TestCheckGuardrails::test_all_enabled": 0.0029409930139081553,
     "tests/test_status_checker.py::TestCheckGuardrails::test_compression_inactive_when_scope_default": 0.0026646719925338402,
     "tests/test_status_checker.py::TestCheckHooks::test_all_hooks_present": 0.0027645420050248504,

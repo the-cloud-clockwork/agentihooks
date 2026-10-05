@@ -1,6 +1,4 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,19 +66,16 @@ def test_shard_option_weighs_source_size(tmp_path):
     assert ignored == {"b", "c"}
 
 
-def test_shard_option_collects_only_that_shards_files():
+def test_shard_option_collects_only_that_shards_files(pytestconfig):
     files = discover_test_files(_ROOT)
     shard = 2
     expected = set(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[shard - 1])
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q", "-p", "no:xdist", "--shard", f"{shard}/4"],
-        cwd=_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    collected = {line.split("::")[0] for line in result.stdout.splitlines() if "::" in line}
-    assert collected and collected <= expected
+    pytestconfig.getoption("shard")
+    config = SimpleNamespace(getoption=lambda name: f"{shard}/4", stash=pytest.Stash(), rootpath=_ROOT)
+    kept = {path for path in files if not conftest.pytest_ignore_collect(_ROOT / path, config)}
+    assert kept == expected
+    assert conftest.pytest_ignore_collect(_ROOT / "tests", config) is None
+    assert conftest.pytest_ignore_collect(_ROOT / "tests" / "conftest.py", config) is None
 
 
 def test_slow_tests_run_first_and_the_rest_keep_their_order():
