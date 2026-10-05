@@ -25,7 +25,7 @@ class TestFileReadCache:
         f.write_text("content")
         session_id = "session-abc"
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             mark_file_read(session_id, str(f))
             assert was_file_read(session_id, str(f)) is True
 
@@ -36,7 +36,7 @@ class TestFileReadCache:
         f = tmp_path / "unread.py"
         f.write_text("content")
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             assert was_file_read("session-xyz", str(f)) is False
 
     def test_mtime_change_allows_reread(self, tmp_path):
@@ -47,7 +47,7 @@ class TestFileReadCache:
         f.write_text("original content")
         session_id = "session-mtime"
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             mark_file_read(session_id, str(f))
             assert was_file_read(session_id, str(f)) is True
 
@@ -72,7 +72,7 @@ class TestFileReadCache:
             f.write_text(f"content {i}")
             files.append(str(f))
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             for fp in files:
                 mark_file_read(session_id, fp)
             for fp in files:
@@ -90,7 +90,7 @@ class TestFileReadCache:
         f = tmp_path / "shared.py"
         f.write_text("content")
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             mark_file_read("session-A", str(f))
             assert was_file_read("session-A", str(f)) is True
             assert was_file_read("session-B", str(f)) is False
@@ -103,7 +103,7 @@ class TestFileReadCache:
         f.write_text("content")
         session_id = "session-fallback"
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             assert was_file_read(session_id, str(f)) is False
             mark_file_read(session_id, str(f))
             assert was_file_read(session_id, str(f)) is True
@@ -118,7 +118,7 @@ class TestFileReadCache:
         session_id = "session-block"
         payload = {"session_id": session_id, "tool_input": {"file_path": str(f)}}
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             mark_file_read(session_id, str(f))
             with pytest.raises(BlockAction):
                 check_and_block_redundant_read(payload)
@@ -132,6 +132,6 @@ class TestFileReadCache:
         session_id = "session-first"
         payload = {"session_id": session_id, "tool_input": {"file_path": str(f)}}
 
-        with patch("hooks._redis.get_redis", return_value=None):
+        with patch("hooks.context.file_read_cache.get_redis", return_value=None):
             # Should not raise
             check_and_block_redundant_read(payload)
