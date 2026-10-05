@@ -44,6 +44,18 @@ def test_every_command_exists():
     assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger - {"new"})
 
 
+def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():
+    from scripts.trace_cli import build_sweep_parser
+
+    text = (SKILL.parent / "work-beyond-code.md").read_text()
+    template = text.split("## Template: sweep a corrected directive", 1)[1]
+    assert "--kind troubleshoot" in template
+    runs = re.findall(r"agentihooks trace sweep((?: --[a-z]+(?: <slug>)?)*)", template)
+    assert {"", " --apply --ledger <slug>"} <= set(runs)
+    for run in runs:
+        build_sweep_parser().parse_args(run.replace("<slug>", "s").split())
+
+
 def test_create_names_the_template_flag_the_parser_accepts():
     from scripts.swarm.cli import build_parser
 

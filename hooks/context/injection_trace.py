@@ -102,6 +102,7 @@ def correct(session_id: str, source: str, repo: str, reason: str) -> dict:
         "layer": received[-1]["layer"],
         "source": source,
         "locator": received[-1].get("locator") or {},
+        "text": received[-1].get("text", ""),
         "repo": repo,
         "reason": reason,
     }
