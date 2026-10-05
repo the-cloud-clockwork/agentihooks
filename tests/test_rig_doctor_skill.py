@@ -152,6 +152,14 @@ def test_init_swarm_task_additions_pass_the_ledger_cli_identity_check(runner):
         assert args.slug and args.name
 
 
+def test_demo_task_titles_pass_the_ledger_plain_words_check():
+    from scripts.swarm_ledger import ledger_comments
+
+    template = json.loads((SKILL / "demo-template.json").read_text())
+    for task in template["tasks"]:
+        assert ledger_comments.problems(task["title"], "item") == [], task["id"]
+
+
 def test_demo_reset_really_pushes_clean_seed_on_existing_dev(runner, monkeypatch, tmp_path):
     import subprocess
 
