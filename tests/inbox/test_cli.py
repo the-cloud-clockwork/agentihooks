@@ -15,6 +15,10 @@ def store(monkeypatch):
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "registered_name", lambda: "", raising=False)
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions",
+        lambda **kwargs: {"sess-a": {"name": "alice"}, "sess-b": {"name": "bob"}},
+    )
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "alice")
     return store
@@ -40,6 +44,16 @@ def test_a_reply_to_the_operator_with_a_clock_time_is_refused_at_send(store, cap
     assert store.get(asked.id).state == "pending" and store.inbox("operator") == []
     assert run("reply", asked.id, "merged", "and", "deployed") == 0
     assert [i.text for i in store.inbox("operator")] == ["merged and deployed"]
+
+
+def test_a_reply_to_the_operator_accepts_an_issue_link(store, capsys):
+    asked = store.send("operator", "alice", "where is the issue")
+    text = "The issue is https://github.com/the-cloud-clockwork/agentihooks/issues/613"
+    assert run("reply", asked.id, text) == 0
+    answer = json.loads(capsys.readouterr().out)
+    assert answer["closed"] == asked.id
+    assert [i.text for i in store.inbox("operator")] == [text]
+    assert store.get(asked.id).state == "done"
 
 
 def test_a_message_sent_to_the_operator_with_a_clock_time_is_refused_at_send(store, capsys):

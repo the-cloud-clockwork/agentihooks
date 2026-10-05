@@ -146,6 +146,32 @@ def test_stop_now_terminates_reopens_claimed_but_not_finished_work(env, monkeypa
     assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "done")
 
 
+def test_a_binned_ledger_stops_its_swarm_and_the_tick_leaves_it_alone(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    panes = sorted(a.pane_id for a in store.agents("sw"))
+    ledger.bin = {"sw"}
+    assert run("sw", "stop", "--now") == 0
+    assert store.agents("sw") == [] and sorted(rt.closed) == panes and rt.live == set()
+    assert rt.closed_spaces == ["sw"]
+    store.update("sw", state="running")
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, skipped"]
+    assert store.agents("sw") == [] and len(rt.spawned) == 2 and len(rt.masters) == 1
+
+
+def test_restoring_from_the_bin_leaves_the_swarm_stopped(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.bin = {"sw"}
+    run("sw", "stop", "--now")
+    ledger.bin = set()
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert store.config("sw").state == "stopped"
+    assert store.agents("sw") == [] and len(rt.spawned) == 2 and len(rt.masters) == 1
+
+
 def test_create_refuses_ids_that_break_agent_names(env, capsys):
     assert run("2026-q4", "create", "--repo", "/repo") == 1
     assert "starting with a letter" in capsys.readouterr().err
