@@ -64,7 +64,7 @@ def state(slug):
 
 
 def pointers(slug):
-    return [c for c in state(slug)["chat"] if "Doctor" in c["text"]]
+    return [c for c in state(slug)["chat"] if c["text"] == doctor.POINTER]
 
 
 def test_start_refuses_without_a_linked_bundle_and_creates_nothing(env, monkeypatch, capsys):
@@ -90,7 +90,7 @@ def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(e
     assert config.lanes["eng"]["kind"] == "troubleshoot"
     assert all(kind in config.lanes["eng"]["role"] for kind in ("troubleshoot", "tune", "code"))
     assert (store.peer(WATCHED), store.peer(DOCTOR)) == (DOCTOR, WATCHED)
-    opening = InboxStore(store.redis).inbox(f"master@{WATCHED}")
+    opening = [i for i in InboxStore(store.redis).inbox(f"master@{WATCHED}") if not i.fyi]
     assert [item.sender for item in opening] == [f"master@{DOCTOR}"]
     name, task = rt.masters[-1]
     assert store.names.slug_of(name) == DOCTOR and task["peer"] == WATCHED
@@ -103,7 +103,7 @@ def test_a_second_start_adds_no_second_link(env):
     assert doctor.main([WATCHED, "start"]) == 0
     assert len(state(WATCHED)["sources"]) == len(state(DOCTOR)["sources"]) == 1
     assert len(pointers(WATCHED)) == 1
-    assert len(InboxStore(store.redis).inbox(f"master@{WATCHED}")) == 1
+    assert len([i for i in InboxStore(store.redis).inbox(f"master@{WATCHED}") if not i.fyi]) == 1
 
 
 LONG = "a" * 40 + "-2026-10"
@@ -241,8 +241,9 @@ def test_stop_cancels_the_pending_peer_messages_and_tells_the_watched_master(env
     assert doctor.main([WATCHED, "stop"]) == 0
     assert inbox.pending_items(f"master@{DOCTOR}") == []
     assert inbox.get(sent.id).state == "cancelled"
-    notice = [i for i in inbox.pending_items(f"master@{WATCHED}") if "closed" in i.text]
-    assert notice and notice[0].fyi and f"master@{DOCTOR}" in notice[0].text
+    notice = [i for i in inbox.pending_items(f"master@{WATCHED}") if "stopped the Doctor" in i.text]
+    assert len(notice) == 1 and notice[0].fyi
+    assert notice[0].text.endswith("The Doctor is stopped.")
 
 
 def test_a_message_to_a_closed_doctors_master_does_not_restart_it(env):
