@@ -53,10 +53,10 @@ def test_codex_steps_are_five_and_set_caps_sends_the_draft(page_script):
     result = run_page(
         page_script,
         'renderSwarm(sw); press("codex_up"); renderSwarm(sw); const up = $("cap-codex").value;'
-        'press("codex_down"); const down = $("cap-codex").value; press("set");'
+        'press("codex_up"); press("codex_down"); const down = $("cap-codex").value; press("set");'
         "console.log(JSON.stringify({up, down, sent}));",
     )
-    assert result == {"up": 40, "down": 35, "sent": [{"action": "set", "max_eng": 2, "max_ci": 1, "codex_share": 35}]}
+    assert result == {"up": 40, "down": 40, "sent": [{"action": "set", "max_eng": 2, "max_ci": 1, "codex_share": 40}]}
 
 
 @pytest.mark.parametrize(
