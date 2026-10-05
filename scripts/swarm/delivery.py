@@ -6,6 +6,7 @@ Replies addressed to the operator are posted on the ledger page chat.
 
 import json
 
+from scripts.inbox import links
 from scripts.inbox.store import InboxStore
 
 READY = ("idle", "done")
@@ -39,6 +40,8 @@ def recipients(store, slug, to, sender):
 def send(store, slug, text, sender, to):
     found = recipients(store, slug, to, sender)
     inbox = InboxStore(store.redis)
+    for agent in found:
+        links.check_send(inbox, sender, agent.name)
     for agent in found:
         inbox.send(sender, agent.name, text)
     return [a.name for a in found]

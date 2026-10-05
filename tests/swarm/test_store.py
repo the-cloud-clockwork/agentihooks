@@ -103,3 +103,11 @@ def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(store)
     assert (store.config("smoke").template, store.config("smoke").lanes) == ("t", lanes)
     store.redis.hdel(store.key("smoke", "config"), "template", "lanes")
     assert (store.config("smoke").template, store.config("smoke").lanes) == ("", {})
+
+
+def test_links_round_trip_and_an_old_config_reads_as_none(store):
+    links = [{"from": "eng", "to": "ci", "kind": "delegates-to"}]
+    store.create(config(links=links))
+    assert store.config("smoke").links == links
+    store.redis.hdel(store.key("smoke", "config"), "links")
+    assert store.config("smoke").links == []

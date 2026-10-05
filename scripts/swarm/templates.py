@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from scripts import agent_choice
+from scripts.inbox import links
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -17,6 +18,7 @@ LANES = ("eng", "ci")
 DEFAULT_CAPS = {"eng": 2, "ci": 1}
 AUTO = "auto"
 LANE_FIELDS = ("role", "agent", "model", "effort", "kind")
+LINK_FIELDS = {"from", "to", "kind"}
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 BUILT_IN = Path(__file__).resolve().parents[2] / "profiles" / "package" / "swarm-templates"
 
@@ -60,6 +62,16 @@ def lane(name, data):
     return found
 
 
+def link(data):
+    if not isinstance(data, dict) or set(data) != LINK_FIELDS:
+        raise SwarmError(f"a link is an object with exactly {sorted(LINK_FIELDS)}")
+    if data["kind"] not in links.KINDS:
+        raise SwarmError(f"a link kind is one of {links.KINDS}")
+    if not all(isinstance(data[end], str) and data[end] for end in ("from", "to")):
+        raise SwarmError("a link's from and to each name a seat or a lane")
+    return dict(data)
+
+
 def _checked(name):
     if not NAME_RE.match(name):
         raise SwarmError("a template name is lowercase letters, digits and dashes, starting with a letter")
@@ -76,7 +88,7 @@ def parse(data):
         name,
         {key: lane(key, lanes.get(key, {})) for key in LANES},
         int(data.get("compact_limit", 0)),
-        list(data.get("links", [])),
+        [link(found) for found in data.get("links", [])],
         str(data.get("autonomy", "")),
     )
 
@@ -121,7 +133,7 @@ def from_config(name, config, source=None):
             "name": name,
             "lanes": {key: {**config.lanes.get(key, {}), "cap": caps[key]} for key in LANES},
             "compact_limit": config.compact_limit,
-            "links": source.links if source else [],
+            "links": config.links,
             "autonomy": source.autonomy if source else "",
         }
     )

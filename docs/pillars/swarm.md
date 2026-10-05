@@ -73,8 +73,8 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 
 ### Templates
 
-A template is a JSON file: a `name`, a `compact_limit`, optional `links` and `autonomy` kept for later
-use, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
+A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy` kept
+for later use, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
 
 | Field | Meaning |
 |---|---|
@@ -83,6 +83,13 @@ use, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
 | `agent` | `claude`, `codex` or `auto`; `auto` lets init-agent choose by quota and session caps. |
 | `model`, `effort` | Passed to init-agent for the lane's agents; `auto` keeps init-agent's default. |
 | `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
+
+`links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
+`ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
+has any, a sender holding one of its seats may `msg send` or `swarm say` to another of its seats only
+along a `delegates-to` link; a `can-observe` link refuses the send and names why. Either kind lets the
+sender read that seat's items with `agentihooks msg inbox --of <seat>`. The operator, the master, a
+sender holding no seat, and a swarm without links are never restricted.
 
 Built-in templates (`default`, `codex-ci`) ship with agentihooks. User templates live in
 `$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores

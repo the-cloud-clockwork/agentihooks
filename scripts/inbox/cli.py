@@ -1,7 +1,7 @@
 """agentihooks msg: durable messages between any two sessions.
 
 agentihooks msg send ADDRESS TEXT...        everything after the address is the text
-agentihooks msg inbox                       this session's items with their state
+agentihooks msg inbox [--of ADDRESS]        this session's items with their state, or another seat's
 agentihooks msg read ID                     show an item with its history, mark it read
 agentihooks msg reply ID TEXT...            answer the item's sender and close the item done
 agentihooks msg close ID done|handoff ADDRESS|blocked WHAT|cancel [WHY]
@@ -15,6 +15,7 @@ import os
 import sys
 from dataclasses import asdict
 
+from scripts.inbox import links
 from scripts.inbox.store import InboxError, connect
 
 
@@ -27,12 +28,15 @@ def identity(environ=None):
 
 
 def cmd_send(store, me, args):
+    links.check_send(store, me, args.address)
     item = store.send(me, args.address, " ".join(args.text))
     print(json.dumps({"id": item.id, "from": item.sender, "to": item.address, "state": item.state}))
 
 
 def cmd_inbox(store, me, args):
-    for item in store.mailbox(me):
+    if args.of:
+        links.check_observe(store, me, args.of)
+    for item in store.mailbox(args.of or me):
         print(f"{item.id}\t{item.state}\t{item.sender}\t{item.text.splitlines()[0]}")
 
 
@@ -60,7 +64,9 @@ def build_parser():
     send.add_argument("address")
     send.add_argument("text", nargs=argparse.REMAINDER)
     send.set_defaults(func=cmd_send)
-    sub.add_parser("inbox").set_defaults(func=cmd_inbox)
+    inbox = sub.add_parser("inbox")
+    inbox.add_argument("--of", default="", metavar="ADDRESS")
+    inbox.set_defaults(func=cmd_inbox)
     read = sub.add_parser("read")
     read.add_argument("id")
     read.set_defaults(func=cmd_read)

@@ -586,3 +586,24 @@ def test_templates_lists_built_in_and_user_templates(env, home, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert any(line.startswith("default\tbuilt-in") for line in lines)
     assert any(line.startswith("mine\tuser") for line in lines)
+
+
+def test_create_and_save_template_carry_the_template_links(env, home):
+    store, _, _ = env
+    link = {"from": "ci", "to": "eng", "kind": "can-observe"}
+    (home / "swarm-templates").mkdir(parents=True)
+    (home / "swarm-templates" / "linked.json").write_text(json.dumps({"name": "linked", "links": [link]}))
+    assert run("sw", "create", "--repo", "/repo", "--template", "linked") == 0
+    assert store.config("sw").links == [link]
+    assert run("sw", "save-template", "copy") == 0
+    assert json.loads((home / "swarm-templates" / "copy.json").read_text())["links"] == [link]
+
+
+def test_say_refused_by_a_link_posts_nothing_and_names_why(env, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", links=[{"from": "ci", "to": "eng", "kind": "can-observe"}])
+    run("sw", "start")
+    assert run("sw", "--as", "sw-ci-1", "say", "take my task", "--to", "eng") == 1
+    assert "can only observe" in capsys.readouterr().err
+    assert ledger.said == [] and InboxStore(store.redis).inbox("sw-eng-1") == []

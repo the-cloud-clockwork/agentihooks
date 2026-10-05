@@ -169,6 +169,7 @@ ledger page chat and closed done.
 |---|---|
 | Hand another session work or a question | `agentihooks msg send <address> <text>` |
 | See what waits for this session | `agentihooks msg inbox` |
+| Read another seat's items | `agentihooks msg inbox --of <seat>`; in a swarm whose template declares links, a seat sends only along a `delegates-to` link and reads along either kind |
 | Take up an item | `agentihooks msg read <id>` |
 | Answer an item | `agentihooks msg reply <id> <text>`: sends to its sender, closes it done |
 | The work is finished, moved or stuck | `agentihooks msg close <id> done\|handoff <address>\|blocked <what>\|cancel [why]`; a close always names where the work went |
