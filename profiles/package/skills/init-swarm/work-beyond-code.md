@@ -12,6 +12,7 @@ a failure or answers a question, instead of shipping a change by pull request.
 | chases a failure whose cause is unknown | `troubleshoot` | the root cause, its evidence, and a fix pull request or a filed task |
 | answers a question or makes a recommendation | `research` | a link to the written finding |
 | ships a change to code, config or docs | none: `code` | a merged pull request |
+| changes a workflow or pipeline, `ci` lane | `ci` | a merged pull request with the runs before and after |
 
 These tasks run in the `eng` lane, sized like a code task: one agent life, one
 worktree. A change the work needs still reaches the system through code; the

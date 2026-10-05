@@ -50,10 +50,12 @@ research) is an `eng` task with a kind and a proof contract: read
 ```bash
 agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
-  [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
+  [--kind ci] [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```
 
-A code task takes no `--kind` and no contract. The ledger refuses `done` on a
+A code task takes no `--kind` and no contract. A `ci` lane task may take
+`--kind ci` for the prompt that starts red on a real workflow run; it carries no
+contract either. The ledger refuses `done` on a
 task beyond code until its agent posts the proof its kind needs.
 
 The tick claims a task only once every task in `--depends-on` is done, and never
