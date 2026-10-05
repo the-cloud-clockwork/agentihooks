@@ -295,6 +295,12 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .hl-evidence { margin: 2px 0 0; padding-left: 16px; list-style: disc; font-size: var(--fs-body); color: var(--text-2); overflow-wrap: anywhere; }
 .hl-evidence li::marker { color: var(--muted); }
 .hl-threshold { margin: 2px 0 0; font-size: var(--fs-meta); color: var(--muted); }
+.hl-earlier { margin: 2px 0 0; font-size: var(--fs-meta); color: var(--accent); overflow-wrap: anywhere; }
+.hl-verdict { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 0; font-size: var(--fs-meta); }
+.hl-pick, .hl-note { min-width: 0; padding: 2px 0; background: transparent; border: 0; border-bottom: 1px solid var(--rule); color: var(--text); font: inherit; }
+.hl-note { flex: 1; }
+.hl-pick option { background: var(--panel); color: var(--text); }
+.hl-pick:hover, .hl-note:hover, .hl-pick:focus, .hl-note:focus { outline: none; border-bottom-color: var(--accent); }
 .crew-row .unhandled { margin-left: auto; color: var(--destructive); text-shadow: var(--glow); }
 #chat-input { max-height: 140px; overflow-y: auto; }
 .col > section, .item { scroll-margin-top: 24px; }
@@ -988,7 +994,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", set: "Set caps",
-      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap" }[action] || action;
+      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `${name} failed: ${error}` };
@@ -1059,7 +1065,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("crew-box").hidden = !crewShown(meta.crew || [], sw);
     $("health-box").hidden = !sw;
     if (!sw) return;
-    renderHealth(sw.findings);
+    if (!$("health").contains(document.activeElement)) renderHealth(sw.findings);
     const c = sw.config, counts = { ...sw.tasks, agents: (sw.agents || []).length };
     $("swarm-state").className = `sw-state ${c.state}`;
     $("swarm-state").textContent = c.state;
@@ -1098,8 +1104,21 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
         h("span", { class: "hl-kind", text: f.kind })),
       h("p", { class: "hl-summary", text: f.summary }),
       h("ul", { class: "hl-evidence" }, ...(f.evidence || []).map((entry) => h("li", { text: entry }))),
-      h("p", { class: "hl-threshold", text: `threshold ${f.threshold}` }));
+      h("p", { class: "hl-threshold", text: `threshold ${f.threshold}` }),
+      f.verdict ? h("p", { class: "hl-earlier", text: `earlier verdict ${f.verdict.value.replace(/-/g, " ")} by ${f.verdict.by}${f.verdict.note ? `: ${f.verdict.note}` : ""}` }) : null,
+      h("div", { class: "hl-verdict" },
+        h("select", { class: "hl-pick", "aria-label": "Verdict" },
+          ...["false-positive", "early-real", "established", "insufficient-evidence", "resolved"].map((v) => h("option", { value: v, text: v.replace(/-/g, " ") }))),
+        h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "note", "aria-label": "Verdict note" }),
+        h("button", { class: "sw-btn", type: "button", "data-verdict": f.id, text: "Give verdict" })));
   }
+
+  $("health").addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-verdict]");
+    if (!btn) return;
+    const card = btn.closest("li");
+    swarmControl({ action: "verdict", id: btn.dataset.verdict, verdict: card.querySelector(".hl-pick").value, note: card.querySelector(".hl-note").value.trim() });
+  });
 
   function itemState(list, i) {
     if (!["phases", "tasks", "questions", "followups"].includes(list)) return undefined;

@@ -165,6 +165,22 @@ def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ]
 
 
+def test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim():
+    ledger = {"tasks": [task("t1", state="pr", title="Fold the chat panel")], "_meta": {"events": []}}
+    idle = [agent(idle_ticks=5)]
+    assert health.findings(ledger, idle, {}, NOW, LIMITS, waiting={"t1"}) == []
+    assert [f.kind for f in health.findings(ledger, idle, {}, NOW, LIMITS)] == ["idle with claim"]
+
+
+def test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by():
+    ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
+    [idle] = health.findings(ledger, [agent(idle_ticks=4)], {}, NOW, LIMITS)
+    [watch] = health.over_monitoring({"sw-eng-1": {"watch": 33, "act": 2}}, LIMITS)
+    assert (idle.id, idle.measure) == ("idle-with-claim/sw-eng-1", 4)
+    assert (watch.id, watch.measure) == ("over-monitoring/sw-eng-1", 33)
+    assert "measure" not in watch.as_dict()
+
+
 def test_a_claim_with_no_change_names_the_task_its_holder_and_the_quiet_time():
     events = [ev("task claimed", "tasks/t1", by="swarm", at=NOW - 45 * MIN), ev("joined", at=NOW - 44 * MIN)]
     ledger = {
@@ -212,6 +228,7 @@ def test_limits_come_from_the_environment_and_fall_back_on_bad_values():
         ("stale_minutes", 30),
         ("watch_min", 20),
         ("watch_ratio", 5),
+        ("cooldown_minutes", 60),
     ],
 )
 def test_defaults_match_the_toolbelt_rule(name, value):

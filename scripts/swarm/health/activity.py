@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -18,8 +19,17 @@ SERENA_EDITS = (
     "replace_in_files",
     "safe_delete_symbol",
 )
-WATCH_RE = re.compile(r"\b(ledger\s+watch|gh\s+pr\s+checks|gh\s+run\s+(watch|view)|swarm\s+\S+\s+status|sleep\s)")
-ACT_RE = re.compile(r"\b(git\s+commit|git\s+push|gh\s+pr\s+(create|merge))\b")
+WATCH_RE = re.compile(r"\b(ledger\s+watch|gh\s+pr\s+checks|gh\s+run\s+(watch|view)|sleep\s)")
+SWARM_CMD = r"\bagentihooks\s+swarm\s+(?:--as\s+\S+\s+)?[a-z][\w-]*\s+(?:--as\s+\S+\s+)?"
+ACT_RE = re.compile(
+    r"\b(git\s+commit|git\s+push|gh\s+pr\s+(create|merge))\b"
+    r"|\bagentihooks\s+ledger\s+(?:--\S+\s+\S+\s+)*(comment|say|phase|task|followup)\b"
+    rf"|{SWARM_CMD}(say|learned|done|pr)\b"
+    r"|\bagentihooks\s+msg\s+reply\b"
+)
+NEITHER_RE = re.compile(rf"{SWARM_CMD}(status|verdict)\b")
+REARM_RE = re.compile(r"\bledger\s+watch\b")
+REARM_WINDOW_MS = 30 * 60_000
 
 
 def default_root():
@@ -37,10 +47,12 @@ def classify(tool_name, tool_input):
     command = (tool_input or {}).get("command", "") if tool_name == "Bash" else ""
     if ACT_RE.search(command):
         return "act"
+    if NEITHER_RE.search(command):
+        return ""
     return "watch" if WATCH_RE.search(command) else ""
 
 
-def record(tool_name, tool_input, environ=None, root=None):
+def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
@@ -48,24 +60,31 @@ def record(tool_name, tool_input, environ=None, root=None):
     kind = classify(tool_name, tool_input)
     if not kind:
         return
+    entry = {"kind": kind, "at": int(time.time() * 1000) if now_ms is None else now_ms}
+    if kind == "watch" and REARM_RE.search((tool_input or {}).get("command", "")):
+        entry["rearm"] = True
     folder = Path(root or default_root()) / slug
     folder.mkdir(parents=True, exist_ok=True)
     with open(folder / f"{name}.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"kind": kind}) + "\n")
+        f.write(json.dumps(entry) + "\n")
 
 
 def counts(slug, root=None):
     folder = Path(root or default_root()) / slug
     found = {}
     for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
-        tally = {"watch": 0, "act": 0}
+        tally, armed = {"watch": 0, "act": 0}, None
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
-                kind = json.loads(line).get("kind")
+                entry = json.loads(line)
             except ValueError:
                 continue
-            if kind in tally:
-                tally[kind] += 1
+            if entry.get("rearm"):
+                if armed is not None and entry["at"] - armed < REARM_WINDOW_MS:
+                    continue
+                armed = entry["at"]
+            if entry.get("kind") in tally:
+                tally[entry["kind"]] += 1
         found[path.stem] = tally
     return found
 

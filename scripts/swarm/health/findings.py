@@ -25,6 +25,7 @@ ENV = {
     "stale_minutes": "AGENTIHOOKS_HEALTH_STALE_MINUTES",
     "watch_min": "AGENTIHOOKS_HEALTH_WATCH_MIN",
     "watch_ratio": "AGENTIHOOKS_HEALTH_WATCH_RATIO",
+    "cooldown_minutes": "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES",
 }
 
 
@@ -39,6 +40,7 @@ class Limits:
     stale_minutes: int = 30
     watch_min: int = 20
     watch_ratio: int = 5
+    cooldown_minutes: int = 60
 
 
 @dataclass(frozen=True)
@@ -48,9 +50,16 @@ class Finding:
     summary: str
     evidence: tuple
     threshold: str
+    measure: int = 0
+
+    @property
+    def id(self):
+        return f"{self.kind.replace(' ', '-')}/{self.subject}"
 
     def as_dict(self):
-        return {**asdict(self), "evidence": list(self.evidence)}
+        found = asdict(self)
+        del found["measure"]
+        return {**found, "evidence": list(self.evidence)}
 
 
 def limits(environ=None):
@@ -63,14 +72,14 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def findings(ledger, agents, activity, now_ms, limits):
+def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset()):
     events = ledger.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in ledger.get("tasks", [])}
     return [
         *ceremony(events, tasks, limits),
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
-        *idle_with_claim(agents, tasks, limits),
+        *idle_with_claim(agents, tasks, limits, waiting),
         *stale_claims(events, tasks, now_ms, limits),
         *over_monitoring(activity, limits),
     ]
@@ -111,6 +120,7 @@ def ceremony(events, tasks, limits):
                     "more ledger transitions than outcomes",
                     (f"{count} ledger transitions", _plural(outcomes, "outcome")),
                     f"at least {limits.ceremony_min} transitions and more than {limits.ceremony_ratio} per outcome",
+                    count,
                 )
             )
     return found
@@ -145,6 +155,7 @@ def scope_inflation(events, tasks, limits):
                 f"queued {len(ids)} tasks for its own lane",
                 listed,
                 f"{limits.self_queued} self queued tasks whose gain never rose",
+                len(ids),
             )
         )
     return found
@@ -168,16 +179,19 @@ def proof_loops(events, tasks, limits):
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
+                    reruns + rounds[tid],
                 )
             )
     return found
 
 
-def idle_with_claim(agents, tasks, limits):
+def idle_with_claim(agents, tasks, limits, waiting=frozenset()):
     found = []
     for a in agents:
         held = tasks.get(a.get("task"), {})
         if a.get("lane") == "master" or held.get("state") not in HELD or a.get("idle_ticks", 0) < limits.idle_ticks:
+            continue
+        if held["id"] in waiting:
             continue
         found.append(
             Finding(
@@ -186,6 +200,7 @@ def idle_with_claim(agents, tasks, limits):
                 f"idle for {a['idle_ticks']} ticks while holding a task",
                 (f"task {_title(tasks, held['id'])} ({held['state']})",),
                 f"{limits.idle_ticks} idle ticks",
+                a["idle_ticks"],
             )
         )
     return found
@@ -207,6 +222,7 @@ def stale_claims(events, tasks, now_ms, limits):
                     f"no change for {_plural(quiet, 'minute')}",
                     (f"task {_title(tasks, tid)}", f"claimed by {holder}"),
                     f"{_plural(limits.stale_minutes, 'minute')} without a change",
+                    quiet,
                 )
             )
     return found
@@ -224,6 +240,7 @@ def over_monitoring(activity, limits):
                     "more watch calls than actions",
                     (f"{watch} watch calls", _plural(act, "action")),
                     f"at least {limits.watch_min} watch calls and more than {limits.watch_ratio} per action",
+                    watch,
                 )
             )
     return found

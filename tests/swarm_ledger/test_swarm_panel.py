@@ -153,6 +153,37 @@ class SwarmPanel(unittest.TestCase):
             self.assertEqual(code, 400, body)
             run.assert_not_called()
 
+    def test_a_verdict_runs_the_verdict_command_as_the_operator(self):
+        code, _, run = self.control(
+            {"action": "verdict", "id": "over-monitoring/s-master-1", "verdict": "false-positive", "note": "-re-arms"}
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(
+            run.call_args_list[0].args[0][1:],
+            [
+                "swarm",
+                SLUG,
+                "--as",
+                "operator",
+                "verdict",
+                "over-monitoring/s-master-1",
+                "false-positive",
+                "--note=-re-arms",
+            ],
+        )
+
+    def test_a_bad_verdict_never_runs_the_cli(self):
+        for body in (
+            {"action": "verdict", "id": "over-monitoring/s-master-1", "verdict": "maybe"},
+            {"action": "verdict", "id": "--as x", "verdict": "resolved"},
+            {"action": "verdict", "verdict": "resolved"},
+            {"action": "verdict", "id": "stale-claim/g1", "verdict": "resolved", "note": 5},
+            {"action": "verdict", "id": "stale-claim/g1", "verdict": "resolved", "note": "x" * 501},
+        ):
+            code, _, run = self.control(body)
+            self.assertEqual(code, 400, body)
+            run.assert_not_called()
+
     def test_control_needs_the_ledger_token(self):
         with patch.object(server.subprocess, "run") as run:
             code, _ = self.put({"action": "start"}, token=False)
@@ -407,7 +438,8 @@ class SwarmPanel(unittest.TestCase):
 
     def test_each_swarm_poll_hides_or_restores_the_crew_box(self):
         stubs = (
-            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {}});"
+            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
+            " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
             'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
@@ -469,6 +501,9 @@ FINDINGS = [
 ]
 
 
+PICK = "|false positive|early real|established|insufficient evidence|resolved|Give verdict"
+
+
 class HealthPanel(unittest.TestCase):
     def render(self, findings):
         stubs = (
@@ -491,9 +526,10 @@ class HealthPanel(unittest.TestCase):
             cards,
             [
                 "|s-eng-1|idle with claim|idle for 4 ticks while holding a task|task Fold the chat panel (claimed)"
-                "|threshold 3 idle ticks",
+                "|threshold 3 idle ticks" + PICK,
                 "|s-eng-2|scope inflation|queued 3 tasks for its own lane|Split the parser, gain 4"
-                "|Cache the index, gain 1.5|q2, no gain stated|threshold 3 self queued tasks whose gain never rose",
+                "|Cache the index, gain 1.5|q2, no gain stated|threshold 3 self queued tasks whose gain never rose"
+                + PICK,
             ],
         )
 
@@ -512,7 +548,7 @@ class HealthPanel(unittest.TestCase):
 
     def test_a_scope_inflation_finding_with_three_tasks_renders_three_bullets(self):
         [(order, tag, items)] = self.bullets([FINDINGS[1]])
-        self.assertEqual(order, ["sw-top", "hl-summary", "hl-evidence", "hl-threshold"])
+        self.assertEqual(order, ["sw-top", "hl-summary", "hl-evidence", "hl-threshold", "hl-verdict"])
         self.assertEqual(tag, "ul")
         self.assertEqual(
             items,
@@ -523,12 +559,43 @@ class HealthPanel(unittest.TestCase):
         [(_, tag, items)] = self.bullets([FINDINGS[0]])
         self.assertEqual((tag, items), ("ul", [["li", "task Fold the chat panel (claimed)"]]))
 
+    def test_each_card_offers_the_five_verdicts_for_its_finding(self):
+        stubs = "const h = (tag, attrs, ...kids) => ({tag, ...attrs, kids: kids.filter(Boolean)});"
+        script = (
+            stubs
+            + function_source("healthCard")
+            + f"\nconst card = healthCard({json.dumps({**FINDINGS[0], 'id': 'idle-with-claim/s-eng-1'})});"
+            + "const pick = card.kids.find((k) => k.class === 'hl-verdict');"
+            + "process.stdout.write(JSON.stringify(pick.kids.map((k) => [k.tag, k['data-verdict'] || '',"
+            + " (k.kids || []).map((o) => o.value)])));"
+        )
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+        self.assertEqual(
+            out,
+            [
+                ["select", "", ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"]],
+                ["input", "", []],
+                ["button", "idle-with-claim/s-eng-1", []],
+            ],
+        )
+
+    def test_a_finding_back_after_its_cooldown_shows_its_earlier_verdict(self):
+        back = {**FINDINGS[0], "verdict": {"value": "early-real", "note": "watch it", "by": "operator", "at": 1}}
+        _, [card] = self.render([back])
+        self.assertIn("|earlier verdict early real by operator: watch it|", card)
+
+    def test_a_verdict_click_sends_the_picked_verdict_and_note(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        self.assertIn('$("health").addEventListener("click"', page)
+        self.assertRegex(page, r'action: "verdict", id: btn\.dataset\.verdict')
+
     def test_no_findings_says_so(self):
         self.assertEqual(self.render([]), ["", ["No findings"]])
 
     def test_the_swarm_poll_shows_the_panel_with_the_swarm_and_hides_it_without(self):
         stubs = (
-            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {}});"
+            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
+            " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
             "const crewShown = () => false; const meta = {}; let shown = null;"
