@@ -89,10 +89,9 @@ def test_an_open_followup_still_wakes_the_master(crew):
     ("collection", "kind", "fields"),
     [
         ("questions", "added", {"answers": [{"text": "Use port 8765", "by": "operator"}]}),
-        ("tasks", "task blocked", {"state": "done", "done": True}),
     ],
 )
-def test_a_decided_question_or_task_closes_before_a_wake(crew, collection, kind, fields):
+def test_a_decided_question_closes_before_a_wake(crew, collection, kind, fields):
     _, inbox, ledger, herdr = crew
     item = queue_event(crew, collection, kind)
     ledger.doc[collection][0].update(fields)
@@ -107,7 +106,6 @@ def test_a_decided_question_or_task_closes_before_a_wake(crew, collection, kind,
     [
         ("followups", "added", {"needs_operator": True}),
         ("questions", "added", {"out_of_scope": True}),
-        ("tasks", "task blocked", {"state": "done"}),
     ],
 )
 def test_other_ledger_decisions_close_the_event(crew, collection, kind, fields):
@@ -126,9 +124,11 @@ def test_other_ledger_decisions_close_the_event(crew, collection, kind, fields):
         ("questions", "added", {}),
         ("questions", "added", {"answers": [{"text": "Removed answer", "deleted": True}]}),
         ("tasks", "task blocked", {"state": "blocked"}),
+        ("tasks", "task blocked", {"state": "done", "done": True}),
+        ("tasks", "task done", {"state": "done", "done": True}),
     ],
 )
-def test_undecided_questions_and_tasks_still_wake(crew, collection, kind, fields):
+def test_undecided_questions_and_task_items_still_wake(crew, collection, kind, fields):
     _, inbox, ledger, herdr = crew
     item = queue_event(crew, collection, kind)
     ledger.doc[collection][0].update(fields)

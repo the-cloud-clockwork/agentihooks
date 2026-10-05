@@ -41,7 +41,7 @@ def _add(doc, op, ctx):
 
 def _clear(doc, op, ctx):
     rows = doc.setdefault("priorities", [])
-    gone = rows if op["target"] == "all" else [p for p in rows if p["id"] == op["target"]]
+    gone = rows if op["target"] == "all" else [p for p in rows if op["target"] in (p["id"], p["item"])]
     if not gone:
         return op["target"] == "all"
     doc["priorities"] = [p for p in rows if p not in gone]

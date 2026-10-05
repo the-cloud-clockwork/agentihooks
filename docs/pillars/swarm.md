@@ -228,9 +228,9 @@ A follow up already closed or flagged for the operator is not raised. Pull reque
 a pull request `gh` cannot read is skipped until a later tick. An engineer that is gone falls back to the master.
 
 These items ride the same wake ladder as any other (see [Talking to the swarm](#talking-to-the-swarm)). Before
-it wakes anyone, the tick closes an event item whose follow up, question or task was already decided on the
-ledger (follow up closed or flagged, question answered or out of scope, task done), so the master never handles
-a decision twice.
+it wakes anyone, the tick closes an event item whose follow up or question was already decided on the ledger
+(follow up closed or flagged, question answered or out of scope), so the master never handles a decision twice.
+A task item stays until the master closes it, so a done task's proof check always reaches the master.
 
 ### Safe retire
 

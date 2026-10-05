@@ -1,7 +1,7 @@
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
-Every swarm that is not stopped keeps one master: an agent the operator talks to, which works no task.
+Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
 from dataclasses import dataclass, replace
@@ -13,7 +13,8 @@ from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle as idle_state
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm import lifetime
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
@@ -60,6 +61,7 @@ class Runtime(Protocol):
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
+    def close_space(self, config: SwarmConfig) -> bool: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
@@ -67,21 +69,31 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions = []
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
+    actions += _reap(slug, store, ledger, runtime, rows, now_ms)
+    actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
     if config.state == "stopped":
-        if not _woken(slug, config, store, ledger):
-            return []
+        retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
+        if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
+            return actions + _close_space(slug, config, store, runtime)
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
-    if config.state == "drained" and any(_claimable(slug, store, rows, lane) for lane in LANES):
+    sleeping = lifetime.sleeping(slug, store, rows)
+    if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
-    actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += _orphans(slug, store, ledger, rows)
-    actions += _master(slug, config, store, runtime, now_ms)
-    if config.state == "running":
-        actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
+    if not sleeping:
+        actions += _master(slug, config, store, runtime, now_ms)
+        if config.state == "running":
+            actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
     _conversations(slug, store, runtime)
-    return actions + _settle(slug, config, store, ledger, rows)
+    return actions + _settle(slug, config, store, ledger, rows) + _close_space(slug, config, store, runtime)
+
+
+def _close_space(slug, config, store, runtime):
+    if not store.agents(slug):
+        runtime.close_space(config)
+    return []
 
 
 def _woken(slug, config, store, ledger):
@@ -106,7 +118,9 @@ def _drop(slug, store, ledger, rows, agent):
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
-        if agent.state == "finished":
+        task = rows.get(agent.task, {})
+        ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
+        if agent.state == "finished" or ended:
             if runtime.retire(agent, agent.name in live):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)

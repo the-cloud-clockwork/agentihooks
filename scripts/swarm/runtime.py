@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.swarm import naming, prompt
-from scripts.swarm.store import codex_split
+from scripts.swarm.store import SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -191,9 +191,29 @@ class HerdrRuntime:
         if agent.pane_id:
             try:
                 self.herdr(["pane", "close", agent.pane_id])
-            except Exception:
-                pass
+            except Exception as exc:
+                return "not found" in str(exc)
         return True
+
+    def close_space(self, config: SwarmConfig) -> bool:
+        try:
+            spaces = self.herdr(["workspace", "list"])["workspaces"]
+            agents = self.herdr(["agent", "list"])["agents"]
+            closed, labels = False, (naming.space(config.repo, config.code), f"swarm-{config.slug}")
+            for space in spaces:
+                if space.get("label") not in labels:
+                    continue
+                workspace = space["workspace_id"]
+                if any(
+                    a.get("workspace_id") == workspace or a.get("pane_id", "").startswith(workspace + ":")
+                    for a in agents
+                ):
+                    return False
+                self.herdr(["workspace", "close", workspace])
+                closed = True
+            return closed
+        except Exception:
+            return False
 
     def status(self, agent):
         found = self._get(pane_target(agent))

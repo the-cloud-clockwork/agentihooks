@@ -85,11 +85,9 @@ def _decided(ref, doc):
     row = next((r for r in doc.get(collection, []) if r.get("id") == item_id), {})
     if collection == "followups":
         return bool(row.get("done") or row.get("needs_operator"))
-    if collection == "questions":
-        return bool(
-            row.get("out_of_scope") or any(a.get("text") and not a.get("deleted") for a in row.get("answers", []))
-        )
-    return collection == "tasks" and bool(row.get("done") or row.get("state") == "done")
+    return collection == "questions" and bool(
+        row.get("out_of_scope") or any(a.get("text") and not a.get("deleted") for a in row.get("answers", []))
+    )
 
 
 def _receiver(inbox, address):
