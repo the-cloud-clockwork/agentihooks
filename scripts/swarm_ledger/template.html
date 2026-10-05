@@ -264,11 +264,11 @@ details.crew { margin: 10px 0 0; }
 .sw-cap:hover { border-bottom-color: var(--accent); }
 .sw-cap:focus { outline: none; border-bottom-color: var(--accent); }
 .sw-cap:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.sw-note { grid-column: 5 / -1; flex: 1; min-width: 0; margin: 0; text-align: right; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-note { grid-column: 5 / -1; min-width: 0; margin: 0; text-align: right; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-note.pending { color: var(--accent); }
 .sw-note.ok { color: var(--positive); text-shadow: var(--glow); }
 .sw-note.bad { color: var(--destructive); text-shadow: var(--glow); }
-.sw-note.bad { grid-column: 1 / -1; flex-basis: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.sw-note.bad { grid-column: 1 / -1; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 details.sw-agents { margin: 0; }
 .sw-agents > summary { padding: 10px 0 8px; font-weight: 700; letter-spacing: .12em; color: var(--text-2); }
 .sw-agents[open] > summary { border-bottom: 1px solid var(--rule); }
