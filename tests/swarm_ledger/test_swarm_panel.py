@@ -526,7 +526,9 @@ class SwarmPanel(unittest.TestCase):
         )
         script = (
             stubs
-            + "".join(function_source(n) + "\n" for n in ("crewShown", "autonomyText", "renderSwarm"))
+            + "".join(
+                function_source(n) + "\n" for n in ("crewShown", "autonomyText", "renderPlanShape", "renderSwarm")
+            )
             + f"renderSwarm({json.dumps(STATUS)}); const withSwarm = $('crew-box').hidden;"
             + "renderSwarm(null); process.stdout.write(JSON.stringify([withSwarm, $('crew-box').hidden]));"
         )
@@ -685,6 +687,7 @@ class HealthPanel(unittest.TestCase):
         script = (
             stubs
             + function_source("autonomyText")
+            + function_source("renderPlanShape")
             + function_source("renderSwarm")
             + f"\nrenderSwarm({json.dumps({**STATUS, 'findings': FINDINGS})}); const on = [$('health-box').hidden, shown];"
             + "renderSwarm(null); process.stdout.write(JSON.stringify([on, $('health-box').hidden]));"

@@ -70,9 +70,15 @@ and `--judge`.
 
 ```bash
 agentihooks swarm <slug> create --repo <dir> [--template <name>] [--max-eng-agents N] [--max-ci-agents N]
+agentihooks swarm <slug> status
 agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
+
+After create, show the status report before start: the longest dependency chain,
+parallel width and engineer width. These are dependency limits for the whole
+plan; territories and agent caps may reduce concurrency. Start warns when
+engineer width is below the configured engineer cap.
 
 A template sets the caps, compact limit and per lane agent, model, effort,
 role and default task kind. Use the one the operator names; list them with

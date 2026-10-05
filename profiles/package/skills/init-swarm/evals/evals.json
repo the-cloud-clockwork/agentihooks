@@ -52,5 +52,14 @@
       "no --max-ci-agents flag is added, so the ci cap comes from the template",
       "status is run after start to show the swarm running with its master"
     ]
+  },
+  {
+    "query": "init swarm for a plan with a seven task dependency chain and parallel width two, with four engineers.",
+    "files": [],
+    "expected_behavior": [
+      "After create and before start, status displays the longest dependency chain, dependency parallel width and engineer width.",
+      "The start command warns that engineer width two is below the configured engineer cap four.",
+      "The operator receives the dependency report before the swarm starts; territory and agent caps may reduce the reported concurrency."
+    ]
   }
 ]

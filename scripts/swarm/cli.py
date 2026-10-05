@@ -50,7 +50,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
-from scripts.swarm_ledger import ledger_kinds, ledger_link
+from scripts.swarm_ledger import ledger_kinds, ledger_link, plan_shape
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -154,6 +154,10 @@ def _state(store, args, state):
 
 
 def cmd_start(store, args):
+    shape = plan_shape.report(LedgerClient().tasks(args.slug), store.config(args.slug).max_eng)
+    print(shape["summary"], flush=True)
+    if shape["warning"]:
+        print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
     _state(store, args, "running")
     print(ledger_link.page_line(args.slug))
 
@@ -390,6 +394,7 @@ def cmd_status(store, args):
                     "auto_snapshot": _auto_snapshot(config),
                     "restored": store.restored(args.slug),
                     "peer": store.peer(args.slug),
+                    "plan_shape": plan_shape.report(tasks, config.max_eng),
                 }
             )
         )
@@ -398,6 +403,7 @@ def cmd_status(store, args):
         f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}  {_share(store, config)}"
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
+    print(plan_shape.report(tasks, config.max_eng)["summary"])
     print(_snapshot_line(_auto_snapshot(config)))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"

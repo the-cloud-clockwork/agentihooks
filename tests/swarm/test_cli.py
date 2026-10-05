@@ -47,6 +47,30 @@ def test_create_is_paused_then_start_spawns_and_status_lists(env, capsys):
     assert "sw-eng-1" in capsys.readouterr().out
 
 
+def test_start_reports_plan_shape_and_warns_before_spawning(env, capsys, monkeypatch):
+    store, ledger, _ = env
+    ledger.rows = {"a": {"id": "a", "lane": "eng"}, "b": {"id": "b", "lane": "eng", "depends_on": ["a"]}}
+    run("demo", "create", "--repo", "/repo", "--max-eng-agents", "4")
+    capsys.readouterr()
+    observed = []
+    monkeypatch.setattr(cli, "run_tick", lambda *args: observed.append(capsys.readouterr()) or [])
+    assert run("demo", "start") == 0
+    assert "Critical path: 2 tasks (a -> b)" in observed[0].out
+    assert "Parallel width: 1 tasks; engineer width: 1" in observed[0].out
+    assert "engineer width 1 is below engineer cap 4" in observed[0].err
+
+
+def test_status_json_includes_plan_shape_without_cap_warning_when_wide_enough(env, capsys):
+    run("demo", "create", "--repo", "/repo", "--max-eng-agents", "1")
+    capsys.readouterr()
+    run("demo", "status", "--json")
+    shape = json.loads(capsys.readouterr().out)["plan_shape"]
+    assert shape["chain_length"] == 1
+    assert shape["parallel_width"] == 2
+    assert shape["engineer_width"] == 1
+    assert shape["warning"] == ""
+
+
 def test_create_marks_the_ledger_as_a_swarm_ledger(env):
     _, ledger, _ = env
     assert run("sw", "create", "--repo", "/repo") == 0
