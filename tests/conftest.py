@@ -8,12 +8,13 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes
+from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes, warm_imports
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
+WARM_PIDS = pytest.StashKey[list[int]]()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -28,17 +29,34 @@ def pytest_addoption(parser):
     parser.addoption("--shard", default=None, metavar="N/M", help="collect only the test files of shard N of M")
 
 
-def pytest_ignore_collect(collection_path, config):
-    spec = config.getoption("shard")
-    if not spec or collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
-        return None
+def _shard_files(config) -> frozenset[str]:
     if SHARD_FILES not in config.stash:
-        index, shards = (int(part) for part in spec.split("/"))
+        index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
         files = discover_test_files(config.rootpath)
         files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
         config.stash[SHARD_FILES] = frozenset(files)
-    if collection_path.relative_to(config.rootpath).as_posix() not in config.stash[SHARD_FILES]:
+    return config.stash[SHARD_FILES]
+
+
+def pytest_configure(config):
+    workers = getattr(config.option, "numprocesses", None)
+    if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
+        return
+    modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
+    config.stash[WARM_PIDS] = warm_imports(modules, workers)
+
+
+def pytest_unconfigure(config):
+    for pid in config.stash.get(WARM_PIDS, []):
+        os.waitpid(pid, 0)
+
+
+def pytest_ignore_collect(collection_path, config):
+    spec = config.getoption("shard")
+    if not spec or collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
+        return None
+    if collection_path.relative_to(config.rootpath).as_posix() not in _shard_files(config):
         return True
     return None
 

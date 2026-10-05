@@ -72,6 +72,8 @@ jobs:
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short
 
   lint:

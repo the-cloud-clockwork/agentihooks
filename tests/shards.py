@@ -1,3 +1,5 @@
+import importlib
+import os
 from pathlib import Path
 
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
@@ -31,3 +33,20 @@ def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float)
     seconds = {nodeid: durations.get(nodeid.split("@", 1)[0], 0.0) for nodeid in nodeids}
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
+
+
+def warm_imports(modules: list[str], workers: int) -> list[int]:
+    pids = []
+    for start in range(workers):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                for module in modules[start::workers]:
+                    try:
+                        importlib.import_module(module)
+                    except BaseException:
+                        pass
+            finally:
+                os._exit(0)
+        pids.append(pid)
+    return pids
