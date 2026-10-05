@@ -74,8 +74,7 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           PYTHONUNBUFFERED: "1"
-          PYTHONPATH: .github
-        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short -p ci_stamp -p no:anyio -p no:pytest-split -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short -p no:anyio -p no:pytest-split -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
   lint:
     runs-on: ubuntu-latest
