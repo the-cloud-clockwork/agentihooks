@@ -28,6 +28,12 @@ tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a la
 
 ## Agent names
 
+Run `agentihooks swarm rename` to rename every live registered swarm's agents and spaces, or
+`agentihooks swarm <id> rename` for one swarm. Running it again makes no changes. Running sessions retain
+their launch names; durable aliases keep inbox delivery, crew ownership, terminate selection, waits and
+heartbeats working under either name. Herdr uses dashes where canonical names use an at sign, as approved
+by the operator.
+
 Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
 `ci@a1b2c3-0001`. The type is `master`, `engineer` or `ci`. The code is six lowercase hex characters minted once
 when the swarm is created, kept on the swarm record and in a global registry that maps it to its swarm, ledger and
