@@ -455,14 +455,16 @@ FINDINGS = [
     {
         "kind": "idle with claim",
         "subject": "s-eng-1",
-        "evidence": "idle for 4 ticks while holding task t1 (claimed)",
+        "summary": "idle for 4 ticks while holding a task",
+        "evidence": ["task Fold the chat panel (claimed)"],
         "threshold": "3 idle ticks",
     },
     {
-        "kind": "stale claim",
-        "subject": "t2",
-        "evidence": "claimed by s-eng-2, no change for 44 minutes",
-        "threshold": "30 minutes without a change",
+        "kind": "scope inflation",
+        "subject": "s-eng-2",
+        "summary": "queued 3 tasks for its own lane",
+        "evidence": ["Split the parser, gain 4", "Cache the index, gain 1.5", "q2, no gain stated"],
+        "threshold": "3 self queued tasks whose gain never rose",
     },
 ]
 
@@ -482,16 +484,44 @@ class HealthPanel(unittest.TestCase):
         )
         return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
-    def test_each_finding_shows_its_subject_kind_evidence_and_threshold(self):
+    def test_each_finding_shows_its_subject_kind_summary_evidence_and_threshold(self):
         count, cards = self.render(FINDINGS)
         self.assertEqual(count, "· 2")
         self.assertEqual(
             cards,
             [
-                "|s-eng-1|idle with claim|idle for 4 ticks while holding task t1 (claimed)|threshold 3 idle ticks",
-                "|t2|stale claim|claimed by s-eng-2, no change for 44 minutes|threshold 30 minutes without a change",
+                "|s-eng-1|idle with claim|idle for 4 ticks while holding a task|task Fold the chat panel (claimed)"
+                "|threshold 3 idle ticks",
+                "|s-eng-2|scope inflation|queued 3 tasks for its own lane|Split the parser, gain 4"
+                "|Cache the index, gain 1.5|q2, no gain stated|threshold 3 self queued tasks whose gain never rose",
             ],
         )
+
+    def bullets(self, findings):
+        stubs = "const h = (tag, attrs, ...kids) => ({tag, ...attrs, kids: kids.filter(Boolean)});"
+        script = (
+            stubs
+            + function_source("healthCard")
+            + f"\nconst cards = {json.dumps(findings)}.map(healthCard);"
+            + "const order = (c) => c.kids.map((k) => k.class);"
+            + "const list = (c) => c.kids.find((k) => k.class === 'hl-evidence');"
+            + "process.stdout.write(JSON.stringify(cards.map((c) => "
+            + "[order(c), list(c).tag, list(c).kids.map((k) => [k.tag, k.text])])));"
+        )
+        return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+
+    def test_a_scope_inflation_finding_with_three_tasks_renders_three_bullets(self):
+        [(order, tag, items)] = self.bullets([FINDINGS[1]])
+        self.assertEqual(order, ["sw-top", "hl-summary", "hl-evidence", "hl-threshold"])
+        self.assertEqual(tag, "ul")
+        self.assertEqual(
+            items,
+            [["li", "Split the parser, gain 4"], ["li", "Cache the index, gain 1.5"], ["li", "q2, no gain stated"]],
+        )
+
+    def test_a_finding_with_one_entry_renders_one_bullet(self):
+        [(_, tag, items)] = self.bullets([FINDINGS[0]])
+        self.assertEqual((tag, items), ("ul", [["li", "task Fold the chat panel (claimed)"]]))
 
     def test_no_findings_says_so(self):
         self.assertEqual(self.render([]), ["", ["No findings"]])

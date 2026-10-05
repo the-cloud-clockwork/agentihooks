@@ -187,7 +187,10 @@ def cmd_status(store, args):
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}")
     for f in found:
-        print(f"finding  {f.kind}  {f.subject}: {f.evidence}; threshold {f.threshold}")
+        print(f"finding  {f.kind}  {f.subject}: {f.summary}")
+        for entry in f.evidence:
+            print(f"  - {entry}")
+        print(f"  threshold {f.threshold}")
 
 
 def cmd_send_message(store, args):
