@@ -1,0 +1,78 @@
+import json
+
+import pytest
+
+from scripts.inbox.store import InboxStore
+from scripts.swarm import cli
+from tests.swarm.test_cli import env, run  # noqa: F401
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+@pytest.fixture
+def closing(env, monkeypatch, tmp_path):  # noqa: F811
+    store, ledger, rt = env
+    ledger.calls = []
+    ledger.summarize = lambda slug, note, by: ledger.calls.append(("summary", note, by))
+    ledger.mark_closed = lambda slug, by: ledger.calls.append(("closed", by))
+    monkeypatch.setattr(cli.snapshot, "path", lambda slug: tmp_path / slug / "snapshot.json")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    return store, ledger, rt, tmp_path
+
+
+def test_close_writes_the_summary_snapshots_retires_everyone_and_marks_the_ledger_closed(closing, capsys):
+    store, ledger, rt, tmp_path = closing
+    store.culture.set("sw", "be kind")
+    store.memory.learn("eng-1@sw", "sw-eng-1", "a lesson", 1, "note")
+    assert {row["state"] for row in ledger.rows.values()} == {"claimed"}
+    assert run("sw", "close", "--note", "It went well.") == 0
+    assert ledger.calls == [("summary", "It went well.", "operator"), ("closed", "operator")]
+    assert (tmp_path / "sw" / "snapshot.json").exists()
+    assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1", "sw-master-1"]
+    assert rt.killed[-1] == "sw-master-1"
+    assert store.agents("sw") == []
+    assert {row["state"] for row in ledger.rows.values()} == {"open"}
+    assert {row["claimed_by"] for row in ledger.rows.values()} == {""}
+    config = store.config("sw")
+    assert (config.state, config.repo) == ("stopped", "/repo")
+    assert store.culture.get("sw") == "be kind"
+    assert [n["text"] for n in store.memory.learned("eng-1@sw")] == ["a lesson"]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["closed"] == "sw"
+
+
+def test_close_works_with_no_agents_and_no_note(closing):
+    store, ledger, rt, _ = closing
+    run("sw", "stop", "--now")
+    ledger.calls.clear()
+    assert run("sw", "close") == 0
+    assert ledger.calls == [("summary", "", "operator"), ("closed", "operator")]
+    assert store.config("sw").state == "stopped"
+
+
+def test_the_master_running_close_signs_the_summary(closing, monkeypatch):
+    _, ledger, _, _ = closing
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-master-1")
+    assert run("sw", "close", "--note", "Done here.") == 0
+    assert ledger.calls == [("summary", "Done here.", "sw-master-1"), ("closed", "sw-master-1")]
+
+
+def test_ask_master_hands_close_to_a_live_master_and_changes_nothing_else(closing, capsys):
+    store, ledger, rt, tmp_path = closing
+    assert run("sw", "close", "--ask-master") == 0
+    out = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert out == {"swarm": "sw", "asked": "sw-master-1"}
+    items = [i for i in InboxStore(store.redis).inbox("sw-master-1") if i.sender == "operator"]
+    assert len(items) == 1 and "agentihooks swarm sw close --note" in items[0].text
+    assert ledger.calls == [] and rt.killed == []
+    assert not (tmp_path / "sw" / "snapshot.json").exists()
+    assert store.config("sw").state == "running"
+
+
+def test_ask_master_closes_at_once_when_no_master_is_live(closing):
+    store, ledger, rt, _ = closing
+    rt.live.discard("sw-master-1")
+    assert run("sw", "close", "--ask-master") == 0
+    assert [c[0] for c in ledger.calls] == ["summary", "closed"]
+    assert store.agents("sw") == []
