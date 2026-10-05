@@ -2,8 +2,9 @@
 
 import os
 import re
+from dataclasses import asdict
 
-from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns
+from scripts.doctor import ci, ci_read, handoffs, health, inbox, read, spawn_read, spawns, traces, traces_read
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm.runtime import SWARM_HOME
@@ -29,6 +30,12 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME):
             for repo, number in open_pulls(ledger.tasks(slug))
             for f in ci.findings(ci_read.pull_request(repo, number))
         ],
+        "trace": lambda: traces.findings(
+            traces_read.record(
+                slug, ledger.tasks(slug), [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env)
+            ),
+            traces.Limits.from_env(env),
+        ),
     }
 
 

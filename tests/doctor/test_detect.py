@@ -22,3 +22,22 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
         {"state": "pr", "pr_url": "https://github.com/o/other/pull/12"},
     ]
     assert detect.open_pulls(tasks) == [("o/other", 12), ("o/r", 9)]
+
+
+def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch):
+    from scripts.doctor import traces_read
+    from scripts.swarm.store import AgentRecord
+
+    asked = []
+
+    def get(path, params):
+        asked.append((path, params))
+        return {"data": [], "meta": {"page": 1, "totalPages": 1}}
+
+    store = type("Store", (), {"redis": object()})()
+    store.agents = lambda slug: [AgentRecord("s-master-1", "master", "master", conversation_id="c1", started_at=1)]
+    ledger = type("Ledger", (), {"tasks": lambda self, slug: []})()
+    monkeypatch.setattr(traces_read, "client", lambda env: get)
+    found = detect.readers(store, ledger, "s", 10**12, environ={})["trace"]()
+    assert asked == [("traces", {"tags": "swarm:s", "page": 1, "limit": 100})]
+    assert [f.id for f in found] == ["untraced-session/s-master-1"]
