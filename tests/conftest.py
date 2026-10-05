@@ -53,6 +53,8 @@ def pytest_configure(config):
     from xdist.workermanage import NodeManager
 
     NodeManager.setup_nodes = setup_nodes_in_parallel
+    if os.environ.get("TESTS_PREWARMED"):
+        return
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
 
