@@ -45,11 +45,12 @@ class Limits:
 class Finding:
     kind: str
     subject: str
-    evidence: str
+    summary: str
+    evidence: tuple
     threshold: str
 
     def as_dict(self):
-        return asdict(self)
+        return {**asdict(self), "evidence": list(self.evidence)}
 
 
 def limits(environ=None):
@@ -83,6 +84,10 @@ def _task_id(target):
     return target.split("/", 1)[1] if target.startswith("tasks/") else ""
 
 
+def _title(tasks, tid):
+    return tasks.get(tid, {}).get("title") or tid
+
+
 def _outcome(task):
     if task.get("state") != "done":
         return False
@@ -103,7 +108,8 @@ def ceremony(events, tasks, limits):
                 Finding(
                     "ceremony",
                     by,
-                    f"{count} ledger transitions against {_plural(outcomes, 'outcome')}",
+                    "more ledger transitions than outcomes",
+                    (f"{count} ledger transitions", _plural(outcomes, "outcome")),
                     f"at least {limits.ceremony_min} transitions and more than {limits.ceremony_ratio} per outcome",
                 )
             )
@@ -126,15 +132,18 @@ def scope_inflation(events, tasks, limits):
         gains = [_gain(tasks[tid]) or 0 for tid in ids]
         if len(ids) < limits.self_queued or any(b > a for a, b in zip(gains, gains[1:])):
             continue
-        listed = ", ".join(
-            f"{tid} gain {_gain(tasks[tid]):g}" if _gain(tasks[tid]) is not None else f"{tid} no gain stated"
+        listed = tuple(
+            f"{_title(tasks, tid)}, gain {_gain(tasks[tid]):g}"
+            if _gain(tasks[tid]) is not None
+            else f"{_title(tasks, tid)}, no gain stated"
             for tid in ids
         )
         found.append(
             Finding(
                 "scope inflation",
                 by,
-                f"queued {len(ids)} tasks for its own lane: {listed}",
+                f"queued {len(ids)} tasks for its own lane",
+                listed,
                 f"{limits.self_queued} self queued tasks whose gain never rose",
             )
         )
@@ -152,8 +161,12 @@ def proof_loops(events, tasks, limits):
                 Finding(
                     "proof loop",
                     tid,
-                    f"claimed {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')}), "
-                    f"{_plural(rounds[tid], 'review round')}",
+                    "reruns or review rounds over the cap",
+                    (
+                        f"task {_title(tasks, tid)}",
+                        f"claimed {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        _plural(rounds[tid], "review round"),
+                    ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
                 )
             )
@@ -170,7 +183,8 @@ def idle_with_claim(agents, tasks, limits):
             Finding(
                 "idle with claim",
                 a["name"],
-                f"idle for {a['idle_ticks']} ticks while holding task {held['id']} ({held['state']})",
+                f"idle for {a['idle_ticks']} ticks while holding a task",
+                (f"task {_title(tasks, held['id'])} ({held['state']})",),
                 f"{limits.idle_ticks} idle ticks",
             )
         )
@@ -190,7 +204,8 @@ def stale_claims(events, tasks, now_ms, limits):
                 Finding(
                     "stale claim",
                     tid,
-                    f"claimed by {holder}, no change for {_plural(quiet, 'minute')}",
+                    f"no change for {_plural(quiet, 'minute')}",
+                    (f"task {_title(tasks, tid)}", f"claimed by {holder}"),
                     f"{_plural(limits.stale_minutes, 'minute')} without a change",
                 )
             )
@@ -206,7 +221,8 @@ def over_monitoring(activity, limits):
                 Finding(
                     "over monitoring",
                     by,
-                    f"{watch} watch calls against {_plural(act, 'action')}",
+                    "more watch calls than actions",
+                    (f"{watch} watch calls", _plural(act, "action")),
                     f"at least {limits.watch_min} watch calls and more than {limits.watch_ratio} per action",
                 )
             )

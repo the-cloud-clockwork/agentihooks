@@ -58,7 +58,8 @@ def test_ceremony_names_the_agent_its_transitions_and_its_outcomes():
         {
             "kind": "ceremony",
             "subject": WORKER,
-            "evidence": "26 ledger transitions against 1 outcome",
+            "summary": "more ledger transitions than outcomes",
+            "evidence": ["26 ledger transitions", "1 outcome"],
             "threshold": "at least 20 transitions and more than 12 per outcome",
         }
     ]
@@ -92,20 +93,26 @@ def test_transitions_with_neither_merges_nor_proofs_are_still_ceremony():
         {
             "kind": "ceremony",
             "subject": WORKER,
-            "evidence": "26 ledger transitions against 0 outcomes",
+            "summary": "more ledger transitions than outcomes",
+            "evidence": ["26 ledger transitions", "0 outcomes"],
             "threshold": "at least 20 transitions and more than 12 per outcome",
         }
     ]
 
 
-def test_scope_inflation_names_the_agent_and_each_gain():
+def test_scope_inflation_lists_each_task_by_title_with_its_gain():
     events = [ev("added", f"tasks/q{n}") for n in range(3)]
-    tasks = [task("q0", state="open", gain=4), task("q1", state="open", gain=1.5), task("q2", state="open")]
+    tasks = [
+        task("q0", state="open", gain=4, title="Split the parser"),
+        task("q1", state="open", gain=1.5, title="Cache the index"),
+        task("q2", state="open"),
+    ]
     assert run({"tasks": tasks, "_meta": {"events": events}}) == [
         {
             "kind": "scope inflation",
             "subject": WORKER,
-            "evidence": "queued 3 tasks for its own lane: q0 gain 4, q1 gain 1.5, q2 no gain stated",
+            "summary": "queued 3 tasks for its own lane",
+            "evidence": ["Split the parser, gain 4", "Cache the index, gain 1.5", "q2, no gain stated"],
             "threshold": "3 self queued tasks whose gain never rose",
         }
     ]
@@ -127,7 +134,8 @@ def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
         {
             "kind": "proof loop",
             "subject": "t1",
-            "evidence": "claimed 4 times (3 reruns), 1 review round",
+            "summary": "reruns or review rounds over the cap",
+            "evidence": ["task t1", "claimed 4 times (3 reruns)", "1 review round"],
             "threshold": "more than 2 reruns or 3 review rounds",
         }
     ]
@@ -136,19 +144,22 @@ def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
 def test_review_rounds_over_the_cap_are_a_proof_loop():
     events = [ev("task claimed", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
     found = run({"tasks": [task("t1")], "_meta": {"events": events}})
-    assert [(f["kind"], f["evidence"]) for f in found] == [("proof loop", "claimed 1 time (0 reruns), 4 review rounds")]
+    assert [(f["kind"], f["evidence"]) for f in found] == [
+        ("proof loop", ["task t1", "claimed 1 time (0 reruns)", "4 review rounds"])
+    ]
 
 
 def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ledger = {
-        "tasks": [task("t1", state="claimed", pr_url="")],
+        "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],
         "_meta": {"events": [ev("comment added", "phases/p1")]},
     }
     assert run(ledger, [agent(idle_ticks=4)]) == [
         {
             "kind": "idle with claim",
             "subject": WORKER,
-            "evidence": "idle for 4 ticks while holding task t1 (claimed)",
+            "summary": "idle for 4 ticks while holding a task",
+            "evidence": ["task Fold the chat panel (claimed)"],
             "threshold": "3 idle ticks",
         }
     ]
@@ -156,12 +167,16 @@ def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
 
 def test_a_claim_with_no_change_names_the_task_its_holder_and_the_quiet_time():
     events = [ev("task claimed", "tasks/t1", by="swarm", at=NOW - 45 * MIN), ev("joined", at=NOW - 44 * MIN)]
-    ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": events}}
+    ledger = {
+        "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],
+        "_meta": {"events": events},
+    }
     assert run(ledger) == [
         {
             "kind": "stale claim",
             "subject": "t1",
-            "evidence": f"claimed by {WORKER}, no change for 44 minutes",
+            "summary": "no change for 44 minutes",
+            "evidence": ["task Fold the chat panel", f"claimed by {WORKER}"],
             "threshold": "30 minutes without a change",
         }
     ]
@@ -172,7 +187,8 @@ def test_over_monitoring_names_the_agent_and_both_counts():
         {
             "kind": "over monitoring",
             "subject": WORKER,
-            "evidence": "40 watch calls against 3 actions",
+            "summary": "more watch calls than actions",
+            "evidence": ["40 watch calls", "3 actions"],
             "threshold": "at least 20 watch calls and more than 5 per action",
         }
     ]

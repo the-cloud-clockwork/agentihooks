@@ -412,16 +412,34 @@ def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monk
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
-    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1")
+    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1", title="Fold the chat panel")
     monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
     run("sw", "status", "--json")
     found = json.loads(capsys.readouterr().out.splitlines()[-1])["findings"]
-    assert [(f["kind"], f["subject"]) for f in found] == [("idle with claim", "sw-eng-1")]
+    assert [(f["kind"], f["subject"], f["evidence"]) for f in found] == [
+        ("idle with claim", "sw-eng-1", ["task Fold the chat panel (claimed)"])
+    ]
     run("sw", "status")
-    assert (
-        "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding task t1 (claimed); threshold 3 idle ticks"
-        in (capsys.readouterr().out)
-    )
+    assert capsys.readouterr().out.splitlines()[-3:] == [
+        "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding a task",
+        "  - task Fold the chat panel (claimed)",
+        "  threshold 3 idle ticks",
+    ]
+
+
+def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypatch):
+    run("sw", "create", "--repo", "/repo")
+    entries = ("Split the parser, gain 4", "Cache the index, gain 1.5", "q2, no gain stated")
+    finding = cli.health.Finding("scope inflation", "sw-eng-1", "queued 3 tasks for its own lane", entries, "3 tasks")
+    monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
+    run("sw", "status")
+    assert capsys.readouterr().out.splitlines()[-5:] == [
+        "finding  scope inflation  sw-eng-1: queued 3 tasks for its own lane",
+        "  - Split the parser, gain 4",
+        "  - Cache the index, gain 1.5",
+        "  - q2, no gain stated",
+        "  threshold 3 tasks",
+    ]
 
 
 def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop(env):
