@@ -159,6 +159,7 @@ def cmd_start(store, args):
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
+    store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     _state(store, args, "running")
     print(ledger_link.page_line(args.slug))
 

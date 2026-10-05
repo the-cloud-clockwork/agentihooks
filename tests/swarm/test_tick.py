@@ -41,7 +41,7 @@ class FakeRuntime:
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
-        self.conversation_ids, self.named = {}, []
+        self.conversation_ids, self.named, self.closed_spaces = {}, [], []
 
     def has_capacity(self):
         return not self.full
@@ -86,6 +86,10 @@ class FakeRuntime:
 
     def conversations(self):
         return None if self.conversation_ids is None else dict(self.conversation_ids)
+
+    def close_space(self, config):
+        self.closed_spaces.append(config.slug)
+        return True
 
 
 @pytest.fixture
