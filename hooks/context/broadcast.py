@@ -880,7 +880,7 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
     """Return session entries from the registry.
 
     By default returns only entries with status="alive" — this matches the
-    semantic of "active" (one per live PID, after the supersede fix).
+    semantic of "active".
     Pass include_all=True to get the full registry including superseded,
     closed, and dead entries.
 
