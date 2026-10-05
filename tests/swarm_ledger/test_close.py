@@ -169,8 +169,8 @@ class Home(unittest.TestCase):
         self.assertIn(f'href="/{SLUG}"', closed)
         self.assertIn("Closed ", closed)
 
-    def test_the_page_close_asks_the_master_first(self):
-        self.assertEqual(server.control_argv({"action": "close"}), ["close", "--ask-master"])
+    def test_the_page_close_runs_the_same_close_command_as_the_cli(self):
+        self.assertEqual(server.control_argv({"action": "close"}), ["close"])
 
 
 if __name__ == "__main__":

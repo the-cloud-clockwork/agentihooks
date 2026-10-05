@@ -227,7 +227,7 @@ CONTROLS = {
     "pause": ["pause"],
     "stop": ["stop"],
     "stop_now": ["stop", "--now"],
-    "close": ["close", "--ask-master"],
+    "close": ["close"],
 }
 MAX_CAP = 50
 MAX_NOTE = 500

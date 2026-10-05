@@ -27,7 +27,7 @@ def test_close_writes_the_summary_snapshots_retires_everyone_and_marks_the_ledge
     store.culture.set("sw", "be kind")
     store.memory.learn("eng-1@sw", "sw-eng-1", "a lesson", 1, "note")
     assert {row["state"] for row in ledger.rows.values()} == {"claimed"}
-    assert run("sw", "close", "--note", "It went well.") == 0
+    assert run("sw", "close", "--now", "--note", "It went well.") == 0
     assert ledger.calls == [("summary", "It went well.", "operator"), ("closed", "operator")]
     assert (tmp_path / "sw" / "snapshot.json").exists()
     assert sorted(rt.killed) == ["sw-ci-1", "sw-eng-1", "sw-master-1"]
@@ -58,9 +58,9 @@ def test_the_master_running_close_signs_the_summary(closing, monkeypatch):
     assert ledger.calls == [("summary", "Done here.", "sw-master-1"), ("closed", "sw-master-1")]
 
 
-def test_ask_master_hands_close_to_a_live_master_and_changes_nothing_else(closing, capsys):
+def test_close_hands_itself_to_a_live_master_and_changes_nothing_else(closing, capsys):
     store, ledger, rt, tmp_path = closing
-    assert run("sw", "close", "--ask-master") == 0
+    assert run("sw", "close") == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert out == {"swarm": "sw", "asked": "sw-master-1"}
     items = [i for i in InboxStore(store.redis).inbox("sw-master-1") if i.sender == "operator"]
@@ -70,9 +70,9 @@ def test_ask_master_hands_close_to_a_live_master_and_changes_nothing_else(closin
     assert store.config("sw").state == "running"
 
 
-def test_ask_master_closes_at_once_when_no_master_is_live(closing):
+def test_close_runs_at_once_when_no_master_is_live(closing):
     store, ledger, rt, _ = closing
     rt.live.discard("sw-master-1")
-    assert run("sw", "close", "--ask-master") == 0
+    assert run("sw", "close") == 0
     assert [c[0] for c in ledger.calls] == ["summary", "closed"]
     assert store.agents("sw") == []

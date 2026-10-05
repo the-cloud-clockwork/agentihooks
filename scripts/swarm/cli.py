@@ -3,7 +3,7 @@
 agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
-agentihooks swarm <id> close [--note TEXT] [--ask-master]          summary into the overview, snapshot, retire every agent, ledger closed
+agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -188,12 +188,12 @@ def cmd_close(store, args):
     store.config(args.slug)
     runtime = HerdrRuntime()
     live = runtime.live_names()
-    master = _live_master(store, args.slug, live) if args.ask_master else None
-    if master is not None:
+    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    master = None if args.now else _live_master(store, args.slug, live)
+    if master is not None and master.name != by:
         InboxStore(store.redis).send("operator", master.name, CLOSE_ASK.format(slug=args.slug))
         print(json.dumps({"swarm": args.slug, "asked": master.name}))
         return
-    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     ledger = LedgerClient()
     ledger.summarize(args.slug, args.note, by)
     path = snapshot.take(store, args.slug, now_ms())
@@ -557,7 +557,7 @@ def build_parser():
     sub.add_parser("stop").add_argument("--now", action="store_true")
     close = sub.add_parser("close")
     close.add_argument("--note", default="")
-    close.add_argument("--ask-master", action="store_true")
+    close.add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
