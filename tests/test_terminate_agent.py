@@ -183,3 +183,77 @@ def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     with patch("scripts.terminate_agent.processes", return_value={300: parent, 301: child}):
         found = sessions(proc, registry={})
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
+
+
+def _codex_registry(memories):
+    return {
+        "main-thread": {
+            "status": "superseded",
+            "pid": 300,
+            "cwd": "/work/repo",
+            "started_at": "2026-10-05T03:40:00Z",
+        },
+        "memory-helper": {
+            "status": "alive",
+            "pid": 300,
+            "cwd": str(memories),
+            "started_at": "2026-10-05T03:40:05Z",
+        },
+    }
+
+
+def test_a_codex_session_lists_under_its_main_thread_not_its_memory_helper(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    memories = tmp_path / "codex" / "memories"
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    proc = _herdr_env(tmp_path, 300, AGENTIHOOKS_AGENT_NAME="m5-codex")
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(proc, registry=_codex_registry(memories))
+    assert [(s.target, s.name, s.session_id, s.cwd, s.status) for s in found] == [
+        ("codex", "m5-codex", "main-thread", "/work/repo", "alive")
+    ]
+    assert resolve(found, "m5-codex", "codex").process.pgid == 300
+
+
+def test_a_codex_memory_helper_without_a_main_thread_record_lists_as_itself(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    memories = tmp_path / "codex" / "memories"
+    registry = _codex_registry(memories)
+    del registry["main-thread"]
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.cwd) for s in found] == [("memory-helper", str(memories))]
+
+
+def test_a_registered_codex_main_thread_lists_from_its_own_record(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    registry = _codex_registry(tmp_path / "codex" / "memories")
+    del registry["memory-helper"]
+    registry["main-thread"]["status"] = "alive"
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.cwd) for s in found] == [("main-thread", "/work/repo")]
+
+
+def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {
+        "old": {"status": "superseded", "pid": 400, "cwd": "/old", "started_at": "2026-10-05T03:00:00Z"},
+        "uuid-1": {"status": "alive", "pid": 400, "cwd": "/repo", "started_at": "2026-10-05T04:00:00Z"},
+    }
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.target, s.name, s.session_id, s.cwd, s.status) for s in found] == [
+        ("claude", "engineer", "uuid-1", "/repo", "alive")
+    ]
