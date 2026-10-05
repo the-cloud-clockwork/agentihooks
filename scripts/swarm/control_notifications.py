@@ -1,4 +1,5 @@
 import os
+import uuid
 from argparse import Namespace
 
 from scripts.inbox.seats import seat_address
@@ -6,6 +7,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, codex_split
 
+CONTROL_REF = "swarm-control:"
 CONTROLS = {
     "start": "started the swarm",
     "pause": "paused the swarm",
@@ -45,4 +47,4 @@ def notify(
         result += f" The verdict is {args.verdict.replace('-', ' ')}."
     text = f"{actor} {verb} from the {source}. {result}" + (f" {detail}" if detail else "")
     ledger.say(args.slug, text, by="swarm")
-    InboxStore(store.redis).send(by, address, text, fyi=True)
+    InboxStore(store.redis).send(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)

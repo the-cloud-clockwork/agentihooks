@@ -5,6 +5,7 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -30,6 +31,18 @@ def controls(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_SOURCE", raising=False)
     return store, ledger, master
+
+
+def test_stop_now_notice_does_not_restart_the_swarm_on_the_next_tick(controls, monkeypatch):
+    store, ledger, master = controls
+    runtime = FakeRuntime()
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug=None: tick(slug or "demo", store, ledger, runtime, 1))
+    assert cli.main(["demo", "stop", "--now"]) == 0
+    assert store.config("demo").state == "stopped"
+    assert cli.main(["tick"]) == 0
+    assert store.config("demo").state == "stopped"
+    assert store.agents("demo") == []
+    assert len(InboxStore(store.redis).pending_items(master.seat)) == 1
 
 
 def test_external_pause_tells_the_master_once_with_the_resulting_state(controls):
