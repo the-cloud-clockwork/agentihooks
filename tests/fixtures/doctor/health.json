@@ -1,0 +1,58 @@
+{
+ "slug": "rig-grade-swarm",
+ "now_ms": 1791209580132,
+ "records": {
+  "idle-with-claim/rig-grade-swarm-eng-45": {
+   "seen_at": 1791201453867,
+   "verdict": null,
+   "returned": false,
+   "evidence": [
+    "task Swarm panel caps rows: minus and plus buttons line up in straight columns (pr)"
+   ],
+   "measure": 3
+  },
+  "idle-with-claim/rig-grade-swarm-eng-34": {
+   "seen_at": 1791194829804,
+   "verdict": null,
+   "returned": false,
+   "evidence": [
+    "task Cleanup crew: sweep a traced bad rule out of every layer (pr)"
+   ],
+   "measure": 3
+  },
+  "idle-with-claim/rig-grade-swarm-eng-32": {
+   "seen_at": 1791193810066,
+   "verdict": null,
+   "returned": false,
+   "evidence": [
+    "task Trace rows carry a locator that finds the source of each injected rule (pr)"
+   ],
+   "measure": 3
+  },
+  "over-monitoring/rig-grade-swarm-master-1": {
+   "seen_at": 1791193225616,
+   "verdict": {
+    "value": "false-positive",
+    "note": "master duty is watching; count still carries pre guard re-arms and status checks after each watch expiry",
+    "by": "rig-grade-swarm-master-1",
+    "at": 1791197438429,
+    "measure": 36
+   },
+   "returned": false,
+   "evidence": [
+    "36 watch calls",
+    "6 actions"
+   ],
+   "measure": 36
+  },
+  "idle-with-claim/rig-grade-swarm-eng-52": {
+   "seen_at": 1791207158165,
+   "verdict": null,
+   "returned": false,
+   "evidence": [
+    "task The qitp repo's ledger reminder names the swarm ledger skill (pr)"
+   ],
+   "measure": 6
+  }
+ }
+}
