@@ -1,7 +1,8 @@
 """Seat registry in Redis: swarm lane slots and the master as addresses `<seat>@<slug>` that outlive their occupants.
 
 Each new occupant bumps the seat's generation; the occupancy history is append-only. Each seat also keeps
-append-only recaps and learned notes that its occupants leave for the next.
+append-only recaps and learned notes that its occupants leave for the next; each learned note has a maturity.
+Each swarm keeps one culture text that every occupant of every seat reads.
 """
 
 import json
@@ -11,6 +12,10 @@ from dataclasses import dataclass
 PREFIX = "agentihooks:seat"
 OCCUPY_ATTEMPTS = 5
 MEMORY_KINDS = ("history", "recaps", "learned")
+MATURITIES = ("data", "note", "insight", "canon")
+DEFAULT_MATURITY = "note"
+CANON = "canon"
+CULTURE_PREFIX = "agentihooks:culture"
 
 
 class SeatError(RuntimeError):
@@ -98,12 +103,55 @@ class SeatMemory:
     def recaps(self, address):
         return [json.loads(entry) for entry in reversed(self.redis.lrange(self.key(address, "recaps"), 0, -1))]
 
-    def learn(self, address, occupant, text, at):
-        entry = {"occupant": occupant, "text": text, "at": at}
+    def learn(self, address, occupant, text, at, maturity=DEFAULT_MATURITY):
+        _known(maturity)
+        entry = {"occupant": occupant, "text": text, "at": at, "maturity": maturity}
         self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
 
     def learned(self, address):
-        return [json.loads(entry) for entry in self.redis.lrange(self.key(address, "learned"), 0, -1)]
+        return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
+
+    def promote(self, address, number, maturity, by, reason, at):
+        """Raise learned note `number` (1 based) on the seat to a higher maturity, keeping who and why."""
+        _known(maturity)
+        key = self.key(address, "learned")
+        raw = self.redis.lindex(key, number - 1) if number > 0 else None
+        if raw is None:
+            raise SeatError(f"seat {address} has no learned note {number}")
+        entry = _entry(raw)
+        if MATURITIES.index(maturity) <= MATURITIES.index(entry["maturity"]):
+            raise SeatError(f"learned note {number} is already {entry['maturity']}; promote only raises it")
+        if not reason.strip():
+            raise SeatError("a promotion needs a reason")
+        step = {"from": entry["maturity"], "to": maturity, "by": by, "reason": reason, "at": at}
+        entry = {**entry, "maturity": maturity, "promotions": [*entry.get("promotions", []), step]}
+        self.redis.lset(key, number - 1, json.dumps(entry))
+        return entry
+
+
+class SwarmCulture:
+    """One shared text per swarm, kept apart from the swarm's own keys so it outlives a swarm remove."""
+
+    def __init__(self, redis):
+        self.redis = redis
+
+    def key(self, slug):
+        return f"{CULTURE_PREFIX}:{slug}"
+
+    def set(self, slug, text):
+        self.redis.set(self.key(slug), text)
+
+    def get(self, slug):
+        return self.redis.get(self.key(slug)) or ""
+
+
+def _known(maturity):
+    if maturity not in MATURITIES:
+        raise SeatError(f"maturity is one of {', '.join(MATURITIES)}, not {maturity}")
+
+
+def _entry(raw):
+    return {"maturity": DEFAULT_MATURITY, **json.loads(raw)}
 
 
 def _occupancy(raw):

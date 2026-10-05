@@ -111,6 +111,7 @@ def test_over_the_limit_work_is_denied_with_the_handoff_command(monkeypatch, too
         ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/agentihooks/t28/handoff.md"}),
         ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/h.md --recap ~/scratchpad/r.md"}),
         ("Bash", {"command": "agentihooks swarm my-swarm learned 'run the whole suite, not -m unit'"}),
+        ("Bash", {"command": "agentihooks swarm my-swarm learned 'ruff twice' --maturity insight"}),
         ("Bash", {"command": 'agentihooks ledger --slug my-swarm --as my-swarm-eng-4 comment phases/p1 "handed off"'}),
         ("Bash", {"command": "agentihooks ledger --slug my-swarm --as my-swarm-eng-4 say 'handing off now'"}),
         ("Bash", {"command": "agentihooks ledger --slug my-swarm --as my-swarm-eng-4 leave"}),

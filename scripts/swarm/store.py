@@ -3,7 +3,7 @@
 import json
 from dataclasses import asdict, dataclass, field, replace
 
-from scripts.inbox.seats import SeatMemory, SeatRegistry, of_swarm
+from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
 
 PREFIX = "agentihooks:swarm"
@@ -51,6 +51,7 @@ class RedisStore:
         self.redis = redis
         self.seats = SeatRegistry(redis)
         self.memory = SeatMemory(redis)
+        self.culture = SwarmCulture(redis)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
@@ -154,7 +155,7 @@ class RedisStore:
         self.config(slug)
         own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
         inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug))
-        keys = sorted(own) + self.seats.swarm_keys(slug) + inbox
+        keys = sorted(own) + self.seats.swarm_keys(slug) + [self.culture.key(slug)] + inbox
         return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
 
     def restore(self, slug, state):

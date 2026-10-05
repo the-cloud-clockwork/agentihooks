@@ -14,7 +14,7 @@ RECAPS = [
     {"occupant": "sw-eng-4", "task": "t1", "text": "latest recap text", "at": 20},
     {"occupant": "sw-eng-1", "task": "t1", "text": "older recap text", "at": 10},
 ]
-LEARNED = [{"occupant": "sw-eng-1", "text": "learned note text", "at": 5}]
+LEARNED = [{"occupant": "sw-eng-1", "text": "learned note text", "at": 5, "maturity": "note"}]
 
 
 def _eng(**task):
@@ -127,3 +127,106 @@ def test_a_first_occupant_is_primed_with_an_empty_seat(store):  # noqa: F811
     tick("sw", store, tasks(("t1", "eng")), runtime, now_ms=1_000)
     primed = runtime.tasks[-1]
     assert (primed["seat"], primed["recaps"], primed["learned"]) == ("eng-1@sw", [], [])
+
+
+def _note(text, maturity):
+    return {"occupant": "sw-eng-1", "text": text, "at": 1, "maturity": maturity}
+
+
+def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data():
+    ranked = [_note("n1", "note"), _note("d1", "data"), _note("c1", "canon"), _note("i1", "insight")]
+    text = _eng(seat="eng-1@sw", learned=[*ranked, _note("d2", "data"), _note("n2", "note")])
+    order = [text.index(f"- {m}: {t}") for m, t in (("canon", "c1"), ("insight", "i1"), ("note", "n1"), ("note", "n2"))]
+    assert order == sorted(order)
+    assert "d1" not in text and "d2" not in text
+    assert "2 data entries are kept on the seat and not shown." in text
+
+
+def test_a_seat_with_only_data_says_so_and_counts_it():
+    text = _eng(seat="eng-1@sw", learned=[_note("d1", "data")])
+    assert "d1" not in text and "1 data entries are kept on the seat" in text
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
+def test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master(lane):
+    task = {"id": "t1", "title": "x", "seat": f"{lane}-1@sw", "culture": "culture text", "recaps": RECAPS}
+    text = prompt.build("sw", "/repo", lane, f"sw-{lane}-1", task)
+    assert text.index("culture text") < text.index("latest recap text")
+
+
+def test_a_culture_alone_still_reaches_a_fresh_seat():
+    text = _eng(seat="eng-1@sw", culture="culture text")
+    assert "culture text" in text and "has no history yet" not in text
+
+
+def test_a_swarm_without_culture_names_it_missing():
+    assert "Swarm culture: none" in _eng(seat="eng-1@sw", recaps=RECAPS)
+
+
+def test_the_tick_primes_every_lane_and_the_master_with_the_swarm_culture(store):  # noqa: F811
+    store.culture.set("sw", "say it plainly")
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, now_ms=1_000)
+    assert [t["culture"] for t in runtime.tasks] == ["say it plainly", "say it plainly"]
+    assert runtime.masters[-1][1]["culture"] == "say it plainly"
+
+
+def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa: F811
+    swarm, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert run("sw", "--as", "sw-eng-1", "learned", "a raw figure", "--maturity", "data") == 0
+    assert run("sw", "--as", "sw-eng-1", "learned", "law", "--maturity", "canon") == 1
+    assert run("sw", "--as", "sw-master-1", "learned", "law", "--maturity", "canon") == 0
+    assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["data"]
+    assert [n["maturity"] for n in swarm.memory.learned("master@sw")] == ["canon"]
+
+
+def test_promote_rules_by_caller(env, capsys):  # noqa: F811
+    swarm, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
+    assert run("sw", "--as", "sw-ci-1", "promote", "eng-1", "1", "insight", "--reason", "held twice") == 0
+    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1", "1", "canon", "--reason", "always") == 1
+    assert "only the master or the operator" in capsys.readouterr().err
+    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1", "1", "note", "--reason", "back down") == 1
+    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1@other", "1", "canon", "--reason", "x") == 1
+    assert run("sw", "--as", "sw-master-1", "promote", "eng-1@sw", "1", "canon", "--reason", "always held") == 0
+    (entry,) = swarm.memory.learned("eng-1@sw")
+    assert entry["maturity"] == "canon"
+    assert [(p["to"], p["by"]) for p in entry["promotions"]] == [("insight", "sw-ci-1"), ("canon", "sw-master-1")]
+
+
+def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    swarm, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
+    assert run("sw", "promote", "eng-1", "1", "canon", "--reason", "the operator says so") == 0
+    assert swarm.memory.learned("eng-1@sw")[0]["promotions"][0]["by"] == "operator"
+
+
+def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  # noqa: F811
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
+    run("sw", "--as", "sw-eng-1", "learned", "lesson two", "--maturity", "insight")
+    capsys.readouterr()
+    assert run("sw", "learned") == 0
+    assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t1\tnote\tlesson one", "eng-1@sw\t2\tinsight\tlesson two"]
+
+
+def test_culture_set_and_show_survive_swarm_remove(env, tmp_path, capsys):  # noqa: F811
+    run("sw", "create", "--repo", "/repo")
+    culture = tmp_path / "culture.md"
+    culture.write_text("say it plainly\n")
+    assert run("sw", "culture", "set", str(culture)) == 0
+    capsys.readouterr()
+    assert run("sw", "culture", "show") == 0
+    assert capsys.readouterr().out == "say it plainly\n"
+    assert run("sw", "remove") == 0
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "culture", "show") == 0
+    assert capsys.readouterr().out.endswith("say it plainly\n")
