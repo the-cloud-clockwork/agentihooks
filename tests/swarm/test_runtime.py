@@ -33,6 +33,39 @@ def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_maste
     assert calls[0][2].endswith("-eng-4")
 
 
+class NamedPanes:
+    def __init__(self, panes):
+        self.panes, self.renamed = panes, []
+
+    def __call__(self, args):
+        if args[:2] == ["agent", "rename"]:
+            self.panes[args[2]]["name"] = args[3]
+            self.renamed.append(args[2:])
+            return {}
+        target = args[2]
+        for pane_id, pane in self.panes.items():
+            if target in (pane_id, pane.get("name")):
+                return {"agent": {**pane, "pane_id": pane_id}}
+        raise RuntimeError("agent_not_found")
+
+
+def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
+    slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
+    herdr = NamedPanes(
+        {
+            "w:p1": {"name": slug[:32], "agent_status": "idle"},
+            "w:p4": {"agent_status": "working"},
+            "w:p5": {"name": "someone-else", "agent_status": "idle"},
+        }
+    )
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.status(SimpleNamespace(name=f"{slug}-eng-3", pane_id="w:p4")) == "working"
+    assert runtime.status(SimpleNamespace(name=f"{slug}-master-1", pane_id="w:p1")) == "idle"
+    assert runtime.status(SimpleNamespace(name=f"{slug}-eng-4", pane_id="w:p5")) == "unknown"
+    assert [r[0] for r in herdr.renamed] == ["w:p4", "w:p1"]
+    assert herdr.panes["w:p4"]["name"].endswith("-eng-3")
+
+
 def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
     out = "status=started\nroute_status=routed\npane_id=w1:p2\naccount=a\nmodel=opus\neffort=high\n"
     runtime = HerdrRuntime(

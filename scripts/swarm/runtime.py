@@ -172,12 +172,30 @@ class HerdrRuntime:
         return True
 
     def status(self, agent):
-        try:
-            result = self.herdr(["agent", "get", herdr_target(agent.name)])
-        except Exception:
+        found = self._get(herdr_target(agent.name))
+        if found is None and self._name_pane(agent):
+            found = self._get(herdr_target(agent.name))
+        if found is None:
             return "unknown"
-        found = result.get("agent", result)
         return found.get("agent_status") or found.get("status") or "unknown"
+
+    def _get(self, target):
+        try:
+            result = self.herdr(["agent", "get", target])
+        except Exception:
+            return None
+        return result.get("agent", result)
+
+    def _name_pane(self, agent):
+        """Give a pane spawned under the old 32 character cut its herdr name; never take one another agent holds."""
+        found = self._get(agent.pane_id) if agent.pane_id else None
+        if found is None or not agent.name.startswith(found.get("name") or ""):
+            return False
+        try:
+            self.herdr(["agent", "rename", agent.pane_id, herdr_target(agent.name)])
+        except Exception:
+            return False
+        return True
 
     def conversations(self):
         """Each herdr pane's resumable conversation id, empty when herdr reports none; None when herdr cannot answer."""
