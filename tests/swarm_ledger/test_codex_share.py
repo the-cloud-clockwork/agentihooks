@@ -26,6 +26,7 @@ def page_script():
         'const $ = id => nodes[id] ||= {value: "", textContent: "", contains: () => true, replaceChildren: () => {},'
         "querySelectorAll: () => buttons}; const h = () => ({}); const document = {};"
         "const swarmCards = () => []; const swarmCard = () => ({});"
+        "const restoreCards = () => []; const restoreCard = () => ({});"
         'const buttons = ["codex_down", "codex_up", "set"].map(action => ({dataset: {swarm: action},'
         "classList: {toggle: () => {}}, setAttribute: () => {}}));"
         "const swarmControl = body => {sent.push(body)};"

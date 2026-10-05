@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
@@ -13,6 +15,7 @@ from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
 SPAWN_TIMEOUT_S = 300
+RESUME_CHECKS, RESUME_CHECK_S = 30, 2
 STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 
@@ -58,6 +61,7 @@ class HerdrRuntime:
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
+        self.sleep = time.sleep
 
     def has_capacity(self):
         return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
@@ -73,18 +77,48 @@ class HerdrRuntime:
             )
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
-        path = self.home / config.slug / "prompts" / f"{name}.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
+        argv = self._argv(config, name, agent, text, f"{name}.md")
+        return self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, chosen)])
+
+    def resume(self, config, agent, text):
+        """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        from scripts.init_agent import model_flags
+
+        argv = self._argv(config, agent.name, agent.harness, text, f"{agent.name}-restored.md")
+        flags = (["--route", agent.account] if agent.account else []) + model_flags(
+            agent.harness, agent.model, agent.effort
+        )
+        argv += ["--resume", agent.conversation_id, *(["--", *flags] if flags else [])]
+        placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
+        if not self._holds(placed.pane_id, agent.conversation_id):
+            self.retire(replace(agent, pane_id=placed.pane_id), True)
+            raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
+        return placed
+
+    def _holds(self, pane_id, conversation_id):
+        for _ in range(RESUME_CHECKS):
+            if (self.conversations() or {}).get(pane_id) == conversation_id:
+                return True
+            self.sleep(RESUME_CHECK_S)
+        return False
+
+    def _argv(self, config, name, agent, text, prompt_name):
+        path = self.home / config.slug / "prompts" / prompt_name
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
         argv = [_bin(), "init-agent", "--host", "herdr", "--workspace", f"swarm-{config.slug}", "--dir", config.repo]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
+        return [*argv, "--prompt-file", str(path)]
+
+    def _launch(self, config, lane, task_id, name, argv):
+        agent = argv[argv.index("--agent") + 1]
         try:
             proc = self.run(
-                [*argv, "--prompt-file", str(path), *_model_args(agent, chosen)],
+                argv,
                 capture_output=True,
                 text=True,
                 timeout=SPAWN_TIMEOUT_S,
@@ -92,7 +126,7 @@ class HerdrRuntime:
                     **os.environ,
                     "AGENTIHOOKS_SWARM": config.slug,
                     "AGENTIHOOKS_SWARM_LANE": lane,
-                    "AGENTIHOOKS_SWARM_TASK": task["id"],
+                    "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },

@@ -125,8 +125,11 @@ def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     store.update("sw", state="running")
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
-    finished = snapshot.restore(store, "sw", live=set())
-    assert finished == ["sw-eng-1", "sw-master-1"]
+    outcomes = snapshot.restore(store, "sw", live=set())
+    assert [(o.name, o.outcome, o.reason) for o in outcomes] == [
+        ("sw-eng-1", "fresh", "no conversation id"),
+        ("sw-master-1", "fresh", "no conversation id"),
+    ]
     assert store.config("sw").state == "paused"
     assert {a.state for a in store.agents("sw")} == {"finished"}
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}])

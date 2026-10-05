@@ -117,6 +117,33 @@ def test_claude_quota_comes_from_routable_accounts_in_the_router_cache(monkeypat
     assert agent_choice.has_quota("claude", {}) is None
 
 
+def test_one_claude_account_quota_comes_from_that_account_in_the_router_cache(monkeypatch):
+    from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
+
+    def result(account, margin):
+        return ProbeResult(account, "allowed", "NORMAL", margin, QuotaWindow(), QuotaWindow())
+
+    monkeypatch.setattr(
+        "scripts.claude_quota_balancer.cached_observations", lambda: [(0, result("a", 2.0)), (0, result("b", 40.0))]
+    )
+    assert agent_choice.account_has_quota("claude", "a", {}) is False
+    assert agent_choice.account_has_quota("claude", "b", {}) is True
+    assert agent_choice.account_has_quota("claude", "c", {}) is None
+
+
+def test_one_codex_account_quota_uses_the_handoff_threshold(monkeypatch):
+    from scripts import codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.codex_quota import CodexQuota
+
+    seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=98.0))
+    monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: seen)
+    assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
+    seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is True
+    assert agent_choice.account_has_quota("codex", "nobody", {}) is None
+
+
 def test_an_agent_at_its_session_cap_is_skipped(monkeypatch):
     _quota(monkeypatch, claude=True, codex=True)
     monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: agent == "claude")

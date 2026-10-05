@@ -72,6 +72,7 @@ class AgentSpec:
     agent: str = "claude"
     exclude: str = ""
     fallback_bare: bool = True
+    resume: str = ""
 
 
 def _collector(environ: dict[str, str]) -> str:
@@ -167,6 +168,7 @@ def _agent_command(
             "codex",
             "--agentihooks-report",
             str(report),
+            *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
@@ -180,6 +182,7 @@ def _agent_command(
         str(report),
         "--name",
         name,
+        *(["--resume", spec.resume] if spec.resume else []),
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
@@ -346,6 +349,7 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
     )
+    parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
 
@@ -407,7 +411,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             prompt,
             claude_args,
             active_env,
-            AgentSpec(agent=agent, exclude=exclude, fallback_bare=not args.handoff),
+            AgentSpec(agent=agent, exclude=exclude, fallback_bare=not args.handoff, resume=args.resume),
         )
         host, explicit = _select_host(args.host, active_env)
         command: list[str] = []

@@ -5,6 +5,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
+from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -696,3 +697,42 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["sw-eng-1"]["conversation_id"], agents["sw-eng-2"]["conversation_id"]) == ("5c90d80c", "")
+
+
+def test_status_shows_each_restored_agent_outcome_with_its_reason(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    resumed = {
+        "name": "sw-eng-1",
+        "lane": "eng",
+        "task": "t1",
+        "outcome": "resumed",
+        "reason": "own conversation reopened",
+    }
+    fresh = {"name": "sw-eng-2", "lane": "eng", "task": "t2", "outcome": "fresh", "reason": "worktree gone"}
+    store.put_restored("sw", [resumed, fresh])
+    run("sw", "status")
+    out = capsys.readouterr().out.splitlines()
+    assert "restored  sw-eng-1  resumed  own conversation reopened" in out
+    assert "restored  sw-eng-2  fresh  worktree gone" in out
+    run("sw", "status", "--json")
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["restored"] == [resumed, fresh]
+
+
+def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env, capsys, monkeypatch):
+    _, _, rt = env
+    seen = {}
+
+    def restore(store, slug, live, source, runtime):
+        seen["runtime"] = runtime
+        return [Outcome("sw-eng-1", "eng", "t1", "fresh", "no conversation id")]
+
+    run("sw", "create", "--repo", "/repo")
+    monkeypatch.setattr(cli.snapshot, "newest", lambda slug: "/snap.json")
+    monkeypatch.setattr(cli.snapshot, "restore", restore)
+    run("sw", "restore")
+    printed = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert [(r["name"], r["outcome"], r["reason"]) for r in printed["restored"]] == [
+        ("sw-eng-1", "fresh", "no conversation id")
+    ]
+    assert seen["runtime"] is rt

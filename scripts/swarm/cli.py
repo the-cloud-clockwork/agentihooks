@@ -30,7 +30,7 @@ import signal
 import sys
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -235,11 +235,13 @@ def cmd_snapshot(store, args):
 
 def cmd_restore(store, args):
     source = Path(args.source).expanduser() if args.source else snapshot.newest(args.slug)
-    finished = snapshot.restore(store, args.slug, HerdrRuntime().live_names(), source)
+    herdr = HerdrRuntime()
+    outcomes = snapshot.restore(store, args.slug, herdr.live_names(), source, runtime=herdr)
     for action in run_tick(store, args.slug):
         print(action)
     state = store.config(args.slug).state
-    print(json.dumps({"swarm": args.slug, "state": state, "snapshot": str(source), "finished": finished}))
+    restored = [asdict(o) for o in outcomes]
+    print(json.dumps({"swarm": args.slug, "state": state, "snapshot": str(source), "restored": restored}))
 
 
 def _share(store, config):
@@ -301,6 +303,7 @@ def cmd_status(store, args):
                     "spawns": store.spawns(args.slug),
                     "findings": found,
                     "auto_snapshot": _auto_snapshot(config),
+                    "restored": store.restored(args.slug),
                 }
             )
         )
@@ -315,6 +318,8 @@ def cmd_status(store, args):
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}"
         )
+    for r in store.restored(args.slug):
+        print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
     for f in found:
         print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
         for entry in f["evidence"]:

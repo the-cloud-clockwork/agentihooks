@@ -1,4 +1,7 @@
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from scripts.swarm.runtime import HerdrRuntime
 
@@ -175,3 +178,60 @@ def test_conversations_is_none_when_herdr_cannot_answer(tmp_path):
         raise RuntimeError("herdr: no server")
 
     assert HerdrRuntime(home=tmp_path, herdr=down).conversations() is None
+
+
+def _resuming(tmp_path, reported, harness="claude"):
+    from scripts.swarm.store import AgentRecord
+
+    seen = {"runs": [], "herdr": []}
+
+    def run(argv, **kwargs):
+        seen["runs"].append(argv)
+        seen.setdefault("env", kwargs.get("env"))
+        out = "status=started\nroute_status=routed\npane_id=w2:p9\naccount=a1\nmodel=opus\neffort=high\n"
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+    def herdr(args):
+        seen["herdr"].append(args)
+        return {"agents": [_listed("w2:p9", {"kind": "id", "value": reported})]}
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, herdr=herdr, choose=lambda *_: ("claude", "open"))
+    runtime.sleep = lambda seconds: None
+    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
+    agent = AgentRecord(
+        "sw-eng-1", "eng", "t1", harness=harness, account="a1", model="opus", effort="high", conversation_id="c0ffee"
+    )
+    return runtime, config, agent, seen
+
+
+def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conversation(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    placed = runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--name") + 1] == "sw-eng-1"
+    assert argv[argv.index("--agent") + 1] == "codex"
+    assert argv[argv.index("--resume") + 1] == "c0ffee"
+    assert argv[argv.index("--dir") + 1] == str(tmp_path)
+    assert argv[argv.index("--workspace") + 1] == "swarm-sw"
+    assert _passed(argv)[:2] == ["--route", "a1"] and "-m" in _passed(argv)
+    assert Path(argv[argv.index("--prompt-file") + 1]).read_text() == "you were restored"
+    assert (seen["env"]["AGENTIHOOKS_SWARM_LANE"], seen["env"]["AGENTIHOOKS_SWARM_TASK"]) == ("eng", "t1")
+    assert (placed.pane_id, placed.harness, placed.account) == ("w2:p9", "codex", "a1")
+
+
+def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, replace(agent, account=""), "you were restored")
+    assert "--route" not in _passed(seen["runs"][0])
+
+
+def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
+    with pytest.raises(SpawnError, match="conversation c0ffee"):
+        runtime.resume(config, agent, "you were restored")
+    assert any("terminate-agent" in argv for argv in seen["runs"])
+    assert ["pane", "close", "w2:p9"] in seen["herdr"]

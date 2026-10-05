@@ -165,6 +165,12 @@ class RedisStore:
     def spawns(self, slug):
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
+    def put_restored(self, slug, outcomes):
+        self.redis.set(self.key(slug, "restored"), json.dumps(outcomes))
+
+    def restored(self, slug):
+        return json.loads(self.redis.get(self.key(slug, "restored")) or "[]")
+
     def remove(self, slug):
         self.config(slug)
         if self.agents(slug):

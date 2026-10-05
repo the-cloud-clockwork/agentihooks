@@ -385,6 +385,44 @@ class SwarmPanel(unittest.TestCase):
         (card,) = self.run_js(["span", "swarmCards"], f"swarmCards({json.dumps(sw)}, [], {{}}, 5)")
         self.assertEqual((card["task"], card["status"], card["ago"]), ("gone", "idle", ""))
 
+    def test_the_last_restore_lists_each_agent_resumed_or_fresh_with_its_reason_and_task_title(self):
+        restored = [
+            {
+                "name": "s-eng-1",
+                "lane": "eng",
+                "task": "t1",
+                "outcome": "resumed",
+                "reason": "own conversation reopened",
+            },
+            {"name": "s-eng-2", "lane": "eng", "task": "gone", "outcome": "fresh", "reason": "worktree gone"},
+        ]
+        tasks = [{"id": "t1", "title": "Parse the config"}]
+        rows = self.run_js(["restoreCards"], f"restoreCards({json.dumps(restored)}, {json.dumps(tasks)})")
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "name": "s-eng-1",
+                    "outcome": "resumed",
+                    "reason": "own conversation reopened",
+                    "task": "Parse the config",
+                },
+                {"name": "s-eng-2", "outcome": "fresh", "reason": "worktree gone", "task": "gone"},
+            ],
+        )
+        self.assertEqual(self.run_js(["restoreCards"], "restoreCards(undefined, [])"), [])
+
+    def test_the_restore_box_folds_inside_the_swarm_panel_and_shows_only_after_a_restore(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
+        self.assertRegex(box, r'<details class="sw-agents fold" id="swarm-restore-box" hidden>')
+        self.assertIn('id="swarm-restore"', box)
+        render = function_source("renderSwarm")
+        self.assertIn("restoreCards(sw.restored", render)
+        self.assertIn('$("swarm-restore-box").hidden = !restored.length', render)
+        for outcome in ("resumed", "fresh"):
+            self.assertRegex(page, rf"\.sw-status\.{outcome} \{{ color: var\(--[a-z0-9-]+\); \}}")
+
     def test_controls_that_do_not_apply_are_disabled(self):
         states = ["running", "paused", "stopping", "stopped", "drained"]
         out = self.run_js(["swarmControls"], f"{json.dumps(states)}.map(swarmControls)")
@@ -483,6 +521,7 @@ class SwarmPanel(unittest.TestCase):
             " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
+            "const restoreCards = () => []; const restoreCard = () => ({});"
             'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
         )
         script = (
@@ -639,6 +678,7 @@ class HealthPanel(unittest.TestCase):
             " contains() { return false; }});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
+            "const restoreCards = () => []; const restoreCard = () => ({});"
             "const crewShown = () => false; const meta = {}; let shown = null;"
             "const renderHealth = (f) => { shown = f; };"
         )
