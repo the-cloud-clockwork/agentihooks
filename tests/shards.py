@@ -1,12 +1,21 @@
 from pathlib import Path
 
+# Each of a shard's four workers rewrites every file it collects, while stored durations are split between them.
+SECONDS_PER_SOURCE_BYTE = 3e-6
+
 
 def discover_test_files(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py"))
 
 
-def assign_files(durations: dict[str, float], files: list[str], shards: int) -> list[list[str]]:
-    seconds = dict.fromkeys(files, 0.0)
+def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
+    return {path: (root / path).stat().st_size for path in files}
+
+
+def assign_files(
+    durations: dict[str, float], files: list[str], shards: int, sizes: dict[str, int] | None = None
+) -> list[list[str]]:
+    seconds = {path: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
     for nodeid, duration in durations.items():
         path = nodeid.split("::", 1)[0]
         if path in seconds:

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.shards import assign_files, discover_test_files, slowest_first
+from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -35,7 +35,8 @@ def pytest_ignore_collect(collection_path, config):
     if SHARD_FILES not in config.stash:
         index, shards = (int(part) for part in spec.split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
-        files = assign_files(durations, discover_test_files(config.rootpath), shards)[index - 1]
+        files = discover_test_files(config.rootpath)
+        files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
         config.stash[SHARD_FILES] = frozenset(files)
     if collection_path.relative_to(config.rootpath).as_posix() not in config.stash[SHARD_FILES]:
         return True
