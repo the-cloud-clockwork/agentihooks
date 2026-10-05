@@ -159,3 +159,8 @@ def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatc
 def test_workers_and_runs_without_workers_warm_nothing(monkeypatch):
     assert _configured(monkeypatch, 4, workerinput={})[0] == []
     assert _configured(monkeypatch, None)[0] == []
+
+
+def test_platforms_without_fork_warm_nothing(monkeypatch):
+    monkeypatch.delattr(conftest.os, "fork")
+    assert _configured(monkeypatch, 4)[0] == []

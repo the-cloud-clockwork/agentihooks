@@ -41,7 +41,7 @@ def _shard_files(config) -> frozenset[str]:
 
 def pytest_configure(config):
     workers = getattr(config.option, "numprocesses", None)
-    if not config.getoption("shard") or not workers or hasattr(config, "workerinput"):
+    if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
         return
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
