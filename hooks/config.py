@@ -440,6 +440,9 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 #      agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
+# Python in a linked worktree is edited through Serena (Development Manifesto §7).
+SERENA_EDIT_GUARD_ENABLED = _env_bool("SERENA_EDIT_GUARD_ENABLED", "true")
+
 # =============================================================================
 # BRAIN ADAPTER
 # =============================================================================
