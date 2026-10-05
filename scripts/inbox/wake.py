@@ -4,9 +4,9 @@ Ladder per pending item: up to three wakes one retry window apart, then an inbox
 then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
 """
 
+from scripts.swarm.delivery import READY
 from scripts.swarm.store import MASTER
 
-READY = ("idle", "done")
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
 DEFAULT_WINDOW_S = 300

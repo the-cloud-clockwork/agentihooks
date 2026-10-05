@@ -1,4 +1,7 @@
-"""Durable agent inbox in Redis: message items indexed by address, each with an append-only history."""
+"""Durable agent inbox in Redis: message items indexed by address, each with an append-only history.
+
+History entries are state transitions (a `state` key) or wake and escalation steps (an `event` key).
+"""
 
 import json
 import time
