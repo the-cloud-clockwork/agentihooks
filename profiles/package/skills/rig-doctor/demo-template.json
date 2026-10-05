@@ -1,0 +1,79 @@
+{
+  "prompt": "# Doctor demo: Tinder style dating app\n\nBuild a Tinder style dating app for consenting adults with a Next.js TypeScript frontend in frontend/ and a FastAPI Python backend in backend/. Run only on localhost. Use fictional seed profiles and placeholder pictures, never real users or paid services. Provide profile discovery, like and pass actions, mutual matches, match detail and local profile editing. Persist state in SQLite. Frontend calls the backend through a configurable API base URL. Validate requests, handle API failures in the UI, and keep components and functions responsible for one behavior. Use semantic accessible controls, responsive layouts and the installed UI doctrine. Use good coding practices: typed public interfaces, small cohesive modules, no credentials in code, Ruff and format checks, pytest API tests, frontend lint and type checks, interaction tests, and a local end to end smoke test. Each task follows red before green and a reviewed pull request into dev. Document exact localhost startup commands and ports, data reset and test commands. Completion: a user can browse profiles, like or pass, see a mutual match and edit their profile through the real API, with automated checks green.\n",
+  "seed": {
+    ".rig-doctor-demo": "owned\n",
+    ".gitignore": ".venv/\n__pycache__/\n.pytest_cache/\n.ruff_cache/\nnode_modules/\n.next/\n*.db\n.env\n",
+    ".gitattributes": "* text=auto\n",
+    "README.md": "# Doctor demo dating app\n\nNext.js frontend and FastAPI backend, localhost only. The swarm builds this seed from the stored rig-doctor plan.\n",
+    "CLAUDE.md": "# Doctor demo\n\nRead the ledger overview for the application spec. Use frontend/ for Next.js and backend/ for FastAPI. Work in a worktree off origin/dev and return by a reviewed PR into dev. Keep the app local, use fictional adult profiles, test the real API, and document startup commands.\n"
+  },
+  "phases": [
+    {
+      "id": "p1",
+      "title": "Backend",
+      "description": "Validated persistent dating API with fictional adult profiles."
+    },
+    {
+      "id": "p2",
+      "title": "Frontend",
+      "description": "Accessible Next.js app wired to the real API."
+    },
+    {
+      "id": "p3",
+      "title": "Local proof",
+      "description": "End to end localhost flow and repeatable operator commands."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "api-base",
+      "title": "FastAPI scaffold and profile discovery",
+      "lane": "eng",
+      "phase": "p1",
+      "territory": "backend",
+      "description": "Create backend/ with FastAPI, SQLite models and fictional adult profile seeds. Seams: health, paginated profile discovery and invalid input response. Red then green API tests, Ruff and formatting. Done when reviewed PR merges into dev and discovery returns seeded profiles."
+    },
+    {
+      "id": "web-base",
+      "title": "Next.js scaffold and discovery cards",
+      "lane": "eng",
+      "phase": "p2",
+      "territory": "frontend",
+      "description": "Create frontend/ with Next.js and TypeScript. Seams: profile card rendering, loading, empty and API error states. Configurable backend URL, accessible like and pass controls. Red then green interaction tests, lint and type check. Done when reviewed PR merges into dev."
+    },
+    {
+      "id": "api-match",
+      "title": "Likes passes mutual matches and profile editing",
+      "lane": "eng",
+      "phase": "p1",
+      "territory": "backend",
+      "depends_on": [
+        "api-base"
+      ],
+      "description": "Add validated like/pass actions, mutual match queries, match detail and local profile editing. Seams: repeated swipe behavior, mutual match creation, missing profile and invalid edit input. Persist in SQLite; use fictional fixtures. Red then green pytest. Done when reviewed PR merges into dev."
+    },
+    {
+      "id": "web-match",
+      "title": "Wire swipes matches and editing to the API",
+      "lane": "eng",
+      "phase": "p2",
+      "territory": "frontend",
+      "depends_on": [
+        "web-base",
+        "api-match"
+      ],
+      "description": "Wire discovery, like/pass actions, match list/detail and local profile editing to the backend. Seams: user interaction calls real API contract and shows results and validation failures. Responsive accessible controls, lint, type check and tests. Done when reviewed PR merges into dev."
+    },
+    {
+      "id": "local-proof",
+      "title": "Localhost integration test and startup documentation",
+      "lane": "eng",
+      "phase": "p3",
+      "territory": "tests,README.md",
+      "depends_on": [
+        "web-match"
+      ],
+      "description": "Provide one command per service to run backend and frontend on documented localhost ports. Add real API/browser integration coverage for browse, like, mutual match and profile edit; document data reset and all check commands. Done when reviewed PR merges into dev and the local flow is observed with invocation and output."
+    }
+  ]
+}
