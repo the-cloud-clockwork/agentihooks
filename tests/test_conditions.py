@@ -1,6 +1,7 @@
 """Conditions: filename grammar, layered discovery, the index cache, the script
 contract, result merging, and the envelopes hook_manager emits per target."""
 
+import errno
 import json
 import os
 import subprocess
@@ -210,6 +211,19 @@ class TestIndexCache:
         assert REAL_CACHE_PATH().name.startswith("conditions-index.codex.")
 
 
+def _wait_gone(pid: int, seconds: float = 3) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        if state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
 class TestScriptContract:
     def test_stdin_and_env(self, layers):
         _, _, profile_dir = layers
@@ -250,17 +264,39 @@ class TestScriptContract:
         result = conditions.run_step("pre", _bash("ls"))
         assert "timed out" in result.contexts[0]
         pid = int(pidfile.read_text())
-        deadline = time.time() + 3
-        while time.time() < deadline:
-            try:
-                state = Path(f"/proc/{pid}/stat").read_text().split()[2]
-            except FileNotFoundError:
-                break
-            if state == "Z":
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail(f"child {pid} survived the timeout")
+        assert _wait_gone(pid), f"child {pid} survived the timeout"
+
+    def test_timeout_tolerates_a_group_already_gone(self, layers, monkeypatch, tmp_path):
+        monkeypatch.setattr("hooks.config.CONDITIONS_TIMEOUT_SEC", 0.2)
+        pidfile = tmp_path / "child.pid"
+        _write(layers[1], "pre-bash-slow.sh", f"sleep 30 & echo $! > {pidfile}; wait")
+        real_killpg = os.killpg
+
+        def killpg_on_a_gone_group(pgid, sig):
+            real_killpg(pgid, sig)
+            raise ProcessLookupError(errno.ESRCH, os.strerror(errno.ESRCH))
+
+        monkeypatch.setattr(conditions.os, "killpg", killpg_on_a_gone_group)
+        result = conditions.run_step("pre", _bash("ls"))
+        assert "timed out" in result.contexts[0]
+        pid = int(pidfile.read_text())
+        assert _wait_gone(pid), f"child {pid} survived the timeout"
+
+    def test_a_child_reaped_mid_read_counts_as_gone(self, monkeypatch):
+        child = subprocess.Popen(["sleep", "30"])
+        stat = Path(f"/proc/{child.pid}/stat")
+        real_read_text = Path.read_text
+
+        def read_after_reap(path, *args, **kwargs):
+            if path != stat:
+                return real_read_text(path, *args, **kwargs)
+            with open(path) as handle:
+                child.kill()
+                child.wait()
+                return handle.read()
+
+        monkeypatch.setattr(Path, "read_text", read_after_reap)
+        assert _wait_gone(child.pid)
 
     def test_executable_without_known_extension(self, layers):
         _write(layers[1], "pre-bash-exe.run", "#!/bin/sh\necho via shebang\n", mode=0o755)
