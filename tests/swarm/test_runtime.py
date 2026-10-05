@@ -50,20 +50,32 @@ class NamedPanes:
 
 
 def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
+    from scripts.swarm.runtime import herdr_target
+
     slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
     herdr = NamedPanes(
         {
             "w:p1": {"name": slug[:32], "agent_status": "idle"},
-            "w:p4": {"agent_status": "working"},
+            "w:p4": {"agent_status": "working", "agent_session": {"kind": "id", "value": "c3"}},
             "w:p5": {"name": "someone-else", "agent_status": "idle"},
+            "w:p6": {"name": "okay", "agent_status": "idle"},
+            "w:p7": {"agent_status": "idle", "agent_session": {"kind": "id", "value": "other"}},
         }
     )
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    assert runtime.status(SimpleNamespace(name=f"{slug}-eng-3", pane_id="w:p4")) == "working"
-    assert runtime.status(SimpleNamespace(name=f"{slug}-master-1", pane_id="w:p1")) == "idle"
-    assert runtime.status(SimpleNamespace(name=f"{slug}-eng-4", pane_id="w:p5")) == "unknown"
-    assert [r[0] for r in herdr.renamed] == ["w:p4", "w:p1"]
-    assert herdr.panes["w:p4"]["name"].endswith("-eng-3")
+
+    def agent(seat, pane, conversation=""):
+        return SimpleNamespace(name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation)
+
+    assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
+    assert runtime.status(agent("master-1", "w:p1")) == "idle"
+    assert runtime.status(agent("eng-4", "w:p5")) == "unknown"
+    assert runtime.status(agent("eng-5", "w:p6")) == "unknown"
+    assert runtime.status(agent("eng-6", "w:p7", "c6")) == "unknown"
+    assert herdr.renamed == [
+        ["w:p4", herdr_target(f"{slug}-eng-3")],
+        ["w:p1", herdr_target(f"{slug}-master-1")],
+    ]
 
 
 def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):

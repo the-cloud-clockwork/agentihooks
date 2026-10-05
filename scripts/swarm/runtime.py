@@ -187,9 +187,13 @@ class HerdrRuntime:
         return result.get("agent", result)
 
     def _name_pane(self, agent):
-        """Give a pane spawned under the old 32 character cut its herdr name; never take one another agent holds."""
+        """Name the agent's own pane: unnamed and holding its conversation, or carrying the 32 character cut of its name."""
         found = self._get(agent.pane_id) if agent.pane_id else None
-        if found is None or not agent.name.startswith(found.get("name") or ""):
+        if found is None:
+            return False
+        name = found.get("name")
+        own = _conversation_id(found.get("agent_session"))
+        if name != agent.name[:32] and (name or not own or own != agent.conversation_id):
             return False
         try:
             self.herdr(["agent", "rename", agent.pane_id, herdr_target(agent.name)])
