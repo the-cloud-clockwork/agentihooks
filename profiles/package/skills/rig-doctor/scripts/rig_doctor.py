@@ -168,6 +168,8 @@ def init_swarm(repo: Path) -> str:
             "ledger",
             "--slug",
             slug,
+            "--as",
+            "rig-doctor",
             "task",
             "add",
             task["id"],
