@@ -3,7 +3,8 @@
 import json
 from dataclasses import asdict, dataclass, field, replace
 
-from scripts.inbox.seats import SeatMemory, SeatRegistry
+from scripts.inbox.seats import SeatMemory, SeatRegistry, of_swarm
+from scripts.inbox.store import InboxStore
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -148,9 +149,54 @@ class RedisStore:
             self.redis.delete(*keys)
         self.redis.srem(f"{PREFIX}:index", slug)
 
+    def export(self, slug):
+        """Everything the swarm holds in Redis: its own keys, its seats and their memory, its inbox addresses."""
+        self.config(slug)
+        own = [key for key in self.redis.scan_iter(match=self.key(slug, "*")) if key != self.key(slug, "tick-lock")]
+        inbox, members = InboxStore(self.redis).keys_for(lambda address: of_swarm(address, slug))
+        keys = sorted(own) + self.seats.swarm_keys(slug) + inbox
+        return {"keys": _dump(self.redis, keys), "members": {f"{PREFIX}:index": [slug], **members}}
+
+    def restore(self, slug, state):
+        """Replace the swarm's own keys with the exported ones and write back its seats and inbox."""
+        with self.redis.pipeline() as pipe:
+            pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
+            for key, entry in state["keys"].items():
+                _WRITE[entry["type"]](pipe, key, entry["value"])
+                if entry["ttl_ms"] > 0:
+                    pipe.pexpire(key, entry["ttl_ms"])
+            for key, found in state["members"].items():
+                pipe.sadd(key, *found)
+            pipe.execute()
+
 
 def _fields(config):
     return {k: json.dumps(v) if isinstance(v, dict) else str(v) for k, v in asdict(config).items()}
+
+
+_READ = {
+    "string": lambda redis, key: redis.get(key),
+    "hash": lambda redis, key: redis.hgetall(key),
+    "list": lambda redis, key: redis.lrange(key, 0, -1),
+    "set": lambda redis, key: sorted(redis.smembers(key)),
+    "zset": lambda redis, key: redis.zrange(key, 0, -1, withscores=True),
+}
+_WRITE = {
+    "string": lambda pipe, key, value: pipe.set(key, value),
+    "hash": lambda pipe, key, value: pipe.hset(key, mapping=value),
+    "list": lambda pipe, key, value: pipe.rpush(key, *value),
+    "set": lambda pipe, key, value: pipe.sadd(key, *value),
+    "zset": lambda pipe, key, value: pipe.zadd(key, dict(value)),
+}
+
+
+def _dump(redis, keys):
+    dumped = {}
+    for key in keys:
+        kind = redis.type(key)
+        if kind in _READ:
+            dumped[key] = {"type": kind, "value": _READ[kind](redis, key), "ttl_ms": max(redis.pttl(key), 0)}
+    return dumped
 
 
 def redis_url(environ):

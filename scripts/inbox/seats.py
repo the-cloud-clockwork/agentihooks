@@ -5,10 +5,12 @@ append-only recaps and learned notes that its occupants leave for the next.
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 PREFIX = "agentihooks:seat"
 OCCUPY_ATTEMPTS = 5
+MEMORY_KINDS = ("history", "recaps", "learned")
 
 
 class SeatError(RuntimeError):
@@ -27,6 +29,11 @@ def seat_address(slug, seat):
 
 def is_seat(address):
     return "@" in address
+
+
+def of_swarm(address, slug):
+    """A seat of the swarm, or the name the swarm gave one of its agents."""
+    return address.endswith(f"@{slug}") or re.fullmatch(rf"{re.escape(slug)}-(eng|ci|master)-\d+", address) is not None
 
 
 class SeatRegistry:
@@ -68,6 +75,13 @@ class SeatRegistry:
 
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]
+
+    def swarm_keys(self, slug):
+        """The swarm's seats with their history and memory, and the seat pointers of its agents."""
+        seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
+        keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
+        pointers = self.redis.scan_iter(match=f"{PREFIX}-of:{slug}-*")
+        return sorted(keys) + sorted(key for key in pointers if of_swarm(key.split(":", 2)[2], slug))
 
 
 class SeatMemory:

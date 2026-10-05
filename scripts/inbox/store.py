@@ -105,6 +105,22 @@ class InboxStore:
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
 
+    def keys_for(self, belongs):
+        """The keys of every address belongs() accepts, its items and their histories, and those
+        addresses' memberships in the shared waiting and indexed sets."""
+        prefix = self.key("address", "")
+        addresses = sorted(a for key in self.redis.scan_iter(match=prefix + "*") if belongs(a := key[len(prefix) :]))
+        keys = []
+        for address in addresses:
+            ids = self.redis.zrange(self.key("address", address), 0, -1)
+            keys += [self.key("address", address), self.key("pending", address)]
+            keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
+        members = {
+            self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
+            for shared in ("waiting", "indexed")
+        }
+        return keys, {key: found for key, found in members.items() if found}
+
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
 
