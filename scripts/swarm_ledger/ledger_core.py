@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import ledger_close
 import ledger_comments
 import ledger_notifications
 import ledger_priorities
@@ -80,7 +81,7 @@ LOCK = threading.Lock()
 
 EXTENSION_OPS = {
     name: module
-    for module in (ledger_priorities, ledger_notifications, ledger_tasks, ledger_title)
+    for module in (ledger_priorities, ledger_notifications, ledger_tasks, ledger_title, ledger_close)
     for name in module.OPS
 }
 
@@ -298,8 +299,9 @@ def text_diff(old, new):
 
 def warnings(doc):
     found = []
-    if len(doc["overview"].split()) > 200:
-        found.append(f"overview has {len(doc['overview'].split())} words, limit 200")
+    words = len(ledger_close.intro(doc["overview"]).split())
+    if words > 200:
+        found.append(f"overview has {words} words, limit 200")
     for phase in doc["phases"]:
         if len(phase["description"].split()) > 100:
             found.append(f"phase {phase['id']} description has {len(phase['description'].split())} words, limit 100")

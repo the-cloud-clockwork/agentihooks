@@ -740,6 +740,7 @@ def register_session(
 ) -> None:
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import record_session
+    from hooks.targets import is_codex_memory_thread
 
     identity = resolve_project(cwd)
     record_session(session_id, identity)
@@ -751,7 +752,7 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        if pid and supersede:
+        if pid and supersede and not is_codex_memory_thread(cwd):
             for existing_sid, existing_info in sessions.items():
                 if existing_sid == session_id:
                     continue
@@ -879,7 +880,7 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
     """Return session entries from the registry.
 
     By default returns only entries with status="alive" — this matches the
-    semantic of "active" (one per live PID, after the supersede fix).
+    semantic of "active".
     Pass include_all=True to get the full registry including superseded,
     closed, and dead entries.
 

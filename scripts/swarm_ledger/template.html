@@ -56,6 +56,10 @@ h1 { font-size: var(--fs-title); line-height: 1.25; font-weight: 700; letter-spa
 .banner { display: none; margin-bottom: 16px; padding: 10px 16px; border-radius: 6px; background: var(--surface-1); color: var(--destructive);
   font-weight: 700; text-shadow: var(--glow); }
 .banner.on { display: block; }
+.closed-banner { margin-bottom: 16px; padding: 10px 16px; border-radius: 6px; background: var(--surface-1); color: var(--accent);
+  font-weight: 700; letter-spacing: .08em; text-transform: uppercase; text-shadow: var(--glow); }
+.closed-banner[hidden] { display: none; }
+#overview { white-space: pre-wrap; }
 section {
   margin-bottom: 12px; padding: 16px 18px; border-radius: 6px;
   background: var(--surface-1);
@@ -375,6 +379,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     <div class="status" id="status" role="status">loading</div>
   </header>
   <div class="banner" id="banner"></div>
+  <div class="closed-banner" id="closed-banner" role="status" hidden></div>
   <div class="layout"><div class="col">
   <section id="sec-overview" data-outline><details class="sources-box fold" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details></section>
   <div class="sec-tools"><button class="link" type="button" id="sections-all"></button></div>
@@ -392,7 +397,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       <details class="crew fold" id="crew-box" hidden><summary>Crew <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></details></section>
     <section id="swarm-box" aria-label="Swarm" hidden><details class="sources-box fold" id="swarm-fold" open><summary>Swarm<span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy" title="Autonomy level: manual, assist, delegate or full"></span></summary><div class="sw-head">
       <dl class="sw-figs" id="swarm-figs"></dl>
-      <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
+      <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button><button class="sw-btn danger" type="button" data-swarm="close" title="Write the summary, retire every agent and close the ledger">Close</button></div>
       <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><label for="cap-codex">codex <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label><span id="codex-split" aria-live="polite"></span><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
       </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details><details class="sw-agents fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><ul class="sw-list" id="swarm-restore"></ul></details></details></section>
     <section id="health-box" aria-label="Swarm health" hidden><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
@@ -499,6 +504,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes: entries(d.notes), chat: entries(d.chat),
       sources: Array.isArray(d.sources) ? d.sources : [],
       time_left_minutes: Number.isInteger(d.time_left_minutes) && d.time_left_minutes >= 0 ? d.time_left_minutes : null,
+      closed_at: Number.isInteger(d.closed_at) ? d.closed_at : null,
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
       notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
       phases: list("phases", ["title", "description", "done", "out_of_scope"], ["comments"]),
@@ -572,6 +578,11 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const el = $("banner");
     el.textContent = messages.filter(Boolean).join(" · ");
     el.classList.toggle("on", !!el.textContent);
+  }
+
+  function closedText(closedAt) {
+    if (!Number.isInteger(closedAt)) return "";
+    return `Closed ${new Date(closedAt).toISOString().slice(0, 16).replace("T", " ")} UTC`;
   }
 
   function grow(el) {
@@ -854,6 +865,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     document.title = doc.title;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
+    $("closed-banner").textContent = closedText(doc.closed_at);
+    $("closed-banner").hidden = !doc.closed_at;
     $("sources-count").textContent = headCount([[doc.sources.length]]);
     listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
     $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
@@ -1126,12 +1139,12 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function controlClick(action, armedNow) {
-    if (action === "stop_now" && armedNow !== action) return { send: false, armed: action };
+    if ((action === "stop_now" || action === "close") && armedNow !== action) return { send: false, armed: action };
     return { send: true, armed: "" };
   }
 
   function opNote(phase, action, error) {
-    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", set: "Set caps",
+    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close", set: "Set caps",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
@@ -1163,6 +1176,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       btn.classList.toggle("armed", armed === action);
       btn.setAttribute("aria-busy", pending === action ? "true" : "false");
       if (action === "stop_now") btn.textContent = armed === action ? "Confirm stop now" : "Stop now";
+      if (action === "close") btn.textContent = armed === action ? "Confirm close" : "Close";
     }
   }
 

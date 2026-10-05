@@ -4,6 +4,7 @@ agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
+agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -60,6 +61,10 @@ LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
+CLOSE_ASK = (
+    "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
+    'stands, then run: agentihooks swarm {slug} close --note "<your paragraph>". Close retires you too.'
+)
 
 
 def now_ms():
@@ -169,6 +174,47 @@ def cmd_stop(store, args):
             ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
     store.update(args.slug, state="stopping" if left else "stopped")
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "still_running": left}))
+
+
+def _live_master(store, slug, live):
+    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
+
+
+def _retire_each(store, slug, runtime, live, agents):
+    left = []
+    for agent in agents:
+        store.release(slug, agent.task, agent.name)
+        store.drop_agent(slug, agent.name)
+        if not runtime.retire(agent, agent.name in live):
+            store.put_agent(slug, agent)
+            left.append(agent.name)
+    return left
+
+
+def cmd_close(store, args):
+    store.config(args.slug)
+    runtime = HerdrRuntime()
+    live = runtime.live_names()
+    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    master = None if args.now else _live_master(store, args.slug, live)
+    if master is not None and master.name != by:
+        InboxStore(store.redis).send("operator", master.name, CLOSE_ASK.format(slug=args.slug))
+        print(json.dumps({"swarm": args.slug, "asked": master.name}))
+        return
+    ledger = LedgerClient()
+    ledger.summarize(args.slug, args.note, by)
+    path = snapshot.take(store, args.slug, now_ms())
+    store.update(args.slug, state="stopping")
+    agents = store.agents(args.slug)
+    left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane != MASTER])
+    for row in ledger.tasks(args.slug):
+        if row.get("state") == "claimed":
+            ledger.update_task(args.slug, row["id"], {"state": "open", "claimed_by": ""})
+    ledger.mark_closed(args.slug, by)
+    store.update(args.slug, state="stopping" if left else "stopped")
+    print(json.dumps({"closed": args.slug, "snapshot": str(path), "still_running": left}), flush=True)
+    if _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER]):
+        store.update(args.slug, state="stopping")
 
 
 def cmd_set(store, args):
@@ -516,6 +562,9 @@ def build_parser():
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
+    close = sub.add_parser("close")
+    close.add_argument("--note", default="")
+    close.add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")

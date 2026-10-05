@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_bin  # noqa: E402
+import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
 import ledger_media  # noqa: E402
@@ -60,7 +61,14 @@ def all_summaries():
             doc, _, _ = core.load_state(json_path, seed)
         except (ValueError, OSError):
             continue
-        found.append({"slug": path.stem, "title": doc.get("title") or path.stem, "overview": doc.get("overview") or ""})
+        found.append(
+            {
+                "slug": path.stem,
+                "title": doc.get("title") or path.stem,
+                "overview": ledger_close.intro(doc.get("overview") or ""),
+                "closed_at": doc.get("closed_at"),
+            }
+        )
     return found
 
 
@@ -84,7 +92,7 @@ HOME_STYLE = (
     "*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;min-height:100vh;color:var(--text);"
     "font:13px/1.6 ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);"
     "background-image:var(--backdrop);background-attachment:fixed}"
-    "main{max-width:960px;margin:0 auto;padding:40px 16px 96px}"
+    "main{max-width:960px;margin:0 auto;padding:40px 16px 96px}section.closed{margin-top:24px}"
     "h1{display:flex;align-items:center;gap:10px;margin:0;padding:14px 18px;font-size:12px;font-weight:700;"
     "letter-spacing:.16em;text-transform:uppercase;color:var(--text);background:var(--surface-1);border-radius:6px 6px 0 0;"
     "border-bottom:1px solid var(--signal-soft)}"
@@ -147,7 +155,12 @@ def bin_meta(s):
     return f'<p class="meta"><span>Deleted {deleted}</span><span class="left">{days} day{"" if days == 1 else "s"} left</span></p>'
 
 
+def closed_meta(s):
+    return f'<p class="meta"><span>Closed {time.strftime("%Y-%m-%d", time.localtime(s["closed_at"] / 1000))}</span></p>'
+
+
 def index_page(view="home"):
+    closed = ""
     if view == "bin":
         heading, empty = "BIN", "The bin is empty."
         control = (
@@ -162,7 +175,11 @@ def index_page(view="home"):
             '<button class="act del" type="button" data-act="delete" data-slug="{slug}" '
             f'title="Move to the bin" aria-label="Move {{title}} to the bin">{TRASH}</button>'
         )
-        rows = [ledger_row(s, control) for s in ledger_summaries()]
+        summaries = ledger_summaries()
+        rows = [ledger_row(s, control) for s in summaries if not s["closed_at"]]
+        ended = [ledger_row({**s, "meta": closed_meta(s)}, control) for s in summaries if s["closed_at"]]
+        if ended:
+            closed = f'<section class="closed"><h1>CLOSED</h1><ul>{"".join(ended)}</ul></section>'
         count = len(ledger_bin.entries())
         badge = f'<span class="count">{count}</span>' if count else ""
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
@@ -170,7 +187,7 @@ def index_page(view="home"):
     return (
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{heading}</title><style>{core.PALETTE.read_text(encoding='utf-8')}{HOME_STYLE}</style>"
-        f"<main><h1>{heading}</h1><ul>{body}</ul></main>{fab}{BIN_SCRIPT}"
+        f"<main><h1>{heading}</h1><ul>{body}</ul>{closed}</main>{fab}{BIN_SCRIPT}"
     )
 
 
@@ -205,7 +222,13 @@ def swarm_status(slug):
         return None
 
 
-CONTROLS = {"start": ["start"], "pause": ["pause"], "stop": ["stop"], "stop_now": ["stop", "--now"]}
+CONTROLS = {
+    "start": ["start"],
+    "pause": ["pause"],
+    "stop": ["stop"],
+    "stop_now": ["stop", "--now"],
+    "close": ["close"],
+}
 MAX_CAP = 50
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
@@ -218,7 +241,7 @@ def control_argv(body):
     if action == "verdict":
         return verdict_argv(body)
     if action != "set":
-        raise ValueError("action must be start, pause, stop, stop_now, set or verdict")
+        raise ValueError("action must be start, pause, stop, stop_now, close, set or verdict")
     pairs = []
     for key, flag, limit in (
         ("max_eng", "max-eng-agents", MAX_CAP),

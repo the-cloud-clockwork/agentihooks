@@ -54,6 +54,12 @@ class LedgerClient:
     def followup(self, slug, text):
         self._call(slug, [_op("add_item", "swarm", list="followups", text=text)])
 
+    def summarize(self, slug, note, by):
+        self._call(slug, [_op("summary_set", by, note=note)])
+
+    def mark_closed(self, slug, by):
+        self._call(slug, [_op("close", by)])
+
 
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}
