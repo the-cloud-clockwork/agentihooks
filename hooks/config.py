@@ -769,8 +769,15 @@ AUTO_DEV_SWITCH_ENABLED = _env_bool("AUTO_DEV_SWITCH_ENABLED", "true")
 OTEL_HOOKS_ENABLED = _env_bool("OTEL_HOOKS_ENABLED", "true")
 OTEL_HOOKS_SERVICE_NAME = os.getenv("OTEL_HOOKS_SERVICE_NAME", "agentihooks")
 
+
 # Langfuse OTEL destination (traces only, OTLP HTTP)
-OTEL_LANGFUSE_ENABLED = _env_bool("OTEL_LANGFUSE_ENABLED", "false")
+def langfuse_enabled(environ) -> bool:
+    """Claude Code strips every OTEL_* variable from hook processes, so the unprefixed name is the one hooks see."""
+    names = ("AGENTIHOOKS_LANGFUSE_ENABLED", "OTEL_LANGFUSE_ENABLED")
+    return any(environ.get(name, "").lower() in ("true", "1", "yes") for name in names)
+
+
+OTEL_LANGFUSE_ENABLED = langfuse_enabled(os.environ)
 
 
 def langfuse_route(environ) -> tuple[str, str]:

@@ -387,10 +387,10 @@ def test_a_swarm_spawn_exports_its_identity_and_enables_langfuse_traces(tmp_path
         "export AGENTIHOOKS_SWARM=swarm-buildout\n",
         "export AGENTIHOOKS_SWARM_LANE=eng\n",
         "export AGENTIHOOKS_SWARM_TASK=t14\n",
-        "export OTEL_LANGFUSE_ENABLED=1\n",
+        "export AGENTIHOOKS_LANGFUSE_ENABLED=1\n",
     ):
         assert line in text
-    assert text.index("OTEL_LANGFUSE_ENABLED") < text.index(" claude ")
+    assert text.index("AGENTIHOOKS_LANGFUSE_ENABLED") < text.index(" claude ")
 
 
 def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
