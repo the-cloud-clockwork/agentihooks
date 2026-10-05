@@ -11,7 +11,7 @@ MAX_BYTES = 8 << 20
 MAX_PER_ENTRY = 6
 EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
 TYPES = {ext: kind for kind, ext in EXTENSIONS.items()}
-ID_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpg|webp|gif)$")
+ID_RE = re.compile(rf"^[0-9a-f]{{64}}\.({'|'.join(TYPES)})$")
 JPEG_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
 
 
