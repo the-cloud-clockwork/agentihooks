@@ -1,7 +1,13 @@
 """Configuration for hooks module."""
 
 import os
+import re
+import sys
 from pathlib import Path
+
+# A name outside this shape cannot be a shell variable, and a mistyped line can
+# put a secret in the name, so such a line is reported by position only.
+_VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Keys whose current os.environ value came from an .env file rather than the
 # surrounding process. Only these may be refreshed by reload_user_env() — a
@@ -44,7 +50,7 @@ def _parse_env_file(
     # scripts/mcp_daemon.py's scanner resolves duplicates the same way and the
     # two are asserted to agree, so "later wins" applies between files only.
     this_file: set[str] = set()
-    for _raw in env_file.read_text(encoding="utf-8").splitlines():
+    for _n, _raw in enumerate(env_file.read_text(encoding="utf-8").splitlines(), 1):
         _line = _raw.strip()
         if not _line or _line.startswith("#"):
             continue
@@ -67,6 +73,12 @@ def _parse_env_file(
             # Strip inline comment: KEY=value # comment
             _val = _val[: _val.index("#")].rstrip()
         if not _key:
+            continue
+        if not _VALID_NAME.fullmatch(_key):
+            print(
+                f"[agentihooks] {env_file} line {_n}: variable name is not a valid identifier, line skipped",
+                file=sys.stderr,
+            )
             continue
         if _key in this_file:
             continue  # first definition within a file wins
