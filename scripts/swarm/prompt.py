@@ -43,8 +43,12 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"Run once: {led} join --role orchestrator. Then keep a Monitor on: agentihooks ledger watch {slug} --as "
         f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
         "",
-        f"Your {'next' if summary else 'first'} message after joining gives the operator the ledger page link: "
-        f"run {me} url and post its line "
+        (
+            "After posting your summary acknowledgement in ledger chat, send the ledger page link as your second chat line: "
+            if summary
+            else "Your first message after joining gives the operator the ledger page link: "
+        )
+        + f"run {me} url and post its line "
         f'with {me} say --to operator "<line>". Answer any question like what is my ledger link with that line at '
         "once.",
         "",
