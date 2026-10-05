@@ -1,6 +1,14 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 from scripts.swarm.store import MASTER
+from scripts.swarm_ledger import ledger_kinds
+
+CLOSES = "The swarm then closes this session; stop working."
+THROUGH_CODE = (
+    "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
+    "request into dev and CI, never a live patch."
+)
+CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 
 LANE_ROLE = {
     "eng": "an engineer",
@@ -65,6 +73,7 @@ def build(slug, repo, lane, name, task):
     ]
     if task.get("description"):
         lines.append(task["description"])
+    lines += contract_lines(task.get("contract") or {})
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
     if task.get("handoff"):
@@ -88,17 +97,7 @@ def build(slug, repo, lane, name, task):
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
         "",
-        "Work it end to end with the dev-cycle skill, then stop:",
-        f"1. Open a GitHub issue naming the seams and record it: {me} issue <issue url>",
-        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
-        "3. Red test, least code to green.",
-        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
-        "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
-        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
-        f"5. Push, open the pull request into dev with Closes #<n>, record it: {me} pr <pr url>",
-        "6. Merge on green checks, then wt.sh done.",
-        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. The swarm then closes "
-        "this session; stop working.",
+        *STEPS[ledger_kinds.kind(task)](me, led, name, phase),
         "",
         f"If your context nears its limit a hook tells you to write a handoff document: then run {me} handoff <doc> "
         "and stop; a successor continues the task from it.",
@@ -112,3 +111,93 @@ def build(slug, repo, lane, name, task):
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def contract_lines(contract):
+    parts = [f"{label}: {contract[key]}." for key, label in CONTRACT_LABELS if contract.get(key)]
+    return ["Proof contract. " + " ".join(parts)] if parts else []
+
+
+def code_steps(me, led, name, phase):
+    return [
+        "Work it end to end with the dev-cycle skill, then stop:",
+        f"1. Open a GitHub issue naming the seams and record it: {me} issue <issue url>",
+        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
+        "3. Red test, least code to green.",
+        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
+        "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
+        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
+        f"5. Push, open the pull request into dev with Closes #<n>, record it: {me} pr <pr url>",
+        "6. Merge on green checks, then wt.sh done.",
+        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
+    ]
+
+
+def ci_steps(me, led, name, phase):
+    steps = code_steps(me, led, name, phase)
+    steps[3] = (
+        "3. Red first on a real run: show the workflow failing or slow, then the least change that turns it green "
+        "or fast. Put the run links before and after in the pull request."
+    )
+    return steps
+
+
+def ops_steps(me, led, name, phase):
+    return [
+        "Work it end to end, then stop:",
+        f"1. Open a GitHub issue naming the system state this task must reach and record it: {me} issue <issue url>",
+        f"2. {THROUGH_CODE.format(name=name)}",
+        "3. Verify the state against the live system with one read only command and keep its output.",
+        f'4. Leave the crew with {led} leave, then close the task with the proof: {me} done --command "<command>" '
+        f'--output "<its output>". The ledger refuses done without both. {CLOSES}',
+    ]
+
+
+def tune_steps(me, led, name, phase):
+    return [
+        "Work it end to end, then stop:",
+        f"1. Open a GitHub issue naming the setting and the number it must reach, and record it: {me} issue <issue url>",
+        "2. Measure the current value with one read only command before changing anything.",
+        f"3. {THROUGH_CODE.format(name=name)}",
+        "4. Once the change runs, measure again with the same command.",
+        f'5. Leave the crew with {led} leave, then close the task with the proof: {me} done --command "<command>" '
+        f'--output "<its output>", with the values before and after in the output. The ledger refuses done without '
+        f"both. {CLOSES}",
+    ]
+
+
+def troubleshoot_steps(me, led, name, phase):
+    return [
+        "Work it end to end, then stop:",
+        f"1. Open a GitHub issue naming the symptom and record it: {me} issue <issue url>",
+        "2. Reproduce the failure before any theory, then test ranked hypotheses one at a time with the "
+        "quick-troubleshoot skill. Diagnostics stay read only.",
+        "3. Show the root cause by evidence: a command and its output, a log line or a failing test.",
+        f"4. Fix it with a pull request into dev through the dev-cycle skill in a worktree (wt.sh new {name}), or "
+        f'file the fix as a task: {led} task add <short id> "<plain title>" --lane eng --phase {phase}',
+        f'5. Leave the crew with {led} leave, then close the task with the proof: {me} done --root-cause "<cause>" '
+        '--evidence "<what shows it>" --fix <pr url>, or --filed <task id> instead of --fix. The ledger refuses '
+        f"done without the cause, the evidence and the fix or the filed task. {CLOSES}",
+    ]
+
+
+def research_steps(me, led, name, phase):
+    return [
+        "Work it end to end, then stop:",
+        f"1. Open a GitHub issue naming the question and record it: {me} issue <issue url>",
+        "2. Answer it from sources you read yourself: code, docs, runs and their output. Name each source.",
+        "3. Write the finding where others can read it later: a comment on the issue, or a document merged into dev "
+        "by pull request.",
+        f"4. Leave the crew with {led} leave, then close the task with the proof: {me} done --finding <link>. The "
+        f"ledger refuses done without a link to the finding. {CLOSES}",
+    ]
+
+
+STEPS = {
+    "code": code_steps,
+    "ci": ci_steps,
+    "ops": ops_steps,
+    "tune": tune_steps,
+    "troubleshoot": troubleshoot_steps,
+    "research": research_steps,
+}

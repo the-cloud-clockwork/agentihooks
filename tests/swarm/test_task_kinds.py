@@ -1,0 +1,71 @@
+import pytest
+
+from scripts.swarm import prompt
+from tests.swarm.test_cli import env, run  # noqa: F401
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
+
+
+def build(**task):
+    return prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1", **task})
+
+
+def test_a_task_without_a_kind_gets_the_code_prompt():
+    assert build() == build(kind="code")
+    assert "agentihooks swarm sw done --pr <pr url>" in build()
+
+
+def test_each_kind_gets_its_own_prompt():
+    texts = {kind: build(kind=kind) for kind in KINDS}
+    assert len(set(texts.values())) == len(KINDS)
+    assert "done --pr <pr url>" in texts["ci"]
+    for kind in ("ops", "tune"):
+        assert '--command "<command>" --output "<its output>"' in texts[kind]
+        assert "done --pr" not in texts[kind]
+    assert '--root-cause "<cause>" --evidence "<what shows it>"' in texts["troubleshoot"]
+    assert "--fix <pr url>" in texts["troubleshoot"] and "--filed <task id>" in texts["troubleshoot"]
+    assert "--finding <link>" in texts["research"]
+    for text in texts.values():
+        assert text.index("agentihooks ledger --slug sw --as sw-eng-1 leave") < text.index("agentihooks swarm sw done")
+
+
+def test_the_prompt_carries_the_proof_contract():
+    text = build(kind="tune", contract={"must": "p99 under 200 ms", "check": "the latency panel", "judge": "master"})
+    assert "Proof contract" in text
+    assert all(part in text for part in ("p99 under 200 ms", "the latency panel", "master"))
+
+
+def _start(env, kind):  # noqa: F811
+    store, ledger, _ = env
+    ledger.rows["t1"]["kind"] = kind
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    return store, ledger
+
+
+def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeypatch, capsys):  # noqa: F811
+    store, ledger = _start(env, "ops")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    assert run("sw", "done") == 1
+    assert run("sw", "done", "--command", "kubectl get pods") == 1
+    assert "--output" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] != "done"
+    assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] != ["finished"]
+    assert run("sw", "done", "--command", "kubectl get pods", "--output", "cache-0 Running") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert ledger.rows["t1"]["proof"] == {"command": "kubectl get pods", "output": "cache-0 Running"}
+
+
+def test_troubleshoot_and_research_close_with_their_own_proof(env, monkeypatch):  # noqa: F811
+    _, ledger = _start(env, "troubleshoot")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    assert run("sw", "done", "--root-cause", "a stale lock", "--evidence", "the lock age in the log") == 1
+    args = ("--root-cause", "a stale lock", "--evidence", "the lock age in the log", "--filed", "t9")
+    assert run("sw", "done", *args) == 0
+    assert ledger.rows["t1"]["proof"]["filed"] == "t9"
+    ledger.rows["t2"].update(kind="research", state="claimed")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
+    assert run("sw", "done", "--finding", "my notes") == 1
+    assert run("sw", "done", "--finding", "https://github.com/o/r/issues/4#issuecomment-1") == 0

@@ -81,6 +81,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, a `Monitor` on `agentihooks ledger watch <slug> --as <name>`, act on every OPERATOR line, then `ack` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
+| A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
 | Context reaches `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Write the handoff document, `agentihooks swarm <slug> handoff <doc>`, stop; a successor continues from it. From the limit on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff command and `ledger` comment, say, leave and ack pass |
 
 - Each swarm keeps one master, `<slug>-master-<n>`: the tick starts it, respawns

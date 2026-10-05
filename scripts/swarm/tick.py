@@ -18,7 +18,7 @@ ACTIVE = ("claimed", "pr")
 NUDGE = (
     "Swarm check: you are idle and your task is still open. If you are waiting on checks, say so with "
     "agentihooks swarm {slug} say and keep waiting. Otherwise finish it with agentihooks swarm {slug} done "
-    "--pr <url>, or agentihooks swarm {slug} block with the reason."
+    "and the proof your task's kind needs (--pr <url> for code), or agentihooks swarm {slug} block with the reason."
 )
 
 

@@ -44,8 +44,15 @@ that owns it: `eng` for code, `ci` for workflows and pipelines.
 
 ```bash
 agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>" \
-  [--depends-on <id>,<id>] [--territory <path or area>,<path or area>]
+  [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
+  [--kind code|ci|ops|troubleshoot|tune|research] [--must "<true when done>" --check "<how>" --judge "<who>"]
 ```
+
+Work that is not a code change takes a kind; a task without one is `code`. Each kind
+gets its own prompt and its own proof: `ops` and `tune` close with the command and its
+output, `troubleshoot` with the root cause, its evidence and a fix or a filed task,
+`research` with a link to the written finding. `--must`, `--check` and `--judge` form
+the task's proof contract, shown to its agent. The ledger refuses `done` without the proof.
 
 The tick claims a task only once every task in `--depends-on` is done, and never
 while its territory overlaps a claimed or in-review task's. Add the tasks a task

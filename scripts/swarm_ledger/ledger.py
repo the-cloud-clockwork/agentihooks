@@ -22,8 +22,10 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
-                                      add a swarm task; IDS and AREAS are comma separated
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on or territory of a task
+           [--kind K] [--must M --check C --judge J]
+                                      add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
+                                      ops, troubleshoot, tune or research; M, C, J form its proof contract
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task
   prompt                              print the join paragraph for a launch prompt
 
 Agent text is for the operator: plain words, what was done or why it was skipped. The server refuses
@@ -48,6 +50,7 @@ sys.path.insert(0, str(HERE))
 import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
+import ledger_kinds  # noqa: E402
 import watch_ledger  # noqa: E402
 
 BASE = f"http://{os.environ.get('LEDGER_HOST', '127.0.0.1')}:{os.environ.get('LEDGER_PORT', '8765')}"
@@ -77,11 +80,11 @@ def call(slug, ops=None):
         sys.exit(f"ledger server not answering on {BASE}: {exc}")
 
 
-def op(kind, args, **fields):
+def op(kind, args, /, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
-def send(args, kind, **fields):
+def send(args, kind, /, **fields):
     state = call(args.slug, [op(kind, args, **fields)])
     if state.get("rejected"):
         sys.exit(f"rejected: {state['rejected']}")
@@ -242,6 +245,11 @@ def cmd_task(args):
         lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
         if args.gain is not None:
             lists["gain"] = args.gain
+        contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
+        if contract:
+            lists["contract"] = contract
+        if args.kind:
+            lists["kind"] = args.kind
         send(
             args,
             "task_add",
@@ -334,6 +342,12 @@ def build_parser():
     task.add_argument(
         "--gain", type=float, help="what the task is expected to win, as a number the health check compares"
     )
+    task.add_argument(
+        "--kind", choices=ledger_kinds.KINDS, help="code (default), ci, ops, troubleshoot, tune, research"
+    )
+    task.add_argument("--must", default="", help="contract: what must be true when the task is done")
+    task.add_argument("--check", default="", help="contract: how it is checked")
+    task.add_argument("--judge", default="", help="contract: who judges it")
     return parser
 
 
