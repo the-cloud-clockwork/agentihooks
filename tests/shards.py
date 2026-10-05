@@ -1,6 +1,6 @@
 from pathlib import Path
 
-# Each of a shard's four workers rewrites every file it collects, while stored durations are split between them.
+# Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
 
 
@@ -12,10 +12,8 @@ def source_sizes(root: Path, files: list[str]) -> dict[str, int]:
     return {path: (root / path).stat().st_size for path in files}
 
 
-def assign_files(
-    durations: dict[str, float], files: list[str], shards: int, sizes: dict[str, int] | None = None
-) -> list[list[str]]:
-    seconds = {path: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
+def assign_files(durations: dict[str, float], files: list[str], shards: int, sizes: dict[str, int]) -> list[list[str]]:
+    seconds = {path: sizes.get(path, 0) * SECONDS_PER_SOURCE_BYTE for path in files}
     for nodeid, duration in durations.items():
         path = nodeid.split("::", 1)[0]
         if path in seconds:
