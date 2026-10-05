@@ -317,6 +317,19 @@ def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
     assert text.index(f"{led} leave") < text.index("agentihooks swarm sw done --pr")
 
 
+def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave_then_done():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1"})
+    steps = [line for line in text.splitlines() if line[:1].isdigit() and line[1:3] == ". "]
+    review = next(i for i, s in enumerate(steps) if "Gates green" in s and "review per the dev-cycle skill" in s)
+    merge = next(i for i, s in enumerate(steps) if "Merge on green checks" in s)
+    assert review < merge
+    assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
+    last = steps[-1]
+    assert last.index("agentihooks ledger --slug sw --as sw-eng-1 leave") < last.index("agentihooks swarm sw done --pr")
+
+
 def test_set_compact_limit_stores_it_on_the_swarm(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
