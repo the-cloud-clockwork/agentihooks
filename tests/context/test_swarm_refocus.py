@@ -155,3 +155,10 @@ def test_each_full_tool_call_counts_once_toward_the_window(bound, monkeypatch, c
     assert "Inject a refocus block." in _prompt(capsys)
     seen = ["Inject a refocus block." in _pre(capsys) + _post(capsys) for _ in range(6)]
     assert seen == [False, False, True, False, False, True]
+
+
+def test_codex_receives_the_block_on_the_first_prompt(bound, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    out = _prompt(capsys)
+    assert "Inject a refocus block." in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "Inject a refocus block." not in _prompt(capsys)
