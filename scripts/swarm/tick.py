@@ -68,7 +68,9 @@ class Runtime(Protocol):
 
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
-    actions = _recover_master(slug, config, store, runtime, now_ms)
+    actions = []
+    if config.state != "stopped" or _woken(slug, config, store, ledger):
+        actions = _recover_master(slug, config, store, runtime, now_ms)
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
@@ -79,7 +81,6 @@ def tick(slug, store, ledger, runtime, now_ms):
             return actions + _close_space(slug, config, store, runtime)
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
-        actions += _recover_master(slug, config, store, runtime, now_ms)
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -296,8 +297,6 @@ def _placed(record, placed):
 
 
 def _recover_master(slug, config, store, runtime, now_ms):
-    if config.state == "stopped":
-        return []
     agents = [a for a in store.agents(slug) if a.lane == MASTER]
     live = runtime.live_names()
     if any(a.state != "finished" and a.name in live for a in agents):

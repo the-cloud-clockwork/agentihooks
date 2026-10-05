@@ -77,6 +77,24 @@ def test_stale_pane_on_a_dead_record_is_not_closed_during_recovery(store):  # no
     assert "hand:p1" not in runtime.closed
 
 
+def test_a_stopped_swarm_recovers_its_live_master_before_reaping_on_wake(store):  # noqa: F811
+    store.update("sw", state="stopped")
+    dead = store.next_name("sw", MASTER)
+    live = store.next_name("sw", MASTER)
+    store.put_agent("sw", AgentRecord(dead, MASTER, MASTER, pane_id="hand:p1"))
+    store.seats.occupy("master@sw", live, 1)
+    InboxStore(store.redis).send("operator", "master@sw", "Resume the master")
+    runtime = RecoveryRuntime()
+    runtime.live.add(live)
+
+    tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 2)
+
+    assert "hand:p1" not in runtime.closed
+    assert runtime.masters == []
+    assert [a.name for a in masters(store)] == [live]
+    assert store.config("sw").state == "paused"
+
+
 def test_a_live_master_in_another_swarm_does_not_prevent_respawn(store):  # noqa: F811
     runtime = RecoveryRuntime()
     runtime.live.add("master@ffffff-0001")
