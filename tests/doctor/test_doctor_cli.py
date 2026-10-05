@@ -197,6 +197,45 @@ def test_the_cli_routes_a_crew_verb_to_the_crew_and_leaves_the_hook_doctor_alone
     assert install._crew_doctor(["doctor"]) is False
 
 
+@pytest.mark.parametrize(
+    "rest",
+    [
+        ["verdict", "health/f1", "established", "--note", "checked"],
+        ["task", "health/f1", "--fix", "tune"],
+        ["measure", "health/f1"],
+        ["intervene", "message", "--to", "master@watch", "--text", "hi"],
+    ],
+)
+def test_the_cli_routes_every_crew_verb_to_the_crew(monkeypatch, rest):
+    from scripts import install
+
+    calls = []
+    monkeypatch.setattr(doctor, "main", lambda argv: calls.append(doctor.build_parser().parse_args(argv).command) or 0)
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "doctor", WATCHED, *rest])
+    with pytest.raises(SystemExit):
+        install.main()
+    assert calls == [rest[0]]
+
+
+@pytest.mark.parametrize("rest", [[], ["--json"], ["--target", "codex"], ["--debug-hook"]])
+def test_the_cli_leaves_hook_health_on_the_hook_doctor(monkeypatch, rest):
+    import argparse
+
+    from scripts import install
+
+    class HookHealth(Exception):
+        pass
+
+    def hook_parser(self, args=None, namespace=None):
+        raise HookHealth
+
+    monkeypatch.setattr(doctor, "main", lambda argv: pytest.fail(f"crew doctor got {argv}"))
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", hook_parser)
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "doctor", *rest])
+    with pytest.raises(HookHealth):
+        install.main()
+
+
 STALE = Finding(
     "stale claim", "watch-eng-1", "claimed task with no change for 40 minutes", ("task t1",), "30 minutes", 40
 )
