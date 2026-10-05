@@ -208,7 +208,7 @@ class SwarmPanel(unittest.TestCase):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         side = re.search(r"^\.side \{([^}]*)\}", page, re.M).group(1)
         self.assertIn("position: sticky", side)
-        self.assertRegex(side, r"max-height: calc\(100vh - \d+px\)")
+        self.assertRegex(side, r"max-height: var\(--side-max, calc\(100vh - \d+px\)\)")
         self.assertIn("overflow-y: auto", side)
         self.assertRegex(page, r"\.side > section \{[^}]*flex: none")
         narrow = page.split("@media (max-width: 1100px) {", 1)[1].split("\n}\n", 1)[0]
