@@ -63,6 +63,25 @@ def test_codex_gets_the_item_at_post_tool_use_not_at_pre_tool_use(store, codex, 
     assert "review my branch" not in _post(capsys)
 
 
+def test_the_codex_memory_helper_never_takes_the_main_thread_item(store, codex, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    item = store.send("alice", "bob", "review my branch")
+    hook_manager.on_post_tool_use(
+        {
+            "session_id": "helper",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"},
+            "tool_response": {"stdout": "a"},
+            "cwd": str(tmp_path / "memories"),
+        }
+    )
+    flush("PostToolUse")
+    assert "review my branch" not in capsys.readouterr().out
+    assert store.get(item.id).state == "pending"
+    assert "review my branch" in _post(capsys)
+    assert store.get(item.id).state == "delivered"
+
+
 def test_another_session_items_are_never_injected(store, capsys):
     item = store.send("alice", "carol", "for carol only")
     assert "for carol only" not in _pre(capsys)

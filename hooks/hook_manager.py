@@ -956,21 +956,21 @@ def on_user_prompt_submit(payload: dict) -> None:
     _inject_refocus(session_id, "prompt")
 
 
-def _inbox_blocks(session_id: str) -> list[str]:
+def _inbox_blocks(session_id: str, cwd: str = "") -> list[str]:
     try:
         from hooks.context.inbox_delivery import pending_context
 
-        context = pending_context(session_id)
+        context = pending_context(session_id, cwd=cwd)
     except Exception as e:
         log("inbox delivery failed", {"error": str(e)})
         return []
     return [context] if context else []
 
 
-def _inject_inbox(session_id: str) -> None:
+def _inject_inbox(session_id: str, cwd: str = "") -> None:
     from hooks.common import inject_context
 
-    for context in _inbox_blocks(session_id):
+    for context in _inbox_blocks(session_id, cwd):
         inject_context(context, also_log=False, skip_compression=True)
 
 
@@ -1464,7 +1464,7 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
-    _pretool_blocks.extend(_inbox_blocks(session_id) if _can_inject_pretool else [])
+    _pretool_blocks.extend(_inbox_blocks(session_id, payload.get("cwd", "")) if _can_inject_pretool else [])
     _pretool_blocks.extend(_refocus_blocks(session_id, "tool") if _can_inject_pretool else [])
 
     if ENFORCEMENT_INJECTION_ENABLED:
@@ -1646,7 +1646,7 @@ def on_post_tool_use(payload: dict) -> None:
                 )
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
-            _inject_inbox(_trace_session_id)
+            _inject_inbox(_trace_session_id, payload.get("cwd", ""))
             _inject_refocus(_trace_session_id, "tool")
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
