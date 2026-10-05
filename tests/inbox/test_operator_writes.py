@@ -90,6 +90,8 @@ def test_a_reply_on_a_phase_goes_to_the_master(swarm):
         write(5, "notes", kind="note added"),
         write(5, "phases/p2", kind="checked", text=None),
         write(5, "followups/f1", kind="unchecked", text=None),
+        write(5, "", kind="sync requested", text="Operator sync."),
+        write(5, "title", kind="title changed", text="New title"),
     ],
 )
 def test_answers_notes_and_checks_go_to_the_master(swarm, event):

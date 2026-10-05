@@ -317,6 +317,14 @@ def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers
     assert runtime.spawned == [] and store.config("sw").state == "paused"
 
 
+def test_a_drained_swarm_without_a_master_starts_one_and_no_engineers(store):
+    store.update("sw", state="drained")
+    runtime = FakeRuntime()
+    actions = tick("sw", store, tasks(), runtime, 1)
+    assert "spawned master sw-master-1" in actions and runtime.spawned == []
+    assert store.config("sw").state == "drained"
+
+
 def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     store.update("sw", state="stopped")
     runtime = FakeRuntime()
