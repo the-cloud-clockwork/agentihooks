@@ -123,7 +123,8 @@ class TaskProofOnThePage(unittest.TestCase):
         self.assertIn('addEventListener("toggle"', source)
 
     def test_show_and_hide_all_comments_leave_the_proof_dropdown_alone(self):
-        self.assertIn('section.querySelectorAll("details[data-key]")', function_source("setAllComments"))
+        self.assertIn("commentBoxes(section)", function_source("setAllComments"))
+        self.assertIn('section.querySelectorAll("details[data-key]")', function_source("commentBoxes"))
         self.assertNotIn("data-key", function_source("taskProof"))
 
     def test_proof_styles_use_only_palette_tokens(self):
