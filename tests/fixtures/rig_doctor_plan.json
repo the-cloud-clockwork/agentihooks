@@ -1,0 +1,125 @@
+{
+  "title": "Rig doctor build",
+  "tasks": [
+    {
+      "id": "lf1",
+      "title": "Find why the Langfuse agent trace export times out",
+      "lane": "eng",
+      "depends_on": []
+    },
+    {
+      "id": "lf2",
+      "title": "Agent trace export completes and logs every failure",
+      "lane": "eng",
+      "depends_on": [
+        "lf1"
+      ]
+    },
+    {
+      "id": "lf3",
+      "title": "Langfuse traces carry full prompt, output and tool text with credentials masked",
+      "lane": "eng",
+      "depends_on": [
+        "lf2"
+      ]
+    },
+    {
+      "id": "lf4",
+      "title": "Every Claude and Codex session is traced to Langfuse by default",
+      "lane": "eng",
+      "depends_on": [
+        "lf2"
+      ]
+    },
+    {
+      "id": "lc1",
+      "title": "Langfuse connector reads the agent-swarm project with tools the Doctor needs",
+      "lane": "eng",
+      "depends_on": []
+    },
+    {
+      "id": "dc1",
+      "title": "Observability setup document for OpenTelemetry and Langfuse",
+      "lane": "eng",
+      "depends_on": [
+        "lf3",
+        "lf4",
+        "lc1"
+      ]
+    },
+    {
+      "id": "dt1",
+      "title": "Doctor detectors over health findings, the inbox and handoffs",
+      "lane": "eng",
+      "depends_on": []
+    },
+    {
+      "id": "dt2",
+      "title": "Doctor detectors over spawns and CI",
+      "lane": "eng",
+      "depends_on": [
+        "dt1"
+      ]
+    },
+    {
+      "id": "dt3",
+      "title": "Doctor detector over Langfuse traces",
+      "lane": "eng",
+      "depends_on": [
+        "dt2",
+        "lc1",
+        "lf3"
+      ]
+    },
+    {
+      "id": "ds1",
+      "title": "Doctor commands: start, stop and status with linked ledgers and peer masters",
+      "lane": "eng",
+      "depends_on": [
+        "dt1"
+      ]
+    },
+    {
+      "id": "ds2",
+      "title": "Doctor master loop: detection timer, verdicts to tasks, interventions and self close",
+      "lane": "eng",
+      "depends_on": [
+        "ds1",
+        "dt2"
+      ]
+    },
+    {
+      "id": "sk1",
+      "title": "rig-doctor skill, demo app workload and bundle Doctor rules file",
+      "lane": "eng",
+      "depends_on": [
+        "ds2"
+      ]
+    },
+    {
+      "id": "ci1",
+      "title": "CI for the Doctor demo app template",
+      "lane": "ci",
+      "depends_on": [
+        "sk1"
+      ]
+    },
+    {
+      "id": "lp1",
+      "title": "Live proof: rig-doctor runs the demo swarm and its Doctor and ships a verified fix",
+      "lane": "eng",
+      "depends_on": [
+        "sk1",
+        "ci1",
+        "dt3",
+        "fx11"
+      ]
+    },
+    {
+      "id": "fx11",
+      "title": "Demo reset keeps authenticated Git access",
+      "lane": "eng",
+      "depends_on": []
+    }
+  ]
+}

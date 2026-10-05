@@ -19,6 +19,7 @@ def page_script():
     functions = "\n".join(
         function_source(n)
         for n in (
+            "renderPlanShape",
             "renderSwarm",
             "renderControls",
             "swarmControls",
