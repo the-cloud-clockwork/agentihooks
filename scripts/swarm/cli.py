@@ -44,7 +44,19 @@ from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, idle, ledger_events, naming, phases, prompt, snapshot, take_master, templates, timer
+from scripts.swarm import (
+    control_notifications,
+    delivery,
+    idle,
+    ledger_events,
+    naming,
+    phases,
+    prompt,
+    snapshot,
+    take_master,
+    templates,
+    timer,
+)
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -724,7 +736,12 @@ def main(argv):
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        handler(connect(), args)
+        store = connect()
+        action = getattr(args, "command", "")
+        before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
+        handler(store, args)
+        if action in control_notifications.CONTROLS:
+            control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError) as exc:
         print(f"swarm: {exc}", file=sys.stderr)
         return 1

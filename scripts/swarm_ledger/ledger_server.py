@@ -305,7 +305,8 @@ def swarm_control(slug, argv, command="swarm"):
     if not exe:
         return None, "agentihooks is not on PATH"
     try:
-        done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60)
+        env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
+        done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
     if done.returncode != 0:

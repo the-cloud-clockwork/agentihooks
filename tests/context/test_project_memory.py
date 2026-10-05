@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from hooks.context.brain_adapter import BrainEntry
@@ -7,9 +7,16 @@ from hooks.context.project_memory import VaultProjectSource
 from hooks.context.project_sessions import record_session
 
 
+class _UtcClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 5, 23, 30, tzinfo=timezone.utc).astimezone(tz)
+
+
 def test_source_confirms_project_and_attributes_lessons(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setenv("BRAIN_STALE_LESSON_DAYS", "1")
+    monkeypatch.setattr("hooks.context.project_memory.datetime", _UtcClock)
     identity = ProjectIdentity("alpha", "org/alpha")
     record_session("ours", identity)
     record_session("theirs", ProjectIdentity("beta", "org/beta"))
@@ -27,7 +34,7 @@ def test_source_confirms_project_and_attributes_lessons(monkeypatch, tmp_path):
             "content": "---\ncluster_id: a\nproject: alpha\ntitle: Alpha\nsummary: Alpha focus\nstatus: active\nupdated: 2026-10-05\n---\n"
         },
         "pineal/b.md": {"content": "---\ncluster_id: b\nproject: beta\ntitle: Beta\n---\n"},
-        f"left/reference/lessons-{date.today().isoformat()}.md": {
+        "left/reference/lessons-2026-10-05.md": {
             "content": "## now — agent — `ours`\n\nOur lesson.\n\n## now — agent — `theirs`\n\nOther lesson.\n"
         },
     }

@@ -58,6 +58,7 @@ LISTS = {
 BOOL_FIELDS = ("done", "out_of_scope")
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
 THREADS = {
+    "notes": ("comments",),
     "phases": ("comments",),
     "questions": ("answers", "comments"),
     "followups": ("comments",),
@@ -161,7 +162,7 @@ def normalize(doc):
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
     doc.setdefault("tasks", [])
-    for name in LISTS:
+    for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
             if not isinstance(item, dict):
                 continue
@@ -201,6 +202,8 @@ def validate(doc):
         raise ValueError("sources must be a list of strings")
     validate_thread("notes", doc.get("notes", []))
     validate_thread("chat", doc.get("chat", []))
+    for note in doc.get("notes", []):
+        validate_thread(f"notes/{note['id']}/comments", note.get("comments", []))
     if "policy" in doc and not isinstance(doc["policy"], dict):
         raise ValueError("policy must be an object")
     for name, fields in LISTS.items():
@@ -236,10 +239,10 @@ def flatten(doc):
 def thread_paths(doc):
     yield "notes", doc["notes"]
     yield "chat", doc["chat"]
-    for name in LISTS:
+    for name in THREADS:
         for item in doc[name]:
             for thread in THREADS[name]:
-                yield f"{name}/{item['id']}/{thread}", item[thread]
+                yield f"{name}/{item['id']}/{thread}", item.get(thread, [])
 
 
 def thread_target(path):
@@ -253,7 +256,7 @@ def get_thread(doc, path):
     if len(parts) != 3 or parts[0] not in THREADS or parts[2] not in THREADS[parts[0]]:
         return None
     item = next((i for i in doc[parts[0]] if i["id"] == parts[1]), None)
-    return None if item is None else item[parts[2]]
+    return None if item is None or item.get("deleted") else item.setdefault(parts[2], [])
 
 
 def parse_seed(html):
@@ -563,6 +566,9 @@ def apply_op(doc, op, ctx):
     else:
         ctx.record("operator", f"{noun} deleted", target, id=op["id"], text=entry["text"])
         entry.update(text="", deleted=True, edited_at=ctx.at)
+    if target.startswith("notes/"):
+        note = next(n for n in doc["notes"] if n["id"] == target.split("/")[1])
+        ctx.events[-1]["note_text"] = note["text"]
     ctx.stamp(op["thread"], "operator")
     return True
 

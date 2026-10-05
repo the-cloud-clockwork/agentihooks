@@ -109,6 +109,7 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
+    ledger.said.clear()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "the docs task is merged", "--to", "ci") == 0
     assert ledger.said == [("@ci the docs task is merged", "engineer@a1b2c3-0001")]
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
@@ -116,6 +117,7 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
     assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
     assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
+
     assert run("sw", "--as", "stranger", "say", "hello") == 1
     assert "not an agent" in capsys.readouterr().err
 
@@ -388,10 +390,13 @@ def test_exit_notice_for_an_exited_sender_goes_to_the_master_seat(env):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     inbox = InboxStore(store.redis)
+    for notice in inbox.pending_items("master@sw"):
+        inbox.close(notice.id, "master@a1b2c3-0001", "done")
     item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
     assert run("sw", "--as", "ci@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/8") == 0
     assert run("sw", "--as", "engineer@a1b2c3-0001", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     assert inbox.pending_items("ci@a1b2c3-0001") == []
+
     [notice] = inbox.pending_items("master@sw")
     assert item.id in notice.text
 
@@ -875,7 +880,9 @@ def test_say_refused_by_a_link_posts_nothing_and_names_why(env, capsys):
     run("sw", "create", "--repo", "/repo")
     store.update("sw", links=[{"from": "ci", "to": "eng", "kind": "can-observe"}])
     run("sw", "start")
+    ledger.said.clear()
     assert run("sw", "--as", "ci@a1b2c3-0001", "say", "take my task", "--to", "eng") == 1
+
     assert "can only observe" in capsys.readouterr().err
     assert ledger.said == [] and InboxStore(store.redis).inbox("engineer@a1b2c3-0001") == []
 

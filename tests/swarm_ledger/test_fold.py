@@ -101,7 +101,7 @@ class EverySectionFolds(unittest.TestCase):
         self.assertIn("collapsible(box);", function_source("outlineGroup"))
 
     def test_sections_with_comment_dropdowns_carry_one_comments_control(self):
-        with_comments = {"sec-phases", "sec-tasks", "sec-questions", "sec-followups"}
+        with_comments = {"sec-phases", "sec-tasks", "sec-questions", "sec-notes", "sec-followups"}
         for section in sections():
             buttons = [k for k in walk(section.kids[0].kids[0], "button") if "data-comments" in k.attrs]
             want = 1 if section.attrs.get("id") in with_comments else 0

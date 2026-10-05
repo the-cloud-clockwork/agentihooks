@@ -37,10 +37,10 @@ def orchestrator(members):
 def owner(event, members, tasks=()):
     boss = orchestrator(members)
     target = event.get("target", "")
-    if target == "chat":
-        mention = MENTION_RE.match(event.get("text", ""))
+    if target == "chat" or target.startswith("notes/"):
         from scripts.swarm.naming import resolve_name
 
+        mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
         named = resolve_name(mention.group(1)) if mention else None
         return named if named in members else boss
     claimer = next((t.get("claimed_by") for t in tasks if f"tasks/{t.get('id')}" == target), None)
