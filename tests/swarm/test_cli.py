@@ -318,6 +318,97 @@ def test_handoff_moves_items_left_for_the_agent_to_its_seat(env, tmp_path):
     assert "moved to eng-1@sw" in inbox.history(item.id)[-1]["reason"]
 
 
+def test_done_also_closes_an_item_delivered_but_never_closed(env, monkeypatch):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    seen = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    unseen = inbox.send("sw-ci-1", "sw-eng-1", "schema confirmed")
+    inbox.deliver(seen.id, "sw-eng-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    assert [inbox.get(i.id).state for i in (seen, unseen)] == ["cancelled", "cancelled"]
+    assert len(inbox.pending_items("sw-ci-1")) == 2
+
+
+def test_handoff_puts_an_item_delivered_but_never_closed_back_on_the_seat_pending(env, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    seen = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    inbox.read(seen.id, "sw-eng-1")
+    doc = tmp_path / "handoff.md"
+    doc.write_text("issue 7 is open")
+    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    moved = inbox.get(seen.id)
+    assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+    assert [i.id for i in inbox.pending_items("eng-1@sw")] == [seen.id]
+
+
+def test_exit_notice_for_an_exited_sender_goes_to_the_master_seat(env):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    assert run("sw", "--as", "sw-ci-1", "done", "--pr", "https://github.com/o/r/pull/8") == 0
+    assert run("sw", "--as", "sw-eng-1", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    assert inbox.pending_items("sw-ci-1") == []
+    [notice] = inbox.pending_items("master@sw")
+    assert item.id in notice.text
+
+
+def test_next_tick_settles_messages_sent_after_done(env):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    assert run("sw", "--as", "sw-eng-1", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    cli.run_tick(store, "sw")
+    item = inbox.send("sw-ci-1", "sw-eng-1", "late contract")
+    cli.run_tick(store, "sw")
+    closed = inbox.get(item.id)
+    assert closed.state == "cancelled"
+    assert "finished its task and exited" in closed.reason
+    [notice] = inbox.pending_items("sw-ci-1")
+    assert item.id in notice.text
+
+
+@pytest.mark.parametrize("state", ["delivered", "read"])
+def test_block_closes_open_items_once_and_tells_the_sender(env, state):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "sw-eng-1")
+    assert run("sw", "--as", "sw-eng-1", "block", "missing dependency") == 0
+    closed = inbox.get(item.id)
+    assert closed.state == "cancelled"
+    assert "blocked its task and exited" in closed.reason
+    cli.run_tick(store, "sw")
+    assert len(inbox.pending_items("sw-ci-1")) == 1
+
+
+def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    doc = tmp_path / "handoff.md"
+    doc.write_text("keep working")
+    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    cli.run_tick(store, "sw")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-1", "sw-eng-1", "late contract")
+    cli.run_tick(store, "sw")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
+    successor = store.seats.occupant("eng-1@sw").occupant
+    assert successor != "sw-eng-1"
+    assert inbox.deliver(item.id, successor).state == "delivered"
+
+
 def test_agent_prompt_starts_by_reading_the_ledger_json():
     from scripts.swarm import prompt
 

@@ -86,6 +86,23 @@ class SeatRegistry:
         address = self.redis.get(f"{PREFIX}-of:{name}") or ""
         return address if address and self.occupant(address).occupant == name else ""
 
+    def known_seat(self, name: str) -> str:
+        return self.redis.get(f"{PREFIX}-of:{name}") or ""
+
+    def agent_seats(self, slug: str) -> list[tuple[str, str]]:
+        prefix = f"{PREFIX}-of:"
+        return [
+            (name, self.known_seat(name))
+            for key in self.redis.scan_iter(match=f"{prefix}{slug}-*")
+            if of_swarm(name := key[len(prefix) :], slug)
+        ]
+
+    def record_exit(self, name: str, seat: str, reason: str) -> None:
+        self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps({"seat": seat, "reason": reason}), nx=True)
+
+    def exit_of(self, name: str) -> dict[str, str]:
+        return json.loads(self.redis.get(f"{PREFIX}-of:{name}:exit") or "{}")
+
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]
 
@@ -94,7 +111,8 @@ class SeatRegistry:
         seat = re.compile(rf"{re.escape(PREFIX)}:[^:@]+@{re.escape(slug)}(:({'|'.join(MEMORY_KINDS)}))?")
         keys = [key for key in self.redis.scan_iter(match=f"{PREFIX}:*@{slug}*") if seat.fullmatch(key)]
         pointers = self.redis.scan_iter(match=f"{PREFIX}-of:{slug}-*")
-        return sorted(keys) + sorted(key for key in pointers if of_swarm(key.split(":", 2)[2], slug))
+        agents = sorted(key for key in pointers if of_swarm(key.split(":", 2)[2], slug))
+        return sorted(keys) + agents + [f"{key}:exit" for key in agents if self.redis.exists(f"{key}:exit")]
 
 
 class SeatMemory:
