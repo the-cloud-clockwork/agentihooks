@@ -176,6 +176,7 @@ def _load_json_enforcements(path: Path, source: str) -> list[dict]:
             return []
         for e in entries:
             e["source"] = source
+            e["store"] = str(path)
         return entries
     except (json.JSONDecodeError, OSError):
         return []
@@ -226,6 +227,7 @@ def load_all_enforcements(cwd: str | Path | None = None) -> list[dict]:
             by_id[eid] = e
     for e in _load_store():
         e["source"] = "runtime"
+        e["store"] = str(_store_path())
         eid = e.get("id")
         if eid:
             by_id[eid] = e
