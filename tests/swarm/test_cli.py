@@ -1,7 +1,6 @@
 import json
 import subprocess
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, runtime, timer
@@ -9,9 +8,13 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     ledger.said = []

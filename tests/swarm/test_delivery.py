@@ -1,8 +1,9 @@
-import fakeredis
 import pytest
 
 from scripts.swarm import delivery
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class FakeHerdr:
@@ -18,6 +19,8 @@ class FakeHerdr:
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     s.create(SwarmConfig("sw", "/repo", 2, 1))
     for name, lane, pane in (("sw-eng-1", "eng", "p1"), ("sw-eng-2", "eng", "p2"), ("sw-ci-1", "ci", "p3")):
