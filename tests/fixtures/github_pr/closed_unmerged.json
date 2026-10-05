@@ -1,0 +1,36 @@
+{
+ "state": "CLOSED",
+ "mergedAt": null,
+ "commits": [
+  {
+   "oid": "959b628afd580c538a37911177a387f6ff19ac52",
+   "committedDate": "2026-10-05T01:40:12Z"
+  }
+ ],
+ "statusCheckRollup": [
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 1, base)",
+   "status": "COMPLETED",
+   "conclusion": "CANCELLED"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 1, early)",
+   "status": "COMPLETED",
+   "conclusion": "FAILURE"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 2, base)",
+   "status": "COMPLETED",
+   "conclusion": "CANCELLED"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 2, early)",
+   "status": "COMPLETED",
+   "conclusion": "CANCELLED"
+  }
+ ]
+}

@@ -1,0 +1,36 @@
+{
+ "state": "MERGED",
+ "mergedAt": "2026-10-05T17:34:59Z",
+ "commits": [
+  {
+   "oid": "463c8733b9a9e21afe7107d2b7c61caa4c5ad01c",
+   "committedDate": "2026-10-05T17:31:17Z"
+  }
+ ],
+ "statusCheckRollup": [
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 1)",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 2)",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 3)",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS"
+  },
+  {
+   "__typename": "CheckRun",
+   "name": "unit (3.11, 4)",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS"
+  }
+ ]
+}

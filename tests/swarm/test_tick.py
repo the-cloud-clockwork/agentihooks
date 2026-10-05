@@ -22,6 +22,10 @@ class FakeLedger:
     def events(self, slug):
         return []
 
+    def state(self, slug):
+        log = getattr(self, "log", [])
+        return {"tasks": self.tasks(slug), "_meta": {"rev": len(log), "events": log}, "followups": []}
+
     def update_task(self, slug, task_id, fields, by="swarm"):
         self.rows[task_id].update(fields)
 
