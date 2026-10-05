@@ -16,7 +16,7 @@ OLDER_RECAPS = 3
 LANE_ROLE = {
     "eng": "an engineer",
     "ci": "a CI engineer whose only job is CI speed: find the slowest jobs and steps, fix the bottleneck so CI runs "
-    "as parallel and as fast as possible, and add each further bottleneck you find as a new ci task",
+    "as parallel and as fast as possible, and propose each further bottleneck you find as a follow up",
 }
 
 
@@ -99,8 +99,8 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     lines += priming_lines(task)
     if lane == "ci":
         lines.append(
-            f"Add a further bottleneck as a ci task: agentihooks ledger --slug {slug} --as {name} task add <short id> "
-            f'"<plain title>" --lane ci --phase {task.get("phase") or "p1"}'
+            f'Propose a further bottleneck as a follow up: {led} followup add "<plain words naming it>". '
+            "Never queue it as a task yourself: the master or the operator decides."
         )
     lines += [
         "",

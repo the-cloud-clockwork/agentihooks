@@ -23,7 +23,7 @@ A swarm is a herdr workspace named `swarm-<id>`. Its agents work the tasks of on
 | Lane | Agent |
 |---|---|
 | `eng` | An engineer working a code task end to end with the dev-cycle skill. |
-| `ci` | A CI engineer whose only job is CI speed; it adds each further bottleneck as a new `ci` task. |
+| `ci` | A CI engineer whose only job is CI speed; it proposes each further bottleneck as a follow up. |
 | `master` | The one agent the operator talks to. It works no task and never edits code, commits or merges. |
 
 ## The master
