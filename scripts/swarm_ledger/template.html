@@ -379,7 +379,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     <div class="status" id="status" role="status">loading</div>
   </header>
   <div class="banner" id="banner"></div>
-  <div class="closed-banner" id="closed-banner" role="status" hidden></div>
+  <div class="closed-banner" id="closed-banner" role="status" hidden><span id="closed-label"></span> <button class="sw-btn" type="button" data-swarm="reopen">Reopen</button></div>
   <div class="layout"><div class="col">
   <section id="sec-overview" data-outline><details class="sources-box fold" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details></section>
   <div class="sec-tools"><button class="link" type="button" id="sections-all"></button></div>
@@ -865,7 +865,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     document.title = doc.title;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
-    $("closed-banner").textContent = closedText(doc.closed_at);
+    $("closed-label").textContent = closedText(doc.closed_at);
     $("closed-banner").hidden = !doc.closed_at;
     $("sources-count").textContent = headCount([[doc.sources.length]]);
     listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
@@ -1144,7 +1144,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function opNote(phase, action, error) {
-    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close", set: "Set caps",
+    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close", reopen: "Reopen", set: "Set caps",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
@@ -1169,7 +1169,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function renderControls() {
     const off = swarm ? { ...swarmControls(swarm.config.state), ...capBounds({ ...swarm.config, codex_share: codexDraft ?? swarm.config.codex_share }) } : swarmControls("");
-    for (const btn of $("swarm-box").querySelectorAll("button[data-swarm]")) {
+    for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
       const action = btn.dataset.swarm;
       btn.disabled = !!pending || !!off[action];
       btn.classList.toggle("sending", pending === action);
@@ -1199,6 +1199,11 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     pending = "";
     renderSwarm(swarm);
   }
+
+  $("closed-banner").addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-swarm]");
+    if (btn && !btn.disabled) swarmControl({ action: "reopen" });
+  });
 
   $("swarm-box").addEventListener("click", (event) => {
     const btn = event.target.closest("button[data-swarm]");

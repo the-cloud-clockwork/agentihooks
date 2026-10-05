@@ -113,6 +113,7 @@ HOME_STYLE = (
     "border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;"
     "transition:background .15s,border-color .15s,box-shadow .15s,color .15s}"
     ".act svg{width:16px;height:16px}.act:disabled{opacity:.3;cursor:wait}"
+    ".act.reopen{width:auto;padding:0 10px;color:var(--link)}"
     ".act:hover,.act:focus-visible{outline:none;background:var(--hover);border-color:var(--edge);"
     "box-shadow:0 0 12px -2px currentColor}"
     ".act:focus-visible{outline:1px solid currentColor;outline-offset:2px}"
@@ -138,8 +139,15 @@ TRASH = ICON.format(
 RESTORE = ICON.format('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>')
 HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
 BIN_SCRIPT = (
-    "<script>document.addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;"
-    "b.disabled=true;const r=await fetch('/api/bin',{method:'POST',headers:{'Content-Type':'application/json'},"
+    "<script>async function reopenLedger(b){"
+    "const slug=encodeURIComponent(b.dataset.slug),page=await fetch('/'+slug);if(!page.ok)return page;"
+    "const doc=new DOMParser().parseFromString(await page.text(),'text/html');"
+    "const token=doc.querySelector('meta[name=ledger-token]').content;"
+    "return fetch('/api/swarm/'+slug,{method:'PUT',headers:{'Content-Type':'application/json',"
+    "'X-Ledger-Token':token},body:JSON.stringify({action:'reopen'})});}"
+    "document.addEventListener('click',async e=>{const b=e.target.closest('button[data-act]');if(!b)return;"
+    "b.disabled=true;const r=b.dataset.act==='reopen'?await reopenLedger(b):"
+    "await fetch('/api/bin',{method:'POST',headers:{'Content-Type':'application/json'},"
     "body:JSON.stringify({action:b.dataset.act,slug:b.dataset.slug})});if(r.ok)return location.reload();"
     "b.disabled=false;alert(await r.text())})</script>"
 )
@@ -182,7 +190,11 @@ def index_page(view="home"):
         )
         summaries = ledger_summaries()
         rows = [ledger_row(s, control) for s in summaries if not s["closed_at"]]
-        ended = [ledger_row({**s, "meta": closed_meta(s)}, control) for s in summaries if s["closed_at"]]
+        reopen = (
+            '<button class="act reopen" type="button" data-act="reopen" data-slug="{slug}" '
+            'aria-label="Reopen {title}">Reopen</button>'
+        )
+        ended = [ledger_row({**s, "meta": closed_meta(s)}, reopen + control) for s in summaries if s["closed_at"]]
         if ended:
             closed = f'<section class="closed"><h1>CLOSED</h1><ul>{"".join(ended)}</ul></section>'
         count = len(ledger_bin.entries())
@@ -233,6 +245,7 @@ CONTROLS = {
     "stop": ["stop"],
     "stop_now": ["stop", "--now"],
     "close": ["close"],
+    "reopen": ["reopen"],
 }
 MAX_CAP = 50
 MAX_NOTE = 500
@@ -246,7 +259,7 @@ def control_argv(body):
     if action == "verdict":
         return verdict_argv(body)
     if action != "set":
-        raise ValueError("action must be start, pause, stop, stop_now, close, set or verdict")
+        raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
     for key, flag, limit in (
         ("max_eng", "max-eng-agents", MAX_CAP),
