@@ -61,6 +61,7 @@ from hooks.config import (
     BROADCAST_MIN_INTERVAL_SEC,
     BROADCAST_PERSISTENT_THROTTLE,
 )
+from hooks.context import injection_trace
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
 
@@ -898,7 +899,7 @@ def format_broadcast_banner(msg: dict) -> str:
     return "\n".join(lines)
 
 
-def format_critical_context(msgs: list[dict]) -> str:
+def format_critical_context(msgs: list[dict], session_id: str = "") -> str:
     if not msgs:
         return ""
     # Drop empty-body messages — `[ALERT] No active signals.` is a #34713
@@ -924,6 +925,7 @@ def format_critical_context(msgs: list[dict]) -> str:
             msg_id = m.get("id", "")
             sev = _display_label(m.get("severity", "alert"))
             lines.append(f"  - [{sev}] (id:{msg_id}) {m.get('message', '')}")
+            injection_trace.record_broadcast(session_id, m)
     else:
         budget = max(0, BROADCAST_MAX_BYTES_PRETOOL - len(header.encode("utf-8")) - 1)
         for m in deduped:
@@ -935,6 +937,7 @@ def format_critical_context(msgs: list[dict]) -> str:
             if line_bytes > budget:
                 break
             lines.append(line)
+            injection_trace.record_broadcast(session_id, m)
             budget -= line_bytes
     if len(lines) == 1:
         return ""
@@ -991,6 +994,7 @@ def check_and_inject_broadcasts(session_id: str) -> None:
 
             banner = format_broadcast_banner(msg)
             inject_banner("BROADCAST", banner)
+            injection_trace.record_broadcast(session_id, msg)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
@@ -1013,7 +1017,7 @@ def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | 
         msgs = list(msgs.values())
         if not msgs:
             return None
-        return format_critical_context(msgs)
+        return format_critical_context(msgs, session_id if claim_unseen else "")
     except Exception:
         return None
 
@@ -1036,5 +1040,6 @@ def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None
         if not claim_delivery(session_id, message["id"]):
             continue
         banners.append(format_broadcast_banner(message))
+        injection_trace.record_broadcast(session_id, message)
         _record_delivery(session_id, message, now_ts)
     return "\n\n".join(banners) or None
