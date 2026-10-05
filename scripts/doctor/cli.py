@@ -172,18 +172,19 @@ def fixes_note(tasks):
     return "\n".join(lines)[:NOTE_MAX]
 
 
-def _close(store, slug, doctor, lead=""):
+def _close(store, slug, doctor, lead="", announce=True):
     note = (lead + fixes_note(swarm.LedgerClient().tasks(doctor)))[:NOTE_MAX]
     swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name="operator"))
     store.clear_peer(slug)
     store.clear_peer(doctor)
     inbox = InboxStore(store.redis)
     cancel_master_items(inbox, doctor)
-    inbox.send(f"master@{doctor}", f"master@{slug}", CLOSED_NOTICE.format(doctor=doctor), fyi=True)
+    if announce:
+        inbox.send(f"master@{doctor}", f"master@{slug}", CLOSED_NOTICE.format(doctor=doctor), fyi=True)
 
 
 def cmd_stop(store, args):
-    _close(store, *_pair_of(store, args.slug))
+    _close(store, *_pair_of(store, args.slug), announce=False)
 
 
 def timer(store, doctor, now_ms):
@@ -280,7 +281,15 @@ COMMANDS = {
 def main(argv):
     args = build_parser().parse_args(argv)
     try:
-        COMMANDS[args.command](swarm.connect(), args)
+        store = swarm.connect()
+        watched, peer = _pair_of(store, args.slug) if args.command == "stop" else (args.slug, doctor_slug(args.slug))
+        before = swarm.control_notifications.master(store, watched) if args.command in ("start", "stop") else None
+        COMMANDS[args.command](store, args)
+        if args.command in ("start", "stop"):
+            detail = f"The Doctor is {store.config(peer).state}."
+            swarm.control_notifications.notify(
+                store, Namespace(slug=watched), swarm.LedgerClient(), before, f"doctor_{args.command}", detail
+            )
     except (SwarmError, InboxError) as exc:
         print(f"doctor: {exc}", file=sys.stderr)
         return 1

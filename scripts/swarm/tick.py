@@ -12,8 +12,8 @@ from scripts.doctor import priming
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import control_notifications, lifetime
 from scripts.swarm import idle as idle_state
-from scripts.swarm import lifetime
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
 
@@ -102,7 +102,7 @@ def _woken(slug, config, store, ledger):
     if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
         priming.cancel_master_items(inbox, slug)
         return False
-    return bool(waiting)
+    return any(not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF)) for item in waiting)
 
 
 def _drop(slug, store, ledger, rows, agent):
