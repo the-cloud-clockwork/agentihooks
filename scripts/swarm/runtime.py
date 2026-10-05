@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.swarm import prompt
-from scripts.swarm.store import codex_split
+from scripts.swarm.store import SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -186,7 +186,7 @@ class HerdrRuntime:
                 return "not found" in str(exc)
         return True
 
-    def close_space(self, config) -> bool:
+    def close_space(self, config: SwarmConfig) -> bool:
         try:
             spaces = self.herdr(["workspace", "list"])["workspaces"]
             agents = self.herdr(["agent", "list"])["agents"]

@@ -14,7 +14,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle as idle_state
 from scripts.swarm import lifetime
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
@@ -61,7 +61,7 @@ class Runtime(Protocol):
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
-    def close_space(self, config) -> bool: ...
+    def close_space(self, config: SwarmConfig) -> bool: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
