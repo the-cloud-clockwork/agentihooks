@@ -78,6 +78,13 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
     ]
 
 
+def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
+    herdr = NamedPanes({"w:p1": {"name": "sw-master-1", "agent_status": "idle"}})
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.name_pane(SimpleNamespace(name="sw-master-1", pane_id="w:p1", conversation_id="")) is False
+    assert herdr.renamed == []
+
+
 def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
     out = "status=started\nroute_status=routed\npane_id=w1:p2\naccount=a\nmodel=opus\neffort=high\n"
     runtime = HerdrRuntime(

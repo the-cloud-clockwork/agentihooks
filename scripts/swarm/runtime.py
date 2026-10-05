@@ -193,6 +193,8 @@ class HerdrRuntime:
             return False
         name = found.get("name")
         own = _conversation_id(found.get("agent_session"))
+        if name == herdr_target(agent.name):
+            return False
         if name != agent.name[:32] and (name or not own or own != agent.conversation_id):
             return False
         try:
