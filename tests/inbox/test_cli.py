@@ -15,6 +15,10 @@ def store(monkeypatch):
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "registered_name", lambda: "", raising=False)
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions",
+        lambda **kwargs: {"sess-a": {"name": "alice"}, "sess-b": {"name": "bob"}},
+    )
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "alice")
     return store

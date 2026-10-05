@@ -56,6 +56,9 @@ def informational(words):
 
 
 def cmd_send(store, me, args):
+    from scripts.inbox.addresses import check_address
+
+    check_address(store, me, args.address)
     links.check_send(store, me, args.address)
     fyi, words = informational(args.text)
     check_for_operator(args.address, " ".join(words))
@@ -76,6 +79,9 @@ def cmd_read(store, me, args):
 
 
 def cmd_reply(store, me, args):
+    from scripts.inbox.addresses import check_address
+
+    check_address(store, me, store.get(args.id).sender)
     fyi, words = informational(args.text)
     check_for_operator(store.get(args.id).sender, " ".join(words))
     answer = store.reply(args.id, me, " ".join(words), fyi=fyi)
