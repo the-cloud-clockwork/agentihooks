@@ -49,6 +49,15 @@ def test_inbox_wakes_in_a_long_named_swarm_read_and_prompt_the_engineer_pane():
     assert calls[0][2].endswith("-eng-4")
 
 
+def test_inbox_wakes_read_and_prompt_the_agents_pane_id():
+    calls = []
+    messenger = delivery.HerdrMessenger(herdr=lambda args: calls.append(args) or {"agent_status": "idle"})
+    eng = AgentRecord("sw-eng-1", "eng", "t", pane_id="w:p9")
+    assert messenger.agent_status(eng) == "idle"
+    messenger.prompt(eng, "inbox")
+    assert calls == [["agent", "get", "w:p9"], ["agent", "prompt", "w:p9", "inbox"]]
+
+
 def inbox(store, address):
     return [(i.sender, i.text, i.state) for i in InboxStore(store.redis).inbox(address)]
 

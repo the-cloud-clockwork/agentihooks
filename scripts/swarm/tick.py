@@ -11,6 +11,7 @@ from typing import Protocol
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
+from scripts.swarm import idle as idle_state
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm_ledger import ledger_workspace
 
@@ -21,8 +22,8 @@ IDLE_KILL_TICKS = 10
 LANES = ("eng", "ci")
 ACTIVE = ("claimed", "pr")
 NUDGE = (
-    "Swarm check: you are idle and your task is still open. If you are waiting on checks, say so with "
-    "agentihooks swarm {slug} say and keep waiting. Otherwise finish it with agentihooks swarm {slug} done "
+    "Swarm check: you are idle and your task is still open. If you are waiting on checks or a deploy, declare it "
+    "with agentihooks swarm {slug} wait <minutes> --reason <what> and keep waiting. Otherwise finish it with agentihooks swarm {slug} done "
     "and the proof your task's kind needs (--pr <url> for code), or agentihooks swarm {slug} block with the reason."
 )
 
@@ -108,7 +109,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.name_pane(agent)
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            actions += _watch_idle(slug, store, ledger, runtime, rows, agent)
+            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
             runtime.retire(agent, False)
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
@@ -123,8 +124,11 @@ def agent_status(agent):
     return "idle" if agent.idle_ticks else "working"
 
 
-def _watch_idle(slug, store, ledger, runtime, rows, agent):
-    if runtime.status(agent) not in ("idle", "done"):
+def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
+    state = idle_state.of(store, runtime, slug, agent, now_ms)
+    if state == idle_state.WAITING:
+        return []
+    if state == idle_state.WORKING:
         if agent.idle_ticks:
             store.put_agent(slug, replace(agent, idle_ticks=0))
         return []

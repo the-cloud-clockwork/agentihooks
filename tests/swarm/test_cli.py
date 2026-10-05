@@ -262,6 +262,23 @@ def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_
     assert "stop now" in capsys.readouterr().out
 
 
+def test_wait_declares_an_end_time_for_the_calling_agent(env, capsys, monkeypatch):
+    from scripts.swarm import idle
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
+    assert run("sw", "--as", "sw-eng-1", "wait", "15", "--reason", "deploy run") == 0
+    assert idle.wait(store.redis, "sw", "sw-eng-1") == {
+        "until": 1_000 + 15 * 60_000,
+        "reason": "deploy run",
+        "at": 1_000,
+    }
+    assert '"until"' in capsys.readouterr().out
+    assert run("sw", "--as", "sw-eng-1", "wait", "0") == 1
+
+
 def test_handoff_refuses_a_missing_document(env, capsys):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
