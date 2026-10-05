@@ -125,6 +125,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(fake_home / ".agentibrain"))
     for _adopted in ("KB_ROUTER_TOKEN", "BRAIN_URL", "BRAIN_HTTP_TOKEN"):
         monkeypatch.delenv(_adopted, raising=False)
+    # Every PreToolUse delivers the running session's inbox from the swarm Redis.
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:1/0")
 
     # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
     # the operator's real condition scripts and write the real cache and counters.

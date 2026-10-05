@@ -1419,6 +1419,16 @@ def on_pre_tool_use(payload: dict) -> None:
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
+    if _can_inject_pretool:
+        try:
+            from hooks.context.inbox_delivery import pending_context
+
+            _inbox_ctx = pending_context(session_id)
+            if _inbox_ctx:
+                _pretool_blocks.append(_inbox_ctx)
+        except Exception as e:
+            log("inbox pretool failed", {"error": str(e)})
+
     if ENFORCEMENT_INJECTION_ENABLED:
         try:
             from hooks.context.enforcement import get_pretool_enforcements
@@ -1598,6 +1608,11 @@ def on_post_tool_use(payload: dict) -> None:
                 )
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
+            from hooks.context.inbox_delivery import pending_context
+
+            inbox_context = pending_context(_trace_session_id)
+            if inbox_context:
+                inject_context(inbox_context, also_log=False, skip_compression=True)
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 

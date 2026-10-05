@@ -107,6 +107,8 @@ A durable inbox in Redis: an item waits under its address until it is closed and
 outlives both sessions. The sender is this session (`AGENTIHOOKS_AGENT_NAME`,
 else the Claude session id), never an argument. An address is a session name;
 seats (`name@slug`) arrive later. Every state change is kept in the item's history.
+A pending item is delivered once, into this session's context at its next tool call
+(PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
 
 | Trigger | Action |
 |---|---|
