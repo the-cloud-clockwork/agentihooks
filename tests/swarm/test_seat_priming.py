@@ -92,6 +92,7 @@ def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
     run("sw", "start")
     assert run("sw", "--as", "sw-eng-1", "learned", "the ledger refuses dashes in chat") == 0
     assert [n["text"] for n in swarm.memory.learned("eng-1@sw")] == ["the ledger refuses dashes in chat"]
+    assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["note"]
 
 
 def test_the_tick_primes_a_successor_from_its_seat(store):  # noqa: F811
