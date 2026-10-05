@@ -30,6 +30,9 @@ class LedgerClient:
     def tasks(self, slug):
         return self._call(slug).get("tasks", [])
 
+    def events(self, slug):
+        return self._call(slug).get("_meta", {}).get("events", [])
+
     def chat(self, slug):
         return self._call(slug).get("chat", [])
 

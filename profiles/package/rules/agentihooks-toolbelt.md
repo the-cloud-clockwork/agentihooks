@@ -93,6 +93,17 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   `AGENTIHOOKS_REFOCUS_MAX_CHARS` (default 1500).
 - Every agent session is one Langfuse trace in the project `agent-swarm`,
   tagged with swarm, agent, lane, task and account.
+- `agentihooks swarm <slug> status` and the ledger page's Swarm health panel
+  list health findings, each naming the agent or task, the evidence and the
+  threshold crossed. The master diagnoses them; the operator decides. Thresholds
+  (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
+  transitions at least `CEREMONY_MIN` (20) and over `CEREMONY_RATIO` (12) per
+  merged outcome; scope inflation, a lane agent queued `SELF_QUEUED` (3) tasks
+  itself whose stated `--gain` never rose; proof loop, a task over `RERUNS` (2)
+  reruns or `REVIEW_ROUNDS` (3) moves to pr; idle with claim, `IDLE_TICKS` (3)
+  idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
+  over monitoring, at least `WATCH_MIN` (20) watch calls and over `WATCH_RATIO`
+  (5) per action, counted at each swarm agent's tool calls.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
   panel in a sidebar that scrolls on its own, and the agent list and Swarm tasks
   collapsed until clicked. HOME lists every ledger; a deleted ledger sits in the

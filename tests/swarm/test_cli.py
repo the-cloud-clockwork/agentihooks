@@ -398,3 +398,19 @@ def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     actions = cli.run_tick(store, "sw", ledger, rt, herdr)
     assert herdr.prompts == [("p1", WAKE_TEXT)]
     assert f"woke sw-eng-1 for message {item.id}" in actions
+
+
+def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", idle_ticks=4))
+    ledger.rows["t1"].update(state="claimed", claimed_by="sw-eng-1")
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+    run("sw", "status", "--json")
+    found = json.loads(capsys.readouterr().out.splitlines()[-1])["findings"]
+    assert [(f["kind"], f["subject"]) for f in found] == [("idle with claim", "sw-eng-1")]
+    run("sw", "status")
+    assert (
+        "finding  idle with claim  sw-eng-1: idle for 4 ticks while holding task t1 (claimed); threshold 3 idle ticks"
+        in (capsys.readouterr().out)
+    )

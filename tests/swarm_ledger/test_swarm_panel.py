@@ -197,10 +197,12 @@ class SwarmPanel(unittest.TestCase):
         side = page.split('<aside class="side">', 1)[1].split("</aside>", 1)[0]
         self.assertNotIn("swarm", column)
         sections = re.findall(r"<section[^>]*>", side)
-        self.assertEqual(len(sections), 2)
+        self.assertEqual(len(sections), 3)
         self.assertIn('id="stats"', side.split(sections[1], 1)[0])
         self.assertIn('id="swarm-box"', sections[1])
         self.assertIn("hidden", sections[1])
+        self.assertIn('id="health-box"', sections[2])
+        self.assertIn("hidden", sections[2])
 
     def test_sidebar_scrolls_on_its_own_pinned_to_the_viewport(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
@@ -408,7 +410,7 @@ class SwarmPanel(unittest.TestCase):
             "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {}});"
             "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
-            'const meta = {crew: [{name: "a"}]};'
+            'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
         )
         script = (
             stubs
@@ -447,3 +449,73 @@ class SwarmPanel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FINDINGS = [
+    {
+        "kind": "idle with claim",
+        "subject": "s-eng-1",
+        "evidence": "idle for 4 ticks while holding task t1 (claimed)",
+        "threshold": "3 idle ticks",
+    },
+    {
+        "kind": "stale claim",
+        "subject": "t2",
+        "evidence": "claimed by s-eng-2, no change for 44 minutes",
+        "threshold": "30 minutes without a change",
+    },
+]
+
+
+class HealthPanel(unittest.TestCase):
+    def render(self, findings):
+        stubs = (
+            "const els = {}; const $ = (id) => els[id] || (els[id] = {replaceChildren(...k) { this.kids = k; }});"
+            "const h = (tag, attrs, ...kids) => ({tag, ...attrs, kids: kids.filter(Boolean)});"
+        )
+        script = (
+            stubs
+            + "".join(function_source(n) + "\n" for n in ("healthCard", "renderHealth"))
+            + f"renderHealth({json.dumps(findings)});"
+            + "const text = (n) => [n.text || '', ...(n.kids || []).map(text)].join('|').replace(/\\|+/g, '|');"
+            + "process.stdout.write(JSON.stringify([els['health-count'].textContent, els['health'].kids.map(text)]));"
+        )
+        return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+
+    def test_each_finding_shows_its_subject_kind_evidence_and_threshold(self):
+        count, cards = self.render(FINDINGS)
+        self.assertEqual(count, "· 2")
+        self.assertEqual(
+            cards,
+            [
+                "|s-eng-1|idle with claim|idle for 4 ticks while holding task t1 (claimed)|threshold 3 idle ticks",
+                "|t2|stale claim|claimed by s-eng-2, no change for 44 minutes|threshold 30 minutes without a change",
+            ],
+        )
+
+    def test_no_findings_says_so(self):
+        self.assertEqual(self.render([]), ["", ["No findings"]])
+
+    def test_the_swarm_poll_shows_the_panel_with_the_swarm_and_hides_it_without(self):
+        stubs = (
+            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {}});"
+            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
+            "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
+            "const crewShown = () => false; const meta = {}; let shown = null;"
+            "const renderHealth = (f) => { shown = f; };"
+        )
+        script = (
+            stubs
+            + function_source("renderSwarm")
+            + f"\nrenderSwarm({json.dumps({**STATUS, 'findings': FINDINGS})}); const on = [$('health-box').hidden, shown];"
+            + "renderSwarm(null); process.stdout.write(JSON.stringify([on, $('health-box').hidden]));"
+        )
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+        self.assertEqual(out, [[False, FINDINGS], True])
+
+    def test_health_styles_use_only_palette_tokens(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        rules = re.findall(r"^\.hl-[^{]*\{[^}]*\}", page, re.M)
+        self.assertGreaterEqual(len(rules), 3)
+        for rule in rules:
+            self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])", rule)
