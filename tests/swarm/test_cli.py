@@ -637,7 +637,7 @@ def test_the_master_takes_no_task_commands(env, capsys):
 def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
+    store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master", seat="master@sw"))
     doc = _handoff_doc(tmp_path, intent="Run the swarm; the operator asked for a docs task.")
     assert run("sw", "--as", "master@a1b2c3-0001", "handoff", str(doc)) == 0
     assert store.handoff("sw", "master") == doc.read_text()

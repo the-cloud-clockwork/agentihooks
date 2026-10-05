@@ -597,14 +597,15 @@ def cmd_wait(store, args):
 def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
-    recap = _read(args.recap, "recap") if args.recap else ""
+    recap = "\n\n".join(
+        f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
+    )
     ledger = LedgerClient()
     found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope = handoff_envelope.build(store, args.slug, agent, args.reason, _ledger_rows(ledger, args.slug), now_ms())
-    if recap:
-        store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
+    store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(args.slug, agent.task, text, seat=agent.seat, envelope=envelope)
     store.put_agent(args.slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
@@ -634,6 +635,8 @@ def cmd_learned(store, args):
     agent = _me(store, args)
     if args.maturity == CANON and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_CANON)
+    if not re.fullmatch(r".*\w.*\bbecause\b.*\w.*", args.text, re.IGNORECASE | re.DOTALL):
+        raise SwarmError("a learned note needs a because clause with a reason")
     store.memory.learn(_seat(agent), agent.name, args.text, now_ms(), args.maturity)
     print(json.dumps({"seat": agent.seat, "learned": args.text, "maturity": args.maturity}))
 

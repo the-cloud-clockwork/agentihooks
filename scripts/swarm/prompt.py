@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from scripts.doctor import priming
+from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm import naming
 from scripts.swarm.health.verdicts import VERDICTS
@@ -95,7 +96,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "- When an engineer merges work that changes a page, check it in a real browser on localhost "
         f"(the ledger page link {me} url prints) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
-        f'- Record a lesson the next master should know with {me} learned "<lesson>".',
+        f'- Record a lesson the next master should know with {me} learned "<lesson because reason>".',
         f"- Raise a learned note that has held up: {me} learned lists every seat's notes with their numbers, and "
         f'{me} promote <seat> <number> insight|canon --reason "<why>" raises one. Only you and the operator make '
         "a note canon.",
@@ -103,8 +104,8 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "new occupant of every seat reads it.",
         "",
         f"If your context nears its limit a hook tells you to write a handoff document: write what the operator "
-        f"asked for, what is pending and what you promised, and a recap of what you did and where you stopped, "
-        f"run {me} handoff <doc> --recap <recap> and stop. The next master continues from them.",
+        f"asked for, what is pending and what you promised under the Handoff v2 headings, "
+        f"run {me} handoff <doc> and stop. The next master continues from it; its recap is derived from the document.",
         "Write chat and comments in plain words for the operator: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"
@@ -169,14 +170,14 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
         waiting_line(led),
-        f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>" (a note; add '
+        f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
         *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy),
         "",
-        "If your context nears its limit a hook tells you to write a handoff document: write it and a recap of what "
-        f"you did, where you stopped and what you promised, then run {me} handoff <doc> --recap <recap> and stop; a "
-        "successor continues the task from them.",
+        "If your context nears its limit a hook tells you to write a handoff document: use the Handoff v2 headings "
+        f"for what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
+        "successor continues the task from it and the seat recap is derived from the same document.",
         "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
         f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
         "",
@@ -207,7 +208,7 @@ def priming_lines(task):
         return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
     lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
     if handoff:
-        lines += ["1. Handoff document: a previous agent ran out of context and left it. Continue from it:", handoff]
+        lines += handoff_lines(task)
     else:
         lines.append("1. Handoff document: none was left for this task.")
     if culture:
@@ -227,6 +228,24 @@ def priming_lines(task):
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
     if len(older) > OLDER_RECAPS:
         lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
+    return lines
+
+
+def handoff_lines(task):
+    envelope = task.get("handoff_envelope")
+    lines = [
+        "1. Handoff runtime envelope:",
+        json.dumps(envelope, indent=2) if envelope else "Missing runtime envelope.",
+    ]
+    lines += ["Handoff document: continue from it:", task["handoff"]]
+    reading = section(task["handoff"], "Read first")
+    if reading:
+        lines += [
+            "Read first: Open each address in rank order and answer its question before reading older recaps.",
+            reading,
+        ]
+    else:
+        lines.append("Read first: missing from the handoff document.")
     return lines
 
 
