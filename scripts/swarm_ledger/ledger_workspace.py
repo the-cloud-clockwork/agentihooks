@@ -1,7 +1,9 @@
 """A swarm task's work folder: steering notes seeded from the task, and the progress and proof its agents append."""
 
+import re
 from pathlib import Path
 
+PART_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,127}")
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 TAILS = (("latest_progress", "progress.md"), ("latest_proof", "proof.md"))
 TAIL_LINES = 3
@@ -9,6 +11,8 @@ TAIL_BYTES = 4096
 
 
 def folder(slug, task_id):
+    if not all(isinstance(part, str) and PART_RE.fullmatch(part) for part in (slug, task_id)):
+        raise ValueError(f"work folder needs a plain slug and task id, not {slug!r} and {task_id!r}")
     return Path.home() / ".agentihooks" / "swarm" / slug / "tasks" / task_id
 
 

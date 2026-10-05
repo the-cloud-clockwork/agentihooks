@@ -76,3 +76,11 @@ def test_tails_of_an_empty_or_missing_folder_are_empty():
     ledger_workspace.scaffold("sw", {"id": "t3", "title": "x"})
     assert ledger_workspace.tails("sw", "t3") == {}
     assert ledger_workspace.tails("sw", "nothing") == {}
+
+
+@pytest.mark.parametrize(
+    "slug, task_id", [("sw", "../x"), ("../../etc", "t1"), ("sw", "a/b"), ("", "t1"), ("sw", "t1\n")]
+)
+def test_a_slug_or_task_id_that_is_not_a_plain_name_is_refused(slug, task_id):
+    with pytest.raises(ValueError):
+        ledger_workspace.scaffold(slug, {"id": task_id, "title": "x"})
