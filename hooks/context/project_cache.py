@@ -59,6 +59,8 @@ def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash
 
     path = _cache_path(identity)
     with _file_lock(path):
+        if _read(_state_dir() / "feed.json").get("hash") != feed_hash:
+            return
         if _fresh(_read(path), feed_hash):
             return
         try:
@@ -66,7 +68,8 @@ def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash
         except BrainSourceUnavailable as error:
             log("brain_project: refresh failed", {"error": str(error)})
             return
-        _write(path, {"feed_hash": feed_hash, "at": time.time(), "memory": asdict(memory)})
+        if _read(_state_dir() / "feed.json").get("hash") == feed_hash:
+            _write(path, {"feed_hash": feed_hash, "at": time.time(), "memory": asdict(memory)})
 
 
 def _swarm_overview() -> str:
@@ -77,10 +80,19 @@ def _swarm_overview() -> str:
     return str(ledger.get("overview", ""))
 
 
-def project_context(session_id: str, cwd: str = "") -> str | None:
+def project_context(session_id: str, cwd: str | None = None) -> str | None:
     if os.getenv("BRAIN_PROJECT_SCOPE", "strict") == "off":
         return None
-    identity = lookup(session_id) or resolve_project(cwd)
+    from hooks.context.broadcast import _load_sessions
+
+    sessions = _load_sessions()
+    if cwd is not None:
+        identity = resolve_project(cwd)
+    elif session_id in sessions:
+        row = sessions[session_id].get("project")
+        identity = ProjectIdentity(**row) if row else None
+    else:
+        identity = lookup(session_id)
     if not identity:
         return None
     from hooks._async import fork_and_call

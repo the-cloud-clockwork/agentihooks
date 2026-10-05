@@ -39,3 +39,12 @@ def test_source_confirms_project_and_attributes_lessons(monkeypatch, tmp_path):
     assert [arc["id"] for arc in memory.arcs] == ["a"]
     assert memory.lessons == ["Our lesson."]
     assert memory.arcs[0]["summary"] == "Alpha focus"
+
+
+def test_scratch_project_receives_its_git_session_lessons(monkeypatch, tmp_path):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setenv("BRAIN_STALE_LESSON_DAYS", "1")
+    record_session("git", ProjectIdentity("alpha", "alpha", remote="org/alpha"))
+    with patch("hooks._brain_http.get", return_value={"content": "## now — agent — `git`\n\nGit lesson.\n"}):
+        memory = VaultProjectSource([]).fetch(ProjectIdentity("alpha", "alpha"))
+    assert memory.lessons == ["Git lesson."]

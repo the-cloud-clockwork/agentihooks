@@ -70,7 +70,12 @@ def _lessons(identity: ProjectIdentity) -> list[str]:
             header, _, body = section.partition("\n")
             sessions = re.findall(r"`([^`]+)`", header)
             owner = lookup(sessions[-1]) if sessions else None
-            if owner and (owner.remote or owner.repo) == (identity.remote or identity.repo) and body.strip():
+            if (
+                owner
+                and owner.repo == identity.repo
+                and (not owner.remote or not identity.remote or owner.remote == identity.remote)
+                and body.strip()
+            ):
                 lessons.append(body.strip())
     return lessons
 
