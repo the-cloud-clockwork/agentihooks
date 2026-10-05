@@ -79,7 +79,11 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 
 A swarm agent does not run its context to the end. When its context reaches `AGENTIHOOKS_COMPACT_LIMIT`
 thousand tokens (default 600), a hook tells it to write a handoff document and run
-`agentihooks swarm <id> handoff <doc>`, then stop. The task stays claimed, and the next tick starts a
+`agentihooks swarm <id> handoff <doc>`, then stop. From that point PreToolUse denies every tool call except
+reading files (in the shell too: cat, head, tail, ls, wc, grep, git status, log, diff, show), writing or
+editing files under `~/scratchpad`, `agentihooks swarm <id> handoff <doc>` and the
+`agentihooks ledger` comment, say, leave and ack commands, each as one command with no chaining; the deny
+reason repeats the handoff command. The task stays claimed, and the next tick starts a
 successor on the same task with the document in its opening prompt. A task that already has a pull request
 keeps it and stays in `pr` state under its successor. `agentihooks swarm <id> set compact-limit=N`
 sets the limit for one swarm's next agents; 0 keeps the default.

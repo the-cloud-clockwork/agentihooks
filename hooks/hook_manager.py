@@ -1006,6 +1006,16 @@ def on_pre_tool_use(payload: dict) -> None:
     if _quota_policy_block:
         raise BlockAction(_quota_policy_block)
 
+    _recycle_block = None
+    try:
+        from hooks.context.context_recycle import gate as _recycle_gate
+
+        _recycle_block = _recycle_gate(tool_name, tool_input, payload.get("session_id", ""))
+    except Exception as e:
+        log("context recycle gate failed", {"error": str(e)})
+    if _recycle_block:
+        raise BlockAction(_recycle_block)
+
     from hooks.lifecycle.guard import pretool as _lifecycle_pretool
 
     _lifecycle_block = _lifecycle_pretool(payload)

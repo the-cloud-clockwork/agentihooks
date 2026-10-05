@@ -567,6 +567,16 @@ class TestCodexEnforcementFallback:
         hm.on_post_tool_use({"hook_event_name": "PostToolUse", "tool_output": "ok", **call})
         assert any("agentihooks swarm sw handoff" in text for text in captured)
 
+    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch):
+        import hooks.context.context_recycle as recycle
+        import hooks.hook_manager as hm
+
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+        monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 900_000)
+        call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
+        with pytest.raises(hm.BlockAction, match="agentihooks swarm sw handoff"):
+            hm.on_pre_tool_use({"hook_event_name": "PreToolUse", "cwd": "/p", **call})
+
 
 class TestSplitGlobal:
     """The one shape rule shared by the installer's migration and the hook
