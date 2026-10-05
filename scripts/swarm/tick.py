@@ -62,12 +62,13 @@ class Runtime(Protocol):
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.config(slug)
     actions = []
+    rows = {t["id"]: t for t in ledger.tasks(slug)}
+    exits.sweep(InboxStore(store.redis), slug, store, rows)
     if config.state == "stopped":
         if not InboxStore(store.redis).pending_items(seat_address(slug, MASTER)):
             return []
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
-    rows = {t["id"]: t for t in ledger.tasks(slug)}
     if config.state == "drained" and any(_claimable(slug, store, rows, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")

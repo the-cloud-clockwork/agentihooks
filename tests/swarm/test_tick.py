@@ -241,7 +241,8 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
     assert runtime.killed == ["sw-eng-1"] and ledger.rows["t1"]["state"] == "open"
 
 
-def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store):
+@pytest.mark.parametrize("state", ["pending", "delivered", "read"])
+def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     from scripts.inbox.store import InboxStore
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
@@ -249,6 +250,8 @@ def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     inbox = InboxStore(store.redis)
     item = inbox.send("sw-ci-9", "sw-eng-1", "contract confirmed")
+    if state != "pending":
+        getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, "sw-eng-1")
     runtime.statuses["sw-eng-1"] = "idle"
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):

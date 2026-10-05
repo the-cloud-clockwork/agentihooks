@@ -143,11 +143,13 @@ class InboxStore:
         )
 
     def withdraw(self, item_id, by, reason):
-        """Cancel a pending item nobody is left to read; a swarm step, so no actor check."""
-        return self._move(item_id, by, lambda item: (by,), "cancelled", reason, only_from=("pending",))
+        """Cancel an open item left by an exited agent; a swarm step, so no actor check."""
+        return self._move(
+            item_id, by, lambda item: (by,), "cancelled", reason, only_from=("pending", "delivered", "read")
+        )
 
     def redirect(self, item_id, by, address, reason):
-        """Move a pending item to another address; a swarm step, so no actor check."""
+        """Return an open item to pending at another address; a swarm step, so no actor check."""
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
@@ -162,12 +164,12 @@ class InboxStore:
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
-            if item.state != "pending":
+            if item.state in CLOSED:
                 return None
             pending = self.key("pending", item.address)
             pipe.watch(pending)
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
-            moved = replace(item, address=address, updated_at=now_ms(), reason=reason)
+            moved = replace(item, address=address, state="pending", updated_at=now_ms(), reason=reason)
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
             pipe.zrem(self.key("address", item.address), item_id)
