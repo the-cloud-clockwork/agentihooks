@@ -46,10 +46,17 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
     statuses, prompted, actions = {}, set(), []
+    doc = None
     for item in inbox.pending():
         if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
             continue
         receiver, held = _receiver(inbox, item.address)
+        if item.sender == BY and item.ref.startswith(f"{slug}:event:"):
+            if doc is None:
+                doc = ledger.state(slug)
+            if _decided(item.ref, doc):
+                inbox.close(item.id, BY, "done", "decided on the ledger")
+                continue
         if item.ref and receiver and marks.seen(receiver, item.ref):
             inbox.close(item.id, receiver, "done", SEEN_ON_LEDGER)
             continue
@@ -69,6 +76,18 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _decided(ref, doc):
+    collection, _, item_id = ref.partition(":event:")[2].partition("/")
+    row = next((r for r in doc.get(collection, []) if r.get("id") == item_id), {})
+    if collection == "followups":
+        return bool(row.get("done") or row.get("needs_operator"))
+    if collection == "questions":
+        return bool(
+            row.get("out_of_scope") or any(a.get("text") and not a.get("deleted") for a in row.get("answers", []))
+        )
+    return collection == "tasks" and bool(row.get("done") or row.get("state") == "done")
 
 
 def _receiver(inbox, address):
