@@ -14,12 +14,15 @@ def settle(inbox, name, seat, exit_text):
     """seat is where the work goes on, '' when nobody takes it up."""
     from scripts.inbox.store import CLOSED
 
+    inbox.seats.record_exit(name, seat, exit_text)
     for item in inbox.inbox(name):
         if item.state in CLOSED:
             continue
         if seat:
-            inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant")
-        elif inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it") and item.sender != BY:
+            inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
+        elif (
+            inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
+        ):
             inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text))
 
 
@@ -44,6 +47,10 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", rows: dict) -> No
     tasks = {row.get("claimed_by"): row for row in rows.values()}
     for name, seat in store.seats.agent_seats(slug):
         if name in active:
+            continue
+        outcome = store.seats.exit_of(name)
+        if outcome:
+            settle(inbox, name, outcome["seat"], outcome["reason"])
             continue
         state = tasks.get(name, {}).get("state")
         if state in ("done", "blocked"):

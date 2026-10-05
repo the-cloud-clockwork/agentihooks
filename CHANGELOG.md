@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Swarm exits settle delivered and read inbox items, preserve transferred work,
+  and settle late messages using the recorded exit. Notices for exited senders
+  reach the swarm master seat.
+
 ## [2.17.0] - 2026-10-01
 
 ### Added

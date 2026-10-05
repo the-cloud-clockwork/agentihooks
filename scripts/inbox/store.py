@@ -142,44 +142,48 @@ class InboxStore:
             item_id, closer, lambda item: (item.address, item.sender, master_of(item.address)), state, reason
         )
 
-    def withdraw(self, item_id, by, reason):
-        """Cancel an open item left by an exited agent; a swarm step, so no actor check."""
-        return self._move(
-            item_id, by, lambda item: (by,), "cancelled", reason, only_from=("pending", "delivered", "read")
-        )
+    def withdraw(self, item_id: str, by: str, reason: str, expected_address: str = "") -> Item | None:
+        return self.redirect(item_id, by, "", reason, expected_address)
 
-    def redirect(self, item_id, by, address, reason):
+    def redirect(self, item_id: str, by: str, address: str, reason: str, expected_address: str = "") -> Item | None:
         """Return an open item to pending at another address; a swarm step, so no actor check."""
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
             try:
-                return self._try_redirect(item_id, by, address, reason)
+                return self._try_redirect(item_id, by, address, reason, expected_address)
             except WatchError:
                 continue
         raise InboxError(f"message {item_id} changed meanwhile; run the command again")
 
-    def _try_redirect(self, item_id, by, address, reason):
+    def _try_redirect(self, item_id, by, address, reason, expected_address):
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
-            if item.state in CLOSED:
+            if item.state in CLOSED or (expected_address and item.address != expected_address):
                 return None
             pending = self.key("pending", item.address)
             pipe.watch(pending)
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
-            moved = replace(item, address=address, state="pending", updated_at=now_ms(), reason=reason)
+            moved = replace(
+                item,
+                address=address or item.address,
+                state="pending" if address else "cancelled",
+                updated_at=now_ms(),
+                reason=reason,
+            )
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
-            pipe.zrem(self.key("address", item.address), item_id)
             pipe.zrem(pending, item_id)
             if last:
                 pipe.srem(self.key("waiting"), item.address)
-            pipe.zadd(self.key("address", address), {item_id: item.created_at})
-            pipe.zadd(self.key("pending", address), {item_id: item.created_at})
-            pipe.sadd(self.key("waiting"), address)
-            pipe.rpush(self.key("history", item_id), _entry("pending", by, reason, moved.updated_at))
+            if address:
+                pipe.zrem(self.key("address", item.address), item_id)
+                pipe.zadd(self.key("address", address), {item_id: item.created_at})
+                pipe.zadd(self.key("pending", address), {item_id: item.created_at})
+                pipe.sadd(self.key("waiting"), address)
+            pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
 
