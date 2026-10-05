@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -109,6 +110,42 @@ def _run_hook(payload, env):
     )
 
 
+_REPEAT_HOOK = """
+import io, json, os, sys
+from hooks.hook_manager import main
+
+class Exit(BaseException):
+    pass
+
+def fake_exit(code):
+    raise Exit(code)
+
+os._exit = fake_exit
+raw, times = sys.stdin.read(), int(sys.argv[1])
+out, results = sys.stdout, []
+for _ in range(times):
+    sys.stdin, sys.stdout = io.StringIO(raw), io.StringIO()
+    try:
+        main()
+    except Exit as done:
+        results.append({"returncode": done.args[0], "stdout": sys.stdout.getvalue()})
+out.write(json.dumps(results))
+"""
+
+
+def _run_hook_times(payload, env, times):
+    proc = subprocess.run(
+        [sys.executable, "-c", _REPEAT_HOOK, str(times)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=_PROJECT_ROOT,
+        env=env,
+        check=True,
+    )
+    return [SimpleNamespace(**result) for result in json.loads(proc.stdout)]
+
+
 def test_statusline_snapshot_reaches_user_prompt_hook(tmp_path):
     env = _hook_env(tmp_path)
     now = time.time()
@@ -172,7 +209,9 @@ def test_pretool_banner_fires_on_every_fifth_tool_call(tmp_path):
         "cwd": str(_PROJECT_ROOT),
     }
 
-    results = [_run_hook(payload, env) for _ in range(5)]
+    results = _run_hook_times(payload, env, 5)
+
+    assert len(results) == 5
 
     assert all(result.returncode == 0 for result in results)
     assert all("ATTENTION TO QOUTA USAGE" not in result.stdout for result in results[:4])
