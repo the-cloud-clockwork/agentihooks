@@ -63,6 +63,19 @@ def test_export_then_restore_after_losing_redis_gives_back_the_same_swarm_state(
     assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
 
 
+def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
+    seed(store, "sw")
+    seed(store, "other")
+    before = everything(store.redis)
+    state = store.export("sw")
+    for agent in store.agents("sw"):
+        store.drop_agent("sw", agent.name)
+    store.remove("sw")
+    assert store.slugs() == ["other"]
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert everything(store.redis) == before
+
+
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     seed(store, "sw")
     seed(store, "sw-b")
