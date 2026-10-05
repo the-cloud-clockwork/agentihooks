@@ -71,6 +71,24 @@ The deterministic CLI primitives behind these skills are respectively
 `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
+## Swarm, small ledger or nothing
+
+A hook decides how each piece of work is tracked and injects a `LEDGER DECISION`
+directive once per session for each trigger. Act on it at once, without asking:
+
+- **Swarm** — the operator accepted a plan (Claude or Copilot leaving plan mode,
+  Codex's "Yes, implement this plan"): start a swarm from it with `init-swarm`.
+  This session does not implement the plan; the swarm's master never edits code.
+- **Small ledger** — work beyond a trivial edit with no accepted plan: the
+  session's task list reaches four items, or the operator asks to troubleshoot,
+  debug, investigate or refactor. Create a small ledger with `swarm-ledger`, join
+  it as its worker and keep it current.
+- **Nothing** — a trivial request gets no directive and no ledger.
+
+Swarm agents and sessions already bound to a ledger never get a directive. When
+the operator declines, run `agentihooks ledger decline`; the hook stays silent
+for the rest of that session.
+
 ## Swarms and ledgers
 
 A swarm runs Claude and Codex agents over the tasks of a swarm ledger
