@@ -47,7 +47,7 @@ class Ledger(Protocol):
 
 class Runtime(Protocol):
     def has_capacity(self) -> bool: ...
-    def spawn(self, config, lane: str, name: str, task: dict) -> Placed: ...
+    def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
     def retire(self, agent: AgentRecord, live: bool) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
@@ -205,11 +205,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 ledger.update_task(slug, task["id"], fields)
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
-                placed = runtime.spawn(config, lane, name, _primed(store, slug, seat, task))
+                placed = runtime.spawn(config, lane, name, _primed(store, slug, seat, task), spawns=store.spawns(slug))
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
             store.put_agent(slug, _placed(record, placed))
+            store.count_spawn(slug, placed.harness)
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
