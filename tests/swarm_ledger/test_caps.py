@@ -3,14 +3,12 @@ import os
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-os.environ["LEDGER_DIR"] = tempfile.mkdtemp(prefix="ledger-caps-test-")
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 

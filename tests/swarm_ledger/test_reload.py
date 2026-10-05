@@ -6,7 +6,6 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-os.environ.setdefault("LEDGER_DIR", tempfile.mkdtemp(prefix="ledger-reload-test-"))
 import ledger_server as server  # noqa: E402
 
 
