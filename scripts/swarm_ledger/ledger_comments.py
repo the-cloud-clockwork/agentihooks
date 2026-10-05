@@ -77,7 +77,7 @@ def can_change(entry, by, members):
     return entry.get("by") == by or members.get(by, {}).get("role") == "orchestrator"
 
 
-def post_status(thread, by, entry_id, text, ctx, target):
+def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     """An agent's comment amends its own latest one on the item, unless the operator spoke after it."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by), None)
@@ -86,12 +86,16 @@ def post_status(thread, by, entry_id, text, ctx, target):
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
+        if attachments:
+            thread[-1]["attachments"] = attachments
         ctx.record(by, "comment added", target, id=entry_id, text=text)
-    elif mine["text"] != text:
+    elif mine["text"] != text or (attachments is not None and mine.get("attachments") != attachments):
         from ledger_core import text_diff
 
         ctx.record(by, "comment edited", target, id=mine["id"], diff=text_diff(mine["text"], text))
         mine.update(text=text, edited_at=ctx.at)
+        if attachments is not None:
+            mine["attachments"] = attachments
     member = ctx.meta.get("members", {}).get(by)
     if member is not None:
         member["last_seen"] = ctx.at
@@ -106,12 +110,16 @@ def refused(text, kind, where, ctx):
 
 def agent_thread_op(thread, op, ctx, target, noun):
     by, text = op["by"], op.get("text", "")
+    if op.get("attachments") and by not in ctx.meta.get("members", {}):
+        return False
     if op["op"] == "add" and noun == "comment":
-        post_status(thread, by, op["id"], text, ctx, target)
+        post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True
     if op["op"] == "add":
         if not any(e["id"] == op["id"] for e in thread):
             thread.append({"id": op["id"], "by": by, "at": ctx.at, "text": text})
+            if op.get("attachments"):
+                thread[-1]["attachments"] = op["attachments"]
             ctx.record(by, f"{noun} added", target, id=op["id"], text=text)
         return True
     entry = next((e for e in thread if e["id"] == op["id"]), None)
