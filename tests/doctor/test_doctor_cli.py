@@ -85,6 +85,7 @@ def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(e
     assert (config.template, config.max_eng, config.max_ci) == ("doctor", 1, 0)
     assert config.state in ("running", "drained") and store.agents(DOCTOR)
     assert config.lanes["eng"]["kind"] == "troubleshoot"
+    assert all(kind in config.lanes["eng"]["role"] for kind in ("troubleshoot", "tune", "code"))
     assert (store.peer(WATCHED), store.peer(DOCTOR)) == (DOCTOR, WATCHED)
     opening = InboxStore(store.redis).inbox(f"master@{WATCHED}")
     assert [item.sender for item in opening] == [f"master@{DOCTOR}"]

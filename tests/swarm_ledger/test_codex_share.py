@@ -18,7 +18,15 @@ def page_script():
     click = page.split('  $("swarm-box").addEventListener("click",', 1)[1].split("\n  });", 1)[0]
     functions = "\n".join(
         function_source(n)
-        for n in ("renderSwarm", "renderControls", "swarmControls", "capBounds", "crewShown", "autonomyText")
+        for n in (
+            "renderSwarm",
+            "renderControls",
+            "swarmControls",
+            "doctorControls",
+            "capBounds",
+            "crewShown",
+            "autonomyText",
+        )
     )
     return (
         'let swarm = null, codexDraft = null, pending = "", armed = "", doc = null; const meta = {crew: []};'
