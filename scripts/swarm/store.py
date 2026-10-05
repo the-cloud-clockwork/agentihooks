@@ -1,7 +1,9 @@
-"""Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry."""
+"""Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
 from dataclasses import asdict, dataclass, replace
+
+from scripts.swarm.seats import SeatRegistry
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -36,6 +38,7 @@ class AgentRecord:
     idle_ticks: int = 0
     model: str = ""
     effort: str = ""
+    seat: str = ""
 
 
 class RedisStore:
@@ -43,6 +46,7 @@ class RedisStore:
         if redis is None:
             raise SwarmError("no Redis client; the swarm refuses to run without it")
         self.redis = redis
+        self.seats = SeatRegistry(redis)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
@@ -103,14 +107,18 @@ class RedisStore:
             except WatchError:
                 return False
 
-    def put_handoff(self, slug, task, text):
+    def put_handoff(self, slug, task, text, seat=""):
         self.redis.set(self.key(slug, "handoff", task), text)
+        self.redis.set(self.key(slug, "handoff-seat", task), seat)
 
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""
 
+    def handoff_seat(self, slug, task):
+        return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
+
     def clear_handoff(self, slug, task):
-        self.redis.delete(self.key(slug, "handoff", task))
+        self.redis.delete(self.key(slug, "handoff", task), self.key(slug, "handoff-seat", task))
 
     def next_name(self, slug, lane):
         return f"{slug}-{lane}-{self.redis.incr(self.key(slug, 'seq', lane))}"

@@ -5,6 +5,7 @@ then a follow-up on the ledger page. Every step is appended to the item's histor
 """
 
 from scripts.swarm.delivery import READY
+from scripts.swarm.seats import is_seat
 from scripts.swarm.store import MASTER
 
 MAX_WAKES = 3
@@ -40,19 +41,21 @@ def decide(item, pane, history, now_ms, window):
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
     names = {a.name for a in agents}
     panes = {a.name: a for a in agents if a.pane_id}
-    master = next((a.name for a in agents if a.lane == MASTER), "")
+    boss = next((a for a in agents if a.lane == MASTER), None)
+    master = (boss.seat or boss.name) if boss else ""
     statuses, prompted, actions = {}, set(), []
     for item in inbox.pending():
-        if item.address not in names and item.sender not in names:
+        if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
             continue
-        agent = panes.get(item.address)
+        receiver, held = _receiver(inbox, item.address)
+        agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _status(herdr, agent)
-        step = decide(item, statuses.get(item.address), inbox.history(item.id), now_ms, window)
+        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window)
         if step == WOKEN and _wake(herdr, agent, prompted):
-            inbox.note(item.id, WOKEN, BY, f"prompted {item.address} to read its inbox", now_ms)
-            actions.append(f"woke {item.address} for message {item.id}")
-        elif step == TO_MASTER and master and master != item.address:
+            if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
+                actions.append(f"woke {receiver} for message {item.id}")
+        elif step == TO_MASTER and master and receiver != boss.name:
             raised = inbox.send(BY, master, _master_text(item))
             inbox.note(item.id, TO_MASTER, BY, f"raised to {master} as message {raised.id}", now_ms)
             actions.append(f"raised message {item.id} to {master}")
@@ -61,6 +64,14 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _receiver(inbox, address):
+    """The session behind an address, and for a seat the (address, generation) its wake note is guarded by."""
+    if not is_seat(address):
+        return address, None
+    held = inbox.seats.occupant(address)
+    return held.occupant, (address, held.generation)
 
 
 def _status(herdr, agent):

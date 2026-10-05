@@ -181,3 +181,43 @@ def test_a_herdr_failure_records_no_wake(inbox):
 def test_the_window_comes_from_the_environment():
     assert wake.window_ms({}) == 300_000
     assert wake.window_ms({"AGENTIHOOKS_INBOX_RETRY_WINDOW_S": "60"}) == 60_000
+
+
+SEATED = [
+    AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat="eng-1@sw"),
+    AgentRecord("sw-eng-4", "eng", "t2", pane_id="p4", seat="eng-2@sw"),
+    AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw"),
+]
+
+
+def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
+    herdr = FakeHerdr({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]
+
+
+def test_a_wake_racing_a_handover_writes_no_wake_note(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
+
+    class HandoverHerdr(FakeHerdr):
+        def prompt(self, agent, text):
+            super().prompt(agent, text)
+            inbox.seats.occupy("eng-1@sw", "sw-eng-4")
+
+    herdr = HandoverHerdr({"p1": "idle", "p4": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 2, SEATED)
+    assert herdr.prompts[-1] == ("p4", wake.WAKE_TEXT)
+
+
+def test_escalation_goes_to_the_master_seat(inbox):
+    item = inbox.send("sw-eng-4", "sw-eng-1", "hello")
+    outside = AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw")
+    run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [outside, SEATED[2]])
+    [raised] = inbox.inbox("master@sw")
+    assert item.id in raised.text

@@ -1,0 +1,47 @@
+import pytest
+
+from scripts.swarm.seats import Occupancy, SeatRegistry, is_seat, seat_address
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+@pytest.fixture
+def seats():
+    import fakeredis
+
+    return SeatRegistry(fakeredis.FakeRedis(decode_responses=True))
+
+
+def test_a_seat_address_is_the_seat_at_the_swarm():
+    assert seat_address("rig", "eng-1") == "eng-1@rig"
+    assert is_seat("eng-1@rig")
+    assert not is_seat("rig-eng-13")
+
+
+def test_an_empty_seat_has_no_occupant_and_generation_zero(seats):
+    assert seats.occupant("eng-1@rig") == Occupancy("", 0)
+
+
+def test_each_new_occupant_bumps_the_generation(seats):
+    assert seats.occupy("eng-1@rig", "rig-eng-1", at=10) == 1
+    assert seats.occupy("eng-1@rig", "rig-eng-4", at=20) == 2
+    assert seats.occupant("eng-1@rig") == Occupancy("rig-eng-4", 2)
+
+
+def test_the_occupancy_history_keeps_every_generation(seats):
+    for at, name in enumerate(("rig-eng-1", "rig-eng-4", "rig-eng-9")):
+        seats.occupy("eng-1@rig", name, at=at)
+    assert seats.history("eng-1@rig") == [
+        {"generation": 1, "occupant": "rig-eng-1", "at": 0},
+        {"generation": 2, "occupant": "rig-eng-4", "at": 1},
+        {"generation": 3, "occupant": "rig-eng-9", "at": 2},
+    ]
+
+
+def test_seat_of_names_only_the_seat_a_session_still_holds(seats):
+    seats.occupy("eng-1@rig", "rig-eng-1", at=1)
+    assert seats.seat_of("rig-eng-1") == "eng-1@rig"
+    seats.occupy("eng-1@rig", "rig-eng-4", at=2)
+    assert seats.seat_of("rig-eng-1") == ""
+    assert seats.seat_of("rig-eng-4") == "eng-1@rig"
+    assert seats.seat_of("nobody") == ""

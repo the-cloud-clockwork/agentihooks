@@ -123,8 +123,11 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 
 A durable inbox in Redis: an item waits under its address until it is closed and
 outlives both sessions. The sender is this session (`AGENTIHOOKS_AGENT_NAME`,
-else the Claude session id), never an argument. An address is a session name;
-seats (`name@slug`) arrive later. Every state change is kept in the item's history.
+else the Claude session id), never an argument. An address is a session name or
+a seat: `master@<slug>`, `eng-1@<slug>`, `ci-1@<slug>`, one per swarm lane slot.
+The tick seats every agent it spawns, a handoff successor in its predecessor's seat;
+whoever occupies a seat now gets its items, the ones a predecessor left pending
+included. Every state change is kept in the item's history.
 A pending item is delivered once, into this session's context at its next tool call
 (PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
 An idle session never makes that call, so the swarm tick wakes it: an idle herdr pane

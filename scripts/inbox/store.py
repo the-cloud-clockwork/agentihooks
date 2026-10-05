@@ -8,7 +8,10 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, replace
 
+from scripts.swarm.seats import SeatRegistry, is_seat
+
 PREFIX = "agentihooks:inbox"
+MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "read", "done", "blocked", "handed_off", "cancelled")
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
@@ -53,6 +56,7 @@ class InboxStore:
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
+        self.seats = SeatRegistry(redis)
 
     def key(self, *parts):
         return ":".join((PREFIX, *parts))
@@ -75,6 +79,19 @@ class InboxStore:
     def inbox(self, address):
         return [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
 
+    def mailbox(self, me):
+        seat = self.seats.seat_of(me)
+        items = self.inbox(me) + (self.inbox(seat) if seat else [])
+        return sorted(items, key=lambda item: item.created_at)
+
+    def acts_for(self, by, address, pipe=None):
+        if by == address:
+            return True
+        if not is_seat(address):
+            return False
+        held = self.seats.watch(pipe, address) if pipe is not None else self.seats.occupant(address)
+        return held.occupant == by
+
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
 
@@ -87,7 +104,7 @@ class InboxStore:
 
     def reply(self, item_id, replier, text):
         item = self.get(item_id)
-        if replier != item.address:
+        if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
         if item.state in CLOSED:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
@@ -106,35 +123,51 @@ class InboxStore:
         items = [self.get(i) for key in addresses for i in self.redis.zrange(key, 0, -1)]
         return [item for item in items if item.state == "pending"]
 
-    def note(self, item_id, event, by, detail, at):
-        self.redis.rpush(
-            self.key("history", item_id), json.dumps({"event": event, "by": by, "reason": detail, "at": at})
-        )
+    def note(self, item_id, event, by, detail, at, held=None):
+        """held=(seat address, generation): write nothing and return False once that seat has a new occupant."""
+        from redis.exceptions import WatchError
+
+        entry = json.dumps({"event": event, "by": by, "reason": detail, "at": at})
+        with self.redis.pipeline() as pipe:
+            try:
+                if held is not None and self.seats.watch(pipe, held[0]).generation != held[1]:
+                    return False
+                pipe.multi()
+                pipe.rpush(self.key("history", item_id), entry)
+                pipe.execute()
+                return True
+            except WatchError:
+                return False
 
     def _move(self, item_id, by, actors, state, reason, only_from=None):
         from redis.exceptions import WatchError
 
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_move(item_id, by, actors, state, reason, only_from)
+            except WatchError:
+                continue
+        raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_move(self, item_id, by, actors, state, reason, only_from):
         key = self.key("item", item_id)
         with self.redis.pipeline() as pipe:
-            try:
-                pipe.watch(key)
-                item = _item(pipe.hgetall(key), item_id)
-                if by not in actors(item):
-                    raise InboxError(f"message {item_id} belongs to {item.address}, not {by}")
-                if only_from is not None and item.state not in only_from:
-                    return None
-                if item.state in CLOSED:
-                    raise InboxError(f"message {item_id} is closed: {item.reason}")
-                if item.state == state:
-                    return item
-                moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
-                pipe.multi()
-                pipe.hset(key, mapping=_fields(moved))
-                pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
-                pipe.execute()
-                return moved
-            except WatchError as exc:
-                raise InboxError(f"message {item_id} changed meanwhile; run the command again") from exc
+            pipe.watch(key)
+            item = _item(pipe.hgetall(key), item_id)
+            if not any(self.acts_for(by, address, pipe) for address in actors(item)):
+                raise InboxError(f"message {item_id} belongs to {item.address}, not {by}")
+            if only_from is not None and item.state not in only_from:
+                return None
+            if item.state in CLOSED:
+                raise InboxError(f"message {item_id} is closed: {item.reason}")
+            if item.state == state:
+                return item
+            moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
+            pipe.multi()
+            pipe.hset(key, mapping=_fields(moved))
+            pipe.rpush(self.key("history", item_id), _entry(state, by, reason, moved.updated_at))
+            pipe.execute()
+            return moved
 
 
 def _fields(item):

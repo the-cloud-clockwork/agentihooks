@@ -32,7 +32,7 @@ def cmd_send(store, me, args):
 
 
 def cmd_inbox(store, me, args):
-    for item in store.inbox(me):
+    for item in store.mailbox(me):
         print(f"{item.id}\t{item.state}\t{item.sender}\t{item.text.splitlines()[0]}")
 
 
