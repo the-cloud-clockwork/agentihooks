@@ -17,8 +17,6 @@ import importlib
 import os
 import sys
 
-from mcp.server.fastmcp import FastMCP
-
 from hooks.common import log
 from hooks.mcp._registry import ALL_CATEGORIES, CATEGORY_MODULES
 from hooks.mcp._session import set_env_fallback_allowed
@@ -87,6 +85,8 @@ def build_server(categories=None, name="agentihooks"):
     # inherited CLAUDE_CODE_SESSION_ID names some unrelated session rather than
     # the caller. Shut the env fallback off before any tool can consult it.
     set_env_fallback_allowed(resolve_transport() == "stdio")
+
+    from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP(
         name,
