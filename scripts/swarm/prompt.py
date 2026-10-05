@@ -27,6 +27,7 @@ LANE_ROLE = {
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
+    summary = summary_lines(slug)
     lines = [
         f"You are {name}, the master of swarm {slug}, working over the repo {repo}. The operator talks to the swarm "
         "through you. You stay online for the life of the swarm; the swarm restarts you if you die.",
@@ -35,14 +36,15 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
     ]
     lines += [
         *priming_lines(task),
-        *summary_lines(slug),
+        *summary,
         "",
         f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
         "the operator's notes, answers, comments and chat.",
         f"Run once: {led} join --role orchestrator. Then keep a Monitor on: agentihooks ledger watch {slug} --as "
         f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
         "",
-        f"Your first message after joining gives the operator the ledger page link: run {me} url and post its line "
+        f"Your {'next' if summary else 'first'} message after joining gives the operator the ledger page link: "
+        f"run {me} url and post its line "
         f'with {me} say --to operator "<line>". Answer any question like what is my ledger link with that line at '
         "once.",
         "",

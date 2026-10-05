@@ -10,6 +10,7 @@ def test_master_reads_the_previous_summary_before_its_first_chat_line(monkeypatc
     text = prompt.build_master("sw", "/repo", "sw-master-2", {"seat": "master@sw", "culture": "Keep records"})
     assert summary in text
     assert "first ledger chat line" in text
+    assert "Your next message after joining gives the operator the ledger page link" in text
     assert "summary" in text.lower()
     assert text.index(summary) < text.index("Your standing duties:")
     assert "Keep records" in text
