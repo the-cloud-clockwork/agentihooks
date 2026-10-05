@@ -38,16 +38,11 @@ def _handoff(prompt):
     return seat.group(1) if seat else "", task.group(1) if task else MASTER, document
 
 
-def _record(store, seat, task, names, at, document, sent):
-    successor = names[1]
+def _record(store, handoff, sent):
+    successor, at = handoff["to"], handoff["at"]
     return {
-        "seat": seat,
-        "task": task,
-        "from": names[0],
-        "to": successor,
-        "at": at,
-        "document": document,
-        "recaps": store.memory.recaps(seat),
+        **handoff,
+        "recaps": store.memory.recaps(handoff["seat"]),
         "asked": [
             {k: m[k] for k in ("id", "address", "text", "at")}
             for m in sent
@@ -69,11 +64,13 @@ def handoffs(store, inbox, home, slug):
         if mine is None:
             continue
         before = next((e["occupant"] for e in history if e["generation"] == mine["generation"] - 1), "")
-        found.append(_record(store, seat, task, (before, path.stem), mine["at"], document, sent))
+        handoff = {"seat": seat, "task": task, "from": before, "to": path.stem, "at": mine["at"], "document": document}
+        found.append(_record(store, handoff, sent))
     waiting = ":".join((PREFIX, slug, "handoff", ""))
     for key in sorted(store.redis.scan_iter(match=waiting + "*")):
         task = key[len(waiting) :]
         seat = store.handoff_seat(slug, task)
-        names = (store.seats.occupant(seat).occupant if seat else "", "")
-        found.append(_record(store, seat, task, names, 0, store.handoff(slug, task), sent))
+        holder = store.seats.occupant(seat).occupant if seat else ""
+        handoff = {"seat": seat, "task": task, "from": holder, "to": "", "at": 0, "document": store.handoff(slug, task)}
+        found.append(_record(store, handoff, sent))
     return found
