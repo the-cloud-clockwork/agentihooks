@@ -106,12 +106,6 @@ def test_create_refuses_ids_that_break_agent_names(env, capsys):
     assert "starting with a letter" in capsys.readouterr().err
 
 
-def test_create_starts_the_chat_cursor_at_the_latest_message(env):
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    assert store.redis.get(store.key("sw", "chat-cursor")) == "50"
-
-
 def test_as_equals_is_not_mistaken_for_set(env, monkeypatch):
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -443,18 +437,28 @@ def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypa
 
 
 def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop(env):
+    from scripts.swarm import operator_mail
+    from scripts.swarm_ledger.watch_ledger import line
+
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1"))
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", seat="master@sw"))
+    store.seats.occupy("master@sw", "sw-master-1", 1)
     rt.live.add("sw-master-1")
-    line = {"id": "new", "by": "operator", "at": 60, "text": "how far along are we"}
-    chat = [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}, line]
-    ledger.chat = lambda slug: chat
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
     box = InboxStore(store.redis)
-    [item] = box.inbox("sw-master-1")
-    assert (item.sender, item.text, item.state) == ("operator", "how far along are we", "pending")
-    assert line in ledger.chat("sw")
+    said = {
+        "rev": 7,
+        "at": 60,
+        "by": "operator",
+        "kind": "message added",
+        "target": "chat",
+        "id": "m",
+        "text": "how far",
+    }
+    operator_mail.relay(box, store, "sw", {}, [said], line)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
+    [item] = box.inbox("master@sw")
+    assert (item.sender, item.state) == ("operator", "pending") and "how far" in item.text
     answer = box.reply(item.id, "sw-master-1", "two tasks left")
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
     assert ("two tasks left", "sw-master-1") in ledger.said

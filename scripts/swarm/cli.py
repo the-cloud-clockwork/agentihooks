@@ -53,7 +53,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         herdr = messenger or delivery.HerdrMessenger()
         inbox = InboxStore(store.redis)
         delivery.migrate_outbox(store, slug, inbox)
-        delivery.relay_operator_chat(store, slug, ledger.chat(slug))
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         window = wake.window_ms(os.environ)
@@ -85,7 +84,6 @@ def cmd_create(store, args):
     ledger = LedgerClient()
     ledger.tasks(args.slug)
     store.create(SwarmConfig(args.slug, repo, args.max_eng_agents, args.max_ci_agents, state="paused"))
-    delivery.start_cursor(store, args.slug, ledger.chat(args.slug))
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused"}))
 
 
@@ -195,9 +193,7 @@ def cmd_status(store, args):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    ledger = LedgerClient()
-    ledger.say(args.slug, args.text)
-    delivery.relay_operator_chat(store, args.slug, ledger.chat(args.slug))
+    LedgerClient().say(args.slug, args.text)
     print(json.dumps({"posted": True}))
 
 

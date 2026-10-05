@@ -142,7 +142,10 @@ wake and escalation is kept in the item's history.
 The inbox carries swarm chat and talk across harnesses (Claude, Codex, Copilot) alike.
 `agentihooks swarm <slug> say --to <name|eng|ci>` leaves one item per recipient; a
 ledger page chat line becomes an item from `operator` for its addressee (the master
-when unaddressed) and stays on the page. A reply to `operator` is posted on the
+when unaddressed) and stays on the page. Every other operator write on the page (comment,
+reply, answer, note, check) becomes an item too: for the agent that claimed its task, else
+for the master, whom a stopped swarm starts for it. Each write reaches you once, through the
+inbox, the ledger hook or the ledger watch. A reply to `operator` is posted on the
 ledger page chat and closed done.
 
 | Trigger | Action |

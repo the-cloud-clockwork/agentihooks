@@ -27,7 +27,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import ledger_core as core  # noqa: E402
+
+from scripts.inbox import seen  # noqa: E402
 
 
 def read(json_path):
@@ -72,6 +75,7 @@ def main():
     print(f"WATCHING {json_path} rev {state['_meta']['rev']}", flush=True)
     seed_error, warned = None, []
     beat = core.watch_path(args.slug, args.name) if args.name else None
+    marks = seen.marks_for(args.slug) if args.name else None
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -80,9 +84,11 @@ def main():
             beat.parent.mkdir(parents=True, exist_ok=True)
             beat.touch()
         meta = state["_meta"]
-        for event in meta.get("events", []):
-            if event.get("rev", 0) > since and (event.get("by") == "operator" or args.all):
-                print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
+        fresh = [
+            e for e in meta.get("events", []) if e.get("rev", 0) > since and (e.get("by") == "operator" or args.all)
+        ]
+        for event in seen.first_showing(marks, args.name, args.slug, fresh):
+            print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
         since = max(since, meta["rev"])
         if meta.get("seed_error") != seed_error:
             seed_error = meta.get("seed_error")

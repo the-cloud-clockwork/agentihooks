@@ -305,6 +305,33 @@ def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(s
     assert tick("sw", store, tasks(), runtime, 3) == [] and len(runtime.masters) == 1
 
 
+def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
+    from scripts.inbox.store import InboxStore
+
+    store.update("sw", state="stopped")
+    InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
+    runtime = FakeRuntime()
+    actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, 1)
+    assert "spawned master sw-master-1" in actions
+    assert [a.name for a in masters(store)] == ["sw-master-1"] and workers(store) == []
+    assert runtime.spawned == [] and store.config("sw").state == "paused"
+
+
+def test_a_drained_swarm_without_a_master_starts_one_and_no_engineers(store):
+    store.update("sw", state="drained")
+    runtime = FakeRuntime()
+    actions = tick("sw", store, tasks(), runtime, 1)
+    assert "spawned master sw-master-1" in actions and runtime.spawned == []
+    assert store.config("sw").state == "drained"
+
+
+def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
+    store.update("sw", state="stopped")
+    runtime = FakeRuntime()
+    assert tick("sw", store, tasks(("t1", "eng")), runtime, 1) == []
+    assert runtime.masters == [] and store.config("sw").state == "stopped"
+
+
 def test_a_dead_master_is_respawned(store):
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)

@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
@@ -244,6 +245,26 @@ def swarm_control(slug, argv):
     return status, "" if status else "swarm status unreadable after the command"
 
 
+def relay_to_inbox(slug, state):
+    """Operator writes from this sync become inbox items for the swarm on this ledger, if it has one."""
+    meta = state["_meta"]
+    events = [e for e in meta.get("events", []) if e.get("rev") == meta["rev"] and e.get("by") == "operator"]
+    if not events:
+        return []
+    try:
+        import watch_ledger
+
+        from scripts.inbox.store import connect
+        from scripts.swarm import operator_mail
+        from scripts.swarm.store import RedisStore
+
+        inbox = connect()
+        return operator_mail.relay(inbox, RedisStore(inbox.redis), slug, state, events, watch_ledger.line)
+    except Exception as exc:  # the ledger write stands whatever the inbox does
+        sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
+        return []
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
@@ -279,6 +300,8 @@ class Handler(BaseHTTPRequestHandler):
             state, rejected = core.sync(slug, changes=changes, ops=ops)
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
+        if changes or ops:
+            relay_to_inbox(slug, state)
         state["_meta"] = {
             **state["_meta"],
             "page_version": core.page_version(),

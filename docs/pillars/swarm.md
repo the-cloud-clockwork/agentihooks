@@ -147,7 +147,7 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
 ## Talking to the swarm
 
 - Operator: the chat on the ledger page, or `agentihooks swarm <id> send-message "@eng <text>"`. A message with
-  no `@` address, or one for an agent not in the swarm, goes to the master; without a master, to everyone. The
+  no `@` address, or one for an agent not in the swarm, goes to the master's seat. The
   master answers with `agentihooks msg reply <message> "<text>"` and posts its own updates with
   `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
@@ -157,3 +157,10 @@ sent by the real author; an unaddressed agent line only shows on the page. The r
 next tool call, an idle pane is prompted by the next tick, and unread items climb to the master, then to the
 operator. A reply to the operator is posted on the page chat and its item closed. The page keeps the whole
 conversation.
+
+Every operator write on the page reaches the inbox the moment the ledger server applies it: a comment or reply,
+an answer, a note, a check or uncheck, a chat line. A write on a task goes to the agent that claimed it, a chat
+line to its addressee, everything else to the master's seat; an addressee that is gone falls back to the master.
+A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
+The ledger hook, the ledger watch and the inbox share one seen mark per agent and write, so each write reaches each
+agent once, through whichever path shows it first.
