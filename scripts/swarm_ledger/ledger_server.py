@@ -478,10 +478,17 @@ class Handler(BaseHTTPRequestHandler):
     def post_media(self, slug):
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
-        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+        origin = self.headers.get("Origin")
+        agent = self.headers.get("X-Ledger-Agent")
+        if origin not in ALLOWED_ORIGINS and (origin is not None or not agent):
             return self.send(403, "origin not allowed", "text/plain")
         if self.refused(slug):
             return None
+        if agent:
+            with core.LOCK:
+                _, meta, _ = core.load_state(core.paths(slug)[1], None)
+                if agent not in meta.get("members", {}):
+                    return self.send(403, "agent must join this ledger before uploading", "text/plain")
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:

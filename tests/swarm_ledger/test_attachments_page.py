@@ -54,13 +54,14 @@ def test_the_optimistic_entry_shows_its_attachments_before_the_server_answers():
     assert result == [ATT]
 
 
-def test_a_thumbnail_links_to_the_full_size_image_in_a_new_tab():
+def test_an_attachment_opens_the_same_page_viewer():
     result = run(
         ["mediaUrl", "thumb", "attachmentsView"], f"console.log(JSON.stringify(attachmentsView([{json.dumps(ATT)}])));"
     )
-    link = result["kids"][0]
-    assert link["tag"] == "a" and link["href"] == f"/media/shots/{PNG_ID}" and link["target"] == "_blank"
-    img = link["kids"][0]
+    button = result["kids"][0]
+    assert button["tag"] == "button" and button["aria-label"] == "Open image viewer"
+    assert "href" not in button and "target" not in button
+    img = button["kids"][0]
     assert (img["tag"], img["src"], img["width"], img["height"]) == ("img", f"/media/shots/{PNG_ID}", 30, 20)
 
 

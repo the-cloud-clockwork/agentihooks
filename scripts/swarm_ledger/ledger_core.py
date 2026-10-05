@@ -598,8 +598,8 @@ def check_op(op):
         import ledger_media
 
         talks = op["thread"] == "chat" or op["thread"].endswith("/comments")
-        if op["op"] != "add" or "by" in op or not talks:
-            raise ValueError("attachments ride only on an operator add to chat or a comment thread")
+        if op["op"] != "add" or not talks:
+            raise ValueError("attachments ride only on an add to chat or a comment thread")
         ledger_media.check(op["attachments"])
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))

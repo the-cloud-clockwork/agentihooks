@@ -9,7 +9,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   events                              my unhandled operator events, one line each
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
   say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
-  comment ITEM TEXT                   your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
+  comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -148,12 +148,28 @@ def cmd_say(args):
     print(json.dumps({"posted": not state.get("rejected")}))
 
 
+def upload_image(slug: str, name: str, path: str) -> dict:
+    token = core.read_token(core.paths(slug)[0].read_text(encoding="utf-8")) or ""
+    req = urllib.request.Request(
+        f"{BASE}/api/media/{slug}",
+        data=Path(path).read_bytes(),
+        headers={"X-Ledger-Token": token, "X-Ledger-Agent": name, "Content-Type": "application/octet-stream"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"server refused image: {exc.code} {exc.read().decode(errors='replace')}")
+
+
 def cmd_comment(args):
     thread = f"{args.item}/comments"
-    state = call(
-        args.slug,
-        [{"op": "add", "thread": thread, "id": f"c-{uuid.uuid4().hex[:10]}", "text": args.text, "by": args.name}],
-    )
+    attachments = [upload_image(args.slug, args.name, path) for path in getattr(args, "image", [])]
+    entry = {"op": "add", "thread": thread, "id": f"c-{uuid.uuid4().hex[:10]}", "text": args.text, "by": args.name}
+    if attachments:
+        entry["attachments"] = attachments
+    state = call(args.slug, [entry])
     print(json.dumps({"posted": not state.get("rejected")}))
 
 
@@ -333,6 +349,10 @@ def build_parser():
         parser_ = sub.add_parser(name)
         parser_.add_argument(first)
         parser_.add_argument(second)
+        if name == "comment":
+            parser_.add_argument(
+                "--image", action="append", default=[], help="image path to upload; repeat for several"
+            )
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state", choices=["done", "open"])

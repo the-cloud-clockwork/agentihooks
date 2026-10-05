@@ -322,7 +322,17 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .attach-tray:empty { display: none; }
 .attach-pre { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .attach-note { font-size: var(--fs-meta); color: var(--destructive); text-shadow: var(--glow); overflow-wrap: anywhere; }
-.attach-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.attach-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; }
+.attach-row .thumb { max-width: 100%; padding: 0; border: 0; }
+.attach-row .thumb img { max-width: 100%; max-height: none; }
+.image-viewer { position: fixed; inset: 16px; width: calc(100vw - 32px); height: calc(100dvh - 32px); max-width: none; max-height: none;
+  margin: 0; padding: 16px; border: 0; border-radius: 8px; background: var(--overlay); color: var(--text); }
+.image-viewer[open] { display: flex; flex-direction: column; gap: 12px; }
+.image-viewer::backdrop { background: color-mix(in srgb, var(--canvas) 85%, transparent); }
+.image-toolbar { display: flex; align-items: center; gap: 16px; flex: none; }
+.image-toolbar .image-close { margin-left: auto; }
+.image-scroll { overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
+.image-scroll img { display: block; max-width: none; max-height: none; margin: 0 auto; }
 .thumb { display: block; padding: 2px; border: 1px solid transparent; border-radius: 6px; line-height: 0; transition: background .15s, border-color .15s, box-shadow .15s; }
 .thumb:hover, .thumb:active { background: var(--hover); border-color: var(--edge); box-shadow: 0 0 12px -4px var(--accent); }
 .thumb:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
@@ -630,14 +640,47 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     return `${API.replace(`/api/${SLUG}`, `/media/${SLUG}`)}/${id}`;
   }
 
-  function thumb(att) {
-    const url = mediaUrl(att.id);
-    return h("a", { class: "thumb", href: url, target: "_blank", rel: "noopener", title: "Open full size" },
-      h("img", { src: url, alt: "Screenshot", loading: "lazy", width: att.width, height: att.height }));
+  function openImages(list, index) {
+    const previousFocus = document.activeElement;
+    const image = h("img", { alt: "Attached image" });
+    const previous = h("button", { class: "link", type: "button", text: "Previous", "aria-label": "Previous image", on: { click: () => show(index - 1) } });
+    const next = h("button", { class: "link", type: "button", text: "Next", "aria-label": "Next image", on: { click: () => show(index + 1) } });
+    const counter = h("span", { "aria-live": "polite" });
+    const scroll = h("div", { class: "image-scroll" }, image);
+    const viewer = h("dialog", { class: "image-viewer", "aria-label": "Image viewer" },
+      h("div", { class: "image-toolbar" }, previous, counter, next,
+        h("button", { class: "link image-close", type: "button", text: "Close", "aria-label": "Close viewer", on: { click: () => viewer.close() } })), scroll);
+    function show(value) {
+      index = value;
+      const att = list[index];
+      image.src = mediaUrl(att.id);
+      image.width = att.width;
+      image.height = att.height;
+      counter.textContent = `${index + 1} / ${list.length}`;
+      previous.disabled = index === 0;
+      next.disabled = index === list.length - 1;
+      previous.hidden = next.hidden = list.length === 1;
+      scroll.scrollTop = scroll.scrollLeft = 0;
+    }
+    viewer.addEventListener("click", (ev) => { if (!ev.target.closest("img, button")) viewer.close(); });
+    viewer.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") ev.stopPropagation();
+      if (ev.key === "ArrowRight" && !next.disabled) show(index + 1);
+      if (ev.key === "ArrowLeft" && !previous.disabled) show(index - 1);
+    });
+    viewer.addEventListener("close", () => { viewer.remove(); previousFocus.focus(); });
+    document.body.append(viewer);
+    show(index);
+    viewer.showModal();
+  }
+
+  function thumb(att, list = [att], index = 0) {
+    return h("button", { class: "thumb", type: "button", "aria-label": "Open image viewer", on: { click: () => openImages(list, index) } },
+      h("img", { src: mediaUrl(att.id), alt: "Screenshot", loading: "lazy", width: att.width, height: att.height }));
   }
 
   function attachmentsView(list) {
-    return list && list.length ? h("div", { class: "attach-row" }, ...list.map(thumb)) : null;
+    return list && list.length ? h("div", { class: "attach-row" }, ...list.map((att, index) => thumb(att, list, index))) : null;
   }
 
   function withAttachments(op, key) {
