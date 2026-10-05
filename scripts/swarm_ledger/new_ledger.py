@@ -151,7 +151,7 @@ def upgrade_page(slug):
         "TITLE": html.escape(doc["title"]),
         "SLUG": slug,
         "TOKEN": token,
-        "PORT": str(int(os.environ.get("LEDGER_PORT", "8765"))),
+        "PORT": str(int(ledger_link.address()[1])),
         "DATA": core.seed_text(doc, state["_meta"]["rev"]),
         "PAGE": core.page_version(),
         "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
@@ -182,7 +182,7 @@ def create(slug, content, size="small"):
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     doc = build_doc(content, size)
     core.validate(doc)
-    core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
+    core.atomic_write(html_path, render(doc, slug, ledger_link.address()[1]))
     core.sync(slug)
     return True
 
