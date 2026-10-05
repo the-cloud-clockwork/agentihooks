@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Agent CLI for a ledger: join the crew, talk in chat, record progress, acknowledge operator events.
 
-Usage: ledger.py [--slug SLUG] [--as NAME] <command> [args]      (env fallbacks PLAN_LEDGER, PLAN_LEDGER_AS)
+Usage: ledger.py --slug SLUG --as NAME <command> [args]
 
   join [--role orchestrator|member]   enter the crew (the gate binds this session)
   leave                               leave the crew
@@ -265,8 +265,8 @@ def cmd_prompt(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--slug", default=os.environ.get("PLAN_LEDGER"))
-    parser.add_argument("--as", dest="name", default=os.environ.get("PLAN_LEDGER_AS"))
+    parser.add_argument("--slug")
+    parser.add_argument("--as", dest="name")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("join").add_argument("--role", choices=["orchestrator", "member"], default="member")
     for plain in ("leave", "status", "events", "prompt"):
@@ -317,7 +317,7 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
     if not args.slug or not args.name:
-        sys.exit("--slug and --as are required (or env PLAN_LEDGER and PLAN_LEDGER_AS)")
+        sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
 

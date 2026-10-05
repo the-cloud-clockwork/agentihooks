@@ -98,15 +98,12 @@ agentihooks ledger --slug <slug> --as <member-name> prompt
 ```
 
 Paste that paragraph into each member's opening prompt. The orchestrator joins
-with `--role orchestrator`. Set the ledger's `orchestrator` to its name. A
-launcher that can set env may export `PLAN_LEDGER=<slug>` and
-`PLAN_LEDGER_AS=<name>` instead; the session then binds itself at start.
+with `--role orchestrator`. Set the ledger's `orchestrator` to its name.
 Done when `agentihooks ledger --slug <slug> --as <name> status` lists every member.
 
 ## Part B — Work a plan that has a ledger (every crew member)
 
-All commands are `agentihooks ledger --slug <slug> --as <name> <command>`
-(env `PLAN_LEDGER`, `PLAN_LEDGER_AS` replace the flags).
+All commands are `agentihooks ledger --slug <slug> --as <name> <command>`.
 
 ### B1. Join, watch
 
@@ -204,7 +201,7 @@ For a bound session the hooks do the following; each is tunable in the ledger's 
   command, or (orchestrator) the watcher is not running; after `stop_blocks` blocks it lets the
   stop through and logs `gate bypassed` in the ledger for the operator;
 - any error, an unreadable ledger or a stopped server lets everything through; a ledger with every
-  phase and follow-up done is not gated; `PLAN_LEDGER_HOOKS=off` disables the hooks.
+  phase and follow-up done is not gated.
 
 ### B5. Close
 

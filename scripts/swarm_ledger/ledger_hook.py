@@ -2,8 +2,7 @@
 """Claude Code hook that keeps a crew member bound to its ledger.
 
 One entry for SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
-`agentihooks ledger join` or `ledger.py join` (learned from the Bash command) or by env PLAN_LEDGER and PLAN_LEDGER_AS at
-session start. Unbound sessions exit at once. Every error fails open.
+`agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
 """
 
 import json
@@ -65,11 +64,11 @@ def join_from_command(command):
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "join" not in tokens:
         return None
-    opts = {t.split("=", 1)[0]: t.split("=", 1)[1] for t in tokens if t.startswith(("PLAN_LEDGER=", "PLAN_LEDGER_AS="))}
+    opts = {}
     for i, token in enumerate(tokens[:-1]):
         if token in ("--slug", "--as", "--role"):
             opts[token] = tokens[i + 1]
-    slug, name = opts.get("--slug") or opts.get("PLAN_LEDGER"), opts.get("--as") or opts.get("PLAN_LEDGER_AS")
+    slug, name = opts.get("--slug"), opts.get("--as")
     return (slug, name, opts.get("--role", "member")) if slug and name else None
 
 
@@ -89,9 +88,7 @@ def new_session(slug, name, role):
 def bind(payload, sid):
     event = payload.get("hook_event_name")
     found = None
-    if event == "SessionStart" and os.environ.get("PLAN_LEDGER") and os.environ.get("PLAN_LEDGER_AS"):
-        found = (os.environ["PLAN_LEDGER"], os.environ["PLAN_LEDGER_AS"], os.environ.get("PLAN_LEDGER_ROLE", "member"))
-    elif (
+    if (
         event == "PostToolUse"
         and payload.get("tool_name") == "Bash"
         and '"joined"' in str(payload.get("tool_response"))
@@ -257,8 +254,6 @@ def dispatch(payload):
 
 
 def main():
-    if os.environ.get("PLAN_LEDGER_HOOKS") == "off":
-        return 0
     try:
         payload = json.load(sys.stdin)
         dispatch(payload if isinstance(payload, dict) else {})
