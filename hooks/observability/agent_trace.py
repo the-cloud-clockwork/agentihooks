@@ -272,7 +272,7 @@ class _ExportErrors(logging.Handler):
         self.reason = "exporter returned failure"
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.msg.startswith("Failed to export span batch code") and len(record.args or ()) == 2:
+        if "code: %s, reason: %s" in str(record.msg) and len(record.args or ()) == 2:
             self.status, reason = record.args
             self.reason = f"{type(reason).__name__}: {reason}" if isinstance(reason, BaseException) else str(reason)
         elif record.levelno >= logging.ERROR:
