@@ -3021,9 +3021,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         rendered["disabledMcpjsonServers"] = merged_disabled
         _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
 
-    # NOTE: OTEL env injection used to read otel: from profile.yml here.
-    # That dependency was removed 2026-05-07. _build_otel_env helper is
-    # retained for re-wiring through a different mechanism later.
+    from scripts.profile_telemetry import apply_langfuse_env
+
+    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
 
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)

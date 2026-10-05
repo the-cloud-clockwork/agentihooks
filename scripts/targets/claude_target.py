@@ -85,6 +85,10 @@ class ClaudeAdapter:
 
     def write_settings(self, rendered: dict) -> Path:
         _i = _install_module()
+        rendered = deepcopy(rendered)
+        profile_env = rendered.pop("_agentihooks", {}).get("env", {})
+        if profile_env:
+            rendered["env"] = {**profile_env, **rendered.get("env", {})}
 
         # rendered["env"] can carry connector-injected literal values, and this
         # is the one adapter that copies the whole dict into settings verbatim

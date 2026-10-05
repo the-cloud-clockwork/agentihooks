@@ -227,6 +227,10 @@ def read_entries(transcript_path: str) -> list[dict]:
                 continue
             if isinstance(entry, dict):
                 entries.append(entry)
+    if any(entry.get("type") == "session_meta" for entry in entries):
+        from hooks.observability.codex_transcript import normalize_entries
+
+        return normalize_entries(entries)
     return entries
 
 

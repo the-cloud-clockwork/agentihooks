@@ -9,6 +9,7 @@ from scripts import herdr_host, init_agent
 @pytest.fixture(autouse=True)
 def _no_herdr(monkeypatch):
     monkeypatch.setattr(herdr_host, "binary", lambda: None)
+    monkeypatch.setattr("scripts.profile_telemetry.installed_langfuse_env", lambda target: {})
 
 
 def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeypatch, tmp_path, capsys):
