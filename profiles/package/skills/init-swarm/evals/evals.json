@@ -1,0 +1,38 @@
+[
+  {
+    "query": "init swarm for this plan: the nightly sync job has failed three nights in a row, find out why and get it running again, then confirm it ran.",
+    "files": [],
+    "expected_behavior": [
+      "the cause hunt is a task with --kind troubleshoot and the confirmation is a task with --kind ops, both in the eng lane",
+      "every one of those tasks carries --must, --check and --judge, with a measurable must and a read only check",
+      "no task beyond code is described as ending in a pull request"
+    ]
+  },
+  {
+    "query": "init swarm: cut the cache miss rate under ten percent by tuning the cache size, and add a cache hit counter to the metrics endpoint.",
+    "files": [],
+    "expected_behavior": [
+      "the sizing is a task with --kind tune whose --must names the number to reach and whose --check measures it before and after",
+      "the metrics counter is a code task added with no --kind and no --must, --check or --judge",
+      "the tune task depends on the code task when it needs the counter to measure"
+    ]
+  },
+  {
+    "query": "init swarm for the accepted plan: split the hook manager into one module per event and add a lint rule for module size.",
+    "files": [],
+    "expected_behavior": [
+      "every task is a code or ci task added exactly as before task kinds: no --kind, no --must, --check or --judge",
+      "code tasks sit in the eng lane and the lint workflow change in the ci lane",
+      "each task description names its seam and its done condition"
+    ]
+  },
+  {
+    "query": "init swarm: research whether we should move the ledger store from JSON files to Postgres and recommend one.",
+    "files": [],
+    "expected_behavior": [
+      "the question is a task with --kind research",
+      "its --judge is operator because accepting the recommendation is the operator's decision",
+      "its --check names that the linked finding cites its sources"
+    ]
+  }
+]
