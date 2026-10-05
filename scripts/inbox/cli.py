@@ -1,10 +1,12 @@
 """agentihooks msg: durable messages between any two sessions.
 
-agentihooks msg send ADDRESS TEXT...        everything after the address is the text
-agentihooks msg inbox [--of ADDRESS]        this session's items with their state, or another seat's
-agentihooks msg read ID                     show an item with its history, mark it read
-agentihooks msg reply ID TEXT...            answer the item's sender and close the item done
+agentihooks msg send ADDRESS [--fyi] TEXT...  everything after the address is the text
+agentihooks msg inbox [--of ADDRESS]          this session's items with their state, or another seat's
+agentihooks msg read ID                       show an item with its history, mark it read
+agentihooks msg reply ID [--fyi] TEXT...      answer the item's sender and close the item done
 agentihooks msg close ID done|handoff ADDRESS|blocked WHAT|cancel [WHY]
+
+--fyi marks an item that needs no work (a thanks, a confirmation): its receiver closes it done with nothing to name.
 
 The sender is this session: AGENTIHOOKS_AGENT_NAME, else CLAUDE_CODE_SESSION_ID.
 """
@@ -17,6 +19,8 @@ from dataclasses import asdict
 
 from scripts.inbox import links
 from scripts.inbox.store import InboxError, connect
+
+FYI = "--fyi"
 
 
 def identity(environ=None):
@@ -34,9 +38,14 @@ def registered_name():
     return session_name(agent_pid())
 
 
+def informational(words):
+    return (True, words[1:]) if words[:1] == [FYI] else (False, words)
+
+
 def cmd_send(store, me, args):
     links.check_send(store, me, args.address)
-    item = store.send(me, args.address, " ".join(args.text))
+    fyi, words = informational(args.text)
+    item = store.send(me, args.address, " ".join(words), fyi=fyi)
     print(json.dumps({"id": item.id, "from": item.sender, "to": item.address, "state": item.state}))
 
 
@@ -53,7 +62,8 @@ def cmd_read(store, me, args):
 
 
 def cmd_reply(store, me, args):
-    answer = store.reply(args.id, me, " ".join(args.text))
+    fyi, words = informational(args.text)
+    answer = store.reply(args.id, me, " ".join(words), fyi=fyi)
     print(json.dumps({"id": answer.id, "to": answer.address, "closed": args.id}))
 
 

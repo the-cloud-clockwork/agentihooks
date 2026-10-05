@@ -25,6 +25,6 @@ def phase_pass(inbox, store, slug, doc, ledger):
             text = f"For your information: phase {phase['id']} {phase['title']} is done, all {len(mine)} tasks closed."
         else:
             text = f"For your information: phase {phase['id']} {phase['title']} reopened for {', '.join(open_ids)}."
-        inbox.send(SENDER, mail.master, text)
+        inbox.send(SENDER, mail.master, text, fyi=True)
         actions.append(f"phase {phase['id']} {'ticked' if done else 'reopened'}")
     return actions

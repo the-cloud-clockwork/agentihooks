@@ -58,6 +58,10 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
         f'closes the message. Post your own updates with {me} say --to operator "<text>". Answer what the operator '
         "types in this pane here.",
+        "- A message that needs no work, such as a thanks, a confirmation or a reply that asks for nothing, carries "
+        '--fyi: agentihooks msg send <address> --fyi "<text>", agentihooks msg reply <id> --fyi "<text>" or '
+        f'{me} say "<text>" --to <agent name> --fyi. Its receiver closes it done with nothing more to name; a '
+        "work item without --fyi closes with where the work went.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
@@ -171,6 +175,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "",
         f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
+        "Add --fyi after the id or address of a thanks or confirmation that needs no work. "
         "Write chat and comments in plain words for the operator: no ids, "
         "paths, hashes or dashes.",
         "Other agents work other tasks in parallel. Touch only what your task needs.",
