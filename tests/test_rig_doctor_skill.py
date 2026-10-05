@@ -209,3 +209,57 @@ def test_reset_plan_refuses_seed_paths_outside_demo(runner):
                 "branch": "dev",
             }
         )
+
+
+def test_reset_configures_gh_credential_helper_before_first_network_call(runner, monkeypatch):
+    module, calls = runner
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", True))
+    module.reset_demo()
+    helper = ("git", "config", "--local", "credential.helper", "!gh auth git-credential")
+    assert helper in calls
+    assert calls.index(helper) < calls.index(("git", "ls-remote", "--heads", "origin", "dev"))
+
+
+def test_freshly_reset_demo_gets_push_credentials_from_gh(runner, monkeypatch, tmp_path):
+    import subprocess
+
+    module, _ = runner
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    monkeypatch.setattr(module, "ensure_remote", lambda remote=None: ("owner/demo", False))
+
+    def local_run(*args, cwd=None):
+        if args[:3] == ("git", "remote", "add"):
+            args = (*args[:-1], str(remote))
+        return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+
+    password = "-".join(["fake", "gh", "password"])
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        '#!/bin/sh\n[ "$*" = "auth git-credential get" ] || exit 1\n'
+        f"echo username=x-access-token\necho password={password}\n"
+    )
+    gh.chmod(0o755)
+    empty_config = tmp_path / "gitconfig"
+    empty_config.write_text("")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{module.os.environ['PATH']}")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    for key in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{key}_NAME", "Doctor test")
+        monkeypatch.setenv(f"GIT_{key}_EMAIL", "doctor@example.invalid")
+    monkeypatch.setattr(module, "run", local_run)
+    repo = module.reset_demo()
+    filled = subprocess.run(
+        ["git", "credential", "fill"],
+        cwd=repo,
+        input="protocol=https\nhost=github.com\npath=owner/demo.git\n\n",
+        text=True,
+        capture_output=True,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert f"password={password}" in filled.stdout
+    assert password not in (repo / ".git/config").read_text()
