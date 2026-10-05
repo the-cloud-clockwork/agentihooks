@@ -8,6 +8,7 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_comments as comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
+import ledger_link  # noqa: E402
 import new_ledger  # noqa: E402
 
 SLUG = "status-2026-01-01"
@@ -69,6 +70,20 @@ class Style(unittest.TestCase):
         with self.assertRaises(ValueError):
             comments.check("word " * 101, "chat")
         comments.check("word " * 101, "chat", long=True)
+
+    def test_a_ledger_link_whose_name_carries_a_date_passes(self):
+        link = ledger_link.page_url("okay-we-re-going-to-mossy-rabin-2026-10-05")
+        comments.check(f"The swarm is running, follow it at {link}", "chat")
+        comments.check(f"Ledger page {link}/ is open.", "chat")
+
+    def test_a_bare_date_next_to_a_ledger_link_is_refused(self):
+        link = ledger_link.page_url("okay-we-re-going-to-mossy-rabin-2026-10-05")
+        with self.assertRaises(ValueError):
+            comments.check(f"Merged on 2026-10-05, see {link}", "chat")
+
+    def test_a_date_in_another_link_is_refused(self):
+        with self.assertRaises(ValueError):
+            comments.check("Notes at http://example.com/notes-2026-10-05", "chat")
 
 
 class Comments(unittest.TestCase):

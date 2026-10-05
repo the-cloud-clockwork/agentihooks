@@ -4,6 +4,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 `check` refuses machine noise and AI-slop markers with every reason at once.
 """
 
+import os
 import re
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
@@ -38,10 +39,17 @@ RULES = (
 PUNCTUATION = (("parentheses", "(", 1), ("semicolons", ";", 1))
 
 
+def ledger_link():
+    host = re.escape(os.environ.get("LEDGER_HOST", "127.0.0.1"))
+    port = re.escape(os.environ.get("LEDGER_PORT", "8765"))
+    return re.compile(rf"\bhttps?://{host}:{port}/[a-z0-9-]+\b/?")
+
+
 def problems(text, kind, long=False):
     found = []
+    prose = ledger_link().sub(" ", text)
     for name, pattern in RULES:
-        match = pattern.search(text)
+        match = pattern.search(prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
