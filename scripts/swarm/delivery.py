@@ -43,13 +43,13 @@ def recipients(store, slug, to, sender):
     return [a for a in agents if to in (a.lane, a.name)]
 
 
-def send(store, slug, text, sender, to):
+def send(store, slug, text, sender, to, fyi=False):
     found = recipients(store, slug, to, sender)
     inbox = InboxStore(store.redis)
     for agent in found:
         links.check_send(inbox, sender, agent.name)
     for agent in found:
-        inbox.send(sender, agent.name, text)
+        inbox.send(sender, agent.name, text, fyi=fyi)
     return [a.name for a in found]
 
 

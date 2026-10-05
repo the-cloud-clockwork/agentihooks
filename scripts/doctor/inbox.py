@@ -68,7 +68,7 @@ def escalated(items):
 def no_outcome(items):
     found = []
     for item in items:
-        if item["state"] not in BARE or item["reason"].strip() not in ("", item["state"]):
+        if item.get("fyi") or item["state"] not in BARE or item["reason"].strip() not in ("", item["state"]):
             continue
         closer = next((e["by"] for e in reversed(item["history"]) if e.get("state") == item["state"]), "")
         found.append(

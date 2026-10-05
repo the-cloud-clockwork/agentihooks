@@ -43,3 +43,11 @@ def test_late_message_keeps_the_exit_outcome_after_task_reassignment(redis, exit
     assert exit_text in inbox.get(item.id).reason
     [notice] = inbox.pending_items("sender")
     assert item.id in notice.text
+
+
+def test_the_exit_notice_to_a_sender_is_informational(redis):
+    inbox = InboxStore(redis)
+    inbox.send("sender", "sw-eng-1", "contract")
+    exits.settle(inbox, "sw-eng-1", "", "finished its task and exited")
+    [notice] = inbox.pending_items("sender")
+    assert notice.fyi is True

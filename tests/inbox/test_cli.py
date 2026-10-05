@@ -131,6 +131,18 @@ def test_reply_answers_the_sender_and_closes_the_item(store, monkeypatch, capsys
     assert store.get(item.id).state == "done"
 
 
+def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys):
+    assert run("send", "bob", "--fyi", "thanks,", "merged") == 0
+    [thanks] = store.inbox("bob")
+    assert (thanks.text, thanks.fyi) == ("thanks, merged", True)
+    item = store.send("bob", "alice", "is the branch ready")
+    assert run("reply", item.id, "--fyi", "yes") == 0
+    assert run("send", "bob", "review", "my", "branch") == 0
+    answer, plain = store.inbox("bob")[1:]
+    assert (answer.text, answer.fyi) == ("yes", True)
+    assert (plain.text, plain.fyi) == ("review my branch", False)
+
+
 def test_multi_agent_chat_rooms_are_retired_without_dangling_references():
     import subprocess
     from pathlib import Path

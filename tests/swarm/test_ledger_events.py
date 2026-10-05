@@ -97,6 +97,13 @@ def test_each_agent_event_kind_makes_exactly_one_master_item(store):
     assert texts(store, ENG_SEAT) == []
 
 
+def test_only_the_task_done_notice_is_informational(store):
+    run(store, recorded())
+    tasks = [{"id": "t1", "title": "Build the thing", "state": "blocked", "claimed_by": "sw-eng-1"}, DONE_T2]
+    run(store, recorded(AGENT_EVENTS, tasks=tasks))
+    assert [i.fyi for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == [False, False, False, True]
+
+
 def test_a_replay_of_the_same_ledger_makes_no_item(store):
     run(store, recorded())
     doc = recorded(AGENT_EVENTS, tasks=[DONE_T2])
