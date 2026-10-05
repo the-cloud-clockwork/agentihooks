@@ -120,3 +120,12 @@ def test_a_master_doing_ledger_writes_and_watches_does_not_trip_over_monitoring(
     counts = activity.counts("sw", tmp_path)
     assert counts == {"sw-master-1": {"watch": 16, "act": 16}}
     assert health.over_monitoring(counts, health.Limits()) == []
+
+
+def test_the_first_hook_event_of_each_agent_is_kept_whatever_the_tool(tmp_path):
+    activity.record("Read", {"file_path": "a.py"}, BOUND, tmp_path, now_ms=5_000)
+    activity.record("Edit", {}, BOUND, tmp_path, now_ms=9_000)
+    activity.record("Read", {}, {**BOUND, "AGENTIHOOKS_AGENT_NAME": "sw-eng-2"}, tmp_path, now_ms=7_000)
+    assert activity.first_events("sw", tmp_path) == {"sw-eng-1": 5_000, "sw-eng-2": 7_000}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1}}
+    assert activity.first_events("none", tmp_path / "missing") == {}

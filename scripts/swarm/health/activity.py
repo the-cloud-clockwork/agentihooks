@@ -57,14 +57,18 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
         return
+    at = int(time.time() * 1000) if now_ms is None else now_ms
+    folder = Path(root or default_root()) / slug
+    first = folder / f"{name}.first"
+    if not first.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+        first.write_text(str(at), encoding="utf-8")
     kind = classify(tool_name, tool_input)
     if not kind:
         return
-    entry = {"kind": kind, "at": int(time.time() * 1000) if now_ms is None else now_ms}
+    entry = {"kind": kind, "at": at}
     if kind == "watch" and REARM_RE.search((tool_input or {}).get("command", "")):
         entry["rearm"] = True
-    folder = Path(root or default_root()) / slug
-    folder.mkdir(parents=True, exist_ok=True)
     with open(folder / f"{name}.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -86,6 +90,17 @@ def counts(slug, root=None):
             if entry.get("kind") in tally:
                 tally[entry["kind"]] += 1
         found[path.stem] = tally
+    return found
+
+
+def first_events(slug, root=None):
+    folder = Path(root or default_root()) / slug
+    found = {}
+    for path in sorted(folder.glob("*.first")) if folder.is_dir() else []:
+        try:
+            found[path.stem] = int(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
     return found
 
 
