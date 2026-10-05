@@ -80,6 +80,13 @@ def test_the_issue_step_applies_only_where_the_repo_has_issues(kind):
 
 
 @pytest.mark.parametrize("kind", ["code", "ci"])
+def test_code_kinds_activate_serena_on_the_worktree(kind):
+    text = build(kind=kind)
+    assert "mcp__serena__activate_project" in text
+    assert "replace_symbol_body" in text
+
+
+@pytest.mark.parametrize("kind", ["code", "ci"])
 def test_a_ci_agent_proposes_a_further_bottleneck_as_a_follow_up_and_never_queues_a_task(kind):
     text = prompt.build("sw", "/repo", "ci", "sw-ci-1", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
     assert "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as sw-ci-1 followup add" in text

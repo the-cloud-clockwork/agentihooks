@@ -209,7 +209,10 @@ def code_steps(me, led, name, phase):
     return [
         "Work it end to end with the dev-cycle skill, then stop:",
         issue_step(me, "the seams"),
-        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout).",
+        f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call "
+        "mcp__serena__activate_project with its absolute path. Python is read and edited through Serena "
+        "(find_symbol, replace_symbol_body, insert_after_symbol, replace_content); built-in Edit and shell "
+        "rewrites of existing .py files are blocked.",
         "3. Red test, least code to green.",
         "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree, then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "

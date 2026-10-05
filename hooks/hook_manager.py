@@ -1244,6 +1244,17 @@ def on_pre_tool_use(payload: dict) -> None:
                 flush=True,
             )
 
+    # --- Serena edit guard: Python in a worktree is edited by symbol ---
+    if tool_name in ("Bash", "Edit", "MultiEdit", "Write"):
+        try:
+            from hooks.context.serena_edit_guard import check as check_serena_edit
+
+            check_serena_edit(payload)
+        except BlockAction:
+            raise
+        except Exception as e:
+            log("serena_edit_guard check failed", {"error": str(e)})
+
     # --- Dependency install banner (supply chain defense) ---
     if tool_name == "Bash":
         try:
