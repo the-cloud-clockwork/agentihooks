@@ -1,0 +1,51 @@
+{
+ "_source": "codex: codex-cli 0.160.0 interactive, captured raw from hook stdin 2026-10-05 (plan mode, option 1 'Yes, implement this plan'). claude: Claude Code ExitPlanMode tool_use input and toolUseResult as recorded in a session transcript, in the PostToolUse hook envelope.",
+ "codex_plan_prompt": {
+  "session_id": "01a10ca5-ed8c-7841-9740-2e6667fd8c85",
+  "turn_id": "01a10ca8-a70e-7fa2-9652-806d240e6a1f",
+  "transcript_path": "/home/u/.codex/sessions/2026/10/05/rollout-2026-10-05T17-19-23-01a10ca5-ed8c-7841-9740-2e6667fd8c85.jsonl",
+  "cwd": "/home/u/work",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Plan a tiny hello world python script in three steps: write it, run it, delete it. No questions, propose the plan now."
+ },
+ "codex_plan_accept": {
+  "session_id": "01a10ca5-ed8c-7841-9740-2e6667fd8c85",
+  "turn_id": "01a10ca9-d9d2-7703-b69d-9b92af421b1c",
+  "transcript_path": "/home/u/.codex/sessions/2026/10/05/rollout-2026-10-05T17-19-23-01a10ca5-ed8c-7841-9740-2e6667fd8c85.jsonl",
+  "cwd": "/home/u/work",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Implement the plan."
+ },
+ "codex_trivial": {
+  "session_id": "01a10ca5-ed8c-7841-9740-2e6667fd8c85",
+  "turn_id": "01a10ca6-d099-7641-b42b-969143dda9c7",
+  "transcript_path": "/home/u/.codex/sessions/2026/10/05/rollout-2026-10-05T17-19-23-01a10ca5-ed8c-7841-9740-2e6667fd8c85.jsonl",
+  "cwd": "/home/u/work",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Use your update_plan tool to record a plan of four steps (write, run, test, clean) for a hello world script, mark the first in_progress, then reply done without running anything."
+ },
+ "claude_plan_accept": {
+  "session_id": "5f0c1e7a-2b4d-4c39-9a51-6f1d2e3a4b5c",
+  "transcript_path": "/home/u/.claude/projects/-home-u-work/5f0c1e7a-2b4d-4c39-9a51-6f1d2e3a4b5c.jsonl",
+  "cwd": "/home/u/work",
+  "permission_mode": "plan",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "ExitPlanMode",
+  "tool_input": {
+   "plan": "# Hello world\n\n1. Write hello.py\n2. Run it\n3. Delete it\n",
+   "planFilePath": "/home/u/.claude/plans/go-and-plan-it-fizzy-taco.md"
+  },
+  "tool_response": {
+   "plan": "# Hello world\n\n1. Write hello.py\n2. Run it\n3. Delete it\n",
+   "isAgent": false,
+   "filePath": "/home/u/.claude/plans/go-and-plan-it-fizzy-taco.md"
+  },
+  "tool_use_id": "toolu_01ExitPlanModeRecorded"
+ }
+}
