@@ -142,8 +142,8 @@ input[type=checkbox] {
   border: 1px solid transparent; background: var(--surface-2); color: var(--accent); display: grid; place-content: center;
   transition: background .15s, border-color .15s, box-shadow .15s;
 }
-input[type=checkbox]:hover:not(:disabled) { background: var(--hover); border-color: var(--edge); }
-input[type=checkbox]:checked { background: var(--hover); box-shadow: 0 0 10px -2px currentColor; }
+input[type=checkbox]:hover:not(:disabled):not(:checked) { background: var(--hover); border-color: var(--edge); }
+input[type=checkbox]:checked { background: var(--positive); color: var(--canvas); box-shadow: 0 0 10px -2px var(--positive); }
 input[type=checkbox]:checked::after { content: ""; width: 8px; height: 4px; border: 2px solid currentColor; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
 input[type=checkbox]:focus-visible, summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 textarea {
@@ -315,6 +315,9 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .outline a.in { color: var(--accent); }
 .outline a.on { color: var(--accent); text-shadow: var(--glow); }
 .outline a.on::before { color: var(--accent); }
+.outline .ol-items a.st-open::before, .outline .ol-items a.st-open.on::before { color: var(--signal); }
+.outline .ol-items a.st-done::before, .outline .ol-items a.st-done.on::before { color: var(--positive); }
+.outline .ol-items a.st-out::before, .outline .ol-items a.st-out.on::before { color: var(--warn); }
 .fab-outline { bottom: 240px; }
 @media (min-width: 1280px) {
   body { padding-left: var(--outline-w); }
@@ -1078,15 +1081,22 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       h("p", { class: "hl-threshold", text: `threshold ${f.threshold}` }));
   }
 
+  function itemState(list, i) {
+    if (!["phases", "tasks", "questions", "followups"].includes(list)) return undefined;
+    if (i.out_of_scope) return "out";
+    const done = list === "questions" ? (i.answers || []).some((a) => !a.deleted) : !!i.done;
+    return done ? "done" : "open";
+  }
+
   function outlineOf(doc, heads) {
     const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
-      : { id: `item-${list}-${i.id}`, title: i.title || i.text || i.item || i.id };
+      : { id: `item-${list}-${i.id}`, title: i.title || i.text || i.item || i.id, state: itemState(list, i) };
     return heads.map((head) => ({ id: head.id, title: head.title,
       items: (head.list ? (doc[head.list] || []).filter((i) => !i.deleted) : []).map(entry(head.list)) }));
   }
 
   function outlineGroup(s) {
-    const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title });
+    const link = (e) => h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title, class: e.state && `st-${e.state}` });
     const box = h("details", { class: "fold", id: `ol-${s.id}`, open: "" }, h("summary", {}, link(s)),
       h("ul", { class: "ol-items" }, ...s.items.map((i) => h("li", {}, link(i)))));
     collapsible(box);
