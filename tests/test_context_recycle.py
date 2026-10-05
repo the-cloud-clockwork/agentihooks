@@ -28,6 +28,7 @@ def test_claude_agent_at_the_limit_gets_the_handoff_directive(monkeypatch):
     monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 600_000)
     text = recycle.directive("s1", _swarm_env("my-swarm-ci-2"))
     assert "agentihooks swarm my-swarm handoff" in text and "handoff document" in text
+    assert "--recap" in text and "agentihooks swarm my-swarm learned" in text
 
 
 def test_codex_agent_over_the_limit_gets_the_directive(monkeypatch):
@@ -87,6 +88,8 @@ def test_recycle_check_returns_the_slug_only_at_or_over_the_limit(monkeypatch):
         ("Bash", {"command": "agentihooks ledger --slug my-swarm --as a say hi; git push"}),
         ("Bash", {"command": "agentihooks swarm my-swarm handoff $(git commit -m x)"}),
         ("Bash", {"command": "agentihooks swarm my-swarm done --pr x"}),
+        ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/h.md --pr x"}),
+        ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/h.md --recap"}),
         ("Agent", {"prompt": "keep going"}),
     ],
 )
@@ -106,6 +109,8 @@ def test_over_the_limit_work_is_denied_with_the_handoff_command(monkeypatch, too
         ("Write", {"file_path": "~/scratchpad/agentihooks/t28/handoff.md", "content": "state"}),
         ("Edit", {"file_path": "{home}/scratchpad/agentihooks/t28/handoff.md", "old_string": "a", "new_string": "b"}),
         ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/agentihooks/t28/handoff.md"}),
+        ("Bash", {"command": "agentihooks swarm my-swarm handoff ~/scratchpad/h.md --recap ~/scratchpad/r.md"}),
+        ("Bash", {"command": "agentihooks swarm my-swarm learned 'run the whole suite, not -m unit'"}),
         ("Bash", {"command": 'agentihooks ledger --slug my-swarm --as my-swarm-eng-4 comment phases/p1 "handed off"'}),
         ("Bash", {"command": "agentihooks ledger --slug my-swarm --as my-swarm-eng-4 say 'handing off now'"}),
         ("Bash", {"command": "agentihooks ledger --slug my-swarm --as my-swarm-eng-4 leave"}),

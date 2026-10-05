@@ -3,7 +3,7 @@
 import json
 from dataclasses import asdict, dataclass, replace
 
-from scripts.inbox.seats import SeatRegistry
+from scripts.inbox.seats import SeatMemory, SeatRegistry
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -47,6 +47,7 @@ class RedisStore:
             raise SwarmError("no Redis client; the swarm refuses to run without it")
         self.redis = redis
         self.seats = SeatRegistry(redis)
+        self.memory = SeatMemory(redis)
 
     def key(self, slug, *parts):
         return ":".join((PREFIX, slug, *parts))
