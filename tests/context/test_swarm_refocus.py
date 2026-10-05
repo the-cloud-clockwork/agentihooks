@@ -146,3 +146,12 @@ def test_a_missing_ledger_lets_the_tool_call_through_silently(bound, capsys):
     (bound / "rig.json").unlink()
     assert "Inject a refocus block." not in _prompt(capsys)
     assert "Inject a refocus block." not in _pre(capsys)
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_each_full_tool_call_counts_once_toward_the_window(bound, monkeypatch, capsys, target):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    monkeypatch.setenv("AGENTIHOOKS_REFOCUS_EVERY", "3")
+    assert "Inject a refocus block." in _prompt(capsys)
+    seen = ["Inject a refocus block." in _pre(capsys) + _post(capsys) for _ in range(6)]
+    assert seen == [False, False, True, False, False, True]
