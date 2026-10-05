@@ -16,7 +16,9 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
-    config = SimpleNamespace(slug="swarm-buildout", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
     runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x"})
     assert seen["env"]["AGENTIHOOKS_SWARM"] == "swarm-buildout"
     assert seen["env"]["AGENTIHOOKS_SWARM_LANE"] == "eng"
@@ -35,13 +37,15 @@ def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_maste
 
 
 def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
-    herdr = NamedPanes({"w:p9": {"name": "sw-eng-1", "agent_status": "idle"}, "w:p1": {"name": "sw-eng-1"}})
+    herdr = NamedPanes(
+        {"w:p9": {"name": "engineer@a1b2c3-0001", "agent_status": "idle"}, "w:p1": {"name": "engineer@a1b2c3-0001"}}
+    )
     prompts = []
     runtime = HerdrRuntime(
         home=tmp_path,
         herdr=lambda args: prompts.append(args) or {} if args[:2] == ["agent", "prompt"] else herdr(args),
     )
-    eng = AgentRecord("sw-eng-1", "eng", "t", pane_id="w:p9")
+    eng = AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9")
     assert runtime.status(eng) == "idle"
     runtime.nudge(eng, "wake")
     assert prompts == [["agent", "prompt", "w:p9", "wake"]]
@@ -93,9 +97,9 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 
 
 def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
-    herdr = NamedPanes({"w:p1": {"name": "sw-master-1", "agent_status": "idle"}})
+    herdr = NamedPanes({"w:p1": {"name": "master-a1b2c3-0001", "agent_status": "idle"}})
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    assert runtime.name_pane(SimpleNamespace(name="sw-master-1", pane_id="w:p1", conversation_id="")) is False
+    assert runtime.name_pane(SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="")) is False
     assert herdr.renamed == []
 
 
@@ -106,8 +110,10 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
         run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""),
         choose=lambda *_: ("claude", "open"),
     )
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
-    placed = runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert (placed.model, placed.effort) == ("opus", "high")
 
 
@@ -121,9 +127,9 @@ def _spawn_env(tmp_path, monkeypatch, **config):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     runtime.spawn(
-        SimpleNamespace(slug="sw", repo=str(tmp_path), lanes={}, **{"autonomy": "delegate", **config}),
+        SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", lanes={}, **{"autonomy": "delegate", **config}),
         "eng",
-        "sw-eng-1",
+        "engineer@a1b2c3-0001",
         {"id": "t1", "title": "x"},
     )
     return seen["env"]
@@ -149,8 +155,10 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         return requested or "claude", "requested" if requested else "priority"
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes=lanes, autonomy="delegate")
-    runtime.spawn(config, lane, "sw-eng-1", {"id": "t1", "title": "x"})
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes=lanes, autonomy="delegate"
+    )
+    runtime.spawn(config, lane, "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     return seen
 
 
@@ -188,8 +196,8 @@ def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
     _spawn_seen(tmp_path, {"eng": {"role": "a reviewer who only reads"}})
-    text = (tmp_path / "sw" / "prompts" / "sw-eng-1.md").read_text()
-    assert text.startswith("You are sw-eng-1, a reviewer who only reads in swarm sw,")
+    text = (tmp_path / "sw" / "prompts" / "engineer@a1b2c3-0001.md").read_text()
+    assert text.startswith("You are engineer@a1b2c3-0001, a reviewer who only reads in swarm sw,")
 
 
 def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_settings(tmp_path, monkeypatch):
@@ -212,13 +220,14 @@ def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_setting
     config = SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
+        code="a1b2c3",
         compact_limit=0,
         lanes={"eng": {"agent": "auto"}},
         autonomy="delegate",
         codex_share=None,
         codex_min_week_left=None,
     )
-    runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"}, spawns={"claude": 2})
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"}, spawns={"claude": 2})
     assert seen["requested"] == "" and seen["spawns"] == {"claude": 2}
     assert (seen["share"], seen["min_week_left"]) == (30, 7)
     assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
@@ -274,9 +283,18 @@ def _resuming(tmp_path, reported, harness="claude"):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, herdr=herdr, choose=lambda *_: ("claude", "open"))
     runtime.sleep = lambda seconds: None
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
     agent = AgentRecord(
-        "sw-eng-1", "eng", "t1", harness=harness, account="a1", model="opus", effort="high", conversation_id="c0ffee"
+        "engineer@a1b2c3-0001",
+        "eng",
+        "t1",
+        harness=harness,
+        account="a1",
+        model="opus",
+        effort="high",
+        conversation_id="c0ffee",
     )
     return runtime, config, agent, seen
 
@@ -285,11 +303,11 @@ def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conve
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
     placed = runtime.resume(config, agent, "you were restored")
     argv = seen["runs"][0]
-    assert argv[argv.index("--name") + 1] == "sw-eng-1"
+    assert argv[argv.index("--name") + 1] == "engineer@a1b2c3-0001"
     assert argv[argv.index("--agent") + 1] == "codex"
     assert argv[argv.index("--resume") + 1] == "c0ffee"
     assert argv[argv.index("--dir") + 1] == str(tmp_path)
-    assert argv[argv.index("--workspace") + 1] == "swarm-sw"
+    assert argv[argv.index("--workspace") + 1] == f"{tmp_path.name}-a1b2c3"
     assert _passed(argv)[:2] == ["--route", "a1"] and "-m" in _passed(argv)
     assert Path(argv[argv.index("--prompt-file") + 1]).read_text() == "you were restored"
     assert (seen["env"]["AGENTIHOOKS_SWARM_LANE"], seen["env"]["AGENTIHOOKS_SWARM_TASK"]) == ("eng", "t1")

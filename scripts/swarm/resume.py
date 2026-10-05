@@ -54,7 +54,7 @@ def restored_text(slug, agent, ledger):
 
 def reopen(store, slug, worktrees, runtime, now_ms, ledger, has_quota=account_quota, exists=os.path.isdir):
     """Resume every unfinished agent it can; the rest are marked finished. Records and returns each outcome."""
-    config, outcomes = store.config(slug), []
+    config, outcomes = store.ensure_code(slug), []
     for agent in store.agents(slug):
         if agent.state == "finished":
             continue

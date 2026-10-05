@@ -9,7 +9,7 @@ KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
 
 
 def build(**task):
-    return prompt.build("sw", "/repo", "eng", "sw-eng-1", {"id": "t1", "title": "x", "phase": "p1", **task})
+    return prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1", **task})
 
 
 def test_a_task_without_a_kind_gets_the_code_prompt():
@@ -28,7 +28,9 @@ def test_each_kind_gets_its_own_prompt():
     assert "--fix <pr url>" in texts["troubleshoot"] and "--filed <task id>" in texts["troubleshoot"]
     assert "--finding <link>" in texts["research"]
     for text in texts.values():
-        assert text.index("agentihooks ledger --slug sw --as sw-eng-1 leave") < text.index("agentihooks swarm sw done")
+        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(
+            "agentihooks swarm sw done"
+        )
 
 
 def test_the_prompt_carries_the_proof_contract():
@@ -47,12 +49,12 @@ def _start(env, kind):  # noqa: F811
 
 def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeypatch, capsys):  # noqa: F811
     store, ledger = _start(env, "ops")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     assert run("sw", "done") == 1
     assert run("sw", "done", "--command", "kubectl get pods") == 1
     assert "--output" in capsys.readouterr().err
     assert ledger.rows["t1"]["state"] != "done"
-    assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] != ["finished"]
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] != ["finished"]
     assert run("sw", "done", "--command", "kubectl get pods", "--output", "cache-0 Running") == 0
     assert ledger.rows["t1"]["state"] == "done"
     assert ledger.rows["t1"]["proof"] == {"command": "kubectl get pods", "output": "cache-0 Running"}
@@ -60,13 +62,13 @@ def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeyp
 
 def test_troubleshoot_and_research_close_with_their_own_proof(env, monkeypatch):  # noqa: F811
     _, ledger = _start(env, "troubleshoot")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     assert run("sw", "done", "--root-cause", "a stale lock", "--evidence", "the lock age in the log") == 1
     args = ("--root-cause", "a stale lock", "--evidence", "the lock age in the log", "--filed", "t9")
     assert run("sw", "done", *args) == 0
     assert ledger.rows["t1"]["proof"]["filed"] == "t9"
     ledger.rows["t2"].update(kind="research", state="claimed")
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-ci-1")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ci@a1b2c3-0001")
     assert run("sw", "done", "--finding", "my notes") == 1
     assert run("sw", "done", "--finding", "https://github.com/o/r/issues/4#issuecomment-1") == 0
 
@@ -88,6 +90,9 @@ def test_code_kinds_activate_serena_on_the_worktree(kind):
 
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_a_ci_agent_proposes_a_further_bottleneck_as_a_follow_up_and_never_queues_a_task(kind):
-    text = prompt.build("sw", "/repo", "ci", "sw-ci-1", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
-    assert "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as sw-ci-1 followup add" in text
+    text = prompt.build("sw", "/repo", "ci", "ci@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
+    assert (
+        "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as ci@a1b2c3-0001 followup add"
+        in text
+    )
     assert "task add" not in text

@@ -11,7 +11,7 @@ argument-hint: "<slug> [--replace]"
 # Take Master
 
 `agentihooks swarm <slug> take-master` seats the session that runs it as the
-swarm's master. It names an unnamed session `<slug>-master-<n>`, occupies the
+swarm's master. It names an unnamed session `master@<code>-<n>`, occupies the
 master seat, reopens a closed ledger, sets a stopped swarm running and prints
 the full master priming.
 

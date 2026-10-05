@@ -4,14 +4,12 @@ The calculator only reports; the master diagnoses and the operator decides.
 """
 
 import os
-import re
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
-WORKER_RE = re.compile(r"-(eng|ci)-\d+$")
-MASTER_RE = re.compile(r"-master-\d+$")
 NOT_TRANSITIONS = ("joined", "left")
 HELD = ("claimed", "pr")
 MINUTE_MS = 60_000
@@ -97,6 +95,14 @@ def _task_id(target):
     return target.split("/", 1)[1] if target.startswith("tasks/") else ""
 
 
+def _is_master(by):
+    return naming.lane_of(by) == "master"
+
+
+def _is_worker(by):
+    return naming.lane_of(by) in ("eng", "ci")
+
+
 def _title(tasks, tid):
     return tasks.get(tid, {}).get("title") or tid
 
@@ -113,9 +119,9 @@ def ceremony(events, tasks, limits):
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
     found = []
     for by, count in sorted(moves.items()):
-        if not (WORKER_RE.search(by) or MASTER_RE.search(by)):
+        if not naming.lane_of(by):
             continue
-        outcomes = len(finished) if MASTER_RE.search(by) else closed[by]
+        outcomes = len(finished) if _is_master(by) else closed[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
             found.append(
                 Finding(
@@ -139,7 +145,7 @@ def scope_inflation(events, tasks, limits):
     queued = {}
     for e in events:
         tid = _task_id(e.get("target", ""))
-        if e.get("kind") == "added" and WORKER_RE.search(e["by"]) and tid in tasks:
+        if e.get("kind") == "added" and _is_worker(e["by"]) and tid in tasks:
             queued.setdefault(e["by"], []).append(tid)
     found = []
     for by, ids in sorted(queued.items()):
@@ -236,7 +242,7 @@ def over_monitoring(activity, limits):
     found = []
     for by, counts in sorted(activity.items()):
         watch, act = counts.get("watch", 0), counts.get("act", 0)
-        if MASTER_RE.search(by):
+        if _is_master(by):
             least, ratio = limits.master_watch_min, limits.master_watch_ratio
         else:
             least, ratio = limits.watch_min, limits.watch_ratio

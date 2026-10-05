@@ -7,7 +7,7 @@ import re
 
 import ledger_comments
 
-AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ROLES = ("orchestrator", "member")
 ITEM_PATH_RE = re.compile(r"^(phases|questions|followups)/[^/]+$")
 STATE_PATH_RE = re.compile(

@@ -3,6 +3,7 @@
 agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
@@ -43,7 +44,7 @@ from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, idle, ledger_events, phases, prompt, snapshot, take_master, templates, timer
+from scripts.swarm import delivery, idle, ledger_events, naming, phases, prompt, snapshot, take_master, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -423,6 +424,20 @@ def cmd_status(store, args):
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
 
 
+def cmd_names(store, args):
+    config = store.ensure_code(args.slug)
+    rows = store.names.names(args.slug)
+    if args.json:
+        print(json.dumps({"code": config.code, "space": naming.space(config.repo, config.code), "names": rows}))
+        return
+    print(f"code {config.code}\tspace {naming.space(config.repo, config.code)}")
+    for row in rows:
+        retired = row["retired_at"] or "-"
+        print(
+            f"{row['name']}\t{row['type']}\t{row['number']}\t{row['session_id'] or '-'}\t{row['spawned_at']}\t{retired}"
+        )
+
+
 def _findings(store, slug, config, tasks, events):
     rows, limits = [a.__dict__ for a in store.agents(slug)], health.limits()
     return _verdicts(store, slug).visible(
@@ -644,6 +659,7 @@ def build_parser():
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("names").add_argument("--json", action="store_true")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
     verdict.add_argument("verdict")

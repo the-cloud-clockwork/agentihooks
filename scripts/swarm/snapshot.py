@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from scripts.swarm import resume
+from scripts.swarm import naming, resume
 from scripts.swarm.store import SwarmError
 
 VERSION = 1
@@ -94,7 +94,7 @@ def worktrees(repo, names, run=subprocess.run):
             current = line.removeprefix("worktree ")
         elif line.startswith("branch refs/heads/"):
             found[line.removeprefix("branch refs/heads/")] = current
-    return {name: found.get(name, "") for name in names}
+    return {name: found.get(naming.plain(name), "") for name in names}
 
 
 def take(store, slug, now_ms, run=subprocess.run, target=None):

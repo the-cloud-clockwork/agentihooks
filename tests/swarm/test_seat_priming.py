@@ -11,14 +11,14 @@ from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  #
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 RECAPS = [
-    {"occupant": "sw-eng-4", "task": "t1", "text": "latest recap text", "at": 20},
-    {"occupant": "sw-eng-1", "task": "t1", "text": "older recap text", "at": 10},
+    {"occupant": "engineer@a1b2c3-0004", "task": "t1", "text": "latest recap text", "at": 20},
+    {"occupant": "engineer@a1b2c3-0001", "task": "t1", "text": "older recap text", "at": 10},
 ]
-LEARNED = [{"occupant": "sw-eng-1", "text": "learned note text", "at": 5, "maturity": "note"}]
+LEARNED = [{"occupant": "engineer@a1b2c3-0001", "text": "learned note text", "at": 5, "maturity": "note"}]
 
 
 def _eng(**task):
-    return prompt.build("sw", "/repo", "eng", "sw-eng-5", {"id": "t1", "title": "x", "phase": "p1", **task})
+    return prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0005", {"id": "t1", "title": "x", "phase": "p1", **task})
 
 
 def test_the_successor_prompt_carries_the_chain_in_order():
@@ -58,7 +58,7 @@ def test_older_recaps_beyond_the_cap_are_counted_not_dropped_silently():
 
 def test_the_master_prompt_carries_the_chain_too():
     task = {"id": MASTER, "seat": "master@sw", "handoff": "caps go to four", "recaps": RECAPS, "learned": LEARNED}
-    text = prompt.build("sw", "/repo", MASTER, "sw-master-2", task)
+    text = prompt.build("sw", "/repo", MASTER, "master@a1b2c3-0002", task)
     assert text.index("caps go to four") < text.index("latest recap text") < text.index("learned note text")
 
 
@@ -69,9 +69,9 @@ def test_a_handoff_writes_a_recap_under_the_seat(env, tmp_path):  # noqa: F811
     doc, recap = tmp_path / "handoff.md", tmp_path / "recap.md"
     doc.write_text("next step: seam 2")
     recap.write_text("did seam 1, stopped at seam 2, promised the master a pr")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc), "--recap", str(recap)) == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", str(recap)) == 0
     (entry,) = swarm.memory.recaps("eng-1@sw")
-    assert (entry["occupant"], entry["task"]) == ("sw-eng-1", "t1")
+    assert (entry["occupant"], entry["task"]) == ("engineer@a1b2c3-0001", "t1")
     assert entry["text"] == "did seam 1, stopped at seam 2, promised the master a pr"
 
 
@@ -81,7 +81,7 @@ def test_a_handoff_refuses_a_missing_recap_file(env, tmp_path, capsys):  # noqa:
     run("sw", "start")
     doc = tmp_path / "handoff.md"
     doc.write_text("doc")
-    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc), "--recap", "/no/such/recap.md") == 1
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", "/no/such/recap.md") == 1
     assert "recap" in capsys.readouterr().err
     assert swarm.handoff("sw", "t1") == ""
 
@@ -90,7 +90,7 @@ def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "sw-eng-1", "learned", "the ledger refuses dashes in chat") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "the ledger refuses dashes in chat") == 0
     assert [n["text"] for n in swarm.memory.learned("eng-1@sw")] == ["the ledger refuses dashes in chat"]
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["note"]
 
@@ -131,7 +131,7 @@ def test_a_first_occupant_is_primed_with_an_empty_seat(store):  # noqa: F811
 
 
 def _note(text, maturity):
-    return {"occupant": "sw-eng-1", "text": text, "at": 1, "maturity": maturity}
+    return {"occupant": "engineer@a1b2c3-0001", "text": text, "at": 1, "maturity": maturity}
 
 
 def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data():
@@ -176,9 +176,9 @@ def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "sw-eng-1", "learned", "a raw figure", "--maturity", "data") == 0
-    assert run("sw", "--as", "sw-eng-1", "learned", "law", "--maturity", "canon") == 1
-    assert run("sw", "--as", "sw-master-1", "learned", "law", "--maturity", "canon") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "a raw figure", "--maturity", "data") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "law", "--maturity", "canon") == 1
+    assert run("sw", "--as", "master@a1b2c3-0001", "learned", "law", "--maturity", "canon") == 0
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["data"]
     assert [n["maturity"] for n in swarm.memory.learned("master@sw")] == ["canon"]
 
@@ -187,16 +187,19 @@ def test_promote_rules_by_caller(env, capsys):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
-    assert run("sw", "--as", "sw-ci-1", "promote", "eng-1", "1", "insight", "--reason", "held twice") == 0
-    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1", "1", "canon", "--reason", "always") == 1
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "promote", "eng-1", "1", "insight", "--reason", "held twice") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "promote", "eng-1", "1", "canon", "--reason", "always") == 1
     assert "only the master or the operator" in capsys.readouterr().err
-    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1", "1", "note", "--reason", "back down") == 1
-    assert run("sw", "--as", "sw-eng-1", "promote", "eng-1@other", "1", "canon", "--reason", "x") == 1
-    assert run("sw", "--as", "sw-master-1", "promote", "eng-1@sw", "1", "canon", "--reason", "always held") == 0
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "promote", "eng-1", "1", "note", "--reason", "back down") == 1
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "promote", "eng-1@other", "1", "canon", "--reason", "x") == 1
+    assert run("sw", "--as", "master@a1b2c3-0001", "promote", "eng-1@sw", "1", "canon", "--reason", "always held") == 0
     (entry,) = swarm.memory.learned("eng-1@sw")
     assert entry["maturity"] == "canon"
-    assert [(p["to"], p["by"]) for p in entry["promotions"]] == [("insight", "sw-ci-1"), ("canon", "sw-master-1")]
+    assert [(p["to"], p["by"]) for p in entry["promotions"]] == [
+        ("insight", "ci@a1b2c3-0001"),
+        ("canon", "master@a1b2c3-0001"),
+    ]
 
 
 def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
@@ -204,7 +207,7 @@ def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
     assert run("sw", "promote", "eng-1", "1", "canon", "--reason", "the operator says so") == 0
     assert swarm.memory.learned("eng-1@sw")[0]["promotions"][0]["by"] == "operator"
 
@@ -212,8 +215,8 @@ def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
 def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "sw-eng-1", "learned", "lesson one")
-    run("sw", "--as", "sw-eng-1", "learned", "lesson two", "--maturity", "insight")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two", "--maturity", "insight")
     capsys.readouterr()
     assert run("sw", "learned") == 0
     assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t1\tnote\tlesson one", "eng-1@sw\t2\tinsight\tlesson two"]

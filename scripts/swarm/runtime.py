@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
-from scripts.swarm import prompt
+from scripts.swarm import naming, prompt
 from scripts.swarm.store import SwarmConfig, codex_split
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -124,7 +124,16 @@ class HerdrRuntime:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
-        argv = [_bin(), "init-agent", "--host", "herdr", "--workspace", f"swarm-{config.slug}", "--dir", config.repo]
+        argv = [
+            _bin(),
+            "init-agent",
+            "--host",
+            "herdr",
+            "--workspace",
+            naming.space(config.repo, config.code),
+            "--dir",
+            config.repo,
+        ]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
         return [*argv, "--prompt-file", str(path)]
 
@@ -190,9 +199,9 @@ class HerdrRuntime:
         try:
             spaces = self.herdr(["workspace", "list"])["workspaces"]
             agents = self.herdr(["agent", "list"])["agents"]
-            closed = False
+            closed, labels = False, (naming.space(config.repo, config.code), f"swarm-{config.slug}")
             for space in spaces:
-                if space.get("label") != f"swarm-{config.slug}":
+                if space.get("label") not in labels:
                     continue
                 workspace = space["workspace_id"]
                 if any(

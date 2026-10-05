@@ -4,7 +4,7 @@ import re
 
 OPS = ("size_set",)
 SIZES = ("small", "swarm")
-AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 
 
 def size_of(doc):

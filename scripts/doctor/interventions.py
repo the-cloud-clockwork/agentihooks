@@ -94,7 +94,7 @@ def handoff_at_stop(ctx, args):
 
 
 def message(ctx, args):
-    if not of_swarm(args.to, ctx.watched):
+    if not of_swarm(args.to, ctx.watched, ctx.store.names):
         raise SwarmError(f"{args.to} is not the master or an agent of the watched swarm {ctx.watched}")
     if not args.text.strip():
         raise SwarmError("a message needs its text")
