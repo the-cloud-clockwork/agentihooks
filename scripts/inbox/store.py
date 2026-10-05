@@ -140,6 +140,14 @@ class InboxStore:
     def _back_fill(self, address):
         from redis.exceptions import WatchError
 
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_back_fill(address)
+            except WatchError:
+                continue
+        return [item.id for item in self.inbox(address) if item.state == "pending"]
+
+    def _try_back_fill(self, address):
         with self.redis.pipeline() as pipe:
             pipe.watch(self.key("address", address))
             ids = pipe.zrange(self.key("address", address), 0, -1)
@@ -147,14 +155,11 @@ class InboxStore:
                 pipe.watch(*(self.key("item", item_id) for item_id in ids))
             items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
             pending = {item.id: item.created_at for item in items if item.state == "pending"}
-            try:
-                pipe.multi()
-                if pending:
-                    pipe.zadd(self.key("pending", address), pending)
-                pipe.sadd(self.key("indexed"), address)
-                pipe.execute()
-            except WatchError:
-                pass
+            pipe.multi()
+            if pending:
+                pipe.zadd(self.key("pending", address), pending)
+            pipe.sadd(self.key("indexed"), address)
+            pipe.execute()
         return list(pending)
 
     def note(self, item_id, event, by, detail, at, held=None):

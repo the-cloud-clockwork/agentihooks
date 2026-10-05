@@ -149,3 +149,21 @@ def test_a_refused_transition_leaves_the_pending_set_alone(store):
     with pytest.raises(InboxError):
         store.read(item.id, "mallory")
     assert pending_ids(store, "bob") == [item.id]
+
+
+def test_a_send_racing_the_back_fill_is_in_the_result_and_the_set(store, monkeypatch):
+    import scripts.inbox.store as module
+
+    old = store.send("alice", "bob", "before the change")
+    store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
+    real, raced = module._item, []
+
+    def racing(raw, item_id):
+        if not raced:
+            raced.append(store.send("carol", "bob", "raced"))
+        return real(raw, item_id)
+
+    monkeypatch.setattr(module, "_item", racing)
+    assert [i.id for i in store.pending_items("bob")] == [old.id, raced[0].id]
+    assert pending_ids(store, "bob") == [old.id, raced[0].id]
+    assert store.redis.sismember(store.key("indexed"), "bob")
