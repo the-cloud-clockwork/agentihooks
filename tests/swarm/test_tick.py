@@ -65,6 +65,9 @@ class FakeRuntime:
             pane_id=f"w1:p{len(self.spawned)}", harness=self.harness, account="acct", model="opus", effort="high"
         )
 
+    def recover(self, name):
+        return Placed("", "claude")
+
     def live_names(self):
         return set(self.live)
 
