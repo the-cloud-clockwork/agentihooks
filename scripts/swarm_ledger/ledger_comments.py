@@ -6,7 +6,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 
 import re
 
-import ledger_link as links
+from scripts.swarm_ledger import ledger_link as links
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 RULES = (
