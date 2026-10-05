@@ -100,7 +100,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   threshold crossed. The master diagnoses them; the operator decides. Thresholds
   (`AGENTIHOOKS_HEALTH_*`, defaults in brackets): ceremony, an agent's ledger
   transitions at least `CEREMONY_MIN` (20) and over `CEREMONY_RATIO` (12) per
-  merged outcome; scope inflation, a lane agent queued `SELF_QUEUED` (3) tasks
+  outcome, a merged task or one closed with the proof its kind needs; scope inflation, a lane agent queued `SELF_QUEUED` (3) tasks
   itself whose stated `--gain` never rose; proof loop, a task over `RERUNS` (2)
   reruns or `REVIEW_ROUNDS` (3) moves to pr; idle with claim, `IDLE_TICKS` (3)
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
