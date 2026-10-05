@@ -527,3 +527,62 @@ def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
     monkeypatch.setattr(cli.checks, "pending", lambda url, run=None: url.endswith("/7"))
     assert _findings(capsys) == []
+
+
+@pytest.fixture
+def home(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    return tmp_path / "home"
+
+
+def test_create_from_a_template_sets_the_caps_and_the_lane_map(env, home):
+    store, _, _ = env
+    assert run("sw", "create", "--repo", "/repo", "--template", "codex-ci") == 0
+    config = store.config("sw")
+    assert (config.template, config.max_eng, config.max_ci) == ("codex-ci", 2, 1)
+    assert (config.lanes["eng"]["agent"], config.lanes["ci"]["agent"]) == ("claude", "codex")
+
+
+def test_a_cap_flag_wins_over_the_template(env, home):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo", "--template", "codex-ci", "--max-eng-agents", "5")
+    assert (store.config("sw").max_eng, store.config("sw").max_ci) == (5, 1)
+
+
+def test_create_with_an_unknown_template_is_refused(env, home):
+    store, _, _ = env
+    assert run("sw", "create", "--repo", "/repo", "--template", "nope") == 1
+    assert store.slugs() == []
+
+
+def test_set_changes_one_lane_field_and_refuses_a_bad_one(env, home):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "eng-model=sonnet", "eng-agent=claude") == 0
+    eng = store.config("sw").lanes["eng"]
+    assert (eng["model"], eng["agent"], eng["effort"]) == ("sonnet", "claude", "auto")
+    assert run("sw", "set", "eng-agent=gemini") == 1
+    assert run("sw", "set", "qa-agent=codex") == 1
+    assert store.config("sw").lanes["eng"]["agent"] == "claude"
+
+
+def test_save_then_create_round_trips(env, home):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo", "--template", "codex-ci", "--max-eng-agents", "3")
+    run("sw", "set", "eng-model=sonnet", "eng-role=a reviewer", "compact-limit=300")
+    assert run("sw", "save-template", "mine") == 0
+    assert (home / "swarm-templates" / "mine.json").is_file()
+    assert run("sw2", "create", "--repo", "/repo", "--template", "mine") == 0
+    a, b = store.config("sw"), store.config("sw2")
+    assert (b.template, b.max_eng, b.max_ci, b.compact_limit) == ("mine", 3, 1, 300)
+    assert b.lanes == a.lanes and b.lanes["eng"]["role"] == "a reviewer"
+
+
+def test_templates_lists_built_in_and_user_templates(env, home, capsys):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "save-template", "mine")
+    capsys.readouterr()
+    assert run("templates") == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("default\tbuilt-in") for line in lines)
+    assert any(line.startswith("mine\tuser") for line in lines)
