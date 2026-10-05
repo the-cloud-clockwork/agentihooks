@@ -81,9 +81,26 @@ class Style(unittest.TestCase):
         with self.assertRaises(ValueError):
             comments.check(f"Merged on 2026-10-05, see {link}", "chat")
 
-    def test_a_date_in_another_link_is_refused(self):
-        with self.assertRaises(ValueError):
-            comments.check("Notes at http://example.com/notes-2026-10-05", "chat")
+    def test_a_web_link_can_carry_a_date(self):
+        comments.check("Notes at http://example.com/notes-2026-10-05", "chat")
+
+    def test_web_links_pass_and_noise_outside_them_stays_refused(self):
+        for kind in comments.LIMITS:
+            link = "https://github.com/the-cloud-clockwork/agentihooks/issues/613"
+            comments.check(f"Read {link}", kind)
+            comments.check("Read https://example.com/file_name.py?run=37119097059#4a5414f78", kind)
+            for noise in ("core/strategy/reentry.py", "engine_setup", "37119097059", "4a5414f78"):
+                with self.assertRaises(ValueError, msg=noise):
+                    comments.check(f"Read {link} then {noise}", kind)
+
+    def test_chat_and_comment_writes_accept_issue_links(self):
+        make_ledger()
+        text = "The issue is https://github.com/the-cloud-clockwork/agentihooks/issues/613"
+        ops = [post("eng", text, 1, "chat"), post("eng", text, 2, "phases/p1/comments")]
+        core.check_body({"ops": ops})
+        state, _ = core.sync(SLUG, ops=ops)
+        self.assertEqual([entry["text"] for entry in state["chat"]], [text])
+        self.assertEqual(state["phases"][0]["comments"][0]["text"], text)
 
 
 class Comments(unittest.TestCase):

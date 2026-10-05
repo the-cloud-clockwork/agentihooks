@@ -750,6 +750,21 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       h("button", { class: "link", type: "button", text: "Add image", title: "Pick, paste or drop images", on: { click: () => pick.click() } }), trayView(key));
   }
 
+  function entryBody(text) {
+    const body = h("div", { class: "entry-body" });
+    let offset = 0;
+    for (const match of text.matchAll(/\bhttps?:\/\/[^\s<>"']+/gi)) {
+      let url = match[0].replace(/[.,;:!?]+$/, "");
+      for (const [open, close] of [["(", ")"], ["[", "]"], ["{", "}"]]) {
+        while (url.endsWith(close) && url.split(close).length > url.split(open).length) url = url.slice(0, -1);
+      }
+      body.append(text.slice(offset, match.index), h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: url }), match[0].slice(url.length));
+      offset = match.index + match[0].length;
+    }
+    body.append(text.slice(offset));
+    return body;
+  }
+
   function entryView(path, entry, noun) {
     const mine = entry.by === "operator";
     if (entry.id in editing) {
@@ -764,7 +779,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       } } }));
     const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
       h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }), attachmentsView(entry.attachments),
+    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, entryBody(entry.text), attachmentsView(entry.attachments),
       path === "notes" ? commentsView(`notes/${entry.id}`, entry.comments || []) : null);
   }
 
@@ -1545,7 +1560,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     log.dataset.sig = sig;
     log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
       h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
-      h("div", { class: "entry-body", text: e.text }), attachmentsView(e.attachments))));
+      entryBody(e.text), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
     if (stick) {
       log.scrollTop = log.scrollHeight;
