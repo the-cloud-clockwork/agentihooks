@@ -18,14 +18,19 @@ This is the canonical non-blocking primitive for the hook layer. Do not
 from __future__ import annotations
 
 import os
+import pickle
 import signal
 import sys
+import tempfile
+import time
+from pathlib import Path
 from typing import Any, Callable
 
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.logfile import append_text, rotate_if_full
 
 _LOG_FILE = AGENTIHOOKS_HOME / "logs" / "async-hooks.log"
+_WORKER = "import sys; from hooks._async import run_job; run_job(*sys.argv[1:])"
 
 
 def fork_and_call(
@@ -35,13 +40,18 @@ def fork_and_call(
     task_name: str = "hook-task",
     **kwargs: Any,
 ) -> None:
-    """Run ``func(*args, **kwargs)`` in a fully detached grandchild.
+    """Run ``func(*args, **kwargs)`` in a fully detached grandchild running a fresh interpreter.
 
     Classic double-fork:
       1. fork → parent waitpids first child (<1ms) → returns to caller
       2. first child ``setsid()`` → new session
       3. first child forks again → exits (grandchild orphan → init)
-      4. grandchild: signal.alarm(timeout_sec) + func(...) + os._exit()
+      4. grandchild execs a fresh Python that loads the pickled job,
+         arms signal.alarm(timeout_sec) and calls func(...)
+
+    ``func`` must be importable by module and name; its arguments must pickle.
+    The fresh interpreter matters: a forked child inherits import locks held by
+    parent threads it does not have, and blocks forever on its first import.
 
     The grandchild redirects stdout + stderr to ``~/.agentihooks/logs/async-hooks.log``
     and closes inherited fds above stderr (Redis / OTel / transcript pipes)
@@ -51,8 +61,16 @@ def fork_and_call(
     """
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     try:
+        job = _write_job(func, args, kwargs)
+    except Exception as e:  # noqa: BLE001
+        _best_effort_log(f"{task_name}: job not serializable: {type(e).__name__}: {e}")
+        return
+    argv = [sys.executable, "-c", _WORKER, job, str(timeout_sec), task_name]
+    env = _worker_env()
+    try:
         pid = os.fork()
     except OSError as e:
+        os.unlink(job)
         _best_effort_log(f"{task_name}: fork failed: {e}")
         return
     if pid > 0:
@@ -74,17 +92,11 @@ def fork_and_call(
     if pid2 > 0:
         os._exit(0)
 
-    # Grandchild — detached, runs the actual work.
+    # Grandchild — detached, replaced by a fresh interpreter that runs the job.
     try:
         _detach_stdio()
         _close_inherited_fds()
-        _install_alarm(timeout_sec, task_name)
-        try:
-            func(*args, **kwargs)
-        except Exception as e:  # noqa: BLE001
-            sys.stderr.write(f"[async] {task_name}: FAILED: {type(e).__name__}: {e}\n")
-            os._exit(1)
-        os._exit(0)
+        os.execve(argv[0], argv, env)
     finally:
         os._exit(1)
 
@@ -111,11 +123,43 @@ def _close_inherited_fds(start: int = 3, end: int = 1024) -> None:
 
 def _install_alarm(timeout_sec: int, task_name: str) -> None:
     def _handler(signum, frame):  # noqa: ARG001
-        sys.stderr.write(f"[async] {task_name}: TIMEOUT after {timeout_sec}s\n")
+        sys.stderr.write(_stamped(f"[async] {task_name}: TIMEOUT after {timeout_sec}s"))
         os._exit(124)
 
     signal.signal(signal.SIGALRM, _handler)
     signal.alarm(max(1, timeout_sec))
+
+
+def _stamped(line: str) -> str:
+    return f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n"
+
+
+def _write_job(func: Callable[..., Any], args: tuple, kwargs: dict) -> str:
+    fd, path = tempfile.mkstemp(prefix="async-job-", dir=_LOG_FILE.parent)
+    with os.fdopen(fd, "wb") as handle:
+        pickle.dump((func, args, kwargs), handle)
+    return path
+
+
+def _worker_env() -> dict[str, str]:
+    env = dict(os.environ)
+    root = str(Path(__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (root, env.get("PYTHONPATH", "")) if p)
+    return env
+
+
+def run_job(job: str, timeout_sec: str, task_name: str) -> None:
+    """Entry point of the fresh interpreter ``fork_and_call`` execs; never returns."""
+    try:
+        _install_alarm(int(timeout_sec), task_name)
+        with open(job, "rb") as handle:
+            func, args, kwargs = pickle.load(handle)
+        os.unlink(job)
+        func(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(_stamped(f"[async] {task_name}: FAILED: {type(e).__name__}: {e}"))
+        os._exit(1)
+    os._exit(0)
 
 
 def _best_effort_log(msg: str) -> None:

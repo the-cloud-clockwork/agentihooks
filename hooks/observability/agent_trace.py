@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME
 
 CURSOR_DIR = AGENTIHOOKS_HOME / "agent_trace"
 SYSTEM = "anthropic"
+_EXPORTER_LOGGER = "opentelemetry.exporter.otlp.proto.http.trace_exporter"
 
 
 @dataclass(frozen=True)
@@ -260,6 +263,30 @@ def _readable(spec: SpanSpec, trace: int):
     )
 
 
+class _ExportErrors(logging.Handler):
+    """Collects the HTTP status and reason the OTLP exporter logs when it gives up."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.status: object = None
+        self.reason = "exporter returned failure"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.msg.startswith("Failed to export span batch code") and len(record.args or ()) == 2:
+            self.status, reason = record.args
+            self.reason = f"{type(reason).__name__}: {reason}" if isinstance(reason, BaseException) else str(reason)
+        elif record.levelno >= logging.ERROR:
+            self.reason = record.getMessage()
+
+
+def _log_failure(status: object, reason: str) -> None:
+    from hooks.observability import otel
+
+    endpoint = (otel.langfuse_exporter_config() or {}).get("endpoint", "")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sys.stderr.write(f"{stamp} agent_trace export failed endpoint={endpoint} status={status} reason={reason}\n")
+
+
 def export_session(session_id: str, transcript_path: str, identity: Identity | None = None) -> None:
     from opentelemetry.sdk.trace.export import SpanExportResult
 
@@ -276,11 +303,18 @@ def export_session(session_id: str, transcript_path: str, identity: Identity | N
     if not spans:
         return
     trace = trace_id(session_id)
+    errors = _ExportErrors()
+    logging.getLogger(_EXPORTER_LOGGER).addHandler(errors)
     try:
         result = exporter.export([_readable(spec, trace) for spec in spans])
+    except Exception as e:  # noqa: BLE001
+        errors.reason = f"{type(e).__name__}: {e}"
+        result = SpanExportResult.FAILURE
     finally:
+        logging.getLogger(_EXPORTER_LOGGER).removeHandler(errors)
         exporter.shutdown()
     if result is not SpanExportResult.SUCCESS:
+        _log_failure(errors.status, errors.reason)
         return
     path = _cursor_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
