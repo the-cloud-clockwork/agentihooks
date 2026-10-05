@@ -70,7 +70,9 @@ def _create_ledger(doctor, slug, title):
         "system with proof and applies each fix to the running swarm. Its master and the master of the watched "
         "swarm keep each other in sync through the inbox."
     )
-    return _new_ledger().create(doctor, {"title": f"Doctor for {title}", "overview": overview, "phases": PHASES})
+    return _new_ledger().create(
+        doctor, {"title": f"Doctor for {title}", "overview": overview, "phases": PHASES}, "swarm"
+    )
 
 
 def _link(ledger, slug, doctor):

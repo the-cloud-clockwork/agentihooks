@@ -79,6 +79,7 @@ def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(e
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0
     assert state(DOCTOR)["sources"] == [str(tmp / f"{WATCHED}.json")]
+    assert state(DOCTOR)["size"] == "swarm"
     assert state(WATCHED)["sources"] == [str(tmp / f"{DOCTOR}.json")]
     assert len(pointers(WATCHED)) == 1
     config = store.config(DOCTOR)

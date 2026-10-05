@@ -66,6 +66,9 @@ class LedgerClient:
     def mark_closed(self, slug, by):
         self._call(slug, [_op("close", by)])
 
+    def mark_swarm(self, slug, by="swarm"):
+        self._call(slug, [_op("size_set", by, size="swarm")])
+
     def reopen(self, slug, by):
         self._call(slug, [_op("reopen", by)])
 

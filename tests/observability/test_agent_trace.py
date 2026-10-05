@@ -1,5 +1,9 @@
 import base64
 import json
+import re
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 import pytest
@@ -280,3 +284,74 @@ def test_export_is_a_noop_when_langfuse_is_off(monkeypatch, tmp_path):
     monkeypatch.setattr(otel, "langfuse_exporter", lambda: None)
     agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
     assert not (tmp_path / "cursor").exists()
+
+
+class _OtlpHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        mode = self.server.mode
+        if mode in ("slow", "hang"):
+            time.sleep(0.4 if mode == "slow" else 3)
+        self.send_response(401 if mode == "401" else 200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def otlp(monkeypatch, tmp_path):
+    from hooks.observability import agent_trace, otel
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _OtlpHandler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    monkeypatch.setattr(otel, "LANGFUSE_EXPORT_TIMEOUT_SEC", 1)
+    endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+    with _config(OTEL_LANGFUSE_ENDPOINT=endpoint, OTEL_LANGFUSE_HOST_HEADER=""):
+        yield server, f"{endpoint}/v1/traces"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.parametrize("mode", ["ok", "slow"])
+def test_export_to_an_otlp_endpoint_writes_the_cursor(otlp, tmp_path, mode, capsys):
+    from hooks.observability import agent_trace
+
+    server, _ = otlp
+    server.mode = mode
+    agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
+    assert agent_trace._exported_turns("sess-1") == 2
+    assert "export failed" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("mode", "status", "reason"), [("401", "401", "Unauthorized"), ("hang", "None", "timed out")])
+def test_failed_export_logs_time_endpoint_status_and_reason(otlp, tmp_path, mode, status, reason, capsys):
+    from hooks.observability import agent_trace
+
+    server, endpoint = otlp
+    server.mode = mode
+    agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
+    assert not (tmp_path / "cursor").exists()
+    line = re.escape(f" agent_trace export failed endpoint={endpoint} status={status} reason=")
+    found = re.search(rf"^\d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ{line}(.+)$", capsys.readouterr().err, re.M)
+    assert found and reason in found.group(1)
+
+
+def test_exporter_exception_is_logged_not_raised(monkeypatch, tmp_path, capsys):
+    from hooks.observability import agent_trace, otel
+
+    class Broken(_Exporter):
+        def export(self, spans):
+            raise RuntimeError("encoder broke")
+
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    monkeypatch.setattr(otel, "langfuse_exporter", Broken)
+    agent_trace.export_session("sess-1", _transcript(tmp_path, ENTRIES), _identity())
+    assert re.search(
+        r"Z agent_trace export failed endpoint=\S* status=None reason=RuntimeError: encoder broke$",
+        capsys.readouterr().err,
+        re.M,
+    )

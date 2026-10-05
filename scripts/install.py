@@ -2262,12 +2262,22 @@ def _remove_bashrc_block() -> bool:
 
 _AGENTIENV_CHECK = (
     "_agentienv_check() {\n"
-    '  awk -v f="$1" \'/^[ \\t]*(#|$)/ {next}'
-    ' {l = $0; sub(/^[ \\t]*(export[ \\t]+)?/, "", l); i = index(l, "=")}'
-    " i && substr(l, 1, i - 1) !~ /^[A-Za-z_][A-Za-z0-9_]*[ \\t]*$/"
-    ' {print "[agentienv] WARNING: " f " line " NR ": variable name is not a valid identifier" > "/dev/stderr"}\''
+    '  awk -v f="$1" -v sq="\'" \'q != "" {if (index($0, q)) q = ""; next}'
+    " /^[ \\t]*(#|$)/ {next}"
+    ' {l = $0; sub(/^[ \\t]*(export[ \\t]+)?/, "", l); i = index(l, "="); n = substr(l, 1, i - 1)'
+    '; v = substr(l, i + 1); c = substr(v, 1, 1); m = i && (c == "\\"" || c == sq) && !index(substr(v, 2), c)}'
+    " i && n !~ /^[A-Za-z_][A-Za-z0-9_]*[ \\t]*$/"
+    ' {if (m) q = c; print "[agentienv] WARNING: " f " line " NR ": variable name is not a valid identifier" > "/dev/stderr"; next}'
+    " m {q = c}'"
     ' "$1"\n'
     "}\n"
+)
+
+_AGENTIENV_MULTILINE = (
+    '  local _n _m=""\n'
+    '  for _n in $(compgen -e); do [[ "${!_n}" == *$\'\\n\'* ]] && _m="$_m $_n"; done\n'
+    '  [[ -n "$_m" ]] && echo "[agentienv] WARNING: these values span several lines, and line based tools'
+    ' such as env print their later lines as if they were names:$_m" >&2\n'
 )
 
 
@@ -2294,6 +2304,7 @@ def _update_bashrc_block() -> None:
         f'    . "$HOME/.env" 2>/dev/null && _c=$((_c + 1))\n'
         f"  fi\n"
         f"  set +a\n"
+        f"{_AGENTIENV_MULTILINE}"
         f"  if (( _c > 0 )); then\n"
         f'    echo "[agentienv] loaded $_c env file(s)"\n'
         f"  fi\n"

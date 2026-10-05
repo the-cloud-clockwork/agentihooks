@@ -247,6 +247,36 @@ class TestEnvironmentNames:
         assert self.FAKE_VALUE not in r.stdout + r.stderr
 
 
+class TestMultilineEnvValues:
+    """A value spanning two lines turns its second line into a fake name in line based listings."""
+
+    FAKE_FIRST = "fake-first-line-0000"
+    FAKE_REST = "fake-rest-line-0000"
+    LISTING = "env | cut -d= -f1"
+
+    def _run(self, command):
+        import os
+        import subprocess
+
+        env = {"PATH": os.environ.get("PATH", ""), "FAKE_MULTI_0001": self.FAKE_FIRST + "\n" + self.FAKE_REST}
+        return subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
+
+    def test_unguarded_listing_would_print_the_second_line(self):
+        assert self.FAKE_REST in self._run(self.LISTING).stdout.splitlines()
+
+    def test_guard_blocks_the_listing(self):
+        assert decide(_bash(self.LISTING))
+
+    def test_block_message_names_multiline_values(self):
+        assert "several lines" in decide(_bash(self.LISTING))
+
+    def test_safe_form_never_prints_either_line(self):
+        r = self._run(ENV_NAMES_SAFE)
+        assert "FAKE_MULTI_0001" in r.stdout.splitlines()
+        assert self.FAKE_FIRST not in r.stdout + r.stderr
+        assert self.FAKE_REST not in r.stdout + r.stderr
+
+
 class TestRecursiveRewrite:
     """Under bypass on claude the search keeps running; credential files leave it."""
 

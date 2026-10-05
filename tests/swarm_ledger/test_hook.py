@@ -178,6 +178,13 @@ class Gate(unittest.TestCase):
         session = json.loads((core.LEDGER_DIR / ".sessions" / f"{SID}.json").read_text())
         self.assertEqual((session["slug"], session["name"]), (SLUG, "boss"))
 
+    def test_creating_a_small_ledger_binds_the_creator_as_its_worker(self):
+        (core.LEDGER_DIR / ".sessions" / f"{SID}.json").unlink()
+        created = json.dumps({"slug": SLUG, "created": True, "size": "small", "joined": "worker"})
+        bash("agentihooks ledger new --content c.json --plan p.md --as worker", f"{created}\nLedger page: x")
+        session = json.loads((core.LEDGER_DIR / ".sessions" / f"{SID}.json").read_text())
+        self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "worker", "member"))
+
     def test_the_old_environment_names_do_not_bind_a_session(self):
         import ledger_hook
 
