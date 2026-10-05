@@ -24,6 +24,8 @@ _meter = None
 _log_emitter = None
 _initialized = False
 _gauges: dict[str, Any] = {}
+_providers: list = []
+FLUSH_TIMEOUT_SEC = 1.0
 
 
 def _can_init() -> bool:
@@ -118,6 +120,12 @@ def _dispatch_op(op: tuple) -> None:
         if name not in _gauges:
             _gauges[name] = _meter.create_gauge(name)
         _gauges[name].set(value, dict(attrs))
+    elif kind == "flush":
+        try:
+            for provider in _providers:
+                provider.force_flush(int(FLUSH_TIMEOUT_SEC * 1000))
+        finally:
+            op[1].set()
 
 
 def init() -> None:
@@ -188,6 +196,7 @@ def _init_sdk() -> None:
         lp = LoggerProvider(resource=resource)
         lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoints["logs"])))
         _log_emitter = lp.get_logger("agentihooks")
+        _providers.extend((tp, mp, lp))
 
         # No atexit flush — both our worker and OTEL's internal batch threads
         # are daemons; they die with the process. force_flush() honors its
@@ -276,3 +285,18 @@ def record_gauge(name: str, value: float, attributes: dict[str, str] | None = No
         pass
     except Exception:
         pass
+
+
+def flush() -> None:
+    """Export queued events and gauges; the hook exits with os._exit, which skips the SDK's own flush.
+
+    Gives up after FLUSH_TIMEOUT_SEC so an unreachable collector never holds the hook.
+    """
+    if _q is None:
+        return
+    done = _threading.Event()
+    try:
+        _q.put_nowait(("flush", done))
+    except _queue.Full:
+        return
+    done.wait(FLUSH_TIMEOUT_SEC)
