@@ -173,7 +173,7 @@ class HerdrRuntime:
 
     def status(self, agent):
         found = self._get(herdr_target(agent.name))
-        if found is None and self._name_pane(agent):
+        if found is None and self.name_pane(agent):
             found = self._get(herdr_target(agent.name))
         if found is None:
             return "unknown"
@@ -186,7 +186,7 @@ class HerdrRuntime:
             return None
         return result.get("agent", result)
 
-    def _name_pane(self, agent):
+    def name_pane(self, agent):
         """Name the agent's own pane: unnamed and holding its conversation, or carrying the 32 character cut of its name."""
         found = self._get(agent.pane_id) if agent.pane_id else None
         if found is None:
