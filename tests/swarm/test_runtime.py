@@ -12,7 +12,7 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
-    config = SimpleNamespace(slug="swarm-buildout", repo=str(tmp_path), compact_limit=0, lanes={})
+    config = SimpleNamespace(slug="swarm-buildout", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
     runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x"})
     assert seen["env"]["AGENTIHOOKS_SWARM"] == "swarm-buildout"
     assert seen["env"]["AGENTIHOOKS_SWARM_LANE"] == "eng"
@@ -26,7 +26,7 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
         run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""),
         choose=lambda *_: ("claude", "open"),
     )
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes={})
+    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes={}, autonomy="delegate")
     placed = runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"})
     assert (placed.model, placed.effort) == ("opus", "high")
 
@@ -41,7 +41,7 @@ def _spawn_env(tmp_path, monkeypatch, **config):
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
     runtime.spawn(
-        SimpleNamespace(slug="sw", repo=str(tmp_path), lanes={}, **config),
+        SimpleNamespace(slug="sw", repo=str(tmp_path), lanes={}, **{"autonomy": "delegate", **config}),
         "eng",
         "sw-eng-1",
         {"id": "t1", "title": "x"},
@@ -69,7 +69,7 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         return requested or "claude", "requested" if requested else "priority"
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
-    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes=lanes)
+    config = SimpleNamespace(slug="sw", repo=str(tmp_path), compact_limit=0, lanes=lanes, autonomy="delegate")
     runtime.spawn(config, lane, "sw-eng-1", {"id": "t1", "title": "x"})
     return seen
 

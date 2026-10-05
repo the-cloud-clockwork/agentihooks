@@ -11,7 +11,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.inbox import links
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AUTONOMY, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 LANES = ("eng", "ci")
@@ -84,6 +84,8 @@ def parse(data):
     custom = set(lanes) - set(LANES)
     if custom:
         raise SwarmError(f"template {name} names lanes {sorted(custom)}; a swarm has only the eng and ci lanes")
+    if data.get("autonomy", "") not in ("", *AUTONOMY):
+        raise SwarmError(f"template {name} autonomy must be one of {AUTONOMY}")
     return Template(
         name,
         {key: lane(key, lanes.get(key, {})) for key in LANES},
@@ -126,7 +128,7 @@ def lane_map(template):
     return {key: {f: getattr(value, f) for f in LANE_FIELDS} for key, value in template.lanes.items()}
 
 
-def from_config(name, config, source=None):
+def from_config(name, config):
     caps = {"eng": config.max_eng, "ci": config.max_ci}
     return parse(
         {
@@ -134,6 +136,6 @@ def from_config(name, config, source=None):
             "lanes": {key: {**config.lanes.get(key, {}), "cap": caps[key]} for key in LANES},
             "compact_limit": config.compact_limit,
             "links": config.links,
-            "autonomy": source.autonomy if source else "",
+            "autonomy": config.autonomy,
         }
     )

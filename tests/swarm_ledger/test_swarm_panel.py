@@ -274,6 +274,14 @@ class SwarmPanel(unittest.TestCase):
         script = "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
         return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
+    def test_the_panel_header_shows_the_autonomy_level(self):
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
+        self.assertIn('id="swarm-autonomy"', box.split("<summary>", 1)[1].split("</summary>", 1)[0])
+        self.assertIn('$("swarm-autonomy").textContent = autonomyText(c)', function_source("renderSwarm"))
+        shown = self.run_js(["autonomyText"], '[autonomyText({}), autonomyText({ autonomy: "manual" })]')
+        self.assertEqual(shown, ["autonomy delegate", "autonomy manual"])
+
     def test_cards_show_task_titles_pull_requests_status_model_and_last_activity(self):
         sw = {
             "agents": [
@@ -446,7 +454,7 @@ class SwarmPanel(unittest.TestCase):
         )
         script = (
             stubs
-            + "".join(function_source(n) + "\n" for n in ("crewShown", "renderSwarm"))
+            + "".join(function_source(n) + "\n" for n in ("crewShown", "autonomyText", "renderSwarm"))
             + f"renderSwarm({json.dumps(STATUS)}); const withSwarm = $('crew-box').hidden;"
             + "renderSwarm(null); process.stdout.write(JSON.stringify([withSwarm, $('crew-box').hidden]));"
         )
@@ -603,6 +611,7 @@ class HealthPanel(unittest.TestCase):
         )
         script = (
             stubs
+            + function_source("autonomyText")
             + function_source("renderSwarm")
             + f"\nrenderSwarm({json.dumps({**STATUS, 'findings': FINDINGS})}); const on = [$('health-box').hidden, shown];"
             + "renderSwarm(null); process.stdout.write(JSON.stringify([on, $('health-box').hidden]));"

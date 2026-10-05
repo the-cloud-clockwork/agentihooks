@@ -62,6 +62,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> status [--json]` | Config, task counts, one row per agent, and the health findings. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
+| `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Operator message to the swarm chat. |
@@ -73,8 +74,8 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 
 ### Templates
 
-A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy` kept
-for later use, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
+A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`
+(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
 
 | Field | Meaning |
 |---|---|

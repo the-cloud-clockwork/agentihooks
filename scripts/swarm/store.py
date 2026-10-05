@@ -10,6 +10,8 @@ PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+AUTONOMY = ("manual", "assist", "delegate", "full")
+MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
 
 
 class SwarmError(RuntimeError):
@@ -27,6 +29,7 @@ class SwarmConfig:
     template: str = ""
     lanes: dict = field(default_factory=dict)
     links: list = field(default_factory=list)
+    autonomy: str = DELEGATE
 
 
 @dataclass(frozen=True)
@@ -80,11 +83,14 @@ class RedisStore:
             raw.get("template", ""),
             json.loads(raw.get("lanes") or "{}"),
             json.loads(raw.get("links") or "[]"),
+            raw.get("autonomy") or DELEGATE,
         )
 
     def update(self, slug, **changes):
         if changes.get("state", STATES[0]) not in STATES:
             raise SwarmError(f"state must be one of {STATES}")
+        if changes.get("autonomy", DELEGATE) not in AUTONOMY:
+            raise SwarmError(f"autonomy must be one of {AUTONOMY}")
         config = replace(self.config(slug), **changes)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config

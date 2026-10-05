@@ -2,7 +2,7 @@
 
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm.health.verdicts import VERDICTS
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_kinds
 
 CLOSES = "The swarm then closes this session; stop working."
@@ -20,7 +20,7 @@ LANE_ROLE = {
 }
 
 
-def build_master(slug, repo, name, task):
+def build_master(slug, repo, name, task, autonomy=DELEGATE):
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     lines = [
@@ -47,6 +47,14 @@ def build_master(slug, repo, name, task):
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
         '--phase <phase id> --description "<seams and done condition>". Rewrite a task description with '
         f'{led} task set <id> description="<text>".',
+        *(
+            [
+                "- This swarm runs at full autonomy: turn a follow up an agent proposes into a task yourself, with "
+                "the same task add, without asking the operator first."
+            ]
+            if autonomy == FULL
+            else []
+        ),
         f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N, {me} pause, {me} start, "
         f"{me} stop, {me} status.",
         f"- Give every new health finding a verdict once you have checked its evidence: {me} verdict <finding id> "
@@ -72,9 +80,9 @@ def build_master(slug, repo, name, task):
     return "\n".join(lines) + "\n"
 
 
-def build(slug, repo, lane, name, task, role=""):
+def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == MASTER:
-        return build_master(slug, repo, name, task)
+        return build_master(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
@@ -107,7 +115,7 @@ def build(slug, repo, lane, name, task, role=""):
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
-        *STEPS[ledger_kinds.kind(task)](me, led, name, phase),
+        *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy),
         "",
         "If your context nears its limit a hook tells you to write a handoff document: write it and a recap of what "
         f"you did, where you stopped and what you promised, then run {me} handoff <doc> --recap <recap> and stop; a "
@@ -280,3 +288,34 @@ STEPS = {
     "troubleshoot": troubleshoot_steps,
     "research": research_steps,
 }
+
+
+def manual_ship(me, led, phase):
+    return [
+        "5. Push, open a draft pull request into dev (gh pr create --draft --base dev, with Closes #<n> when there "
+        f"is an issue), record it: {me} pr <pr url>",
+        "6. This swarm runs at manual autonomy: you never merge. The operator reviews the draft and merges it.",
+        f'7. Leave the crew with {led} leave, then hand the draft to the operator: {me} block "<plain words: the '
+        f'draft pull request is ready for your review and merge>". {CLOSES}',
+    ]
+
+
+def assist_ship(me, led, phase):
+    return [
+        f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
+        "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
+        f'{led} comment phases/{phase} "<plain words: what the pull request does, checks green, waiting for your '
+        'approval to merge>", then wait on your ledger watch. Merge only after an OPERATOR line on the ledger '
+        "approves it, then wt.sh done. An OPERATOR line asking for changes: make them and ask again.",
+        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
+    ]
+
+
+GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
+
+
+def kind_steps(kind, me, led, name, phase, autonomy):
+    steps = STEPS[kind](me, led, name, phase)
+    if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
+        return steps
+    return steps[:5] + GATED_SHIP[autonomy](me, led, phase)

@@ -62,7 +62,9 @@ class HerdrRuntime:
             raise SpawnError(reason)
         path = self.home / config.slug / "prompts" / f"{name}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = prompt.build(config.slug, config.repo, lane, name, task, role=chosen.get("role", ""))
+        text = prompt.build(
+            config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
+        )
         path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
         argv = [_bin(), "init-agent", "--host", "herdr", "--workspace", f"swarm-{config.slug}", "--dir", config.repo]
@@ -78,6 +80,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM": config.slug,
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task["id"],
+                    "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )
