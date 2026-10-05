@@ -219,9 +219,11 @@ def _apply_one(hit: Hit, correction: dict, session_id: str, ledger: str) -> str:
         )
     if hit.action == "manual":
         return f"edit by hand: {hit.location} is outside git and has no clear function"
+    entry = re.sub(r"[-_]+", " ", hit.location)
+    repo = Path(correction.get("repo", "")).name
     text = (
-        f"Brain entry {hit.location} still carries directive {hit.source}, marked wrong for "
-        f"{correction.get('repo', '')}: {correction.get('reason', '')}. Brain regenerates it; fix its source."
+        f"The {entry} brain entry still carries a directive marked wrong for the {repo} repo: "
+        f"{correction.get('reason', '')}. Brain regenerates it, so fix it at its source."
     )
     if not ledger:
         return f"follow up to file: {text}"

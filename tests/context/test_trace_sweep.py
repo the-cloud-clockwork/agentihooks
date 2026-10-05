@@ -173,7 +173,10 @@ def test_apply_clears_the_runtime_layers_and_files_a_brain_followup(layers):
     assert not layers["runtime_condition"].exists()
     remaining = {m["id"] for m in json.loads(layers["broadcasts"].read_text())}
     assert remaining == {"bc-other", "bc-brain"}
-    assert len(filed) == 1 and "operator-intent" in filed[0]
+    assert filed == [
+        "The operator intent brain entry still carries a directive marked wrong for the agentihooks repo: "
+        "qitp rule leaked here. Brain regenerates it, so fix it at its source."
+    ]
 
 
 def test_a_condition_stays_while_the_operator_has_not_armed_the_gate(layers):
