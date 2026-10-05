@@ -70,11 +70,6 @@ jobs:
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
-      - name: Experiment warm collection
-        if: steps.lookup.outputs.skip != 'true'
-        run: |
-          date +%s.%N; python -m pytest tests/ -q --co -p no:xdist --shard ${{ matrix.shard }}/4 > /dev/null; date +%s.%N
-
       - name: Run tests
         if: steps.lookup.outputs.skip != 'true'
         env:
