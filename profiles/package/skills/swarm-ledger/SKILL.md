@@ -61,8 +61,20 @@ names and every source path exists.
 
 <!-- DETERMINISTIC: validate limits, types and sources, write <slug>.html + <slug>.json -->
 ```bash
-agentihooks ledger new --content <content.json> --plan <plan-file>
+agentihooks ledger new --content <content.json> --plan <plan-file> [--size small|swarm] [--as <name>]
 ```
+
+A ledger is small (the default) or swarm. A small ledger is one session's work
+without a swarm: troubleshooting, an investigation, several steps with no
+accepted plan. The session that creates it joins it as its worker through
+`--as <name>` (default `$AGENTIHOOKS_AGENT_NAME`; refused without one) and
+records its steps and findings there. A plan a swarm works takes `--size swarm`;
+`agentihooks swarm <slug> create` marks its ledger swarm. HOME shows each size.
+A small ledger moves itself to the bin once every phase, follow-up and task is
+done and every question answered, or after 7 days with no change; the bin
+deletes it 30 days later. A restored one stays on HOME until it changes again or
+sits 7 more days. Swarm ledgers, and ledgers made before sizes, never move on
+their own.
 
 Slug = `<plan-file-stem>-<YYYY-MM-DD>`. It refuses an overview over 200 words,
 a phase description over 100, an empty title, no phases or a missing source.

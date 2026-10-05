@@ -60,6 +60,9 @@ class LedgerClient:
     def mark_closed(self, slug, by):
         self._call(slug, [_op("close", by)])
 
+    def mark_swarm(self, slug, by="swarm"):
+        self._call(slug, [_op("size_set", by, size="swarm")])
+
 
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}

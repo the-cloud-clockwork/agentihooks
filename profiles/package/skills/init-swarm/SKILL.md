@@ -33,7 +33,7 @@ every source path exists.
 ## 2. Build the ledger
 
 ```bash
-agentihooks ledger new --content <content.json> --plan <plan-file>
+agentihooks ledger new --content <content.json> --plan <plan-file> --size swarm
 ```
 
 Done when it prints the slug (`"created": true`, or the existing ledger's paths).

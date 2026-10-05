@@ -14,6 +14,7 @@ class FakeLedger:
             t["id"]: {"state": "open", "claimed_by": "", "out_of_scope": False, "lane": "eng", **t} for t in tasks
         }
         self.notes = []
+        self.swarm_sized = []
 
     def tasks(self, slug):
         return list(self.rows.values())
@@ -26,6 +27,9 @@ class FakeLedger:
 
     def notify(self, slug, text):
         self.notes.append(text)
+
+    def mark_swarm(self, slug):
+        self.swarm_sized.append(slug)
 
 
 class FakeRuntime:

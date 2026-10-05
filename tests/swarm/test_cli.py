@@ -47,6 +47,12 @@ def test_create_is_paused_then_start_spawns_and_status_lists(env, capsys):
     assert "sw-eng-1" in capsys.readouterr().out
 
 
+def test_create_marks_the_ledger_as_a_swarm_ledger(env):
+    _, ledger, _ = env
+    assert run("sw", "create", "--repo", "/repo") == 0
+    assert ledger.swarm_sized == ["sw"]
+
+
 def test_bare_pairs_set_the_caps(env):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")

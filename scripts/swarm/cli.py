@@ -114,6 +114,7 @@ def cmd_create(store, args):
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
     ledger.tasks(args.slug)
+    ledger.mark_swarm(args.slug)
     caps = {key: value.cap for key, value in template.lanes.items()}
     config = SwarmConfig(
         args.slug,

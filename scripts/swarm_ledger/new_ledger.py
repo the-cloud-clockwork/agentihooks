@@ -2,6 +2,10 @@
 """Create a ledger from an agent-written content file.
 
 Usage: new_ledger.py --content <content.json> (--plan <plan-file> | --slug <slug>) [--date YYYY-MM-DD]
+                     [--size small|swarm] [--as NAME]
+
+--size: small (default) is one session's work without a swarm; its creator, --as NAME (default
+$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
@@ -26,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
+import ledger_size  # noqa: E402
 
 TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
@@ -88,7 +93,7 @@ def check(content):
     return errors
 
 
-def build_doc(content):
+def build_doc(content, size="small"):
     def items(key, prefix, fields):
         return [
             {"id": f"{prefix}{n}", **{f: item.get(f, "") for f in fields}, **extra(key)}
@@ -104,6 +109,7 @@ def build_doc(content):
         return base
 
     return {
+        **({"size": size} if size else {}),
         "title": content["title"].strip(),
         "overview": content.get("overview", "").strip(),
         "sources": [os.path.abspath(os.path.expanduser(s)) for s in content.get("sources", [])],
@@ -173,6 +179,8 @@ def main():
     source.add_argument("--plan")
     source.add_argument("--slug")
     parser.add_argument("--date", default=datetime.date.today().isoformat())
+    parser.add_argument("--size", choices=ledger_size.SIZES, default="small")
+    parser.add_argument("--as", dest="name", default=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
     args = parser.parse_args()
 
     slug = args.slug or slugify(args.plan, args.date)
@@ -183,16 +191,23 @@ def main():
         return
     if json_path.exists():
         sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
+    small = args.size == "small"
+    if small and not ledger_size.AUTHOR_RE.match(args.name):
+        sys.exit("a small ledger needs --as NAME: the session that creates it joins it as its worker")
     content = json.loads(Path(args.content).read_text(encoding="utf-8"))
     errors = check(content)
     if errors:
         sys.exit("content rejected:\n  " + "\n  ".join(errors))
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    doc = build_doc(content)
+    doc = build_doc(content, args.size)
     core.validate(doc)
     core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
     core.sync(slug)
-    print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": True}))
+    out = {"slug": slug, "html": str(html_path), "json": str(json_path), "created": True, "size": args.size}
+    if small:
+        core.sync(slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}])
+        out["joined"] = args.name
+    print(json.dumps(out))
     print(ledger_link.page_line(slug))
 
 

@@ -32,6 +32,7 @@ import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
 import ledger_media  # noqa: E402
+import ledger_size  # noqa: E402
 import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
@@ -67,6 +68,7 @@ def all_summaries():
                 "title": doc.get("title") or path.stem,
                 "overview": ledger_close.intro(doc.get("overview") or ""),
                 "closed_at": doc.get("closed_at"),
+                "size": ledger_size.size_of(doc),
             }
         )
     return found
@@ -105,6 +107,8 @@ HOME_STYLE = (
     "p{margin:2px 0 0;color:var(--muted);overflow-wrap:anywhere}"
     ".meta{display:flex;gap:14px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}"
     ".left{color:var(--link);text-shadow:0 0 8px currentColor}"
+    ".size{margin-left:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal);"
+    "text-shadow:0 0 8px currentColor}"
     ".act{flex:none;width:32px;height:32px;display:grid;place-content:center;border:1px solid transparent;"
     "border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;"
     "transition:background .15s,border-color .15s,box-shadow .15s,color .15s}"
@@ -143,8 +147,9 @@ BIN_SCRIPT = (
 
 def ledger_row(s, control):
     slug, title = html.escape(s["slug"]), html.escape(s["title"])
+    size = f'<span class="size">{html.escape(s["size"])}</span>'
     return (
-        f'<li><div class="row"><div class="info"><a href="/{slug}">{title}</a>'
+        f'<li><div class="row"><div class="info"><a href="/{slug}">{title}</a>{size}'
         f"<p>{html.escape(s['overview'])}</p>{s.get('meta', '')}</div>{control.format(slug=slug, title=title)}</div></li>"
     )
 
@@ -387,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/media/"):
             return self.send_media(*route.removeprefix("/media/").partition("/")[::2])
         if route == "/":
-            ledger_bin.purge_expired()
+            ledger_bin.tidy()
             view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
             return self.send(200, index_page(view), "text/html; charset=utf-8")
         if route.startswith("/api/swarm/"):
@@ -529,7 +534,7 @@ def watch_seeds(interval=2.0):
     while True:
         reload_if_changed(started)
         try:
-            ledger_bin.purge_expired()
+            ledger_bin.tidy()
         except OSError as exc:
             sys.stderr.write(f"bin purge: {exc}\n")
         for path in core.LEDGER_DIR.glob("*.html"):
