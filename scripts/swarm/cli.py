@@ -21,7 +21,7 @@ agentihooks swarm <id> learned                                    list every sea
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
@@ -40,6 +40,9 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.handoff import check as handoff_check
+from scripts.handoff import envelope as handoff_envelope
+from scripts.handoff.resolve import Resolver
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
@@ -595,16 +598,33 @@ def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
     recap = _read(args.recap, "recap") if args.recap else ""
+    ledger = LedgerClient()
+    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
+    if found:
+        raise SwarmError(handoff_check.refusal(found))
+    envelope = handoff_envelope.build(store, args.slug, agent, args.reason, _ledger_rows(ledger, args.slug), now_ms())
     if recap:
         store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
-    store.put_handoff(args.slug, agent.task, text, seat=agent.seat)
+    store.put_handoff(args.slug, agent.task, text, seat=agent.seat, envelope=envelope)
     store.put_agent(args.slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
     print(
         json.dumps(
-            {"task": agent.task, "state": "handoff", "next": "stop now; a successor continues from your document"}
+            {
+                "task": agent.task,
+                "state": "handoff",
+                "envelope": envelope,
+                "next": "stop now; a successor continues from your document",
+            }
         )
     )
+
+
+def _ledger_rows(ledger, slug):
+    try:
+        return ledger.tasks(slug)
+    except SwarmError:
+        return None
 
 
 def cmd_learned(store, args):
@@ -726,6 +746,7 @@ def build_parser():
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
+    handoff.add_argument("--reason", choices=handoff_envelope.REASONS, default="recycle")
     learned = sub.add_parser("learned")
     learned.add_argument("text", nargs="?", default="")
     learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)

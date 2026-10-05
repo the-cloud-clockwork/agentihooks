@@ -311,19 +311,68 @@ def test_runtime_retire_forces_past_the_agents_own_subagents(tmp_path):
     assert seen[0][1:] == ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
 
 
+HANDOFF = """# Handoff v2
+## Intent
+{intent}
+## Done
+- Seam one green, `pytest -k seam_one` 3 passed
+## Stopped at
+Seam two test red for the expected reason.
+## Decisions and promises
+None
+## Next
+1. Make seam two green; done when its test passes.
+## Read first
+- ledger:sw/tasks/t1 the task and its contract
+<!-- handoff complete -->
+"""
+
+
+def _handoff_doc(tmp_path, intent="Finish the parser task for the swarm."):
+    doc = tmp_path / "handoff.md"
+    doc.write_text(HANDOFF.format(intent=intent))
+    return doc
+
+
 def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_path, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    doc = tmp_path / "handoff.md"
-    doc.write_text("issue 7 is open, tests red on seam 2")
+    doc = _handoff_doc(tmp_path)
+    capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
     assert store.claimant("sw", "t1") == "engineer@a1b2c3-0001"
-    assert store.handoff("sw", "t1") == "issue 7 is open, tests red on seam 2"
+    assert store.handoff("sw", "t1") == doc.read_text()
     assert store.handoff_seat("sw", "t1") == "eng-1@sw"
     assert ledger.rows["t1"]["state"] == "claimed"
-    assert "stop now" in capsys.readouterr().out
+    out = json.loads(capsys.readouterr().out)
+    assert "stop now" in out["next"]
+    assert out["envelope"] == store.handoff_envelope("sw", "t1")
+    assert out["envelope"]["seat"] == "eng-1@sw" and out["envelope"]["reason"] == "recycle"
+    assert out["envelope"]["claims"] == ["t1"]
+
+
+def test_handoff_records_the_reason_given(env, tmp_path, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    doc = _handoff_doc(tmp_path)
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--reason", "quota") == 0
+    assert store.handoff_envelope("sw", "t1")["reason"] == "quota"
+
+
+def test_handoff_refuses_a_malformed_document_and_stores_nothing(env, tmp_path, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    doc = _handoff_doc(tmp_path, intent="Fix the bug in hooks/context/context_recycle.py at line 140.")
+    doc.write_text(doc.read_text().replace("- ledger:sw/tasks/t1", "- ledger:sw/tasks/t9"))
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 1
+    err = capsys.readouterr().err
+    assert "handoff refused" in err and "file path" in err and "line number" in err and "does not resolve" in err
+    assert store.handoff("sw", "t1") == "" and store.handoff_envelope("sw", "t1") is None
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["working"]
 
 
 def test_wait_declares_an_end_time_for_the_calling_agent(env, capsys, monkeypatch):
@@ -372,8 +421,7 @@ def test_handoff_moves_items_left_for_the_agent_to_its_seat(env, tmp_path):
     run("sw", "start")
     inbox = InboxStore(store.redis)
     item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
-    doc = tmp_path / "handoff.md"
-    doc.write_text("issue 7 is open")
+    doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     moved = inbox.get(item.id)
     assert (moved.address, moved.state) == ("eng-1@sw", "pending")
@@ -403,8 +451,7 @@ def test_handoff_puts_an_item_delivered_but_never_closed_back_on_the_seat_pendin
     inbox = InboxStore(store.redis)
     seen = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
     inbox.read(seen.id, "engineer@a1b2c3-0001")
-    doc = tmp_path / "handoff.md"
-    doc.write_text("issue 7 is open")
+    doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     moved = inbox.get(seen.id)
     assert (moved.address, moved.state) == ("eng-1@sw", "pending")
@@ -463,8 +510,7 @@ def test_tick_redirects_a_late_handoff_item_to_the_successor(env, tmp_path):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    doc = tmp_path / "handoff.md"
-    doc.write_text("keep working")
+    doc = _handoff_doc(tmp_path)
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 0
     cli.run_tick(store, "sw")
     inbox = InboxStore(store.redis)
@@ -592,10 +638,10 @@ def test_a_master_handoff_stores_the_doc_for_its_successor(env, tmp_path):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
-    doc = tmp_path / "handoff.md"
-    doc.write_text("operator asked for a docs task")
+    doc = _handoff_doc(tmp_path, intent="Run the swarm; the operator asked for a docs task.")
     assert run("sw", "--as", "master@a1b2c3-0001", "handoff", str(doc)) == 0
-    assert store.handoff("sw", "master") == "operator asked for a docs task"
+    assert store.handoff("sw", "master") == doc.read_text()
+    assert store.handoff_envelope("sw", "master")["worktree"] == "/repo"
     assert [a.state for a in store.agents("sw")] == ["finished"]
 
 
