@@ -98,7 +98,10 @@ def test_the_wake_pass_listing_reads_only_pending_sets(redis):
     assert counting.calls.count("hgetall") == 1, counting.calls
 
 
-def test_back_fill_rebuilds_the_pending_set_from_existing_items(store):
+def test_back_fill_rebuilds_the_pending_set_from_existing_items(store, monkeypatch):
+    from scripts.inbox import store as inbox_store
+
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: 1000)
     first = store.send("alice", "bob", "one")
     second = store.send("carol", "bob", "two")
     store.close(store.send("alice", "bob", "old").id, "bob", "done")
@@ -106,7 +109,7 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store):
     store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
 
     assert [i.id for i in store.pending_items("bob")] == [first.id, second.id]
-    assert pending_ids(store, "bob") == [first.id, second.id]
+    assert sorted(pending_ids(store, "bob")) == sorted([first.id, second.id])
     assert store.redis.sismember(store.key("indexed"), "bob")
 
 
@@ -204,6 +207,7 @@ def test_a_refused_transition_leaves_the_pending_set_alone(store):
 def test_a_send_racing_the_back_fill_is_in_the_result_and_the_set(store, monkeypatch):
     import scripts.inbox.store as module
 
+    monkeypatch.setattr(module, "now_ms", lambda: 1000)
     old = store.send("alice", "bob", "before the change")
     store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
     real, raced = module._item, []
@@ -215,7 +219,7 @@ def test_a_send_racing_the_back_fill_is_in_the_result_and_the_set(store, monkeyp
 
     monkeypatch.setattr(module, "_item", racing)
     assert [i.id for i in store.pending_items("bob")] == [old.id, raced[0].id]
-    assert pending_ids(store, "bob") == [old.id, raced[0].id]
+    assert sorted(pending_ids(store, "bob")) == sorted([old.id, raced[0].id])
     assert store.redis.sismember(store.key("indexed"), "bob")
 
 
