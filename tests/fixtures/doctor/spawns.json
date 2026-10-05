@@ -1,0 +1,93 @@
+{
+  "source": "agentihooks swarm status --json and journalctl --user -u agentihooks-swarm.service, recorded 2026-10-05",
+  "slug": "okay-we-re-going-to-mossy-rabin-2026-10-05",
+  "target": 30,
+  "spawns": {
+    "codex": 3,
+    "claude": 5
+  },
+  "agents": [
+    {
+      "name": "okay-we-re-going-to-mossy-rabin-2026-10-05-eng-4",
+      "lane": "eng",
+      "task": "hn1",
+      "pane_id": "wV:p5",
+      "harness": "claude",
+      "account": "tccgma",
+      "started_at": 1791209702546,
+      "state": "working",
+      "idle_ticks": 0,
+      "model": "opus",
+      "effort": "high",
+      "seat": "eng-4@okay-we-re-going-to-mossy-rabin-2026-10-05",
+      "conversation_id": "117fe70d-bfdd-4786-9e65-b66833d87b3b",
+      "status": "working"
+    },
+    {
+      "name": "okay-we-re-going-to-mossy-rabin-2026-10-05-eng-6",
+      "lane": "eng",
+      "task": "lc1",
+      "pane_id": "wV:p7",
+      "harness": "claude",
+      "account": "ncsmgma",
+      "started_at": 1791209897267,
+      "state": "working",
+      "idle_ticks": 0,
+      "model": "opus",
+      "effort": "high",
+      "seat": "eng-2@okay-we-re-going-to-mossy-rabin-2026-10-05",
+      "conversation_id": "1ae34066-52f3-4e4b-8937-93763fa23b26",
+      "status": "working"
+    },
+    {
+      "name": "okay-we-re-going-to-mossy-rabin-2026-10-05-eng-7",
+      "lane": "eng",
+      "task": "lf2",
+      "pane_id": "wV:p8",
+      "harness": "claude",
+      "account": "tccgma",
+      "started_at": 1791210287256,
+      "state": "working",
+      "idle_ticks": 0,
+      "model": "opus",
+      "effort": "high",
+      "seat": "eng-1@okay-we-re-going-to-mossy-rabin-2026-10-05",
+      "conversation_id": "49c1c635-2159-4d87-aca9-7b3c9583b663",
+      "status": "working"
+    },
+    {
+      "name": "okay-we-re-going-to-mossy-rabin-2026-10-05-eng-8",
+      "lane": "eng",
+      "task": "dt2",
+      "pane_id": "wV:p9",
+      "harness": "codex",
+      "account": "default",
+      "started_at": 1791210417254,
+      "state": "working",
+      "idle_ticks": 0,
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "seat": "eng-3@okay-we-re-going-to-mossy-rabin-2026-10-05",
+      "conversation_id": "01a10c75-f7be-7893-b96e-a2807bd5bd23",
+      "status": "working"
+    },
+    {
+      "name": "okay-we-re-going-to-mossy-rabin-2026-10-05-master-1",
+      "lane": "master",
+      "task": "master",
+      "pane_id": "wV:p1",
+      "harness": "claude",
+      "account": "nctcc",
+      "started_at": 1791209256574,
+      "state": "working",
+      "idle_ticks": 0,
+      "model": "opus",
+      "effort": "high",
+      "seat": "master@okay-we-re-going-to-mossy-rabin-2026-10-05",
+      "conversation_id": "69a82202-8013-4608-b35e-0177f4f22e86",
+      "status": "working"
+    }
+  ],
+  "restored": [],
+  "actions": []
+}
