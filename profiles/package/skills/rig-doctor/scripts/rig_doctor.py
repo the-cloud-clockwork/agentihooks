@@ -113,6 +113,7 @@ def reset_demo() -> Path:
     repo.mkdir(parents=True)
     run("git", "init", "--initial-branch", "dev", cwd=repo)
     run("git", "remote", "add", "origin", f"https://github.com/{remote}.git", cwd=repo)
+    run("git", "config", "--local", "credential.helper", "!gh auth git-credential", cwd=repo)
     has_dev = exists and bool(run("git", "ls-remote", "--heads", "origin", "dev", cwd=repo))
     if has_dev:
         run("git", "fetch", "origin", "dev", cwd=repo)
