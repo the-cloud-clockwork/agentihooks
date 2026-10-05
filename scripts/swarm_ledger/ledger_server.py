@@ -30,6 +30,7 @@ sys.path.insert(1, str(Path(__file__).resolve().parents[2]))
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
+import ledger_media  # noqa: E402
 import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
@@ -360,6 +361,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if route == "/healthz":
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
+        if route.startswith("/media/"):
+            return self.send_media(*route.removeprefix("/media/").partition("/")[::2])
         if route == "/":
             ledger_bin.purge_expired()
             view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
@@ -397,10 +400,50 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")
 
+    def send_media(self, slug, media_id):
+        try:
+            if not core.SLUG_RE.match(slug):
+                raise ValueError("not a ledger")
+            data = ledger_media.path_of(slug, media_id).read_bytes()
+        except (ValueError, OSError):
+            return self.send(404, "no such image", "text/plain")
+        self.send_response(200)
+        self.send_header("Content-Type", ledger_media.TYPES[media_id.rsplit(".", 1)[1]])
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "private, max-age=31536000, immutable")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def post_media(self, slug):
+        if not self.exists(slug):
+            return self.send(404, "no such ledger", "text/plain")
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            return self.send(403, "origin not allowed", "text/plain")
+        if self.refused(slug):
+            return None
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length > ledger_media.MAX_BYTES:
+            self.close_connection = True
+            return self.send(413, f"an image may be at most {ledger_media.MAX_BYTES >> 20} MB", "text/plain")
+        if length <= 0:
+            return self.send(400, "the upload is empty", "text/plain")
+        try:
+            attachment = ledger_media.store(slug, self.rfile.read(length))
+        except ledger_media.Refused as exc:
+            return self.send(exc.status, str(exc), "text/plain")
+        return self.send(200, json.dumps(attachment), "application/json")
+
     def do_POST(self):
         if self.refused():
             return None
-        if self.path.split("?", 1)[0] != "/api/bin":
+        route = self.path.split("?", 1)[0]
+        if route.startswith("/api/media/"):
+            return self.post_media(route.removeprefix("/api/media/"))
+        if route != "/api/bin":
             return self.send(404, "not found", "text/plain")
         if self.headers.get("Origin") not in ALLOWED_ORIGINS:
             return self.send(403, "origin not allowed", "text/plain")
@@ -438,6 +481,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 <= length <= MAX_BODY:
                 raise ValueError("body size out of range")
             changes, ops = core.check_body(core.loads(self.rfile.read(length) or b"{}"))
+            ledger_media.resolve(slug, ops)
         except ValueError as exc:
             return self.send(400, f'body must be {{"changes": [...], "ops": [...]}}: {exc}', "text/plain")
         return self.reply_state(slug, changes, ops)
