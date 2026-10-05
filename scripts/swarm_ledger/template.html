@@ -243,8 +243,10 @@ details.crew { margin: 10px 0 0; }
 .sw-figs .lit dd { color: var(--accent); text-shadow: var(--glow); }
 .sw-figs .warn dd { color: var(--destructive); text-shadow: var(--glow); }
 .sw-ctl, .sw-caps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--fs-meta); color: var(--muted); }
-.sw-caps { margin: 8px 0 10px; gap: 6px 12px; }
-.sw-caps label { display: inline-flex; gap: 6px; align-items: baseline; letter-spacing: .1em; text-transform: uppercase; }
+.sw-caps { display: grid; grid-template-columns: repeat(5, max-content) minmax(0, 1fr); margin: 8px 0 10px; }
+.sw-caps label { grid-column: 1 / 6; display: grid; grid-template-columns: subgrid; align-items: center; letter-spacing: .1em; text-transform: uppercase; }
+#codex-split { min-width: 0; overflow-wrap: anywhere; }
+.sw-caps [data-swarm="set"] { grid-column: 1 / 5; justify-self: start; }
 .sw-btn { background: var(--surface-2); border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; color: var(--accent);
   font: inherit; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer;
   transition: background .15s, border-color .15s, text-shadow .15s, box-shadow .15s; }
@@ -262,11 +264,11 @@ details.crew { margin: 10px 0 0; }
 .sw-cap:hover { border-bottom-color: var(--accent); }
 .sw-cap:focus { outline: none; border-bottom-color: var(--accent); }
 .sw-cap:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.sw-note { flex: 1; min-width: 0; margin: 0; text-align: right; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-note { grid-column: 5 / -1; flex: 1; min-width: 0; margin: 0; text-align: right; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sw-note.pending { color: var(--accent); }
 .sw-note.ok { color: var(--positive); text-shadow: var(--glow); }
 .sw-note.bad { color: var(--destructive); text-shadow: var(--glow); }
-.sw-note.bad { flex-basis: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.sw-note.bad { grid-column: 1 / -1; flex-basis: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 details.sw-agents { margin: 0; }
 .sw-agents > summary { padding: 10px 0 8px; font-weight: 700; letter-spacing: .12em; color: var(--text-2); }
 .sw-agents[open] > summary { border-bottom: 1px solid var(--rule); }
@@ -373,7 +375,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     <section id="swarm-box" aria-label="Swarm" hidden><details class="sources-box fold" id="swarm-fold" open><summary>Swarm<span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy" title="Autonomy level: manual, assist, delegate or full"></span></summary><div class="sw-head">
       <dl class="sw-figs" id="swarm-figs"></dl>
       <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button></div>
-      <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><label for="cap-codex">codex <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><span>%</span><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></label><span id="codex-split" aria-live="polite"></span><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
+      <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><label for="cap-codex">codex <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label><span id="codex-split" aria-live="polite"></span><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
       </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details></details></section>
     <section id="health-box" aria-label="Swarm health" hidden><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
   </aside>
