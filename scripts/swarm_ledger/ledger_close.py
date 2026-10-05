@@ -2,7 +2,7 @@
 
 import re
 
-OPS = ("summary_set", "close")
+OPS = ("summary_set", "close", "reopen")
 HEAD = "Summary"
 MARK = f"\n\n{HEAD}\n"
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
@@ -18,10 +18,10 @@ def check(op):
 
 
 def apply(doc, op, ctx):
-    if op["op"] == "close":
-        doc["closed_at"] = ctx.at
+    if op["op"] in ("close", "reopen"):
+        doc["closed_at"] = ctx.at if op["op"] == "close" else None
         ctx.stamp("closed_at", op["by"])
-        ctx.record(op["by"], "ledger closed", "", id=op["id"])
+        ctx.record(op["by"], "ledger closed" if op["op"] == "close" else "ledger reopened", "", id=op["id"])
         return True
     doc["overview"] = with_summary(doc.get("overview", ""), summary(doc, op.get("note", "")))
     ctx.stamp("overview", op["by"])

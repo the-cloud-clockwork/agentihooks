@@ -70,6 +70,17 @@ def newest(slug):
     return max(found, key=lambda p: json.loads(p.read_text(encoding="utf-8"))["taken_at"])
 
 
+def recreate(store, slug, live):
+    doc = json.loads(newest(slug).read_text(encoding="utf-8"))
+    saved = doc["state"]["keys"].get(store.key(slug, "agents"), {}).get("value", {})
+    if set(saved) & set(live):
+        raise SwarmError(f"swarm {slug} still has live agents; wait for close to finish")
+    store.restore(slug, doc["state"])
+    for agent in store.agents(slug):
+        store.release(slug, agent.task, agent.name)
+        store.drop_agent(slug, agent.name)
+
+
 def ledger_path(slug):
     return Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser() / f"{slug}.json"
 

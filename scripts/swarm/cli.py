@@ -4,6 +4,7 @@ agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
+agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -208,6 +209,21 @@ def cmd_close(store, args):
     print(json.dumps({"closed": args.slug, "snapshot": str(path), "still_running": left}), flush=True)
     if _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER]):
         store.update(args.slug, state="stopping")
+
+
+def cmd_reopen(store, args):
+    runtime = HerdrRuntime()
+    live = runtime.live_names()
+    if args.slug not in store.slugs():
+        snapshot.recreate(store, args.slug, live)
+    if any(a.name in live for a in store.agents(args.slug)):
+        raise SwarmError(f"swarm {args.slug} still has live agents; wait for close to finish")
+    for agent in store.agents(args.slug):
+        store.release(args.slug, agent.task, agent.name)
+        store.drop_agent(args.slug, agent.name)
+    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    LedgerClient().reopen(args.slug, by)
+    _state(store, args, "running")
 
 
 def cmd_set(store, args):
@@ -551,7 +567,7 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
-    for plain in ("start", "pause", "remove", "snapshot"):
+    for plain in ("start", "pause", "remove", "snapshot", "reopen"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")

@@ -1,9 +1,13 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
+import json
+import os
+from pathlib import Path
+
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_close, ledger_kinds
 
 CLOSES = "The swarm then closes this session; stop working."
 THROUGH_CODE = (
@@ -31,6 +35,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
     ]
     lines += [
         *priming_lines(task),
+        *summary_lines(slug),
         "",
         f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
         "the operator's notes, answers, comments and chat.",
@@ -79,6 +84,21 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "Write chat and comments in plain words for the operator: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def summary_lines(slug):
+    path = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser() / f"{slug}.json"
+    if not path.exists():
+        return []
+    overview = json.loads(path.read_text(encoding="utf-8")).get("overview", "")
+    _, marker, summary = overview.partition(ledger_close.MARK)
+    if not marker:
+        return []
+    return [
+        "Ledger summary from the previous close:",
+        f"Summary\n{summary}",
+        "In your first ledger chat line, name this summary and say where the work stopped in plain words.",
+    ]
 
 
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
