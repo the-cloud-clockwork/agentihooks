@@ -14,8 +14,8 @@ def addresses(slug, event, doc, agents):
     live = [a for a in agents if a.state != "finished"]
     target = event.get("target", "")
     found = []
-    if target == "chat":
-        mention = MENTION_RE.match(event.get("text", ""))
+    if target == "chat" or target.startswith("notes/"):
+        mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
         to = mention.group(1) if mention else ""
         found = [a for a in live if to in (a.name, a.lane)]
     elif target.startswith("tasks/"):
