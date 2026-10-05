@@ -168,6 +168,13 @@ class TaskDependencies(unittest.TestCase):
         self.assertEqual(rejected, [update["id"]])
         self.assertNotIn("t9", state["tasks"][0].get("depends_on", []))
 
+    def test_a_task_cannot_depend_on_itself(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        update = op("task_update", 1, item="tasks/t1", fields={"depends_on": ["t1"]})
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual(rejected, [update["id"]])
+        self.assertEqual(state["tasks"][0].get("depends_on", []), [])
+
     def test_task_update_sets_dependencies_and_territory(self):
         make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}, {"title": "b", "phase": "p1", "lane": "eng"}])
         update = op("task_update", 1, item="tasks/t2", fields={"depends_on": ["t1"], "territory": ["hooks", "docs"]})

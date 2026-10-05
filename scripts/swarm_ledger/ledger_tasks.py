@@ -103,7 +103,8 @@ def _known(tasks, ids):
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
-    if task is None or not _known(doc["tasks"], op["fields"].get("depends_on", [])):
+    others = [t for t in doc["tasks"] if t["id"] != task_id]
+    if task is None or not _known(others, op["fields"].get("depends_on", [])):
         return False
     changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
     task.update(changed)
