@@ -3,6 +3,7 @@
 agentihooks msg send ADDRESS TEXT...        everything after the address is the text
 agentihooks msg inbox                       this session's items with their state
 agentihooks msg read ID                     show an item with its history, mark it read
+agentihooks msg reply ID TEXT...            answer the item's sender and close the item done
 agentihooks msg close ID done|handoff ADDRESS|blocked WHAT|cancel [WHY]
 
 The sender is this session: AGENTIHOOKS_AGENT_NAME, else CLAUDE_CODE_SESSION_ID.
@@ -40,6 +41,11 @@ def cmd_read(store, me, args):
     print(json.dumps({**asdict(item), "history": store.history(item.id)}))
 
 
+def cmd_reply(store, me, args):
+    answer = store.reply(args.id, me, " ".join(args.text))
+    print(json.dumps({"id": answer.id, "to": answer.address, "closed": args.id}))
+
+
 def cmd_close(store, me, args):
     item = store.close(args.id, me, args.kind, " ".join(args.detail))
     print(json.dumps({"id": item.id, "state": item.state, "reason": item.reason}))
@@ -58,6 +64,10 @@ def build_parser():
     read = sub.add_parser("read")
     read.add_argument("id")
     read.set_defaults(func=cmd_read)
+    reply = sub.add_parser("reply")
+    reply.add_argument("id")
+    reply.add_argument("text", nargs=argparse.REMAINDER)
+    reply.set_defaults(func=cmd_reply)
     close = sub.add_parser("close")
     close.add_argument("id")
     close.add_argument("kind", nargs="?", default="")

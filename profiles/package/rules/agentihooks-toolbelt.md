@@ -61,13 +61,12 @@ run when the operator uses one of their trigger phrases.
 |---|---|---|
 | `get-agents-quota` | Show quota left for every agent harness (each Claude account and Codex) and name this session's routed Claude account. | `$get-agents-quota` or "which agent has quota left?" |
 | `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
-| `multi-agent-chat` | Open or join a file-backed room when participants run under different agent harnesses. This skill is explicit-only. | `$multi-agent-chat --name codex-a --topic "review"`; join with `$multi-agent-chat --target <room-id> --name claude-b` |
 | `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
 | `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
 
 The deterministic CLI primitives behind these skills are respectively
-`agentihooks quota` with `agentihooks balance --current`, `agentihooks terminate-agent`, the scripts shipped
-with `multi-agent-chat`, `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
+`agentihooks quota` with `agentihooks balance --current`, `agentihooks terminate-agent`,
+`agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
 ## Swarms and ledgers
@@ -136,11 +135,18 @@ herdr skips the wakes and is escalated one window after the send. An item for th
 master, or in a swarm without one, goes from the wakes straight to the operator. Each
 wake and escalation is kept in the item's history.
 
+The inbox carries swarm chat and talk across harnesses (Claude, Codex, Copilot) alike.
+`agentihooks swarm <slug> say --to <name|eng|ci>` leaves one item per recipient; a
+ledger page chat line becomes an item from `operator` for its addressee (the master
+when unaddressed) and stays on the page. A reply to `operator` is posted on the
+ledger page chat and closed done.
+
 | Trigger | Action |
 |---|---|
 | Hand another session work or a question | `agentihooks msg send <address> <text>` |
 | See what waits for this session | `agentihooks msg inbox` |
 | Take up an item | `agentihooks msg read <id>` |
+| Answer an item | `agentihooks msg reply <id> <text>`: sends to its sender, closes it done |
 | The work is finished, moved or stuck | `agentihooks msg close <id> done\|handoff <address>\|blocked <what>\|cancel [why]`; a close always names where the work went |
 
 ## Conditions

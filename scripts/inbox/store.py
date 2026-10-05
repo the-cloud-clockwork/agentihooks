@@ -85,6 +85,16 @@ class InboxStore:
         state, reason = close_reason(kind, detail)
         return self._move(item_id, closer, lambda item: (item.address, item.sender), state, reason)
 
+    def reply(self, item_id, replier, text):
+        item = self.get(item_id)
+        if replier != item.address:
+            raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
+        if item.state in CLOSED:
+            raise InboxError(f"message {item_id} is closed: {item.reason}")
+        answer = self.send(replier, item.sender, text)
+        self.close(item_id, replier, "done", f"replied with message {answer.id}")
+        return answer
+
     def deliver(self, item_id, receiver):
         try:
             return self._move(item_id, receiver, lambda item: (item.address,), "delivered", "", only_from=("pending",))

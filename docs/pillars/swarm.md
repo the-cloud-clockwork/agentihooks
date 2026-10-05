@@ -107,7 +107,8 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
    under its session cap.
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
-7. Relay operator chat and deliver queued messages.
+7. Turn new operator chat lines into inbox items, post inbox replies to the operator on the page, and wake
+   idle panes holding unread items.
 
 A lock keeps two ticks from running at once.
 
@@ -118,7 +119,7 @@ Redis holds the swarm's runtime state, and the swarm refuses to run without it:
 - the config of each swarm and the index of swarm ids;
 - one claim per task, with a 10 minute lease that each tick renews for live agents, so a task has one owner;
 - the agent registry;
-- the chat outbox and the tick and flush locks.
+- the tick lock.
 
 The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to use another. Task content
 (title, lane, state, links) lives in the ledger, not in Redis.
@@ -127,8 +128,12 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
 
 - Operator: the chat on the ledger page, or `agentihooks swarm <id> send-message "@eng <text>"`. A message with
   no `@` address, or one for an agent not in the swarm, goes to the master; without a master, to everyone. The
-  master answers on the page with `agentihooks swarm <id> say --to operator "<text>"`.
-- Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `eng` or `ci`.
+  master answers with `agentihooks msg reply <message> "<text>"` and posts its own updates with
+  `agentihooks swarm <id> say --to operator "<text>"`.
+- Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
 
-A message reaches an idle agent's pane at once. A busy agent's message waits in the Redis outbox, and every
-tick delivers it once the agent is idle. Undelivered messages expire after 30 minutes.
+Every message goes through the agent inbox. An addressed line leaves one pending inbox item per recipient,
+sent by the real author; an unaddressed agent line only shows on the page. The receiver gets the item at its
+next tool call, an idle pane is prompted by the next tick, and unread items climb to the master, then to the
+operator. A reply to the operator is posted on the page chat and its item closed. The page keeps the whole
+conversation.

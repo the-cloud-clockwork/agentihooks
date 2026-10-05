@@ -1,5 +1,8 @@
+import json
+
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -17,6 +20,14 @@ class FakeHerdr:
         self.prompts.append((agent.pane_id, text))
 
 
+class PageLedger:
+    def __init__(self):
+        self.said = []
+
+    def say(self, slug, text, by=None):
+        self.said.append((text, by))
+
+
 @pytest.fixture
 def store():
     import fakeredis
@@ -28,6 +39,10 @@ def store():
     return s
 
 
+def inbox(store, address):
+    return [(i.sender, i.text, i.state) for i in InboxStore(store.redis).inbox(address)]
+
+
 def test_addressing_by_all_lane_and_name_skips_the_sender(store):
     names = lambda to, sender="": sorted(a.name for a in delivery.recipients(store, "sw", to, sender))  # noqa: E731
     assert names("", "sw-eng-1") == ["sw-ci-1", "sw-eng-2"]
@@ -35,90 +50,90 @@ def test_addressing_by_all_lane_and_name_skips_the_sender(store):
     assert names("sw-ci-1") == ["sw-ci-1"]
 
 
-def test_idle_agents_get_it_now_busy_ones_on_a_later_flush(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "working"})
-    delivery.send(store, "sw", "merge the docs first", sender="operator", to="eng", herdr=herdr)
-    assert herdr.prompts == [("p1", "[swarm chat] operator: merge the docs first")]
-    herdr.status["p2"] = "done"
-    delivery.flush(store, "sw", herdr)
-    assert herdr.prompts[-1] == ("p2", "[swarm chat] operator: merge the docs first")
-    delivery.flush(store, "sw", herdr)
-    assert len(herdr.prompts) == 2
+def test_send_leaves_one_pending_inbox_item_per_recipient_from_the_real_sender(store):
+    assert delivery.send(store, "sw", "merge the docs first", sender="sw-ci-1", to="eng") == ["sw-eng-1", "sw-eng-2"]
+    for name in ("sw-eng-1", "sw-eng-2"):
+        assert inbox(store, name) == [("sw-ci-1", "merge the docs first", "pending")]
+    assert inbox(store, "sw-ci-1") == []
 
 
-def test_messages_for_agents_that_left_are_dropped(store):
-    herdr = FakeHerdr({"p3": "working"})
-    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr)
-    store.drop_agent("sw", "sw-ci-1")
-    delivery.flush(store, "sw", herdr)
-    assert herdr.prompts == [] and store.redis.llen(store.key("sw", "outbox")) == 0
-
-
-def test_a_herdr_failure_keeps_the_message_queued(store):
-    class Broken(FakeHerdr):
-        def prompt(self, agent, text):
-            raise TimeoutError("herdr hung")
-
-    herdr = Broken({"p3": "idle"})
-    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr)
-    assert store.redis.llen(store.key("sw", "outbox")) == 1
-
-
-def test_operator_page_messages_are_relayed_once_with_their_address(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
+def test_operator_page_messages_become_inbox_items_once(store):
     chat = [
         {"id": "a", "by": "operator", "at": 10, "text": "@ci please look at the slow job"},
         {"id": "b", "by": "sw-eng-1", "at": 11, "text": "an agent line is not relayed"},
     ]
-    assert delivery.relay_operator_chat(store, "sw", chat, herdr) == 1
-    assert herdr.prompts == [("p3", "[swarm chat] operator: please look at the slow job")]
-    assert delivery.relay_operator_chat(store, "sw", chat, herdr) == 0
-
-
-def test_stale_messages_expire(store):
-    herdr = FakeHerdr({"p3": "working"})
-    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr, now_ms=1_000)
-    delivery.flush(store, "sw", herdr, now_ms=1_000 + delivery.EXPIRE_MS + 1)
-    assert store.redis.llen(store.key("sw", "outbox")) == 0
-
-
-def test_a_second_flusher_backs_off_while_one_runs(store):
-    herdr = FakeHerdr({"p3": "idle"})
-    store.redis.set(store.key("sw", "flush-lock"), "other")
-    delivery.send(store, "sw", "hello", sender="operator", to="sw-ci-1", herdr=herdr)
-    assert herdr.prompts == [] and store.redis.llen(store.key("sw", "outbox")) == 1
+    assert delivery.relay_operator_chat(store, "sw", chat) == 1
+    assert inbox(store, "sw-ci-1") == [("operator", "please look at the slow job", "pending")]
+    assert delivery.relay_operator_chat(store, "sw", chat) == 0
+    assert len(inbox(store, "sw-ci-1")) == 1
 
 
 def test_a_new_swarm_does_not_replay_old_chat(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
     old = [{"id": "a", "by": "operator", "at": 10, "text": "old plan talk"}]
     delivery.start_cursor(store, "sw", old)
-    assert delivery.relay_operator_chat(store, "sw", old, herdr) == 0 and herdr.prompts == []
+    assert delivery.relay_operator_chat(store, "sw", old) == 0
+    assert all(inbox(store, a.name) == [] for a in store.agents("sw"))
 
 
 def test_an_unknown_addressee_goes_to_everyone_with_a_note(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle"})
-    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "@nobody hi"}], herdr)
-    assert len(herdr.prompts) == 3 and "not in the swarm" in herdr.prompts[0][1]
+    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "@nobody hi"}])
+    for agent in store.agents("sw"):
+        [(sender, text, _)] = inbox(store, agent.name)
+        assert sender == "operator" and "not in the swarm" in text
 
 
 def test_unaddressed_operator_chat_goes_to_the_master_when_one_is_online(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle", "m1": "idle"})
     store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1"))
     chat = [
         {"id": "a", "by": "operator", "at": 5, "text": "how far along are we"},
         {"id": "b", "by": "operator", "at": 6, "text": "@eng rebase on dev"},
         {"id": "c", "by": "operator", "at": 7, "text": "@nobody hi"},
     ]
-    delivery.relay_operator_chat(store, "sw", chat, herdr)
-    assert herdr.prompts[0] == ("m1", "[swarm chat] operator: how far along are we")
-    assert sorted(p for p, _ in herdr.prompts[1:3]) == ["p1", "p2"]
-    assert herdr.prompts[3][0] == "m1" and "not in the swarm" in herdr.prompts[3][1]
-    assert len(herdr.prompts) == 4
+    delivery.relay_operator_chat(store, "sw", chat)
+    master = inbox(store, "sw-master-1")
+    assert master[0] == ("operator", "how far along are we", "pending")
+    assert len(master) == 2 and "not in the swarm" in master[1][1]
+    assert inbox(store, "sw-eng-1") == inbox(store, "sw-eng-2") == [("operator", "rebase on dev", "pending")]
+    assert inbox(store, "sw-ci-1") == []
 
 
 def test_a_finished_master_does_not_take_the_chat(store):
-    herdr = FakeHerdr({"p1": "idle", "p2": "idle", "p3": "idle", "m1": "idle"})
     store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="m1", state="finished"))
-    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "hi"}], herdr)
-    assert sorted(p for p, _ in herdr.prompts) == ["p1", "p2", "p3"]
+    delivery.relay_operator_chat(store, "sw", [{"id": "a", "by": "operator", "at": 5, "text": "hi"}])
+    assert inbox(store, "sw-master-1") == []
+    assert all(inbox(store, n) == [("operator", "hi", "pending")] for n in ("sw-eng-1", "sw-eng-2", "sw-ci-1"))
+
+
+def test_items_for_the_operator_from_swarm_agents_are_shown_on_the_page_and_closed(store):
+    box = InboxStore(store.redis)
+    reply = box.send("sw-eng-1", "operator", "the slow job is fixed")
+    stranger = box.send("someone-else", "operator", "not from this swarm")
+    ledger = PageLedger()
+    agents = store.agents("sw")
+    assert delivery.relay_to_page(box, "sw", agents, ledger) == 1
+    assert ledger.said == [("the slow job is fixed", "sw-eng-1")]
+    assert box.get(reply.id).state == "done" and "ledger page" in box.get(reply.id).reason
+    assert box.get(stranger.id).state == "pending"
+    assert delivery.relay_to_page(box, "sw", agents, ledger) == 0
+
+
+def test_messages_left_in_the_old_outbox_move_into_the_inbox(store):
+    outbox = store.key("sw", "outbox")
+    store.redis.rpush(outbox, json.dumps({"to": "sw-ci-1", "at": 5, "text": "[swarm chat] operator: rerun the job"}))
+    store.redis.rpush(outbox, json.dumps({"to": "sw-eng-1", "at": 6, "text": "no prefix here"}))
+    assert delivery.migrate_outbox(store, "sw", InboxStore(store.redis)) == 2
+    assert inbox(store, "sw-ci-1") == [("operator", "rerun the job", "pending")]
+    assert inbox(store, "sw-eng-1") == [("swarm", "no prefix here", "pending")]
+    assert not store.redis.exists(outbox)
+
+
+def test_an_outbox_entry_stays_when_moving_it_fails(store):
+    class Down:
+        def send(self, sender, address, text):
+            raise ConnectionError("redis went away")
+
+    outbox = store.key("sw", "outbox")
+    store.redis.rpush(outbox, json.dumps({"to": "sw-ci-1", "at": 5, "text": "[swarm chat] operator: rerun the job"}))
+    with pytest.raises(ConnectionError):
+        delivery.migrate_outbox(store, "sw", Down())
+    assert store.redis.llen(outbox) == 1

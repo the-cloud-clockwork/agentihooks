@@ -21,5 +21,5 @@ def pending_context(session_id, environ=None):
 def _render(item):
     return (
         f"=== INBOX: message {item.id} from {item.sender} ===\n{item.text}\n"
-        f"Close it: agentihooks msg close {item.id} {CLOSE_HINT}"
+        f"Answer it: agentihooks msg reply {item.id} <text>, or close it: agentihooks msg close {item.id} {CLOSE_HINT}"
     )

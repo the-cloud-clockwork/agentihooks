@@ -47,11 +47,13 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     try:
         actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         herdr = messenger or delivery.HerdrMessenger()
-        delivery.relay_operator_chat(store, slug, ledger.chat(slug), herdr)
-        actions += [f"delivered to {name}" for name in delivery.flush(store, slug, herdr)]
+        inbox = InboxStore(store.redis)
+        delivery.migrate_outbox(store, slug, inbox)
+        delivery.relay_operator_chat(store, slug, ledger.chat(slug))
         agents = [a for a in store.agents(slug) if a.state != "finished"]
+        delivery.relay_to_page(inbox, slug, agents, ledger)
         window = wake.window_ms(os.environ)
-        return actions + wake.wake_pass(InboxStore(store.redis), slug, agents, herdr, ledger, now_ms(), window)
+        return actions + wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
@@ -182,7 +184,7 @@ def cmd_send_message(store, args):
     store.config(args.slug)
     ledger = LedgerClient()
     ledger.say(args.slug, args.text)
-    delivery.relay_operator_chat(store, args.slug, ledger.chat(args.slug), delivery.HerdrMessenger())
+    delivery.relay_operator_chat(store, args.slug, ledger.chat(args.slug))
     print(json.dumps({"posted": True}))
 
 
@@ -254,7 +256,8 @@ def cmd_say(store, args):
     agent = _me(store, args)
     text = f"@{args.to} {args.text}" if args.to in ("eng", "ci") else args.text
     LedgerClient().say(args.slug, text, by=agent.name)
-    delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, herdr=delivery.HerdrMessenger())
+    if args.to:
+        delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to)
     print(json.dumps({"posted": True}))
 
 
