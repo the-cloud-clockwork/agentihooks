@@ -1,6 +1,7 @@
 """Seat registry in Redis: swarm lane slots and the master as addresses `<seat>@<slug>` that outlive their occupants.
 
-Each new occupant bumps the seat's generation; the occupancy history is append-only.
+Each new occupant bumps the seat's generation; the occupancy history is append-only. Each seat also keeps
+append-only recaps and learned notes that its occupants leave for the next.
 """
 
 import json
@@ -67,6 +68,28 @@ class SeatRegistry:
 
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]
+
+
+class SeatMemory:
+    def __init__(self, redis):
+        self.redis = redis
+
+    def key(self, address, kind):
+        return f"{PREFIX}:{address}:{kind}"
+
+    def add_recap(self, address, occupant, task, text, at):
+        entry = {"occupant": occupant, "task": task, "text": text, "at": at}
+        self.redis.rpush(self.key(address, "recaps"), json.dumps(entry))
+
+    def recaps(self, address):
+        return [json.loads(entry) for entry in reversed(self.redis.lrange(self.key(address, "recaps"), 0, -1))]
+
+    def learn(self, address, occupant, text, at):
+        entry = {"occupant": occupant, "text": text, "at": at}
+        self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
+
+    def learned(self, address):
+        return [json.loads(entry) for entry in self.redis.lrange(self.key(address, "learned"), 0, -1)]
 
 
 def _occupancy(raw):

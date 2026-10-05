@@ -11,14 +11,17 @@ _AGENT_NAME = re.compile(r"^(?P<slug>[a-z][a-z0-9-]*)-(?:eng|ci|master)-\d+$")
 
 _DIRECTIVE = (
     "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
-    "(task state, what is done, what is red, the next step) to a file under ~/scratchpad, then run "
-    "`agentihooks swarm {slug} handoff <doc>` and stop. A successor continues the task from the document."
+    "(task state, what is done, what is red, the next step) and a recap (what you did, where you stopped, what you "
+    "promised) to files under ~/scratchpad, record any lesson for your seat with "
+    '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc> --recap <recap>` '
+    "and stop. A successor continues the task from them."
 )
 
 _ALLOWED = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
     "log, diff, show in the shell), writing the handoff document under "
-    "~/scratchpad, `agentihooks swarm {slug} handoff <doc>` and `agentihooks ledger` comment, say, leave and ack, "
+    "~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, `agentihooks swarm {slug} learned` "
+    "and `agentihooks ledger` comment, say, leave and ack, "
     "each as one command."
 )
 
@@ -120,8 +123,14 @@ def _allowed_command(command: str, slug: str) -> bool:
     if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
         return False
     if tokens[1] == "swarm":
-        return len(tokens) == 5 and tokens[2:4] == [slug, "handoff"]
+        return _swarm_step(tokens[2:], slug)
     return tokens[1] == "ledger" and _ledger_step(tokens[2:]) in _LEDGER_STEPS
+
+
+def _swarm_step(args: list[str], slug: str) -> bool:
+    if args[:2] == [slug, "learned"]:
+        return len(args) == 3
+    return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
 def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str | None:

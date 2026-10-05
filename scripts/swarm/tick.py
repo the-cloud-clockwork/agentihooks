@@ -196,7 +196,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 ledger.update_task(slug, task["id"], {"state": state, "claimed_by": name})
                 task.update(state=state, claimed_by=name)
                 store.seats.occupy(seat, name, now_ms)
-                placed = runtime.spawn(config, lane, name, task)
+                placed = runtime.spawn(config, lane, name, _primed(store, seat, task))
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
@@ -204,6 +204,10 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
+
+
+def _primed(store, seat, task):
+    return {**task, "seat": seat, "recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
 
 
 def _free_seat(slug, lane, taken, preferred):
@@ -240,7 +244,9 @@ def _master(slug, config, store, runtime, now_ms):
     store.put_agent(slug, record)
     try:
         store.seats.occupy(record.seat, name, now_ms)
-        placed = runtime.spawn(config, MASTER, name, {"id": MASTER, "handoff": store.handoff(slug, MASTER)})
+        placed = runtime.spawn(
+            config, MASTER, name, _primed(store, record.seat, {"id": MASTER, "handoff": store.handoff(slug, MASTER)})
+        )
     except Exception as exc:
         store.drop_agent(slug, name)
         return [f"master spawn failed: {exc}"]

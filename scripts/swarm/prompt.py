@@ -9,6 +9,7 @@ THROUGH_CODE = (
     "request into dev and CI, never a live patch."
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
+OLDER_RECAPS = 3
 
 LANE_ROLE = {
     "eng": "an engineer",
@@ -17,7 +18,7 @@ LANE_ROLE = {
 }
 
 
-def build_master(slug, repo, name, handoff=""):
+def build_master(slug, repo, name, task):
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     lines = [
@@ -26,9 +27,8 @@ def build_master(slug, repo, name, handoff=""):
         "You claim no task and never edit code, commit or merge: engineers do that. Your work is the ledger, the "
         "chat and the swarm controls.",
     ]
-    if handoff:
-        lines += ["The previous master ran out of context and left this handoff document. Continue from it:", handoff]
     lines += [
+        *priming_lines(task),
         "",
         f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
         "the operator's notes, answers, comments and chat.",
@@ -52,10 +52,11 @@ def build_master(slug, repo, name, handoff=""):
         "- When an engineer merges work that changes a page, check it in a real browser on localhost "
         f"(http://127.0.0.1:8765/{slug} for the ledger) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
+        f'- Record a lesson the next master should know with {me} learned "<lesson>".',
         "",
         f"If your context nears its limit a hook tells you to write a handoff document: write what the operator "
-        f"asked for, what is pending and what you promised, run {me} handoff <doc> and stop. The next master "
-        "continues from it.",
+        f"asked for, what is pending and what you promised, and a recap of what you did and where you stopped, "
+        f"run {me} handoff <doc> --recap <recap> and stop. The next master continues from them.",
         "Write chat and comments in plain words for the operator: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"
@@ -63,7 +64,7 @@ def build_master(slug, repo, name, handoff=""):
 
 def build(slug, repo, lane, name, task):
     if lane == MASTER:
-        return build_master(slug, repo, name, task.get("handoff", ""))
+        return build_master(slug, repo, name, task)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
@@ -76,11 +77,7 @@ def build(slug, repo, lane, name, task):
     lines += contract_lines(task.get("contract") or {})
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
-    if task.get("handoff"):
-        lines += [
-            "A previous agent ran out of context on this task and left this handoff document. Continue from it:",
-            task["handoff"],
-        ]
+    lines += priming_lines(task)
     if lane == "ci":
         lines.append(
             f"Add a further bottleneck as a ci task: agentihooks ledger --slug {slug} --as {name} task add <short id> "
@@ -96,11 +93,13 @@ def build(slug, repo, lane, name, task):
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
+        f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>".',
         "",
         *STEPS[ledger_kinds.kind(task)](me, led, name, phase),
         "",
-        f"If your context nears its limit a hook tells you to write a handoff document: then run {me} handoff <doc> "
-        "and stop; a successor continues the task from it.",
+        "If your context nears its limit a hook tells you to write a handoff document: write it and a recap of what "
+        f"you did, where you stopped and what you promised, then run {me} handoff <doc> --recap <recap> and stop; a "
+        "successor continues the task from them.",
         "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
         f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
         "",
@@ -111,6 +110,39 @@ def build(slug, repo, lane, name, task):
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def priming_lines(task):
+    seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
+    handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
+    if not (handoff or recaps or learned):
+        return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
+    lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
+    if handoff:
+        lines += ["1. Handoff document: a previous agent ran out of context and left it. Continue from it:", handoff]
+    else:
+        lines.append("1. Handoff document: none was left for this task.")
+    if recaps:
+        lines += [f"2. Latest recap, {_by(recaps[0])}:", recaps[0]["text"]]
+    else:
+        lines.append("2. Latest recap: missing, no occupant of this seat left one.")
+    if learned:
+        lines += ["3. Learned notes:", *(f"- {note['text']}" for note in learned)]
+    else:
+        lines.append("3. Learned notes: none recorded on this seat yet.")
+    older = recaps[1:]
+    if not older:
+        return [*lines, "4. Older recaps: none."]
+    lines.append("4. Older recaps, newest first:")
+    for recap in older[:OLDER_RECAPS]:
+        lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
+    if len(older) > OLDER_RECAPS:
+        lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
+    return lines
+
+
+def _by(recap):
+    return f"by {recap['occupant']} on task {recap['task']}"
 
 
 def contract_lines(contract):

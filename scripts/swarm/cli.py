@@ -6,7 +6,7 @@ agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC | say TEXT [--to NAME|eng|ci]
+agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | learned TEXT | say TEXT [--to NAME|eng|ci]
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
 --evidence E with --fix URL or --filed TASK; research --finding URL
 """
@@ -244,10 +244,10 @@ def cmd_block(store, args):
 
 def cmd_handoff(store, args):
     agent = _me(store, args)
-    try:
-        text = Path(args.doc).expanduser().read_text(encoding="utf-8")
-    except OSError as exc:
-        raise SwarmError(f"cannot read the handoff document {args.doc}: {exc.strerror}") from exc
+    text = _read(args.doc, "handoff document")
+    recap = _read(args.recap, "recap") if args.recap else ""
+    if recap:
+        store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(args.slug, agent.task, text, seat=agent.seat)
     store.put_agent(args.slug, replace(agent, state="finished"))
     print(
@@ -255,6 +255,25 @@ def cmd_handoff(store, args):
             {"task": agent.task, "state": "handoff", "next": "stop now; a successor continues from your document"}
         )
     )
+
+
+def cmd_learned(store, args):
+    agent = _me(store, args)
+    store.memory.learn(_seat(agent), agent.name, args.text, now_ms())
+    print(json.dumps({"seat": agent.seat, "learned": args.text}))
+
+
+def _read(path, what):
+    try:
+        return Path(path).expanduser().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SwarmError(f"cannot read the {what} {path}: {exc.strerror}") from exc
+
+
+def _seat(agent):
+    if not agent.seat:
+        raise SwarmError(f"{agent.name} holds no seat, so there is nowhere to keep this")
+    return agent.seat
 
 
 def _retire(store, slug, agent):
@@ -295,7 +314,10 @@ def build_parser():
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
-    sub.add_parser("handoff").add_argument("doc")
+    handoff = sub.add_parser("handoff")
+    handoff.add_argument("doc")
+    handoff.add_argument("--recap", default="")
+    sub.add_parser("learned").add_argument("text")
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")
