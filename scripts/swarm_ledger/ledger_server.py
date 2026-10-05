@@ -219,15 +219,19 @@ def control_argv(body):
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, set or verdict")
     pairs = []
-    for key, flag in (("max_eng", "max-eng-agents"), ("max_ci", "max-ci-agents")):
+    for key, flag, limit in (
+        ("max_eng", "max-eng-agents", MAX_CAP),
+        ("max_ci", "max-ci-agents", MAX_CAP),
+        ("codex_share", "codex-share", 100),
+    ):
         value = body.get(key)
         if value is None:
             continue
-        if type(value) is not int or not 0 <= value <= MAX_CAP:
-            raise ValueError(f"{key} must be a whole number from 0 to {MAX_CAP}")
+        if type(value) is not int or not 0 <= value <= limit:
+            raise ValueError(f"{key} must be a whole number from 0 to {limit}")
         pairs.append(f"{flag}={value}")
     if not pairs:
-        raise ValueError("set needs max_eng or max_ci")
+        raise ValueError("set needs max_eng, max_ci or codex_share")
     return ["set", *pairs]
 
 
