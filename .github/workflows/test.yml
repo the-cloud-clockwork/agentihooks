@@ -65,7 +65,7 @@ jobs:
       - name: Install dependencies
         if: steps.lookup.outputs.skip != 'true'
         run: |
-          uv pip install --system -e ".[dev,all]"
+          uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune

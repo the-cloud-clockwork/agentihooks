@@ -76,7 +76,12 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
-    assert install["run"].strip() == 'uv pip install --system -e ".[dev,all]"'
+    assert install["run"].strip() == 'uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"'
+
+
+def test_unit_install_excludes_playwright_and_the_grpc_exporter():
+    excludes = (_ROOT / ".github/test-excludes.txt").read_text().split()
+    assert excludes == ["playwright", "opentelemetry-exporter-otlp-proto-grpc"]
 
 
 def test_unit_matrix_runs_one_shard_per_split():
