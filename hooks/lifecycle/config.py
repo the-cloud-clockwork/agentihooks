@@ -5,7 +5,7 @@ from pathlib import Path
 from hooks.lifecycle.model import Root
 
 BASE_FILE = Path(__file__).resolve().parents[2] / "profiles" / "_base" / "lifecycle.json"
-KINDS = {"worktrees", "scratch", "ttl", "archive"}
+KINDS = {"worktrees", "scratch", "ttl", "archive", "traces"}
 
 
 def _entries(path: Path) -> list[dict]:

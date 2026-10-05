@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from hooks.lifecycle.liveness import Snapshot, in_boot_grace, path_in_use
@@ -5,6 +6,7 @@ from hooks.lifecycle.model import Finding, Root
 from hooks.lifecycle.scratch import DAY, walk_stats
 
 ARCHIVE_DIR = "archive"
+TRACE_KEEP_ENV = "AGENTIHOOKS_TRACE_KEEP_DAYS"
 
 
 def _candidates(root: Root) -> list[Path]:
@@ -32,4 +34,27 @@ def classify_files(root: Root, snap: Snapshot) -> list[Finding]:
             findings.append(
                 Finding(str(path), root.id, "file", action, f"idle over {root.idle_days:g} days", newest, size)
             )
+    return findings
+
+
+def trace_keep_days(root: Root) -> float:
+    try:
+        return float(os.environ.get(TRACE_KEEP_ENV, root.idle_days))
+    except ValueError:
+        return root.idle_days
+
+
+def classify_traces(root: Root, snap: Snapshot) -> list[Finding]:
+    base = Path(root.path)
+    if in_boot_grace(snap) or not base.is_dir():
+        return []
+    days, live = trace_keep_days(root), set(snap.sessions.values())
+    findings = []
+    for path in sorted(base.glob("*.jsonl")):
+        if path.stem in live:
+            continue
+        newest = min(path.stat().st_mtime, snap.now)
+        if snap.now - newest >= days * DAY:
+            reason = f"session ended over {days:g} days ago"
+            findings.append(Finding(str(path), root.id, "trace", "remove", reason, newest, path.stat().st_size))
     return findings

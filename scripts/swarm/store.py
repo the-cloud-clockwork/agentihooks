@@ -135,6 +135,15 @@ class RedisStore:
     def drop_agent(self, slug, name):
         self.redis.hdel(self.key(slug, "agents"), name)
 
+    def remove(self, slug):
+        self.config(slug)
+        if self.agents(slug):
+            raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
+        keys = list(self.redis.scan_iter(match=self.key(slug, "*")))
+        if keys:
+            self.redis.delete(*keys)
+        self.redis.srem(f"{PREFIX}:index", slug)
+
 
 def _fields(config):
     return {k: str(v) for k, v in asdict(config).items()}

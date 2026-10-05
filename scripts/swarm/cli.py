@@ -3,6 +3,7 @@
 agentihooks swarm list | tick
 agentihooks swarm <id> create --repo DIR [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
@@ -147,6 +148,12 @@ def cmd_set(store, args):
             }
         )
     )
+
+
+def cmd_remove(store, args):
+    store.remove(args.slug)
+    activity.clear(args.slug)
+    print(json.dumps({"removed": args.slug}))
 
 
 def cmd_status(store, args):
@@ -301,7 +308,7 @@ def build_parser():
     create.add_argument("--repo", required=True)
     create.add_argument("--max-eng-agents", type=int, default=2)
     create.add_argument("--max-ci-agents", type=int, default=1)
-    for plain in ("start", "pause"):
+    for plain in ("start", "pause", "remove"):
         sub.add_parser(plain)
     sub.add_parser("stop").add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
