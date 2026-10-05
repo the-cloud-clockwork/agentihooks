@@ -43,6 +43,8 @@ MAX_BODY = 1 << 20
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
+ROOT = CODE_DIR.parents[1]
+CODE_DIRS = (CODE_DIR, ROOT / "scripts" / "inbox", ROOT / "scripts" / "swarm")
 
 
 def all_summaries():
@@ -437,12 +439,14 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, ops)
 
 
-def code_stamp(code_dir=CODE_DIR):
-    return max((p.stat().st_mtime_ns for p in code_dir.iterdir() if p.suffix in (".py", ".html")), default=0)
+def code_stamp(code_dirs=CODE_DIRS):
+    return max(
+        (p.stat().st_mtime_ns for d in code_dirs for p in d.rglob("*") if p.suffix in (".py", ".html")), default=0
+    )
 
 
-def reload_if_changed(started, code_dir=CODE_DIR, execv=os.execv):
-    if code_stamp(code_dir) == started:
+def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
+    if code_stamp(code_dirs) == started:
         return False
     execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
     return True
