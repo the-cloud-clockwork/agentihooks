@@ -19,7 +19,7 @@ def _parse(line: str) -> CodexContext | None:
         return None
     payload = event.get("payload") if isinstance(event, dict) else None
     info = payload.get("info") if isinstance(payload, dict) and payload.get("type") == "token_count" else None
-    usage = info.get("total_token_usage") if isinstance(info, dict) else None
+    usage = info.get("last_token_usage") if isinstance(info, dict) else None
     if not isinstance(usage, dict):
         return None
     used, window = usage.get("total_tokens"), info.get("model_context_window")
