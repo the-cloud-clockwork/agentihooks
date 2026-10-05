@@ -106,7 +106,7 @@ def _swarm_exports(environ: dict[str, str]) -> str:
         return ""
     names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
     exports = {name: environ[name] for name in names if environ.get(name)}
-    exports["OTEL_LANGFUSE_ENABLED"] = "1"
+    exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
 
 
