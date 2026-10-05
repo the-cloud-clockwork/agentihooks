@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
 
+from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import MASTER, AgentRecord
@@ -82,10 +83,11 @@ def tick(slug, store, ledger, runtime, now_ms):
 def _drop(slug, store, ledger, rows, agent):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    if rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name:
+    reopen = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    if reopen:
         _reopen(slug, ledger, rows, agent.task)
-        return f", task {agent.task} reopened"
-    return ""
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
+    return f", task {agent.task} reopened" if reopen else ""
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -95,8 +97,10 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             if runtime.retire(agent, agent.name in live):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
-                if store.handoff(slug, agent.task) and rows.get(agent.task, {}).get("state") in ACTIVE:
+                goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
+                if goes_on:
                     _reopen(slug, ledger, rows, agent.task)
+                exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
                 actions.append(f"retired {agent.name}")
             else:
                 actions.append(f"could not retire {agent.name}, retrying next tick")

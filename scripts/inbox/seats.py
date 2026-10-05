@@ -41,6 +41,14 @@ def of_swarm(address, slug):
     return address.endswith(f"@{slug}") or re.fullmatch(rf"{re.escape(slug)}-(eng|ci|master)-\d+", address) is not None
 
 
+def master_of(address):
+    """The master seat of the swarm a seat or a swarm agent's name belongs to, '' for any other address."""
+    if is_seat(address):
+        return seat_address(address.split("@", 1)[1], "master")
+    found = re.fullmatch(r"(.+)-(?:eng|ci|master)-\d+", address)
+    return seat_address(found.group(1), "master") if found else ""
+
+
 class SeatRegistry:
     def __init__(self, redis):
         self.redis = redis

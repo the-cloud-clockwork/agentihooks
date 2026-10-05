@@ -38,7 +38,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.inbox import wake
+from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
@@ -487,7 +487,7 @@ def cmd_done(store, args):
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    _retire(store, args.slug, agent)
+    _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
 
@@ -496,7 +496,7 @@ def cmd_block(store, args):
     ledger = LedgerClient()
     ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
-    _retire(store, args.slug, agent)
+    _retire(store, args.slug, agent, "blocked its task and exited")
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 
@@ -508,6 +508,7 @@ def cmd_handoff(store, args):
         store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(args.slug, agent.task, text, seat=agent.seat)
     store.put_agent(args.slug, replace(agent, state="finished"))
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
     print(
         json.dumps(
             {"task": agent.task, "state": "handoff", "next": "stop now; a successor continues from your document"}
@@ -577,9 +578,10 @@ def _seat(agent):
     return agent.seat
 
 
-def _retire(store, slug, agent):
+def _retire(store, slug, agent, exit_text):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
+    exits.settle(InboxStore(store.redis), agent.name, "", exit_text)
 
 
 def cmd_say(store, args):
