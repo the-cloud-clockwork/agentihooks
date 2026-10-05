@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, replace
 
-from scripts.swarm.seats import SeatRegistry, is_seat
+from scripts.inbox.seats import SeatRegistry, is_seat
 
 PREFIX = "agentihooks:inbox"
 MOVE_ATTEMPTS = 3

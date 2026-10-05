@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm.seats import Occupancy, SeatRegistry, is_seat, seat_address
+from scripts.inbox.seats import Occupancy, SeatRegistry, is_seat, seat_address
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -45,3 +45,20 @@ def test_seat_of_names_only_the_seat_a_session_still_holds(seats):
     assert seats.seat_of("rig-eng-1") == ""
     assert seats.seat_of("rig-eng-4") == "eng-1@rig"
     assert seats.seat_of("nobody") == ""
+
+
+def test_a_seat_that_keeps_changing_refuses_after_bounded_attempts(seats):
+    from scripts.inbox.seats import OCCUPY_ATTEMPTS, SeatError
+
+    watch, calls = seats.watch, []
+
+    def contended(pipe, address):
+        seen = watch(pipe, address)
+        calls.append(seen)
+        seats.redis.hset(seats.key(address), "generation", seen.generation + 10)
+        return seen
+
+    seats.watch = contended
+    with pytest.raises(SeatError):
+        seats.occupy("eng-1@rig", "rig-eng-1", at=1)
+    assert len(calls) == OCCUPY_ATTEMPTS and seats.history("eng-1@rig") == []

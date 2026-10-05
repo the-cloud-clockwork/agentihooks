@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
 
-from scripts.swarm.seats import seat_address
+from scripts.inbox.seats import seat_address
 from scripts.swarm.store import MASTER, AgentRecord
 
 LEASE_MS = 10 * 60 * 1000
@@ -195,12 +195,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 state = "pr" if task.get("pr_url") else "claimed"
                 ledger.update_task(slug, task["id"], {"state": state, "claimed_by": name})
                 task.update(state=state, claimed_by=name)
+                store.seats.occupy(seat, name, now_ms)
                 placed = runtime.spawn(config, lane, name, task)
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
             store.put_agent(slug, _placed(record, placed))
-            store.seats.occupy(seat, name, now_ms)
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
@@ -239,12 +239,12 @@ def _master(slug, config, store, runtime, now_ms):
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))
     store.put_agent(slug, record)
     try:
+        store.seats.occupy(record.seat, name, now_ms)
         placed = runtime.spawn(config, MASTER, name, {"id": MASTER, "handoff": store.handoff(slug, MASTER)})
     except Exception as exc:
         store.drop_agent(slug, name)
         return [f"master spawn failed: {exc}"]
     store.put_agent(slug, _placed(record, placed))
-    store.seats.occupy(record.seat, name, now_ms)
     store.clear_handoff(slug, MASTER)
     return [f"spawned master {name}"]
 

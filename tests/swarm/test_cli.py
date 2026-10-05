@@ -256,6 +256,7 @@ def test_handoff_finishes_the_agent_keeps_the_claim_and_stores_the_doc(env, tmp_
     assert [a.state for a in store.agents("sw") if a.name == "sw-eng-1"] == ["finished"]
     assert store.claimant("sw", "t1") == "sw-eng-1"
     assert store.handoff("sw", "t1") == "issue 7 is open, tests red on seam 2"
+    assert store.handoff_seat("sw", "t1") == "eng-1@sw"
     assert ledger.rows["t1"]["state"] == "claimed"
     assert "stop now" in capsys.readouterr().out
 

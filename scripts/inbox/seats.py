@@ -4,10 +4,14 @@ Each new occupant bumps the seat's generation; the occupancy history is append-o
 """
 
 import json
-import time
 from dataclasses import dataclass
 
 PREFIX = "agentihooks:seat"
+OCCUPY_ATTEMPTS = 5
+
+
+class SeatError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -31,12 +35,11 @@ class SeatRegistry:
     def key(self, address):
         return f"{PREFIX}:{address}"
 
-    def occupy(self, address, occupant, at=None):
+    def occupy(self, address, occupant, at):
         from redis.exceptions import WatchError
 
-        at = time.time_ns() // 1_000_000 if at is None else at
         key = self.key(address)
-        while True:
+        for _ in range(OCCUPY_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
                     generation = self.watch(pipe, address).generation + 1
@@ -49,6 +52,7 @@ class SeatRegistry:
                     return generation
                 except WatchError:
                     continue
+        raise SeatError(f"seat {address} kept changing; {occupant} could not take it")
 
     def watch(self, pipe, address):
         pipe.watch(self.key(address))

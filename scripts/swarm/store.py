@@ -3,7 +3,7 @@
 import json
 from dataclasses import asdict, dataclass, replace
 
-from scripts.swarm.seats import SeatRegistry
+from scripts.inbox.seats import SeatRegistry
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -108,8 +108,10 @@ class RedisStore:
                 return False
 
     def put_handoff(self, slug, task, text, seat=""):
-        self.redis.set(self.key(slug, "handoff", task), text)
-        self.redis.set(self.key(slug, "handoff-seat", task), seat)
+        with self.redis.pipeline() as pipe:
+            pipe.set(self.key(slug, "handoff", task), text)
+            pipe.set(self.key(slug, "handoff-seat", task), seat)
+            pipe.execute()
 
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""

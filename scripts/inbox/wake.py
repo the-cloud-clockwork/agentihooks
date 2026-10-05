@@ -4,8 +4,8 @@ Ladder per pending item: up to three wakes one retry window apart, then an inbox
 then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
 """
 
+from scripts.inbox.seats import is_seat
 from scripts.swarm.delivery import READY
-from scripts.swarm.seats import is_seat
 from scripts.swarm.store import MASTER
 
 MAX_WAKES = 3

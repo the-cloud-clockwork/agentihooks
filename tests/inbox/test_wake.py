@@ -191,7 +191,7 @@ SEATED = [
 
 
 def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):
-    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
     herdr = FakeHerdr({"p1": "idle"})
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
@@ -200,13 +200,13 @@ def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):
 
 
 def test_a_wake_racing_a_handover_writes_no_wake_note(inbox):
-    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
 
     class HandoverHerdr(FakeHerdr):
         def prompt(self, agent, text):
             super().prompt(agent, text)
-            inbox.seats.occupy("eng-1@sw", "sw-eng-4")
+            inbox.seats.occupy("eng-1@sw", "sw-eng-4", at=1)
 
     herdr = HandoverHerdr({"p1": "idle", "p4": "idle"})
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
@@ -224,12 +224,12 @@ def test_escalation_goes_to_the_master_seat(inbox):
 
 
 def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
-    inbox.seats.occupy("eng-1@sw", "sw-eng-1")
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
 
     class HandoverOnStatus(FakeHerdr):
         def agent_status(self, agent):
-            inbox.seats.occupy("eng-1@sw", "sw-eng-4")
+            inbox.seats.occupy("eng-1@sw", "sw-eng-4", at=1)
             return super().agent_status(agent)
 
     herdr = HandoverOnStatus({"p1": "idle"})
