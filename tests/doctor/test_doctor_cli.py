@@ -162,6 +162,77 @@ def test_stop_closes_the_doctor_ledger_with_every_fix_and_removes_its_agents(env
     assert store.config(WATCHED).state == "paused"
 
 
+def test_stop_summary_includes_before_and_after_from_fix_proof_files(env):
+    _, _, root = env
+    doctor.main([WATCHED, "start"])
+    records = [
+        (
+            "pending",
+            "Close items for exited agents",
+            "2026-10-05T17:44:10Z before: inbox lists 2 pending\n2026-10-05T17:54:57Z after: inbox lists 0 pending (before 2)",
+        ),
+        ("delivered", "Settle delivered items", "before 4 [('item', 'delivered')]\nafter 0"),
+        (
+            "fyi",
+            "Skip informational items",
+            "measure on recorded inputs: before 11, after 0; control work item still flagged: True",
+        ),
+    ]
+    for task, title, numbers in records:
+        workspace = root / task
+        workspace.mkdir()
+        (workspace / "proof.md").write_text(f"Tests passed\n{numbers}\nReview closed\n")
+        FileLedger()._call(
+            DOCTOR,
+            [
+                {
+                    "op": "task_add",
+                    "id": f"add-{task}",
+                    "by": "doctor",
+                    "task": task,
+                    "title": title,
+                    "lane": "eng",
+                    "kind": "code",
+                },
+                {
+                    "op": "task_update",
+                    "id": f"done-{task}",
+                    "by": "doctor",
+                    "item": f"tasks/{task}",
+                    "fields": {
+                        "state": "done",
+                        "pr_url": PR,
+                        "workspace": str(workspace),
+                        "proof": {"output": "Regression tests passed"},
+                    },
+                },
+            ],
+        )
+    assert doctor.main([WATCHED, "stop"]) == 0
+    summary = state(DOCTOR)["overview"]
+    for _, title, numbers in records:
+        assert title in summary
+        for line in numbers.splitlines():
+            assert line in summary
+    assert "no number recorded" not in summary
+
+
+@pytest.mark.parametrize("content", [None, "", "Tests passed; review closed"])
+def test_summary_reports_missing_numbers_only_without_measurement_evidence(tmp_path, content):
+    if content is not None:
+        (tmp_path / "proof.md").write_text(content)
+    tasks = [
+        {"title": "Missing", "state": "done", "workspace": str(tmp_path)},
+        {"title": "Ledger", "state": "done", "workspace": str(tmp_path), "proof": {"output": "before 3, after 0"}},
+        {"title": "Legacy", "state": "done", "proof": {"output": "before 5, after 0"}},
+    ]
+    summary = doctor.fixes_note(tasks)
+    assert "Missing: moved no number recorded" in summary
+    assert "Ledger: moved before 3, after 0" in summary
+    assert "Legacy: moved before 5, after 0" in summary
+    assert summary.count("no number recorded") == 1
+
+
 def test_stop_cancels_the_pending_peer_messages_and_tells_the_watched_master(env):
     store, _, _ = env
     doctor.main([WATCHED, "start"])
