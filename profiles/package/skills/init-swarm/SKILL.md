@@ -2,7 +2,9 @@
 name: init-swarm
 description: >
   Turn an accepted plan into a running swarm: ledger content with phases, PR
-  sized tasks in the eng and ci lanes, then create and start the swarm. Use when the operator says
+  sized tasks in the eng and ci lanes, then create and start the swarm. Takes
+  code plans and plans for ops, troubleshooting, tuning or research work, whose
+  tasks carry a kind and a proof contract. Use when the operator says
   "init swarm", "init-swarm", "start a swarm for this plan", or hands over an
   accepted plan to run with agents.
 argument-hint: "<plan-file> --repo DIR [--max-eng-agents N] [--max-ci-agents N]"
@@ -39,26 +41,28 @@ The slug is the swarm id below.
 
 ## 3. Add the tasks
 
-One task is one pull request, sized for one agent in one worktree, in the lane
-that owns it: `eng` for code, `ci` for workflows and pipelines.
+One task is sized for one agent in one worktree. A code task is one pull
+request in the lane that owns it: `eng` for code, `ci` for workflows and
+pipelines. A plan item that is not a code change (ops, troubleshooting, tuning,
+research) is an `eng` task with a kind and a proof contract: read
+[work-beyond-code.md](work-beyond-code.md) for the kind and the contract.
 
 ```bash
 agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
-  [--kind code|ci|ops|troubleshoot|tune|research] [--must "<true when done>" --check "<how>" --judge "<who>"]
+  [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```
 
-Work that is not a code change takes a kind; a task without one is `code`. Each kind
-gets its own prompt and its own proof: `ops` and `tune` close with the command and its
-output, `troubleshoot` with the root cause, its evidence and a fix or a filed task,
-`research` with a link to the written finding. `--must`, `--check` and `--judge` form
-the task's proof contract, shown to its agent. The ledger refuses `done` without the proof.
+A code task takes no `--kind` and no contract. The ledger refuses `done` on a
+task beyond code until its agent posts the proof its kind needs.
 
 The tick claims a task only once every task in `--depends-on` is done, and never
 while its territory overlaps a claimed or in-review task's. Add the tasks a task
 waits on first; an unknown id is refused. A task without territory never conflicts.
 
-Done when every phase has at least one task and every task names its done condition.
+Done when every phase has at least one task, every task names its done
+condition, and every task beyond code carries its kind with `--must`, `--check`
+and `--judge`.
 
 ## 4. Create and start
 
