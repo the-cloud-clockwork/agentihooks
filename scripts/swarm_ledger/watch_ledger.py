@@ -47,8 +47,14 @@ def line(event, rules=""):
     head = f"{event['by'].upper() if event['by'] == 'operator' else event['by']} rev={event['rev']} {event['kind']}{where.rstrip()}"
     if "id" in event:
         head += f" [{event['id']}]"
+    images = ""
+    if event.get("image_paths"):
+        images = (
+            f" | Screenshots: {json.dumps(event['image_paths'], ensure_ascii=False)}."
+            " Open each image: Claude use Read; Codex use view_image with the absolute path."
+        )
     if "diff" in event:
-        return f"{head} diff: {json.dumps(event['diff'], ensure_ascii=False)}"
+        return f"{head} diff: {json.dumps(event['diff'], ensure_ascii=False)}{images}"
     if "text" in event:
         sep = " was:" if event["kind"].endswith("deleted") else ":"
         wrapped = (
@@ -56,8 +62,8 @@ def line(event, rules=""):
             if rules and event.get("target") == "chat" and event["kind"].endswith("added")
             else ""
         )
-        return f"{head}{sep} {json.dumps(event['text'], ensure_ascii=False)}{wrapped}"
-    return head
+        return f"{head}{sep} {json.dumps(event['text'], ensure_ascii=False)}{images}{wrapped}"
+    return head + images
 
 
 def main():
