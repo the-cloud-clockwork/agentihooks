@@ -48,7 +48,7 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
         "session_id": "export-test",
         "transcript_path": "",
     }
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-m", "hooks"],
         input=json.dumps(payload),
         capture_output=True,
@@ -57,4 +57,19 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
         env=env,
         timeout=60,
     )
+    assert result.returncode == 0
     assert "/v1/logs" in paths
+
+
+def test_flush_drains_every_provider(monkeypatch):
+    from hooks.observability import otel
+
+    for name in ("AGENTIHOOKS_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
+    flushed = []
+    provider = type("Provider", (), {"force_flush": lambda self, timeout: flushed.append(self)})
+    providers = [provider(), provider(), provider()]
+    monkeypatch.setattr(otel, "_providers", list(providers))
+    otel.init()
+    otel.flush()
+    assert flushed == providers

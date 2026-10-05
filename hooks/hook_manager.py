@@ -2541,6 +2541,7 @@ def main() -> None:
         os._exit(130)  # standard SIGINT exit code
     except Exception as e:
         log(f"Hook manager error: {str(e)}")
+        otel.flush()
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(1)
