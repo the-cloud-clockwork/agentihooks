@@ -32,11 +32,23 @@ def test_offline_collector_hooks_skip_repeated_flush_waits(tmp_path):
                 "transcript_path": "",
             }
         )
-        times = []
+        script = """
+import sys
+from unittest.mock import patch
+from hooks.hook_manager import main
+
+def flush_wait():
+    print("FLUSH_WAIT_CALLED", file=sys.stderr, flush=True)
+    return False
+
+with patch("hooks.observability.otel._flush_pending", side_effect=flush_wait):
+    with patch("hooks.observability.otel.time.time", return_value=0):
+        main()
+"""
+        waits = []
         for _ in range(3):
-            start = time.monotonic()
             result = subprocess.run(
-                [sys.executable, "-m", "hooks"],
+                [sys.executable, "-c", script],
                 input=payload,
                 capture_output=True,
                 text=True,
@@ -44,10 +56,9 @@ def test_offline_collector_hooks_skip_repeated_flush_waits(tmp_path):
                 env=env,
                 timeout=15,
             )
-            times.append(time.monotonic() - start)
             assert result.returncode == 0, result.stderr
-    print("offline collector hook exit seconds:", ", ".join(f"{elapsed:.3f}" for elapsed in times))
-    assert max(times[1:]) < times[0] - 0.6, times
+            waits.append(result.stderr.splitlines().count("FLUSH_WAIT_CALLED"))
+    assert waits == [1, 0, 0]
     messages = [json.loads(line)["message"] for line in (tmp_path / "hooks.log").read_text().splitlines()]
     assert messages.count("Telemetry flush failed; skipping flush waits for 60s") == 1
 
