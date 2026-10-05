@@ -8,12 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
+from tests import shards
 from tests.shards import (
     assign_files,
     discover_test_files,
     setup_nodes_in_parallel,
     slowest_first,
     source_sizes,
+    serve_workers,
     warm_imports,
 )
 
@@ -22,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
+FORK_PID = pytest.StashKey[int]()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -47,6 +50,8 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    if hasattr(config, "workerinput") and shards.forked_sys_path:
+        sys.path[:] = shards.forked_sys_path
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
         return
@@ -56,10 +61,23 @@ def pytest_configure(config):
     if os.environ.get("TESTS_PREWARMED"):
         return
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
+    if os.environ.get("TESTS_FORK_WORKERS"):
+        import tempfile
+
+        path = os.path.join(tempfile.mkdtemp(), "fork.sock")
+        os.environ["TESTS_FORK_SERVER"] = path
+        config.option.tx = [f"popen//python={sys.executable} -S {config.rootpath / 'tests' / 'fork_worker.py'}"] * len(config.option.tx)
+        config.stash[FORK_PID] = serve_workers(path, modules, workers)
+        return
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
 
 
 def pytest_unconfigure(config):
+    if FORK_PID in config.stash:
+        import signal
+
+        os.kill(config.stash[FORK_PID], signal.SIGKILL)
+        os.waitpid(config.stash[FORK_PID], 0)
     for pid in config.stash.get(WARM_PIDS, []):
         os.waitpid(pid, 0)
 

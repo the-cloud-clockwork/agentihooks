@@ -1,7 +1,9 @@
 import importlib
 import importlib.util
 import json
+import io
 import os
+import socket
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -84,6 +86,72 @@ def warm_imports(modules: list[str], workers: int, load=importlib.import_module)
                 os._exit(0)
         pids.append(pid)
     return pids
+
+
+def _read_line(fd: int) -> bytes:
+    line = b""
+    while not line.endswith(b"\n"):
+        chunk = os.read(fd, 1)
+        if not chunk:
+            break
+        line += chunk
+    return line
+
+
+forked_sys_path: list[str] = []
+
+
+def _run_worker(conn: socket.socket, fds: list[int]) -> None:
+    forked_sys_path[:] = sys.path
+    try:
+        for target, fd in enumerate(fds):
+            os.dup2(fd, target)
+            os.close(fd)
+        sys.stdin = io.TextIOWrapper(io.FileIO(0, closefd=False))
+        sys.stdout = io.TextIOWrapper(io.FileIO(1, "w", closefd=False), write_through=True)
+        sys.stderr = io.TextIOWrapper(io.FileIO(2, "w", closefd=False), write_through=True)
+        exec(eval(_read_line(0)), {"__name__": "__main__"})
+    finally:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            os._exit(0)
+
+
+def serve_workers(path: str, modules: list[str], workers: int) -> int:
+    pid = os.fork()
+    if pid:
+        return pid
+    try:
+        for warm in warm_imports(modules, workers):
+            os.waitpid(warm, 0)
+        for module in modules:
+            try:
+                importlib.import_module(module)
+            except BaseException:
+                pass
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(path + ".tmp")
+        server.listen()
+        os.replace(path + ".tmp", path)
+        while True:
+            conn, _ = server.accept()
+            _, fds, _, _ = socket.recv_fds(conn, 1, 3)
+            if os.fork() == 0:
+                server.close()
+                _run_worker(conn, fds)
+            conn.close()
+            for fd in fds:
+                os.close(fd)
+            while True:
+                try:
+                    if os.waitpid(-1, os.WNOHANG)[0] == 0:
+                        break
+                except ChildProcessError:
+                    break
+    finally:
+        os._exit(0)
 
 
 def setup_nodes_in_parallel(manager, putevent) -> list:
