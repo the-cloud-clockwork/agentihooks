@@ -14,7 +14,7 @@ writes to Langfuse; the others speak OTLP to an OpenTelemetry collector.
 | Agent trace exporter | One trace per Claude or Codex session: turns, model calls, tool calls, with prompt, reply and tool text | Langfuse, OTLP/HTTP traces | `AGENTIHOOKS_LANGFUSE_ENABLED` plus a Langfuse key pair |
 | Hook events and gauges | Log events (`agentihooks.*`) and gauges such as `agentihooks.tokens.fill_pct` from hook handlers; spans such as `agentihooks.session.stop` | `OTEL_EXPORTER_OTLP_ENDPOINT` (collector), gRPC or HTTP | `OTEL_HOOKS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `CLAUDE_CODE_ENABLE_TELEMETRY` |
 | Brain spans | `brain.inject`, `brain.delivery`, `brain.marker_write` | `OTEL_EXPORTER_OTLP_ENDPOINT` `/v1/traces` (collector) | `OTEL_HOOKS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| Claude Code native telemetry | Claude Code's own metrics and log events | `OTEL_EXPORTER_OTLP_ENDPOINT` (collector) | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` in the Claude settings `env` |
+| Claude Code native telemetry | Claude Code's own metrics and log events | `OTEL_EXPORTER_OTLP_ENDPOINT` (collector) | `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the `OTEL_*` exporter variables in Claude Code's environment: a settings `env` block from the bundle (the anton profile sets the endpoint there), or `agentihooks init-agent` with `AGENTIHOOKS_OTEL_COLLECTOR` set |
 | Codex native telemetry | Codex log events | `AGENTIHOOKS_OTEL_COLLECTOR` `/v1/logs` | `agentihooks init-agent --agent codex` with `AGENTIHOOKS_OTEL_COLLECTOR` set |
 
 Langfuse accepts OTLP traces only, so metrics and log events never reach it.
@@ -79,8 +79,9 @@ writes `AGENTIHOOKS_LANGFUSE_ENABLED=1` (or `0`) into:
 A later profile in the chain overrides an earlier one. `otel.enabled: false`
 writes `0` whatever `langfuse.enabled` says. A profile with neither key writes
 nothing, and tracing stays off. The anton profile turns it on.
-`agentihooks init-agent` exports the same switch for the sessions it launches,
-from the installed profile; swarm spawns always get `1`.
+`agentihooks init-agent` exports the switch for the sessions it launches: the
+caller's value when set, else the installed profile's; a swarm spawn with neither
+gets `1`.
 
 Run `agentihooks init` after changing `profile.yml`. Sessions already running
 keep the old value.
