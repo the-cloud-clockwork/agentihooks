@@ -243,7 +243,7 @@ class OutlineFolds(unittest.TestCase):
     def build(self):
         script = (
             FakeDom.SCRIPT
-            + "".join(function_source(n) + "\n" for n in ("h", "outlineOf", "outlineGroup"))
+            + "".join(function_source(n) + "\n" for n in ("h", "itemState", "outlineOf", "outlineGroup"))
             + f"const tree = outlineOf({json.dumps(self.DOC)}, {json.dumps(self.HEADS)});"
             + "process.stdout.write(JSON.stringify({ groups: tree.map((s) => shape(outlineGroup(s))), wired, tree }));"
         )
@@ -257,9 +257,11 @@ class OutlineFolds(unittest.TestCase):
             [{"id": "item-sources-0", "title": "a.md"}, {"id": "item-sources-1", "title": "b.md"}],
         )
         self.assertEqual(tree["sec-priorities"], [{"id": "item-priorities-pr1", "title": "Answer the port"}])
-        self.assertEqual(tree["sec-questions"], [{"id": "item-questions-q1", "title": "Which port?"}])
+        self.assertEqual(tree["sec-questions"], [{"id": "item-questions-q1", "title": "Which port?", "state": "open"}])
         self.assertEqual(tree["sec-notes"], [{"id": "item-notes-n1", "title": "Keep it small"}])
-        self.assertEqual(tree["sec-followups"], [{"id": "item-followups-f1", "title": "Rotate the key"}])
+        self.assertEqual(
+            tree["sec-followups"], [{"id": "item-followups-f1", "title": "Rotate the key", "state": "open"}]
+        )
 
     def test_every_outline_category_has_a_toggle_even_without_items(self):
         out = self.build()

@@ -37,7 +37,9 @@ class Outline(unittest.TestCase):
     def test_outline_lists_each_section_and_its_item_titles(self):
         doc = new_ledger.build_doc(CONTENT)
         script = (
-            function_source("outlineOf")
+            function_source("itemState")
+            + "\n"
+            + function_source("outlineOf")
             + f"\nprocess.stdout.write(JSON.stringify(outlineOf({json.dumps(doc)}, {json.dumps(HEADS)})));"
         )
         out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
@@ -49,24 +51,24 @@ class Outline(unittest.TestCase):
                     "id": "sec-phases",
                     "title": "Plan phases",
                     "items": [
-                        {"id": "item-phases-p1", "title": "Build it"},
-                        {"id": "item-phases-p2", "title": "Ship it"},
+                        {"id": "item-phases-p1", "title": "Build it", "state": "open"},
+                        {"id": "item-phases-p2", "title": "Ship it", "state": "open"},
                     ],
                 },
                 {
                     "id": "sec-tasks",
                     "title": "Swarm tasks",
-                    "items": [{"id": "item-tasks-t1", "title": "Write the test"}],
+                    "items": [{"id": "item-tasks-t1", "title": "Write the test", "state": "open"}],
                 },
                 {
                     "id": "sec-questions",
                     "title": "Open questions",
-                    "items": [{"id": "item-questions-q1", "title": "Which port?"}],
+                    "items": [{"id": "item-questions-q1", "title": "Which port?", "state": "open"}],
                 },
                 {
                     "id": "sec-followups",
                     "title": "Follow-ups or blockers",
-                    "items": [{"id": "item-followups-f1", "title": "Rotate the key"}],
+                    "items": [{"id": "item-followups-f1", "title": "Rotate the key", "state": "open"}],
                 },
             ],
         )
