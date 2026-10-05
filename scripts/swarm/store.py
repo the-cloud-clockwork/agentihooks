@@ -133,7 +133,7 @@ def redis_url(environ):
     return environ.get("AGENTIHOOKS_SWARM_REDIS_URL") or DEFAULT_URL
 
 
-def connect(environ=None):
+def redis_client(environ=None):
     import os
 
     import redis
@@ -142,8 +142,14 @@ def connect(environ=None):
 
     url = redis_url(os.environ if environ is None else environ)
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
+    client.ping()
+    return client
+
+
+def connect(environ=None):
+    import redis
+
     try:
-        client.ping()
+        return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
         raise SwarmError(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
-    return RedisStore(client)
