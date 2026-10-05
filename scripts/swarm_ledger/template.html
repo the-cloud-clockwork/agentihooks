@@ -1239,6 +1239,7 @@ input, textarea { caret-color: var(--accent-2); }
 
   const FIGURES = [["agents", "Agents"], ["open", "Open"], ["claimed", "Claimed"], ["pr", "In PR"], ["blocked", "Blocked"], ["done", "Done"]];
   let swarm = null;
+  let swarmReadError = false;
   let codexDraft = null;
   let capDraft = {};
   let workFilter = "";
@@ -1248,13 +1249,22 @@ input, textarea { caret-color: var(--accent-2); }
   let noteTimer = 0;
 
   async function pollSwarm() {
-    let sw = null;
     try {
       const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
-      if (resp.ok) sw = await resp.json();
-    } catch (e) {}
-    renderSwarm(sw);
-    renderChatTo(sw);
+      if (!resp.ok) throw new Error(`server answered ${resp.status}`);
+      const sw = await resp.json();
+      if (swarmReadError && !pending) $("swarm-note").textContent = "";
+      swarmReadError = false;
+      renderSwarm(sw);
+      renderChatTo(sw);
+    } catch (error) {
+      swarmReadError = true;
+      renderSwarm(swarm);
+      $("swarm-status-box").hidden = false;
+      $("swarm-note").className = "sw-note bad";
+      $("swarm-note").textContent = `Could not read swarm status: ${error.message}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
+      renderControls();
+    }
   }
 
   function swarmCards(sw, tasks, seen, now) {
@@ -1325,7 +1335,7 @@ input, textarea { caret-color: var(--accent-2); }
       const action = btn.dataset.swarm;
       btn.hidden = (action === "start" && config.state === "running") || (action === "pause" && config.state !== "running")
         || (action === "doctor_start" && !!(swarm && swarm.peer)) || (action === "doctor_stop" && !(swarm && swarm.peer));
-      btn.disabled = !!pending || !!off[action] || (action === "set" && !Object.keys(capDraft).some((key) => capDraft[key] !== config[key]));
+      btn.disabled = !swarm || !!pending || !!off[action] || (action === "set" && !Object.keys(capDraft).some((key) => capDraft[key] !== config[key]));
       btn.classList.toggle("sending", pending === action);
       btn.setAttribute("aria-busy", pending === action ? "true" : "false");
     }
@@ -1394,10 +1404,10 @@ input, textarea { caret-color: var(--accent-2); }
   function renderSwarm(sw) {
     swarm = sw;
     $("swarm-status-box").hidden = !sw;
-    $("swarm-state").className = `sw-state ${sw ? sw.config.state : "stopped"}`;
-    $("swarm-state").textContent = sw ? sw.config.state : "stopped";
-    $("tab-swarm").replaceChildren("Swarm ", h("span", { class: $("swarm-state").className, text: $("swarm-state").textContent }),
-      sw && ((sw.findings || []).some((f) => !f.verdict) || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null);
+    $("swarm-state").className = `sw-state ${sw ? sw.config.state : "unavailable"}`;
+    $("swarm-state").textContent = sw ? sw.config.state : "unavailable";
+    $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: $("swarm-state").textContent }),
+      sw && ((sw.findings || []).some((f) => !f.verdict) || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
     if (!sw) {
       $("swarm-agents").replaceChildren(h("li", { class: "sw-empty", text: "No agents running. Start the swarm to work the open tasks." }));
       return;
