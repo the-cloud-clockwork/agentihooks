@@ -17,7 +17,7 @@ def retire_idle_master(
     slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, rows: dict, now_ms: int
 ) -> list[str]:
     agents = store.agents(slug)
-    if any(a.lane != MASTER for a in agents):
+    if not agents or any(a.lane != MASTER for a in agents):
         return []
     inbox = InboxStore(store.redis)
     events = ledger.events(slug)
