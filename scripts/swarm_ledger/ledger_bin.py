@@ -107,7 +107,7 @@ def due(state, now, restored_at=None):
 def auto_bin(now=None):
     now = core.now_ms() if now is None else now
     binned = []
-    with LOCK:
+    with LOCK, core.LOCK:
         found, marks = entries(), restored()
         for html_path in sorted(core.LEDGER_DIR.glob("*.html")):
             slug, json_path = html_path.stem, core.paths(html_path.stem)[1]
