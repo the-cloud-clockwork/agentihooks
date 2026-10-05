@@ -269,6 +269,38 @@ def test_handoff_refuses_a_missing_document(env, capsys):
     assert "handoff" in capsys.readouterr().err
 
 
+def test_done_closes_items_left_for_the_agent_and_tells_their_sender(env, monkeypatch):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    closed = inbox.get(item.id)
+    assert closed.state == "cancelled" and "sw-eng-1 finished its task and exited" in closed.reason
+    assert [entry["state"] for entry in inbox.history(item.id)] == ["pending", "cancelled"]
+    assert inbox.pending_items("sw-eng-1") == []
+    [told] = inbox.pending_items("sw-ci-1")
+    assert told.sender == "swarm" and item.id in told.text
+
+
+def test_handoff_moves_items_left_for_the_agent_to_its_seat(env, tmp_path):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-1", "sw-eng-1", "contract confirmed")
+    doc = tmp_path / "handoff.md"
+    doc.write_text("issue 7 is open")
+    assert run("sw", "--as", "sw-eng-1", "handoff", str(doc)) == 0
+    moved = inbox.get(item.id)
+    assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+    assert inbox.pending_items("sw-eng-1") == []
+    assert [i.id for i in inbox.pending_items("eng-1@sw")] == [item.id]
+    assert "moved to eng-1@sw" in inbox.history(item.id)[-1]["reason"]
+
+
 def test_agent_prompt_starts_by_reading_the_ledger_json():
     from scripts.swarm import prompt
 

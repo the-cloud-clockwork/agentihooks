@@ -241,6 +241,22 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
     assert runtime.killed == ["sw-eng-1"] and ledger.rows["t1"]["state"] == "open"
 
 
+def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("sw-ci-9", "sw-eng-1", "contract confirmed")
+    runtime.statuses["sw-eng-1"] = "idle"
+    store.update("sw", state="paused")
+    for n in range(IDLE_KILL_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+    assert runtime.killed == ["sw-eng-1"]
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == ("eng-1@sw", "pending")
+
+
 def test_a_busy_turn_resets_the_idle_count(store):
     from scripts.swarm.tick import IDLE_NUDGE_TICKS
 

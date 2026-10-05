@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, replace
 
-from scripts.inbox.seats import SeatRegistry, is_seat
+from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 
 PREFIX = "agentihooks:inbox"
 MOVE_ATTEMPTS = 3
@@ -138,7 +138,48 @@ class InboxStore:
 
     def close(self, item_id, closer, kind, detail=""):
         state, reason = close_reason(kind, detail)
-        return self._move(item_id, closer, lambda item: (item.address, item.sender), state, reason)
+        return self._move(
+            item_id, closer, lambda item: (item.address, item.sender, master_of(item.address)), state, reason
+        )
+
+    def withdraw(self, item_id, by, reason):
+        """Cancel a pending item nobody is left to read; a swarm step, so no actor check."""
+        return self._move(item_id, by, lambda item: (by,), "cancelled", reason, only_from=("pending",))
+
+    def redirect(self, item_id, by, address, reason):
+        """Move a pending item to another address; a swarm step, so no actor check."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_redirect(item_id, by, address, reason)
+            except WatchError:
+                continue
+        raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_redirect(self, item_id, by, address, reason):
+        key = self.key("item", item_id)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(key)
+            item = _item(pipe.hgetall(key), item_id)
+            if item.state != "pending":
+                return None
+            pending = self.key("pending", item.address)
+            pipe.watch(pending)
+            last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
+            moved = replace(item, address=address, updated_at=now_ms(), reason=reason)
+            pipe.multi()
+            pipe.hset(key, mapping=_fields(moved))
+            pipe.zrem(self.key("address", item.address), item_id)
+            pipe.zrem(pending, item_id)
+            if last:
+                pipe.srem(self.key("waiting"), item.address)
+            pipe.zadd(self.key("address", address), {item_id: item.created_at})
+            pipe.zadd(self.key("pending", address), {item_id: item.created_at})
+            pipe.sadd(self.key("waiting"), address)
+            pipe.rpush(self.key("history", item_id), _entry("pending", by, reason, moved.updated_at))
+            pipe.execute()
+            return moved
 
     def reply(self, item_id, replier, text):
         item = self.get(item_id)

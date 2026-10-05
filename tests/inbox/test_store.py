@@ -87,6 +87,21 @@ def test_the_sender_may_cancel_but_a_stranger_may_not_close(store):
     assert store.close(item.id, "alice", "cancel").state == "cancelled"
 
 
+def test_the_master_closes_items_left_for_a_seat_or_agent_of_its_swarm(store):
+    store.seats.occupy("master@sw", "sw-master-1", 1)
+    by_name = store.send("sw-eng-1", "sw-eng-2", "contract confirmed")
+    by_seat = store.send("sw-eng-1", "eng-2@sw", "contract confirmed")
+    assert store.close(by_name.id, "sw-master-1", "cancel", "engineer two exited").state == "cancelled"
+    assert store.close(by_seat.id, "sw-master-1", "cancel", "engineer two exited").state == "cancelled"
+
+
+def test_another_swarms_master_may_not_close_an_item_of_this_swarm(store):
+    store.seats.occupy("master@other", "other-master-1", 1)
+    item = store.send("sw-eng-1", "sw-eng-2", "contract confirmed")
+    with pytest.raises(InboxError, match="belongs to sw-eng-2"):
+        store.close(item.id, "other-master-1", "cancel")
+
+
 def test_a_closed_item_stays_closed(store):
     item = store.send("alice", "bob", "hi")
     store.close(item.id, "bob", "done")
