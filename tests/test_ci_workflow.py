@@ -206,7 +206,7 @@ def test_unit_pins_an_exact_uv_version():
 def test_stored_durations_cover_the_collected_suite(request):
     collected = request.config.stash[COLLECTED_NODEIDS]
     stored = json.loads((_ROOT / ".test_durations").read_text())
-    missing = [nodeid for nodeid in collected if nodeid not in stored]
+    missing = [nodeid for nodeid in collected if nodeid.split("@", 1)[0] not in stored]
     assert len(missing) * 10 <= len(collected), (
         f"{len(missing)} of {len(collected)} tests have no stored duration; "
         "refresh them with: python -m tests.refresh_durations"

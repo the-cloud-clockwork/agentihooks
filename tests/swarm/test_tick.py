@@ -1,10 +1,11 @@
 from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, SpawnError, tick
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class FakeLedger:
@@ -67,6 +68,8 @@ class FakeRuntime:
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     return s

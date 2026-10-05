@@ -1,14 +1,17 @@
 import socket
 import time
 
-import fakeredis
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
