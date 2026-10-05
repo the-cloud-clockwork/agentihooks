@@ -211,15 +211,7 @@ details.panel-fold[open]::details-content { display: flex; flex-direction: colum
 textarea.line { min-height: 0; margin-top: 10px; padding: 6px 2px; border-radius: 0; background: transparent; box-shadow: inset 0 -1px 0 var(--edge); resize: none; overflow: hidden; }
 textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent); }
 .hint { font-size: var(--fs-meta); color: var(--dim); margin-top: 4px; }
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; align-items: start; }
 .col { min-width: 0; }
-.side { position: sticky; top: 24px; max-height: var(--side-max, calc(100vh - 48px)); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 12px;
-  scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
-.side::-webkit-scrollbar { width: 6px; }
-.side::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
-.side::-webkit-scrollbar-thumb:hover { background: var(--hover); }
-.side section { margin-bottom: 0; }
-.side > section { flex: none; }
 .stat { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
 .stat:first-child { border-top: 0; padding-top: 0; }
 .stat dt { font-size: var(--fs-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
@@ -232,13 +224,6 @@ details.crew { margin: 10px 0 0; }
 .crew-row { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
 .crew-row .who { color: var(--text-2); }
 .crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 6px var(--signal); flex: none; align-self: center; }
-#swarm-box { --sw-sum: 46px; padding-top: 0; padding-bottom: 14px; }
-#swarm-fold > summary { position: sticky; top: 0; z-index: 2; margin: 0 -18px; padding: 16px 18px 0; width: auto; border-radius: 6px 6px 0 0;
-  background: var(--panel); }
-#swarm-fold[open] > summary { margin: 0 -18px; padding-bottom: 10px; }
-.sw-head { position: sticky; top: var(--sw-sum); z-index: 1; margin: 0 -18px; padding: 12px 18px 0;
-  background: var(--panel); border-bottom: 1px solid var(--rule); }
-#swarm-box[hidden] { display: none; }
 .sw-state { margin-left: auto; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--muted); }
 .sw-state.running { color: var(--positive); text-shadow: var(--glow); }
 .sw-state.paused { color: var(--warn); text-shadow: var(--glow); }
@@ -362,7 +347,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .outline .ol-items a.st-open::before, .outline .ol-items a.st-open.on::before { color: var(--signal); }
 .outline .ol-items a.st-done::before, .outline .ol-items a.st-done.on::before { color: var(--positive); }
 .outline .ol-items a.st-out::before, .outline .ol-items a.st-out.on::before { color: var(--warn); }
-.outline .ol-items a.pending::after { content: "+"; position: absolute; left: 2px; font-weight: 700; color: var(--pending); }
+.outline a.pending::after { content: "+"; position: absolute; left: 2px; font-weight: 700; color: var(--pending); }
 .fab-outline { bottom: 240px; }
 @media (min-width: 1280px) {
   body { padding-left: var(--outline-w); }
@@ -373,14 +358,102 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     background: var(--overlay); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
   .outline.open { display: block; }
 }
-@media (max-width: 1100px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .side { position: static; max-height: none; overflow: visible; }
+
+
+:root { --space-tight: 8px; --space-row: 16px; --space-group: 32px; --gutter: 72px; }
+html, body { height: 100%; overflow: hidden; }
+body { padding-left: 0; }
+main { height: 100dvh; max-width: none; padding: 0 0 0 var(--gutter); display: flex; flex-direction: column; }
+header { flex: none; margin: 0; padding: var(--space-row) var(--space-group); flex-wrap: wrap; align-items: center; }
+.tabs { display: flex; flex: none; gap: var(--space-row); padding: 0 var(--space-group); border-bottom: 1px solid var(--rule); }
+.tab { padding: var(--space-row); background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+.tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-2); }
+.tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.tab .sw-state { margin-left: var(--space-tight); }
+.attention-dot { display: inline-block; width: 6px; height: 6px; margin-left: var(--space-tight); border-radius: 50%; background: var(--warn); }
+.tab-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-group); overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+.tab-body[hidden] { display: none; }
+.ledger-layout { display: grid; grid-template-columns: 240px minmax(0, 960px); gap: var(--space-group); max-width: 1232px; margin: 0 auto; }
+.outline { position: sticky; align-self: start; top: 0; left: auto; bottom: auto; width: auto; height: auto; max-height: none; overflow: visible; padding: 0; }
+section { margin-bottom: var(--space-group); padding: var(--space-row); }
+.summary-strip { display: flex; gap: var(--space-row); flex-wrap: wrap; margin: var(--space-row) 0 var(--space-group); font-size: var(--fs-meta); color: var(--muted); }
+.summary-strip button { margin-left: auto; }
+.sec-tools { display: flex; gap: var(--space-row); align-items: center; margin: 0 0 var(--space-row); }
+.sec-tools > button:first-of-type { margin-left: auto; }
+.jump-menu { display: none; }
+.jump-menu select { display: block; max-width: 180px; background: var(--surface-2); color: var(--text); border: 0; font: inherit; }
+.overview { margin: 0; color: var(--muted); }
+.overview:not([open]) > summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#swarm-box { max-width: 1400px; margin: 0 auto; padding: 0; }
+#swarm-fold > summary, #swarm-fold[open] > summary { position: static; margin: 0; padding: 0 0 var(--space-tight); background: transparent; border-radius: 0; }
+.swarm-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-group); }
+.swarm-work-column, .swarm-side-column { min-width: 0; }
+.counts-row { margin-bottom: var(--space-group); }
+.sw-figs { display: flex; gap: var(--space-row); flex-wrap: wrap; margin: var(--space-row) 0; }
+.count-filter { display: flex; flex-direction: column; align-items: center; min-width: 64px; min-height: 44px; padding: var(--space-tight); border: 0; background: var(--surface-2); color: var(--muted); font: inherit; cursor: pointer; }
+.count-filter:hover, .count-filter[aria-pressed="true"] { color: var(--accent-2); background: var(--hover); }
+.figure-value { display: block; color: var(--text); font-size: var(--fs-item); font-weight: 700; font-variant-numeric: tabular-nums; }
+.count-filter:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sw-ctl { gap: var(--space-tight); margin-top: var(--space-tight); }
+.destructive-group { display: flex; gap: var(--space-tight); border-left: 1px solid var(--rule); padding-left: var(--space-row); margin-left: auto; }
+.sw-btn { min-height: 40px; text-transform: none; letter-spacing: 0; }
+.sw-btn[hidden] { display: none; }
+.sw-note { text-align: left; white-space: normal; margin-top: var(--space-tight); }
+.sw-caps { grid-template-columns: minmax(80px, 1fr) 40px 48px 40px 20px; gap: var(--space-tight); }
+.sw-caps label { grid-column: 1 / -1; text-transform: none; letter-spacing: 0; }
+.sw-caps #codex-split, .sw-caps [data-swarm="set"] { grid-column: 1 / -1; }
+.sw-cap { width: 48px; }
+.sw-card { padding: var(--space-row) 0; }
+.sw-card > details { margin: 0; }
+.sw-card > details > summary { display: block; }
+.sw-card > details > summary .sw-task, .sw-card > details > summary .sw-meta, .sw-card > details > summary .hint { text-transform: none; letter-spacing: normal; }
+#swarm-fold .sw-state { margin-left: var(--space-tight); }
+.sw-card > details > summary::before { float: left; margin-top: 6px; }
+.sw-task { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sw-top { flex-wrap: wrap; }
+.sw-name { overflow-wrap: anywhere; white-space: normal; flex: 1; }
+.sw-meta { gap: var(--space-tight) var(--space-row); }
+#swarm-work-box { margin-top: var(--space-row); }
+.crew-row { flex-wrap: wrap; }
+.sync { left: 16px; right: auto; width: 40px; height: 40px; }
+#chat-fab { left: 16px; right: auto; bottom: 24px; }
+#sync { bottom: 80px; }
+#to-top { bottom: 136px; }
+#bell { bottom: 192px; }
+#home { bottom: 248px; }
+#outline-toggle { display: none; }
+.header-actions { display: none; gap: var(--space-tight); }
+.header-actions .sync { position: relative; left: auto; right: auto; bottom: auto; width: 40px; height: 40px; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--selection); color: var(--text); }
+input, textarea { caret-color: var(--accent-2); }
+@media (max-width: 1279px) {
+  .ledger-layout { display: block; max-width: 960px; }
+  .outline { display: none; }
+  .jump-menu { display: block; }
 }
+@media (max-width: 1023px) {
+  main { padding-left: 0; }
+  header { padding: var(--space-row); gap: var(--space-tight); flex-direction: row; align-items: center; }
+  header > div:first-child { min-width: 0; max-width: 100%; }
+  .status { white-space: normal; flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
+  .header-actions { flex-shrink: 1; min-width: 0; }
+  .header-actions { display: flex; flex-basis: 100%; }
+  .header-actions #home, .header-actions #bell, .header-actions #to-top, .header-actions #sync, .header-actions #chat-fab { position: static; }
+  .tab-body { padding: var(--space-row); }
+  .tabs { padding: 0 var(--space-row); }
+  .tab { padding: var(--space-tight); }
+  .swarm-grid { display: block; }
+  .destructive-group { flex-basis: 100%; margin-left: 0; border-left: 0; padding: var(--space-tight) 0 0; border-top: 1px solid var(--rule); }
+  .sw-figs { gap: var(--space-tight); }
+  .count-filter { min-width: 56px; }
+  .sec-tools { flex-wrap: wrap; }
+  .summary-strip { gap: var(--space-tight); }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 </style>
 </head>
 <body>
-<nav class="outline" id="outline" aria-label="Outline"></nav>
 <main>
   <header>
     <div>
@@ -389,32 +462,37 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     </div>
     <div class="status" id="status" role="status">loading</div>
   </header>
+  <div class="tabs" role="tablist" aria-label="Ledger views"><button class="tab" id="tab-ledger" role="tab" aria-controls="ledger" aria-selected="true">Ledger</button><button class="tab" id="tab-swarm" role="tab" aria-controls="swarm" aria-selected="false" tabindex="-1">Swarm</button></div>
   <div class="banner" id="banner"></div>
   <div class="closed-banner" id="closed-banner" role="status" hidden><span id="closed-label"></span> <button class="sw-btn" type="button" data-swarm="reopen">Reopen</button></div>
-  <div class="layout"><div class="col">
-  <section id="sec-overview" data-outline><details class="sources-box fold" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details></section>
-  <div class="sec-tools"><button class="link" type="button" id="sections-all"></button></div>
-  <section id="sec-sources" data-outline="sources"><details class="sources-box fold" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
-  <section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
+<div class="tab-body" id="ledger" role="tabpanel" aria-labelledby="tab-ledger"><div class="ledger-layout"><nav class="outline" id="outline" aria-label="Outline"></nav><div class="col"><details class="fold overview" id="overview-box"><summary>Overview</summary><p id="overview"></p></details><div class="summary-strip"><div id="stats"></div><button class="link" id="stats-sync" type="button" aria-label="Ask master to recheck">Ask master to recheck</button></div><div class="sec-tools"><label class="jump-menu">Jump to <select id="jump-to" aria-label="Jump to section"></select></label><button class="link" type="button" id="sections-all"></button><button class="link" type="button" id="comments-all">Show all comments</button></div><section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
-  <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
-  <section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="tasks"></ol></details></section>
-  <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
-  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><div id="notes"></div></details></section>
-  <section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers <span class="count" id="followups-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
-  </div>
-  <aside class="side">
-    <section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats" style="margin:0"></dl>
-      <details class="crew fold" id="crew-box" hidden><summary>Crew <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></details></section>
-    <section id="swarm-box" aria-label="Swarm" hidden><details class="sources-box fold" id="swarm-fold" open><summary>Swarm<span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy" title="Autonomy level: manual, assist, delegate or full"></span></summary><div class="sw-head">
-      <dl class="sw-figs" id="swarm-figs"></dl>
-      <p class="sw-note" id="swarm-plan-shape" hidden></p>
-      <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button><button class="sw-btn danger" type="button" data-swarm="close" title="Write the summary, retire every agent and close the ledger">Close</button><button class="sw-btn" type="button" data-swarm="doctor_start" title="Start a Doctor crew on its own linked ledger to watch this swarm">Start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop" title="Close the Doctor ledger with every fix and retire its agents">Stop doctor</button></div>
-      <div class="sw-caps"><label for="cap-eng">eng <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower eng cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Eng agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise eng cap">+</button></label><label for="cap-ci">ci <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower ci cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise ci cap">+</button></label><label for="cap-codex">codex <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label><span id="codex-split" aria-live="polite"></span><button class="sw-btn" type="button" data-swarm="set">Set caps</button><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></div>
-      </div><ul class="sw-list sw-master" id="swarm-master"></ul><details class="sw-agents fold" id="swarm-agents-box"><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><ul class="sw-list" id="swarm-agents"></ul></details><details class="sw-agents fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><ul class="sw-list" id="swarm-restore"></ul></details></details></section>
-    <section id="health-box" aria-label="Swarm health" hidden><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
-  </aside>
-  </div>
+<section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
+<section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
+<section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="tasks"></ol></details></section>
+<section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers <span class="count" id="followups-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
+<section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><div id="notes"></div></details></section>
+<section id="sec-sources" data-outline="sources"><details class="sources-box fold" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
+</div></div></div>
+
+<div class="tab-body" id="swarm" role="tabpanel" aria-labelledby="tab-swarm" hidden><div id="swarm-box">
+<section id="swarm-status-box"><details class="sources-box fold" id="swarm-fold" open><summary>Swarm <span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy"></span><span class="hint" id="swarm-tick"></span></summary>
+<div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><div class="destructive-group"><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button><button class="sw-btn danger" type="button" data-swarm="close">Close ledger</button></div></div><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></details></section>
+<div class="swarm-grid">
+<section id="needs-you-box"><details class="sources-box fold" id="needs-you-fold" open><summary>Needs you</summary><ul id="needs-you"></ul></details></section>
+<div class="counts-row"><dl class="sw-figs" id="swarm-figs"></dl><div class="sw-figs" id="swarm-plan-shape" hidden></div><button class="link" type="button" id="filter-clear" hidden>Show all work</button></div>
+<section id="agents-box"><details class="sources-box fold" id="swarm-agents-box" open><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><p class="hint" id="active-agents"></p><ul class="sw-list" id="swarm-master"></ul><ul class="sw-list" id="swarm-agents"></ul><details class="fold" id="swarm-work-box" open><summary>Work <span class="count" id="swarm-work-count"></span></summary><ul id="swarm-work"></ul></details></details></section>
+<section id="capacity-box"><details class="sources-box fold" id="capacity-fold" open><summary>Capacity</summary>
+<div class="sw-caps">
+<label for="cap-eng">Engineers <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Engineer agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></label>
+<label for="cap-ci">CI agents <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></label>
+<label for="cap-codex">Codex share <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label>
+<p class="hint" id="codex-split" aria-live="polite"></p><button class="sw-btn" type="button" data-swarm="set">Apply caps</button></div></details></section>
+<section id="health-box"><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
+<section id="doctor-box"><details class="sources-box fold" id="doctor-fold" open><summary>Doctor</summary><p class="hint">A Doctor crew watches this swarm on its own linked ledger and proposes fixes.</p><div class="sw-ctl"><button class="sw-btn" type="button" data-swarm="doctor_start">Start Doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">Stop Doctor</button></div><a id="doctor-link" class="sw-task" hidden></a></details></section>
+<section id="history-box"><details class="sources-box fold" id="crew-box"><summary>Crew history <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></section>
+<section id="restore-box" hidden><details class="sources-box fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><p class="hint" id="restore-summary"></p><ul class="sw-list" id="swarm-restore"></ul></details></section>
+</div></div></div>
 </main>
 <button class="sync" id="sync" type="button" title="Sync the crew" aria-label="Sync the crew">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
@@ -911,6 +989,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     document.title = doc.title;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
+    $("overview-box").querySelector("summary").textContent = doc.overview || "Overview";
     $("closed-label").textContent = closedText(doc.closed_at);
     $("closed-banner").hidden = !doc.closed_at;
     $("sources-count").textContent = headCount([[doc.sources.length]]);
@@ -918,13 +997,13 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
     listInto("phases", doc.phases, (p, i) => checkRow("phases", p, i + 1, p.title, p.description));
     $("tasks-count").textContent = taskCounts(doc.tasks);
-    listInto("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
+    groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
     $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
-    listInto("questions", doc.questions, (q, i) => questionRow(q, i + 1));
+    listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
     $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
     $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
     $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
-    listInto("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
+    groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
     renderSync();
     renderPriorities();
     renderNotifications();
@@ -935,7 +1014,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     renderSwarm(swarm);
     renderOutline();
     markToggles();
-    fitSide();
+
     const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
     if (!again) return;
     again.focus();
@@ -946,14 +1025,20 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     }
   }
 
-  function sideMaxHeight(top, viewport, sticky) {
-    return Math.max(0, viewport - Math.max(top, sticky) - sticky);
+  function groupedWork(name, items, row) {
+    const live = items.filter((i) => !i.deleted && !i.done && i.state !== "done");
+    const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
+    const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
+    live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4));
+    $(name).replaceChildren(...live.map(row));
+    if (!done.length) return;
+    const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }), h("ol", {}, ...done.map(row)));
+    collapsible(box);
+    $(name).append(h("li", {}, box));
   }
 
-  function fitSide() {
-    const side = document.querySelector(".side");
-    const max = sideMaxHeight(side.getBoundingClientRect().top, innerHeight, parseFloat(getComputedStyle(side).top));
-    side.style.setProperty("--side-max", `${max}px`);
+  function age(ms) {
+    return ms < 60000 ? `${Math.max(0, Math.floor(ms / 1000))}s` : span(ms);
   }
 
   function span(ms) {
@@ -976,28 +1061,23 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function activeAgents() {
-    return Object.values(lastSeen()).filter((at) => Date.now() - at < ACTIVE_MS).length;
+    const seen = lastSeen();
+    for (const agent of (swarm && swarm.agents) || []) seen[agent.name] = Math.max(seen[agent.name] || 0, agent.started_at || 0);
+    return Object.values(seen).filter((at) => Date.now() - at < ACTIVE_MS).length;
   }
 
   function renderStats() {
     const phases = inScope(doc.phases), ups = inScope(doc.followups);
-    const total = phases.length, done = phases.filter((p) => p.done).length, upsDone = ups.filter((f) => f.done).length;
-    const out = ["phases", "questions", "followups"].reduce((n, l) => n + doc[l].length - inScope(doc[l]).length, 0);
-    const started = meta.created_at, elapsed = started ? Date.now() - started : null;
-    const left = doc.time_left_minutes;
-    const leftText = left === null ? "—" : left < 60 ? `${left}m` : `${Math.floor(left / 60)}h ${left % 60}m`;
+    const total = phases.length, done = phases.filter((p) => p.done).length;
+    const started = meta.created_at, left = doc.time_left_minutes;
+    const leftText = left ? span(left * 60000) : "not set";
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
-    const pct = total ? Math.round(100 * done / total) : 0;
-    const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", {}, value, extra));
-    $("stats").replaceChildren(
-      row("Started", started ? when(started) : "—"),
-      row("Elapsed", elapsed === null ? "—" : span(elapsed)),
-      row("Time Left", leftText),
-      row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
-      row("Follow-ups", `${upsDone} / ${ups.length}`),
-      ...(out ? [row("Out of scope", String(out))] : []),
-      row("Agents · 2 h", String(activeAgents())),
-      row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
+    $("stats").textContent = [
+      `Phases ${done} / ${total}`, `Follow-ups ${ups.filter((f) => !f.done).length} open`,
+      `Time left ${leftText}`, `Last activity ${last ? span(Date.now() - last) + " ago" : "not recorded"}`,
+      started ? `Started ${new Date(started).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}, running ${span(Date.now() - started)}` : "Started not recorded"
+    ].join(" · ");
+    $("active-agents").textContent = `Agents active in the last 2 hours: ${activeAgents()}`;
   }
 
   function jumpTo(ev, item) {
@@ -1018,6 +1098,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   function renderPriorities() {
     const list = doc.priorities;
     $("prio-count").textContent = headCount([[list.length]]);
+    $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
+    if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
     document.querySelector(".prio-head").hidden = !list.length;
     $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio", id: `item-priorities-${p.id}` },
       h("a", { class: "prio-link", href: `#item-${p.item.replace("/", "-")}`, text: `#${p.item.split("/")[1]}`, on: { click: (ev) => jumpTo(ev, p.item) } }),
@@ -1111,7 +1193,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     $("sync").title = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
     const statsWait = cooldown("stats_sync", "stats sync requested");
     $("stats-sync").disabled = !!statsWait;
-    $("stats-sync").title = statsWait ? `Stats check ${statsWait}` : "Ask the orchestrator to review the stats";
+    $("stats-sync").title = statsWait ? `Stats check ${statsWait}` : "Ask master to recheck";
   }
 
   function sendSync(op, buttonId) {
@@ -1131,18 +1213,20 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function renderCrew() {
-    const crew = meta.crew || [];
+    const crew = (swarm && swarm.history) || meta.crew || [];
     $("crew-count").textContent = crew.length ? `· ${crew.length}` : "";
     $("crew").replaceChildren(...crew.map((m) => h("div", { class: "crew-row" },
-      m.unhandled ? h("span", { class: "dot" }) : null, h("span", { class: "who", text: m.name }),
-      h("span", { text: m.role === "orchestrator" ? "orchestrator" : "" }),
-      h("span", { text: m.last_seen ? `${span(Date.now() - m.last_seen)} ago` : "" }),
-      m.unhandled ? h("span", { class: "unhandled", text: `${m.unhandled} open` }) : null)));
+      h("span", { class: "who", text: m.name }),
+      h("span", { text: m.lane === "master" || m.role === "orchestrator" ? "master" : m.lane || "" }),
+      h("span", { text: m.ended_at || m.last_seen ? `${span(Date.now() - (m.ended_at || m.last_seen))} ago` : "" }),
+      h("span", { text: m.reason || m.state || "" }))));
   }
 
-  const FIGURES = [["agents", "Agents"], ["open", "Open"], ["claimed", "Claimed"], ["pr", "PR"], ["blocked", "Blocked"], ["done", "Done"]];
+  const FIGURES = [["agents", "Agents"], ["open", "Open"], ["claimed", "Claimed"], ["pr", "In PR"], ["blocked", "Blocked"], ["done", "Done"]];
   let swarm = null;
   let codexDraft = null;
+  let capDraft = {};
+  let workFilter = "";
   let armed = "";
   let armTimer = 0;
   let pending = "";
@@ -1166,7 +1250,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       const last = Math.max(seen[a.name] || 0, a.started_at || 0);
       return { name: a.name, lane: a.lane, model: a.model ? [a.model, a.effort].filter(Boolean).join(" ") : "unknown",
         account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
-        ago: last ? span(now - last) : "" };
+        ago: last ? span(now - last) : "", taskState: t.state || "open", inbox: a.inbox,
+        held: a.state_since ? span(now - a.state_since) : "", taskId: a.task };
     });
   }
 
@@ -1198,7 +1283,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
-    return { cls: "bad", text: `${name} failed: ${error}` };
+    return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
   }
 
   function showNote(phase, action, error) {
@@ -1218,16 +1303,16 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function renderControls() {
-    const off = swarm ? { ...swarmControls(swarm.config.state), ...doctorControls(swarm), ...capBounds({ ...swarm.config, codex_share: codexDraft ?? swarm.config.codex_share }) } : swarmControls("");
+    const config = swarm ? swarm.config : {};
+    const draft = { ...config, ...capDraft };
+    const off = swarm ? { ...swarmControls(config.state), ...doctorControls(swarm), ...capBounds(draft) } : swarmControls("");
     for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
       const action = btn.dataset.swarm;
-      btn.disabled = !!pending || !!off[action];
+      btn.hidden = (action === "start" && config.state === "running") || (action === "pause" && config.state !== "running")
+        || (action === "doctor_start" && !!(swarm && swarm.peer)) || (action === "doctor_stop" && !(swarm && swarm.peer));
+      btn.disabled = !!pending || !!off[action] || (action === "set" && !Object.keys(capDraft).some((key) => capDraft[key] !== config[key]));
       btn.classList.toggle("sending", pending === action);
-      btn.classList.toggle("armed", armed === action);
       btn.setAttribute("aria-busy", pending === action ? "true" : "false");
-      if (action === "stop_now") btn.textContent = armed === action ? "Confirm stop now" : "Stop now";
-      if (action === "close") btn.textContent = armed === action ? "Confirm close" : "Close";
-      if (action === "doctor_stop") btn.textContent = armed === action ? "Confirm stop doctor" : "Stop doctor";
     }
   }
 
@@ -1239,7 +1324,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
       if (resp.ok) {
         swarm = await resp.json();
-        if (op === "set") codexDraft = null;
+        if (op === "set") { codexDraft = null; capDraft = {}; }
         showNote("done", op);
       } else {
         showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
@@ -1261,59 +1346,106 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
     if (action === "set") return swarmControl({ action, max_eng: Number($("cap-eng").value), max_ci: Number($("cap-ci").value), codex_share: Number($("cap-codex").value) });
-    if (action === "codex_up" || action === "codex_down") {
-      codexDraft = Math.min(100, Math.max(0, Number($("cap-codex").value) + (action === "codex_up" ? 5 : -5)));
-      $("cap-codex").value = codexDraft;
+    const step = action.match(/^(eng|ci|codex)_(up|down)$/);
+    if (step) {
+      const lane = step[1], key = lane === "codex" ? "codex_share" : "max_" + lane;
+      const value = Number($("cap-" + lane).value) + (step[2] === "up" ? 1 : -1) * (lane === "codex" ? 5 : 1);
+      capDraft[key] = Math.min(lane === "codex" ? 100 : 50, Math.max(0, value));
+      $("cap-" + lane).value = capDraft[key];
       return renderControls();
     }
-    const lane = action.match(/^(eng|ci)_(up|down)$/);
-    if (lane) return swarmControl(capStep(swarm.config, lane[1], lane[2] === "up" ? 1 : -1), action);
-    const step = controlClick(action, armed);
-    setArmed(step.armed);
-    if (step.send) swarmControl({ action });
+    const consequence = {
+      stop_now: "Retire every agent now. Work in progress stays in its worktree.",
+      close: "Write the summary, retire every agent and close this ledger. Reopen brings it back.",
+      doctor_stop: "Stop the Doctor crew and close its linked ledger."
+    }[action];
+    if (!consequence || confirm(consequence)) swarmControl({ action });
   });
 
-  $("cap-codex").addEventListener("input", () => {
-    codexDraft = Number($("cap-codex").value);
-    renderControls();
-  });
+  for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-codex", "codex_share"]]) {
+    $(id).addEventListener("input", () => {
+      capDraft[key] = Number($(id).value);
+      renderControls();
+    });
+  }
 
   function renderPlanShape(shape) {
     const node = $("swarm-plan-shape");
-    node.hidden = !shape;
-    if (shape) node.textContent = shape.summary + (shape.warning ? `\nWarning: ${shape.warning}` : "");
+    node.hidden = !shape || !shape.has_dependencies;
+    node.replaceChildren(...(!node.hidden ? [["Chain", shape.chain_length], ["Parallel", shape.parallel_width]].map(([label, count]) =>
+      h("div", {}, h("span", { class: "figure-value", text: String(count) }), h("span", { text: label }))) : []));
   }
 
   function renderSwarm(sw) {
     swarm = sw;
-    $("swarm-box").hidden = !sw;
-    $("crew-box").hidden = !crewShown(meta.crew || [], sw);
-    $("health-box").hidden = !sw;
-    renderPlanShape(sw ? sw.plan_shape : null);
-    if (!sw) return;
-    if (!$("health").contains(document.activeElement)) renderHealth(sw.findings);
+    $("swarm-status-box").hidden = !sw;
+    $("swarm-state").className = `sw-state ${sw ? sw.config.state : "stopped"}`;
+    $("swarm-state").textContent = sw ? sw.config.state : "stopped";
+    $("tab-swarm").replaceChildren("Swarm ", h("span", { class: $("swarm-state").className, text: $("swarm-state").textContent }),
+      sw && ((sw.findings || []).some((f) => !f.verdict) || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null);
+    if (!sw) {
+      $("swarm-agents").replaceChildren(h("li", { class: "sw-empty", text: "No agents running. Start the swarm to work the open tasks." }));
+      return;
+    }
     const c = sw.config, counts = { ...sw.tasks, agents: (sw.agents || []).length };
-    $("swarm-state").className = `sw-state ${c.state}`;
-    $("swarm-state").textContent = c.state;
     $("swarm-autonomy").textContent = autonomyText(c);
+    $("swarm-tick").textContent = sw.last_tick ? `last tick ${age(Date.now() - sw.last_tick)} ago` : "last tick not recorded";
     $("swarm-figs").replaceChildren(...FIGURES.map(([key, label]) => h("div",
       { class: key === "blocked" && counts[key] ? "warn" : key === "agents" && counts[key] ? "lit" : "" },
-      h("dd", { text: String(counts[key] || 0) }), h("dt", { text: label }))));
-    if (document.activeElement !== $("cap-eng")) $("cap-eng").value = c.max_eng;
-    if (document.activeElement !== $("cap-ci")) $("cap-ci").value = c.max_ci;
-    if (document.activeElement !== $("cap-codex")) $("cap-codex").value = codexDraft ?? c.codex_share;
+      h("button", { class: "count-filter", type: "button", "aria-pressed": workFilter === key, on: { click: () => setWorkFilter(key) } },
+        h("span", { class: "figure-value", text: String(counts[key] || 0) }), h("span", { text: label })))));
+    renderPlanShape(sw.plan_shape);
+    for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-codex", "codex_share"]]) {
+      if (document.activeElement !== $(id)) $(id).value = capDraft[key] ?? c[key];
+    }
     const spawns = sw.spawns || {}, codex = spawns.codex || 0, total = Object.values(spawns).reduce((sum, n) => sum + n, 0);
-    $("codex-split").textContent = `${codex}/${total} spawns · ${total ? Math.floor(codex * 100 / total) : 0}% actual`;
+    $("codex-split").textContent = `Codex share: percent of new engineers started on Codex. So far ${codex} of ${total} started on Codex (${total ? Math.floor(codex * 100 / total) : 0}%).`;
     renderControls();
-    const cards = swarmCards(sw, doc ? doc.tasks : [], doc ? lastSeen() : {}, Date.now());
-    const workers = cards.filter((a) => a.lane !== "master");
-    $("swarm-master").replaceChildren(...cards.filter((a) => a.lane === "master").map(swarmCard));
-    $("swarm-agents-count").textContent = `· ${workers.length}`;
-    $("swarm-agents").replaceChildren(...(workers.length ? workers.map(swarmCard) : [h("li", { class: "sw-empty", text: "No agents running" })]));
+    renderWork(sw);
+    renderNeedsYou(sw);
+    if (!$("health").contains(document.activeElement)) renderHealth(sw.findings);
+    renderCrew();
+    renderStats();
     const restored = restoreCards(sw.restored, doc ? doc.tasks : []);
+    $("restore-box").hidden = !restored.length;
     $("swarm-restore-box").hidden = !restored.length;
     $("swarm-restore-count").textContent = `· ${restored.length}`;
+    const resumed = restored.filter((r) => r.outcome === "resumed").length;
+    $("restore-summary").textContent = `Restored after a reboot: ${resumed} agents reopened their conversations, ${restored.length - resumed} started fresh.`;
     $("swarm-restore").replaceChildren(...restored.map(restoreCard));
+    $("doctor-link").hidden = !sw.peer;
+    if (sw.peer) { $("doctor-link").href = "/" + sw.peer; $("doctor-link").textContent = "Open Doctor ledger"; }
+  }
+
+  function setWorkFilter(key) {
+    workFilter = workFilter === key ? "" : key;
+    renderSwarm(swarm);
+  }
+
+  function renderWork(sw) {
+    const tasks = doc ? doc.tasks : [];
+    const cards = swarmCards(sw, tasks, doc ? lastSeen() : {}, Date.now());
+    const matches = (a) => !workFilter || workFilter === "agents" || a.lane === "master" || a.taskState === workFilter;
+    $("swarm-master").replaceChildren(...cards.filter((a) => a.lane === "master" && matches(a)).map(swarmCard));
+    const workers = cards.filter((a) => a.lane !== "master" && matches(a));
+    $("swarm-agents-count").textContent = `· ${cards.length}`;
+    $("swarm-agents").replaceChildren(...(workers.length ? workers.map(swarmCard) : [h("li", { class: "sw-empty", text: workFilter ? "No agents match this filter." : "No agents running. Start the swarm to work the open tasks." })]));
+    const work = tasks.filter((t) => !t.out_of_scope && (!workFilter ? !t.done : workFilter === "agents" ? !!t.claimed_by : t.state === workFilter));
+    $("swarm-work-count").textContent = `· ${work.length}`;
+    $("swarm-work").replaceChildren(...work.map((t) => h("li", { class: "sw-card" },
+      h("a", { href: `#item-tasks-${t.id}`, class: "sw-task", text: t.title }),
+      h("span", { class: "hint", text: t.state || "open" }))));
+    $("filter-clear").hidden = !workFilter;
+  }
+
+  function renderNeedsYou(sw) {
+    const waiting = (sw.findings || []).filter((f) => !f.verdict).map(healthCard);
+    for (const t of doc.tasks.filter((t) => t.state === "blocked" || (t.state === "pr" && t.approval_required))) {
+      waiting.push(h("li", { class: "sw-card" },
+        h("a", { class: "sw-task", href: `#item-tasks-${t.id}`, text: t.title }),
+        h("p", { class: "hint", text: t.blocked_reason || t.blocker || ((t.comments || []).filter((c) => !c.deleted).at(-1) || {}).text || (t.approval_required ? "Pull request awaits merge approval." : "Blocked: ask the master for the reason.") })));
+    }
+    if (!$("needs-you").contains(document.activeElement)) $("needs-you").replaceChildren(...(waiting.length ? waiting : [h("li", { class: "sw-empty", text: "Nothing waits on you." })]));
   }
 
   function restoreCards(restored, tasks) {
@@ -1335,19 +1467,33 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function swarmCard(a) {
-    return h("li", { class: a.lane === "master" ? "sw-card master" : "sw-card" },
-      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
-        h("span", { class: `sw-status ${a.status}`, text: a.status })),
-      a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: a.task, title: `${a.task}, open the pull request` })
-        : h("span", { class: "sw-task", text: a.task, title: a.task }),
-      h("div", { class: "sw-meta" }, h("span", { text: a.lane }), a.model ? h("span", { text: a.model }) : null,
-        a.account ? h("span", { text: a.account }) : null, a.ago ? h("span", { class: "sw-ago", text: `${a.ago} ago` }) : null));
+    const task = (doc ? doc.tasks : []).find((t) => t.title === a.task) || {};
+    const box = h("details", { class: "fold", id: "agent-" + a.name },
+      h("summary", {},
+        h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
+          h("span", { class: `sw-status ${a.status}`, text: a.status }),
+          h("span", { class: "hint", text: a.held || "duration not recorded" })),
+        h("span", { class: "sw-task", text: a.task }),
+        h("div", { class: "sw-meta" }, h("span", { text: { eng: "engineer", ci: "CI agent", master: "master" }[a.lane] || a.lane }),
+          h("span", { text: a.model }), a.account ? h("span", { text: a.account }) : null,
+          h("span", { class: "sw-ago", text: a.ago ? `last activity ${a.ago} ago` : "last activity not recorded" }))),
+      h("p", { class: "hint", text: (task.workspace_tail || {}).progress || "Progress not recorded." }),
+      a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: `Pull request · ${task.checks_state || "checks not reported"}` }) : null,
+      h("ul", { class: "pending-inbox" }, ...(a.inbox || []).map((i) => h("li", { class: "hint", text: i.text }))),
+      h("p", { class: "hint", text: a.inbox ? `Pending inbox items: ${a.inbox.length}` : "Pending inbox items not reported." }),
+      h("div", { class: "sw-ctl" },
+        h("button", { class: "sw-btn", type: "button", text: "Message", on: { click: () => { showChat(true); $("chat-to").value = a.lane === "master" ? "" : a.name; } } }),
+        h("button", { class: "sw-btn danger", type: "button", text: "Terminate", on: { click: () => {
+          if (confirm(`Terminate ${a.name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name: a.name });
+        } } })));
+    collapsible(box);
+    return h("li", { class: a.lane === "master" ? "sw-card master" : "sw-card" }, box);
   }
 
   function renderHealth(findings) {
     const list = findings || [];
     $("health-count").textContent = list.length ? `· ${list.length}` : "";
-    $("health").replaceChildren(...(list.length ? list.map(healthCard) : [h("li", { class: "sw-empty", text: "No findings" })]));
+    $("health").replaceChildren(...(list.length ? list.map(healthCard) : [h("li", { class: "sw-empty", text: "No health findings. The swarm checks every minute." })]));
   }
 
   function healthCard(f) {
@@ -1365,7 +1511,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
         h("button", { class: "sw-btn", type: "button", "data-verdict": f.id, text: "Give verdict" })));
   }
 
-  $("health").addEventListener("click", (event) => {
+  $("swarm-box").addEventListener("click", (event) => {
     const btn = event.target.closest("button[data-verdict]");
     if (!btn) return;
     const card = btn.closest("li");
@@ -1382,8 +1528,14 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   function outlineOf(doc, heads) {
     const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
       : { id: `item-${list}-${i.id}`, title: i.title || i.text || i.item || i.id, state: itemState(list, i) };
-    return heads.map((head) => ({ id: head.id, title: head.title,
-      items: (head.list ? (doc[head.list] || []).filter((i) => !i.deleted) : []).map(entry(head.list)) }));
+    return heads.map((head) => {
+      const list = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
+      const grouped = ["tasks", "followups"].includes(head.list);
+      const counts = grouped ? [...new Set(list.map((i) => i.state || (i.done ? "done" : "open")))]
+        .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length} ${state}`).join(" · ") : "";
+      return { id: head.id, title: head.title + (counts ? ` · ${counts}` : ""),
+        items: grouped ? [] : list.map(entry(head.list)) };
+    });
   }
 
   function outlineGroup(s) {
@@ -1427,6 +1579,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const sig = JSON.stringify(tree);
     if (nav.dataset.sig !== sig) {
       nav.dataset.sig = sig;
+      $("jump-to").replaceChildren(h("option", { value: "", text: "Choose a section" }), ...tree.map((s) => h("option", { value: s.id, text: s.title })));
       nav.replaceChildren(h("div", { class: "ol-tools" }, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } })),
         h("ul", {}, ...tree.map(outlineGroup)));
     }
@@ -1436,6 +1589,10 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function markPending() {
     const pending = new Set(doc.notifications.map((n) => noticeTarget(n.item)));
+    for (const n of doc.notifications) {
+      const list = n.item.split("/")[0];
+      if (["tasks", "followups"].includes(list)) pending.add("sec-" + list);
+    }
     for (const a of $("outline").querySelectorAll("a[data-target]")) a.classList.toggle("pending", pending.has(a.dataset.target));
   }
 
@@ -1459,8 +1616,47 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function reveal(el) {
-    const box = el.closest("details");
-    if (box) box.open = true;
+    const panel = el.closest('[role="tabpanel"]');
+    if (panel) selectTab(panel.id, false);
+    for (let box = el.closest("details"); box; box = box.parentElement.closest("details")) box.open = true;
+  }
+
+  function selectTab(id, updateHash = true) {
+    if (!["ledger", "swarm"].includes(id)) return;
+    for (const name of ["ledger", "swarm"]) {
+      const active = name === id;
+      $(name).hidden = !active;
+      $("tab-" + name).setAttribute("aria-selected", String(active));
+      $("tab-" + name).tabIndex = active ? 0 : -1;
+    }
+    store(`plan-ledger:${SLUG}:tab`, id);
+    if (updateHash) history.replaceState(null, "", "#" + id);
+  }
+
+  function openHash() {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (["ledger", "swarm"].includes(id)) return selectTab(id, false);
+    const target = id && document.getElementById(id);
+    if (target) {
+      reveal(target);
+      requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
+    } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  }
+
+  function wireTabs() {
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    for (const [index, tab] of tabs.entries()) {
+      tab.addEventListener("click", () => selectTab(tab.getAttribute("aria-controls")));
+      tab.addEventListener("keydown", (ev) => {
+        const next = { ArrowRight: (index + 1) % 2, ArrowLeft: (index + 1) % 2, Home: 0, End: 1 }[ev.key];
+        if (next === undefined) return;
+        ev.preventDefault();
+        tabs[next].click();
+        tabs[next].focus();
+      });
+    }
+    window.addEventListener("hashchange", openHash);
+    openHash();
   }
 
   function stored(key, fallback) {
@@ -1706,7 +1902,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     });
     $("title-input").addEventListener("input", () => { $("title-error").textContent = ""; });
     $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
-    $("to-top").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    $("to-top").addEventListener("click", () => document.querySelector(".tab-body:not([hidden])").scrollTo({ top: 0, behavior: "smooth" }));
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
     $("notif-close").addEventListener("click", () => showNotifications(false));
     $("notif-clear-all").addEventListener("click", () => { if (confirm("Clear every notification?")) clearNotification("all"); });
@@ -1742,7 +1938,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const userScroll = () => { outlinePick = null; };
     for (const ev of ["wheel", "touchstart", "keydown"]) window.addEventListener(ev, userScroll, { passive: true });
     for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => {
-      if (!outlineFrame) outlineFrame = requestAnimationFrame(() => { outlineFrame = 0; markOutline(); fitSide(); });
+      if (!outlineFrame) outlineFrame = requestAnimationFrame(() => { outlineFrame = 0; markOutline(); });
     }, { passive: true });
     const input = $("chat-input");
     $("chat-clear").addEventListener("click", () => {
@@ -1760,6 +1956,15 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       }, true);
     }
     $("sections-all").addEventListener("click", foldSections);
+    $("comments-all").addEventListener("click", () => {
+      const open = $("comments-all").textContent === "Show all comments";
+      for (const section of document.querySelectorAll(".col > section")) setAllComments(section, open);
+      $("comments-all").textContent = open ? "Hide all comments" : "Show all comments";
+    });
+    $("jump-to").addEventListener("change", (ev) => {
+      const target = $(ev.target.value);
+      if (target) { reveal(target); target.scrollIntoView({ block: "start" }); }
+    });
     document.querySelector(".col").addEventListener("toggle", (ev) => {
       if (sectionBoxes().includes(ev.target)) { rememberUnanimous("sections", sectionBoxes()); markToggles(); }
     }, true);
@@ -1767,6 +1972,33 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       if (ev.target.matches("details.fold")) { rememberUnanimous("outline", outlineBoxes()); markToggles(); }
     }, true);
     render();
+    wireTabs();
+    const rail = h("div", { class: "header-actions", id: "header-actions" });
+    document.querySelector("header").append(rail);
+    const railButtons = ["home", "bell", "to-top", "sync", "chat-fab"].map($);
+    const placeRail = () => {
+      const narrow = innerWidth < 1024;
+      for (const btn of railButtons) (narrow ? rail : document.body).append(btn);
+    };
+    const grid = document.querySelector(".swarm-grid");
+    const workColumn = h("div", { class: "swarm-work-column" });
+    const sideColumn = h("div", { class: "swarm-side-column" });
+    const parts = ["needs-you-box", "agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "restore-box"].map($);
+    const counts = document.querySelector(".counts-row");
+    const placePanels = () => {
+      placeRail();
+      if (innerWidth < 1024) grid.replaceChildren(parts[0], counts, ...parts.slice(1));
+      else {
+        $("swarm-status-box").after(counts);
+        workColumn.replaceChildren(parts[1], parts[5]);
+        sideColumn.replaceChildren(parts[0], parts[2], parts[3], parts[4], parts[6]);
+        grid.replaceChildren(workColumn, sideColumn);
+      }
+    };
+    placePanels();
+    window.addEventListener("resize", placePanels);
+    $("filter-clear").addEventListener("click", () => { workFilter = ""; renderSwarm(swarm); });
+    $("ledger").addEventListener("scroll", markOutline, { passive: true });
     poll();
     pollSwarm();
     setInterval(poll, POLL_MS);

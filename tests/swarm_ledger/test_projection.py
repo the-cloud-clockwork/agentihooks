@@ -123,43 +123,28 @@ class TimeLeft(unittest.TestCase):
             self.assertEqual(migrated["title"], state["title"])
 
     def test_stats_show_one_duration_independent_of_time_and_completion(self):
-        template = core.TEMPLATE.read_text(encoding="utf-8")
-        defaults = template.split("  function withDefaults(d) {", 1)[1].split("  function itemOf", 1)[0]
-        stats = template.split("  function renderStats() {", 1)[1].split("  function renderCrew", 1)[0]
+        from tests.swarm_ledger.test_fold import function_source
+
         script = """
-const assert = require("node:assert/strict");
-const entries = (v) => Array.isArray(v) ? v : [];
-const h = (tag, attrs, ...kids) => ({tag, attrs, kids});
-let rows;
-const $ = () => ({replaceChildren: (...v) => { rows = v; }});
-const span = () => "elapsed";
-const when = () => "started";
+const nodes = {}; const $ = id => nodes[id] ||= {};
+const inScope = list => list;
 const activeAgents = () => 0;
 let meta = {created_at: Date.now() - 3600000};
-let doc;
+let doc = {phases: [{done: true}, {done: false}], followups: [], time_left_minutes: 200};
 """
-        script += "function withDefaults(d) {" + defaults + "function renderStats() {" + stats
+        script += function_source("span") + function_source("renderStats")
         script += """
-const timeLeft = () => { renderStats(); return rows.find(r => r.kids[0].attrs.text === "Time Left").kids[1].kids[0]; };
-doc = withDefaults({projection: 85, phases: [{done: true}, {done: false}]});
-assert.equal(timeLeft(), "—");
-doc = withDefaults({time_left_minutes: "State at 12:23Z"});
-assert.equal(timeLeft(), "—");
-doc = withDefaults({time_left_minutes: 200, phases: [{done: true}, {done: false}]});
-assert.equal(timeLeft(), "3h 20m");
-assert.equal(rows.some(r => r.kids[0].attrs.text === "Projection"), false);
+const assert = require("node:assert/strict");
+const timeLeft = () => { renderStats(); return $("stats").textContent.split(" · ")[2]; };
+assert.equal(timeLeft(), "Time left 3h 20m");
 meta.created_at -= 86400000;
 doc.phases[1].done = true;
-assert.equal(timeLeft(), "3h 20m");
+assert.equal(timeLeft(), "Time left 3h 20m");
 doc.time_left_minutes = 0;
-assert.equal(timeLeft(), "0m");
+assert.equal(timeLeft(), "Time left not set");
+doc.time_left_minutes = null;
+assert.equal(timeLeft(), "Time left not set");
 doc.time_left_minutes = 20;
-assert.equal(timeLeft(), "20m");
-doc.time_left_minutes = 1500;
-assert.equal(timeLeft(), "25h 0m");
+assert.equal(timeLeft(), "Time left 20m");
 """
         subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-
-
-if __name__ == "__main__":
-    unittest.main()

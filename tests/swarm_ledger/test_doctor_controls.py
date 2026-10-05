@@ -74,7 +74,7 @@ class DoctorControls(unittest.TestCase):
 
     def test_the_panel_carries_doctor_buttons(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        box = page.split('id="swarm-ctl"', 1)[1].split("</div>", 1)[0]
+        box = page.split('id="doctor-box"', 1)[1].split("</section>", 1)[0]
         self.assertIn('data-swarm="doctor_start"', box)
         self.assertIn('data-swarm="doctor_stop"', box)
 

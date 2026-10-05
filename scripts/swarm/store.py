@@ -166,14 +166,28 @@ class RedisStore:
         return self.names.next(slug, lane, at)
 
     def put_agent(self, slug, agent):
+        from scripts.swarm.tick import agent_status
+
+        previous = self.redis.hget(self.key(slug, "agents"), agent.name)
+        if not previous or agent_status(AgentRecord(**json.loads(previous))) != agent_status(agent):
+            self.redis.hset(self.key(slug, "state-since"), agent.name, int(time.time() * 1000))
         self.redis.hset(self.key(slug, "agents"), agent.name, json.dumps(asdict(agent)))
 
     def agents(self, slug):
         return [AgentRecord(**json.loads(v)) for _, v in sorted(self.redis.hgetall(self.key(slug, "agents")).items())]
 
     def drop_agent(self, slug, name, at=None):
+        ended = int(time.time() * 1000) if at is None else at
+        previous = self.redis.hget(self.key(slug, "agents"), name)
+        if previous:
+            row = json.loads(previous)
+            reason = "finished" if row["state"] == "finished" else "retired"
+            if self.handoff(slug, row["task"]):
+                reason = "handed off"
+            self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
         self.redis.hdel(self.key(slug, "agents"), name)
-        self.names.retire(name, int(time.time() * 1000) if at is None else at)
+        self.redis.hdel(self.key(slug, "state-since"), name)
+        self.names.retire(name, ended)
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)

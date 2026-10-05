@@ -258,6 +258,11 @@ def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
         return CONTROLS[action]
+    if action == "terminate":
+        name = body.get("name")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9@._-]{1,200}", name) or name.startswith("-"):
+            raise ValueError("terminate needs an exact agent name")
+        return ["terminate", name]
     if action == "verdict":
         return verdict_argv(body)
     if action != "set":
@@ -300,11 +305,26 @@ def bin_request(body):
     return body["action"], body["slug"]
 
 
+def terminate_control(slug, name):
+    status = swarm_status(slug)
+    if not status or not any(agent["name"] == name for agent in status.get("agents", [])):
+        return None, "agent is not in this swarm"
+    exe = shutil.which("agentihooks")
+    argv = [exe, "terminate-agent", name, "--type", "any"]
+    for command in ([*argv, "--dry-run"], argv):
+        done = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        if done.returncode:
+            return None, (done.stderr or done.stdout).strip() or "agent termination failed"
+    return swarm_status(slug), ""
+
+
 def swarm_control(slug, argv, command="swarm"):
     exe = shutil.which("agentihooks")
     if not exe:
         return None, "agentihooks is not on PATH"
     try:
+        if command == "swarm" and argv[0] == "terminate":
+            return terminate_control(slug, argv[1])
         env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
         done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError) as exc:

@@ -34,7 +34,7 @@ assert.equal(unreadCount([], 0), 0);
 
     def test_the_chat_lives_in_a_floating_panel(self):
         page = TEMPLATE.read_text(encoding="utf-8")
-        side = page.split('<aside class="side">', 1)[1].split("</aside>", 1)[0]
+        side = page.split('id="swarm" role="tabpanel"', 1)[1].split("</main>", 1)[0]
         self.assertNotIn("chat-log", side)
         for marker in ('id="chat-fab"', 'id="chat-badge"', 'id="chat-panel"', 'id="chat-size"', 'id="chat-close"'):
             self.assertIn(marker, page)

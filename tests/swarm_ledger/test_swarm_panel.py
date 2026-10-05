@@ -203,6 +203,30 @@ class SwarmPanel(unittest.TestCase):
             self.assertEqual(code, 400, body)
             run.assert_not_called()
 
+    def test_terminate_checks_membership_and_dry_run_before_signalling(self):
+        live = {**STATUS, "agents": [{"name": "engineer-one"}]}
+        with (
+            patch.object(server, "swarm_status", return_value=live),
+            patch.object(server.shutil, "which", return_value="agentihooks"),
+            patch.object(server.subprocess, "run", return_value=completed(0)) as run,
+        ):
+            code, _ = self.put({"action": "terminate", "name": "engineer-one"})
+        self.assertEqual(code, 200)
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            ["agentihooks", "terminate-agent", "engineer-one", "--type", "any", "--dry-run"],
+        )
+        self.assertEqual(
+            run.call_args_list[1].args[0], ["agentihooks", "terminate-agent", "engineer-one", "--type", "any"]
+        )
+        with (
+            patch.object(server, "swarm_status", return_value=live),
+            patch.object(server.subprocess, "run") as run,
+        ):
+            code, _ = self.put({"action": "terminate", "name": "other-swarm-agent"})
+        self.assertEqual(code, 502)
+        run.assert_not_called()
+
     def test_control_needs_the_ledger_token(self):
         with patch.object(server.subprocess, "run") as run:
             code, _ = self.put({"action": "start"}, token=False)
@@ -241,46 +265,33 @@ class SwarmPanel(unittest.TestCase):
         self.assertIn('method: "PUT"', page)
         self.assertIn("/api/swarm/", page)
 
-    def test_panel_sits_in_the_sidebar_directly_under_stats(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        column = page.split('<div class="layout"><div class="col">', 1)[1].split("<aside", 1)[0]
-        side = page.split('<aside class="side">', 1)[1].split("</aside>", 1)[0]
-        self.assertNotIn("swarm", column)
-        sections = re.findall(r"<section[^>]*>", side)
-        self.assertEqual(len(sections), 3)
-        self.assertIn('id="stats"', side.split(sections[1], 1)[0])
-        self.assertIn('id="swarm-box"', sections[1])
-        self.assertIn("hidden", sections[1])
-        self.assertIn('id="health-box"', sections[2])
-        self.assertIn("hidden", sections[2])
+    def test_operational_panels_render_inside_the_swarm_tab(self):
+        page = (SCRIPTS / "template.html").read_text()
+        swarm = page.split('id="swarm" role="tabpanel"', 1)[1].split("</main>", 1)[0]
+        for marker in (
+            "swarm-box",
+            "swarm-ctl",
+            "swarm-agents",
+            "health-box",
+            "capacity-box",
+            "doctor-box",
+            "crew-box",
+        ):
+            self.assertIn(f'id="{marker}"', swarm)
+        self.assertNotIn('id="stats"', swarm)
 
-    def test_sidebar_scrolls_on_its_own_pinned_to_the_viewport(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        side = re.search(r"^\.side \{([^}]*)\}", page, re.M).group(1)
-        self.assertIn("position: sticky", side)
-        self.assertRegex(side, r"max-height: var\(--side-max, calc\(100vh - \d+px\)\)")
-        self.assertIn("overflow-y: auto", side)
-        self.assertRegex(page, r"\.side > section \{[^}]*flex: none")
-        narrow = page.split("@media (max-width: 1100px) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertRegex(narrow, r"\.side \{[^}]*position: static; max-height: none; overflow: visible")
+    def test_the_tab_body_owns_page_scroll(self):
+        page = (SCRIPTS / "template.html").read_text()
+        self.assertRegex(page, r"\.tab-body \{[^}]*overflow-y: auto")
+        self.assertIn("html, body { height: 100%; overflow: hidden; }", page)
 
-    def test_agent_list_takes_its_natural_height_under_a_sticky_header(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    def test_agent_list_takes_its_natural_height_inside_the_tab(self):
+        page = (SCRIPTS / "template.html").read_text()
         rule = re.search(r"\.sw-list \{([^}]*)\}", page).group(1)
         self.assertNotIn("max-height", rule)
         self.assertNotIn("overflow", rule)
-        title = re.search(r"#swarm-fold > summary \{([^}]*)\}", page).group(1)
-        self.assertIn("position: sticky; top: 0", title)
-        head = re.search(r"\.sw-head \{([^}]*)\}", page).group(1)
-        self.assertIn("position: sticky; top: var(--sw-sum)", head)
-        for rule in (title, head):
-            self.assertRegex(rule, r"background: var\(--panel\)")
-        self.assertRegex((SCRIPTS / "palette.css").read_text(encoding="utf-8"), r"--panel: var\(--[a-z]+-\d{2,3}\);")
-        box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
-        self.assertIn('id="swarm-state"', box.split("<summary>", 1)[1].split("</summary>", 1)[0])
-        header = box.split('<div class="sw-head">', 1)[1].split('<ul class="sw-list"', 1)[0]
-        for part in ('id="swarm-figs"', 'id="swarm-ctl"', 'id="cap-eng"', 'id="swarm-note"'):
-            self.assertIn(part, header)
+        self.assertIn('id="swarm-tick"', page)
+        self.assertIn('id="swarm-note"', page)
 
     def test_swarm_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
@@ -347,6 +358,9 @@ class SwarmPanel(unittest.TestCase):
                     "pr": "https://x/pull/205",
                     "status": "working",
                     "ago": "2m",
+                    "taskState": "open",
+                    "held": "",
+                    "taskId": "t7",
                 },
                 {
                     "name": "s-ci-4",
@@ -357,6 +371,9 @@ class SwarmPanel(unittest.TestCase):
                     "pr": "",
                     "status": "stalled",
                     "ago": "3h 5m",
+                    "taskState": "open",
+                    "held": "",
+                    "taskId": "ci-split-tests",
                 },
             ],
         )
@@ -378,7 +395,7 @@ class SwarmPanel(unittest.TestCase):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIn('a.lane === "master" ? "sw-card master" : "sw-card"', page)
         self.assertRegex(page, r"\.sw-card\.master \.sw-name\s*\{")
-        self.assertLess(page.index('id="swarm-master"'), page.index('<details class="sw-agents fold"'))
+        self.assertLess(page.index('id="swarm-master"'), page.index('id="swarm-agents"'))
 
     def test_an_unknown_task_falls_back_to_its_id(self):
         sw = {"agents": [{"name": "a", "lane": "eng", "task": "gone", "status": "idle"}]}
@@ -412,16 +429,12 @@ class SwarmPanel(unittest.TestCase):
         )
         self.assertEqual(self.run_js(["restoreCards"], "restoreCards(undefined, [])"), [])
 
-    def test_the_restore_box_folds_inside_the_swarm_panel_and_shows_only_after_a_restore(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        box = page.split('id="swarm-box"', 1)[1].split("</section>", 1)[0]
-        self.assertRegex(box, r'<details class="sw-agents fold" id="swarm-restore-box" hidden>')
-        self.assertIn('id="swarm-restore"', box)
-        render = function_source("renderSwarm")
-        self.assertIn("restoreCards(sw.restored", render)
-        self.assertIn('$("swarm-restore-box").hidden = !restored.length', render)
-        for outcome in ("resumed", "fresh"):
-            self.assertRegex(page, rf"\.sw-status\.{outcome} \{{ color: var\(--[a-z0-9-]+\); \}}")
+    def test_the_restore_box_folds_and_is_hidden_until_a_restore(self):
+        page = (SCRIPTS / "template.html").read_text()
+        self.assertIn('id="restore-box" hidden', page)
+        self.assertIn('id="swarm-restore-box" hidden', page)
+        self.assertIn('$("restore-box").hidden = !restored.length', function_source("renderSwarm"))
+        self.assertIn("Restored after a reboot:", function_source("renderSwarm"))
 
     def test_controls_that_do_not_apply_are_disabled(self):
         states = ["running", "paused", "stopping", "stopped", "drained"]
@@ -463,7 +476,7 @@ class SwarmPanel(unittest.TestCase):
             [
                 {"cls": "pending", "text": "Stop now: sending"},
                 {"cls": "ok", "text": "Set caps: done"},
-                {"cls": "bad", "text": "Start failed: no swarm x"},
+                {"cls": "bad", "text": "Could not start the swarm: no swarm x. Try again or ask the master."},
             ],
         )
 
@@ -515,25 +528,11 @@ class SwarmPanel(unittest.TestCase):
         )
         self.assertEqual(out, [False, True, False])
 
-    def test_each_swarm_poll_hides_or_restores_the_crew_box(self):
-        stubs = (
-            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
-            " contains() { return false; }});"
-            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
-            "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
-            "const restoreCards = () => []; const restoreCard = () => ({});"
-            'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
-        )
-        script = (
-            stubs
-            + "".join(
-                function_source(n) + "\n" for n in ("crewShown", "autonomyText", "renderPlanShape", "renderSwarm")
-            )
-            + f"renderSwarm({json.dumps(STATUS)}); const withSwarm = $('crew-box').hidden;"
-            + "renderSwarm(null); process.stdout.write(JSON.stringify([withSwarm, $('crew-box').hidden]));"
-        )
-        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-        self.assertEqual(out, [True, False])
+    def test_crew_history_remains_in_the_swarm_tab(self):
+        page = (SCRIPTS / "template.html").read_text()
+        self.assertIn('<section id="history-box">', page)
+        self.assertIn('id="crew-box"', page)
+        self.assertIn("renderCrew();", function_source("renderSwarm"))
 
     def test_step_ops_report_pending_then_done_or_error_by_name(self):
         out = self.run_js(
@@ -545,7 +544,7 @@ class SwarmPanel(unittest.TestCase):
             [
                 {"cls": "pending", "text": "Raise eng cap: sending"},
                 {"cls": "ok", "text": "Lower ci cap: done"},
-                {"cls": "bad", "text": "Lower eng cap failed: no swarm x"},
+                {"cls": "bad", "text": "Could not lower eng cap: no swarm x. Try again or ask the master."},
             ],
         )
 
@@ -557,7 +556,7 @@ class SwarmPanel(unittest.TestCase):
     def test_a_cap_label_targets_its_input_not_a_step_button(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         for lane in ("eng", "ci"):
-            label = re.search(rf"<label[^>]*>{lane} <button[^>]*data-swarm=\"{lane}_down\"", page).group(0)
+            label = re.search(rf"<label[^>]*>[^<]+<button[^>]*data-swarm=\"{lane}_down\"", page).group(0)
             self.assertIn(f'for="cap-{lane}"', label)
 
 
@@ -668,32 +667,16 @@ class HealthPanel(unittest.TestCase):
 
     def test_a_verdict_click_sends_the_picked_verdict_and_note(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        self.assertIn('$("health").addEventListener("click"', page)
+        self.assertIn('$("swarm-box").addEventListener("click"', page)
         self.assertRegex(page, r'action: "verdict", id: btn\.dataset\.verdict')
 
     def test_no_findings_says_so(self):
-        self.assertEqual(self.render([]), ["", ["No findings"]])
+        self.assertEqual(self.render([]), ["", ["No health findings. The swarm checks every minute."]])
 
-    def test_the_swarm_poll_shows_the_panel_with_the_swarm_and_hides_it_without(self):
-        stubs = (
-            "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
-            " contains() { return false; }});"
-            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
-            "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
-            "const restoreCards = () => []; const restoreCard = () => ({});"
-            "const crewShown = () => false; const meta = {}; let shown = null;"
-            "const renderHealth = (f) => { shown = f; };"
-        )
-        script = (
-            stubs
-            + function_source("autonomyText")
-            + function_source("renderPlanShape")
-            + function_source("renderSwarm")
-            + f"\nrenderSwarm({json.dumps({**STATUS, 'findings': FINDINGS})}); const on = [$('health-box').hidden, shown];"
-            + "renderSwarm(null); process.stdout.write(JSON.stringify([on, $('health-box').hidden]));"
-        )
-        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-        self.assertEqual(out, [[False, FINDINGS], True])
+    def test_the_swarm_health_renders_findings_with_the_swarm(self):
+        source = function_source("renderSwarm")
+        self.assertIn("renderHealth(sw.findings)", source)
+        self.assertIn("renderNeedsYou(sw)", source)
 
     def test_health_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")

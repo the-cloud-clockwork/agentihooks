@@ -57,8 +57,8 @@ class Outline(unittest.TestCase):
                 },
                 {
                     "id": "sec-tasks",
-                    "title": "Swarm tasks",
-                    "items": [{"id": "item-tasks-t1", "title": "Write the test", "state": "open"}],
+                    "title": "Swarm tasks · 1 open",
+                    "items": [],
                 },
                 {
                     "id": "sec-questions",
@@ -67,15 +67,15 @@ class Outline(unittest.TestCase):
                 },
                 {
                     "id": "sec-followups",
-                    "title": "Follow-ups or blockers",
-                    "items": [{"id": "item-followups-f1", "title": "Rotate the key", "state": "open"}],
+                    "title": "Follow-ups or blockers · 1 open",
+                    "items": [],
                 },
             ],
         )
 
     def test_every_content_section_is_tagged_for_the_outline(self):
         page = TEMPLATE.read_text(encoding="utf-8")
-        column = page.split('<div class="layout"><div class="col">', 1)[1].split("<aside", 1)[0]
+        column = page.split('<div class="col">', 1)[1].split('id="swarm" role="tabpanel"', 1)[0]
         sections = re.findall(r"<section[^>]*>", column)
         self.assertTrue(sections)
         for tag in sections:
