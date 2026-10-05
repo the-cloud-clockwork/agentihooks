@@ -128,3 +128,44 @@ def test_items_carry_no_expiry(store):
 def test_an_unknown_id_is_refused(store):
     with pytest.raises(InboxError):
         store.get("nope")
+
+
+def test_deliver_moves_a_pending_item_once_and_records_it(store):
+    item = store.send("alice", "bob", "hi")
+    delivered = store.deliver(item.id, "bob")
+    assert delivered.state == "delivered"
+    assert store.get(item.id).state == "delivered"
+    assert store.deliver(item.id, "bob") is None
+    assert [e["state"] for e in store.history(item.id)] == ["pending", "delivered"]
+
+
+def test_deliver_skips_an_item_that_is_no_longer_pending(store):
+    item = store.send("alice", "bob", "hi")
+    store.read(item.id, "bob")
+    assert store.deliver(item.id, "bob") is None
+    assert store.get(item.id).state == "read"
+
+
+def test_deliver_never_moves_another_address_item(store):
+    item = store.send("alice", "bob", "hi")
+    assert store.deliver(item.id, "carol") is None
+    assert store.get(item.id).state == "pending"
+
+
+def test_two_racing_deliveries_have_one_winner(server, monkeypatch):
+    import scripts.inbox.store as inbox_store
+
+    first, second = fresh(server), fresh(server)
+    item = first.send("alice", "bob", "hi")
+    real_now, raced = inbox_store.now_ms, []
+
+    def racing_now():
+        if not raced:
+            raced.append(None)
+            raced[0] = second.deliver(item.id, "bob")
+        return real_now()
+
+    monkeypatch.setattr(inbox_store, "now_ms", racing_now)
+    assert first.deliver(item.id, "bob") is None
+    assert raced[0].state == "delivered"
+    assert [e["state"] for e in first.history(item.id)] == ["pending", "delivered"]

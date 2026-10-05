@@ -82,7 +82,13 @@ class InboxStore:
         state, reason = close_reason(kind, detail)
         return self._move(item_id, closer, lambda item: (item.address, item.sender), state, reason)
 
-    def _move(self, item_id, by, actors, state, reason):
+    def deliver(self, item_id, receiver):
+        try:
+            return self._move(item_id, receiver, lambda item: (item.address,), "delivered", "", only_from=("pending",))
+        except InboxError:
+            return None
+
+    def _move(self, item_id, by, actors, state, reason, only_from=None):
         from redis.exceptions import WatchError
 
         key = self.key("item", item_id)
@@ -92,6 +98,8 @@ class InboxStore:
                 item = _item(pipe.hgetall(key), item_id)
                 if by not in actors(item):
                     raise InboxError(f"message {item_id} belongs to {item.address}, not {by}")
+                if only_from is not None and item.state not in only_from:
+                    return None
                 if item.state in CLOSED:
                     raise InboxError(f"message {item_id} is closed: {item.reason}")
                 if item.state == state:
