@@ -298,6 +298,23 @@ class TestSessionRegistry:
         assert sessions["parent"]["account"] == "alpha"
         assert sessions["agent-1"]["status"] == "alive"
 
+    def test_codex_memory_helper_keeps_the_engineer_record(self, broadcast_dir, tmp_path, monkeypatch):
+        from hooks.context.broadcast import _load_sessions, register_session
+
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("engineer", pid=12345, cwd="/work/tree", model="gpt-6.1-sol", account="default")
+            register_session(
+                "helper", pid=12345, cwd=str(tmp_path / "codex" / "memories"), model="gpt-5.6-terra", account="default"
+            )
+            sessions = _load_sessions()
+
+        assert sessions["engineer"]["status"] == "alive"
+        assert sessions["engineer"]["cwd"] == "/work/tree"
+        assert sessions["engineer"]["model"] == "gpt-6.1-sol"
+        assert sessions["engineer"]["account"] == "default"
+
     def test_handed_off_session_is_marked_and_reported(self, broadcast_dir):
         from hooks.context.broadcast import mark_handed_off, register_session, session_status
 

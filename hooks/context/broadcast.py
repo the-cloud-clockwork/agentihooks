@@ -740,6 +740,7 @@ def register_session(
 ) -> None:
     from hooks.context.project_identity import resolve_project
     from hooks.context.project_sessions import record_session
+    from hooks.targets import is_codex_memory_thread
 
     identity = resolve_project(cwd)
     record_session(session_id, identity)
@@ -751,7 +752,7 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        if pid and supersede:
+        if pid and supersede and not is_codex_memory_thread(cwd):
             for existing_sid, existing_info in sessions.items():
                 if existing_sid == session_id:
                     continue
