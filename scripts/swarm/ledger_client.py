@@ -87,6 +87,12 @@ class LedgerClient:
     def closed(self, slug):
         return bool(self._call(slug).get("closed_at"))
 
+    def binned(self, slug):
+        _ledger()
+        import ledger_bin
+
+        return slug in ledger_bin.entries()
+
 
 def _op(kind, by, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": by, **fields}

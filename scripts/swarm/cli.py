@@ -88,10 +88,12 @@ def now_ms():
 
 
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
+    ledger = ledger or LedgerClient()
+    if ledger.binned(slug):
+        return ["the ledger is in the bin, skipped"]
     lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
-    ledger = ledger or LedgerClient()
     try:
         actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
@@ -204,8 +206,10 @@ def cmd_stop(store, args):
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
             ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
-    store.update(args.slug, state="stopping" if left else "stopped")
-    print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "still_running": left}))
+    config = store.update(args.slug, state="stopping" if left else "stopped")
+    if not left:
+        runtime.close_space(config)
+    print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 
 def _live_master(store, slug, live):

@@ -525,11 +525,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, str(exc), "text/plain")
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
+        reply = {}
         if action == "delete":
             ledger_bin.delete(slug)
+            if swarm_status(slug) is not None:
+                _, error = swarm_control(slug, ["stop", "--now"])
+                reply = {"swarm_error": error} if error else {}
         elif not ledger_bin.restore(slug):
             return self.send(404, "not in the bin", "text/plain")
-        return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries())}), "application/json")
+        return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
     def do_PUT(self):
         slug = self.slug()

@@ -35,6 +35,9 @@ class FakeLedger:
     def mark_swarm(self, slug):
         self.swarm_sized.append(slug)
 
+    def binned(self, slug):
+        return slug in getattr(self, "bin", set())
+
 
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
