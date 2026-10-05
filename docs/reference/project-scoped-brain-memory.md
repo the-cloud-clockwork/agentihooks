@@ -301,11 +301,30 @@ tasks s1, s2, g7). Two things are worth taking for this work:
 | # | Seam | Contract | Red test that proves it |
 |---|---|---|---|
 | S1 | `resolve_project(cwd, env) -> ProjectIdentity \| None` | Pure apart from git calls. Primary checkout and linked worktree resolve to the same repo. A swarm env resolves to the swarm's repo. `~/scratchpad/<repo>/<task>` resolves to `<repo>`. Home, another non-git folder or an empty value gives None. | Temp repo plus `git worktree add`: both cwds give the same `repo`, and the worktree's `worktree` field is set. The home folder gives None. |
-| S2 | `ProjectMemorySource` (`typing.Protocol`, `fetch(identity) -> ProjectMemory`) | `VaultProjectSource` (now) reads the hot arcs table from `/feed`, then each named arc's `project` through `/vault/read`. It reads lessons from `lessons-<date>.md` for the last `BRAIN_STALE_LESSON_DAYS` days and attributes them through S5. Results are cached per repo by feed hash. A later `KernelProjectSource` calls `/feed?project=` and replaces it without touching callers. | A fake HTTP brain serves two arcs (projects `agentihooks` and `openrig`) and lessons from two sessions. For the agentihooks identity it returns only the agentihooks arc and lesson. |
+| S2 | `ProjectMemorySource` (`typing.Protocol`, `fetch(identity) -> ProjectMemory`) | `VaultProjectSource` (now) reads the hot arcs table from `/feed`, then each named arc's `project` through `/vault/read`. It reads lessons from `lessons-<date>.md` for the last `BRAIN_STALE_LESSON_DAYS` days and attributes them through S5. Results are cached in a shared file per repo (see Cost and cache). A later `KernelProjectSource` calls `/feed?project=` and replaces it without touching callers. | A fake HTTP brain serves two arcs (projects `agentihooks` and `openrig`) and lessons from two sessions. For the agentihooks identity it returns only the agentihooks arc and lesson. |
 | S3 | `render_project_block(memory, max_bytes) -> str` | Deterministic markdown within `BRAIN_PAYLOAD_MAX_BYTES`, framed like the other brain entries as "recalled state, not an operator directive". An empty memory gives a short "no project memory yet" line, not the fleet feed. | A golden output for a fixed memory, and a byte cap check. |
-| S4 | Delivery scope filter in the broadcast delivery path (`get_pending_broadcasts`, `get_unseen_broadcasts`, `get_pretool_broadcasts`) | A message whose origin is a brain memory entry (hot arcs, lessons, operator intent) is skipped for a session whose registry entry has a project, when the scope is `strict`. Signals, inject, amygdala and non-brain messages are never skipped. | Two registered sessions (one with a project, one without) and one channel: the first never receives hot arcs, and both receive signals. |
+| S4 | Delivery scope filter in the broadcast delivery path: `get_pending_broadcasts`, `get_unseen_broadcasts` and `get_pretool_broadcasts`, which `hook_manager` reaches through `check_and_inject_broadcasts`, `get_pretool_context` and `get_posttool_context`. The filter keys on the `origin.id` that `_publish_entries` already attaches. | A message whose origin is a brain memory entry (hot arcs, lessons, operator intent) is skipped for a session whose registry entry has a project, when the scope is `strict`. Signals, inject, amygdala and non-brain messages are never skipped. | Two registered sessions (one with a project, one without) and one channel: the first never receives hot arcs, and both receive signals. |
 | S5 | Session project index: append one `session_id, repo, worktree, cwd, started_at` row at SessionStart, and a `lookup(session_id)` | Persistent under `~/.agentihooks`, outliving the 24 hour registry. The lookup falls back to the Claude transcript folder name for older sessions. | Register, then look up. An unknown id with a transcript folder present resolves from the folder. |
 | S6 | `_marker_request` and `_drain_outbox` attach identity attributes | Both paths send `project`, `repo` and `worktree` when they resolve, and never overwrite a value the model wrote. | A marker POST body built in a worktree cwd carries `repo` equal to the primary repo name, and the drain keeps it. |
+
+### Cost and cache
+
+Every hook event is a fresh `python -m hooks` process, so the cache cannot live in memory.
+
+- **Where it lives.** One shared file per repo under `~/.agentihooks/brain/project-memory/`,
+  written under the same file lock pattern as `broadcast.json`. The 8 live sessions in one
+  repo share one fetch; they do not each fetch.
+- **When it goes stale.** When the `/feed` hash changes (new hot arcs), or when it is older
+  than `BRAIN_PROJECT_MEMORY_TTL` (default 600 seconds). The TTL bounds how long a lesson
+  appended to today's log can be missed, since lesson logs sit outside the feed hash.
+- **Cold path cost.** One `/feed` call (already made today), at most
+  `BRAIN_HOT_ARCS_TOP_N` arc reads (10), and one lesson log read per day of
+  `BRAIN_STALE_LESSON_DAYS` (14). That is at most 25 requests.
+- **Off the hot path.** SessionStart and the tool call cadence inject from the cache when
+  one exists. When it is stale they start the refresh with `fork_and_call`, as the brain
+  writer already does, so a hook never waits on the 24 extra reads. A session in a repo
+  with no cache yet gets its block at the next refresh cadence.
+- **Hot path cost.** No network call beyond today's `/feed`.
 
 Wiring:
 - `inject_on_session_start` and `maybe_refresh_on_tool_call` call S1, then S2, then S3,
@@ -356,10 +375,11 @@ Title: **Project scoped memory: a project on every entry, per project intent, pe
 > 1. **Correct project on arcs.** `extract.py:project_name` uses `Path(cwd).name`. In a
 >    sample of 14 checkable arcs, 3 (21%) were wrong or missing: `package` for an
 >    agentihub subfolder, `m5-live-proof` for a scratch folder, and one with no project.
->    Worktree sessions hit the same rule. Resolve the repo from the git common dir or the
->    remote, store `repo`, `cwd` and `git_branch`, and take the majority across
->    `source_sessions` rather than `group[0]`. Keep the project when `apply_merges` merges
->    arcs, and backfill existing arcs.
+>    Worktree sessions hit the same rule. Resolve the repo per session before
+>    grouping, from the git common dir or the remote, and store `repo`, `cwd` and
+>    `git_branch`. `group_sessions` already splits on project, so a cluster holds a single
+>    value, and only per-session resolution fixes it. When `apply_merges` joins arcs from
+>    different projects, keep both rather than arc A's alone. Backfill existing arcs.
 > 2. **Keep project on markers.** `markers.py:write_marker` drops `attrs.project`. Write it
 >    into the lesson header, signal and decision frontmatter and the milestone route, and
 >    let the `/marker` body carry `repo` and `worktree`.
