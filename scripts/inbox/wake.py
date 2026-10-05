@@ -33,11 +33,10 @@ def decide(item, pane, history, now_ms, window):
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
     wakes = steps.count(WOKEN)
-    if pane is None or wakes >= MAX_WAKES:
-        return TO_MASTER if due else None
-    if pane in READY and (wakes == 0 or due):
+    if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    return None
+    # The swarm only sends escalations; the item each one raises keeps its own ladder to the operator.
+    return TO_MASTER if due and item.sender != BY else None
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):

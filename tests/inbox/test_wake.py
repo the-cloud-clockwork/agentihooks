@@ -76,12 +76,40 @@ def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
 
 
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])
-def test_a_pane_that_is_not_idle_is_never_typed_into(inbox, state):
-    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
-    herdr = FakeHerdr({"p1": state})
-    for n in range(6):
-        run(inbox, herdr, FakeLedger(), sent_at(item) + n * W)
-    assert herdr.prompts == [] and events(inbox, item.id) == []
+def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_window(inbox, state):
+    item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
+    herdr, ledger = FakeHerdr({"p1": state}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1)
+    assert inbox.inbox(MASTER_NAME) == [] and events(inbox, item.id) == []
+    for n in range(1, 6):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    assert herdr.prompts == []
+    (raised,) = inbox.inbox(MASTER_NAME)
+    assert item.id in raised.text and "review my diff" in raised.text
+    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.followups) == 1
+
+
+ORIGINAL_SENT = 1791220997780
+ORIGINAL_AGE = 540_000
+
+
+@pytest.mark.parametrize(
+    "pane,step",
+    [
+        ("blocked", "escalated_master"),
+        ("unknown", "escalated_master"),
+        ("working", "escalated_master"),
+        ("idle", "woken"),
+        ("done", "woken"),
+        (None, "escalated_master"),
+    ],
+)
+def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
+    from types import SimpleNamespace
+
+    item = SimpleNamespace(state="pending", sender="sw-eng-2")
+    history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
+    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
 
 
 def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):

@@ -124,3 +124,17 @@ def test_recorded_restores_and_planted_fresh_fallback():
     assert "conversation is unavailable" in found.evidence
     planted["restored"][0]["outcome"] = "resumed"
     assert spawns.fresh_restores(planted) == []
+
+
+def test_recorded_agents_with_no_hook_event_one_tick_after_spawn_are_flagged():
+    agents = load("spawns")["agents"]
+    last = max(a["started_at"] for a in agents)
+    found = spawns.silent_starts(agents, {}, last + spawns.TICK_MS)
+    assert [f.id for f in found] == sorted(f"no-hook-event/{a['name']}" for a in agents)
+    assert all(f.measure >= 1 for f in found)
+    assert spawns.silent_starts(agents, {a["name"]: a["started_at"] + 1 for a in agents}, last + spawns.TICK_MS) == []
+    assert spawns.silent_starts(agents, {}, last + spawns.TICK_MS - 1) == [
+        f for f in found if f.subject != max(agents, key=lambda a: a["started_at"])["name"]
+    ]
+    finished = [{**a, "state": "finished"} for a in agents]
+    assert spawns.silent_starts(finished, {}, last + spawns.TICK_MS) == []

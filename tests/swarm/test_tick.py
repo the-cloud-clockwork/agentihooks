@@ -617,3 +617,67 @@ def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(st
     rt.conversation_ids = None
     tick("sw", store, ledger, rt, 2000)
     assert _conversations(store)["sw-eng-1"] == "5c90d80c"
+
+
+def idle_for(store, ledger, runtime, ticks, start):
+    for n in range(ticks):
+        tick("sw", store, ledger, runtime, now_ms=start + n * 60_000)
+
+
+def test_an_idle_agent_under_a_declared_wait_is_never_nudged_or_retired(store):
+    from scripts.swarm import idle
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["sw-eng-1"] = "idle"
+    idle.declare_wait(store.redis, "sw", "sw-eng-1", 1_000 + 15 * 60_000 + IDLE_KILL_TICKS * 60_000, "deploy", 1_000)
+    idle_for(store, ledger, runtime, 15 + IDLE_KILL_TICKS, start=2_000)
+    assert runtime.nudged == [] and runtime.killed == [] and ledger.rows["t1"]["state"] == "claimed"
+
+
+def test_a_wait_that_ended_lets_the_idle_count_run_again(store):
+    from scripts.swarm import idle
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["sw-eng-1"] = "idle"
+    idle.declare_wait(store.redis, "sw", "sw-eng-1", 2_000, "deploy", 1_000)
+    store.redis.persist(idle.key("sw", "wait", "sw-eng-1"))
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=3_000)
+    assert runtime.killed == ["sw-eng-1"]
+
+
+def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_reads_idle(store):
+    from scripts.swarm import idle
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["sw-eng-1"] = "idle"
+    for n in range(IDLE_KILL_TICKS + 2):
+        idle.beat(store.redis, "sw", "sw-eng-1", idle.WORKING, 2_000 + n * 60_000)
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
+    assert runtime.nudged == [] and runtime.killed == []
+
+
+def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    inbox = InboxStore(store.redis)
+    open_item = inbox.send("sw-master-1", "sw-eng-1", "your pull request has a red check")
+    closed = inbox.send("sw-master-1", "sw-eng-1", "old news")
+    inbox.close(closed.id, "sw-eng-1", "done")
+    runtime.statuses["sw-eng-1"] = "idle"
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
+    assert runtime.killed == ["sw-eng-1"]
+    assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
+    assert [i.id for i in inbox.inbox("sw-eng-1")] == [closed.id]

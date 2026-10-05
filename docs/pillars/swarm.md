@@ -114,6 +114,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request; the task moves to `pr`. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
+| `agentihooks swarm <id> wait MINUTES [--reason TEXT]` | Declare a wait (checks, a deploy, a reply) that ends MINUTES from now. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
@@ -169,6 +170,9 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 
 1. Retire agents that finished.
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
+   A tick counts as idle only when the agent's herdr pane, read by its pane id, reads idle, its session heartbeat
+   (hooks write `working` on each prompt and tool call, `idle` at Stop; a `working` beat older than 20 minutes no
+   longer counts) does not say working, and no wait it declared with `wait` still holds.
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left.
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room

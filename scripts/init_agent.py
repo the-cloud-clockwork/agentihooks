@@ -117,6 +117,13 @@ def _codex_otel_args(environ: dict[str, str]) -> list[str]:
     return ["-c", f'otel.exporter={{otlp-http={{endpoint="{collector}/v1/logs",protocol="binary"}}}}']
 
 
+def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
+    if not claude_trust.allowed(environ):
+        return []
+    # An inline table, because Codex splits a dotted -c key on every dot, path dots included.
+    return ["-c", f'projects={{{json.dumps(str(directory))}={{trust_level="trusted"}}}}']
+
+
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
 EFFORT_DEFAULT = "high"
 
@@ -158,7 +165,7 @@ def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> l
 
 
 def _agent_command(
-    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str]
+    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str], directory: Path
 ) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
@@ -170,6 +177,7 @@ def _agent_command(
             str(report),
             *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
+            *_codex_trust_args(directory, environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
         ], ""
@@ -211,7 +219,7 @@ def _write_launcher(
     environ = {**installed_langfuse_env(spec.agent), **environ}
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
-    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ)
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
     if prompt_file is not None:
         command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
     else:

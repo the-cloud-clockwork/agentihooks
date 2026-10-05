@@ -13,7 +13,7 @@ def _config_path(environ: dict[str, str]) -> Path:
     return Path(environ.get("HOME", str(Path.home()))).expanduser() / ".claude.json"
 
 
-def _allowed(environ: dict[str, str]) -> bool:
+def allowed(environ: dict[str, str]) -> bool:
     return environ.get("AGENTIHOOKS_TRUST_LAUNCH_DIR", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
@@ -84,7 +84,7 @@ def ensure_trusted(directory: Path, environ: dict[str, str], lock_timeout: float
     try:
         if _trusted(_read(config), directory):
             return "trusted", ""
-        if not _allowed(environ):
+        if not allowed(environ):
             return "untrusted", "AGENTIHOOKS_TRUST_LAUNCH_DIR is off"
         return ("marked" if _mark(config, directory, lock_timeout) else "trusted"), ""
     except (OSError, ValueError) as exc:

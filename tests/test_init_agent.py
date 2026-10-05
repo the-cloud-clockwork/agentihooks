@@ -573,3 +573,28 @@ def test_when_trust_cannot_be_set_the_caller_is_told(monkeypatch, tmp_path, caps
     assert "trust=untrusted" in captured.out
     assert "folder trust question" in captured.err
     assert config.read_text() == config_text
+
+
+def test_codex_trusts_exactly_its_launch_folder_for_that_session(tmp_path):
+    project = tmp_path / "repo.with.dots"
+    project.mkdir()
+    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    launcher, _ = init_agent._write_launcher(project, "m", "", [], env, init_agent.AgentSpec(agent="codex"))
+    words = next(line for line in launcher.read_text().splitlines() if "codex " in line)
+    import shlex
+
+    argv = shlex.split(words)
+    assert argv[argv.index(f'projects={{"{project}"={{trust_level="trusted"}}}}') - 1] == "-c"
+
+
+def test_codex_launch_trust_follows_the_trust_setting(tmp_path):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path), "AGENTIHOOKS_TRUST_LAUNCH_DIR": "0"}
+    launcher, _ = init_agent._write_launcher(tmp_path, "m", "", [], env, init_agent.AgentSpec(agent="codex"))
+    assert "trust_level" not in launcher.read_text()
+
+
+def test_a_claude_launch_gets_no_codex_trust_override(tmp_path):
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent="claude")
+    )
+    assert "trust_level" not in launcher.read_text()

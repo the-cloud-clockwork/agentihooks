@@ -22,6 +22,7 @@ agentihooks swarm <id> culture set FILE | show                    the swarm's sh
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
+agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
 --evidence E with --fix URL or --filed TASK; research --finding URL
 """
@@ -42,7 +43,7 @@ from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, ledger_events, phases, prompt, snapshot, take_master, templates, timer
+from scripts.swarm import delivery, idle, ledger_events, phases, prompt, snapshot, take_master, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
@@ -509,6 +510,16 @@ def cmd_block(store, args):
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 
+def cmd_wait(store, args):
+    agent = _me(store, args)
+    if args.minutes <= 0:
+        raise SwarmError("a wait lasts a whole number of minutes above zero")
+    at = now_ms()
+    until = at + args.minutes * 60_000
+    idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at)
+    print(json.dumps({"agent": agent.name, "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat()}))
+
+
 def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
@@ -637,6 +648,9 @@ def build_parser():
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
+    wait = sub.add_parser("wait")
+    wait.add_argument("minutes", type=int)
+    wait.add_argument("--reason", default="")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
