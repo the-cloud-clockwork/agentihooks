@@ -82,6 +82,10 @@ def test_demo_reset_preserves_previous_copy_and_seeds_dev(runner, monkeypatch):
     archives = list((module.HOME / "doctor-demo-archives").iterdir())
     assert len(archives) == 1 and (archives[0] / "old.py").read_text() == "old application"
     assert (repo / "CLAUDE.md").is_file()
+    workflow = repo / ".github/workflows/ci.yml"
+    assert workflow.is_file()
+    template = json.loads((SKILL / "demo-template.json").read_text())
+    assert workflow.read_text() == template["seed"][".github/workflows/ci.yml"]
     assert ("git", "init", "--initial-branch", "dev") in calls
     assert ("git", "push", "--set-upstream", "origin", "dev") in calls
 
