@@ -153,8 +153,8 @@ def run_job(job: str, timeout_sec: str, task_name: str) -> None:
     try:
         _install_alarm(int(timeout_sec), task_name)
         with open(job, "rb") as handle:
+            os.unlink(job)
             func, args, kwargs = pickle.load(handle)
-        os.unlink(job)
         func(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
         sys.stderr.write(_stamped(f"[async] {task_name}: FAILED: {type(e).__name__}: {e}"))
