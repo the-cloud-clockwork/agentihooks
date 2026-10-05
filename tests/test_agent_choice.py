@@ -172,3 +172,75 @@ def test_a_fresh_token_account_keeps_codex_available_when_the_default_is_spent(m
     assert agent_choice.has_quota("codex", environ) is True
     pool = codex_router.routing_pool(environ)
     assert codex_router.select(pool, {"default": spent, "alpha": None}, {}, cap=3)[0].name == "alpha"
+
+
+def _share(monkeypatch, week_left=50.0, codex_full=False):
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda environ: week_left)
+    monkeypatch.setattr(agent_choice, "at_cap", lambda agent, environ: codex_full and agent == "codex")
+    monkeypatch.setattr(agent_choice, "has_quota", lambda agent, environ: True)
+
+
+def test_codex_share_below_target_picks_codex(monkeypatch):
+    _share(monkeypatch)
+    agent, reason = agent_choice.choose_shared("", {}, {"claude": 8, "codex": 2}, share=30, min_week_left=5)
+    assert agent == "codex"
+    assert "share" in reason
+
+
+def test_codex_share_at_target_picks_claude(monkeypatch):
+    _share(monkeypatch)
+    assert agent_choice.choose_shared("", {}, {"claude": 7, "codex": 3}, share=30, min_week_left=5) == (
+        "claude",
+        "priority",
+    )
+
+
+def test_codex_week_left_under_the_minimum_picks_claude(monkeypatch):
+    _share(monkeypatch, week_left=4.0)
+    assert agent_choice.choose_shared("", {}, {}, share=30, min_week_left=5) == ("claude", "priority")
+
+
+def test_unknown_codex_week_left_keeps_the_priority_choice(monkeypatch):
+    _share(monkeypatch, week_left=None)
+    assert agent_choice.choose_shared("", {}, {}, share=30, min_week_left=5) == ("claude", "priority")
+
+
+def test_a_full_codex_keeps_the_priority_choice(monkeypatch):
+    _share(monkeypatch, codex_full=True)
+    assert agent_choice.choose_shared("", {}, {}, share=30, min_week_left=5) == ("claude", "priority")
+
+
+def test_the_first_spawn_of_a_swarm_goes_to_codex(monkeypatch):
+    _share(monkeypatch)
+    assert agent_choice.choose_shared("", {}, {}, share=30, min_week_left=5)[0] == "codex"
+
+
+def test_a_zero_share_never_picks_codex(monkeypatch):
+    _share(monkeypatch)
+    assert agent_choice.choose_shared("", {}, {}, share=0, min_week_left=5)[0] == "claude"
+
+
+def test_an_explicit_lane_harness_wins_over_the_share(monkeypatch):
+    _share(monkeypatch)
+    assert agent_choice.choose_shared("claude", {}, {}, share=30, min_week_left=5) == ("claude", "requested")
+    assert agent_choice.choose_shared("codex", {}, {"codex": 9}, share=30, min_week_left=5) == ("codex", "requested")
+
+
+def test_codex_week_left_is_the_best_signed_in_account(monkeypatch):
+    from scripts import codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.codex_quota import CodexQuota
+
+    pool = [
+        codex_router.CodexAccount("default"),
+        codex_router.CodexAccount("b", "AH_CX_TOKEN_b"),
+        codex_router.CodexAccount("c", "AH_CX_TOKEN_c", signed_in=False),
+    ]
+    seen = {
+        "default": CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=90.0)),
+        "b": CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=40.0)),
+        "c": CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=1.0)),
+    }
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: pool)
+    monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {a.name: seen[a.name] for a in accounts})
+    assert agent_choice.codex_week_left({}) == 60.0

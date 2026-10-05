@@ -110,3 +110,35 @@ def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
     _spawn_seen(tmp_path, {"eng": {"role": "a reviewer who only reads"}})
     text = (tmp_path / "sw" / "prompts" / "sw-eng-1.md").read_text()
     assert text.startswith("You are sw-eng-1, a reviewer who only reads in swarm sw,")
+
+
+def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_settings(tmp_path, monkeypatch):
+    from scripts import agent_choice
+
+    seen = {}
+
+    def shared(requested, environ, spawns, share, min_week_left, choose):
+        seen.update(requested=requested, spawns=spawns, share=share, min_week_left=min_week_left)
+        return "codex", "codex share 0/2 below 30%"
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    monkeypatch.setattr(agent_choice, "choose_shared", shared)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT", "7")
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "priority"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        compact_limit=0,
+        lanes={"eng": {"agent": "auto"}},
+        autonomy="delegate",
+        codex_share=None,
+        codex_min_week_left=None,
+    )
+    runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"}, spawns={"claude": 2})
+    assert seen["requested"] == "" and seen["spawns"] == {"claude": 2}
+    assert (seen["share"], seen["min_week_left"]) == (30, 7)
+    assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
