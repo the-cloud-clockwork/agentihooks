@@ -40,7 +40,7 @@ from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
-from scripts.swarm.store import MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, tick
 from scripts.swarm_ledger import ledger_kinds
 
@@ -107,6 +107,7 @@ def cmd_create(store, args):
         template=args.template,
         lanes=templates.lane_map(template),
         links=template.links,
+        autonomy=template.autonomy or DELEGATE,
     )
     store.create(config)
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
@@ -160,8 +161,14 @@ def cmd_set(store, args):
             lanes.setdefault(lane, {})[field] = value
             changes["lanes"] = templates.lane_map(templates.parse({"name": "set", "lanes": lanes}))
             continue
+        if key == "autonomy":
+            changes["autonomy"] = value
+            continue
         if key not in SETTABLE or not value.isdigit():
-            raise SwarmError(f"set takes {', '.join(SETTABLE)}=<whole number> or {', '.join(LANE_KEYS)}=<value>")
+            raise SwarmError(
+                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)} "
+                f"or {', '.join(LANE_KEYS)}=<value>"
+            )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
     if config.state == "running":
@@ -174,6 +181,7 @@ def cmd_set(store, args):
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "compact_limit": config.compact_limit,
+                "autonomy": config.autonomy,
                 "lanes": config.lanes,
             }
         )
@@ -190,12 +198,7 @@ def cmd_templates(store, args):
 
 
 def cmd_save_template(store, args):
-    config = store.config(args.slug)
-    try:
-        source = templates.load(config.template, os.environ) if config.template else None
-    except SwarmError:
-        source = None
-    path = templates.save(templates.from_config(args.template_name, config, source), os.environ)
+    path = templates.save(templates.from_config(args.template_name, store.config(args.slug)), os.environ)
     print(json.dumps({"swarm": args.slug, "template": args.template_name, "path": str(path)}))
 
 
@@ -483,7 +486,7 @@ def main(argv):
     if argv and argv[0] in ("list", "tick", "templates"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
-        if len(argv) > 1 and (argv[1].partition("=")[0] in SETTABLE or argv[1].partition("=")[0] in LANE_KEYS):
+        if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, "autonomy"):
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
