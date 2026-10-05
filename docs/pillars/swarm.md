@@ -70,7 +70,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request; the task moves to `pr`. |
-| `agentihooks swarm <id> done [--pr URL]` | Close the task; the swarm then closes the session. |
+| `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> handoff DOC` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
@@ -94,6 +94,19 @@ An agent is spawned for one task, told that task in its opening prompt, and ends
 blocked. The prompt walks it through a fixed order: open an issue, create a worktree, red test then green,
 pull request into `dev`, merge on green, then `done`. An agent that cannot finish pushes a draft pull request
 and calls `block`. A finished agent is retired on the next tick and its pane closed.
+
+That order is for a task of kind `code` (the default) or `ci`. A task's kind (`ledger task add --kind`)
+picks its prompt and the proof `done` must carry, and the ledger refuses `done` without it:
+
+| Kind | Ends with | `done` flags |
+|---|---|---|
+| `code`, `ci` | a merged pull request | `--pr URL` |
+| `ops`, `tune` | a verified system state | `--command C --output O` |
+| `troubleshoot` | the root cause shown by evidence, and a fix or a filed task | `--root-cause R --evidence E`, `--fix URL` or `--filed TASK` |
+| `research` | a written finding | `--finding URL` |
+
+`--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
+checked, who judges it) that the agent's prompt carries.
 
 ## The minute tick
 

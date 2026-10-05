@@ -7,6 +7,8 @@ agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (o
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC | say TEXT [--to NAME|eng|ci]
+done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
+--evidence E with --fix URL or --filed TASK; research --finding URL
 """
 
 import argparse
@@ -29,6 +31,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import MASTER, SwarmConfig, SwarmError, connect
 from scripts.swarm.tick import agent_status, tick
+from scripts.swarm_ledger import ledger_kinds
 
 SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
 TICK_LOCK_MS = 10 * 60 * 1000
@@ -217,8 +220,15 @@ def cmd_pr(store, args):
 
 def cmd_done(store, args):
     agent = _worker(store, args)
-    fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {})}
-    LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
+    ledger = LedgerClient()
+    row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
+    proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
+    missing = ledger_kinds.unmet({**row, "proof": {**(row.get("proof") or {}), **proof}})
+    if missing:
+        flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
+        raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
+    fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
+    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _retire(store, args.slug, agent)
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
@@ -280,7 +290,10 @@ def build_parser():
     sub.add_parser("send-message").add_argument("text")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
-    sub.add_parser("done").add_argument("--pr", default="")
+    done = sub.add_parser("done")
+    done.add_argument("--pr", default="")
+    for key in ledger_kinds.PROOF_KEYS:
+        done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
     sub.add_parser("handoff").add_argument("doc")
     say = sub.add_parser("say")
