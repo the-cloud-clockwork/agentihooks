@@ -467,7 +467,7 @@ def on_session_start(payload: dict) -> None:
         if BRAIN_ENABLED:
             from hooks.context.brain_adapter import inject_on_session_start
 
-            inject_on_session_start()
+            inject_on_session_start(session_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 
@@ -1645,6 +1645,11 @@ def on_post_tool_use(payload: dict) -> None:
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
                 inject_context(recycle_context, also_log=False, skip_compression=True)
+            from hooks.context.project_cache import take_project_context
+
+            project_context = take_project_context(_trace_session_id)
+            if project_context:
+                inject_context(project_context, also_log=False, skip_compression=True)
             if BROADCAST_ENABLED:
                 from hooks.context.broadcast import get_posttool_context
 
@@ -2136,7 +2141,7 @@ def on_subagent_start(payload: dict) -> None:
         if BRAIN_ENABLED:
             from hooks.context.brain_adapter import inject_on_session_start
 
-            inject_on_session_start()
+            inject_on_session_start(agent_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter subagent_start failed", {"error": str(e)})
 

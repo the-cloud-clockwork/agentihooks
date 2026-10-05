@@ -356,6 +356,22 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
     return msg_channel in session_channels
 
 
+def _message_matches_project(msg: dict, session: dict) -> bool:
+    if os.getenv("BRAIN_PROJECT_SCOPE", "strict") != "strict" or not session.get("project"):
+        return True
+    if msg.get("source") != "brain-adapter":
+        return True
+    entry_id = (msg.get("origin") or {}).get("id", "")
+    if entry_id.startswith("hot-arcs") or entry_id == "lessons":
+        return False
+    if entry_id == "operator-intent":
+        import re
+
+        project = session["project"]["project"]
+        return bool(re.search(r"(?<![\w-])" + re.escape(project) + r"(?![\w-])", msg.get("message", ""), re.IGNORECASE))
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Message lifecycle
 # ---------------------------------------------------------------------------
@@ -560,11 +576,12 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
     """
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
+    session = _load_sessions().get(session_id, {})
     pending = []
     for m in msgs:
         if _is_expired(m):
             continue
-        if not _message_matches_channel(m, channels):
+        if not _message_matches_channel(m, channels) or not _message_matches_project(m, session):
             continue
         if session_id in m.get("acknowledged_by", []):
             continue
@@ -598,11 +615,13 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
 def get_unseen_broadcasts(session_id: str, *, claim: bool = False) -> list[dict]:
     def select(msgs: list[dict]) -> list[dict]:
         channels = _get_session_channels(session_id)
+        session = _load_sessions().get(session_id, {})
         return [
             msg
             for msg in msgs
             if not _is_expired(msg)
             and _message_matches_channel(msg, channels)
+            and _message_matches_project(msg, session)
             and session_id not in msg.get("acknowledged_by", [])
             and session_id not in msg.get("delivered_to", [])
         ]
@@ -632,6 +651,7 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
     min_rank = _SEVERITY_RANK.get(BROADCAST_PRETOOL_MIN_SEVERITY, 2)
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
+    session = _load_sessions().get(session_id, {})
     out = {msg["id"]: msg for msg in get_unseen_broadcasts(session_id)}
     for m in msgs:
         if (
@@ -639,6 +659,7 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
             or _is_expired(m)
             or session_id in m.get("acknowledged_by", [])
             or not _message_matches_channel(m, channels)
+            or not _message_matches_project(m, session)
         ):
             continue
         if BROADCAST_CRITICAL_ON_PRETOOL and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank:
@@ -717,6 +738,11 @@ def register_session(
     account: str = "",
     supersede: bool = True,
 ) -> None:
+    from hooks.context.project_identity import resolve_project
+    from hooks.context.project_sessions import record_session
+
+    identity = resolve_project(cwd)
+    record_session(session_id, identity)
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         now = _now_iso()
@@ -746,6 +772,7 @@ def register_session(
             "cwd": cwd,
             "model": model,
             "account": account,
+            "project": identity.attributes() if identity else None,
         }
         _save_sessions(sessions)
 

@@ -471,17 +471,21 @@ def maybe_refresh_on_tool_call(
         from hooks.config import BRAIN_ENABLED, BRAIN_REFRESH_TOOL_CALLS
     except ImportError:
         return None
-
     if not BRAIN_ENABLED or tool_call_count <= 0:
         return None
     if tool_call_count % max(1, BRAIN_REFRESH_TOOL_CALLS) != 0:
         return None
     result = _refresh()
-    if not result or not claim_delivery:
-        return None
     from hooks.context.broadcast import get_broadcast_context
+    from hooks.context.project_cache import defer_project_context, project_context
 
-    return get_broadcast_context(session_id, result["created_ids"])
+    project = project_context(session_id)
+    if not claim_delivery:
+        if project:
+            defer_project_context(session_id, project)
+        return None
+    fleet = get_broadcast_context(session_id, result["created_ids"]) if result else None
+    return "\n\n".join(part for part in (project, fleet) if part) or None
 
 
 def _refresh() -> dict | None:
@@ -506,6 +510,9 @@ def _refresh() -> dict | None:
         log("brain_adapter: source fetch failed", {"error": str(e)})
         return None
 
+    from hooks.context.project_cache import store_feed
+
+    store_feed(entries)
     new_hash = _compute_hash(entries)
     result = _publish_entries(entries)
     _content_hash = new_hash
@@ -528,17 +535,25 @@ def force_refresh() -> bool:
     return bool(result and result["changed"])
 
 
-def inject_on_session_start() -> bool:
-    """One-shot injection at session start. Publishes brain content immediately."""
+def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
     try:
         from hooks.config import BRAIN_ENABLED
     except ImportError:
         return False
-
     if not BRAIN_ENABLED:
         return False
+    refreshed = force_refresh()
+    if session_id:
+        from hooks.common import inject_context
+        from hooks.context.project_cache import project_context
+        from hooks.context.project_identity import resolve_project
+        from hooks.context.project_sessions import record_session
 
-    return force_refresh()
+        record_session(session_id, resolve_project(cwd))
+        context = project_context(session_id, cwd)
+        if context:
+            inject_context(context, skip_compression=True)
+    return refreshed
 
 
 def get_status() -> dict:
