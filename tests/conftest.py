@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes, warm_imports
+from tests.shards import (
+    assign_files,
+    discover_test_files,
+    setup_nodes_in_parallel,
+    slowest_first,
+    source_sizes,
+    warm_imports,
+)
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -43,6 +50,9 @@ def pytest_configure(config):
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
         return
+    from xdist.workermanage import NodeManager
+
+    NodeManager.setup_nodes = setup_nodes_in_parallel
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
 

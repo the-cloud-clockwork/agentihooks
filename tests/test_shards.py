@@ -1,13 +1,22 @@
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from xdist.workermanage import NodeManager
 
 from tests import conftest
-from tests.shards import assign_files, discover_test_files, slowest_first, source_sizes, warm_imports
+from tests.shards import (
+    assign_files,
+    discover_test_files,
+    setup_nodes_in_parallel,
+    slowest_first,
+    source_sizes,
+    warm_imports,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -133,6 +142,7 @@ def test_a_module_that_fails_to_import_leaves_the_rest_of_its_stride_warmed(tmp_
 
 def _configured(monkeypatch, numprocesses, **extra):
     calls = []
+    monkeypatch.setattr(NodeManager, "setup_nodes", NodeManager.setup_nodes)
     monkeypatch.setattr(conftest, "warm_imports", lambda modules, workers: calls.append((modules, workers)) or [7])
     config = SimpleNamespace(
         option=SimpleNamespace(numprocesses=numprocesses),
@@ -164,3 +174,38 @@ def test_workers_and_runs_without_workers_warm_nothing(monkeypatch):
 def test_platforms_without_fork_warm_nothing(monkeypatch):
     monkeypatch.delattr(conftest.os, "fork")
     assert _configured(monkeypatch, 4)[0] == []
+
+
+class _Manager:
+    def __init__(self, specs):
+        self.specs = specs
+        self.events = []
+        self.started = threading.Barrier(len(specs), timeout=5)
+        self.config = SimpleNamespace(hook=SimpleNamespace(pytest_xdist_setupnodes=self._announce))
+
+    def _announce(self, config, specs):
+        self.events.append(("setupnodes", list(specs)))
+
+    def setup_node(self, spec, putevent):
+        self.started.wait()
+        return (spec, putevent)
+
+
+def test_the_workers_of_a_shard_are_set_up_side_by_side():
+    manager = _Manager(["gw0", "gw1", "gw2", "gw3"])
+    put = object()
+    assert setup_nodes_in_parallel(manager, put) == [("gw0", put), ("gw1", put), ("gw2", put), ("gw3", put)]
+    assert manager.events == [("setupnodes", ["gw0", "gw1", "gw2", "gw3"])]
+
+
+def test_the_controller_of_a_sharded_run_sets_up_its_workers_side_by_side(monkeypatch):
+    _configured(monkeypatch, 4)
+    assert NodeManager.setup_nodes is setup_nodes_in_parallel
+
+
+def test_workers_and_runs_without_workers_keep_xdists_node_setup(monkeypatch):
+    original = NodeManager.setup_nodes
+    _configured(monkeypatch, 4, workerinput={})
+    assert NodeManager.setup_nodes is original
+    _configured(monkeypatch, None)
+    assert NodeManager.setup_nodes is original
