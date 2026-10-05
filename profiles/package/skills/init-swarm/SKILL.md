@@ -43,8 +43,13 @@ One task is one pull request, sized for one agent in one worktree, in the lane
 that owns it: `eng` for code, `ci` for workflows and pipelines.
 
 ```bash
-agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>"
+agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<seam and done condition>" \
+  [--depends-on <id>,<id>] [--territory <path or area>,<path or area>]
 ```
+
+The tick claims a task only once every task in `--depends-on` is done, and never
+while its territory overlaps a claimed or in-review task's. Add the tasks a task
+waits on first; an unknown id is refused. A task without territory never conflicts.
 
 Done when every phase has at least one task and every task names its done condition.
 

@@ -636,15 +636,31 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       commentsView(key, item.comments));
   }
 
-  function taskRow(item) {
+  function taskBlockers(task, tasks) {
+    if ((task.state || "open") !== "open") return "";
+    const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+    const area = (e) => String(e).trim().replace(/^\.\//, "").replace(/\/+$/, "");
+    const nested = (a, b) => a === b || b.startsWith(`${a}/`);
+    const overlap = (x, y) => (x || []).some((a) => (y || []).some((b) => nested(area(a), area(b)) || nested(area(b), area(a))));
+    const reasons = (task.depends_on || []).filter((id) => (byId[id] || {}).state !== "done")
+      .map((id) => `${byId[id] ? byId[id].title : `task ${id}`} is done`);
+    for (const t of tasks) {
+      if (t.id !== task.id && ["claimed", "pr"].includes(t.state) && overlap(task.territory, t.territory)) reasons.push(`${t.title} leaves the same files`);
+    }
+    return reasons.length ? `Waiting until ${reasons.join(", and ")}` : "";
+  }
+
+  function taskRow(item, tasks) {
     const key = `tasks/${item.id}`;
+    const waits = taskBlockers(item, tasks || []);
     const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
     const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), h("span", { text: item.state }),
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
       link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
     const body = h("div", {}, h("div", { class: "item-title", text: item.title }),
-      item.description ? h("p", { class: "desc", text: item.description }) : null, meta);
+      item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
+      waits ? h("p", { class: "desc", text: waits }) : null);
     const row = h("div", { class: "row" }, body, scopeDot(key, item));
     return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, commentsView(key, item.comments));
   }
@@ -674,7 +690,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
     listInto("phases", doc.phases, (p, i) => checkRow("phases", p, i + 1, p.title, p.description));
     $("tasks-count").textContent = taskCounts(doc.tasks);
-    listInto("tasks", doc.tasks, taskRow);
+    listInto("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
     listInto("questions", doc.questions, (q, i) => questionRow(q, i + 1));
     $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
     listInto("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));

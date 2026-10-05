@@ -21,8 +21,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   priority clear ID... | --all        clear priorities once answered
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
-  task add ID TITLE --lane eng|ci [--phase P] [--description D]   add a swarm task
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url or pr_url of a swarm task
+  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS]
+                                      add a swarm task; IDS and AREAS are comma separated
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on or territory of a task
   prompt                              print the join paragraph for a launch prompt
 
 Agent text is for the operator: plain words, what was done or why it was skipped. The server refuses
@@ -238,16 +239,31 @@ def cmd_claim(args):
 def cmd_task(args):
     if args.action == "add":
         title = " ".join(args.values)
+        lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
         send(
-            args, "task_add", task=args.id, title=title, lane=args.lane, phase=args.phase, description=args.description
+            args,
+            "task_add",
+            task=args.id,
+            title=title,
+            lane=args.lane,
+            phase=args.phase,
+            description=args.description,
+            **lists,
         )
         print(json.dumps({"task": args.id, "added": title}))
         return
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
         sys.exit("task set takes FIELD=VALUE pairs")
+    for key in ("depends_on", "territory"):
+        if key in fields:
+            fields[key] = comma_list(fields[key])
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))
+
+
+def comma_list(text):
+    return [part.strip() for part in text.split(",") if part.strip()]
 
 
 def cmd_prompt(args):
@@ -311,6 +327,8 @@ def build_parser():
     task.add_argument("--lane", choices=["eng", "ci"], default="eng")
     task.add_argument("--phase", default="")
     task.add_argument("--description", default="")
+    task.add_argument("--depends-on", default="", help="comma separated task ids that must be done first")
+    task.add_argument("--territory", default="", help="comma separated files, folders or areas the task touches")
     return parser
 
 

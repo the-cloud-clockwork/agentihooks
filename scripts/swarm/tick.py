@@ -138,14 +138,37 @@ def _reopen(slug, ledger, rows, task_id):
 
 
 def _claimable(slug, store, rows, lane):
-    return [
-        t
-        for t in rows.values()
-        if t.get("lane") == lane
-        and t.get("state") == "open"
-        and not t.get("out_of_scope")
-        and store.claimant(slug, t["id"]) is None
-    ]
+    held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
+    picked = []
+    for t in rows.values():
+        if (
+            t.get("lane") == lane
+            and t.get("state") == "open"
+            and not t.get("out_of_scope")
+            and store.claimant(slug, t["id"]) is None
+            and _unblocked(t, rows, held)
+        ):
+            picked.append(t)
+            held.append(t.get("territory") or [])
+    return picked
+
+
+def _unblocked(task, rows, held):
+    if any(rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
+        return False
+    return not any(_overlaps(task.get("territory") or [], other) for other in held)
+
+
+def _overlaps(mine, theirs):
+    return any(_nested(a, b) or _nested(b, a) for a in map(_area, mine) for b in map(_area, theirs))
+
+
+def _area(entry):
+    return entry.strip().removeprefix("./").rstrip("/")
+
+
+def _nested(outer, inner):
+    return inner == outer or inner.startswith(outer + "/")
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, now_ms):

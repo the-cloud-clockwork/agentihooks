@@ -146,3 +146,100 @@ class TaskRules(unittest.TestCase):
     def test_a_new_ledger_refuses_an_unknown_lane(self):
         errors = new_ledger.check_types({"title": "t", "tasks": [{"title": "a", "lane": "ops"}]})
         self.assertIn("tasks[1].lane must be eng or ci", errors)
+
+
+class TaskDependencies(unittest.TestCase):
+    def test_task_add_stores_dependencies_and_territory(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        add = op("task_add", 1, task="t2", title="b", lane="eng", depends_on=["t1"], territory=["scripts/swarm"])
+        core.check_op(add)
+        state, rejected = core.sync(SLUG, ops=[add])
+        self.assertEqual(rejected, [])
+        self.assertEqual((state["tasks"][1]["depends_on"], state["tasks"][1]["territory"]), (["t1"], ["scripts/swarm"]))
+
+    def test_a_dependency_on_an_unknown_task_is_refused(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        add = op("task_add", 1, task="t2", title="b", lane="eng", depends_on=["t9"])
+        state, rejected = core.sync(SLUG, ops=[add])
+        self.assertEqual(rejected, [add["id"]])
+        self.assertEqual([t["id"] for t in state["tasks"]], ["t1"])
+        update = op("task_update", 2, item="tasks/t1", fields={"depends_on": ["t9"]})
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual(rejected, [update["id"]])
+        self.assertNotIn("t9", state["tasks"][0].get("depends_on", []))
+
+    def test_a_task_cannot_depend_on_itself(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        update = op("task_update", 1, item="tasks/t1", fields={"depends_on": ["t1"]})
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual(rejected, [update["id"]])
+        self.assertEqual(state["tasks"][0].get("depends_on", []), [])
+
+    def test_task_update_sets_dependencies_and_territory(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}, {"title": "b", "phase": "p1", "lane": "eng"}])
+        update = op("task_update", 1, item="tasks/t2", fields={"depends_on": ["t1"], "territory": ["hooks", "docs"]})
+        core.check_op(update)
+        state, rejected = core.sync(SLUG, ops=[update])
+        self.assertEqual(rejected, [])
+        self.assertEqual((state["tasks"][1]["depends_on"], state["tasks"][1]["territory"]), (["t1"], ["hooks", "docs"]))
+
+    def test_dependencies_and_territory_must_be_lists_of_strings(self):
+        for bad in (
+            op("task_add", 1, task="t2", title="b", lane="eng", depends_on="t1"),
+            op("task_add", 2, task="t2", title="b", lane="eng", territory=[3]),
+            op("task_update", 3, item="tasks/t1", fields={"territory": "hooks"}),
+            op("task_update", 4, item="tasks/t1", fields={"state": ["open"]}),
+        ):
+            with self.assertRaises(ValueError):
+                core.check_op(bad)
+        base = {"title": "t", "phases": [], "questions": [], "followups": []}
+        with self.assertRaises(ValueError):
+            core.validate({**base, "tasks": [{"id": "t1", "title": "a", "depends_on": "t0"}]})
+
+    def test_task_cli_takes_dependencies_and_territory_as_comma_lists(self):
+        import ledger
+
+        sent = []
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, **f: sent.append((kind, f))):
+            for argv in (
+                ["task", "add", "t3", "b", "--depends-on", "t1,t2", "--territory", "scripts/swarm, ledger page"],
+                ["task", "set", "t3", "depends_on=t1", "territory="],
+            ):
+                ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
+        self.assertEqual(sent[0][1]["depends_on"], ["t1", "t2"])
+        self.assertEqual(sent[0][1]["territory"], ["scripts/swarm", "ledger page"])
+        self.assertEqual(sent[1][1]["fields"], {"depends_on": ["t1"], "territory": []})
+
+
+class TaskBlockersOnThePage(unittest.TestCase):
+    def blockers(self, tasks):
+        import json
+        import subprocess
+
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        source = "function taskBlockers(" + page.split("  function taskBlockers(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
+        script = f"{source}\nconst ts = {json.dumps(tasks)};\nprocess.stdout.write(JSON.stringify(ts.map((t) => taskBlockers(t, ts))));"
+        return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+
+    def test_a_waiting_task_names_its_blockers_in_plain_words(self):
+        tasks = [
+            {"id": "t1", "title": "Build the inbox", "state": "open"},
+            {"id": "t2", "title": "Speed up the tick", "state": "claimed", "territory": ["scripts/swarm"]},
+            {
+                "id": "t3",
+                "title": "Deliver messages",
+                "state": "open",
+                "depends_on": ["t1"],
+                "territory": ["scripts/swarm/tick.py"],
+            },
+            {"id": "t4", "title": "Docs", "state": "open"},
+        ]
+        self.assertEqual(
+            self.blockers(tasks),
+            [
+                "",
+                "",
+                "Waiting until Build the inbox is done, and Speed up the tick leaves the same files",
+                "",
+            ],
+        )
