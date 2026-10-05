@@ -33,6 +33,7 @@ class Item:
     updated_at: int
     reason: str = ""
     ref: str = ""
+    sequence: int = 0
 
 
 def now_ms():
@@ -67,7 +68,17 @@ class InboxStore:
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         at = now_ms()
-        item = Item(uuid.uuid4().hex[:12], sender, address, text, "pending", at, at, ref=ref)
+        item = Item(
+            uuid.uuid4().hex[:12],
+            sender,
+            address,
+            text,
+            "pending",
+            at,
+            at,
+            ref=ref,
+            sequence=self.redis.incr(self.key("sequence", address)),
+        )
         with self.redis.pipeline() as pipe:
             pipe.hset(self.key("item", item.id), mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
@@ -81,7 +92,8 @@ class InboxStore:
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
 
     def inbox(self, address):
-        return [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
+        items = [self.get(item_id) for item_id in self.redis.zrange(self.key("address", address), 0, -1)]
+        return sorted(items, key=_order)
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
@@ -92,7 +104,7 @@ class InboxStore:
     def _with_seat(self, me, read):
         seat = self.seats.seat_of(me)
         items = read(me) + (read(seat) if seat else [])
-        return sorted(items, key=lambda item: item.created_at)
+        return sorted(items, key=_order)
 
     def acts_for(self, by, address, pipe=None):
         if by == address:
@@ -113,7 +125,7 @@ class InboxStore:
         keys = []
         for address in addresses:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
-            keys += [self.key("address", address), self.key("pending", address)]
+            keys += [self.key("address", address), self.key("pending", address), self.key("sequence", address)]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
@@ -148,10 +160,12 @@ class InboxStore:
         if not self.redis.exists(self.key("waiting", "built")):
             self._build_waiting()
         addresses = sorted(self.redis.smembers(self.key("waiting")))
-        return [item for address in addresses for item in self.pending_items(address)]
+        items = [item for address in addresses for item in self.pending_items(address)]
+        return sorted(items, key=_order)
 
     def pending_items(self, address):
-        return [self.get(item_id) for item_id in self._pending_ids(address)]
+        items = [self.get(item_id) for item_id in self._pending_ids(address)]
+        return sorted(items, key=_order)
 
     def _pending_ids(self, address):
         if self.redis.sismember(self.key("indexed"), address):
@@ -267,10 +281,21 @@ def _fields(item):
     return {k: str(v) for k, v in asdict(item).items()}
 
 
+def _order(item: Item) -> tuple[int, int, str]:
+    return item.created_at, item.sequence, item.id
+
+
 def _item(raw, item_id):
     if not raw:
         raise InboxError(f"no message {item_id}")
-    return Item(**{**raw, "created_at": int(raw["created_at"]), "updated_at": int(raw["updated_at"])})
+    return Item(
+        **{
+            **raw,
+            "created_at": int(raw["created_at"]),
+            "updated_at": int(raw["updated_at"]),
+            "sequence": int(raw.get("sequence", 0)),
+        }
+    )
 
 
 def _entry(state, by, reason, at):
