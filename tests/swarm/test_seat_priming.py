@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm import prompt
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
-from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -66,8 +66,7 @@ def test_a_handoff_writes_a_recap_under_the_seat(env, tmp_path):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    doc, recap = tmp_path / "handoff.md", tmp_path / "recap.md"
-    doc.write_text("next step: seam 2")
+    doc, recap = _handoff_doc(tmp_path), tmp_path / "recap.md"
     recap.write_text("did seam 1, stopped at seam 2, promised the master a pr")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", str(recap)) == 0
     (entry,) = swarm.memory.recaps("eng-1@sw")
