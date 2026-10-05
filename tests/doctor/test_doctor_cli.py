@@ -106,6 +106,38 @@ def test_a_second_start_adds_no_second_link(env):
     assert len(InboxStore(store.redis).inbox(f"master@{WATCHED}")) == 1
 
 
+LONG = "a" * 40 + "-2026-10"
+
+
+def test_start_on_a_ledger_name_at_the_swarm_name_limit_builds_a_valid_unique_doctor_name(env, capsys):
+    store, rt, tmp = env
+    twin = LONG[:-1] + "1"
+    for slug in (LONG, twin):
+        assert new_ledger.create(
+            slug, {"title": "Long", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
+        )
+        assert swarm_cli.main([slug, "create", "--repo", "/repo"]) == 0
+    assert len(LONG) == 48
+    assert doctor.main([LONG, "start"]) == 0
+    assert doctor.main([twin, "start"]) == 0
+    doctors = {store.peer(LONG), store.peer(twin)}
+    assert len(doctors) == 2 and doctors == {s for s in store.slugs() if store.config(s).template == "doctor"}
+    assert all(swarm_cli.SLUG_RE.match(slug) and slug.endswith("-doctor") for slug in doctors)
+    long_doctor = store.peer(LONG)
+    assert store.peer(long_doctor) == LONG
+    assert state(long_doctor)["sources"] == [str(tmp / f"{LONG}.json")]
+    assert state(LONG)["sources"] == [str(tmp / f"{long_doctor}.json")]
+    [(name, task)] = [(n, t) for n, t in rt.masters if n.startswith(f"{long_doctor}-master")]
+    assert f"agentihooks doctor {LONG} verdict" in prompt.build_master(long_doctor, "/repo", name, task)
+    capsys.readouterr()
+    assert doctor.main([long_doctor, "status"]) == 0
+    assert f"doctor {long_doctor} watches {LONG}" in capsys.readouterr().out
+    assert doctor.main([long_doctor, "stop"]) == 0
+    assert state(long_doctor)["closed_at"]
+    assert doctor.main([long_doctor, "status"]) == 0
+    assert f"doctor {long_doctor} watches {LONG}" in capsys.readouterr().out
+
+
 def fix(slug):
     add = {"op": "task_add", "id": "a1", "by": "doctor", "task": "d1", "title": "Inbox wake reaches idle panes"}
     proof = {"command": "agentihooks swarm watch status", "output": "unread items over the window 7 before, 0 after"}

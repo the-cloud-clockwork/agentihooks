@@ -1,12 +1,22 @@
 """The Doctor master's standing duties, added to the master priming of a Doctor swarm."""
 
+import hashlib
+
 from scripts.swarm.health.verdicts import VERDICTS
 
 SUFFIX = "-doctor"
+SLUG_MAX = 48
+
+
+def doctor_slug(slug):
+    if len(slug) + len(SUFFIX) <= SLUG_MAX:
+        return slug + SUFFIX
+    digest = hashlib.sha256(slug.encode()).hexdigest()[:6]
+    return f"{slug[: SLUG_MAX - len(SUFFIX) - len(digest) - 1]}-{digest}{SUFFIX}"
 
 
 def master_lines(slug, peer):
-    if not peer or slug != peer + SUFFIX:
+    if not peer or slug != doctor_slug(peer):
         return []
     doc = f"agentihooks doctor {peer}"
     return [

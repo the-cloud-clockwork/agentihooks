@@ -27,7 +27,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from scripts.doctor import detect, interventions, loop
-from scripts.doctor.priming import SUFFIX
+from scripts.doctor.priming import SUFFIX, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.verdicts import VERDICTS
@@ -108,8 +108,8 @@ def _pair(store, slug, doctor):
 
 def _pair_of(store, slug):
     if slug.endswith(SUFFIX) and slug in store.slugs() and store.config(slug).template == TEMPLATE:
-        slug = slug.removesuffix(SUFFIX)
-    doctor = slug + SUFFIX
+        slug = next((s for s in store.slugs() if doctor_slug(s) == slug), slug.removesuffix(SUFFIX))
+    doctor = doctor_slug(slug)
     if doctor not in store.slugs():
         raise SwarmError(f"no Doctor watches {slug}; start one with agentihooks doctor {slug} start")
     return slug, doctor
@@ -119,9 +119,9 @@ def cmd_start(store, args):
     bundle = linked_bundle()
     if bundle is None:
         raise SwarmError("rig doctor needs a linked bundle for its rules: link one with agentihooks init --bundle DIR")
-    slug, doctor = args.slug, args.slug + SUFFIX
+    slug, doctor = args.slug, doctor_slug(args.slug)
     if not swarm.SLUG_RE.match(doctor):
-        raise SwarmError(f"the Doctor swarm id {doctor} is longer than a swarm id may be, 48 characters")
+        raise SwarmError(f"the Doctor swarm id {doctor} is not a swarm id: lowercase letters, digits and dashes")
     ledger = swarm.LedgerClient()
     _create_ledger(doctor, slug, ledger.state(slug).get("title") or slug)
     _link(ledger, slug, doctor)
