@@ -176,6 +176,23 @@ class TestClaudeRouting:
         assert "70%" in output
         assert "source=cached" in output
 
+    def test_cmd_balance_lists_every_codex_account_even_without_claude_tokens(self, monkeypatch, capsys):
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+
+        rows = [
+            agents_quota.QuotaRow("codex", "default", "SIGNED_OUT", 0, None, None, None, "no session log"),
+            agents_quota.QuotaRow("codex", "alpha", "NORMAL", 2, None, 60.0, None, "session-log 1m ago"),
+        ]
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
+        monkeypatch.setattr(agents_quota, "_codex", lambda now: rows)
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 2
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[1].split()[:4] == ["codex", "default", "SIGNED_OUT", "0"]
+        assert lines[2].split()[:4] == ["codex", "alpha", "NORMAL", "2"]
+
     def test_cmd_balance_can_print_raw_account_metadata(self, monkeypatch, capsys):
         from scripts import claude_quota_balancer as balancer
 

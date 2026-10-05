@@ -324,7 +324,7 @@ def test_the_launcher_exports_the_agent_name_so_codex_can_be_found_by_it(tmp_pat
     )
     text = launcher.read_text()
     assert "export AGENTIHOOKS_AGENT_NAME='smoke codex'\n" in text
-    assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("codex -m ")
+    assert text.index("AGENTIHOOKS_AGENT_NAME") < text.index("agentihooks codex ")
 
 
 def test_the_shell_left_after_the_agent_exits_drops_the_agent_name(tmp_path):

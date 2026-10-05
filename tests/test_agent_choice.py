@@ -48,22 +48,25 @@ def test_codex_has_quota_below_the_handoff_threshold(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
     seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=97.0))
-    monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None: seen)
+    monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: seen)
     assert agent_choice.has_quota("codex", {}) is True
     seen = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=98.0))
     assert agent_choice.has_quota("codex", {}) is False
 
 
-def test_a_codex_launcher_runs_codex_and_reports_a_direct_route(monkeypatch, tmp_path):
+def test_a_codex_launcher_runs_through_the_codex_router(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: f"/usr/bin/{name}")
     env = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt"), "SHELL": "/bin/bash"}
     launcher, prompt_file = init_agent._write_launcher(
         tmp_path, "eng-c", "fix it", ["--model", "o3"], env, init_agent.AgentSpec(agent="codex")
     )
     text = launcher.read_text()
-    assert f'/usr/bin/codex -c \'model_reasoning_effort="high"\' --model o3 "$(cat {prompt_file})"' in text
-    assert "status=direct" in text and str(launcher.with_suffix(".route")) in text
-    assert "agentihooks claude" not in text
+    report = launcher.with_suffix(".route")
+    assert (
+        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"high\"' --model o3 "
+        f'"$(cat {prompt_file})"'
+    ) in text
+    assert "status=direct" not in text and "agentihooks claude" not in text
 
 
 def test_init_agent_reports_the_chosen_agent(monkeypatch, tmp_path, capsys):
@@ -129,9 +132,19 @@ def test_every_agent_at_cap_is_reported(monkeypatch):
 def test_codex_cap_counts_live_codex_sessions(monkeypatch):
     from hooks.context import account_sessions
 
-    monkeypatch.setattr(account_sessions, "live_codex_sessions", lambda: 3)
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 3})
     assert agent_choice.at_cap("codex", {}) is True
     assert agent_choice.at_cap("codex", {"AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT": "4"}) is False
+
+
+def test_codex_is_full_only_when_every_codex_account_is(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import codex_router
+
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 3, "alpha": 3})
+    assert agent_choice.at_cap("codex", {"AH_CX_TOKEN_alpha": "cx-a"}) is True
+    assert agent_choice.at_cap("codex", {"AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_beta": "cx-b"}) is False
 
 
 def test_claude_is_full_only_when_every_routable_account_is(monkeypatch):
@@ -145,3 +158,17 @@ def test_claude_is_full_only_when_every_routable_account_is(monkeypatch):
     assert agent_choice.at_cap("claude", {}) is False
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"a": 3, "b": 3})
     assert agent_choice.at_cap("claude", {}) is True
+
+
+def test_a_fresh_token_account_keeps_codex_available_when_the_default_is_spent(monkeypatch):
+    from scripts import codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.codex_quota import CodexQuota
+
+    spent = CodexQuota(observed_at=0, plan_type="pro", seven_day=QuotaWindow(used=99.0))
+    environ = {"AH_CX_TOKEN_alpha": "cx-a"}
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": spent, "alpha": None})
+    assert agent_choice.has_quota("codex", environ) is True
+    pool = codex_router.routing_pool(environ)
+    assert codex_router.select(pool, {"default": spent, "alpha": None}, {}, cap=3)[0].name == "alpha"

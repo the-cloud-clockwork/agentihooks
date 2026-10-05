@@ -23,8 +23,11 @@ agentihooks balance --current
 
 `agentihooks quota` prints one row per agent account:
 `AGENT ACCOUNT STATE SESSIONS 5H LEFT 7D LEFT 7D RESET SOURCE`. Claude rows come
-from the router cache or a live probe (`--refresh`); the Codex row comes from the
-newest rate-limit event in Codex's session logs, so `SOURCE` says how old it is.
+from the router cache or a live probe (`--refresh`). Codex has one row per account:
+`default` (the `codex login` on this machine, `SIGNED_OUT` when logged out) and
+each `AH_CX_TOKEN_<slug>`. Its quota comes from the newest rate-limit event in
+that account's Codex session logs, so `SOURCE` says how old it is, or
+`no session log` when the account has not run yet.
 Codex plans that report only a weekly window show `?` under `5H LEFT`.
 `--json` prints the same rows as JSON.
 

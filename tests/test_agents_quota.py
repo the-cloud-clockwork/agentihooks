@@ -3,6 +3,7 @@ import os
 
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
+from scripts.codex_router import CodexAccount
 
 
 def _event(ts: str, primary: dict | None, secondary: dict | None = None, plan: str = "pro") -> str:
@@ -69,7 +70,8 @@ def test_rows_list_every_claude_account_and_codex():
     )
     rows = agents_quota.claude_rows([claude], {"ncgma": 2}, "cached")
     quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", WEEK))
-    rows.append(agents_quota.codex_row(quota, sessions=1, now=quota.observed_at + 120))
+    accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    rows += agents_quota.codex_rows(accounts, {"default": quota}, {"default": 1}, now=quota.observed_at + 120)
     table = agents_quota.render(rows, now=1000).splitlines()
     assert table[0].split() == [
         "AGENT",
@@ -85,8 +87,53 @@ def test_rows_list_every_claude_account_and_codex():
         "SOURCE",
     ]
     assert table[1].split()[:6] == ["claude", "ncgma", "NORMAL", "2", "95%", "60%"]
-    assert table[2].split()[:6] == ["codex", "pro", "NORMAL", "1", "?", "54%"]
+    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1", "?", "54%"]
     assert table[2].endswith("session-log 2m ago")
+    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0", "?", "?", "?", "no", "session", "log"]
+
+
+def test_a_signed_out_default_login_is_listed_as_signed_out():
+    rows = agents_quota.codex_rows([CodexAccount("default", signed_in=False)], {}, {}, now=0)
+    assert [(row.account, row.state, row.sessions) for row in rows] == [("default", "SIGNED_OUT", 0)]
+
+
+def test_each_codex_account_reads_only_its_own_session_logs(tmp_path, monkeypatch):
+    from scripts import codex_router
+
+    ids = {"a": "11111111-1111-1111-1111-111111111111", "b": "22222222-2222-2222-2222-222222222222"}
+    ids["c"] = "33333333-3333-3333-3333-333333333333"
+    _rollout(
+        tmp_path,
+        "04",
+        f"2026-10-04T10-00-00-{ids['a']}",
+        [_event("2026-10-04T10:00:00Z", {**WEEK, "used_percent": 10.0})],
+        300,
+    )
+    _rollout(
+        tmp_path,
+        "04",
+        f"2026-10-04T09-00-00-{ids['b']}",
+        [_event("2026-10-04T09:00:00Z", {**WEEK, "used_percent": 20.0})],
+        200,
+    )
+    _rollout(
+        tmp_path,
+        "04",
+        f"2026-10-04T08-00-00-{ids['c']}",
+        [_event("2026-10-04T08:00:00Z", {**WEEK, "used_percent": 30.0})],
+        100,
+    )
+    registry = {ids["a"]: {"account": "alpha"}, ids["b"]: {"account": "unrouted"}}
+    monkeypatch.setattr(codex_router, "_registry", lambda: registry)
+    accounts = [
+        CodexAccount("default"),
+        CodexAccount("alpha", "AH_CX_TOKEN_alpha"),
+        CodexAccount("beta", "AH_CX_TOKEN_beta"),
+    ]
+    quotas = codex_router.quotas(accounts, {"HOME": str(tmp_path)})
+    assert quotas["alpha"].seven_day.used == 10.0
+    assert quotas["default"].seven_day.used == 20.0
+    assert quotas["beta"] is None
 
 
 def test_a_plan_with_only_a_five_hour_window_is_classified_on_it():
@@ -99,8 +146,7 @@ def test_a_plan_with_only_a_five_hour_window_is_classified_on_it():
 def test_quota_json_lists_every_row(monkeypatch, capsys):
     row = agents_quota.QuotaRow("claude", "ncgma", "NORMAL", 1, 90.0, 40.0, 9000, "cached")
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [row])
-    monkeypatch.setattr(agents_quota, "latest_codex_quota", lambda: None)
-    monkeypatch.setattr(agents_quota, "_codex_sessions", lambda: 0)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
     assert agents_quota.main(["--json"]) == 0
     assert json.loads(capsys.readouterr().out) == [
         {
@@ -118,7 +164,17 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
 
 def test_no_agent_rows_exit_one(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
-    monkeypatch.setattr(agents_quota, "latest_codex_quota", lambda: None)
-    monkeypatch.setattr(agents_quota, "_codex_sessions", lambda: 0)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
     assert agents_quota.main([]) == 1
     assert "no Claude account and no Codex session log" in capsys.readouterr().err
+
+
+def test_without_registry_entries_the_default_login_keeps_every_session_log(tmp_path, monkeypatch):
+    from scripts import codex_router
+
+    session = "44444444-4444-4444-4444-444444444444"
+    _rollout(tmp_path, "04", f"2026-10-04T10-00-00-{session}", [_event("2026-10-04T10:00:00Z", WEEK)], 100)
+    monkeypatch.setattr(codex_router, "_registry", lambda: {})
+    quotas = codex_router.quotas([CodexAccount("default")], {"HOME": str(tmp_path)})
+    assert quotas["default"] == codex_quota.latest_codex_quota({"HOME": str(tmp_path)})
+    assert quotas["default"].seven_day.used == 46.0

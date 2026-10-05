@@ -205,6 +205,10 @@ Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 - **Status:** `agentihooks balance` shows `SESSIONS n/cap` per account from a
   live process scan; `agentihooks balance --current` names this session's
   account.
+- **Codex:** `agentihooks codex` (and `init-agent --agent codex`) routes the
+  same way across the default `codex login` and each `AH_CX_TOKEN_<slug>`; a
+  token session runs `codex --no-daemon` with only its own token. `balance` and
+  `quota` list every Codex account.
 - **Quota policy:** the hook compares this session's own quota with every
   other account and injects exactly one directive. The decision is code; do not
   second-guess it, argue with it, or improvise another route.

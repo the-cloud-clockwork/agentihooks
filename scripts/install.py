@@ -5563,6 +5563,7 @@ def cmd_balance(
     current: bool = False,
 ) -> int:
     from hooks.context.account_sessions import max_sessions, sessions_by_account
+    from scripts.agents_quota import codex_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5612,6 +5613,7 @@ def cmd_balance(
             )
         return 0 if session.account else 1
     if not credentials:
+        print(codex_table())
         print("agentihooks: no non-empty AH_CC_TOKEN_* variables found", file=sys.stderr)
         return 2
     if show_account_metadata:
@@ -5637,6 +5639,7 @@ def cmd_balance(
     )
     print(render_table(results, include_fable=include_fable, sessions=live, max_sessions=cap))
     print(f"\nsource={source} max_sessions_per_account={cap}")
+    print(f"\n{codex_table()}")
     return 0 if any(is_routable(result) for result in results) else 1
 
 
@@ -6282,6 +6285,11 @@ def main() -> None:
     if _argv and _argv[0] == "claude":
         cmd_claude(_argv[1:])
         return
+    if _argv and _argv[0] == "codex":
+        from scripts.codex_router import main as codex_main
+
+        _load_claude_runtime_env()
+        raise SystemExit(codex_main(_argv[1:]))
     if _argv and _argv[0] == "init-agent":
         from scripts.init_agent import main as terminal_main
 
@@ -6451,6 +6459,7 @@ def main() -> None:
     )
 
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
+    sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("run-in-terminal", help="Run a command in a new herdr tab or terminal")

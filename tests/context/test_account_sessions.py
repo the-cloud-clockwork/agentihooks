@@ -95,3 +95,17 @@ def test_live_codex_sessions_count_interactive_codex_only(tmp_path):
     _proc(root, 203, "codex", 1, ["codex", "exec", "summarize"], {})
     _proc(root, 204, "codex", 1, ["codex", "--yolo"], {})
     assert acc.live_codex_sessions(root) == 2
+
+
+def test_codex_sessions_count_per_codex_account(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 300, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "cx-a", "CODEX_ACCESS_TOKEN": "cx-a"})
+    _proc(root, 301, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "cx-a"})
+    _proc(root, 302, "codex", 1, ["codex"], {"AH_CC_TOKEN_ncgma": "cc"})
+    _proc(root, 303, "codex", 1, ["codex"], {"AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_beta": "cx-b"})
+    _proc(root, 304, "codex", 1, ["codex", "exec", "x"], {"AH_CX_TOKEN_beta": "cx-b"})
+    _proc(root, 305, "claude", 1, ["claude"], {"AH_CC_TOKEN_alpha": "cc"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 2}
+    assert acc.session_account(300, root) == "alpha"
+    assert acc.session_account(302, root) == "default"
+    assert acc.session_account(305, root) == "alpha"
