@@ -390,7 +390,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
   <section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="tasks"></ol></details></section>
   <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
-  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span></summary><div id="notes"></div></details></section>
+  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><div id="notes"></div></details></section>
   <section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers <span class="count" id="followups-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
   </div>
   <aside class="side">
@@ -503,7 +503,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       return item;
     });
     return {
-      title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes: entries(d.notes), chat: entries(d.chat),
+      title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes: entries(d.notes).map((n) => ({ ...n, comments: entries(n.comments) })), chat: entries(d.chat),
       sources: Array.isArray(d.sources) ? d.sources : [],
       time_left_minutes: Number.isInteger(d.time_left_minutes) && d.time_left_minutes >= 0 ? d.time_left_minutes : null,
       closed_at: Number.isInteger(d.closed_at) ? d.closed_at : null,
@@ -721,7 +721,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       } } }));
     const head = h("div", { class: "entry-head" }, h("span", { class: "who", text: mine ? "You" : entry.by === "earlier" ? "earlier notes" : entry.by }),
       h("span", { text: when(entry.at) }), entry.edited_at ? h("span", { text: "edited" }) : null, entry.sending ? h("span", { text: "sending" }) : null, actions);
-    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }), attachmentsView(entry.attachments));
+    return h("div", { class: "entry" + (mine ? " mine" : "") + (entry.sending ? " sending" : ""), id: path === "notes" ? `item-notes-${entry.id}` : false }, head, h("div", { class: "entry-body", text: entry.text }), attachmentsView(entry.attachments),
+      path === "notes" ? commentsView(`notes/${entry.id}`, entry.comments || []) : null);
   }
 
   function threadView(path, list, cls) {
@@ -925,7 +926,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     };
     for (const e of meta.events || []) note(e.by, e.at);
     for (const m of meta.crew || []) note(m.name, m.last_seen);
-    const threads = [doc.notes, doc.chat];
+    const threads = [doc.notes, doc.chat, ...doc.notes.map((n) => n.comments)];
     for (const list of ["phases", "questions", "followups", "tasks"]) for (const i of doc[list]) threads.push(i.comments, i.answers || []);
     for (const t of threads) for (const e of t) note(e.by, e.at);
     return seen;

@@ -11,6 +11,10 @@ DOC = {
     "overview": "o",
     "phases": [{"id": f"p{n}", "title": f"phase {n}", "done": False, "comments": [COMMENT]} for n in range(3)],
     "followups": [{"id": "f1", "text": "rotate the key", "done": False, "comments": [COMMENT]}],
+    "notes": [
+        {"id": "n1", "by": "operator", "at": 1, "text": "Keep replies here", "comments": [COMMENT]},
+        {"id": "n2", "by": "operator", "at": 2, "text": "An older note"},
+    ],
 }
 SECTIONS = ("sec-phases", "sec-tasks", "sec-questions", "sec-followups")
 BLOCKED_STORAGE = (
@@ -70,6 +74,33 @@ def test_every_comment_section_shows_one_control_and_the_outline_one(tab):
     for section in SECTIONS:
         assert len(comments(tab, section)["labels"]) == 1, section
     assert len(outline(tab)["labels"]) == 1
+
+
+def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab):
+    note = tab.locator("#item-notes-n1")
+    assert note.locator(".entry-body").all_text_contents() == ["Keep replies here", COMMENT["text"]]
+    assert tab.locator("#item-notes-n2 details[data-key]").count() == 1
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [True, False]}
+    tab.click("#sec-notes button[data-comments]")
+    settle(tab)
+    assert comments(tab, "sec-notes") == {"labels": ["Hide all comments"], "open": [True, True]}
+    tab.click("#sec-notes button[data-comments]")
+    settle(tab)
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
+    tab.reload()
+    settle(tab)
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
+    tab.click("#sec-notes button[data-comments]")
+    settle(tab)
+    assert comments(tab, "sec-notes") == {"labels": ["Hide all comments"], "open": [True, True]}
+
+
+def test_newly_added_note_immediately_has_a_comments_dropdown(tab):
+    tab.locator("#notes > .thread > button.add").click()
+    tab.locator("#notes textarea").fill("Another operator note")
+    tab.locator("#notes textarea").press("Enter")
+    assert tab.locator("#notes .entry-body", has_text="Another operator note").count() == 1
+    assert tab.locator("#notes details[data-key]").count() == 3
 
 
 def test_comment_control_label_flips_with_state_and_survives_a_reload(tab):

@@ -47,6 +47,8 @@ def line(event, rules=""):
     head = f"{event['by'].upper() if event['by'] == 'operator' else event['by']} rev={event['rev']} {event['kind']}{where.rstrip()}"
     if "id" in event:
         head += f" [{event['id']}]"
+    if "note_text" in event:
+        head += f" | Note: {json.dumps(event['note_text'], ensure_ascii=False)}"
     images = ""
     if event.get("image_paths"):
         images = (
