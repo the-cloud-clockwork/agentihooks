@@ -138,6 +138,20 @@ def test_init_swarm_queues_all_template_tasks_and_starts_last(runner):
     assert "localhost" in (repo / "plan.md").read_text()
 
 
+def test_init_swarm_task_additions_pass_the_ledger_cli_identity_check(runner):
+    from scripts.swarm_ledger.ledger import build_parser
+
+    module, calls = runner
+    repo = module.HOME / "doctor-demo-app"
+    repo.mkdir()
+    module.init_swarm(repo)
+    additions = [c[2:] for c in calls if c[:2] == ("agentihooks", "ledger") and "task" in c]
+    assert additions
+    for argv in additions:
+        args = build_parser().parse_args(argv)
+        assert args.slug and args.name
+
+
 def test_demo_reset_really_pushes_clean_seed_on_existing_dev(runner, monkeypatch, tmp_path):
     import subprocess
 
