@@ -4,8 +4,9 @@ agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
-agentihooks swarm <id> snapshot | restore                         save the swarm's state to its folder (stop does too); restore it paused
+agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
+agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
 agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
@@ -30,6 +31,7 @@ import sys
 import time
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.inbox import wake
@@ -51,6 +53,7 @@ SETTABLE = {
     "compact-limit": "compact_limit",
     "codex-share": "codex_share",
     "codex-min-week-left": "codex_min_week_left",
+    "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 TICK_LOCK_MS = 10 * 60 * 1000
@@ -75,7 +78,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         window = wake.window_ms(os.environ)
-        return actions + wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
+        actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
+        taken = snapshot.auto(store, slug, now_ms(), os.environ)
+        return actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
@@ -191,6 +196,7 @@ def cmd_set(store, args):
                 "autonomy": config.autonomy,
                 "codex_share": config.codex_share,
                 "codex_min_week_left": config.codex_min_week_left,
+                "snapshot_minutes": config.snapshot_minutes,
                 "lanes": config.lanes,
             }
         )
@@ -228,10 +234,12 @@ def cmd_snapshot(store, args):
 
 
 def cmd_restore(store, args):
-    finished = snapshot.restore(store, args.slug, HerdrRuntime().live_names())
+    source = Path(args.source).expanduser() if args.source else snapshot.newest(args.slug)
+    finished = snapshot.restore(store, args.slug, HerdrRuntime().live_names(), source)
     for action in run_tick(store, args.slug):
         print(action)
-    print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "finished": finished}))
+    state = store.config(args.slug).state
+    print(json.dumps({"swarm": args.slug, "state": state, "snapshot": str(source), "finished": finished}))
 
 
 def _share(store, config):
@@ -241,6 +249,22 @@ def _share(store, config):
     return (
         f"codex {codex}/{total} spawns {codex * 100 // total if total else 0}%  target {share}%  min week left {floor}%"
     )
+
+
+def _auto_snapshot(config):
+    return {
+        "last": snapshot.last_auto(config.slug),
+        "kept": len(snapshot.automatic(config.slug)),
+        "every_minutes": snapshot.interval_minutes(config, os.environ),
+    }
+
+
+def _snapshot_line(auto):
+    every = f"every {auto['every_minutes']} min" if auto["every_minutes"] > 0 else "automatic snapshots off"
+    if auto["last"] is None:
+        return f"snapshots  no automatic snapshot yet  {every}"
+    taken = datetime.fromtimestamp(auto["last"] / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return f"snapshots  last automatic snapshot {taken}  {every}  kept {auto['kept']}"
 
 
 def cmd_status(store, args):
@@ -276,6 +300,7 @@ def cmd_status(store, args):
                     "tasks": counts,
                     "spawns": store.spawns(args.slug),
                     "findings": found,
+                    "auto_snapshot": _auto_snapshot(config),
                 }
             )
         )
@@ -284,6 +309,7 @@ def cmd_status(store, args):
         f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}  {_share(store, config)}"
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
+    print(_snapshot_line(_auto_snapshot(config)))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(
@@ -472,8 +498,9 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
-    for plain in ("start", "pause", "remove", "snapshot", "restore"):
+    for plain in ("start", "pause", "remove", "snapshot"):
         sub.add_parser(plain)
+    sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
