@@ -2371,3 +2371,31 @@ class TestInstallGlobalHonoursTarget:
         state = json.loads(install.STATE_JSON.read_text())
         assert state["targets"]["global"]["codex"]["profile"] == "tiny"
         assert "claude" not in state["targets"]["global"]
+
+
+class TestAgentienvMalformedNames:
+    def test_agentienv_warns_with_file_and_line_only(self, tmp_path):
+        import os
+        import subprocess
+
+        fake_name, fake_value = "fake-leaked-name-0000", "fake-value-0000"
+        bashrc = tmp_path / ".bashrc"
+        env_file = tmp_path / ".agentihooks" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text("GOOD_NAME_0000=ok\n")
+        extra = env_file.parent / "extra.env"
+        extra.write_text(f"# note\n\nexport {fake_name}={fake_value}\n")
+
+        with patch.object(install, "_BASHRC", bashrc), patch.object(install, "_ENV_FILE_DST", env_file):
+            install._update_bashrc_block()
+
+        r = subprocess.run(
+            ["bash", "-c", f'. "{bashrc}"; echo "good=$GOOD_NAME_0000"'],
+            env={"HOME": str(tmp_path), "PATH": os.environ.get("PATH", "")},
+            capture_output=True,
+            text=True,
+        )
+        assert "good=ok" in r.stdout
+        assert f"{extra} line 3" in r.stderr
+        assert str(env_file) not in r.stderr
+        assert fake_name not in r.stdout + r.stderr and fake_value not in r.stdout + r.stderr
