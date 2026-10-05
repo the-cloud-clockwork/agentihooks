@@ -77,3 +77,10 @@ def test_the_issue_step_applies_only_where_the_repo_has_issues(kind):
     assert "hasIssuesEnabled" in text
     assert "the ledger task is the spec" in text
     assert "1. Open a GitHub issue" not in text
+
+
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_a_ci_agent_proposes_a_further_bottleneck_as_a_follow_up_and_never_queues_a_task(kind):
+    text = prompt.build("sw", "/repo", "ci", "sw-ci-1", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
+    assert "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as sw-ci-1 followup add" in text
+    assert "task add" not in text
