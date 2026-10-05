@@ -315,6 +315,18 @@ class TestSessionRegistry:
         assert sessions["engineer"]["model"] == "gpt-6.1-sol"
         assert sessions["engineer"]["account"] == "default"
 
+    def test_a_named_session_keeps_its_name_across_registrations(self, broadcast_dir):
+        from hooks.context.broadcast import name_session, register_session, session_name
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            register_session("sess-b", pid=5151, cwd="/tmp", model="opus")
+            assert name_session(4242, "sw-master-1") == 1
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            assert (session_name(4242), session_name(5151)) == ("sw-master-1", "")
+            assert name_session(7777, "nobody") == 0
+
     def test_handed_off_session_is_marked_and_reported(self, broadcast_dir):
         from hooks.context.broadcast import mark_handed_off, register_session, session_status
 

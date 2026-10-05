@@ -2260,22 +2260,37 @@ def _remove_bashrc_block() -> bool:
     return True
 
 
+_AGENTIENV_CHECK = (
+    "_agentienv_check() {\n"
+    '  awk -v f="$1" \'/^[ \\t]*(#|$)/ {next}'
+    ' {l = $0; sub(/^[ \\t]*(export[ \\t]+)?/, "", l); i = index(l, "=")}'
+    " i && substr(l, 1, i - 1) !~ /^[A-Za-z_][A-Za-z0-9_]*[ \\t]*$/"
+    ' {print "[agentienv] WARNING: " f " line " NR ": variable name is not a valid identifier" > "/dev/stderr"}\''
+    ' "$1"\n'
+    "}\n"
+)
+
+
 def _update_bashrc_block() -> None:
     """Remove old block then append fresh one at the end of ~/.bashrc."""
     env_file = _ENV_FILE_DST
     env_dir = env_file.parent
     block = (
         f"{_BLOCK_START}\n"
+        f"{_AGENTIENV_CHECK}"
         f"agentienv() {{\n"
         f"  local _c=0\n"
         f"  set -a\n"
         f'  if [[ -f "{env_file}" ]]; then\n'
+        f'    _agentienv_check "{env_file}"\n'
         f'    . "{env_file}" 2>/dev/null && _c=$((_c + 1))\n'
         f'    for f in "{env_dir}"/*.env; do\n'
-        f'      [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{ . "$f" 2>/dev/null && _c=$((_c + 1)); }}\n'
+        f'      [[ -f "$f" ]] && [[ "$f" != "{env_file}" ]] && {{\n'
+        f'        _agentienv_check "$f"; . "$f" 2>/dev/null && _c=$((_c + 1)); }}\n'
         f"    done\n"
         f"  fi\n"
         f'  if [[ -f "$HOME/.env" ]]; then\n'
+        f'    _agentienv_check "$HOME/.env"\n'
         f'    . "$HOME/.env" 2>/dev/null && _c=$((_c + 1))\n'
         f"  fi\n"
         f"  set +a\n"

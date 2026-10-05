@@ -37,6 +37,7 @@ class Placed:
     account: str = ""
     model: str = ""
     effort: str = ""
+    placement: str = ""
 
 
 class Ledger(Protocol):
@@ -220,7 +221,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 ledger.update_task(slug, task["id"], fields)
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
-                placed = runtime.spawn(config, lane, name, _primed(store, slug, seat, task), spawns=store.spawns(slug))
+                placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
             except Exception as exc:
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
@@ -231,7 +232,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
     return actions
 
 
-def _primed(store, slug, seat, task):
+def primed(store, slug, seat, task):
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     return {**task, "seat": seat, "culture": store.culture.get(slug), **memory}
 
@@ -250,6 +251,7 @@ def _placed(record, placed):
         account=placed.account,
         model=placed.model,
         effort=placed.effort,
+        placement=placed.placement,
         state="working",
     )
 
@@ -274,7 +276,7 @@ def _master(slug, config, store, runtime, now_ms):
             config,
             MASTER,
             name,
-            _primed(store, slug, record.seat, {"id": MASTER, "handoff": store.handoff(slug, MASTER)}),
+            primed(store, slug, record.seat, {"id": MASTER, "handoff": store.handoff(slug, MASTER)}),
         )
     except Exception as exc:
         store.drop_agent(slug, name)

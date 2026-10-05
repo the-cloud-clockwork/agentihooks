@@ -103,3 +103,23 @@ class TestSecretsMode:
     def test_secrets_mode_strips_whitespace(self, tmp_path):
         """SECRETS_MODE strips surrounding whitespace."""
         assert self._reload_with_mode(tmp_path, "  warn  ") == "warn"
+
+
+class TestMalformedEnvNames:
+    """A line whose name is not a valid identifier is reported by file and line, never by content."""
+
+    FAKE_NAME = "fake-leaked-name-0000"
+    FAKE_VALUE = "fake-value-0000"
+
+    def test_loader_warns_with_file_and_line_and_skips_the_line(self, tmp_path, capsys):
+        from hooks.config import _parse_env_file
+
+        env_file = tmp_path / "x.env"
+        env_file.write_text(f"GOOD_NAME_0000=ok\n# note\n{self.FAKE_NAME}={self.FAKE_VALUE}\n")
+        with patch.dict(os.environ, {}, clear=False):
+            _parse_env_file(env_file)
+            assert os.environ.get(self.FAKE_NAME) is None
+            assert os.environ.get("GOOD_NAME_0000") == "ok"
+        err = capsys.readouterr().err
+        assert f"{env_file} line 3" in err
+        assert self.FAKE_NAME not in err and self.FAKE_VALUE not in err

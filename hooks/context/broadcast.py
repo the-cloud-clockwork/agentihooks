@@ -765,7 +765,9 @@ def register_session(
         # age to reflect the true session start, not the last event).
         existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
+        named = {"name": existing["name"]} if existing and existing.get("name") else {}
         sessions[session_id] = {
+            **named,
             "started_at": started_at,
             "last_seen": now,
             "status": "alive",
@@ -784,6 +786,29 @@ def deregister_session(session_id: str) -> None:
         sessions = _load_sessions()
         sessions.pop(session_id, None)
         _save_sessions(sessions)
+
+
+def name_session(pid: int, name: str) -> int:
+    """Give every live session of ``pid`` an agent name; returns how many records carry it."""
+    with _file_lock(_sessions_path()):
+        sessions = _load_sessions()
+        live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
+        for info in live:
+            info["name"] = name
+        if live:
+            _save_sessions(sessions)
+    return len(live)
+
+
+def session_name(pid: int) -> str:
+    return next(
+        (
+            str(info["name"])
+            for info in _load_sessions().values()
+            if info.get("pid") == pid and info.get("status") == "alive" and info.get("name")
+        ),
+        "",
+    )
 
 
 def mark_handed_off(pid: int, target_account: str) -> list[str]:
