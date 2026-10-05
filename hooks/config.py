@@ -790,3 +790,4 @@ def langfuse_route(environ) -> tuple[str, str]:
 OTEL_LANGFUSE_ENDPOINT, OTEL_LANGFUSE_HOST_HEADER = langfuse_route(os.environ)
 OTEL_LANGFUSE_PUBLIC_KEY = os.getenv("OTEL_LANGFUSE_PUBLIC_KEY", "") or os.getenv("LANGFUSE_PUBLIC_KEY", "")
 OTEL_LANGFUSE_SECRET_KEY = os.getenv("OTEL_LANGFUSE_SECRET_KEY", "") or os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_FIELD_MAX_CHARS = int(os.getenv("AGENTIHOOKS_LANGFUSE_FIELD_MAX_CHARS", "32000"))
