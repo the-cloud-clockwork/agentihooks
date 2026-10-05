@@ -74,7 +74,15 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short
+        run: |
+          export DIAG_T0=$(date +%s.%N) PYTHONPATH=.github/diag
+          python -c 'import os,time;print("python-start", round(time.time()-float(os.environ["DIAG_T0"]),3))'
+          export DIAG_T0=$(date +%s.%N)
+          python -X importtime -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short -p diag_plugin 2> diag.txt
+
+      - name: Diag summary
+        if: always() && steps.lookup.outputs.skip != 'true'
+        run: python .github/diag/summary.py diag.txt
 
   lint:
     runs-on: ubuntu-latest
