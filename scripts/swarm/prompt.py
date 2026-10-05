@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from scripts.doctor import priming
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
@@ -61,6 +62,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
         *peer_lines(task.get("peer", "")),
+        *priming.master_lines(slug, task.get("peer", "")),
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
         '--phase <phase id> --description "<seams and done condition>". Rewrite a task description with '
         f'{led} task set <id> description="<text>".',

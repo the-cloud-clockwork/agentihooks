@@ -80,6 +80,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     ledger = ledger or LedgerClient()
     try:
         actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        if store.config(slug).template == "doctor":
+            from scripts.doctor import cli as doctor
+
+            actions += doctor.timer(store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
         inbox = InboxStore(store.redis)
         delivery.migrate_outbox(store, slug, inbox)
