@@ -2399,3 +2399,46 @@ class TestAgentienvMalformedNames:
         assert f"{extra} line 3" in r.stderr
         assert str(env_file) not in r.stderr
         assert fake_name not in r.stdout + r.stderr and fake_value not in r.stdout + r.stderr
+
+
+class TestAgentienvMultilineValues:
+    FAKE_FIRST, FAKE_REST = "fake-first-line-0000", "fake-rest=line-0000"
+
+    def _source(self, tmp_path, extra_text, inherited=None):
+        import os
+        import subprocess
+
+        bashrc = tmp_path / ".bashrc"
+        env_file = tmp_path / ".agentihooks" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text("GOOD_NAME_0001=ok\n")
+        (env_file.parent / "extra.env").write_text(extra_text)
+
+        with patch.object(install, "_BASHRC", bashrc), patch.object(install, "_ENV_FILE_DST", env_file):
+            install._update_bashrc_block()
+
+        return subprocess.run(
+            ["bash", "-c", f'. "{bashrc}"; echo "good=$GOOD_NAME_0001 single=$SINGLE_0001"'],
+            env={"HOME": str(tmp_path), "PATH": os.environ.get("PATH", ""), **(inherited or {})},
+            capture_output=True,
+            text=True,
+        )
+
+    def test_agentienv_names_a_multiline_file_value_only(self, tmp_path):
+        r = self._source(
+            tmp_path, f"# note\nexport FAKE_MULTI_0001='{self.FAKE_FIRST}\n{self.FAKE_REST}'\nSINGLE_0001=\"a b\"\n"
+        )
+        assert "good=ok single=a b" in r.stdout
+        assert "several lines" in r.stderr and "FAKE_MULTI_0001" in r.stderr
+        assert "SINGLE_0001" not in r.stderr
+        assert "not a valid identifier" not in r.stderr
+        assert self.FAKE_FIRST not in r.stdout + r.stderr and self.FAKE_REST not in r.stdout + r.stderr
+
+    def test_agentienv_names_a_multiline_value_inherited_from_the_shell(self, tmp_path):
+        r = self._source(tmp_path, "SINGLE_0001=x\n", {"FAKE_INHERITED_0001": self.FAKE_FIRST + "\n" + self.FAKE_REST})
+        assert "FAKE_INHERITED_0001" in r.stderr
+        assert self.FAKE_FIRST not in r.stdout + r.stderr and self.FAKE_REST not in r.stdout + r.stderr
+
+    def test_agentienv_is_quiet_without_multiline_values(self, tmp_path):
+        r = self._source(tmp_path, "SINGLE_0001=x\n")
+        assert r.stderr == ""
