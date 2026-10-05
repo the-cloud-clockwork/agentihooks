@@ -441,3 +441,26 @@ def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({"m1": "working"}))
     assert ("two tasks left", "sw-master-1") in ledger.said
     assert box.get(item.id).state == "done" and box.get(answer.id).state == "done"
+
+
+def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_zero(env, monkeypatch, tmp_path):
+    store, _, _ = env
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    run("other", "create", "--repo", "/repo")
+    for slug in ("sw", "other"):
+        cli.activity.record("Monitor", {}, {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_AGENT_NAME": f"{slug}-eng-1"})
+        store.next_name(slug, "eng")
+    assert run("missing", "remove") == 1
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1"))
+    assert run("sw", "remove") == 1
+    assert store.slugs() == ["other", "sw"]
+    store.drop_agent("sw", "sw-eng-1")
+    assert run("sw", "remove") == 0
+    assert store.slugs() == ["other"]
+    assert cli.activity.counts("sw") == {}
+    assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0}}
+    run("sw", "create", "--repo", "/repo")
+    assert cli.activity.counts("sw") == {}
+    assert store.next_name("sw", "eng") == "sw-eng-1"
+    assert store.next_name("other", "eng") == "other-eng-2"

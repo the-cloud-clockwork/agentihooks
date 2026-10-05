@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -67,3 +68,7 @@ def counts(slug, root=None):
                 tally[kind] += 1
         found[path.stem] = tally
     return found
+
+
+def clear(slug, root=None):
+    shutil.rmtree(Path(root or default_root()) / slug, ignore_errors=True)
