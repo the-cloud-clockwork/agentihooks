@@ -101,6 +101,20 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   keep the ledger's own red and blue. Layout follows design system 2026-001 and
   the `ui-doctrine` skill.
 
+## Messages between sessions
+
+A durable inbox in Redis: an item waits under its address until it is closed and
+outlives both sessions. The sender is this session (`AGENTIHOOKS_AGENT_NAME`,
+else the Claude session id), never an argument. An address is a session name;
+seats (`name@slug`) arrive later. Every state change is kept in the item's history.
+
+| Trigger | Action |
+|---|---|
+| Hand another session work or a question | `agentihooks msg send <address> <text>` |
+| See what waits for this session | `agentihooks msg inbox` |
+| Take up an item | `agentihooks msg read <id>` |
+| The work is finished, moved or stuck | `agentihooks msg close <id> done\|handoff <address>\|blocked <what>\|cancel [why]`; a close always names where the work went |
+
 ## Conditions
 
 A condition is an operator-authored script that runs on every tool call its
