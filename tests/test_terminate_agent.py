@@ -217,6 +217,19 @@ def test_a_codex_session_lists_under_its_main_thread_not_its_memory_helper(tmp_p
     assert resolve(found, "m5-codex", "codex").process.pgid == 300
 
 
+def test_a_codex_memory_helper_without_a_main_thread_record_lists_as_itself(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    memories = tmp_path / "codex" / "memories"
+    registry = _codex_registry(memories)
+    del registry["main-thread"]
+    item = process(300, comm="codex", argv=("/bin/codex",))
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.cwd) for s in found] == [("memory-helper", str(memories))]
+
+
 def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     from scripts.terminate_agent import sessions
 

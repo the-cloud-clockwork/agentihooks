@@ -7,8 +7,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from hooks.context.inbox_delivery import _is_codex_memory_thread
 from hooks.proc import Process, _process, _target, processes
+from hooks.targets import is_codex_memory_thread
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
 
 def _main_thread(target: str, session_id: str, info: dict, records: dict[str, dict]) -> tuple[str, str]:
     cwd = str(info.get("cwd", ""))
-    if target != "codex" or not cwd or not _is_codex_memory_thread(cwd):
+    if target != "codex" or not cwd or not is_codex_memory_thread(cwd):
         return session_id, cwd
     threads = [
         (str(other.get("started_at", "")), other_id, str(other["cwd"]))
@@ -55,7 +55,7 @@ def _main_thread(target: str, session_id: str, info: dict, records: dict[str, di
         if other.get("pid") == info.get("pid")
         and other.get("status") in {"alive", "handed_off", "superseded"}
         and other.get("cwd")
-        and not _is_codex_memory_thread(str(other["cwd"]))
+        and not is_codex_memory_thread(str(other["cwd"]))
     ]
     if not threads:
         return session_id, cwd

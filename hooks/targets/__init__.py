@@ -32,6 +32,11 @@ def codex_home() -> Path:
     return Path(raw).expanduser() if raw else Path.home() / ".codex"
 
 
+def is_codex_memory_thread(cwd: str) -> bool:
+    # Codex runs its memory consolidation thread in CODEX_HOME/memories under the parent's environment.
+    return Path(cwd).resolve().is_relative_to((codex_home() / "memories").resolve())
+
+
 def copilot_home() -> Path:
     raw = (os.environ.get("COPILOT_HOME") or "").split(",")[0].strip()
     return Path(raw).expanduser() if raw else Path.home() / ".copilot"
