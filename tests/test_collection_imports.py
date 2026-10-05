@@ -44,7 +44,7 @@ def loads_heavy(name: str, seen: set[str]) -> bool:
     return path is not None and any(loads_heavy(dep, seen) for dep in parents | _module_level_imports(path))
 
 
-def test_the_check_follows_a_package_init_to_the_sdk(monkeypatch):
+def test_the_check_follows_a_package_init_to_a_heavy_module(monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "HEAVY", "importlib")
     assert loads_heavy("hooks.mcp._session", set())
     assert not loads_heavy("hooks.common", set())
