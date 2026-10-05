@@ -1,4 +1,5 @@
 import ast
+import sys
 from functools import cache
 from pathlib import Path
 
@@ -43,9 +44,15 @@ def loads_heavy(name: str, seen: set[str]) -> bool:
     return path is not None and any(loads_heavy(dep, seen) for dep in parents | _module_level_imports(path))
 
 
-def test_the_check_follows_a_package_init_to_the_sdk():
+def test_the_check_follows_a_package_init_to_the_sdk(monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "HEAVY", "importlib")
     assert loads_heavy("hooks.mcp._session", set())
     assert not loads_heavy("hooks.common", set())
+
+
+def test_the_mcp_tables_load_without_the_sdk():
+    assert not loads_heavy("hooks.mcp._session", set())
+    assert not loads_heavy("hooks.mcp._registry", set())
 
 
 def test_no_test_module_loads_the_mcp_sdk_while_collecting():
