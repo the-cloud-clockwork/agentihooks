@@ -33,6 +33,20 @@ def test_send_then_inbox_shows_a_pending_item_from_the_session(store, monkeypatc
     assert store.get(sent["id"]).text == "review my branch"
 
 
+def test_a_reply_to_the_operator_with_a_clock_time_is_refused_at_send(store, capsys):
+    asked = store.send("operator", "alice", "is the fix merged")
+    assert run("reply", asked.id, "merged", "at", "18:45") == 1
+    assert "clock time '18:45'" in capsys.readouterr().err
+    assert store.get(asked.id).state == "pending" and store.inbox("operator") == []
+    assert run("reply", asked.id, "merged", "and", "deployed") == 0
+    assert [i.text for i in store.inbox("operator")] == ["merged and deployed"]
+
+
+def test_a_message_sent_to_the_operator_with_a_clock_time_is_refused_at_send(store, capsys):
+    assert run("send", "operator", "done", "at", "18:45") == 1
+    assert "clock time" in capsys.readouterr().err and store.inbox("operator") == []
+
+
 @pytest.mark.parametrize(
     "argv",
     [

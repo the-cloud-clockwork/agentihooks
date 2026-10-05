@@ -19,6 +19,9 @@ from dataclasses import asdict
 
 from scripts.inbox import links
 from scripts.inbox.store import InboxError, connect
+from scripts.swarm_ledger import ledger_comments
+
+OPERATOR = "operator"
 
 FYI = "--fyi"
 
@@ -38,6 +41,16 @@ def registered_name():
     return session_name(agent_pid())
 
 
+def check_for_operator(address, text):
+    """A message to the operator is shown in the ledger page chat, so it must pass the chat word rules now."""
+    if address != OPERATOR:
+        return
+    try:
+        ledger_comments.check(text, "chat")
+    except ValueError as exc:
+        raise InboxError(str(exc)) from exc
+
+
 def informational(words):
     return (True, words[1:]) if words[:1] == [FYI] else (False, words)
 
@@ -45,6 +58,7 @@ def informational(words):
 def cmd_send(store, me, args):
     links.check_send(store, me, args.address)
     fyi, words = informational(args.text)
+    check_for_operator(args.address, " ".join(words))
     item = store.send(me, args.address, " ".join(words), fyi=fyi)
     print(json.dumps({"id": item.id, "from": item.sender, "to": item.address, "state": item.state}))
 
@@ -63,6 +77,7 @@ def cmd_read(store, me, args):
 
 def cmd_reply(store, me, args):
     fyi, words = informational(args.text)
+    check_for_operator(store.get(args.id).sender, " ".join(words))
     answer = store.reply(args.id, me, " ".join(words), fyi=fyi)
     print(json.dumps({"id": answer.id, "to": answer.address, "closed": args.id}))
 

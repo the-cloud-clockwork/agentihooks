@@ -89,6 +89,28 @@ def test_items_for_the_operator_from_swarm_agents_are_shown_on_the_page_and_clos
     assert delivery.relay_to_page(box, "sw", agents, ledger) == 0
 
 
+def test_a_refused_page_post_closes_that_item_alone_and_tells_its_sender(store):
+    from scripts.swarm.store import SwarmError
+
+    class StrictLedger(PageLedger):
+        def say(self, slug, text, by=None):
+            if "18:45" in text:
+                raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
+            super().say(slug, text, by)
+
+    box = InboxStore(store.redis)
+    refused = box.send("sw-eng-1", "operator", "the job finished at 18:45")
+    shown = box.send("sw-eng-2", "operator", "the docs are merged")
+    ledger = StrictLedger()
+    assert delivery.relay_to_page(box, "sw", store.agents("sw"), ledger) == 1
+    assert ledger.said == [("the docs are merged", "sw-eng-2")]
+    closed = box.get(refused.id)
+    assert closed.state == "cancelled" and "refused" in closed.reason and "clock time" in closed.reason
+    assert box.get(shown.id).state == "done"
+    [notice] = box.pending_items("sw-eng-1")
+    assert notice.sender == "swarm" and "clock time" in notice.text and refused.id in notice.text
+
+
 def test_messages_left_in_the_old_outbox_move_into_the_inbox(store):
     outbox = store.key("sw", "outbox")
     store.redis.rpush(outbox, json.dumps({"to": "sw-ci-1", "at": 5, "text": "[swarm chat] operator: rerun the job"}))

@@ -157,6 +157,27 @@ def test_the_operator_notification_is_text_the_ledger_accepts_whatever_the_messa
     assert ledger_comments.problems(text, "item") == [] and "sw-eng-1" in text
 
 
+def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(inbox):
+    from scripts.swarm.store import SwarmError
+
+    class StrictLedger(FakeLedger):
+        def followup(self, slug, text):
+            if "first" in text:
+                raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
+            super().followup(slug, text)
+
+    first = inbox.send("sw-eng-2", "sw-eng-1", "first message")
+    second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
+    herdr, ledger = FakeHerdr({"p1": "idle"}), StrictLedger()
+    t = sent_at(second)
+    for n in range(10):
+        run(inbox, herdr, ledger, t + n * W)
+    assert [text for _, text in ledger.followups if "second message" in text]
+    closed = inbox.get(first.id)
+    assert closed.state == "cancelled" and "refused" in closed.reason and "date" in closed.reason
+    assert any(first.id in i.text and "date" in i.text for i in inbox.pending_items("sw-eng-2"))
+
+
 def test_counts_survive_a_fresh_store_connection(server, inbox):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr = FakeHerdr({"p1": "idle"})
