@@ -42,8 +42,10 @@ def classify(tool_name, tool_input):
 def record(tool_name, tool_input, environ=None, root=None):
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
+    if not (NAME_RE.match(slug) and NAME_RE.match(name)):
+        return
     kind = classify(tool_name, tool_input)
-    if not (kind and NAME_RE.match(slug) and NAME_RE.match(name)):
+    if not kind:
         return
     folder = Path(root or default_root()) / slug
     folder.mkdir(parents=True, exist_ok=True)
@@ -57,7 +59,10 @@ def counts(slug, root=None):
     for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
         tally = {"watch": 0, "act": 0}
         for line in path.read_text(encoding="utf-8").splitlines():
-            kind = json.loads(line).get("kind") if line.strip() else None
+            try:
+                kind = json.loads(line).get("kind")
+            except ValueError:
+                continue
             if kind in tally:
                 tally[kind] += 1
         found[path.stem] = tally

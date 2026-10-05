@@ -56,3 +56,18 @@ def test_the_pre_tool_hook_records_a_bound_session(monkeypatch, tmp_path):
         {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "sleep 1"}, "cwd": "/"}
     )
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0}}
+
+
+def test_a_torn_line_is_skipped_and_the_rest_still_counts(tmp_path):
+    (tmp_path / "sw").mkdir()
+    (tmp_path / "sw" / "sw-eng-1.jsonl").write_text('{"kind": "watch"}\n{"kind": "wa\n{"kind": "act"}\n')
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 1}}
+
+
+def test_an_unbound_session_never_classifies(monkeypatch, tmp_path):
+    def boom(*_):
+        raise AssertionError("classified an unbound call")
+
+    monkeypatch.setattr(activity, "classify", boom)
+    activity.record("Bash", {"command": "sleep 1"}, {}, tmp_path)
+    assert activity.counts("sw", tmp_path) == {}
