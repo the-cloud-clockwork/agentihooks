@@ -41,7 +41,7 @@ from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
-from scripts.swarm.store import AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
+from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, tick
 from scripts.swarm_ledger import ledger_kinds
 
@@ -257,7 +257,12 @@ def cmd_status(store, args):
             activity.counts(args.slug),
             now_ms(),
             limits,
-            checks.waiting(rows, tasks, limits, checks.cached(store.redis, store.key(args.slug, "checks"))),
+            checks.waiting(
+                rows,
+                tasks,
+                limits,
+                checks.cached(store.redis, store.key(args.slug, "checks"), approval=config.autonomy == ASSIST),
+            ),
         ),
         now_ms(),
         limits.cooldown_minutes * 60_000,

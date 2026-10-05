@@ -525,8 +525,46 @@ def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
     ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
-    monkeypatch.setattr(cli.checks, "pending", lambda url, run=None: url.endswith("/7"))
+    monkeypatch.setattr(cli.checks, "pending", lambda url, run=None, approval=False: url.endswith("/7"))
     assert _findings(capsys) == []
+
+
+def test_status_skips_idle_only_when_green_checks_wait_for_operator_approval(env, capsys, monkeypatch, tmp_path):
+    from functools import partial
+
+    from tests.swarm.test_health_checks import PASSED, runner
+
+    _, ledger, _ = env
+    _idle_finding(env, monkeypatch, tmp_path)
+    ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
+    monkeypatch.setattr(cli.checks, "cached", partial(cli.checks.cached, run=runner(PASSED)))
+    for autonomy, expected in [
+        ("assist", []),
+        ("delegate", ["idle with claim"]),
+        ("full", ["idle with claim"]),
+        ("assist", []),
+    ]:
+        run("sw", "set", f"autonomy={autonomy}")
+        assert [f["kind"] for f in _findings(capsys)] == expected
+    run("sw", "set", "autonomy=manual")
+    ledger.rows["t1"].update(state="blocked")
+    assert _findings(capsys) == []
+
+
+@pytest.mark.parametrize(
+    "out, code", [("lint\tfail\t8s\thttps://x/1\n", 1), ("", 0), ("lint\tpass\t8s\thttps://x/1\n", 1)]
+)
+def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(env, capsys, monkeypatch, tmp_path, out, code):
+    from functools import partial
+
+    from tests.swarm.test_health_checks import runner
+
+    _, ledger, _ = env
+    _idle_finding(env, monkeypatch, tmp_path)
+    run("sw", "set", "autonomy=assist")
+    ledger.rows["t1"].update(state="pr", pr_url="https://github.com/o/r/pull/7")
+    monkeypatch.setattr(cli.checks, "cached", partial(cli.checks.cached, run=runner(out, code)))
+    assert [f["kind"] for f in _findings(capsys)] == ["idle with claim"]
 
 
 @pytest.fixture
