@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
 
+from scripts.doctor import priming
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -46,6 +47,7 @@ class Ledger(Protocol):
     def tasks(self, slug: str) -> list[dict]: ...
     def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm") -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
+    def closed(self, slug: str) -> bool: ...
 
 
 class Runtime(Protocol):
@@ -66,7 +68,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     rows = {t["id"]: t for t in ledger.tasks(slug)}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
     if config.state == "stopped":
-        if not InboxStore(store.redis).pending_items(seat_address(slug, MASTER)):
+        if not _woken(slug, config, store, ledger):
             return []
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
@@ -80,6 +82,15 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += _spawn(slug, config, store, ledger, runtime, rows, now_ms)
     _conversations(slug, store, runtime)
     return actions + _settle(slug, config, store, ledger, rows)
+
+
+def _woken(slug, config, store, ledger):
+    inbox = InboxStore(store.redis)
+    waiting = inbox.pending_items(seat_address(slug, MASTER))
+    if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
+        priming.cancel_master_items(inbox, slug)
+        return False
+    return bool(waiting)
 
 
 def _drop(slug, store, ledger, rows, agent):

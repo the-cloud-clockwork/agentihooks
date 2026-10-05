@@ -6,6 +6,8 @@ from scripts.swarm.health.verdicts import VERDICTS
 
 SUFFIX = "-doctor"
 SLUG_MAX = 48
+TEMPLATE = "doctor"
+CLOSED = "the Doctor is closed"
 
 
 def doctor_slug(slug):
@@ -13,6 +15,11 @@ def doctor_slug(slug):
         return slug + SUFFIX
     digest = hashlib.sha256(slug.encode()).hexdigest()[:6]
     return f"{slug[: SLUG_MAX - len(SUFFIX) - len(digest) - 1]}-{digest}{SUFFIX}"
+
+
+def cancel_master_items(inbox, doctor):
+    for item in inbox.pending_items(f"master@{doctor}"):
+        inbox.withdraw(item.id, "swarm", CLOSED)
 
 
 def master_lines(slug, peer):
