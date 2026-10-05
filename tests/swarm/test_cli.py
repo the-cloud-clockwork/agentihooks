@@ -669,6 +669,17 @@ def test_status_takes_the_codex_target_from_the_environment_without_a_swarm_sett
     assert "codex 0/0 spawns 0%  target 50%  min week left 5%" in capsys.readouterr().out.splitlines()[0]
 
 
+@pytest.mark.parametrize("setting, expected", [(None, 30), (50, 50), (0, 0)])
+def test_status_json_reports_the_effective_codex_target(env, capsys, monkeypatch, setting, expected):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_CODEX_SHARE", raising=False)
+    if setting is not None:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", str(setting))
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    run("sw", "status", "--json")
+    assert json.loads(capsys.readouterr().out)["config"]["codex_share"] == expected
+
+
 def test_set_refuses_a_codex_share_over_one_hundred(env):
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "codex-share=101") == 1

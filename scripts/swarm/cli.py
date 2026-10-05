@@ -271,7 +271,7 @@ def cmd_status(store, args):
         print(
             json.dumps(
                 {
-                    "config": config.__dict__,
+                    "config": {**config.__dict__, "codex_share": codex_split(config, os.environ)[0]},
                     "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
                     "tasks": counts,
                     "spawns": store.spawns(args.slug),
