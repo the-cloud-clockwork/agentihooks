@@ -22,6 +22,7 @@ AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding.
 import argparse
 import json
 import os
+import re
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -141,9 +142,27 @@ def cmd_start(store, args):
         swarm.cmd_start(store, Namespace(slug=doctor))
 
 
-def moved(task):
+def proof_numbers(task: dict) -> str:
+    workspace = task.get("workspace")
+    if not workspace:
+        return ""
+    try:
+        text = (Path(workspace) / "proof.md").read_text()
+    except OSError:
+        return ""
+    labels = r"^(?:[-*]\s*|\d{4}-\d{2}-\d{2}T\S+\s*)?(?:before|after|baseline)\b"
+    pair = r"\b(?:before|after)\s+\d|\b\d+(?:\.\d+)?\s+(?:before|after)\b"
+    return " ".join(
+        line.strip()
+        for line in text.splitlines()
+        if re.search(r"\d", line) and re.search(f"{labels}|{pair}", line.strip(), re.IGNORECASE)
+    )
+
+
+def moved(task: dict) -> str:
     proof, contract = task.get("proof") or {}, task.get("contract") or {}
-    return proof.get("output") or contract.get("must") or "no number recorded"
+    numbers = " ".join(part for part in (proof.get("output"), proof_numbers(task)) if part)
+    return numbers or contract.get("must") or "no number recorded"
 
 
 def fixes_note(tasks):
