@@ -954,6 +954,19 @@ def on_user_prompt_submit(payload: dict) -> None:
             log("broadcast user_prompt failed", {"error": str(e)})
 
     _inject_refocus(session_id, "prompt")
+    _inject_ledger_decision(payload)
+
+
+def _inject_ledger_decision(payload: dict) -> None:
+    try:
+        from hooks.common import inject_context
+        from hooks.context.ledger_decision import directive
+
+        context = directive(payload)
+        if context:
+            inject_context(context, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("ledger decision failed", {"error": str(e)})
 
 
 def _inbox_blocks(session_id: str, cwd: str = "") -> list[str]:
@@ -1671,6 +1684,8 @@ def on_post_tool_use(payload: dict) -> None:
             _inject_refocus(_trace_session_id, "tool")
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
+
+    _inject_ledger_decision(payload)
 
     # --- AskUserQuestion answers feed signal detection (CI Manifesto §9, §14, §15) ---
     if tool_name == "AskUserQuestion":
