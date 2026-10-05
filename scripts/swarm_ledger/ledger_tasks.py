@@ -22,6 +22,7 @@ UPDATABLE = (
     "contract",
     "proof",
     "workspace",
+    "awaiting",
 )
 LIST_FIELDS = ("depends_on", "territory")
 OBJECT_FIELDS = ("contract", "proof")

@@ -116,3 +116,22 @@ def test_only_a_full_master_queues_follow_ups_without_asking():
     for level in ("manual", "assist", "delegate"):
         assert "without asking the operator" not in build(level, MASTER)
     assert len({build(level) for level in AUTONOMY}) == 3
+
+
+@pytest.mark.parametrize(("level", "awaiting"), [("assist", "approval"), ("delegate", ""), ("manual", "")])
+def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(env, level, awaiting):  # noqa: F811
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "set", f"autonomy={level}")
+    run("sw", "start")
+    assert run("sw", "--as", "sw-eng-1", "pr", "https://github.com/o/r/pull/3") == 0
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["awaiting"]) == ("pr", awaiting)
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
+def test_every_prompt_says_to_raise_a_priority_when_waiting_on_the_operator(lane):
+    text = build(lane=lane)
+    led = f"agentihooks ledger --slug sw --as sw-{lane}-1"
+    assert "Whenever you wait on the operator" in text
+    assert f'{led} priority add <item> "<' in text
+    assert f'{led} followup add "<text>" --needs-operator' in text

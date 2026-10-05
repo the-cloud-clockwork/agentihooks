@@ -44,6 +44,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "types in this pane here.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
+        f"- {waiting_line(led)}",
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
         '--phase <phase id> --description "<seams and done condition>". Rewrite a task description with '
         f'{led} task set <id> description="<text>".',
@@ -113,6 +114,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
+        waiting_line(led),
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
@@ -131,6 +133,15 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def waiting_line(led):
+    return (
+        "Whenever you wait on the operator, raise it where he looks instead of only writing it in chat: "
+        f'{led} priority add <item> "<the ask in plain words>", where the item is phases/<id>, questions/<id>, '
+        f'followups/<id> or tasks/<id>, or {led} followup add "<text>" --needs-operator for a decision only he can '
+        "make. Unanswered questions, blocked tasks and merge approvals show in Priorities on their own."
+    )
 
 
 def priming_lines(task):

@@ -12,12 +12,16 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   comment ITEM TEXT                   your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
+  followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
+  followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
   delete chat|ITEM ENTRY...           delete entries (yours; the orchestrator: any agent's)
   audit                               list every agent text the filter refuses, the cleanup worklist
-  priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words
+  priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
+                                      be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
+                                      questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
@@ -162,7 +166,15 @@ def with_status(args, **fields):
 
 def cmd_followup(args):
     if args.action == "add":
-        send(args, "add_item", list="followups", text=args.value)
+        send(
+            args,
+            "add_item",
+            list="followups",
+            text=args.value,
+            **({"needs_operator": True} if args.needs_operator else {}),
+        )
+    elif args.action in ("flag", "unflag"):
+        send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")
     else:
         send(args, "set", **with_status(args, path=f"followups/{args.value}/done", value=args.action == "done"))
     print(json.dumps({"followup": args.action}))
@@ -315,9 +327,10 @@ def build_parser():
     phase.add_argument("state", choices=["done", "open"])
     phase.add_argument("--status")
     followup = sub.add_parser("followup")
-    followup.add_argument("action", choices=["add", "done", "open"])
+    followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
     followup.add_argument("--status")
+    followup.add_argument("--needs-operator", action="store_true")
     scope = sub.add_parser("scope")
     scope.add_argument("item")
     scope.add_argument("state", choices=["in", "out"])

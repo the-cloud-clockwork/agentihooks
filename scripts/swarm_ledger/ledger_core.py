@@ -653,6 +653,7 @@ def sync(slug, changes=None, ops=None):
         import ledger_media
 
         ledger_media.attach_paths(slug, doc, ctx.events)
+        ledger_priorities.derive(doc, ctx)
         ledger_notifications.derive(doc, ctx)
         del doc["chat"][:-CHAT_KEPT]
         found = warnings(doc) + ctx.refused

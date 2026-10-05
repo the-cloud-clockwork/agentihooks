@@ -945,6 +945,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const el = document.getElementById(`item-${item.replace("/", "-")}`);
     if (!el) return;
     ev.preventDefault();
+    reveal(el);
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.remove("flash");
     void el.offsetWidth;

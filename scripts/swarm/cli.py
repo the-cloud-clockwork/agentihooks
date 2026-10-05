@@ -372,7 +372,9 @@ def cmd_issue(store, args):
 
 def cmd_pr(store, args):
     agent = _worker(store, args)
-    LedgerClient().update_task(args.slug, agent.task, {"pr_url": args.url, "state": "pr"}, by=agent.name)
+    awaiting = "approval" if store.config(args.slug).autonomy == ASSIST else ""
+    fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting}
+    LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url}))
 
 

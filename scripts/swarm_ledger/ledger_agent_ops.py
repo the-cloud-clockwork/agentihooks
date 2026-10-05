@@ -10,7 +10,10 @@ import ledger_comments
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 ROLES = ("orchestrator", "member")
 ITEM_PATH_RE = re.compile(r"^(phases|questions|followups)/[^/]+$")
-STATE_PATH_RE = re.compile(r"^((phases|followups)/[^/]+/done|(phases|questions|followups|tasks)/[^/]+/out_of_scope)$")
+STATE_PATH_RE = re.compile(
+    r"^((phases|followups)/[^/]+/done|(phases|questions|followups|tasks)/[^/]+/out_of_scope|followups/[^/]+/needs_operator)$"
+)
+FLAG_EVENTS = ("needs the operator", "no longer needs the operator")
 TEXT_ITEM_RE = re.compile(r"^(questions|followups)/[^/]+$")
 MAX_TEXT = 20000
 
@@ -36,6 +39,12 @@ def check(op):
         op.get("list") not in ("followups", "questions") or not _text(op.get("text")) or "/" in op["id"]
     ):
         raise ValueError("add_item needs list followups|questions, text and an id without '/'")
+    if (
+        kind == "add_item"
+        and "needs_operator" in op
+        and (op["list"] != "followups" or not isinstance(op["needs_operator"], bool))
+    ):
+        raise ValueError("needs_operator is a boolean flag on a follow-up")
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
@@ -118,9 +127,14 @@ def _set(doc, op, ctx):
         return False
     target, field = "/".join(op["path"].split("/")[:2]), op["path"].rsplit("/", 1)[1]
     if item.get(field, False) != op["value"]:
-        core.set_state(item, field, op["value"])
+        if field == "needs_operator":
+            item[field] = op["value"]
+            kind = FLAG_EVENTS[0 if op["value"] else 1]
+        else:
+            core.set_state(item, field, op["value"])
+            kind = core.state_event(field, op["value"])
         ctx.stamp(op["path"], op["by"])
-        ctx.record(op["by"], core.state_event(field, op["value"]), target)
+        ctx.record(op["by"], kind, target)
     if op.get("status"):
         ledger_comments.post_status(item["comments"], op["by"], f"{op['id']}-st", op["status"], ctx, target)
     return True
@@ -132,6 +146,8 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
+    if op.get("needs_operator"):
+        item["needs_operator"] = True
     items.append(item)
     ctx.record(op["by"], "added", f"{op['list']}/{op['id']}", text=op["text"])
     return True

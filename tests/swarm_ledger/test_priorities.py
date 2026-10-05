@@ -42,7 +42,7 @@ class Priorities(unittest.TestCase):
         state, rejected = core.sync(SLUG, ops=[add(1, self.phase, "Approve the broker choice so it can merge.")])
         self.assertEqual(rejected, [])
         self.assertEqual(
-            [(p["item"], p["text"]) for p in state["priorities"]],
+            [(p["item"], p["text"]) for p in state["priorities"] if not p.get("derived")],
             [(self.phase, "Approve the broker choice so it can merge.")],
         )
         self.assertIn(("boss", "priority added"), [(e["by"], e["kind"]) for e in state["_meta"]["events"]])
@@ -63,7 +63,7 @@ class Priorities(unittest.TestCase):
     def test_one_priority_per_item(self):
         core.sync(SLUG, ops=[add(6, self.phase, "First ask.")])
         state, _ = core.sync(SLUG, ops=[add(7, self.phase, "Second ask.")])
-        self.assertEqual([p["text"] for p in state["priorities"]], ["Second ask."])
+        self.assertEqual([p["text"] for p in state["priorities"] if p["item"] == self.phase], ["Second ask."])
 
     def test_clear_by_id_and_all_from_operator_or_agent(self):
         core.sync(SLUG, ops=[add(8, self.phase, "Ask one."), add(9, self.question, "Ask two.")])
