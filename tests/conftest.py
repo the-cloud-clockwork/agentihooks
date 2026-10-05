@@ -147,6 +147,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(_telemetry, raising=False)
     monkeypatch.setattr("hooks.config.OTEL_LANGFUSE_ENABLED", False)
+    for _bound in (
+        "OTEL_LANGFUSE_ENDPOINT",
+        "OTEL_LANGFUSE_HOST_HEADER",
+        "OTEL_LANGFUSE_PUBLIC_KEY",
+        "OTEL_LANGFUSE_SECRET_KEY",
+    ):
+        monkeypatch.setattr(f"hooks.config.{_bound}", "")
 
     # hooks.config binds AGENTIHOOKS_HOME at import, so these would otherwise run
     # the operator's real condition scripts and write the real cache and counters.
