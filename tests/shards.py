@@ -38,10 +38,15 @@ def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float)
 
 def warm_imports(modules: list[str], workers: int) -> list[int]:
     pids = []
+    variant = os.environ.get("WARM_VARIANT", "base")
+    if variant == "half":
+        workers = max(1, workers // 2)
     for start in range(workers):
         pid = os.fork()
         if pid == 0:
             try:
+                if variant == "nice":
+                    os.nice(19)
                 for module in modules[start::workers]:
                     try:
                         importlib.import_module(module)

@@ -26,6 +26,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3, 4]
+        variant: [base, nice, half]
     steps:
       # A squash merge into an unmoved dev has the same tree as the merge commit
       # its pull request tested, so the dev push run would repeat a passed run.
@@ -76,6 +77,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTHONPATH: ${{ github.workspace }}/.github/probe
           PROBE_OUT: ${{ runner.temp }}/probe.txt
+          WARM_VARIANT: ${{ matrix.variant }}
         run: nproc; python -m pytest -p probeplug tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short -p no:anyio -p no:pytest-split -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       - name: Probe
