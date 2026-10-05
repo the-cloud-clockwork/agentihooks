@@ -140,6 +140,25 @@ class SwarmPanel(unittest.TestCase):
             run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=0"]
         )
 
+    def test_set_passes_codex_share_with_caps_and_returns_fresh_status(self):
+        code, text, run = self.control({"action": "set", "max_eng": 3, "max_ci": 1, "codex_share": 45})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(text), STATUS)
+        self.assertEqual(
+            run.call_args_list[0].args[0][1:],
+            ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=1", "codex-share=45"],
+        )
+        for share in (0, 100):
+            code, _, run = self.control({"action": "set", "codex_share": share})
+            self.assertEqual(code, 200)
+            self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", f"codex-share={share}"])
+
+    def test_invalid_codex_share_never_runs_the_cli_or_changes_caps(self):
+        for share in (-1, 101, 2.5, True, "30"):
+            code, _, run = self.control({"action": "set", "max_eng": 3, "codex_share": share})
+            self.assertEqual(code, 400, share)
+            run.assert_not_called()
+
     def test_bad_requests_never_run_the_cli(self):
         for body in (
             {"action": "kill"},
@@ -432,8 +451,22 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(
             out,
             [
-                {"eng_down": True, "eng_up": False, "ci_down": False, "ci_up": True},
-                {"eng_down": False, "eng_up": False, "ci_down": False, "ci_up": False},
+                {
+                    "eng_down": True,
+                    "eng_up": False,
+                    "ci_down": False,
+                    "ci_up": True,
+                    "codex_down": False,
+                    "codex_up": False,
+                },
+                {
+                    "eng_down": False,
+                    "eng_up": False,
+                    "ci_down": False,
+                    "ci_up": False,
+                    "codex_down": False,
+                    "codex_up": False,
+                },
             ],
         )
 
@@ -448,7 +481,7 @@ class SwarmPanel(unittest.TestCase):
         stubs = (
             "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
             " contains() { return false; }});"
-            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
+            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
             'const renderHealth = () => {}; const meta = {crew: [{name: "a"}]};'
         )
@@ -604,7 +637,7 @@ class HealthPanel(unittest.TestCase):
         stubs = (
             "const els = {}; const $ = (id) => els[id] || (els[id] = {hidden: true, replaceChildren() {},"
             " contains() { return false; }});"
-            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null;"
+            "const h = () => ({}); const document = {}; const FIGURES = []; let doc = null; let swarm = null; let codexDraft = null;"
             "const renderControls = () => {}; const swarmCards = () => []; const swarmCard = () => ({});"
             "const crewShown = () => false; const meta = {}; let shown = null;"
             "const renderHealth = (f) => { shown = f; };"
