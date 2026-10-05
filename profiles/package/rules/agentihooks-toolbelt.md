@@ -116,8 +116,9 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   each new health finding; each phase it ticks because all its tasks are done,
   or reopens for a task that is not. It tells an engineer when its task sits in
   pr 10 minutes after the merge (the master at 20), or its pull request closed
-  unmerged or sat red with no push for 20 minutes. An item whose ledger item
-  is already decided closes itself before a wake.
+  unmerged or sat red with no push for 20 minutes. A follow-up or question
+  item already decided on the ledger closes itself before a wake; a task item
+  stays until the master closes it.
 - The tick counts an agent idle only when its pane reads idle, its heartbeat
   does not say working and no declared wait holds; nudge at 3 idle ticks,
   retire at 10. A leaving agent's open items move to its seat when its task
