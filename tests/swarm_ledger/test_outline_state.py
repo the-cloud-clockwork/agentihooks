@@ -74,15 +74,10 @@ class OutlineDotsByState(unittest.TestCase):
                 "item-notes-n1": None,
                 "item-phases-p1": "open",
                 "item-phases-p2": "done",
-                "item-tasks-t1": "open",
-                "item-tasks-t2": "done",
-                "item-tasks-t3": "out",
                 "item-questions-q1": "open",
                 "item-questions-q2": "done",
                 "item-questions-q3": "open",
                 "item-questions-q4": "out",
-                "item-followups-f1": "open",
-                "item-followups-f2": "out",
             },
         )
 

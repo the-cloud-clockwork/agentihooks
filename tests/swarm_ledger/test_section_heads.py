@@ -127,7 +127,7 @@ def test_counts_follow_an_item_change(tab):
 
 def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
     assert tab.evaluate(
-        "() => document.getElementById('sec-overview').nextElementSibling.contains(document.getElementById('sections-all'))"
+        "() => document.querySelector('.summary-strip').nextElementSibling.contains(document.getElementById('sections-all'))"
     )
     first = sections(tab)
     assert first["labels"] == ["Expand all"]
@@ -137,7 +137,7 @@ def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
     tab.click("#sections-all")
     settle(tab)
     assert sections(tab) == {"labels": ["Expand all"], "open": [False] * len(SECTIONS)}
-    assert tab.evaluate("() => document.getElementById('overview-box').open")
+    assert not tab.evaluate("() => document.getElementById('overview-box').open")
 
 
 def test_sections_toggle_leaves_comments_and_outline_alone(tab):

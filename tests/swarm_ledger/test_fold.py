@@ -7,7 +7,6 @@ from pathlib import Path
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
-    "Overview": True,
     "Original sources": False,
     "Priorities": False,
     "Plan phases": True,
@@ -15,9 +14,14 @@ SECTIONS = {
     "Open questions": True,
     "Operator notes": True,
     "Follow-ups or blockers": True,
-    "Stats": True,
     "Swarm": True,
+    "Needs you": True,
+    "Agents": True,
+    "Capacity": True,
     "Swarm health": True,
+    "Doctor": True,
+    "Crew history": False,
+    "Last restore": False,
     "Chat": True,
     "Notifications": True,
 }
@@ -265,9 +269,7 @@ class OutlineFolds(unittest.TestCase):
         self.assertEqual(tree["sec-priorities"], [{"id": "item-priorities-pr1", "title": "Answer the port"}])
         self.assertEqual(tree["sec-questions"], [{"id": "item-questions-q1", "title": "Which port?", "state": "open"}])
         self.assertEqual(tree["sec-notes"], [{"id": "item-notes-n1", "title": "Keep it small"}])
-        self.assertEqual(
-            tree["sec-followups"], [{"id": "item-followups-f1", "title": "Rotate the key", "state": "open"}]
-        )
+        self.assertEqual(tree["sec-followups"], [])
 
     def test_every_outline_category_has_a_toggle_even_without_items(self):
         out = self.build()

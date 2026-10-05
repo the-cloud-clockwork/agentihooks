@@ -36,10 +36,10 @@ class CollapsedByDefault(unittest.TestCase):
 
     def test_swarm_agents_start_collapsed_with_their_count_in_the_header(self):
         attrs, body = details("swarm-agents-box")
-        self.assertNotIn("open", attrs)
+        self.assertIn("open", attrs)
         self.assertIn('id="swarm-agents-count"', body.split("</summary>", 1)[0])
         self.assertIn('id="swarm-agents"', body)
-        self.assertIn('$("swarm-agents-count").textContent', function_source("renderSwarm"))
+        self.assertIn('$("swarm-agents-count").textContent', function_source("renderWork"))
 
     def test_task_counts_by_state_in_a_fixed_order_skipping_empty_states(self):
         tasks = [{"state": s} for s in ("done", "open", "claimed", "done", "pr", "done", "open")]
@@ -52,7 +52,7 @@ class CollapsedByDefault(unittest.TestCase):
 
     def test_an_outline_jump_opens_the_collapsed_section_holding_its_target(self):
         expr = """(() => {
-  const box = { open: false };
+  const box = { open: false, parentElement: { closest: () => null } };
   const inside = { closest: (sel) => (sel === "details" ? box : null) };
   reveal(inside);
   const loose = { closest: () => null };

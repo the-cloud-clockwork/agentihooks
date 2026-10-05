@@ -20,7 +20,7 @@ def _width(nodes, ancestors):
 
 
 def analyze(tasks: list[dict]) -> dict:
-    active = {t["id"]: t for t in tasks if not t.get("out_of_scope")}
+    active = {t["id"]: t for t in tasks if not t.get("out_of_scope") and not t.get("done") and t.get("state") != "done"}
     known = {t["id"] for t in tasks}
     graph = {key: set(t.get("depends_on", [])) & active.keys() for key, t in active.items()}
     unknown = {dep for t in active.values() for dep in t.get("depends_on", [])} - known
@@ -38,6 +38,7 @@ def analyze(tasks: list[dict]) -> dict:
     path = max(paths.values(), key=len, default=[])
     engineers = {key for key, t in active.items() if t.get("lane", "eng") == "eng"}
     return {
+        "has_dependencies": any(graph.values()),
         "critical_path": path,
         "chain_length": len(path),
         "parallel_width": _width(set(active), ancestors),
@@ -51,7 +52,7 @@ def report(tasks: list[dict], engineer_cap: int) -> dict:
     summary = (
         f"Critical path: {shape['chain_length']} tasks ({chain})\n"
         f"Parallel width: {shape['parallel_width']} tasks; engineer width: {shape['engineer_width']}\n"
-        "Dependency limits for the whole plan; territories and agent caps may reduce concurrency."
+        "Dependency limits for remaining tasks; territories and agent caps may reduce concurrency."
     )
     warning = ""
     if shape["engineer_width"] < engineer_cap:

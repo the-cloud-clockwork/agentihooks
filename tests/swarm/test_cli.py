@@ -1061,3 +1061,23 @@ def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeyp
     argv = ["sw", command, "--repo", "/repo"] if command == "create" else ["sw", command]
     assert run(*argv) == 0
     assert capsys.readouterr().out.splitlines()[-1] == cli.ledger_link.page_line("sw")
+
+
+def test_status_exposes_pending_inbox_state_duration_tick_and_crew_history(env, capsys):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    agent = AgentRecord("engineer@a1b2c3-0009", "eng", "t1")
+    store.put_agent("sw", agent)
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", agent.name, "Review this work")
+    store.redis.set(store.key("sw", "last-tick"), "1234")
+    run("sw", "status", "--json")
+    status = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert status["last_tick"] == 1234
+    assert status["agents"][0]["inbox"][0]["text"] == "Review this work"
+    assert status["agents"][0]["state_since"] > 0
+    store.drop_agent("sw", agent.name, at=5678)
+    run("sw", "status", "--json")
+    status = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert status["history"][0]["name"] == agent.name
+    assert status["history"][0]["ended_at"] == 5678
