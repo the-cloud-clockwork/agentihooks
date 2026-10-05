@@ -953,6 +953,8 @@ def on_user_prompt_submit(payload: dict) -> None:
         except Exception as e:
             log("broadcast user_prompt failed", {"error": str(e)})
 
+    _inject_refocus(session_id, "prompt")
+
 
 def _inbox_blocks(session_id: str) -> list[str]:
     try:
@@ -969,6 +971,24 @@ def _inject_inbox(session_id: str) -> None:
     from hooks.common import inject_context
 
     for context in _inbox_blocks(session_id):
+        inject_context(context, also_log=False, skip_compression=True)
+
+
+def _refocus_blocks(session_id: str, event: str) -> list[str]:
+    try:
+        from hooks.context.swarm_refocus import refocus_context
+
+        context = refocus_context(session_id, event)
+    except Exception as e:
+        log("swarm refocus failed", {"error": str(e)})
+        return []
+    return [context] if context else []
+
+
+def _inject_refocus(session_id: str, event: str) -> None:
+    from hooks.common import inject_context
+
+    for context in _refocus_blocks(session_id, event):
         inject_context(context, also_log=False, skip_compression=True)
 
 
@@ -1438,6 +1458,7 @@ def on_pre_tool_use(payload: dict) -> None:
             log("broadcast pretool failed", {"error": str(e)})
 
     _pretool_blocks.extend(_inbox_blocks(session_id) if _can_inject_pretool else [])
+    _pretool_blocks.extend(_refocus_blocks(session_id, "tool") if _can_inject_pretool else [])
 
     if ENFORCEMENT_INJECTION_ENABLED:
         try:
@@ -1619,6 +1640,7 @@ def on_post_tool_use(payload: dict) -> None:
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
             _inject_inbox(_trace_session_id)
+            _inject_refocus(_trace_session_id, "tool")
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 
@@ -2226,6 +2248,12 @@ def on_pre_compact(payload: dict) -> None:
     """Handle PreCompact event."""
     session_id = payload.get("session_id", "")
     log("Pre compact", {"session_id": session_id})
+    try:
+        from hooks.context.swarm_refocus import mark_compacted
+
+        mark_compacted(session_id)
+    except Exception as e:
+        log("swarm refocus compact mark failed", {"error": str(e)})
 
 
 def on_permission_request(payload: dict) -> None:

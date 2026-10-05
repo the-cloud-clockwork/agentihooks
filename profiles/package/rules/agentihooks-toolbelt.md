@@ -86,6 +86,11 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   it and recycles it through a handoff. It answers unaddressed page chat, keeps the
   ledger, writes tasks and steers caps; it never claims a task, edits code,
   commits or merges. Its card sits first in the swarm panel.
+- A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
+  receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
+  arrives on the first prompt, after a compaction, when the block changes and
+  every `AGENTIHOOKS_REFOCUS_EVERY` tool calls (default 40), capped at
+  `AGENTIHOOKS_REFOCUS_MAX_CHARS` (default 1500).
 - Every agent session is one Langfuse trace in the project `agent-swarm`,
   tagged with swarm, agent, lane, task and account.
 - The ledger page carries a fixed outline on the left, Stats and the swarm
