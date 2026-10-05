@@ -320,6 +320,13 @@ Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
 `--handoff`.
 
+Folder trust: before a Claude launch, a folder Claude has not trusted (neither it
+nor a parent has `hasTrustDialogAccepted` in `$CLAUDE_CONFIG_DIR/.claude.json`,
+else `~/.claude.json`) is recorded as trusted, so the session never waits at the
+trust question. `trust=trusted|marked|untrusted` names the outcome;
+`AGENTIHOOKS_TRUST_LAUNCH_DIR=0` turns marking off. On `untrusted` the launch
+still goes ahead and stderr says the session waits for someone to answer.
+
 Hosts: herdr when installed and not disabled (`state.json` `herdr.enabled`), else
 the native terminal. `--host herdr|native` or `AGENTIHOOKS_TERMINAL_HOST` overrides.
 In herdr the session opens as a tab in the caller's workspace, in `--workspace

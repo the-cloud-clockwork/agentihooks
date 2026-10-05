@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -466,3 +467,74 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
     )
     out = capsys.readouterr().out.splitlines()
     assert rc == 0 and "model=fable" in out and "effort=high" in out
+
+
+def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
+    seen = {}
+
+    def popen(command, **kwargs):
+        config = tmp_path / ".claude.json"
+        seen["config"] = config.read_text() if config.exists() else ""
+        Path(command[-1]).with_suffix(".started").touch()
+
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    rc = init_agent.main(
+        ["--dir", str(project), "--name", "trust", "--agent", "claude", "--start-timeout", "0", "--route-timeout", "0"],
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), **(env_extra or {})},
+    )
+    return rc, seen
+
+
+def test_launching_into_an_untrusted_folder_marks_it_trusted_before_the_session_starts(monkeypatch, tmp_path, capsys):
+    project = tmp_path / "fresh"
+    project.mkdir()
+    (tmp_path / ".claude.json").write_text(json.dumps({"numStartups": 3, "projects": {"/elsewhere": {"x": 1}}}))
+
+    rc, seen = _trust_launch(monkeypatch, tmp_path, project)
+
+    assert rc == 0
+    assert "trust=marked" in capsys.readouterr().out
+    before_start = json.loads(seen["config"])
+    assert before_start["projects"][str(project)]["hasTrustDialogAccepted"] is True
+    assert before_start["projects"]["/elsewhere"] == {"x": 1}
+    assert before_start["numStartups"] == 3
+
+
+def test_a_folder_already_trusted_is_left_as_is(monkeypatch, tmp_path, capsys):
+    project = tmp_path / "repo" / "worktree"
+    project.mkdir(parents=True)
+    config = tmp_path / ".claude.json"
+    original = json.dumps({"projects": {str(tmp_path / "repo"): {"hasTrustDialogAccepted": True}}})
+    config.write_text(original)
+
+    rc, _ = _trust_launch(monkeypatch, tmp_path, project)
+
+    assert rc == 0
+    assert "trust=trusted" in capsys.readouterr().out
+    assert config.read_text() == original
+
+
+@pytest.mark.parametrize(
+    ("config_text", "env_extra"),
+    [("{not json", {}), ("{}", {"AGENTIHOOKS_TRUST_LAUNCH_DIR": "0"})],
+    ids=["unreadable-config", "setting-off"],
+)
+def test_when_trust_cannot_be_set_the_caller_is_told(monkeypatch, tmp_path, capsys, config_text, env_extra):
+    project = tmp_path / "fresh"
+    project.mkdir()
+    config = tmp_path / ".claude.json"
+    config.write_text(config_text)
+
+    rc, _ = _trust_launch(monkeypatch, tmp_path, project, env_extra)
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "trust=untrusted" in captured.out
+    assert "folder trust question" in captured.err
+    assert config.read_text() == config_text

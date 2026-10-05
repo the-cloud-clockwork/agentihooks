@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, herdr_host
+from scripts import agent_choice, claude_trust, herdr_host
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -432,6 +432,14 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         if prompt_file is not None:
             prompt_file.unlink(missing_ok=True)
 
+    if agent == "claude":
+        trust, why = claude_trust.ensure_trusted(directory, active_env)
+        report.append(f"trust={trust}")
+        if trust == "untrusted":
+            print(
+                f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
+                file=sys.stderr,
+            )
     marker = _started_marker(launcher)
     if host == "herdr":
         try:
