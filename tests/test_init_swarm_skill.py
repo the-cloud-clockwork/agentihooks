@@ -63,3 +63,9 @@ def test_create_names_the_template_flag_the_parser_accepts():
     assert re.search(r"agentihooks swarm <slug> create .*--template <name>", text)
     assert "agentihooks swarm templates" in text
     assert build_parser().parse_args(["sw", "create", "--repo", "/r", "--template", "codex-ci"]).template == "codex-ci"
+
+
+def test_the_final_message_hands_the_operator_the_ledger_link():
+    final = SKILL.read_text().split("## Hand over to the master", 1)[1]
+    assert "agentihooks swarm <slug> url" in final
+    assert "Ledger page:" in final and "final message" in final

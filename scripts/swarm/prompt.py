@@ -37,6 +37,10 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"Run once: {led} join --role orchestrator. Then keep a Monitor on: agentihooks ledger watch {slug} --as "
         f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
         "",
+        f"Your first message after joining gives the operator the ledger page link: run {me} url and post its line "
+        f'with {me} say --to operator "<line>". Answer any question like what is my ledger link with that line at '
+        "once.",
+        "",
         "Your standing duties:",
         "- Answer every operator chat message. Messages from the page reach this session as inbox messages from "
         'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
@@ -64,7 +68,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'- Talk to agents with {me} say "<text>" --to <agent name>, eng or ci, and relay operator words with '
         f'{me} send-message "<text>".',
         "- When an engineer merges work that changes a page, check it in a real browser on localhost "
-        f"(http://127.0.0.1:8765/{slug} for the ledger) with the playwright-cmd tools, tell the operator what you "
+        f"(the ledger page link {me} url prints) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
         f'- Record a lesson the next master should know with {me} learned "<lesson>".',
         f"- Raise a learned note that has held up: {me} learned lists every seat's notes with their numbers, and "
