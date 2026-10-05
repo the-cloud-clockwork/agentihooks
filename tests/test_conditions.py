@@ -244,7 +244,7 @@ class TestScriptContract:
         assert "failed (exit 3: boom)" in result.contexts[0]
 
     def test_timeout_kills_the_process_group(self, layers, monkeypatch, tmp_path):
-        monkeypatch.setattr("hooks.config.CONDITIONS_TIMEOUT_SEC", 0.5)
+        monkeypatch.setattr("hooks.config.CONDITIONS_TIMEOUT_SEC", 0.2)
         pidfile = tmp_path / "child.pid"
         _write(layers[1], "pre-bash-slow.sh", f"sleep 30 & echo $! > {pidfile}; wait")
         result = conditions.run_step("pre", _bash("ls"))

@@ -29,4 +29,5 @@ def test_unit_passes_the_bundle_context_when_the_bundle_ships_one(monkeypatch, t
 
 def test_release_reports_failure_when_router_is_down(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SERENA_ROUTER_PORT", "1")
+    monkeypatch.setattr(daemon.mcp_daemon, "port_open", lambda *a, **k: False)
     assert daemon.release("/nowhere") == 1

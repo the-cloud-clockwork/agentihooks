@@ -257,6 +257,7 @@ class TestStatusDivergence:
     def test_stopped_daemon_exits_1(self, state_dir, monkeypatch):
         self._pidfile_backend(monkeypatch)
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
+        monkeypatch.setattr(mcp_daemon, "port_open", lambda *a, **k: False)
         assert mcp_daemon.status().exit_code() == 1
 
     def test_stdio_config_with_a_running_daemon_is_divergence(self, state_dir, monkeypatch):
@@ -531,6 +532,7 @@ class TestCliMain:
     def test_status_returns_the_status_exit_code(self, state_dir, monkeypatch):
         monkeypatch.setenv("AGENTIHOOKS_MCP_SUPERVISOR", "pidfile")
         monkeypatch.setenv("MCP_TRANSPORT", "sse")
+        monkeypatch.setattr(mcp_daemon, "port_open", lambda *a, **k: False)
         assert mcp_daemon.main("status", "/venv/bin/python", "/repo") == 1
 
     def test_unknown_action_exits_2(self, state_dir):

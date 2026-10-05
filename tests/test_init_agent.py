@@ -109,7 +109,7 @@ def _launch(monkeypatch, tmp_path, popen):
             "--prompt",
             "hi",
             "--start-timeout",
-            "0.5",
+            "0",
             "--route-timeout",
             "0",
             "--",
@@ -139,7 +139,7 @@ def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypat
     rc = _launch(monkeypatch, tmp_path, lambda command, **kwargs: None)
 
     assert rc == 2
-    assert "did not start the launcher within 0.5s" in capsys.readouterr().err
+    assert "did not start the launcher within 0s" in capsys.readouterr().err
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").iterdir())
 
 
