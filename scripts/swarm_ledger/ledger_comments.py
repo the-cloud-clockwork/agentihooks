@@ -6,8 +6,6 @@ Agent text is for the operator: plain words saying what was done or why it was s
 
 import re
 
-from scripts.swarm_ledger import ledger_link as links
-
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 RULES = (
     ("clock time", re.compile(r"\b\d{1,2}:[\dx]{2}(?::\d{2})?(?:\.\d+)?\s?(?:Z|UTC)?\b", re.I)),
@@ -40,15 +38,13 @@ RULES = (
 PUNCTUATION = (("parentheses", "(", 1), ("semicolons", ";", 1))
 
 
-def ledger_link():
-    address, number = links.address()
-    host, port = re.escape(address), re.escape(str(number))
-    return re.compile(rf"\bhttps?://{host}:{port}/[a-z0-9-]+\b/?")
+def web_links():
+    return re.compile(r"""\bhttps?://[^\s<>"']+""", re.I)
 
 
 def problems(text, kind, long=False):
     found = []
-    prose = ledger_link().sub(" ", text)
+    prose = web_links().sub(" ", text)
     for name, pattern in RULES:
         match = pattern.search(prose)
         if match:
