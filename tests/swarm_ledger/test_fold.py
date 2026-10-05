@@ -100,15 +100,15 @@ class EverySectionFolds(unittest.TestCase):
         self.assertLess(wire, start.index("render();"))
         self.assertIn("collapsible(box);", function_source("outlineGroup"))
 
-    def test_sections_with_comment_dropdowns_carry_show_and_hide_all_comments(self):
+    def test_sections_with_comment_dropdowns_carry_one_comments_control(self):
         with_comments = {"sec-phases", "sec-tasks", "sec-questions", "sec-followups"}
         for section in sections():
-            buttons = [k.attrs.get("data-comments") for k in walk(section.kids[0].kids[0], "button")]
-            want = ["show", "hide"] if section.attrs.get("id") in with_comments else []
-            self.assertEqual([b for b in buttons if b], want, section.attrs.get("id"))
+            buttons = [k for k in walk(section.kids[0].kids[0], "button") if "data-comments" in k.attrs]
+            want = 1 if section.attrs.get("id") in with_comments else 0
+            self.assertEqual(len(buttons), want, section.attrs.get("id"))
         start = function_source("start")
         self.assertIn('document.querySelectorAll("button[data-comments]")', start)
-        self.assertIn('setAllComments(btn.closest("section"), btn.dataset.comments === "show")', start)
+        self.assertIn("setAllComments(section, !groupOpen(section.id))", start)
 
 
 def run_builder(saved, script):
@@ -179,12 +179,18 @@ class CommentsControl(unittest.TestCase):
         harness = f"""
 const openComments = new Set(["followups/f1"]);
 const closedComments = new Set(["phases/p2"]);
+const toggles = {{}};
+const COMMENTS_KEY = "c", TOGGLES_KEY = "t";
+function store() {{}}
+{function_source("rememberGroup")}
 function fakeSection(keys, foldOpen) {{
   const fold = {{ open: foldOpen }};
   const boxes = keys.map((key) => ({{ open: key === "phases/p1", dataset: {{ key }} }}));
   return {{ fold, boxes, querySelector: (sel) => (sel === "details.fold" ? fold : null),
     querySelectorAll: (sel) => (sel === "details[data-key]" ? boxes : []) }};
 }}
+{function_source("rememberComment")}
+{function_source("commentBoxes")}
 {function_source("setAllComments")}
 process.stdout.write(JSON.stringify((() => {{ {script} }})()));
 """
@@ -278,11 +284,9 @@ class OutlineFolds(unittest.TestCase):
             self.assertEqual(items["attrs"]["class"], "ol-items")
         self.assertEqual(out["wired"], [f"ol-{h['id']}" for h in self.HEADS])
 
-    def test_outline_has_expand_all_and_collapse_all_and_entries_still_jump(self):
-        render = function_source("renderOutline")
-        self.assertIn('foldAll("Expand all", true)', render)
-        self.assertIn('foldAll("Collapse all", false)', render)
-        self.assertIn('$("outline").querySelectorAll("details.fold")', function_source("foldAll"))
+    def test_outline_has_one_fold_all_control_and_entries_still_jump(self):
+        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("renderOutline"))
+        self.assertIn('$("outline").querySelectorAll("details.fold")', function_source("outlineBoxes"))
         self.assertIn("ev.preventDefault();", page().split('$("outline").addEventListener("click"', 1)[1])
 
     def test_every_listed_item_has_a_jump_target_on_the_page(self):
