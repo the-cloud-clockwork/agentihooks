@@ -43,3 +43,15 @@ def test_launcher_uses_installed_profile_outside_swarm(tmp_path, monkeypatch, ag
     text = launcher.read_text()
     assert f"export AGENTIHOOKS_LANGFUSE_ENABLED={int(enabled)}\n" in text
     assert "export AGENTIHOOKS_SWARM=" not in text
+
+
+def test_settings_profile_can_disable_all_telemetry(tmp_path):
+    from scripts.profile_telemetry import langfuse_env
+
+    profile = tmp_path / "anton"
+    overlay = tmp_path / "off"
+    profile.mkdir()
+    overlay.mkdir()
+    (profile / "profile.yml").write_text("otel:\n  enabled: true\n  langfuse:\n    enabled: true\n")
+    (overlay / "profile.yml").write_text("otel:\n  enabled: false\n")
+    assert langfuse_env([("anton", profile)], overlay) == {"AGENTIHOOKS_LANGFUSE_ENABLED": "0"}

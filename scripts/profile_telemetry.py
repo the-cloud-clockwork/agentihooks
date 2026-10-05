@@ -4,7 +4,8 @@ import yaml
 
 
 def langfuse_env(profile_dirs: list[tuple[str, Path]], settings_profile: Path | None = None) -> dict[str, str]:
-    env = {}
+    enabled = True
+    tracing = None
     directories = [directory for _, directory in profile_dirs]
     if settings_profile is not None:
         directories.append(settings_profile)
@@ -14,10 +15,11 @@ def langfuse_env(profile_dirs: list[tuple[str, Path]], settings_profile: Path | 
             continue
         data = yaml.safe_load(manifest.read_text()) or {}
         otel = data.get("otel", {})
-        langfuse = otel.get("langfuse", {})
-        if "enabled" in langfuse:
-            env["AGENTIHOOKS_LANGFUSE_ENABLED"] = str(int(bool(otel.get("enabled", True) and langfuse["enabled"])))
-    return env
+        enabled = otel.get("enabled", enabled)
+        tracing = otel.get("langfuse", {}).get("enabled", tracing)
+    if tracing is not None or not enabled:
+        return {"AGENTIHOOKS_LANGFUSE_ENABLED": str(int(bool(enabled and tracing)))}
+    return {}
 
 
 def apply_langfuse_env(settings: dict, profiles: list[tuple[str, Path]], overlay: Path | None) -> None:
