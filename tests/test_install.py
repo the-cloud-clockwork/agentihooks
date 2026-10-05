@@ -1142,6 +1142,25 @@ class TestInitProfileRecall:
     def test_a_linked_profile_outside_the_previous_chain_is_not_added(self):
         assert self._init_with("anton", "anton") == "anton"
 
+    def test_an_unlinked_profile_from_the_previous_chain_is_not_kept(self):
+        import argparse
+        import os
+
+        record = {"path": "/home/test/.claude", "profile": "anton,brain", "installed_at": "2026-01-01T00:00:00Z"}
+        state = {"targets": {"global": {"claude": record}}, "linked_profiles": []}
+        args = argparse.Namespace(
+            profile="anton", init_settings_profile=None, bundle=None, repo=None, query=False, list_profiles=False
+        )
+        with (
+            patch.object(install, "_load_state", return_value=state),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("AGENTIHOOKS_PROFILE", None)
+            install.cmd_init_unified(args)
+        assert mock_install.call_args[0][0].profile == "anton"
+
     def test_force_with_an_explicit_profile_keeps_the_linked_one(self):
         import argparse
         import copy
