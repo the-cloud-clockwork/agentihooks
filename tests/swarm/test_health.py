@@ -210,6 +210,31 @@ def test_over_monitoring_names_the_agent_and_both_counts():
     ]
 
 
+def test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents():
+    counts = {"watch": 40, "act": 4}
+    found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": counts, WORKER: counts})
+    assert [f["subject"] for f in found] == [WORKER]
+
+
+def test_a_master_past_its_looser_limit_still_gets_a_finding():
+    found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": {"watch": 70, "act": 3}})
+    assert found == [
+        {
+            "kind": "over monitoring",
+            "subject": "sw-master-1",
+            "summary": "more watch calls than actions",
+            "evidence": ["70 watch calls", "3 actions"],
+            "threshold": "at least 60 watch calls and more than 15 per action",
+        }
+    ]
+
+
+def test_master_watch_limits_come_from_the_environment():
+    limits = health.limits({"AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN": "90", "AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO": "30"})
+    assert (limits.master_watch_min, limits.master_watch_ratio) == (90, 30)
+    assert (limits.watch_min, limits.watch_ratio) == (LIMITS.watch_min, LIMITS.watch_ratio)
+
+
 def test_limits_come_from_the_environment_and_fall_back_on_bad_values():
     limits = health.limits({"AGENTIHOOKS_HEALTH_STALE_MINUTES": "5", "AGENTIHOOKS_HEALTH_WATCH_RATIO": "x"})
     assert (limits.stale_minutes, limits.watch_ratio) == (5, LIMITS.watch_ratio)
@@ -228,6 +253,8 @@ def test_limits_come_from_the_environment_and_fall_back_on_bad_values():
         ("stale_minutes", 30),
         ("watch_min", 20),
         ("watch_ratio", 5),
+        ("master_watch_min", 60),
+        ("master_watch_ratio", 15),
         ("cooldown_minutes", 60),
     ],
 )

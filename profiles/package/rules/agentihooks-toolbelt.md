@@ -112,7 +112,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   reruns or `REVIEW_ROUNDS` (3) moves to pr; idle with claim, `IDLE_TICKS` (3)
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
   over monitoring, at least `WATCH_MIN` (20) watch calls and over `WATCH_RATIO`
-  (5) per action, counted at each swarm agent's tool calls. Ledger and swarm
+  (5) per action, for the master `MASTER_WATCH_MIN` (60) and
+  `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls. Ledger and swarm
   writes and `msg reply` count as actions, a re-armed ledger watch as one watch
   per 30 minutes, `status` and `verdict` as neither; idle ticks do not count
   while the task's pull request waits on checks.
