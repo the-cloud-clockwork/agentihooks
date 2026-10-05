@@ -1482,7 +1482,7 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function swarmCard(a) {
-    const task = (doc ? doc.tasks : []).find((t) => t.title === a.task) || {};
+    const task = (doc ? doc.tasks : []).find((t) => t.id === a.taskId) || {};
     const box = h("details", { class: "fold", id: "agent-" + a.name },
       h("summary", {},
         h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
@@ -1492,7 +1492,7 @@ input, textarea { caret-color: var(--accent-2); }
         h("div", { class: "sw-meta" }, h("span", { text: { eng: "engineer", ci: "CI agent", master: "master" }[a.lane] || a.lane }),
           h("span", { text: a.model }), a.account ? h("span", { text: a.account }) : null,
           h("span", { class: "sw-ago", text: a.ago ? `last activity ${a.ago} ago` : "last activity not recorded" }))),
-      h("p", { class: "hint", text: (task.workspace_tail || {}).progress || "Progress not recorded." }),
+      h("p", { class: "hint", text: ((task.workspace_tail || {}).latest_progress || "").split("\n").filter((line) => line.trim()).at(-1) || "Progress not recorded." }),
       a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: `Pull request · ${task.checks_state || "checks not reported"}` }) : null,
       h("ul", { class: "pending-inbox" }, ...(a.inbox || []).map((i) => h("li", { class: "hint", text: i.text }))),
       h("p", { class: "hint", text: a.inbox ? `Pending inbox items: ${a.inbox.length}` : "Pending inbox items not reported." }),
@@ -1705,6 +1705,8 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function markToggles() {
+    seedGroup("all-comments", [...document.querySelectorAll(".col details[data-key]")]);
+    $("comments-all").textContent = groupOpen("all-comments") ? "Hide all comments" : "Show all comments";
     for (const btn of document.querySelectorAll("button[data-comments]")) {
       const section = btn.closest("section");
       seedGroup(section.id, commentBoxes(section));
@@ -1972,9 +1974,10 @@ input, textarea { caret-color: var(--accent-2); }
     }
     $("sections-all").addEventListener("click", foldSections);
     $("comments-all").addEventListener("click", () => {
-      const open = $("comments-all").textContent === "Show all comments";
+      const open = !groupOpen("all-comments");
       for (const section of document.querySelectorAll(".col > section")) setAllComments(section, open);
-      $("comments-all").textContent = open ? "Hide all comments" : "Show all comments";
+      rememberGroup("all-comments", open);
+      markToggles();
     });
     $("jump-to").addEventListener("change", (ev) => {
       const target = $(ev.target.value);

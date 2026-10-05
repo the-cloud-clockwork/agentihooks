@@ -128,3 +128,40 @@ def test_plan_shape_shows_only_labelled_counts_for_open_dependencies(tab):
     tab.reload()
     tab.get_by_role("tab", name="Swarm").click()
     assert tab.locator("#swarm-plan-shape").is_hidden()
+
+
+def test_agent_details_use_task_identity_and_the_published_progress_field(tab):
+    doc = {
+        **DOC,
+        "tasks": [
+            {"id": "one", "title": "Same title", "workspace_tail": {"latest_progress": "First task progress"}},
+            {"id": "two", "title": "Same title", "workspace_tail": {"latest_progress": "Second task progress"}},
+        ],
+        "_meta": {"rev": 10},
+    }
+    sw = {**SWARM, "agents": [{"name": "engineer", "lane": "eng", "task": "two"}]}
+    tab.route("**/api/**", lambda route: route.fulfill(json=sw if "/swarm/" in route.request.url else doc))
+    tab.reload()
+    tab.get_by_role("tab", name="Swarm").click()
+    tab.locator("#agent-engineer > summary").click()
+    assert "Second task progress" in tab.locator("#agent-engineer").inner_text()
+    assert "First task progress" not in tab.locator("#agent-engineer").inner_text()
+
+
+def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab):
+    doc = {
+        **DOC,
+        "phases": [
+            {"id": "p0", "title": "Review work", "comments": [{"id": "comment", "by": "operator", "text": "Read this"}]}
+        ],
+        "_meta": {"rev": 10},
+    }
+    tab.route("**/api/**", lambda route: route.fulfill(json=SWARM if "/swarm/" in route.request.url else doc))
+    tab.reload()
+    tab.locator("#comments-all").click()
+    assert tab.locator("#comments-all").text_content() == "Hide all comments"
+    tab.reload()
+    assert tab.locator("#comments-all").text_content() == "Hide all comments"
+    tab.locator("#comments-all").click()
+    assert tab.locator("#comments-all").text_content() == "Show all comments"
+    assert tab.locator("#sec-phases details[data-key]").get_attribute("open") is None
