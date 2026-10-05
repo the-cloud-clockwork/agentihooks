@@ -3,6 +3,7 @@
 agentihooks swarm list | tick | templates
 agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <id> start | pause | stop [--now] | status
+agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
@@ -47,7 +48,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, tick
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_kinds, ledger_link
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -129,6 +130,7 @@ def cmd_create(store, args):
     )
     store.create(config)
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
+    print(ledger_link.page_line(args.slug))
 
 
 def _state(store, args, state):
@@ -142,6 +144,11 @@ def _state(store, args, state):
 
 def cmd_start(store, args):
     _state(store, args, "running")
+    print(ledger_link.page_line(args.slug))
+
+
+def cmd_url(store, args):
+    print(ledger_link.page_line(args.slug))
 
 
 def cmd_pause(store, args):
@@ -567,7 +574,7 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
-    for plain in ("start", "pause", "remove", "snapshot", "reopen"):
+    for plain in ("start", "pause", "remove", "snapshot", "url", "reopen"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")

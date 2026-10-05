@@ -736,3 +736,14 @@ def test_restore_hands_the_runtime_to_restore_and_prints_every_agent_outcome(env
         ("sw-eng-1", "fresh", "no conversation id")
     ]
     assert seen["runtime"] is rt
+
+
+@pytest.mark.parametrize("command", ["create", "start", "url"])
+def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
+    monkeypatch.setattr(cli.ledger_link, "answering", lambda: True)
+    if command != "create":
+        run("sw", "create", "--repo", "/repo")
+        capsys.readouterr()
+    argv = ["sw", command, "--repo", "/repo"] if command == "create" else ["sw", command]
+    assert run(*argv) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == cli.ledger_link.page_line("sw")

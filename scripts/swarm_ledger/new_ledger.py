@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ledger_core as core  # noqa: E402
+import ledger_link  # noqa: E402
 
 TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
@@ -178,6 +179,7 @@ def main():
     html_path, json_path = core.paths(slug)
     if html_path.exists():
         print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))
+        print(ledger_link.page_line(slug))
         return
     if json_path.exists():
         sys.exit(f"{json_path} exists without its HTML; move it aside before creating a new ledger")
@@ -191,6 +193,7 @@ def main():
     core.atomic_write(html_path, render(doc, slug, os.environ.get("LEDGER_PORT", "8765")))
     core.sync(slug)
     print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": True}))
+    print(ledger_link.page_line(slug))
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       --scaffold creates its work folder (steering, progress, proof) in the same call
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task
   prompt                              print the join paragraph for a launch prompt
+  url                                 print the ledger page link for the operator (no --as needed)
 
 Agent text is for the operator: plain words, what was done or why it was skipped. The server refuses
 clock times, dates, hashes, run ids, file names, code identifiers, capital labels, dashes, arrows,
@@ -56,6 +57,7 @@ import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_kinds  # noqa: E402
+import ledger_link  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
@@ -306,13 +308,17 @@ def cmd_prompt(args):
     )
 
 
+def cmd_url(args):
+    print(ledger_link.page_line(args.slug))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
     parser.add_argument("--as", dest="name")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("join").add_argument("--role", choices=["orchestrator", "member"], default="member")
-    for plain in ("leave", "status", "events", "prompt"):
+    for plain in ("leave", "status", "events", "prompt", "url"):
         sub.add_parser(plain)
     sub.add_parser("ack").add_argument("--rev", type=int)
     say = sub.add_parser("say")
@@ -374,7 +380,7 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
-    if not args.slug or not args.name:
+    if not args.slug or not (args.name or args.command == "url"):
         sys.exit("--slug and --as are required")
     globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
