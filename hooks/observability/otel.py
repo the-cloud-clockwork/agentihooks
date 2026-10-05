@@ -188,6 +188,9 @@ def _init_sdk() -> None:
         pass  # OTEL SDK not installed or init failed — all functions remain no-ops
 
 
+LANGFUSE_EXPORT_TIMEOUT_SEC = 10
+
+
 def langfuse_exporter_config() -> dict | None:
     """Endpoint and headers of the Langfuse trace exporter; None when disabled or a key is missing."""
     import base64
@@ -211,7 +214,9 @@ def langfuse_exporter():
         return None
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-    return OTLPSpanExporter(endpoint=settings["endpoint"], headers=settings["headers"], timeout=10)
+    return OTLPSpanExporter(
+        endpoint=settings["endpoint"], headers=settings["headers"], timeout=LANGFUSE_EXPORT_TIMEOUT_SEC
+    )
 
 
 def get_tracer():
