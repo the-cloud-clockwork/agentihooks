@@ -1085,7 +1085,7 @@ input, textarea { caret-color: var(--accent-2); }
     const phases = inScope(doc.phases), ups = inScope(doc.followups);
     const total = phases.length, done = phases.filter((p) => p.done).length;
     const started = meta.created_at, left = doc.time_left_minutes;
-    const leftText = left ? span(left * 60000) : "not set";
+    const leftText = left === null ? "not set" : span(left * 60000);
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
     $("stats").textContent = [
       `Phases ${done} / ${total}`, `Follow-ups ${ups.filter((f) => !f.done).length} open`,

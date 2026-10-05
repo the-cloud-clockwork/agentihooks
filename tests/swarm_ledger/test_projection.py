@@ -141,7 +141,7 @@ meta.created_at -= 86400000;
 doc.phases[1].done = true;
 assert.equal(timeLeft(), "Time left 3h 20m");
 doc.time_left_minutes = 0;
-assert.equal(timeLeft(), "Time left not set");
+assert.equal(timeLeft(), "Time left 0m");
 doc.time_left_minutes = null;
 assert.equal(timeLeft(), "Time left not set");
 doc.time_left_minutes = 20;
