@@ -160,6 +160,13 @@ def test_a_trivial_prompt_gets_nothing(capsys, monkeypatch):
     assert MARK not in run(prompt("rename the helper to build_block"), capsys, "claude", monkeypatch)
 
 
+def test_the_small_ledger_directive_leaves_no_size_judgement(capsys, monkeypatch):
+    out = run(prompt("troubleshoot why sum.py prints 5"), capsys, "claude", monkeypatch)
+    assert "before any other tool call" in out
+    assert "even for a one line fix" in out
+    assert "--slug" in out
+
+
 # Seam three: once per trigger, never in a swarm or a bound session, silenced by a decline.
 
 

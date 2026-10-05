@@ -23,10 +23,12 @@ SWARM_DIRECTIVE = (
     f"so do not implement it here. Only if the operator says no swarm, run `{DECLINE}`."
 )
 SMALL_DIRECTIVE = (
-    "LEDGER DECISION: this work is more than a trivial edit ({reason}) and no ledger is bound to this session. "
-    "Create a small ledger now with the swarm-ledger skill (`agentihooks ledger new --content <file> --plan <file> "
-    "--size small --as <your name>`, which joins you as its worker), then keep it current: record each step, "
-    f"finding and follow-up as it lands. Only if the operator says no ledger, run `{DECLINE}`."
+    "LEDGER DECISION: the operator's rule puts this work on a small ledger ({reason}) and no ledger is bound to "
+    "this session. Create it before any other tool call, even for a one line fix: the operator made this call, "
+    "do not judge whether the work is small enough to skip it. Write a content file with a title, a one line "
+    "overview and one phase per step, then run `agentihooks ledger new --content <file> --slug <short-name> "
+    "--size small --as <your name>`, which joins you as its worker. Keep it current: record each step, finding "
+    f"and follow-up as it lands. Only if the operator says no ledger, run `{DECLINE}`."
 )
 
 
