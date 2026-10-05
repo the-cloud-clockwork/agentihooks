@@ -165,3 +165,29 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Show all comments"
     assert tab.locator("#sec-phases details[data-key]").get_attribute("open") is None
+
+
+def test_failed_status_read_keeps_the_observed_state_and_reports_the_failure(tab):
+    tab.get_by_role("tab", name="Swarm").click()
+    assert tab.locator("#swarm-state").text_content() == "running"
+    tab.route("**/api/swarm/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
+    tab.wait_for_function(
+        "document.querySelector('#swarm-note').textContent.includes('Could not read swarm status')", timeout=6000
+    )
+    assert tab.locator("#swarm-state").text_content() == "running"
+    assert tab.locator('[data-swarm="pause"]').is_visible()
+    assert "null" not in tab.locator("#tab-swarm").text_content()
+    recovered = {**SWARM, "config": {**SWARM["config"], "state": "paused"}}
+    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=recovered))
+    tab.wait_for_function("document.querySelector('#swarm-state').textContent === 'paused'", timeout=6000)
+    assert tab.locator("#swarm-note").text_content() == ""
+    tab.route("**/api/swarm/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
+    tab.reload()
+    tab.get_by_role("tab", name="Swarm").click()
+    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Could not read swarm status')")
+    assert tab.locator("#swarm-state").text_content() == "unavailable"
+    assert "null" not in tab.locator("#tab-swarm").text_content()
+    tab.get_by_role("tab", name="Ledger").click()
+    tab.locator("#phases input[type=checkbox]").first.check()
+    assert tab.locator("#swarm-status-box").get_attribute("hidden") is None
+    assert "Could not read swarm status" in tab.locator("#swarm-note").text_content()
