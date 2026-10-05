@@ -7,8 +7,8 @@ sessions from one process can trust.
 
 import pytest
 
-# build_server loads the MCP SDK, so hooks.mcp is imported inside the tests and one worker runs them.
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-session")]
+# build_server loads the MCP SDK, so hooks.mcp is imported inside the tests and one worker runs every file that loads it.
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 
 def resolve_session_id(*args):

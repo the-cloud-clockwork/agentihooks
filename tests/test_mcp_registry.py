@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-pytestmark = pytest.mark.unit
+# build_server loads the MCP SDK: every file that loads it shares one worker.
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 _SESSION_ENV_VARS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
 
