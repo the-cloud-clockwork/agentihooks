@@ -42,6 +42,9 @@ class LedgerClient:
     def update_task(self, slug, task_id, fields, by="swarm"):
         self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields)])
 
+    def add_task(self, slug, fields, by):
+        self._call(slug, [{**_op("task_add", by), **fields}])
+
     def comment(self, slug, task_id, text, by):
         self._call(slug, [_op("add", by, thread=f"tasks/{task_id}/comments", text=text)])
 

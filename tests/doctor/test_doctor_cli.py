@@ -8,6 +8,7 @@ from scripts.doctor import cli as doctor
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm import prompt
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
@@ -53,6 +54,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
+    monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, tmp_path
 
@@ -161,3 +163,73 @@ def test_the_cli_routes_a_crew_verb_to_the_crew_and_leaves_the_hook_doctor_alone
     assert calls == [[WATCHED, "status"]]
     assert install._crew_doctor(["doctor", "--json"]) is False
     assert install._crew_doctor(["doctor"]) is False
+
+
+STALE = Finding(
+    "stale claim", "watch-eng-1", "claimed task with no change for 40 minutes", ("task t1",), "30 minutes", 40
+)
+
+
+def detecting(monkeypatch, *found):
+    monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {"health": lambda: list(found)})
+
+
+def tick(store, rt):
+    return swarm_cli.run_tick(store, DOCTOR, ledger=FileLedger(), runtime=rt, messenger=FakeHerdr({}))
+
+
+def test_the_swarm_tick_reports_a_finding_and_task_turns_its_verdict_into_ledger_tasks(env, monkeypatch, capsys):
+    store, rt, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    detecting(monkeypatch, STALE)
+    doctor.main([WATCHED, "start"])
+    [item] = InboxStore(store.redis).inbox(f"master@{DOCTOR}")
+    assert f"agentihooks doctor {WATCHED} verdict {STALE.id}" in item.text
+    assert not any("new finding" in action for action in tick(store, rt))
+    assert doctor.main([WATCHED, "task", STALE.id, "--fix", "tune"]) == 1
+    assert "established or early-real" in capsys.readouterr().err
+    assert doctor.main([WATCHED, "verdict", STALE.id, "established", "--note", "checked"]) == 0
+    assert doctor.main([WATCHED, "task", STALE.id, "--fix", "tune"]) == 0
+    tasks = {t["kind"]: t for t in state(DOCTOR)["tasks"]}
+    assert set(tasks) == {"troubleshoot", "tune"}
+    assert tasks["tune"]["depends_on"] == [tasks["troubleshoot"]["id"]]
+    assert f"agentihooks doctor {WATCHED} measure {STALE.id}" in tasks["tune"]["contract"]["check"]
+    capsys.readouterr()
+    assert doctor.main([WATCHED, "measure", STALE.id]) == 0
+    assert capsys.readouterr().out == f"{STALE.id} 40\n"
+    detecting(monkeypatch)
+    assert doctor.main([WATCHED, "measure", STALE.id]) == 0
+    assert capsys.readouterr().out == f"{STALE.id} 0\n"
+
+
+def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
+    store, rt, _ = env
+    doctor.main([WATCHED, "start"])
+    detecting(monkeypatch)
+    monkeypatch.setenv("AGENTIHOOKS_DOCTOR_QUIET_MINUTES", "0")
+    assert any("no new finding" in action for action in tick(store, rt))
+    closed = state(DOCTOR)
+    assert closed["closed_at"] and "two hours with no new finding" in closed["overview"]
+    assert store.agents(DOCTOR) == [] and store.config(DOCTOR).state == "stopped"
+    assert (store.peer(WATCHED), store.peer(DOCTOR)) == ("", "")
+    assert not any("no new finding" in action for action in tick(store, rt))
+
+
+def test_intervene_refuses_a_forbidden_action_and_logs_nothing(env, capsys):
+    doctor.main([WATCHED, "start"])
+    before = len(state(WATCHED)["chat"])
+    assert doctor.main([WATCHED, "intervene", "task-set", "--to", f"{WATCHED}-eng-1"]) == 1
+    assert "not an allowed intervention" in capsys.readouterr().err
+    assert len(state(WATCHED)["chat"]) == before
+
+
+def test_intervene_messages_the_watched_master_and_logs_on_both_ledgers(env, monkeypatch):
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    doctor.main([WATCHED, "start"])
+    args = ["intervene", "message", "--to", f"master@{WATCHED}", "--text", "The inbox fix is merged."]
+    assert doctor.main([WATCHED, *args]) == 0
+    texts = [item.text for item in InboxStore(store.redis).inbox(f"master@{WATCHED}")]
+    assert "The inbox fix is merged." in texts
+    for slug in (WATCHED, DOCTOR):
+        assert any("sent a message to the watched swarm's master" in c["text"] for c in state(slug)["chat"])

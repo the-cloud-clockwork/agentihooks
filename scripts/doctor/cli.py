@@ -5,24 +5,40 @@ agentihooks doctor <slug> start [--repo DIR]   create ledger <slug>-doctor, link
 agentihooks doctor <slug> stop                 close the Doctor ledger with every fix and the number it moved,
                                                retire its agents (the operator's chat line rig doctor stop does too)
 agentihooks doctor <slug> status               the link, the peers and the Doctor swarm's status
+agentihooks doctor <slug> verdict FINDING VERDICT [--note TEXT]
+                                               the Doctor master judges a Doctor finding
+agentihooks doctor <slug> task FINDING --fix code|tune
+                                               an established or early-real finding becomes a troubleshoot task and
+                                               a fix task naming the number to move
+agentihooks doctor <slug> measure FINDING      run the detectors once and print the finding's number, 0 when gone
+agentihooks doctor <slug> intervene ACTION [--to ADDRESS] [--text TEXT] [--file FILE]
+                                               apply a merged fix to the watched swarm: pull-dev, restart-ledger-server,
+                                               refresh-rules, culture, handoff-at-stop or message; logged on both ledgers
 <slug> names the watched ledger or its Doctor ledger. Start refuses without a linked bundle.
+Every swarm tick runs the detectors once per AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES (10) and closes the Doctor after
+AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding.
 """
 
 import argparse
+import json
+import os
 import sys
 from argparse import Namespace
 from pathlib import Path
 
+from scripts.doctor import detect, interventions, loop
+from scripts.doctor.priming import SUFFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
+from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
 
-SUFFIX = "-doctor"
 TEMPLATE = "doctor"
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
 NOTE_MAX = 4000
+QUIET = "Closed on its own after two hours with no new finding.\n"
 PHASES = [
     {"title": "Watch", "description": "Run the detectors on a timer and give every finding a verdict."},
     {
@@ -115,6 +131,7 @@ def cmd_start(store, args):
             store, Namespace(slug=doctor, repo=repo, template=TEMPLATE, max_eng_agents=None, max_ci_agents=None)
         )
     _pair(store, slug, doctor)
+    loop.reset(store, doctor)
     if ledger.closed(doctor):
         swarm.cmd_reopen(store, Namespace(slug=doctor, name="operator"))
     else:
@@ -133,12 +150,26 @@ def fixes_note(tasks):
     return "\n".join(lines)[:NOTE_MAX]
 
 
-def cmd_stop(store, args):
-    slug, doctor = _pair_of(store, args.slug)
-    note = fixes_note(swarm.LedgerClient().tasks(doctor))
+def _close(store, slug, doctor, lead=""):
+    note = (lead + fixes_note(swarm.LedgerClient().tasks(doctor)))[:NOTE_MAX]
     swarm.cmd_close(store, Namespace(slug=doctor, note=note, now=True, name="operator"))
     store.clear_peer(slug)
     store.clear_peer(doctor)
+
+
+def cmd_stop(store, args):
+    _close(store, *_pair_of(store, args.slug))
+
+
+def timer(store, doctor, now_ms):
+    ledger = swarm.LedgerClient()
+    return loop.run(
+        store,
+        doctor,
+        now_ms,
+        lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms)),
+        lambda: _close(store, store.peer(doctor), doctor, QUIET),
+    )
 
 
 def cmd_status(store, args):
@@ -152,6 +183,40 @@ def cmd_status(store, args):
     swarm.cmd_status(store, Namespace(slug=doctor, json=False))
 
 
+def _name():
+    return os.environ.get("AGENTIHOOKS_AGENT_NAME") or BY
+
+
+def cmd_verdict(store, args):
+    _, doctor = _pair_of(store, args.slug)
+    name = os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    verdict = loop.verdicts(store, doctor).judge(args.finding, args.verdict, args.note, name, swarm.now_ms())
+    print(json.dumps({"finding": args.finding, "verdict": verdict["value"]}))
+
+
+def cmd_task(store, args):
+    slug, doctor = _pair_of(store, args.slug)
+    specs = loop.fix_tasks(slug, *loop.judged(store, doctor, args.finding), args.fix)
+    ledger = swarm.LedgerClient()
+    for spec in specs:
+        ledger.add_task(doctor, spec, _name())
+    print(json.dumps({"finding": args.finding, "tasks": [spec["task"] for spec in specs]}))
+
+
+def cmd_measure(store, args):
+    slug, _ = _pair_of(store, args.slug)
+    found, failed = detect.collect(detect.readers(store, swarm.LedgerClient(), slug, swarm.now_ms()))
+    for line in failed:
+        print(line, file=sys.stderr)
+    print(f"{args.finding} {next((f.measure for f in found if f.id == args.finding), 0)}")
+
+
+def cmd_intervene(store, args):
+    slug, doctor = _pair_of(store, args.slug)
+    ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor, _name())
+    print(json.dumps({"intervention": args.action, "logged": interventions.apply(ctx, args.action, args)}))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="agentihooks doctor", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -161,13 +226,36 @@ def build_parser():
     sub.add_parser("start").add_argument("--repo", default="")
     sub.add_parser("stop")
     sub.add_parser("status")
+    verdict = sub.add_parser("verdict")
+    verdict.add_argument("finding")
+    verdict.add_argument("verdict", choices=VERDICTS)
+    verdict.add_argument("--note", default="")
+    task = sub.add_parser("task")
+    task.add_argument("finding")
+    task.add_argument("--fix", required=True, choices=loop.FIXES)
+    sub.add_parser("measure").add_argument("finding")
+    intervene = sub.add_parser("intervene")
+    intervene.add_argument("action")
+    for flag in ("--to", "--text", "--file"):
+        intervene.add_argument(flag, default="")
     return parser
+
+
+COMMANDS = {
+    "start": cmd_start,
+    "stop": cmd_stop,
+    "status": cmd_status,
+    "verdict": cmd_verdict,
+    "task": cmd_task,
+    "measure": cmd_measure,
+    "intervene": cmd_intervene,
+}
 
 
 def main(argv):
     args = build_parser().parse_args(argv)
     try:
-        {"start": cmd_start, "stop": cmd_stop, "status": cmd_status}[args.command](swarm.connect(), args)
+        COMMANDS[args.command](swarm.connect(), args)
     except (SwarmError, InboxError) as exc:
         print(f"doctor: {exc}", file=sys.stderr)
         return 1
