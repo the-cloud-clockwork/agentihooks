@@ -70,7 +70,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 
 | Command | Effect |
 |---|---|
-| `agentihooks swarm <id> issue URL` | Record the task's GitHub issue. |
+| `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request; the task moves to `pr`. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
@@ -99,7 +99,7 @@ in Redis under the seat and are append-only.
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
-blocked. The prompt walks it through a fixed order: open an issue, create a worktree, red test then green,
+blocked. The prompt walks it through a fixed order: open an issue where the repo has issues, create a worktree, red test then green,
 pull request into `dev`, merge on green, then `done`. An agent that cannot finish pushes a draft pull request
 and calls `block`. A finished agent is retired on the next tick and its pane closed.
 
