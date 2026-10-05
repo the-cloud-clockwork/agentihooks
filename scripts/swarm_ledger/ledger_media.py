@@ -112,5 +112,14 @@ def resolve(slug, ops):
     return ops
 
 
+def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
+    for event in events:
+        target = event.get("target", "")
+        thread = core.get_thread(doc, "chat" if target == "chat" else f"{target}/comments")
+        item = next((item for item in thread or [] if item["id"] == event.get("id")), None)
+        if item and item.get("attachments"):
+            event["image_paths"] = [str(path_of(slug, att["id"]).resolve()) for att in item["attachments"]]
+
+
 def purge(slug):
     shutil.rmtree(folder(slug), ignore_errors=True)

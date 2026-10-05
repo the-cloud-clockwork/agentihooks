@@ -650,6 +650,9 @@ def sync(slug, changes=None, ops=None):
             reconcile_threads(doc, base, seed, ctx)
         rejected = apply_changes(doc, changes or [], ctx)
         rejected += [op["id"] for op in ops or [] if not apply_op(doc, op, ctx)]
+        import ledger_media
+
+        ledger_media.attach_paths(slug, doc, ctx.events)
         ledger_notifications.derive(doc, ctx)
         del doc["chat"][:-CHAT_KEPT]
         found = warnings(doc) + ctx.refused
