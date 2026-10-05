@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -178,6 +179,17 @@ class Gate(unittest.TestCase):
         session = json.loads((core.LEDGER_DIR / ".sessions" / f"{SID}.json").read_text())
         self.assertEqual((session["slug"], session["name"]), (SLUG, "boss"))
 
+    def test_the_old_environment_names_do_not_bind_a_session(self):
+        import ledger_hook
+
+        old = {"PLAN_LEDGER": SLUG, "PLAN_LEDGER_AS": "boss", "PLAN_LEDGER_ROLE": "orchestrator"}
+        with unittest.mock.patch.dict(os.environ, old):
+            ledger_hook.bind({"hook_event_name": "SessionStart"}, "old-env")
+        self.assertFalse((core.LEDGER_DIR / ".sessions" / "old-env.json").exists())
+        self.assertIsNone(
+            ledger_hook.join_from_command(f"PLAN_LEDGER={SLUG} PLAN_LEDGER_AS=boss agentihooks ledger join")
+        )
+
     def test_operator_chat_reaches_the_prompt_and_blocks_stop(self):
         ask("where are we", 1)
         prompt = hook("UserPromptSubmit")
@@ -217,13 +229,15 @@ class Gate(unittest.TestCase):
         os.utime(core.watch_path(SLUG, "boss"), (old, old))
         self.assertIn("watcher is not running", hook("Stop")["reason"])
 
-    def test_closed_ledger_and_kill_switch_allow(self):
+    def test_the_old_kill_switch_no_longer_disables_the_hook(self):
         ask("pending", 4)
         os.environ["PLAN_LEDGER_HOOKS"] = "off"
         try:
-            self.assertIsNone(hook("Stop"))
+            self.assertEqual(hook("Stop")["decision"], "block")
         finally:
             del os.environ["PLAN_LEDGER_HOOKS"]
+
+    def test_closed_ledger_allows(self):
         make_ledger(done=True)
         core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": "boss", "role": "orchestrator"}])
         ask("pending", 6)
