@@ -94,7 +94,7 @@ def send(args, kind, /, **fields):
 
 
 def mine(state, name):
-    return gate.unhandled_for(state["_meta"], name)
+    return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))
 
 
 def cmd_join(args):

@@ -33,6 +33,7 @@ class SwarmConfig:
     autonomy: str = DELEGATE
     codex_share: int | None = None
     codex_min_week_left: int | None = None
+    snapshot_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class AgentRecord:
     model: str = ""
     effort: str = ""
     seat: str = ""
+    conversation_id: str = ""
 
 
 class RedisStore:
@@ -89,6 +91,7 @@ class RedisStore:
             raw.get("autonomy") or DELEGATE,
             _whole(raw.get("codex_share")),
             _whole(raw.get("codex_min_week_left")),
+            _whole(raw.get("snapshot_minutes")),
         )
 
     def update(self, slug, **changes):

@@ -142,3 +142,36 @@ def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_setting
     assert seen["requested"] == "" and seen["spawns"] == {"claude": 2}
     assert (seen["share"], seen["min_week_left"]) == (30, 7)
     assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
+
+
+def _listed(pane_id, session):
+    return {"name": pane_id, "pane_id": pane_id, "agent": "claude", "agent_status": "working", "agent_session": session}
+
+
+def test_conversations_maps_each_pane_herdr_lists_to_its_conversation_id(tmp_path):
+    seen = []
+    agents = [
+        _listed("w1:p1", {"agent": "claude", "kind": "id", "source": "herdr:claude", "value": "5c90d80c"}),
+        _listed("w1:p2", {"agent": "codex", "kind": "id", "source": "herdr:codex", "value": "019a-codex"}),
+        _listed("w1:p3", {"agent": "claude", "kind": "path", "value": "/some/transcript.jsonl"}),
+        _listed("w1:p4", {"agent": "claude", "kind": "id", "value": ""}),
+        _listed("w1:p5", None),
+        {"pane_id": "w1:p6", "agent": "claude"},
+    ]
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: seen.append(args) or {"agents": agents})
+    assert runtime.conversations() == {
+        "w1:p1": "5c90d80c",
+        "w1:p2": "019a-codex",
+        "w1:p3": "",
+        "w1:p4": "",
+        "w1:p5": "",
+        "w1:p6": "",
+    }
+    assert seen == [["agent", "list"]]
+
+
+def test_conversations_is_none_when_herdr_cannot_answer(tmp_path):
+    def down(args):
+        raise RuntimeError("herdr: no server")
+
+    assert HerdrRuntime(home=tmp_path, herdr=down).conversations() is None
