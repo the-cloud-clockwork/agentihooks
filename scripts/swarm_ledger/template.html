@@ -1128,10 +1128,9 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   }
 
   function foldAll() {
-    const open = !groupOpen("outline", outlineBoxes());
+    const open = !groupOpen("outline");
     for (const box of outlineBoxes()) box.open = open;
-    toggles.outline = open;
-    store(TOGGLES_KEY, toggles);
+    rememberGroup("outline", open);
     markToggles();
   }
 
@@ -1184,19 +1183,22 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage blocked: the state lasts until reload */ }
   }
 
-  function groupOpen(id, boxes) {
-    if (typeof toggles[id] !== "boolean" && boxes.length) {
-      toggles[id] = boxes.every((b) => b.open);
-      store(TOGGLES_KEY, toggles);
-    }
+  function groupOpen(id) {
     return !!toggles[id];
   }
 
-  function noteGroup(id, boxes) {
-    const open = boxes.filter((b) => b.open).length;
-    if (!boxes.length || (open && open < boxes.length)) return;
-    toggles[id] = open > 0;
+  function rememberGroup(id, open) {
+    toggles[id] = open;
     store(TOGGLES_KEY, toggles);
+  }
+
+  function seedGroup(id, boxes) {
+    if (typeof toggles[id] !== "boolean" && boxes.length) rememberGroup(id, boxes.every((b) => b.open));
+  }
+
+  function rememberUnanimous(id, boxes) {
+    const open = boxes.filter((b) => b.open).length;
+    if (boxes.length && (!open || open === boxes.length)) rememberGroup(id, open > 0);
   }
 
   function commentBoxes(section) {
@@ -1206,9 +1208,11 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   function markToggles() {
     for (const btn of document.querySelectorAll("button[data-comments]")) {
       const section = btn.closest("section");
-      btn.textContent = groupOpen(section.id, commentBoxes(section)) ? "Hide all comments" : "Show all comments";
+      seedGroup(section.id, commentBoxes(section));
+      btn.textContent = groupOpen(section.id) ? "Hide all comments" : "Show all comments";
     }
-    $("outline-all").textContent = groupOpen("outline", outlineBoxes()) ? "Collapse all" : "Expand all";
+    seedGroup("outline", outlineBoxes());
+    $("outline-all").textContent = groupOpen("outline") ? "Collapse all" : "Expand all";
   }
 
   function foldSaved() {
@@ -1232,8 +1236,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
       rememberComment(box.dataset.key, open);
       box.open = open;
     }
-    toggles[section.id] = open;
-    store(TOGGLES_KEY, toggles);
+    rememberGroup(section.id, open);
   }
 
   function showOutline(open) {
@@ -1446,13 +1449,13 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     for (const box of document.querySelectorAll("details.fold")) collapsible(box);
     for (const btn of document.querySelectorAll("button[data-comments]")) {
       const section = btn.closest("section");
-      btn.addEventListener("click", () => { setAllComments(section, !groupOpen(section.id, commentBoxes(section))); markToggles(); });
+      btn.addEventListener("click", () => { setAllComments(section, !groupOpen(section.id)); markToggles(); });
       section.addEventListener("toggle", (ev) => {
-        if (ev.target.matches("details[data-key]")) { noteGroup(section.id, commentBoxes(section)); markToggles(); }
+        if (ev.target.matches("details[data-key]")) { rememberUnanimous(section.id, commentBoxes(section)); markToggles(); }
       }, true);
     }
     $("outline").addEventListener("toggle", (ev) => {
-      if (ev.target.matches("details.fold")) { noteGroup("outline", outlineBoxes()); markToggles(); }
+      if (ev.target.matches("details.fold")) { rememberUnanimous("outline", outlineBoxes()); markToggles(); }
     }, true);
     render();
     poll();

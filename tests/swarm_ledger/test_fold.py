@@ -108,7 +108,7 @@ class EverySectionFolds(unittest.TestCase):
             self.assertEqual(len(buttons), want, section.attrs.get("id"))
         start = function_source("start")
         self.assertIn('document.querySelectorAll("button[data-comments]")', start)
-        self.assertIn("setAllComments(section, !groupOpen(section.id, commentBoxes(section)))", start)
+        self.assertIn("setAllComments(section, !groupOpen(section.id))", start)
 
 
 def run_builder(saved, script):
@@ -182,6 +182,7 @@ const closedComments = new Set(["phases/p2"]);
 const toggles = {{}};
 const COMMENTS_KEY = "c", TOGGLES_KEY = "t";
 function store() {{}}
+{function_source("rememberGroup")}
 function fakeSection(keys, foldOpen) {{
   const fold = {{ open: foldOpen }};
   const boxes = keys.map((key) => ({{ open: key === "phases/p1", dataset: {{ key }} }}));
