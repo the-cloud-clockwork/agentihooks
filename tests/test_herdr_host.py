@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,23 @@ def test_agent_names_fit_herdrs_pattern():
     assert herdr_host.agent_name("Eng A.1") == "eng-a-1"
     assert herdr_host.agent_name("42-handoff") == "a-42-handoff"
     assert len(herdr_host.agent_name("x" * 50)) == 32
+
+
+def test_long_agent_names_stay_unique_and_keep_the_lane_and_number():
+    slug = "okay-we-re-going-to-mossy-rabin-2026-10-05"
+    names = [herdr_host.agent_name(f"{slug}-{seat}") for seat in ("master-1", "eng-2", "eng-3", "eng-12", "ci-1")]
+    assert len(set(names)) == len(names)
+    assert all(len(n) <= 32 and re.fullmatch(r"[a-z][a-z0-9_-]*", n) for n in names)
+    assert names[1].endswith("-eng-2") and names[3].endswith("-eng-12") and names[0].endswith("-master-1")
+    assert herdr_host.agent_name(f"{slug}-eng-2") != herdr_host.agent_name(f"{slug}x-eng-2")
+
+
+def test_the_spawn_rename_uses_the_name_the_swarm_looks_agents_up_by(herdr):
+    from scripts.swarm.runtime import herdr_target
+
+    name = "okay-we-re-going-to-mossy-rabin-2026-10-05-eng-4"
+    assert herdr_host.rename_agent("w1:p5", name, {}) is True
+    assert herdr.made("agent rename")[2:] == ["w1:p5", herdr_target(name)]
 
 
 @pytest.mark.parametrize(

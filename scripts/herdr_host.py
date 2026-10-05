@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import shlex
@@ -139,7 +140,12 @@ def run(pane_id: str, launcher: Path, environ: dict[str, str]) -> None:
 def agent_name(name: str) -> str:
     cleaned = re.sub(r"[^a-z0-9_-]", "-", name.lower()).strip("-_")
     cleaned = cleaned if cleaned[:1].isalpha() else f"a-{cleaned}"
-    return cleaned[:32]
+    if len(cleaned) <= 32:
+        return cleaned
+    tail = "-".join(cleaned.split("-")[-2:])[-16:]
+    digest = hashlib.sha1(cleaned.encode()).hexdigest()[:6]
+    head = cleaned[: 32 - len(tail) - len(digest) - 2].rstrip("-_")
+    return f"{head}-{digest}-{tail}"
 
 
 def rename_agent(pane_id: str, name: str, environ: dict[str, str], timeout: float = 15.0) -> bool:
