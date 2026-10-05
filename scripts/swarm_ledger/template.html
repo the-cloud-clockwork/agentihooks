@@ -97,8 +97,7 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .sync:hover, .sync:focus-visible { background: var(--hover); border-color: var(--edge); box-shadow: 0 0 14px -2px currentColor; outline: none; }
 .sync:focus-visible { outline: 1px solid var(--signal); outline-offset: 2px; }
 .sync svg { width: 20px; height: 20px; }
-.prio-badge { margin-left: 8px; color: var(--destructive); font-size: var(--fs-meta); font-weight: 700; letter-spacing: 0; text-shadow: var(--glow); }
-.prio-badge[hidden], .prio-head[hidden] { display: none; }
+.prio-head[hidden] { display: none; }
 .prio-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .prio { display: flex; gap: 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
 .prio:first-child { border-top: 0; }
@@ -315,6 +314,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .outline summary { display: flex; }
 .outline summary > a { flex: 1; min-width: 0; }
 .ol-tools { display: flex; gap: 14px; padding: 0 10px 10px; }
+.sec-tools { display: flex; justify-content: flex-end; margin: -4px 0 8px; }
 .outline .ol-sec summary > a { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
 .outline .ol-items a { position: relative; padding-left: 24px; }
 .outline .ol-items a::before { content: "•"; position: absolute; left: 11px; color: var(--signal); }
@@ -356,14 +356,15 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
   <div class="banner" id="banner"></div>
   <div class="layout"><div class="col">
   <section id="sec-overview" data-outline><details class="sources-box fold" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details></section>
+  <div class="sec-tools"><button class="link" type="button" id="sections-all"></button></div>
   <section id="sec-sources" data-outline="sources"><details class="sources-box fold" id="sources-box"><summary>Original sources <span class="count" id="sources-count"></span></summary><ul class="sources" id="sources"></ul></details></section>
-  <section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="prio-badge" id="prio-count" hidden></span></summary>
+  <section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
-  <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases<span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
+  <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
   <section id="sec-tasks" data-outline="tasks"><details class="sources-box fold" id="tasks-box"><summary>Swarm tasks <span class="count" id="tasks-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="tasks"></ol></details></section>
-  <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions<span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
-  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes</summary><div id="notes"></div></details></section>
-  <section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers<span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
+  <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
+  <section id="sec-notes" data-outline="notes"><details class="sources-box fold" id="notes-box" open><summary>Operator notes <span class="count" id="notes-count"></span></summary><div id="notes"></div></details></section>
+  <section id="sec-followups" data-outline="followups"><details class="sources-box fold" id="followups-box" open><summary>Follow-ups or blockers <span class="count" id="followups-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ul id="followups"></ul></details></section>
   </div>
   <aside class="side">
     <section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask the orchestrator to review the stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats" style="margin:0"></dl>
@@ -711,7 +712,21 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     const n = {};
     for (const t of tasks) n[t.state || "open"] = (n[t.state || "open"] || 0) + 1;
     const states = [...order, ...Object.keys(n).filter((st) => !order.includes(st))];
-    return `· ${states.filter((st) => n[st]).map((st) => `${n[st]} ${st}`).join(" · ") || 0}`;
+    return headCount(states.map((st) => [n[st], st]));
+  }
+
+  function headCount(parts) {
+    const shown = parts.filter(([n]) => n).map(([n, label]) => (label ? `${n} ${label}` : String(n)));
+    return shown.length ? `· ${shown.join(" · ")}` : "";
+  }
+
+  function stateCounts(list, labels) {
+    const n = {};
+    for (const i of doc[list].filter((i) => !i.deleted)) {
+      const st = itemState(list, i);
+      n[st] = (n[st] || 0) + 1;
+    }
+    return headCount(Object.entries(labels).map(([st, label]) => [n[st], label]));
   }
 
   function listInto(id, items, make) {
@@ -727,13 +742,17 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     document.title = doc.title;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
-    $("sources-count").textContent = `· ${doc.sources.length}`;
+    $("sources-count").textContent = headCount([[doc.sources.length]]);
     listInto("sources", doc.sources, (s, n) => h("li", { id: `item-sources-${n}`, text: s }));
+    $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
     listInto("phases", doc.phases, (p, i) => checkRow("phases", p, i + 1, p.title, p.description));
     $("tasks-count").textContent = taskCounts(doc.tasks);
     listInto("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
+    $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
     listInto("questions", doc.questions, (q, i) => questionRow(q, i + 1));
+    $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
     $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
+    $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
     listInto("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
     renderSync();
     renderPriorities();
@@ -826,8 +845,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 
   function renderPriorities() {
     const list = doc.priorities;
-    $("prio-count").hidden = !list.length;
-    $("prio-count").textContent = String(list.length);
+    $("prio-count").textContent = headCount([[list.length]]);
     document.querySelector(".prio-head").hidden = !list.length;
     $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio", id: `item-priorities-${p.id}` },
       h("a", { class: "prio-link", href: `#item-${p.item.replace("/", "-")}`, text: `#${p.item.split("/")[1]}`, on: { click: (ev) => jumpTo(ev, p.item) } }),
@@ -1158,6 +1176,17 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     markToggles();
   }
 
+  function sectionBoxes() {
+    return [...document.querySelectorAll(".col > section[data-outline]:not(#sec-overview) > details.fold")];
+  }
+
+  function foldSections() {
+    const open = !groupOpen("sections");
+    for (const box of sectionBoxes()) box.open = open;
+    rememberGroup("sections", open);
+    markToggles();
+  }
+
   function pageHeads() {
     return [...document.querySelectorAll(".col > section[data-outline]")].filter((s) => !s.hidden).map((s) => ({
       id: s.id, title: s.querySelector("summary").firstChild.textContent.trim(), list: s.dataset.outline }));
@@ -1243,6 +1272,8 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     }
     seedGroup("outline", outlineBoxes());
     $("outline-all").textContent = groupOpen("outline") ? "Collapse all" : "Expand all";
+    seedGroup("sections", sectionBoxes());
+    $("sections-all").textContent = groupOpen("sections") ? "Collapse all" : "Expand all";
   }
 
   function foldSaved() {
@@ -1484,6 +1515,10 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
         if (ev.target.matches("details[data-key]")) { rememberUnanimous(section.id, commentBoxes(section)); markToggles(); }
       }, true);
     }
+    $("sections-all").addEventListener("click", foldSections);
+    document.querySelector(".col").addEventListener("toggle", (ev) => {
+      if (sectionBoxes().includes(ev.target)) { rememberUnanimous("sections", sectionBoxes()); markToggles(); }
+    }, true);
     $("outline").addEventListener("toggle", (ev) => {
       if (ev.target.matches("details.fold")) { rememberUnanimous("outline", outlineBoxes()); markToggles(); }
     }, true);

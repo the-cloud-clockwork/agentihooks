@@ -101,7 +101,7 @@ class SurfaceLadder(unittest.TestCase):
 
     def test_no_capsule_badges(self):
         ledger = self.pages["ledger"]
-        for selector in (".sync-badge", ".prio-badge", ".status"):
+        for selector in (".sync-badge", ".status"):
             rule = re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", ledger).group(1)
             self.assertNotRegex(rule, r"(?<![-\w])background:", selector)
             self.assertNotRegex(rule, r"(?<![-\w])border:", selector)
