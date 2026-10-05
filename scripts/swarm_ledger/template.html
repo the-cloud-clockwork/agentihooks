@@ -663,7 +663,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
     if (!rows.length) return null;
     const label = (k) => k[0].toUpperCase() + k.slice(1).replace("_", " ");
     const value = (v) => /^https?:\/\//.test(v) ? h("dd", {}, h("a", { href: v, target: "_blank", rel: "noopener", text: v })) : h("dd", { text: v });
-    const box = h("details", { class: "task-proof", "data-key": key }, h("summary", {}, "Contract and proof"),
+    const box = h("details", { class: "task-proof" }, h("summary", {}, "Contract and proof"),
       h("dl", {}, ...rows.flatMap(([k, v]) => [h("dt", { text: label(k) }), value(v)])));
     box.open = openComments.has(key);
     box.addEventListener("toggle", () => {

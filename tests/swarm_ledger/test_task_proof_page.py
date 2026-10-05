@@ -28,7 +28,7 @@ def render(task):
         + f"const t = {json.dumps(task)}; const el = taskRow(t, [t]);"
         + "const proof = (function find(n) { if (!n || typeof n !== 'object') return null;"
         + " if (n.tag === 'details') return n; for (const k of n.kids) { const f = find(k); if (f) return f; } return null; })(el);"
-        + "process.stdout.write(JSON.stringify({ tree: ser(el), proof: proof && { key: proof.attrs['data-key'], open: !!proof.open } }));"
+        + "process.stdout.write(JSON.stringify({ tree: ser(el), proof: proof && { comments_key: proof.attrs['data-key'] || null, open: !!proof.open } }));"
     )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
@@ -97,7 +97,7 @@ class TaskProofOnThePage(unittest.TestCase):
         }
         out = render(task)
         self.assertEqual([n[2] for n in nodes(out["tree"], "kind")], ["ops"])
-        self.assertEqual(out["proof"], {"key": "tasks/t1/proof", "open": False})
+        self.assertEqual(out["proof"], {"comments_key": None, "open": False})
         shown = texts(out["tree"])
         for text in (
             "Contract and proof",
@@ -121,6 +121,10 @@ class TaskProofOnThePage(unittest.TestCase):
         source = function_source("taskProof")
         self.assertIn("openComments.has(key)", source)
         self.assertIn('addEventListener("toggle"', source)
+
+    def test_show_and_hide_all_comments_leave_the_proof_dropdown_alone(self):
+        self.assertIn('section.querySelectorAll("details[data-key]")', function_source("setAllComments"))
+        self.assertNotIn("data-key", function_source("taskProof"))
 
     def test_proof_styles_use_only_palette_tokens(self):
         for selector in (r"\.task-meta \.kind", r"\.task-proof dt", r"\.task-proof dd"):
