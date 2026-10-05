@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-# The MCP SDK loads inside the tests: every worker of a shard collects this file, one worker runs it.
-pytestmark = pytest.mark.xdist_group("serena-router")
+# The MCP SDK loads inside the tests: every worker of a shard collects this file, one worker runs every file that loads it.
+pytestmark = pytest.mark.xdist_group("mcp-sdk")
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_serena.py"
 
