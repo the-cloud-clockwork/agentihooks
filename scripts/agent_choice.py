@@ -66,3 +66,27 @@ def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
     if any("session cap" in reason for reason in skipped):
         return order[0], ALL_FULL
     return order[0], "no agent has quota"
+
+
+def codex_week_left(environ: dict[str, str]) -> float | None:
+    """The weekly quota left on the best signed-in Codex account; None when nothing is known."""
+    from scripts import codex_router
+
+    pool = [account for account in codex_router.routing_pool(environ) if account.signed_in]
+    seen = codex_router.quotas(pool, environ)
+    left = [100.0 - quota.seven_day.used for quota in seen.values() if quota and quota.seven_day.used is not None]
+    return max(left) if left else None
+
+
+def choose_shared(
+    requested: str, environ: dict[str, str], spawns: dict[str, int], share: int, min_week_left: int, choose=choose
+) -> tuple[str, str]:
+    """Codex while its share of the swarm's spawns is below the target and its week has room, else the priority choice."""
+    if requested:
+        return choose(requested, environ)
+    codex, total = spawns.get("codex", 0), sum(spawns.values())
+    if share > 0 and codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
+        left = codex_week_left(environ)
+        if left is not None and left >= min_week_left:
+            return "codex", f"codex share {codex}/{total} below {share}%"
+    return choose("", environ)

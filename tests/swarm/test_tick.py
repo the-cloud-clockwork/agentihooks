@@ -31,13 +31,13 @@ class FakeLedger:
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
-        self.tasks, self.masters = [], []
+        self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
 
     def has_capacity(self):
         return not self.full
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config, lane, name, task, spawns=None):
         if self.crash:
             raise self.crash
         if self.fail:
@@ -48,7 +48,10 @@ class FakeRuntime:
             return Placed(pane_id=f"w1:m{len(self.masters)}", harness="claude")
         self.spawned.append((lane, name, task["id"]))
         self.tasks.append(dict(task))
-        return Placed(pane_id=f"w1:p{len(self.spawned)}", harness="claude", account="acct", model="opus", effort="high")
+        self.spawns_seen.append(dict(spawns or {}))
+        return Placed(
+            pane_id=f"w1:p{len(self.spawned)}", harness=self.harness, account="acct", model="opus", effort="high"
+        )
 
     def live_names(self):
         return set(self.live)
@@ -522,3 +525,19 @@ def test_a_task_without_a_kind_takes_its_lane_default_kind_when_claimed(store):
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "kind": "ops"}, {"id": "t3", "lane": "ci"}])
     tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert [ledger.rows[t].get("kind") for t in ("t1", "t2", "t3")] == ["research", "ops", None]
+
+
+def test_work_lane_spawns_are_counted_by_harness_and_handed_to_the_runtime(store):
+    rt = FakeRuntime()
+    tick("sw", store, FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3", "lane": "ci"}]), rt, 1000)
+    assert rt.spawns_seen == [{}, {"claude": 1}, {"claude": 2}]
+    rt.harness = "codex"
+    store.update("sw", max_eng=3)
+    tick("sw", store, FakeLedger([{"id": "t4"}]), rt, 2000)
+    assert store.spawns("sw") == {"claude": 3, "codex": 1}
+
+
+def test_a_master_spawn_is_not_counted_in_the_codex_share(store):
+    store.update("sw", max_eng=0, max_ci=0)
+    tick("sw", store, FakeLedger([]), FakeRuntime(), 1000)
+    assert store.spawns("sw") == {}

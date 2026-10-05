@@ -6,6 +6,7 @@ agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore                         save the swarm's state to its folder (stop does too); restore it paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
+agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
@@ -40,11 +41,17 @@ from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
-from scripts.swarm.store import AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, tick
 from scripts.swarm_ledger import ledger_kinds
 
-SETTABLE = {"max-eng-agents": "max_eng", "max-ci-agents": "max_ci", "compact-limit": "compact_limit"}
+SETTABLE = {
+    "max-eng-agents": "max_eng",
+    "max-ci-agents": "max_ci",
+    "compact-limit": "compact_limit",
+    "codex-share": "codex_share",
+    "codex-min-week-left": "codex_min_week_left",
+}
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
@@ -182,6 +189,8 @@ def cmd_set(store, args):
                 "max_ci": config.max_ci,
                 "compact_limit": config.compact_limit,
                 "autonomy": config.autonomy,
+                "codex_share": config.codex_share,
+                "codex_min_week_left": config.codex_min_week_left,
                 "lanes": config.lanes,
             }
         )
@@ -225,6 +234,15 @@ def cmd_restore(store, args):
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state, "finished": finished}))
 
 
+def _share(store, config):
+    spawns = store.spawns(config.slug)
+    codex, total = spawns.get("codex", 0), sum(spawns.values())
+    share, floor = codex_split(config, os.environ)
+    return (
+        f"codex {codex}/{total} spawns {codex * 100 // total if total else 0}%  target {share}%  min week left {floor}%"
+    )
+
+
 def cmd_status(store, args):
     config = store.config(args.slug)
     agents = store.agents(args.slug)
@@ -251,12 +269,15 @@ def cmd_status(store, args):
                     "config": config.__dict__,
                     "agents": [{**a.__dict__, "status": agent_status(a)} for a in agents],
                     "tasks": counts,
+                    "spawns": store.spawns(args.slug),
                     "findings": found,
                 }
             )
         )
         return
-    print(f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}")
+    print(
+        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}  {_share(store, config)}"
+    )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"

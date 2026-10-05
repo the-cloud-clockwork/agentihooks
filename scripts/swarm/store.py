@@ -12,6 +12,7 @@ DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
+CODEX_SHARE, CODEX_MIN_WEEK_LEFT = 30, 5
 
 
 class SwarmError(RuntimeError):
@@ -30,6 +31,8 @@ class SwarmConfig:
     lanes: dict = field(default_factory=dict)
     links: list = field(default_factory=list)
     autonomy: str = DELEGATE
+    codex_share: int | None = None
+    codex_min_week_left: int | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,8 @@ class RedisStore:
             json.loads(raw.get("lanes") or "{}"),
             json.loads(raw.get("links") or "[]"),
             raw.get("autonomy") or DELEGATE,
+            _whole(raw.get("codex_share")),
+            _whole(raw.get("codex_min_week_left")),
         )
 
     def update(self, slug, **changes):
@@ -91,6 +96,8 @@ class RedisStore:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if not 0 <= changes.get("codex_share", 0) <= 100:
+            raise SwarmError("codex share is a percent from 0 to 100")
         config = replace(self.config(slug), **changes)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
@@ -149,6 +156,12 @@ class RedisStore:
     def drop_agent(self, slug, name):
         self.redis.hdel(self.key(slug, "agents"), name)
 
+    def count_spawn(self, slug, harness):
+        self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)
+
+    def spawns(self, slug):
+        return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
+
     def remove(self, slug):
         self.config(slug)
         if self.agents(slug):
@@ -180,7 +193,25 @@ class RedisStore:
 
 
 def _fields(config):
-    return {k: json.dumps(v) if isinstance(v, (dict, list)) else str(v) for k, v in asdict(config).items()}
+    return {
+        k: json.dumps(v) if isinstance(v, (dict, list)) else "" if v is None else str(v)
+        for k, v in asdict(config).items()
+    }
+
+
+def _whole(raw):
+    return int(raw) if raw else None
+
+
+def codex_split(config, environ):
+    """(target share, minimum week left) in percent: the swarm setting, else the environment, else the default."""
+    share = config.codex_share
+    if share is None:
+        share = int(environ.get("AGENTIHOOKS_SWARM_CODEX_SHARE") or CODEX_SHARE)
+    floor = config.codex_min_week_left
+    if floor is None:
+        floor = int(environ.get("AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT") or CODEX_MIN_WEEK_LEFT)
+    return share, floor
 
 
 _READ = {

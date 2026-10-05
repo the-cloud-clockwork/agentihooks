@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.swarm import prompt
+from scripts.swarm.store import codex_split
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -55,9 +56,15 @@ class HerdrRuntime:
     def has_capacity(self):
         return self.choose("", dict(os.environ))[1] != agent_choice.ALL_FULL
 
-    def spawn(self, config, lane, name, task):
-        chosen = config.lanes.get(lane, {})
-        agent, reason = self.choose(_set(chosen.get("agent")), dict(os.environ))
+    def spawn(self, config, lane, name, task, spawns=None):
+        chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
+        if spawns is None:
+            agent, reason = self.choose(_set(chosen.get("agent")), environ)
+        else:
+            share, floor = codex_split(config, environ)
+            agent, reason = agent_choice.choose_shared(
+                _set(chosen.get("agent")), environ, spawns, share, floor, choose=self.choose
+            )
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
         path = self.home / config.slug / "prompts" / f"{name}.md"
