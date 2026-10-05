@@ -24,6 +24,7 @@ import ledger_close
 import ledger_comments
 import ledger_notifications
 import ledger_priorities
+import ledger_size
 import ledger_tasks
 import ledger_title
 
@@ -81,7 +82,7 @@ LOCK = threading.Lock()
 
 EXTENSION_OPS = {
     name: module
-    for module in (ledger_priorities, ledger_notifications, ledger_tasks, ledger_title, ledger_close)
+    for module in (ledger_priorities, ledger_notifications, ledger_tasks, ledger_title, ledger_close, ledger_size)
     for name in module.OPS
 }
 

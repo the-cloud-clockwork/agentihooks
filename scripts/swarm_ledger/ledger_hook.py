@@ -73,6 +73,21 @@ def join_from_command(command):
     return (slug, name, opts.get("--role", "member")) if slug and name else None
 
 
+def join_from_new(command, response):
+    tokens = tokens_of(command)
+    if not is_ledger_cli(tokens) or "new" not in tokens:
+        return None
+    stdout = response.get("stdout", "") if isinstance(response, dict) else str(response or "")
+    for text in stdout.splitlines():
+        try:
+            out = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(out, dict) and isinstance(out.get("slug"), str) and isinstance(out.get("joined"), str):
+            return out["slug"], out["joined"], "member"
+    return None
+
+
 def new_session(slug, name, role):
     return {
         "slug": slug,
@@ -94,7 +109,8 @@ def bind(payload, sid):
         and payload.get("tool_name") == "Bash"
         and '"joined"' in str(payload.get("tool_response"))
     ):
-        found = join_from_command((payload.get("tool_input") or {}).get("command"))
+        command = (payload.get("tool_input") or {}).get("command")
+        found = join_from_command(command) or join_from_new(command, payload.get("tool_response"))
     if found:
         write_session(SESSIONS / f"{sid}.json", new_session(*found))
 
