@@ -1,7 +1,11 @@
 import subprocess
 
+import pytest
+
 from scripts.swarm.health import checks
 from scripts.swarm.health.findings import Limits
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 URL = "https://github.com/o/r/pull/7"
 PENDING = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpending\t0\thttps://x/2\n"
