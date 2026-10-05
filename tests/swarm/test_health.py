@@ -58,7 +58,7 @@ def test_ceremony_names_the_agent_its_transitions_and_its_outcomes():
         {
             "kind": "ceremony",
             "subject": WORKER,
-            "evidence": "26 ledger transitions against 1 merged outcome",
+            "evidence": "26 ledger transitions against 1 outcome",
             "threshold": "at least 20 transitions and more than 12 per outcome",
         }
     ]
@@ -69,6 +69,33 @@ def test_the_master_is_credited_with_every_merged_task():
     events += [ev("task done", f"tasks/t{n}") for n in range(2)]
     ledger = {"tasks": [task("t0"), task("t1")], "_meta": {"events": events}}
     assert run(ledger) == []
+
+
+def ops_task(task_id, proof):
+    return task(task_id, pr_url="", kind="ops", proof=proof)
+
+
+def test_ops_tasks_closed_with_their_proof_are_outcomes():
+    proof = {"command": "systemctl status sync", "output": "active (running)"}
+    events = [ev("comment edited", "phases/p1") for _ in range(24)]
+    events += [ev("comment edited", "phases/p1", by="sw-master-1") for _ in range(30)]
+    events += [ev("task done", f"tasks/o{n}") for n in range(3)]
+    ledger = {"tasks": [ops_task(f"o{n}", proof) for n in range(3)], "_meta": {"events": events}}
+    assert run(ledger) == []
+
+
+def test_transitions_with_neither_merges_nor_proofs_are_still_ceremony():
+    events = [ev("comment edited", "phases/p1") for _ in range(24)]
+    events += [ev("task done", f"tasks/{tid}") for tid in ("c0", "o0")]
+    tasks = [task("c0", pr_url=""), ops_task("o0", {"command": "systemctl status sync"})]
+    assert run({"tasks": tasks, "_meta": {"events": events}}) == [
+        {
+            "kind": "ceremony",
+            "subject": WORKER,
+            "evidence": "26 ledger transitions against 0 outcomes",
+            "threshold": "at least 20 transitions and more than 12 per outcome",
+        }
+    ]
 
 
 def test_scope_inflation_names_the_agent_and_each_gain():

@@ -8,6 +8,8 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts.swarm_ledger import ledger_kinds
+
 WORKER_RE = re.compile(r"-(eng|ci)-\d+$")
 MASTER_RE = re.compile(r"-master-\d+$")
 NOT_TRANSITIONS = ("joined", "left")
@@ -81,21 +83,27 @@ def _task_id(target):
     return target.split("/", 1)[1] if target.startswith("tasks/") else ""
 
 
+def _outcome(task):
+    if task.get("state") != "done":
+        return False
+    return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
+
+
 def ceremony(events, tasks, limits):
-    merged = {tid for tid, t in tasks.items() if t.get("state") == "done" and t.get("pr_url")}
+    finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
-    closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in merged)
+    closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
     found = []
     for by, count in sorted(moves.items()):
         if not (WORKER_RE.search(by) or MASTER_RE.search(by)):
             continue
-        outcomes = len(merged) if MASTER_RE.search(by) else closed[by]
+        outcomes = len(finished) if MASTER_RE.search(by) else closed[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
             found.append(
                 Finding(
                     "ceremony",
                     by,
-                    f"{count} ledger transitions against {_plural(outcomes, 'merged outcome')}",
+                    f"{count} ledger transitions against {_plural(outcomes, 'outcome')}",
                     f"at least {limits.ceremony_min} transitions and more than {limits.ceremony_ratio} per outcome",
                 )
             )
