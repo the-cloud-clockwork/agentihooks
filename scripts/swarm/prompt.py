@@ -26,6 +26,12 @@ LANE_ROLE = {
 }
 
 
+def ledger_path(slug: str) -> Path:
+    directory = os.environ.get("LEDGER_DIR")
+    root = Path(directory).expanduser() if directory else Path("~/development-ledger")
+    return root / f"{slug}.json"
+
+
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
     me = f"agentihooks swarm {slug} --as {name}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
@@ -40,7 +46,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         *priming_lines(task),
         *summary,
         "",
-        f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
+        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
         "the operator's notes, answers, comments and chat.",
         f"Run once: {led} join --role orchestrator. Then keep a Monitor on: agentihooks ledger watch {slug} --as "
         f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
@@ -115,7 +121,7 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    path = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser() / f"{slug}.json"
+    path = ledger_path(slug).expanduser()
     if not path.exists():
         return []
     overview = json.loads(path.read_text(encoding="utf-8")).get("overview", "")
@@ -153,7 +159,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         )
     lines += [
         "",
-        f"Before anything else, read the ledger ~/development-ledger/{slug}.json in full: every task and its state, "
+        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
         "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "",
         f"You are a member of the ledger crew. Run once: {led} join. Then keep a Monitor on: "
