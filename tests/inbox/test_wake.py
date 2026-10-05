@@ -116,6 +116,19 @@ def test_the_operator_notification_follows_the_next_window(inbox):
     assert events(inbox, item.id)[-2:] == ["escalated_master", "escalated_operator"]
 
 
+def test_the_operator_notification_is_text_the_ledger_accepts_whatever_the_message_says(inbox):
+    from scripts.swarm_ledger import ledger_comments
+
+    noisy = "On ledger sw: OPERATOR rev=456 comment added on phases/p1 [c-9d1905d6c4]: " + "please " * 30
+    item = inbox.send("operator", "sw-eng-1", noisy)
+    herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
+    t = sent_at(item)
+    for n in range(10):
+        run(inbox, herdr, ledger, t + n * W)
+    [(_, text)] = ledger.followups
+    assert ledger_comments.problems(text, "item") == [] and "sw-eng-1" in text
+
+
 def test_counts_survive_a_fresh_store_connection(server, inbox):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
     herdr = FakeHerdr({"p1": "idle"})

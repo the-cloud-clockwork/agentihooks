@@ -8,6 +8,7 @@ from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.swarm.delivery import READY
 from scripts.swarm.store import MASTER
+from scripts.swarm_ledger import ledger_comments
 
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
@@ -114,6 +115,6 @@ def _master_text(item):
 
 
 def _operator_text(item):
-    return (
-        f"A message from {item.sender} to {item.address} is still unread after every wake and escalation: {_gist(item)}"
-    )
+    plain = f"A message from {item.sender} to {item.address} is still unread after every wake and escalation"
+    quoted = f"{plain}: {_gist(item)}"
+    return plain + "." if ledger_comments.problems(quoted, "item") else quoted
