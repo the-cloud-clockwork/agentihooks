@@ -323,7 +323,8 @@ ALTERNATIVE = {
         "variable or its secret store; never open the file."
     ),
     KIND_ENVIRONMENT: (
-        "A variable name that is not a valid identifier can hold a secret. List valid names "
+        "A variable name that is not a valid identifier can hold a secret, and a value that "
+        "spans several lines prints its later lines as if they were names. List valid names "
         "and only a count of malformed ones:\n  " + ENV_NAMES_SAFE + "\n"
         "Count only:  env | wc -l\n"
         'To test one variable:  test -n "${VAR:-}" && echo set || echo unset\n'

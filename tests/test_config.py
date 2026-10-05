@@ -1,6 +1,7 @@
 """Tests for hooks.config module."""
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -123,3 +124,58 @@ class TestMalformedEnvNames:
         err = capsys.readouterr().err
         assert f"{env_file} line 3" in err
         assert self.FAKE_NAME not in err and self.FAKE_VALUE not in err
+
+
+class TestMultilineEnvValues:
+    """A value spanning several lines is reported by name, never by content."""
+
+    FAKE_FIRST = "fake-first-line-0000"
+    FAKE_REST = "fake-rest=line-0000"
+
+    def _load(self, home, monkeypatch, capsys, *, tty=True, inherited=None):
+        from hooks import config
+
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: tty)
+        env = {"AGENTIHOOKS_HOME": str(home), **(inherited or {})}
+        with patch.dict(os.environ, env, clear=False):
+            config._load_user_env()
+            loaded = {k: os.environ.get(k) for k in ("GOOD_NAME_0001", "AFTER_NAME_0001")}
+        return loaded, capsys.readouterr().err
+
+    def _home(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "x.env").write_text(
+            f'GOOD_NAME_0001=ok\nFAKE_MULTI_0001="{self.FAKE_FIRST}\n{self.FAKE_REST}"\nAFTER_NAME_0001=yes\n'
+        )
+        return home
+
+    def test_loader_names_a_multiline_file_value_and_skips_its_continuation(self, tmp_path, monkeypatch, capsys):
+        loaded, err = self._load(self._home(tmp_path), monkeypatch, capsys)
+        assert loaded == {"GOOD_NAME_0001": "ok", "AFTER_NAME_0001": "yes"}
+        assert "several lines" in err and "FAKE_MULTI_0001" in err
+        assert "not a valid identifier" not in err
+        assert self.FAKE_FIRST not in err and self.FAKE_REST not in err
+
+    def test_loader_names_a_multiline_value_inherited_from_the_shell(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "home"
+        home.mkdir()
+        inherited = {"FAKE_INHERITED_0001": self.FAKE_FIRST + "\n" + self.FAKE_REST}
+        _, err = self._load(home, monkeypatch, capsys, inherited=inherited)
+        assert "FAKE_INHERITED_0001" in err
+        assert self.FAKE_FIRST not in err and self.FAKE_REST not in err
+
+    def test_loader_stays_silent_when_stderr_is_not_a_terminal(self, tmp_path, monkeypatch, capsys):
+        _, err = self._load(self._home(tmp_path), monkeypatch, capsys, tty=False)
+        assert err == ""
+
+    def test_loader_is_silent_on_single_line_quoted_values(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "x.env").write_text("ONE_LINE_0001=\"a b\"\nSINGLE_0001='c'\n")
+        multiline = {k for k, v in os.environ.items() if "\n" in v}
+        with patch.dict(os.environ, {}, clear=False):
+            for k in multiline:
+                del os.environ[k]
+            _, err = self._load(home, monkeypatch, capsys)
+        assert err == ""

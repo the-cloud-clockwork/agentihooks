@@ -22,7 +22,7 @@ def _parse_env_file(
     override_file_owned: bool = False,
     pass_keys: set[str] | None = None,
     blocked_keys: set[str] | None = None,
-) -> None:
+) -> set[str]:
     """Parse a single .env file and set variables in os.environ.
 
     Precedence, highest first:
@@ -42,15 +42,21 @@ def _parse_env_file(
     previous pass, so a long-lived process (the agentihooks MCP server) picks
     up an edited .env instead of reporting whatever was true at import.
     """
+    multiline: set[str] = set()
     if not env_file.is_file():
-        return
+        return multiline
     if pass_keys is None:
         pass_keys = set()
     # Keys written by THIS file. Within one file the first definition wins —
     # scripts/mcp_daemon.py's scanner resolves duplicates the same way and the
     # two are asserted to agree, so "later wins" applies between files only.
     this_file: set[str] = set()
+    _open_quote = ""
     for _n, _raw in enumerate(env_file.read_text(encoding="utf-8").splitlines(), 1):
+        if _open_quote:
+            if _open_quote in _raw:
+                _open_quote = ""
+            continue
         _line = _raw.strip()
         if not _line or _line.startswith("#"):
             continue
@@ -61,17 +67,19 @@ def _parse_env_file(
             continue
         _key, _, _val = _line.partition("=")
         _key = _key.strip()
-        if blocked_keys and _key in blocked_keys:
-            continue
         _val = _val.strip()
         # Handle quoted values: KEY="value" or KEY='value'
         if _val and _val[0] in ('"', "'"):
             _q = _val[0]
             _end = _val.find(_q, 1)
             _val = _val[1:_end] if _end != -1 else _val[1:]
+            if _end == -1:
+                _open_quote = _q
         elif "#" in _val:
             # Strip inline comment: KEY=value # comment
             _val = _val[: _val.index("#")].rstrip()
+        if blocked_keys and _key in blocked_keys:
+            continue
         if not _key:
             continue
         if not _VALID_NAME.fullmatch(_key):
@@ -80,6 +88,8 @@ def _parse_env_file(
                 file=sys.stderr,
             )
             continue
+        if _open_quote:
+            multiline.add(_key)
         if _key in this_file:
             continue  # first definition within a file wins
         if _key in pass_keys:
@@ -95,6 +105,18 @@ def _parse_env_file(
             os.environ[_key] = _val
             pass_keys.add(_key)
             this_file.add(_key)
+    return multiline
+
+
+def _report_multiline_values(from_files: set[str]) -> None:
+    names = from_files | {k for k, v in os.environ.items() if "\n" in v and _VALID_NAME.fullmatch(k)}
+    # Hook processes write stderr into block messages, so only a person at a terminal is told.
+    if names and sys.stderr.isatty():
+        print(
+            "[agentihooks] these values span several lines, and line based tools such as env "
+            "print their later lines as if they were names: " + ", ".join(sorted(names)),
+            file=sys.stderr,
+        )
 
 
 # Connection and client settings adopted from the brain's own directory, where
@@ -204,7 +226,7 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
 
     # 1. Main .env first
     blocked = set(_BRAIN_KEYS_FROM_KERNEL)
-    _parse_env_file(
+    multiline = _parse_env_file(
         _home / ".env",
         override_file_owned=override_file_owned,
         pass_keys=_pass_keys,
@@ -216,12 +238,13 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
         for _extra in sorted(_home.glob("*.env")):
             if _extra.name == ".env":
                 continue
-            _parse_env_file(
+            multiline |= _parse_env_file(
                 _extra,
                 override_file_owned=override_file_owned,
                 pass_keys=_pass_keys,
                 blocked_keys=blocked,
             )
+    _report_multiline_values(multiline)
 
 
 def _brain_http_configured() -> bool:
