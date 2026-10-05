@@ -36,7 +36,7 @@
     },
     {
       "id": "web-base",
-      "title": "Next.js scaffold and discovery cards",
+      "title": "Frontend scaffold and discovery cards",
       "lane": "eng",
       "phase": "p2",
       "territory": "frontend",
