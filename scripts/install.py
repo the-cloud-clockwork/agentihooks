@@ -6295,12 +6295,11 @@ def cmd_migrate(args) -> None:
 
 
 def _crew_doctor(argv: list[str]) -> bool:
-    return (
-        len(argv) >= 3
-        and argv[0] == "doctor"
-        and not argv[1].startswith("-")
-        and argv[2] in ("start", "stop", "status")
-    )
+    if len(argv) < 3 or argv[0] != "doctor" or argv[1].startswith("-"):
+        return False
+    from scripts.doctor.cli import COMMANDS
+
+    return argv[2] in COMMANDS
 
 
 def main() -> None:
@@ -6573,7 +6572,7 @@ def main() -> None:
     doctor_p = sub.add_parser(
         "doctor",
         help="Diagnose hook health: simulate every event, validate stdout JSON, surface broken hooks; "
-        "doctor <id> start|stop|status runs a Doctor crew over the swarm on ledger <id>",
+        "doctor <id> start|stop|status|verdict|task|measure|intervene runs a Doctor crew over the swarm on ledger <id>",
     )
     doctor_p.add_argument(
         "--debug-hook",
