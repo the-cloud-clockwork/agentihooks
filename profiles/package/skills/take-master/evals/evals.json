@@ -1,0 +1,14 @@
+[
+  {
+    "query": "you are the master of ledger rig-grade-swarm",
+    "expected_behavior": "Runs agentihooks swarm rig-grade-swarm take-master in its own shell, reads the printed priming and follows it as master."
+  },
+  {
+    "query": "take the master seat of build-out, the old master is stuck",
+    "expected_behavior": "Runs take-master; on a live master refusal it reruns with --replace because the operator asked to replace the stuck master."
+  },
+  {
+    "query": "you are the master now of ledger docs-sweep",
+    "expected_behavior": "Runs take-master; when it refuses because another master is live and the operator did not ask to replace it, reports that master's name and stops."
+  }
+]

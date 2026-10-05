@@ -1,0 +1,77 @@
+import json
+
+import pytest
+
+from scripts.doctor import read
+from scripts.inbox.store import InboxStore
+from scripts.swarm.store import RedisStore
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+SLUG = "sw"
+
+
+@pytest.fixture
+def redis():
+    import fakeredis
+
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+def test_health_records_are_read_from_the_swarm_findings(redis):
+    record = {"seen_at": 5, "verdict": None, "returned": False, "evidence": ["e"], "measure": 3}
+    redis.hset(f"agentihooks:swarm:{SLUG}:findings", "stale-claim/t1", json.dumps(record))
+    redis.hset("agentihooks:swarm:other:findings", "stale-claim/t9", json.dumps(record))
+    assert read.health_records(redis, SLUG) == {"stale-claim/t1": record}
+
+
+def test_inbox_items_of_the_swarm_carry_their_history(redis):
+    box = InboxStore(redis)
+    kept = box.send("operator", f"eng-1@{SLUG}", "look at this")
+    reply = box.send(f"{SLUG}-eng-3", "operator", "done it")
+    box.send("operator", "other-eng-1", "not ours")
+    box.close(kept.id, f"eng-1@{SLUG}", "done")
+    rows = {row["id"]: row for row in read.inbox_items(box, SLUG)}
+    assert set(rows) == {kept.id, reply.id}
+    assert rows[kept.id]["state"] == "done"
+    assert [e["state"] for e in rows[kept.id]["history"]] == ["pending", "done"]
+
+
+def prompt(name, seat, task, handoff):
+    lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
+    lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")
+    lines += ["1. Handoff document: a previous agent ran out of context and left it. Continue from it:", handoff]
+    return "\n".join([*lines, "2. Swarm culture: none written for this swarm yet.", "rest"])
+
+
+def test_handoffs_pair_the_successor_prompt_with_its_predecessor_recaps_and_questions(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-1@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-1", 10)
+    store.memory.add_recap(seat, f"{SLUG}-eng-1", "t1", "did half", 15)
+    store.seats.occupy(seat, f"{SLUG}-eng-4", 20)
+    asked = box.send(f"{SLUG}-eng-4", f"master@{SLUG}", "which branch?")
+    prompts = tmp_path / SLUG / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / f"{SLUG}-eng-4.md").write_text(prompt(f"{SLUG}-eng-4", seat, "t1", "# t1 handoff\nbranch b1"))
+    (prompts / f"{SLUG}-eng-1.md").write_text("Your seat eng-1@sw has no history yet.")
+    [record] = read.handoffs(store, box, tmp_path, SLUG)
+    assert record["seat"] == seat and record["task"] == "t1"
+    assert (record["from"], record["to"], record["at"]) == (f"{SLUG}-eng-1", f"{SLUG}-eng-4", 20)
+    assert record["document"] == "# t1 handoff\nbranch b1"
+    assert [r["text"] for r in record["recaps"]] == ["did half"]
+    assert [a["id"] for a in record["asked"]] == [asked.id]
+
+
+def test_a_handoff_still_waiting_for_its_successor_is_read(redis, tmp_path):
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat = f"eng-2@{SLUG}"
+    store.seats.occupy(seat, f"{SLUG}-eng-2", 10)
+    store.put_handoff(SLUG, "t2", "# t2 handoff", seat=seat)
+    [record] = read.handoffs(store, box, tmp_path, SLUG)
+    assert (record["task"], record["from"], record["to"], record["document"]) == (
+        "t2",
+        f"{SLUG}-eng-2",
+        "",
+        "# t2 handoff",
+    )

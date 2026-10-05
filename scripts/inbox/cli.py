@@ -21,10 +21,17 @@ from scripts.inbox.store import InboxError, connect
 
 def identity(environ=None):
     env = os.environ if environ is None else environ
-    me = env.get("AGENTIHOOKS_AGENT_NAME", "") or env.get("CLAUDE_CODE_SESSION_ID", "")
+    me = env.get("AGENTIHOOKS_AGENT_NAME", "") or registered_name() or env.get("CLAUDE_CODE_SESSION_ID", "")
     if not me:
         raise InboxError("this session has no identity: set AGENTIHOOKS_AGENT_NAME or run inside a Claude Code session")
     return me
+
+
+def registered_name():
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import session_name
+
+    return session_name(agent_pid())
 
 
 def cmd_send(store, me, args):

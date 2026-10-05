@@ -25,7 +25,7 @@ LANE_ROLE = {
 
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
-    me = f"agentihooks swarm {slug}"
+    me = f"agentihooks swarm {slug} --as {name}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     summary = summary_lines(slug)
     lines = [

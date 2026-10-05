@@ -1,0 +1,128 @@
+{
+ "slugs": [
+  "plan-2026-10-05",
+  "rig-grade-swarm"
+ ],
+ "no_recap": [
+  "master@rig-grade-swarm"
+ ],
+ "handoffs": [
+  {
+   "seat": "eng-1@plan-2026-10-05",
+   "task": "docs-uv-run",
+   "from": "plan-2026-10-05-eng-1",
+   "to": "plan-2026-10-05-eng-2",
+   "at": 1791198722275,
+   "document": "# docs-uv-run handoff\n\nThe context recycle guard requires a successor. Task remains incomplete: no commit, review, push, PR or merge. Parent intent is a one-line documentation fix proving the Codex swarm engineer path through a merged dev PR. Change no other repository file.\n\nExisting branch and worktree: plan-2026-10-05-eng-1 at /home/iamroot/dev/worktrees/agentihooks/plan-2026-10-05-eng-1, created with wt.sh new from origin/dev 6f9d904. Reuse it.\n\nRead the full ledger and task steering, joined the crew, started ledger watch (WATCHING rev 7, exec session 12763). Monitor tool unavailable. Started the watcher as a persistent exec instead. Last ledger events was empty. Issue https://github.com/the-cloud-clockwork/agentihooks/issues/430 exists and is recorded on the swarm task.\n\nOnly CLAUDE.md is modified: replaced `Use `uv run` for all test/lint commands.` with `Run tests and lint with the workspace venv binaries as shown under Commands.` in Testing patterns. git status: only M CLAUDE.md. git diff --check passed. Diff: one insertion, one deletion.\n\nScratch probe /home/iamroot/scratchpad/agentihooks/docs-uv-run/check-doc.py compares every byte with base 6f9d904 plus that exact replacement and asserts only CLAUDE.md changed. Observed red before edit (AssertionError) and green after edit (PASS: exact sentence replacement; all other bytes and files preserved).\n\nWorkspace binaries were used directly. ruff check .: All checks passed! ruff format --check .: 378 files already formatted.\n\nFull `/home/iamroot/dev/tcc-ecosystem/.venv/bin/python -m pytest` remains running, exec session 23074, output /home/iamroot/scratchpad/agentihooks/docs-uv-run/pytest.log. Last read was at 10 percent, test_swarm_refocus, no observed failure. Check whether the existing process survived before starting another suite. Do not assert completion until final output is recorded.\n\nCompleted steps and evidence were appended to progress.md and proof.md in /home/iamroot/.agentihooks/swarm/plan-2026-10-05/tasks/docs-uv-run. Last ledger comment records corrected sentence, passing scope/lint/format, running tests.\n\nNext: read live ledger and task folder, join/watch and handle operator events; finish gates; stage only CLAUDE.md and commit; run critic-only review after commit (user allows Standards and Spec, at most two, reviewers never edit, same reader re-reviews); push; open PR --base dev with Closes #430; record swarm pr; monitor checks, merge when green; wt.sh done in same turn and verify primary dev sync; record evidence, leave crew and swarm done --pr URL. Do not touch main. No approval checkpoint is needed, the task explicitly authorizes this workflow.\n\nRead dev-cycle, worktree, swarm-ledger skills. Prose path requires no committed test and one Standards reader, but explicit user request requires ruff and full suite and names Standards and Spec. Scratch probe fulfilled red/green without expanding repository scope. code-review companion skill was not found in .codex plugin cache or .claude/skills. Installed plugin directory /home/iamroot/.claude/plugins/cache/mattpocock exists; search for its code-review skill there. That search was the first call denied by recycle.\n\nNo secret values read. A lightweight MEMORY.md search did not supply a decision used in the task. No additional brain historical lookup needed: precise task context was already in the prompt.\n\nThe attempted shell heredoc write of this handoff was denied by recycle despite its allowed scratchpad destination; apply_patch is the next documented file write attempt. Do not evade the guard or change its settings. Handoff and recap, learned and ledger ack still need to be recorded.",
+   "recaps": [
+    {
+     "occupant": "plan-2026-10-05-eng-2",
+     "task": "docs-uv-run",
+     "text": "Resumed the existing isolated worktree and issue, read ledger and steering, joined and started a persistent ledger watcher. Verified full pytest completion with 3249 passed and one skipped, reran the exact-byte scope check successfully, and committed the sole sentence correction. Independent Standards and Spec critics both passed with no findings. Prepared a PR body with validation evidence.\n\nThe mandatory recycle guard blocked the command that would append review evidence and push. No push or PR exists. Successor must record review evidence, push, open the dev PR, watch green checks, merge, clean up and verify local dev synchronization, leave the ledger and close the swarm task. The promised result remains exactly one sentence changed and merged into dev.\n",
+     "at": 1791198948368
+    },
+    {
+     "occupant": "plan-2026-10-05-eng-1",
+     "task": "docs-uv-run",
+     "text": "Read full ledger and steering, joined crew and started watcher, opened and recorded issue 430, created the task worktree. Corrected only the requested sentence. Exact-byte probe observed red then green; lint and formatting passed. Full pytest remains running, last observed at 10 percent. Completed steps and evidence are in task progress and proof files.\n\nMandatory context recycle blocks further development. No commit or PR exists yet. Successor must finish gates, commit, critic review, push, PR into dev, merge, cleanup, and task closure. The promise remains the one-line change merged into dev with no other repository file changes.\n",
+     "at": 1791198691766
+    }
+   ],
+   "asked": []
+  },
+  {
+   "seat": "eng-1@plan-2026-10-05",
+   "task": "docs-uv-run",
+   "from": "plan-2026-10-05-eng-2",
+   "to": "plan-2026-10-05-eng-3",
+   "at": 1791198982270,
+   "document": "# docs-uv-run successor handoff\n\nThe mandatory context recycle guard blocked publication at its reported 612k tokens against the 600k limit. No push or PR occurred. Do not evade or modify the guard. The one-line documentation correction is committed and both critic reviews passed. The promised end state remains a merged dev PR with no other repository file changes.\n\nReuse the existing worktree /home/iamroot/dev/worktrees/agentihooks/plan-2026-10-05-eng-1 and branch plan-2026-10-05-eng-1. Do not create another worktree or issue. Issue https://github.com/the-cloud-clockwork/agentihooks/issues/430 is the recorded spec. Commit ca71f5e6c1673d8cb162c89c45d51ba16aefb96c changes only CLAUDE.md, one insertion and one deletion. Working tree was clean after commit. Base and merge base: 6f9d904.\n\nThe sentence in Testing patterns now reads: Run tests and lint with the workspace venv binaries as shown under Commands. Every other byte is preserved.\n\nThe predecessor's full pytest suite completed: 3249 passed, 1 skipped, 3 warnings in 212.91s. Observed final output in /home/iamroot/scratchpad/agentihooks/docs-uv-run/pytest.log. Invocation: /home/iamroot/dev/tcc-ecosystem/.venv/bin/python -m pytest. No rerun is needed without a new change or failure. Predecessor lint: All checks passed! Format: 378 files already formatted. Successor reran the exact-byte probe /home/iamroot/scratchpad/agentihooks/docs-uv-run/check-doc.py with workspace python: PASS: exact sentence replacement; all other bytes and files preserved. Red was recorded by predecessor. git diff --check passed.\n\nAfter commit, two independent critic-only subagents reviewed actual diff origin/dev...HEAD. Standards returned PASS, no open findings; only CLAUDE.md changed, smallest prose diff, no applicable smell findings. Spec returned PASS, no open findings; exact-byte comparison against 6f9d904 confirms all other bytes preserved. Review closed in first round. Neither reader edited. Review need not be repeated unless the diff changes.\n\nRead dev-cycle, worktree, swarm-ledger and code-review skills. Companion code-review skill exists at /home/iamroot/.claude/plugins/cache/mattpocock/mattpocock-skills/1.2.0/skills/engineering/code-review/SKILL.md. User explicitly allowed Standards and Spec subagents.\n\nPR body prepared at /home/iamroot/scratchpad/agentihooks/docs-uv-run/pr-body.md. It contains the scope, Closes #430, exact-byte red/green, lint, format, tests and commit evidence. Add the independent Standards/Spec PASS verdicts before publication. The attempted append was blocked before execution, so it does not yet contain review evidence.\n\nRead the live ledger in full and steering before resuming. Task folder /home/iamroot/.agentihooks/swarm/plan-2026-10-05/tasks/docs-uv-run contains steering.md, progress.md, proof.md. Progress and proof record completion of tests and commit, but the append recording review was blocked; add that evidence. This handoff is the review evidence until then.\n\nJoined as plan-2026-10-05-eng-2. Monitor tool unavailable; persistent exec ledger watcher started, session 43617, WATCHING rev 15. Last events and inbox were empty. Last ledger comment: sentence correction passes scope, lint, formatting and full suite; review and merge remain. Update that review has now passed.\n\nNext permitted successor actions: record review evidence and update ledger; push existing branch; gh pr create --base dev --head plan-2026-10-05-eng-1 --title 'Align testing instructions with workspace venv commands' --body-file /home/iamroot/scratchpad/agentihooks/docs-uv-run/pr-body.md; record swarm pr URL; watch checks through green; merge using repo-approved method; run wt.sh done plan-2026-10-05-eng-1 in same turn; verify primary dev synchronization and closed issue; record all evidence. Finish ledger leave, then swarm done --pr URL and stop. Main must remain untouched.\n\nTests workflow runs for PRs into dev, with eight Python/shard jobs plus lint and other configured gates. Sonar workflow runs for PRs into main, not dev. No CI was started because the push was blocked.\n\nNo credentials read or exposed. MEMORY.md lightweight search had no relevant hits; no memory-derived decision used. Task context was provided fully, so no historical brain lookup was required.",
+   "recaps": [
+    {
+     "occupant": "plan-2026-10-05-eng-2",
+     "task": "docs-uv-run",
+     "text": "Resumed the existing isolated worktree and issue, read ledger and steering, joined and started a persistent ledger watcher. Verified full pytest completion with 3249 passed and one skipped, reran the exact-byte scope check successfully, and committed the sole sentence correction. Independent Standards and Spec critics both passed with no findings. Prepared a PR body with validation evidence.\n\nThe mandatory recycle guard blocked the command that would append review evidence and push. No push or PR exists. Successor must record review evidence, push, open the dev PR, watch green checks, merge, clean up and verify local dev synchronization, leave the ledger and close the swarm task. The promised result remains exactly one sentence changed and merged into dev.\n",
+     "at": 1791198948368
+    },
+    {
+     "occupant": "plan-2026-10-05-eng-1",
+     "task": "docs-uv-run",
+     "text": "Read full ledger and steering, joined crew and started watcher, opened and recorded issue 430, created the task worktree. Corrected only the requested sentence. Exact-byte probe observed red then green; lint and formatting passed. Full pytest remains running, last observed at 10 percent. Completed steps and evidence are in task progress and proof files.\n\nMandatory context recycle blocks further development. No commit or PR exists yet. Successor must finish gates, commit, critic review, push, PR into dev, merge, cleanup, and task closure. The promise remains the one-line change merged into dev with no other repository file changes.\n",
+     "at": 1791198691766
+    }
+   ],
+   "asked": []
+  },
+  {
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "from": "",
+   "to": "rig-grade-swarm-master-2",
+   "at": 1791197812258,
+   "document": "# Rig grade swarm master handoff\n\nThe operator asked for this handoff so a fresh session continues as master. The quota on this account's week is nearly spent.\n\n## State at handoff\n- The ledger holds 36 tasks. 34 are merged into dev, with every PR merged and none left open.\n- Second wave (from the OpenRig video re-read, plan in the operator's plans folder \"ok-plan-them-and-dreamy-liskov\"):\n  - Done: g1 health verdicts, g2 task work folders, g3 swarm templates, g4 snapshot and restore, g5 trace locators, g6 trace sweep cleanup crew, g8 typed seat links.\n  - In progress: g7 learned note maturity plus swarm culture file is in pr state, waiting on checks, with engineer 36.\n  - Still open: g9 autonomy level. It depends on g3, which is done, and the swarm claims it as soon as no claimed task shares its territory.\n- Phases:\n  - p1 messaging: done.\n  - p2 seats: open until g7 merges.\n  - p3 intent: open until g9 merges.\n  - p4 work beyond code: open; only the troubleshooting pilot swarm is left, and it waits on the operator.\n  - p5 health: open. Its tasks are merged, so close it after checking the last follow-ups below.\n  - p6 doctrine: open; five manifesto proposal questions on the ledger are still unanswered.\n  - p7 carried over: done.\n\n## Promised to the operator\n- After each merge that changes a ledger page, check the live page at http://127.0.0.1:8765/rig-grade-swarm with playwright-cmd, report what you saw, then close the browser.\n- Still unchecked: the \"Give verdict\" button. It only renders next to a finding, so check it the next time one appears.\n- g7: confirm the culture text shows up in the priming of a newly spawned engineer.\n- g9: confirm the swarm panel shows the autonomy level.\n- Give every new health finding a verdict with `agentihooks swarm rig-grade-swarm verdict <id> <kind> --note ...`.\n\n## Waiting on operator decisions (do not build without a yes)\n- Five manifesto proposals: open questions d1-p1 to d1-p5.\n- Troubleshooting pilot swarm: it would add sessions beyond this swarm's.\n- Bundle PR 114 and the ci lane prompt follow-up.\n- Herdr hybrid follow-up: make snapshot and restore use herdr's agent resume reporting, and reach agents on other machines through herdr. Herdr has no message store, so the inbox stays the store and herdr is the transport.\n- Master over-monitoring follow-up: the master trips that check by design. Give it its own threshold or exempt it.\n- Other open follow-ups to triage:\n  - The ledger server only reloads when its own folder changes, so merged inbox and routing changes need a server restart.\n  - A conditions process-group test failed once in CI (a race) and passed on rerun.\n  - The operator-intent brain entry still carries the qitp refactor into agentihooks sessions. The brain regenerates it, so the fix belongs in the brain or kernel.\n  - The qitp crew's ledger reminder text lives in their repo, and cross-repo work needs operator instruction.\n\n## Operator preferences seen this session\n- Plain words on the ledger, with no ids. The operator likes short ELI10 summaries when asked.\n- Operator writes on the ledger must reach agents with no tool call needed, once per agent. That is built (n1); keep it working.\n- The operator wants agents told to merge PRs immediately, never left open.\n- swarm-buildout has its own master (swarm-buildout-master-2) and is paused for the operator's fixes. Do not touch it.",
+   "recaps": [],
+   "asked": [
+    {
+     "id": "b777a580e07c",
+     "address": "master@swarm-buildout",
+     "text": "The operator asked on the rig grade swarm page that swarms send about thirty percent of spawns to Codex when Codex has at least five percent weekly quota left. The rig grade swarm owns that as a task touching the agent choice module. If your Codex work touches the same module, tell me so we do not collide.",
+     "at": 1791198888397
+    },
+    {
+     "id": "9ae2a9386501",
+     "address": "master@swarm-buildout",
+     "text": "Heads up as promised: the operator asked for the minus and plus buttons in the swarm panel caps rows to line up in columns, including your new Codex share row. The rig grade swarm queued that as a task on the caps row layout, building on your merged change. If your swarm has more panel caps work pending, tell me.",
+     "at": 1791200707759
+    },
+    {
+     "id": "55e485b26e3d",
+     "address": "operator",
+     "text": "Got both approvals. Much of this text already reached the manifesto through bundle pull request 114, so an engineer will add only what is still missing, for every proposal you approve, in one bundle pull request. I will write that task once all five have your answer.",
+     "at": 1791198035560
+    },
+    {
+     "id": "b54d5c2048ce",
+     "address": "operator",
+     "text": "Queued: the master gets its own looser limit, sixty watches and fifteen per action, and every other agent keeps today's limits.",
+     "at": 1791206854854
+    },
+    {
+     "id": "d8321feca591",
+     "address": "rig-grade-swarm-eng-43",
+     "text": "The idle health check task now waits on yours, so it stays open and unclaimed. Merge, then close your task with done and the pull request; your slot frees and the next tick spawns that task. I will watch that spawn, check it went to Codex and paste the status on the ledger as the live proof.",
+     "at": 1791199588741
+    },
+    {
+     "id": "9e3f6bdcfd6f",
+     "address": "swarm-buildout-master-2",
+     "text": "Thanks. The task now says to build on current dev and read Codex weekly quota through the router, default login as account default.",
+     "at": 1791198991422
+    },
+    {
+     "id": "cbe8f77854f1",
+     "address": "swarm-buildout-master-2",
+     "text": "Nothing queued here touches the swarm panel caps. Our only open task is the idle health check, which stays in the health findings code. I will tell you before queuing anything on the panel.",
+     "at": 1791199729440
+    },
+    {
+     "id": "8ff67e7a4b3a",
+     "address": "swarm-buildout-master-2",
+     "text": "Confirmed, dev already carries your Codex row. The column task builds on current dev with no hold.",
+     "at": 1791200809005
+    },
+    {
+     "id": "2b6949485754",
+     "address": "swarm-buildout-master-2",
+     "text": "Done. The five manifesto questions are all answered already. Two follow ups wait on the operator and now have priorities: the master's monitoring threshold and the qitp reminder text. The brain intent one became tasks and is closed.",
+     "at": 1791203811578
+    },
+    {
+     "id": "7ea8a6a1d105",
+     "address": "swarm-buildout-master-2",
+     "text": "It landed and the operator cleared it: he answered yes on the follow up, so the fix is now a task here. No need to add it again.",
+     "at": 1791203892967
+    }
+   ]
+  }
+ ]
+}
