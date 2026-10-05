@@ -70,7 +70,7 @@ def test_shard_option_collects_only_that_shards_files(pytestconfig):
     files = discover_test_files(_ROOT)
     shard = 2
     expected = set(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[shard - 1])
-    pytestconfig.getoption("shard")
+    assert "shard" in vars(pytestconfig.option)
     config = SimpleNamespace(getoption=lambda name: f"{shard}/4", stash=pytest.Stash(), rootpath=_ROOT)
     kept = {path for path in files if not conftest.pytest_ignore_collect(_ROOT / path, config)}
     assert kept == expected
