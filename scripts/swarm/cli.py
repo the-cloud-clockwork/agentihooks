@@ -6,6 +6,7 @@ agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
+agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -41,13 +42,13 @@ from scripts.inbox import wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery, snapshot, templates, timer
+from scripts.swarm import delivery, prompt, snapshot, take_master, templates, timer
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
-from scripts.swarm.tick import agent_status, tick
+from scripts.swarm.tick import agent_status, primed, tick
 from scripts.swarm_ledger import ledger_kinds, ledger_link
 
 SETTABLE = {
@@ -231,6 +232,28 @@ def cmd_reopen(store, args):
     by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     LedgerClient().reopen(args.slug, by)
     _state(store, args, "running")
+
+
+def cmd_take_master(store, args):
+    runtime = HerdrRuntime()
+    if args.slug not in store.slugs():
+        snapshot.recreate(store, args.slug, runtime.live_names())
+    name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    record = take_master.take(store, args.slug, name, runtime, now_ms(), args.replace)
+    ledger = LedgerClient()
+    if ledger.closed(args.slug):
+        ledger.reopen(args.slug, record.name)
+    if store.config(args.slug).state in ("stopped", "stopping"):
+        store.update(args.slug, state="running")
+        timer.ensure(_bin())
+    config = store.config(args.slug)
+    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER)}
+    print(
+        prompt.build_master(
+            args.slug, config.repo, record.name, primed(store, args.slug, record.seat, task), config.autonomy
+        )
+    )
+    store.clear_handoff(args.slug, MASTER)
 
 
 def cmd_set(store, args):
@@ -581,6 +604,7 @@ def build_parser():
     close = sub.add_parser("close")
     close.add_argument("--note", default="")
     close.add_argument("--now", action="store_true")
+    sub.add_parser("take-master").add_argument("--replace", action="store_true")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
