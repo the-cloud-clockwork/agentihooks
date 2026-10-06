@@ -19,7 +19,7 @@ def isolated(tmp_path, monkeypatch):
     (ledgers / ".sessions").mkdir(parents=True)
     monkeypatch.setenv("LEDGER_DIR", str(ledgers))
     monkeypatch.setattr(decision, "STATE_DIR", tmp_path / "decision-state")
-    for name in ("AGENTIHOOKS_TARGET", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
+    for name in ("AGENTIHOOKS_TARGET", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"):
         monkeypatch.delenv(name, raising=False)
     return ledgers
 
@@ -228,6 +228,36 @@ def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch)
     out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
     assert "init-swarm" in out
     assert "plan phases" not in out
+
+
+def test_the_binding_defaults_to_the_home_ledger_folder(capsys, monkeypatch):
+    monkeypatch.delenv("LEDGER_DIR")
+    sessions = Path.home() / "development-ledger" / ".sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "s1.json").write_text(json.dumps({"slug": "home-ledger", "name": "master@1"}), encoding="utf-8")
+    out = run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
+    assert "--slug home-ledger --as master@1 plan phases" in out
+
+
+@pytest.mark.parametrize("content", ["{}", "not json", "[1]", None])
+def test_an_unreadable_binding_names_placeholders(isolated, content, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    binding = isolated / ".sessions" / "s1.json"
+    if content is None:
+        binding.mkdir()
+    else:
+        binding.write_text(content, encoding="utf-8")
+    out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
+    assert "`agentihooks ledger --slug <slug> --as <your name> plan phases <phases.json>`" in out
+
+
+def test_an_unreadable_binding_falls_back_to_the_swarm(isolated, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "env-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@2")
+    (isolated / ".sessions" / "s1.json").write_text("[1]", encoding="utf-8")
+    out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
+    assert "--slug env-swarm --as master@2 plan phases" in out
 
 
 def test_a_recorded_decline_silences_the_session(capsys, monkeypatch):

@@ -108,19 +108,21 @@ def _declined(payload):
 
 
 def _bound(env, session_id):
+    return _session_file(env, session_id).exists()
+
+
+def _session_file(env, session_id):
     ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    return (ledgers / ".sessions" / f"{session_id}.json").exists()
+    return ledgers / ".sessions" / f"{session_id}.json"
 
 
 def _binding(env, session_id):
     if not (_bound(env, session_id) or env.get("AGENTIHOOKS_SWARM")):
         return None
-    ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
     try:
-        bound = json.loads((ledgers / ".sessions" / f"{session_id}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        bound = dict(json.loads(_session_file(env, session_id).read_text()))
+    except (OSError, ValueError, TypeError):
         bound = {}
-    bound = bound if isinstance(bound, dict) else {}
     return {
         "slug": bound.get("slug") or env.get("AGENTIHOOKS_SWARM") or "<slug>",
         "name": bound.get("name") or env.get("AGENTIHOOKS_AGENT_NAME") or "<your name>",
