@@ -4,7 +4,8 @@ A hit is one place the directive of an open correction lives, matched by its
 source key (enforcement id, condition file, broadcast id) or by its text. Its
 action: ``clear`` for runtime layers, ``pr`` for files tracked by git (never
 edited here), ``followup`` for brain entries (brain regenerates them),
-``manual`` for an untracked file no clear function owns. A correction closes
+``manual`` for an untracked file no clear function owns, ``held`` for a culture
+line or learned note (withheld from priming until its source is fixed). A correction closes
 when a sweep finds nothing for it.
 """
 

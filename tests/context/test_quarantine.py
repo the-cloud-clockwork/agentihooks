@@ -15,6 +15,10 @@ TEXT = "Never run the test suite on this machine, the shared runner owns it"
 OTHER = "Keep every pull request small and focused on one change"
 SAID = "please confirm the correction on the test rule"
 AGENT = "engineer@a1b2c3-0001"
+RAISED = (
+    "A correction waits for your confirmation: an agent marked a bundle directive wrong for the qitp repo: "
+    "it belongs to qitp. It stays in force until you tell the master to confirm the correction."
+)
 
 
 @pytest.fixture(autouse=True)
@@ -91,15 +95,8 @@ def test_an_agent_correction_in_a_swarm_is_proposed_and_raised(swarm, filed, cap
 
     (row,) = injection_trace.corrections()
     assert row["status"] == quarantine.PROPOSED
-    assert filed == [
-        (
-            "sw",
-            "A correction waits for your confirmation: an agent marked a bundle directive wrong for the qitp repo: "
-            "it belongs to qitp. It stays in force until you tell the master to confirm the correction.",
-            "--needs-operator",
-        )
-    ]
-    assert "raised in the operator's Priorities on sw" in capsys.readouterr().out
+    assert filed == [("sw", RAISED, "--needs-operator")]
+    assert capsys.readouterr().out.splitlines()[-1] == "proposed; raised in the operator's Priorities on sw"
     assert quarantine.index() == []
     assert "bad-1" in _start("sess-later")
 
@@ -123,7 +120,8 @@ def test_a_failed_raise_keeps_the_proposal_and_says_so(swarm, capsys):
     _received()
     with patch.object(trace_sweep, "_file_followup", side_effect=OSError("ledger down")):
         assert _wrong() == 0
-    assert "the priority was not raised (ledger down)" in capsys.readouterr().out
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last == f"proposed; the priority was not raised (ledger down): {RAISED}"
     assert injection_trace.corrections()[0]["status"] == quarantine.PROPOSED
 
 
@@ -135,7 +133,11 @@ def test_an_agent_cannot_confirm_its_own_proposal(swarm, filed, capsys):
     with patch("hooks.context.ledger_request.find", return_value=None):
         assert trace(["confirm", "bad-1", "--quote", "confirm the correction now"]) == 2
 
-    assert "only the operator confirms a correction" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "agentihooks trace: only the operator confirms a correction: run it outside a swarm, or pass --quote with "
+        "at least three of his own words from this session that say confirm and correction, or have him comment "
+        "that on your task\n"
+    )
     assert quarantine.index() == []
 
 
@@ -213,7 +215,7 @@ def test_an_operator_comment_on_the_task_confirms(swarm, filed):
 
 def test_confirm_needs_a_waiting_proposal(capsys):
     assert trace(["confirm", "bad-1"]) == 2
-    assert "no proposed correction of bad-1 waits" in capsys.readouterr().err
+    assert capsys.readouterr().err == "agentihooks trace: no proposed correction of bad-1 waits\n"
 
 
 @pytest.mark.parametrize(
@@ -249,7 +251,11 @@ def test_the_ledger_lookup_reads_the_given_environment():
 def test_release_needs_the_operator_and_records_who(swarm, capsys):
     with patch("hooks.context.ledger_request.find", return_value=None):
         assert trace(["release", "bundle/rules/tests.md", "--quote", "release the correction"]) == 2
-    assert "only the operator releases a correction" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "agentihooks trace: only the operator releases a correction: run it outside a swarm, or pass --quote with "
+        "at least three of his own words from this session that say release and correction, or have him comment "
+        "that on your task\n"
+    )
     operator_words.record(AGENT, "go ahead and release the correction on tests")
 
     assert trace(["release", "bundle/rules/tests.md", "--quote", "release the correction"]) == 0
@@ -291,7 +297,11 @@ def test_sweep_without_a_ledger_leaves_the_followup_to_file():
     with patch.object(trace_sweep, "find", side_effect=[[hit], [hit]]):
         report = trace_sweep.sweep("/nowhere", apply=True)
     ((_, outcome),) = report["applied"]
-    assert "follow up to file: One rule directive in the bundle repo" in outcome
+    assert outcome == (
+        "pull request in /r/bundle: remove bad-1 from x.md on a worktree off dev, then gh pr create --base dev; "
+        "file left unchanged; follow up to file: One rule directive in the bundle repo is marked wrong for the qitp "
+        "repo: it belongs to qitp. Remove it by pull request into dev."
+    )
 
 
 def test_sweep_only_touches_the_named_source():
@@ -300,6 +310,27 @@ def test_sweep_only_touches_the_named_source():
     with patch.object(trace_sweep, "find", return_value=[]):
         report = trace_sweep.sweep("/nowhere", only="other-1")
     assert [row["source"] for row in report["closed"]] == ["other-1"]
+
+
+def test_sweep_goes_past_a_proposed_correction_to_close_a_confirmed_one(monkeypatch, filed):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", AGENT)
+    _received()
+    _wrong()
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    _confirmed("other-1", OTHER)
+    with patch.object(trace_sweep, "find", return_value=[]):
+        report = trace_sweep.sweep("/nowhere", apply=True)
+    assert [row["source"] for row in report["proposed"]] == ["bad-1"]
+    assert [row["source"] for row in report["closed"]] == ["other-1"]
+
+
+def test_sweep_apply_without_a_session_clears_with_no_session():
+    _confirmed()
+    hit = trace_sweep.Hit("bad-1", "enforcement", "/s", "bad-1", "clear")
+    with patch.object(trace_sweep, "find", return_value=[hit]), patch.object(trace_sweep, "_clear") as clear:
+        trace_sweep.sweep("/nowhere", apply=True)
+    clear.assert_called_once_with(hit, "")
 
 
 def test_a_confirmed_enforcement_is_withheld_and_logged_once():

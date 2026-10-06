@@ -163,20 +163,37 @@ def _notice(template: str, correction: dict) -> str:
     return template.format(repo=Path(correction["repo"]).name, reason=correction["reason"])
 
 
+def _enforced() -> list[Held]:
+    return index() if mode() == "enforce" else []
+
+
+def _passages(text: str, held: list[Held]) -> str:
+    for item in held:
+        correction = item.correction
+        if correction.get("layer") in injection_trace.FILE_LAYERS and correction.get("quote"):
+            text = _after(text, correction["quote"], _notice(PASSAGE_NOTICE, correction))
+    return text
+
+
+def passages(text: str) -> str:
+    """The rendered persona: a notice after each corrected passage it carries."""
+    return _passages(text, _enforced())
+
+
 def annotate(text: str, source: str) -> str:
     """The rendered copy of a rule or doctrine file: a notice after each corrected passage, or only a notice when held."""
-    held = index() if mode() == "enforce" else []
-    if source and any(h.whole and source in h.keys for h in held):
+    held = _enforced()
+    if any(h.whole and source in h.keys for h in held):
         return HELD_NOTICE.format(source=source) + "\n"
     for item in held:
         correction = item.correction
-        if correction.get("layer") not in injection_trace.FILE_LAYERS:
-            continue
-        if correction.get("quote"):
-            text = _after(text, correction["quote"], _notice(PASSAGE_NOTICE, correction))
-        elif source and source in item.keys:
+        if (
+            correction.get("layer") in injection_trace.FILE_LAYERS
+            and not correction.get("quote")
+            and source in item.keys
+        ):
             text = f"{_notice(FILE_NOTICE, correction)}\n\n{text}"
-    return text
+    return _passages(text, held)
 
 
 def digest() -> str:

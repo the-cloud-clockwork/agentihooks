@@ -202,7 +202,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         else:
             _relink(out / subdir, items)
     persona = build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER)
-    _atomic_write(out / "CLAUDE.md", quarantine.annotate(persona, ""))
+    _atomic_write(out / "CLAUDE.md", quarantine.passages(persona))
     _claude_json(out, bundle, dirs)
     shared = claude_home(_global_env())
     for item in SHARED:
@@ -243,7 +243,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     sources.write(manifest, sources.rows(bundle, dirs, items))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     persona = build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
-    doc["developer_instructions"] = quarantine.annotate(persona, "")
+    doc["developer_instructions"] = quarantine.passages(persona)
     global_config = codex_home() / "config.toml"
     installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}
     hidden_servers = sorted(set(installed) - set(_mcp_servers("codex", bundle, dirs)))

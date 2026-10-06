@@ -5,6 +5,7 @@ import pytest
 from hooks.context import injection_trace
 from scripts.swarm import cli, priming_trace, prompt
 from tests.swarm.test_cli import env  # noqa: F401
+from tests.swarm.test_take_master import taker  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -113,11 +114,32 @@ def test_the_tick_primes_spawns_without_the_corrected_note(env):  # noqa: F811
     store, _, _ = env
     store.memory.learn(SEAT, "e1", BAD, 1)
     store.memory.learn(SEAT, "e1", GOOD, 2)
+    store.culture.set("sw", "# How\n- ok\n")
     _correct(f"learned:{SEAT}#1", BAD, {"seat": SEAT, "note": 1})
+    _correct("culture:sw#2", "- ok", {"swarm": "sw", "line": 2})
 
     task = primed(store, "sw", SEAT, {"id": "t1"})
 
     assert [note.get("withheld", False) for note in task["learned"]] == [True, False]
+    assert task["culture"] == "# How\n\n"
+
+
+def test_take_master_primes_without_the_corrected_note_and_traces_the_withhold(taker, capsys, monkeypatch):  # noqa: F811
+    store, _, _, _ = taker
+    store.memory.learn("master@sw", "m0", BAD, 1)
+    store.memory.learn("master@sw", "m0", GOOD, 2)
+    _correct("learned:master@sw#1", BAD, {"seat": "master@sw", "note": 1})
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-master")
+    capsys.readouterr()
+
+    assert cli.main(["sw", "take-master"]) == 0
+
+    out = capsys.readouterr().out
+    assert BAD not in out and f"- note: {GOOD}" in out
+    rows = [(r["layer"], r["source"]) for r in injection_trace.trace("sess-master")]
+    assert ("withheld", "learned:master@sw#1") in rows
+    assert ("learned", "learned:master@sw#2") in rows
+    assert ("learned", "learned:master@sw#1") not in rows
 
 
 def test_learned_refuses_a_note_restating_an_open_correction(env, capsys):  # noqa: F811
@@ -125,10 +147,14 @@ def test_learned_refuses_a_note_restating_an_open_correction(env, capsys):  # no
     cli.main(["sw", "create", "--repo", "/repo"])
     cli.main(["sw", "start"])
     _correct(f"learned:{SEAT}#1", BAD, {"seat": SEAT, "note": 1})
+    capsys.readouterr()
 
     assert cli.main(["sw", "--as", "master@a1b2c3-0001", "learned", BAD]) == 1
 
-    assert "fix it at its source" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        f"swarm: this text carries a directive under correction (learned:{SEAT}#1: dev is protected); fix it at its "
+        "source instead of restating it here\n"
+    )
     assert swarm.memory.learned("master@sw") == []
     assert cli.main(["sw", "--as", "master@a1b2c3-0001", "learned", GOOD]) == 0
 
@@ -142,6 +168,18 @@ def test_culture_set_refuses_text_restating_an_open_correction(env, tmp_path, ca
     good.write_text("# How\n- plain words\n")
 
     assert cli.main(["sw", "culture", "set", str(bad)]) == 1
-    assert "fix it at its source" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "swarm: this text carries a directive under correction (culture:sw#2: dev is protected); fix it at its "
+        "source instead of restating it here\n"
+    )
     assert cli.main(["sw", "culture", "set", str(good)]) == 0
     assert swarm.culture.get("sw") == "# How\n- plain words\n"
+
+
+def test_culture_set_names_a_culture_file_it_cannot_read(env, tmp_path, capsys):  # noqa: F811
+    cli.main(["sw", "create", "--repo", "/repo"])
+    missing = tmp_path / "missing.md"
+
+    assert cli.main(["sw", "culture", "set", str(missing)]) == 1
+
+    assert capsys.readouterr().err == f"swarm: cannot read the culture file {missing}: No such file or directory\n"
