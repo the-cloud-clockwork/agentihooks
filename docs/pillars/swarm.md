@@ -189,6 +189,12 @@ picks its prompt and the proof `done` must carry, and the ledger refuses `done` 
 | `troubleshoot` | the root cause shown by evidence, and a fix or a filed task | `--root-cause R --evidence E`, `--fix URL` or `--filed TASK` |
 | `research` | a written finding | `--finding URL` |
 
+For `code` and `ci`, `done` reads the pull request (`--pr`, else the task's recorded one) with `gh pr view`
+and refuses unless it is merged, or when GitHub cannot be read. The tick backs this up: a `code` or `ci` task
+an `eng` or `ci` agent marked done in the last day whose pull request is not merged is reopened, with a task
+comment naming the pull request's state. A done from the master or the operator stands, and a pull request
+seen merged is not read again.
+
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
 

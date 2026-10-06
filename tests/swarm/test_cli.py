@@ -6,6 +6,7 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.health import checks
+from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
@@ -31,6 +32,10 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.timer, "ensure", lambda binary: True)
     ledger.chat = lambda slug: [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
+    ledger.pulls = {}
+    monkeypatch.setattr(
+        cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
+    )
     return store, ledger, rt
 
 
@@ -95,6 +100,42 @@ def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("done", "https://github.com/o/r/pull/9")
     assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
     assert store.claimant("sw", "t1") is None
+
+
+def test_done_on_a_code_task_waits_for_its_pull_request_to_merge(env, monkeypatch, capsys):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    url = "https://github.com/o/r/pull/9"
+    ledger.pulls[url] = PullRequest("OPEN", None, 1, False)
+    capsys.readouterr()
+    assert run("sw", "done", "--pr", url) == 1
+    assert capsys.readouterr().err.strip() == (
+        f"swarm: pull request {url} is open, not merged; merge it, then run swarm done again"
+    )
+    assert ledger.rows["t1"]["state"] != "done"
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] != ["finished"]
+    assert run("sw", "done") == 1
+    assert "give --pr <url>" in capsys.readouterr().err
+    ledger.rows["t1"]["pr_url"] = url
+    ledger.pulls[url] = PullRequest("MERGED", 1, 1, False)
+    assert run("sw", "done") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+
+
+def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    url = "https://github.com/o/r/pull/4"
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    ledger.rows["t2"].update(state="done", kind="ci", pr_url=url)
+    ledger.log = [{"kind": "task done", "target": "tasks/t2", "by": "ci@a1b2c3-0001", "at": 8_000_000}]
+    ledger.pulls[url] = PullRequest("CLOSED", None, 1, False)
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert "task t2 reopened, its pull request is closed" in actions
+    assert (ledger.rows["t2"]["state"], ledger.rows["t2"]["claimed_by"]) == ("open", "")
+    assert ledger.comments[-1][0::2] == ("t2", "swarm")
 
 
 def test_block_comments_parks_and_finishes(env):

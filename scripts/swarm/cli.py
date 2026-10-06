@@ -54,6 +54,7 @@ from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     control_notifications,
     delivery,
+    done_gate,
     idle,
     ledger_events,
     naming,
@@ -128,6 +129,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
+        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -545,6 +547,9 @@ def cmd_done(store, args):
     if missing:
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
+    refused = done_gate.refusal(row, args.pr or row.get("pr_url"), ledger_events.view)
+    if refused:
+        raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _retire(store, args.slug, agent, "finished its task and exited")
