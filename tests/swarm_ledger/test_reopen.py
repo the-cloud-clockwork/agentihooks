@@ -1,3 +1,5 @@
+import re
+
 from tests.swarm_ledger.test_close import SLUG, apply, make_ledger
 
 
@@ -40,7 +42,8 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
     assert '$("closed-label").textContent = closedText(doc.closed_at)' in page
     assert '$("closed-banner").addEventListener("click", (event) => {' in page
     assert '$("closed-banner").querySelectorAll("button[data-swarm]")' in page
-    script = server.BIN_SCRIPT.removeprefix("<script>").removesuffix("</script>")
+    home = server.HOME_PAGE.read_text(encoding="utf-8")
+    script = re.search(r"<script>(async function reopenLedger.*?)</script>", home, re.S).group(1)
     probe = (
         """
 const calls=[];

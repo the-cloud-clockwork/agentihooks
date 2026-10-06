@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -46,6 +48,16 @@ class Home(unittest.TestCase):
         home, bell = template.index('id="home"'), template.index('id="bell"')
         self.assertLess(home, bell)
         self.assertIn(".fab-home", template)
+
+    def test_home_and_bin_render_from_the_home_html_source(self):
+        source = server.HOME_PAGE.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            edited = Path(tmp) / "home.html"
+            edited.write_text(source.replace("</style>", "</style><p id=edited>__HOME_HEADING__</p>"), encoding="utf-8")
+            with mock.patch.object(server, "HOME_PAGE", edited):
+                self.assertIn("<p id=edited>HOME</p>", server.index_page("home"))
+                self.assertIn("<p id=edited>BIN</p>", server.index_page("bin"))
+        self.assertTrue(source.rstrip().endswith("</body>"))
 
 
 if __name__ == "__main__":
