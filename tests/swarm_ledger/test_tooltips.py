@@ -12,6 +12,7 @@ browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(LEDGER))
+import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
@@ -200,3 +201,28 @@ def test_the_tip_module_holds_no_colour_and_is_served_with_both_pages():
     rendered = new_ledger.render(new_ledger.build_doc(content), "tips", 8765)
     assert f"<script>{js}</script>" in rendered
     assert "__LEDGER_" not in rendered
+
+
+def test_the_page_version_follows_the_tip_module(tmp_path):
+    before = core.page_version()
+    changed = tmp_path / "tooltips.js"
+    changed.write_text(core.TOOLTIPS.read_text() + ";")
+    with patch.object(core, "TOOLTIPS", changed):
+        after = core.page_version()
+    assert re.fullmatch(r"[0-9a-f]{12}", before)
+    assert after != before
+
+
+def test_upgrading_a_ledger_page_inlines_the_tip_module():
+    content = {"title": "T", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
+    html_path, json_path = core.paths("tips-upgrade")
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(
+        new_ledger.render(new_ledger.build_doc(content), "tips-upgrade", 8765).replace(core.TOOLTIPS.read_text(), "")
+    )
+    json_path.unlink(missing_ok=True)
+    core.sync("tips-upgrade")
+    new_ledger.upgrade_page("tips-upgrade")
+    page = html_path.read_text()
+    assert f"<script>{core.TOOLTIPS.read_text()}</script>" in page
+    assert "__LEDGER_" not in page
