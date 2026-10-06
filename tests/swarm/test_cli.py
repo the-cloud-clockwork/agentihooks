@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.health import checks
@@ -1242,3 +1243,93 @@ def test_status_exposes_pending_inbox_state_duration_tick_and_crew_history(env, 
     status = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert status["history"][0]["name"] == agent.name
     assert status["history"][0]["ended_at"] == 5678
+
+
+def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
+    from hooks.classifier import Answer, DecisionResult
+    from scripts.swarm import trace_plan
+
+    store, ledger, _ = env
+    ledger.followups = []
+    ledger.followup = lambda slug, text: ledger.followups.append((slug, text))
+    ledger.phases = [{"id": "p1", "title": "Build", "description": "Build the doghouse."}]
+    ledger.rows["t1"].update(phase="p1", title="Doghouse", description="A house for the dog.")
+    asked = {f"piece_{i}": Answer(type="noul", noul=p) for i, p in enumerate(p_yes)}
+    asked["size"] = Answer(type="score", score=1.0, confidence=0.9)
+    seen = []
+    monkeypatch.setattr(trace_plan, "decide", lambda state, q, **k: seen.append(state) or DecisionResult(asked, "m"))
+    folder = tmp_path / "_home" / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "plan.md").write_text(plan)
+    return folder, seen
+
+
+def test_trace_plan_traces_the_callers_task_and_files_cut_pieces(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    plan = "- walls | doghouse | it shelters the dog\n- a generator | power | it powers a light\n"
+    folder, seen = _traced(env, monkeypatch, tmp_path, plan, 0.9, 0.1)
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    report = json.loads(capsys.readouterr().out)
+    assert (report["task"], report["verdict"], report["cut"]) == ("t1", "pass", ["a generator"])
+    assert seen[0]["task intent"] == "A house for the dog." and seen[0]["phase intent"] == "Build the doghouse."
+    assert seen[0]["project intent"] == "Project intent"
+    assert ledger.followups == [("sw", "Cut from the plan of task t1: a generator")]
+    assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
+    assert ledger.rows["t1"]["state"] != "blocked"
+
+
+def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_GATE_TRACE_PLAN", "enforce")
+    folder, _ = _traced(env, monkeypatch, tmp_path, "- a generator | power | it powers a light\n", 0.1)
+    writes = []
+    update, comment = ledger.update_task, ledger.comment
+    ledger.update_task = lambda slug, task, fields, by="swarm": writes.append((slug, by)) or update(slug, task, fields)
+    ledger.comment = lambda slug, task, text, by: writes.append((slug, by)) or comment(slug, task, text, by)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert ledger.rows["t1"]["state"] != "blocked"
+    (folder / "plan.md").write_text("- a petrol generator | power | it powers a light\n")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert json.loads(capsys.readouterr().out)["next"] == "stop now; the plan failed twice and the task is blocked"
+    assert ledger.rows["t1"]["state"] == "blocked"
+    note = "Blocked by the plan trace after 2 failed plans: 1 of 1 pieces are off the task intent, more than half"
+    assert ledger.comments[-1] == ("t1", note, "engineer@a1b2c3-0001")
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
+    assert writes == [("sw", "engineer@a1b2c3-0001")] * 2
+    assert inbox.get(item.id).reason == "cancelled: engineer@a1b2c3-0001 blocked its task and exited before closing it"
+    rows = gate_log.recent("sw")
+    assert [(r["gate"], r["kind"], r["agent"], r["task"]) for r in rows] == [
+        ("trace-plan", "deny", "engineer@a1b2c3-0001", "t1")
+    ] * 2
+
+
+def test_trace_plan_reads_the_ledger_of_its_swarm_and_runs_without_a_task_row(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _, seen = _traced(env, monkeypatch, tmp_path, "- walls | doghouse | it shelters the dog\n", 0.9)
+    slugs, state = [], ledger.state
+    ledger.state = lambda slug: slugs.append(slug) or state(slug)
+    del ledger.rows["t1"]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert slugs == ["sw"]
+    assert (seen[0]["task"], seen[0]["phase"], seen[0]["project intent"]) == ("", "", "Project intent")
+
+
+def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkeypatch, tmp_path):
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 1
+    assert capsys.readouterr().err.strip() == (
+        f"swarm: write the plan first: {tmp_path}/_home/.agentihooks/swarm/sw/tasks/t1/plan.md, "
+        "one piece per line: - what | area, area | why"
+    )
