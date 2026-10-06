@@ -337,6 +337,13 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
     button = page.tab.locator("#quota-box .sw-blockhead #quota-refresh")
     assert button.get_attribute("aria-label") == "Refresh quota"
     assert "sw-btn" in button.get_attribute("class")
+    look = button.evaluate(
+        """b => { const s = getComputedStyle(b), probe = document.createElement("i");
+          probe.style.color = "var(--accent)"; document.body.append(probe);
+          const accent = getComputedStyle(probe).color; probe.remove();
+          return [s.color === accent, s.backgroundColor, s.borderStyle]; }"""
+    )
+    assert look == [True, "rgba(0, 0, 0, 0)", "none"]
     fresh = status()
     fresh["quota"] = {**fresh["quota"], "probed_at": NOW_S}
     page.payload = fresh

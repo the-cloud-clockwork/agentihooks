@@ -488,7 +488,7 @@ def swarm_control(slug, argv, command="swarm"):
     return status, "" if status else "swarm status unreadable after the command"
 
 
-def probe_quota():
+def probe_quota() -> str:
     exe = shutil.which("agentihooks")
     if not exe:
         return "agentihooks is not on PATH"
@@ -501,7 +501,7 @@ def probe_quota():
     return "" if done.returncode == 0 else (done.stderr or done.stdout).strip() or "quota probe failed"
 
 
-def refresh_quota(slug):
+def refresh_quota(slug: str) -> tuple[dict | None, str]:
     from scripts import agents_quota
 
     error = agents_quota.refresh_page_quota(probe_quota)
