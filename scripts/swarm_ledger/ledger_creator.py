@@ -45,17 +45,21 @@ def shared(environ) -> bool:
     return shared_directory(Path(environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser())
 
 
-def creator_refusal(environ, swarm) -> str:
-    """Why this session may not create a ledger, or a swarm when `swarm`, here; an empty string when it may."""
-    from scripts.swarm.store import DEFAULT_URL
-
+def creator_refusal(environ) -> str:
+    """Why this session may not create a ledger here; an empty string when it may."""
     if shared(environ):
         return "" if caller(environ) in CREATORS else CALLER
-    if (environ.get("LEDGER_PORT") or SHARED_PORT) == SHARED_PORT:
-        return PORT
-    if swarm and environ.get("AGENTIHOOKS_SWARM_REDIS_URL", "") in ("", DEFAULT_URL):
-        return REDIS
-    return ""
+    return PORT if (environ.get("LEDGER_PORT") or SHARED_PORT) == SHARED_PORT else ""
+
+
+def swarm_refusal(environ) -> str:
+    """Why this session may not create a swarm here: a proof swarm also needs its own Redis."""
+    from scripts.swarm.store import DEFAULT_URL
+
+    refused = creator_refusal(environ)
+    if refused or shared(environ):
+        return refused
+    return REDIS if environ.get("AGENTIHOOKS_SWARM_REDIS_URL", "") in ("", DEFAULT_URL) else ""
 
 
 def floor_refusal(environ, tasks, asked) -> str:

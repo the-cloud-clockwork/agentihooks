@@ -253,7 +253,7 @@ def main():
 
     content = json.loads(Path(args.content).read_bytes())
     tasks = ledger_creator.content_tasks(content) if isinstance(content, dict) else 0
-    refused = ledger_creator.creator_refusal(os.environ, False) or (
+    refused = ledger_creator.creator_refusal(os.environ) or (
         small and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
     )
     if refused:

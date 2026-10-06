@@ -163,7 +163,7 @@ def cmd_create(store, args):
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
     tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
-    refused = ledger_creator.creator_refusal(os.environ, True) or (
+    refused = ledger_creator.swarm_refusal(os.environ) or (
         args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
     )
     if refused:

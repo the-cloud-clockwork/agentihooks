@@ -124,7 +124,7 @@ def cmd_start(store, args):
     bundle = linked_bundle()
     if bundle is None:
         raise SwarmError("rig doctor needs a linked bundle for its rules: link one with agentihooks init --bundle DIR")
-    refused = ledger_creator.creator_refusal(os.environ, True)
+    refused = ledger_creator.swarm_refusal(os.environ)
     if refused:
         raise SwarmError(refused)
     slug, doctor = args.slug, doctor_slug(args.slug)

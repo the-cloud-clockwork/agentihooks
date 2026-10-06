@@ -149,12 +149,28 @@ def test_a_proof_swarm_needs_its_own_redis(tmp_path, redis):
     environ = {"LEDGER_DIR": str(tmp_path), "LEDGER_PORT": "8883"}
     if redis is not None:
         environ["AGENTIHOOKS_SWARM_REDIS_URL"] = redis
-    assert ledger_creator.creator_refusal(environ, True) == ledger_creator.REDIS
+    assert ledger_creator.swarm_refusal(environ) == ledger_creator.REDIS
+
+
+@pytest.mark.parametrize(
+    "environ, refusal",
+    [
+        ({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_LANE": "eng"}, ledger_creator.CALLER),
+        ({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_LANE": "master"}, ""),
+        (
+            {"LEDGER_DIR": "/scratch", "LEDGER_PORT": "8765", "AGENTIHOOKS_SWARM_REDIS_URL": "redis://x:1/0"},
+            ledger_creator.PORT,
+        ),
+        ({"LEDGER_DIR": "/scratch", "LEDGER_PORT": "8883", "AGENTIHOOKS_SWARM_REDIS_URL": "redis://x:1/0"}, ""),
+    ],
+)
+def test_a_swarm_takes_the_ledger_rules_before_its_own_redis(environ, refusal):
+    assert ledger_creator.swarm_refusal(environ) == refusal
 
 
 def test_without_a_ledger_folder_the_shared_one_is_judged():
     environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_LANE": "eng"}
-    assert ledger_creator.creator_refusal(environ, False) == ledger_creator.CALLER
+    assert ledger_creator.creator_refusal(environ) == ledger_creator.CALLER
 
 
 def test_swarm_tasks_count_each_waiting_automatic_phase():
