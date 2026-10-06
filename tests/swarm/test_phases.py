@@ -126,11 +126,12 @@ def test_a_finished_phase_opens_its_waiting_phase_before_the_drained_decision(en
     ledger.add_task(SLUG, {"task": "t3", "title": "Task three", "lane": "eng", "phase": "p2"}, "init-swarm")
     store.update(SLUG, state="running")
     finish(ledger, "t1", "t2")
-    actions = run(store, ledger)
+    rt = FakeRuntime()
+    actions = swarm_cli.run_tick(store, SLUG, ledger, rt, FakeHerdr({}))
     doc = state(SLUG)
     assert phase("p1")["done"] is True
     assert phase_state.lifecycle(phase("p2"), doc) == "building"
     assert "drained" not in actions and store.config(SLUG).state == "running"
     assert not any("no task left" in c["text"] for c in doc["chat"])
-    assert not any(a.startswith(("retired", "could not retire")) for a in actions)
+    assert rt.killed == [] and rt.closed_spaces == []
     assert [a.lane for a in store.agents(SLUG)] == ["master"]
