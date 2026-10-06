@@ -170,12 +170,16 @@ details.phase-fold > summary::before { align-self: center; }
 .chat-panel { z-index: 12; left: auto; right: 16px; bottom: 72px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100vh - 100px)); max-height: none; }
 .chat-panel.big { width: min(760px, calc(100vw - 32px)); height: calc(100vh - 100px); }
 .chat-panel .chat-log { padding: 0 14px; }
-.chat-compose { padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
+.chat-compose { position: relative; padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
 .chat-to { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
-.chat-to select { background: transparent; border: 0; color: var(--accent); text-shadow: var(--glow); font: inherit; letter-spacing: normal; text-transform: none; cursor: pointer; }
-.chat-to select:hover { background: var(--hover); }
-.chat-to select:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.chat-to option { background: var(--surface-2); color: var(--text); }
+.chat-to button { background: transparent; border: 0; padding: 2px 6px; color: var(--accent); text-shadow: var(--glow); font: inherit; letter-spacing: normal; text-transform: none; text-align: left; cursor: pointer; }
+.chat-to button:hover, .chat-to button:focus-visible { background: var(--hover); }
+.chat-to button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.chat-to-menu { position: absolute; left: 14px; bottom: calc(100% - 4px); z-index: 2; display: flex; flex-direction: column; min-width: 180px; max-height: min(320px, 50vh); padding: 6px; overflow-y: auto; scrollbar-width: none; background: var(--menu); }
+.chat-to-menu::-webkit-scrollbar { display: none; }
+.chat-to-menu[hidden] { display: none; }
+.chat-to-menu button { padding: 6px 10px; }
+.chat-to-menu button[aria-selected="true"] { color: var(--accent-2); }
 .notif-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px 10px; border-bottom: 1px solid var(--rule); }
 .notif-list { list-style: none; margin: 0; padding: 0 14px 12px; overflow-y: auto; }
 .notif-row { padding: 8px 0; border-top: 1px solid var(--rule); }
@@ -626,7 +630,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
   <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
-  <div class="chat-compose"><div class="chat-to"><label for="chat-to">To</label><select id="chat-to"><option value="">master</option></select></div><textarea class="line" id="chat-input" rows="1" placeholder="Message…" aria-label="Chat message"></textarea>
+  <div class="chat-compose"><div class="chat-to"><span id="chat-to-label">To</span><input type="hidden" id="chat-to" value=""><button type="button" id="chat-to-pick" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="chat-to-label chat-to-pick">master</button><div class="chat-to-menu" id="chat-to-menu" role="listbox" aria-labelledby="chat-to-label" hidden></div></div><textarea class="line" id="chat-input" rows="1" placeholder="Message…" aria-label="Chat message"></textarea>
     <div class="hint">Enter to send · Ctrl+Enter for a new line</div></div>
 </details></section>
 <section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
@@ -642,6 +646,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   const API = location.protocol.startsWith("http") ? `/api/${SLUG}` : `http://127.0.0.1:${PORT}/api/${SLUG}`;
   const LS_KEY = `plan-ledger:${SLUG}:v2`;
   const CHAT_SEEN = `plan-ledger:${SLUG}:chat-seen`;
+  const SWARM = "swarm";
   const FOLD_KEY = `plan-ledger:${SLUG}:fold`;
   const COMMENTS_KEY = `plan-ledger:${SLUG}:comments`;
   const TOGGLES_KEY = `plan-ledger:${SLUG}:toggles-v2`;
@@ -1754,7 +1759,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const message = event.target.closest("button[data-message]");
     if (message) {
       showChat(true);
-      $("chat-to").value = message.dataset.message;
+      setChatTo(message.dataset.message);
       return;
     }
     const terminate = event.target.closest("button[data-terminate]");
@@ -2184,7 +2189,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const stick = log.dataset.sig === undefined || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
     log.dataset.sig = sig;
     log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
-      h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
+      h("div", { class: "entry-head" }, h("span", { class: "who", text: chatWho(e) }), h("span", { text: when(e.at) })),
       entryBody(e.text, new Set(doc.tasks.map((t) => t.id))), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
     if (stick) {
@@ -2222,12 +2227,31 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function renderChatTo(sw) {
-    const pick = $("chat-to");
-    if (document.activeElement === pick) return;
+    const menu = $("chat-to-menu");
+    if (!menu.hidden) return;
     const live = ((sw && sw.agents) || []).filter((a) => a.lane !== "master" && a.state !== "finished").map((a) => a.name);
-    const keep = live.includes(pick.value) ? pick.value : "";
-    pick.replaceChildren(h("option", { value: "", text: "master" }), ...live.map((name) => h("option", { value: name, text: name })));
-    pick.value = keep;
+    const names = ["", SWARM, ...live];
+    const keep = names.includes($("chat-to").value) ? $("chat-to").value : "";
+    menu.replaceChildren(...names.map((name) => h("button", { type: "button", role: "option", "data-to": name, text: name || "master" })));
+    setChatTo(keep);
+  }
+
+  function setChatTo(name) {
+    $("chat-to").value = name;
+    $("chat-to-pick").textContent = name || "master";
+    for (const row of $("chat-to-menu").children) row.setAttribute("aria-selected", String(row.dataset.to === name));
+  }
+
+  function showChatTo(open) {
+    const menu = $("chat-to-menu");
+    menu.hidden = !open;
+    $("chat-to-pick").setAttribute("aria-expanded", String(open));
+    if (open) (menu.querySelector('[aria-selected="true"]') || menu.firstElementChild).focus();
+  }
+
+  function chatWho(e) {
+    if (e.by !== "operator") return e.by;
+    return e.text.startsWith(`@${SWARM} `) ? "You to the whole swarm" : "You";
   }
 
   function chatText(text, to) {
@@ -2448,6 +2472,29 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     } catch (e) { chatSeen = lastChatAt(); }
     $("chat-fab").addEventListener("click", () => showChat($("chat-panel").hidden));
     $("chat-close").addEventListener("click", () => showChat(false));
+    $("chat-to-pick").addEventListener("click", () => showChatTo($("chat-to-menu").hidden));
+    $("chat-to-menu").addEventListener("click", (ev) => {
+      const row = ev.target.closest("button[data-to]");
+      if (!row) return;
+      setChatTo(row.dataset.to);
+      showChatTo(false);
+      $("chat-input").focus();
+    });
+    $("chat-to-menu").addEventListener("keydown", (ev) => {
+      const rows = [...$("chat-to-menu").children];
+      const at = rows.indexOf(document.activeElement);
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        rows[(at + (ev.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length].focus();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        showChatTo(false);
+        $("chat-to-pick").focus();
+      }
+    });
+    document.addEventListener("click", (ev) => {
+      if (!$("chat-to-menu").hidden && !ev.target.closest(".chat-to")) showChatTo(false);
+    });
     $("chat-size").addEventListener("click", () => {
       const big = $("chat-panel").classList.toggle("big");
       $("chat-size").textContent = big ? "Shrink" : "Expand";
