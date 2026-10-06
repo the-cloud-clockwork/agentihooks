@@ -40,6 +40,30 @@ def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, m
     assert result["untouched_survivors"] == []
 
 
+def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/__init__.py").touch()
+    (tmp_path / "scripts/__init__.py").touch()
+    shutil.copytree(
+        Path(__file__).parents[1] / "scripts/ci_mutation",
+        tmp_path / "scripts/ci_mutation",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sample.py").write_text(
+        "from scripts.sample import covered\n\n"
+        "def test_value(tmp_path, monkeypatch):\n    monkeypatch.chdir(tmp_path)\n    assert covered(1) == 2\n"
+    )
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 30)
+    assert report["not_mutated"] == []
+    assert report["files"][0]["counts"] == {"killed": 2}
+    assert report["failed"] is False
+
+
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import run_selected
 
@@ -56,13 +80,20 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert path in {Path("scripts/sample.py"), Path("hooks/other.py")}
         return data
 
+    config = SimpleNamespace(source_paths=[Path("hooks/")])
+
     def collect_stats(value):
         assert value is test_runner
         assert loaded
+        assert config.source_paths == [Path.cwd() / "mutants/hooks"]
         return "collected"
 
     data.load = load
-    runner = SimpleNamespace(collect_or_load_stats=collect_stats, SourceFileMutationData=mutation_data)
+    runner = SimpleNamespace(
+        collect_or_load_stats=collect_stats,
+        SourceFileMutationData=mutation_data,
+        Config=SimpleNamespace(get=lambda: config),
+    )
     mutmut = SimpleNamespace(__main__=runner)
 
     def cli(args):
@@ -73,6 +104,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert stream.getvalue() == "generated"
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.collect_or_load_stats(test_runner) == "collected"
+        assert config.source_paths == [Path("hooks/")]
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)

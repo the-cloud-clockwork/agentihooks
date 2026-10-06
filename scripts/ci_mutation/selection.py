@@ -44,8 +44,17 @@ def run_selected(selection: Path) -> None:
             data = runner.SourceFileMutationData(path=Path(path))
             data.load()
             if data.exit_code_by_key:
-                return collect_stats(test_runner)
-        raise SystemExit(0)
+                break
+        else:
+            raise SystemExit(0)
+        # mutmut resolves source paths against the working directory on every hit; tests may change it.
+        config = runner.Config.get()
+        relative = config.source_paths
+        config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
+        try:
+            return collect_stats(test_runner)
+        finally:
+            config.source_paths = relative
 
     runner.collect_or_load_stats = collect_selected_stats
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
