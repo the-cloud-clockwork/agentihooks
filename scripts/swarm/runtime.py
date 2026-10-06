@@ -253,7 +253,7 @@ class HerdrRuntime:
         except Exception:
             return PaneObservation(state)
         title = selection_prompt(capture.get("text", ""))
-        return PaneObservation("waiting", title) if title else PaneObservation(state)
+        return PaneObservation("waiting", title) if title or state == "blocked" else PaneObservation(state)
 
     def _get(self, target):
         try:

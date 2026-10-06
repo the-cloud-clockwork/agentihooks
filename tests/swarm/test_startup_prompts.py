@@ -243,6 +243,12 @@ def test_real_codex_idle_composer_is_not_waiting(tmp_path):
     assert (observed.state, observed.prompt_title) == ("idle", "")
 
 
+def test_a_pane_herdr_reports_blocked_is_waiting_even_without_a_known_dialog(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("codex-idle-composer.txt", "blocked"))
+    observed = runtime.observe(AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    assert (observed.state, observed.prompt_title) == ("waiting", "")
+
+
 def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_names_it(tmp_path, monkeypatch, capsys):
     from types import SimpleNamespace
 
