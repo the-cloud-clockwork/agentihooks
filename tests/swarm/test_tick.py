@@ -54,7 +54,7 @@ class FakeRuntime:
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
-        self.conversation_ids, self.named, self.closed_spaces = {}, [], []
+        self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
 
     def has_capacity(self):
         return not self.full
@@ -96,7 +96,7 @@ class FakeRuntime:
     def observe(self, agent):
         from scripts.swarm.pane import PaneObservation
 
-        return PaneObservation(self.status(agent))
+        return PaneObservation(self.status(agent), typed=self.typed.get(agent.name, ""))
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
@@ -306,6 +306,59 @@ def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ]
 
 
+@pytest.mark.parametrize("closed_mid_tick", [True, False])
+def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    from scripts.inbox.store import InboxStore
+
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
+    runtime.live.discard("engineer@a1b2c3-0001")
+    if closed_mid_tick:
+        ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    moved = inbox.get(item.id)
+    if closed_mid_tick:
+        assert ledger.rows["t1"]["state"] == "done"
+        assert (moved.address, moved.state) == ("engineer@a1b2c3-0001", "cancelled")
+        assert inbox.history(item.id)[-1]["reason"] == "cancelled: engineer@a1b2c3-0001 stopped before closing it"
+        assert inbox.inbox("eng-1@sw") == []
+        assert actions == ["lost engineer@a1b2c3-0001"]
+    else:
+        assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+        assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+        assert actions == ["lost engineer@a1b2c3-0001, task t1 reopened"]
+
+
+@pytest.mark.parametrize("closed_mid_tick", [True, False])
+def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS - 1, start=2_000)
+    if closed_mid_tick:
+        ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
+    moved = inbox.get(item.id)
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    if closed_mid_tick:
+        assert ledger.rows["t1"]["state"] == "done"
+        assert (moved.address, moved.state) == ("engineer@a1b2c3-0001", "cancelled")
+        assert actions == ["stalled engineer@a1b2c3-0001"]
+    else:
+        assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+        assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+        assert actions == ["stalled engineer@a1b2c3-0001, task t1 reopened"]
+
+
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
     for _ in range(3):
@@ -349,6 +402,48 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
         if n + 1 == IDLE_NUDGE_TICKS:
             assert runtime.nudged == ["engineer@a1b2c3-0001"]
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
+
+
+def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    runtime.typed["engineer@a1b2c3-0001"] = "wait, before you"
+    for n in range(IDLE_NUDGE_TICKS + 2):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+    assert runtime.nudged == [] and workers(store)[0].idle_ticks == 0
+    runtime.typed.clear()
+    for n in range(IDLE_NUDGE_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=3_000 + n)
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+
+
+def test_the_nudge_is_skipped_inside_the_quiet_window_after_an_operator_prompt(store):
+    from scripts.inbox import wake
+    from scripts.swarm import idle
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle.prompted(store.redis, "sw", "engineer@a1b2c3-0001", 2_000)
+    quiet = wake.DEFAULT_QUIET_S * 1000
+    for n in range(IDLE_NUDGE_TICKS + 2):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet - 10 + n)
+    assert runtime.nudged == []
+    for n in range(IDLE_NUDGE_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet + n)
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+
+
+def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal():
+    from scripts.swarm.tick import NUDGE
+
+    assert "agentihooks msg reply" in NUDGE and "never as text in this terminal" in NUDGE
 
 
 def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store):
@@ -626,6 +721,70 @@ def test_a_task_without_territory_is_claimed_alongside_anything(store):
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert spawned_ids(runtime) == ["t1", "t2", "t3"]
+
+
+def test_an_urgent_ready_task_is_claimed_ahead_of_an_older_normal_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+
+
+def test_a_blocked_urgent_task_is_skipped_for_a_ready_normal_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [{"id": "t0", "state": "blocked"}, {"id": "t1", "rank": "urgent", "depends_on": ["t0"]}, {"id": "t2"}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"] and ledger.rows["t1"]["state"] == "open"
+
+
+def test_an_urgent_task_never_takes_a_territory_an_active_claim_holds(store):
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t1"]["state"] == "claimed"
+
+
+def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store):
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "rank": "urgent", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+
+
+def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
+    store.update("sw", max_eng=6)
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "rank": "low"},
+            {"id": "t2"},
+            {"id": "t3", "rank": "high"},
+            {"id": "t4", "rank": "normal"},
+            {"id": "t5", "rank": "high"},
+            {"id": "t6", "rank": "urgent"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t6", "t3", "t5", "t2", "t4", "t1"]
+
+
+def test_a_rank_change_applies_on_the_next_tick(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1"]
+    ledger.rows["t1"]["state"] = "done"
+    store.put_agent("sw", replace(workers(store)[0], state="finished"))
+    ledger.rows["t3"]["rank"] = "high"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime)[1:] == ["t3"]
 
 
 def test_a_swarm_whose_only_open_task_waits_on_a_blocked_one_drains(store):

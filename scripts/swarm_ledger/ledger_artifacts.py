@@ -166,6 +166,14 @@ def _add(doc, op, ctx):
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
+    from scripts.swarm.naming import lane_of
+
+    member = ctx.meta["members"].get(op["by"], {})
+    if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
+        if not operator_asked(doc, op.get("request")):
+            ctx.refused.append(REFUSED)
+            return False
+        op = {**op, "task": ""}
     task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
     if op["by"] not in ctx.meta["members"] or (op["task"] and task is None):
         return False

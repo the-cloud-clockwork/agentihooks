@@ -240,8 +240,49 @@ def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
     t = sent_at(item)
     for n in range(4):
         run(inbox, herdr, ledger, t + n * W)
-    assert len(herdr.prompts) == 3 and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
-    assert events(inbox, item.id)[-1] == "escalated_operator"
+    assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
+    assert events(inbox, item.id) == ["escalated_operator"]
+
+
+@pytest.mark.parametrize("harness", ["", "claude", "codex"])
+def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harness):
+    master = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw", harness=harness)
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    first = inbox.send("sw-eng-1", MASTER_NAME, "check the plan")
+    inbox.send("sw-eng-1", "master@sw", "and the seat item")
+    inbox.send(wake.BY, MASTER_NAME, "a follow up waits on you")
+    herdr = FakeHerdr({"pm": "idle", "p1": "idle"})
+    for n in range(6):
+        run(inbox, herdr, FakeLedger(), sent_at(first) + n * W, [AGENTS[0], master])
+    assert herdr.prompts == []
+
+
+def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake(inbox):
+    claude = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
+    codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
+    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
+    other = inbox.send(MASTER_NAME, "sw-eng-2", "review mine")
+    herdr = FakeHerdr({"p1": "idle", "p2": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, [claude, codex, AGENTS[1]])
+    assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == [] and events(inbox, other.id) == ["woken"]
+    run(inbox, herdr, FakeLedger(), sent_at(item) + W, [claude, codex, AGENTS[1]])
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_codex_master_pane_is_never_woken_the_moment_an_item_lands(inbox):
+    master = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", harness="codex")
+    codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
+    inbox.send("sw-eng-1", MASTER_NAME, "check the plan")
+    item = inbox.send(MASTER_NAME, "sw-eng-2", "review mine")
+    herdr = FakeHerdr({"pm": "idle", "p2": "idle"})
+    wake.wake_now(inbox, "sw", [master, codex], herdr, sent_at(item) + 1, W)
+    assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
+
+
+def test_the_wake_says_to_answer_through_the_inbox_never_in_the_terminal():
+    assert "agentihooks msg reply" in wake.WAKE_TEXT
+    assert "never as text in this terminal" in wake.WAKE_TEXT
 
 
 def test_items_outside_the_swarm_are_left_alone(inbox):
@@ -322,13 +363,13 @@ def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
 
 
 def test_a_pane_holding_typed_input_is_left_alone_until_the_operator_sends_it(inbox):
-    item = inbox.send("sw-eng-2", MASTER_NAME, "check the plan")
-    herdr = FakeHerdr({"pm": "idle"}, {"pm": "wait, before you"})
+    item = inbox.send("sw-eng-2", "sw-eng-1", "check the plan")
+    herdr = FakeHerdr({"p1": "idle"}, {"p1": "wait, before you"})
     assert run(inbox, herdr, FakeLedger(), sent_at(item) + 1) == []
     assert herdr.prompts == [] and events(inbox, item.id) == []
-    herdr.typed["pm"] = ""
+    herdr.typed["p1"] = ""
     run(inbox, herdr, FakeLedger(), sent_at(item) + 2)
-    assert herdr.prompts == [("pm", wake.WAKE_TEXT)]
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
 
 
 def test_typed_input_keeps_todays_escalation_timing(inbox):
@@ -341,13 +382,13 @@ def test_typed_input_keeps_todays_escalation_timing(inbox):
 
 
 def test_a_pane_the_operator_prompted_inside_the_quiet_window_is_left_alone(inbox):
-    item = inbox.send("sw-eng-2", MASTER_NAME, "check the plan")
-    herdr = FakeHerdr({"pm": "idle"})
-    idle.prompted(inbox.redis, "sw", MASTER_NAME, sent_at(item))
+    item = inbox.send("sw-eng-2", "sw-eng-1", "check the plan")
+    herdr = FakeHerdr({"p1": "idle"})
+    idle.prompted(inbox.redis, "sw", "sw-eng-1", sent_at(item))
     assert run(inbox, herdr, FakeLedger(), sent_at(item) + wake.DEFAULT_QUIET_S * 1000 - 1) == []
     assert herdr.prompts == []
     run(inbox, herdr, FakeLedger(), sent_at(item) + wake.DEFAULT_QUIET_S * 1000)
-    assert herdr.prompts == [("pm", wake.WAKE_TEXT)]
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
 
 
 def test_the_quiet_window_comes_from_the_environment():

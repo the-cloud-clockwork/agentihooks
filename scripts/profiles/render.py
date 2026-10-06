@@ -167,6 +167,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
 def _seed(src: Path) -> dict:
     operator = _read_json(src) or {}
     doc = {key: operator[key] for key in SEED_KEYS if key in operator}
+    doc["hasCompletedOnboarding"] = True
     if isinstance(operator.get("projects"), dict):
         doc["projects"] = {
             path: {key: project[key] for key in PROJECT_SEED_KEYS if key in project}
@@ -181,6 +182,7 @@ def _claude_json(out: Path, bundle: Path | None, dirs: list[tuple[str, Path]]) -
     _i = _install_module()
     dst = out / ".claude.json"
     doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
+    doc.setdefault("hasCompletedOnboarding", True)
     servers = {}
     for name, spec in _mcp_servers("claude", bundle, dirs).items():
         if not drop_if_credentialed(name, spec, str(dst)):
@@ -240,6 +242,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         and _read_json(out / STAMP) == current
         and not (out / "rules").exists()
         and sources.path(name, "claude", rendered_root()).is_file()
+        and "hasCompletedOnboarding" in (_read_json(out / ".claude.json") or {})
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)

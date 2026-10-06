@@ -11,7 +11,7 @@ from pathlib import Path
 from scripts import agent_choice
 from scripts.profiles import plugins
 from scripts.swarm import effort_range, model_pick, naming, priming_trace, prompt
-from scripts.swarm.pane import PaneObservation, selection_prompt
+from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
@@ -266,11 +266,14 @@ class HerdrRuntime:
             self.name_pane(agent)
         state = found.get("agent_status") or found.get("status") or "unknown"
         try:
-            capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "text"])
+            capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "ansi"])
         except Exception:
             return PaneObservation(state)
-        title = selection_prompt(capture.get("text", ""))
-        return PaneObservation("waiting", title) if title or state == "blocked" else PaneObservation(state)
+        text = capture.get("text", "")
+        title = selection_prompt(text)
+        if title or state == "blocked":
+            return PaneObservation("waiting", title)
+        return PaneObservation(state, typed=typed_input(text))
 
     def _get(self, target):
         try:

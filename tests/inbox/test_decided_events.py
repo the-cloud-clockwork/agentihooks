@@ -77,12 +77,12 @@ def test_a_followup_closed_before_the_wake_never_reaches_the_master(crew):
     assert ledger.followups == []
 
 
-def test_an_open_followup_still_wakes_the_master(crew):
+def test_an_open_followup_stays_pending_for_the_master_without_a_typed_wake(crew):
     _, inbox, _, herdr = crew
     item = queue_event(crew)
     wake(crew, item.created_at + 1)
     assert inbox.pending() == [item]
-    assert len(herdr.prompts) == 1
+    assert herdr.prompts == []
 
 
 @pytest.mark.parametrize(
@@ -128,13 +128,13 @@ def test_other_ledger_decisions_close_the_event(crew, collection, kind, fields):
         ("tasks", "task done", {"state": "done", "done": True}),
     ],
 )
-def test_undecided_questions_and_task_items_still_wake(crew, collection, kind, fields):
+def test_undecided_questions_and_task_items_stay_pending_without_a_typed_wake(crew, collection, kind, fields):
     _, inbox, ledger, herdr = crew
     item = queue_event(crew, collection, kind)
     ledger.doc[collection][0].update(fields)
     wake(crew, item.created_at + 1)
     assert inbox.get(item.id).state == "pending"
-    assert len(herdr.prompts) == 1
+    assert herdr.prompts == []
 
 
 def test_a_closed_followup_reminder_also_closes_before_a_wake(crew):
@@ -166,4 +166,4 @@ def test_an_unreferenced_message_is_preserved(crew):
     item = inbox.send("swarm", "master@sw", "Check the deployment")
     wake(crew, item.created_at + 1)
     assert inbox.pending() == [item]
-    assert len(herdr.prompts) == 1
+    assert herdr.prompts == []

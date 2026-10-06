@@ -139,6 +139,16 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Install the artifact viewer browser
+        if: steps.lookup.outputs.skip != 'true'
+        run: |
+          python -m pip install "playwright>=1.44.0"
+          python -m playwright install --with-deps chromium
+
+      - name: Artifact sanity checks
+        if: steps.lookup.outputs.skip != 'true'
+        run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+
   refresh-durations:
     needs: [unit, lint]
     if: github.event_name == 'push'

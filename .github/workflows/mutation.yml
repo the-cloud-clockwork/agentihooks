@@ -33,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Install the browser that page tests drive
+        run: python -m playwright install --with-deps chromium
+
       - name: Mutate changed Python files
         env:
           BASE: ${{ github.event.pull_request.base.sha }}

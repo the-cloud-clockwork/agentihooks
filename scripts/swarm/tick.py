@@ -4,6 +4,7 @@ Scaling up is immediate; scaling down happens only as agents finish, so a lowere
 Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
+import os
 from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
@@ -13,7 +14,7 @@ from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
-from scripts.inbox import exits
+from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications, lifetime, phase_state, session_model
@@ -21,7 +22,7 @@ from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -33,7 +34,8 @@ ACTIVE = ("claimed", "pr")
 NUDGE = (
     "Swarm check: you are idle and your task is still open. If you are waiting on checks or a deploy, declare it "
     "with agentihooks swarm {slug} wait <minutes> --reason <what> and keep waiting. Otherwise finish it with agentihooks swarm {slug} done "
-    "and the proof your task's kind needs (--pr <url> for code), or agentihooks swarm {slug} block with the reason."
+    "and the proof your task's kind needs (--pr <url> for code), or agentihooks swarm {slug} block with the reason. "
+    "Answer with those commands or agentihooks msg reply, never as text in this terminal."
 )
 
 
@@ -136,9 +138,8 @@ def _woken(slug, config, store, ledger):
 def _drop(slug, store, ledger, rows, agent):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    reopen = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    if reopen:
-        _reopen(slug, ledger, rows, agent.task)
+    held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    reopen = held and _reopen(slug, ledger, rows, agent.task)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
 
@@ -203,6 +204,9 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
         return []
+    if _operator_at_pane(slug, store, agent, observed, now_ms):
+        store.put_agent(slug, agent)
+        return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
     who = Who(name=agent.name, task=agent.task)
@@ -215,6 +219,12 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
     return []
+
+
+def _operator_at_pane(slug, store, agent, observed, now_ms):
+    """The idle count holds while the pane's input line holds text or the operator prompted it inside the quiet window."""
+    last = idle_state.last_prompt(store.redis, slug, agent.name)
+    return bool(observed.typed) or (last is not None and now_ms - last < wake.quiet_ms(os.environ))
 
 
 def _orphans(slug, store, ledger, rows):
@@ -257,7 +267,7 @@ def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     picked = []
-    for t in rows.values():
+    for t in sorted(rows.values(), key=ledger_rank.order):
         if (
             t.get("lane") == lane
             and t.get("state") == "open"

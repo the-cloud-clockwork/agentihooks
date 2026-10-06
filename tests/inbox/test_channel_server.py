@@ -1,10 +1,12 @@
 import contextlib
 import queue
+import threading
 import time
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from redis._parsers.encoders import Encoder
 
 from scripts.inbox import channel
 from scripts.inbox.store import NOTIFY, InboxError, Item
@@ -15,6 +17,7 @@ pytestmark = pytest.mark.xdist_group("mcp-sdk")
 class FakePubSub:
     def __init__(self):
         self.notes, self.channels = queue.Queue(), []
+        self.closed = False
 
     def subscribe(self, name):
         self.channels.append(name)
@@ -30,17 +33,25 @@ class FakePubSub:
         except queue.Empty:
             return None
 
+    def close(self):
+        self.closed = True
+
 
 class FakeStore:
     """The inbox calls the channel server makes, in memory; the Redis store itself is covered in test_realtime."""
 
     def __init__(self):
         self.items, self.subs = {}, []
-        self.redis = SimpleNamespace(pubsub=self._pubsub)
+        self.redis = SimpleNamespace(pubsub=self._pubsub, publish=self._publish)
 
     def _pubsub(self):
         self.subs.append(FakePubSub())
         return self.subs[-1]
+
+    def _publish(self, name, data):
+        Encoder("utf-8", "strict", False).encode(data)
+        for sub in self.subs:
+            sub.publish(name, data)
 
     def send(self, sender, address, text, notify=True):
         at = time.time_ns() // 1_000_000
@@ -204,22 +215,73 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
     assert session(store, scenario)[2] == [first.id, second.id]
 
 
-def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_recheck(store, monkeypatch):
+def _close_idle_session(store, monkeypatch, delay=0, wake=True):
     import anyio
 
-    monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 3.0)
-    claims = []
-    real = channel.claim
-    monkeypatch.setattr(channel, "claim", lambda *args: claims.append(1) or real(*args))
+    entered, worker_stopped = threading.Event(), threading.Event()
+    closed, close_requested = threading.Event(), threading.Event()
+    outcomes = queue.Queue()
+    real_get_message = FakePubSub.get_message
+
+    def get_message(pubsub, timeout):
+        if not pubsub.notes.empty():
+            return real_get_message(pubsub, timeout)
+        entered.set()
+        try:
+            assert timeout == 3600
+            return real_get_message(pubsub, 60)
+        finally:
+            worker_stopped.set()
 
     async def idle(send, receive):
-        await anyio.sleep(0.5)
-        return len(claims)
+        await anyio.to_thread.run_sync(close_requested.wait)
 
-    start = time.monotonic()
-    assert session(store, idle)[2] == 2
-    assert time.monotonic() - start < 2.0
+    def drive():
+        try:
+            if delay:
+                time.sleep(delay)
+            session(store, idle)
+            outcomes.put(None)
+        except BaseException as error:
+            outcomes.put(error)
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+    monkeypatch.setattr(FakePubSub, "get_message", get_message)
+    if not wake:
+        monkeypatch.setattr(store.redis, "publish", lambda *args: None)
+    driver = threading.Thread(target=drive)
+    driver.start()
+    try:
+        assert entered.wait(30), "session never entered the recheck wait"
+        close_requested.set()
+        interrupted = closed.wait(10)
+        stopped_on_close = worker_stopped.is_set()
+    finally:
+        close_requested.set()
+        for pubsub in store.subs:
+            pubsub.notes.put({"type": "message", "data": "cleanup"})
+        driver.join(30)
+    assert not driver.is_alive(), "session worker survived cleanup"
+    assert worker_stopped.wait(30), "recheck worker survived cleanup"
+    error = outcomes.get_nowait()
+    if error is not None:
+        raise error
+    assert interrupted, "close did not interrupt the recheck wait"
+    assert stopped_on_close, "recheck worker survived close"
+    assert all(pubsub.closed for pubsub in store.subs), "close left a subscription open"
+
+
+@pytest.mark.parametrize("delay", [0, 2.5], ids=["normal", "delayed-scheduling"])
+def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_recheck(store, monkeypatch, delay):
+    _close_idle_session(store, monkeypatch, delay)
+
+
+def test_idle_close_proof_rejects_a_missing_close_wake(store, monkeypatch):
+    with pytest.raises(AssertionError, match="close did not interrupt the recheck wait"):
+        _close_idle_session(store, monkeypatch, wake=False)
 
 
 def test_serve_runs_the_session_over_stdio(store, monkeypatch):

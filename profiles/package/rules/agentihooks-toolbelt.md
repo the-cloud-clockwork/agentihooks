@@ -126,8 +126,9 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   item already decided on the ledger closes itself before a wake; a task item
   stays until the master closes it.
 - The tick counts an agent idle only when its pane reads idle, its heartbeat
-  does not say working and no declared wait holds; nudge at 3 idle ticks,
-  retire at 10. A leaving agent's open items move to its seat when its task
+  does not say working and no declared wait holds, and holds the count while its
+  input line holds text or the operator prompted it inside the quiet window;
+  nudge at 3 idle ticks, retire at 10. A leaving agent's open items move to its seat when its task
   goes on, else they are withdrawn and each sender told.
 - A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
   receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
@@ -191,14 +192,18 @@ whoever occupies a seat now gets its items, the ones a predecessor left pending
 included. Every state change is kept in the item's history.
 A pending item is delivered once, into this session's context at its next tool call
 (PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
-An idle session never makes that call, so the swarm tick wakes it: an idle herdr pane
-holding a pending item gets one prompt to run `agentihooks msg inbox` (a busy pane or
-one waiting on input never), retried every `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default
-300) up to three times. Still unread one window later, the swarm master gets an item;
-one more window, the operator gets a follow-up on the ledger page. A session outside
-herdr skips the wakes and is escalated one window after the send. An item for the
-master, or in a swarm without one, goes from the wakes straight to the operator. Each
-wake and escalation is kept in the item's history.
+A swarm Claude session also receives each item the moment it lands through its inbox
+channel, answered with the channel's reply tool. The tick types a wake only into the
+idle worker pane of a harness without that channel, Codex today: one prompt to run
+`agentihooks msg inbox` and answer with `msg reply` or the swarm commands, never as text
+in the terminal (a busy pane, one waiting on input, one holding typed text or one the
+operator prompted inside `AGENTIHOOKS_INBOX_QUIET_S` never), retried every
+`AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300) up to three times. The master pane is
+the operator's and is never typed into. Still unread one window later, the swarm master
+gets an item; one more window, the operator gets a follow-up on the ledger page. A
+session with no typed wake is escalated one window after the send. An item for the
+master, or in a swarm without one, goes straight to the operator. Each wake and
+escalation is kept in the item's history.
 
 The inbox carries swarm chat and talk across harnesses (Claude, Codex, Copilot) alike.
 `agentihooks swarm <slug> say --to <name|eng|ci>` leaves one item per recipient; a
