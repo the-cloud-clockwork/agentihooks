@@ -447,7 +447,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-caps { column-gap: var(--space-tight); }
 .sw-gates { --gate-w: calc(30.5ch + 3 * var(--space-tight)); display: grid; grid-template-columns: repeat(auto-fill, var(--gate-w)); gap: var(--space-tight) var(--space-row); max-width: calc(5 * var(--gate-w) + 4 * var(--space-row)); font-size: var(--fs-meta); }
 #gates-label, .sw-gates { grid-column: 1 / -1; }
-.sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 7.5ch 7.5ch 3.5ch; gap: var(--space-tight); align-items: center; }
+.sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 5.5ch 8ch 5ch; gap: var(--space-tight); align-items: center; }
 .sw-gate .sw-cap-name { margin: 0; text-align: right; white-space: nowrap; }
 .sw-gate .sw-mode { min-height: 28px; text-align: left; padding: 4px 0; font-size: inherit; }
 @media (max-width: 1599px) { .sw-caps { grid-column: 1 / -1; } }
@@ -1662,6 +1662,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
   const GATE_MODES = ["enforce", "observe", "off"];
+  const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
   const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100, "codex share"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
@@ -1781,7 +1782,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("swarm-gates").dataset.modes = modes;
     $("swarm-gates").replaceChildren(...gates.map(([name, mode]) => h("div", { class: "sw-cap sw-gate", role: "group", "aria-label": `${name} gate mode` },
       h("span", { class: "sw-cap-name", "data-gate-name": name, text: name }),
-      ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode), text: m })))));
+      ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode || GATE_LABELS[m] === mode), text: GATE_LABELS[m] })))));
   }
 
   async function swarmControl(body, op = body.action) {
