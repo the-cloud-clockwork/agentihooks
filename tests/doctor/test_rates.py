@@ -79,7 +79,7 @@ def test_scope_inflation_reads_merged_pull_requests_of_tasks_done_in_the_window(
         "t2": {"id": "t2", "pr_url": URL.format(2), "territory": []},
         "t3": {"id": "t3", "pr_url": URL.format(3), "territory": ["a"]},
         "t4": {"id": "t4", "pr_url": URL.format(4), "territory": ["a"]},
-        "t5": {"id": "t5", "pr_url": URL.format(5), "territory": ["hooks/"]},
+        "t5": {"id": "t5", "pr_url": URL.format(5), "territory": ["hooks/", "BOX/"]},
         "t6": {"id": "t6", "pr_url": URL.format(6), "territory": ["a"]},
     }
     pulls = {
@@ -87,7 +87,7 @@ def test_scope_inflation_reads_merged_pull_requests_of_tasks_done_in_the_window(
         URL.format(2): merged(2, 140, ("x.py",), 50),
         URL.format(3): merged(3, 140, ("b.py",), 1000, state="OPEN"),
         URL.format(4): merged(4, 140, ("b.py",), 1000),
-        URL.format(5): merged(5, 140, ("hooks/a.py",), 10),
+        URL.format(5): merged(5, 140, ("hooks/a.py", "BOX/b.py"), 10),
     }
     events = [
         ev(150, "task done", "tasks/t1", by="swarm"),
