@@ -36,6 +36,7 @@ def test_claude_render_writes_a_row_per_rule_and_doctrine_file(bundle):
     assert [(row["layer"], Path(row["locator"]["path"]).name) for row in packaged] == [
         ("rule", "agentihooks-toolbelt.md"),
         ("rule", "code-intelligence.md"),
+        ("rule", "read-docs.md"),
         ("rule", "worktrees.md"),
     ]
     assert {source: row["layer"] for source, row in found.items()} == {
@@ -64,7 +65,7 @@ def test_codex_render_writes_the_same_rows(bundle):
     root = render.rendered_root()
     claude = json.loads(sources.path("rb-role", "claude", root).read_text())
     codex = json.loads(sources.path("rb-role", "codex", root).read_text())
-    assert codex == claude and len(codex) == 9
+    assert codex == claude and len(codex) == 10
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
