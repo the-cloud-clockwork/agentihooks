@@ -102,6 +102,13 @@ def test_the_reply_tool_reports_a_refusal_as_text(inbox):
     assert inbox.get(item.id).state == "pending"
 
 
+def test_the_reply_tool_holds_a_reply_to_the_operator_to_the_chat_word_rules(inbox):
+    item = inbox.send("operator", "bob", "status?")
+    assert channel.answer(inbox, "bob", item.id, "done in run 1791318020592").startswith("not sent: chat refused")
+    assert inbox.get(item.id).state == "pending"
+    assert channel.answer(inbox, "bob", item.id, "All done, the change is merged.").startswith("sent to operator")
+
+
 def test_launch_args_name_the_inbox_server_as_a_development_channel():
     mcp, flag = channel.launch_args("/opt/agentihooks", "/venv/bin/python")
     assert flag == "--dangerously-load-development-channels=server:inbox"

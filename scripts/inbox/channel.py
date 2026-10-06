@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.inbox.cli import identity
+from scripts.inbox.cli import check_for_operator, identity
 from scripts.inbox.seen import claim
 from scripts.inbox.store import NOTIFY, InboxError, connect
 
@@ -37,6 +37,7 @@ def event(item):
 
 def answer(store, me, item_id, text):
     try:
+        check_for_operator(store.get(item_id).sender, text)
         sent = store.reply(item_id, me, text)
     except InboxError as exc:
         return f"not sent: {exc}"
