@@ -6,7 +6,7 @@ The mode is the swarm config's gates entry (enforce, observe, off), observe unti
 
 from scripts.gates import log
 from scripts.gates.base import Who
-from scripts.gates.lift import LIFT_SECONDS
+from scripts.gates.lift import LIFT_SECONDS, agent_lifted
 
 NAME = "talk"
 BUDGET = 10
@@ -109,7 +109,11 @@ class Budget:
         return done
 
     def _exempt(self, doc, by, ctx):
-        return owes(ctx.meta, by, doc["tasks"]) or lifted(ctx.meta, by, ctx.at)
+        return (
+            owes(ctx.meta, by, doc["tasks"])
+            or lifted(ctx.meta, by, ctx.at)
+            or agent_lifted(self.slug, by, NAME, self.home, ctx.at / 1000)
+        )
 
     def _marks(self):
         from scripts.gates.progress import Progress

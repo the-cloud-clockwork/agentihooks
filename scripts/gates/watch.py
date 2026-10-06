@@ -50,6 +50,7 @@ class WatchBudget:
         if not named or naming.lane_of(who.name) not in LANES:
             return Decision()
         if activity.REARM_RE.search(call.command) and not watcher_alive(who, self.ledger_dir):
+            activity.mark_revived(who.swarm, who.name, self.root)
             return Decision()
         rows = activity.rows_of(who.swarm, who.name, self.root)
         totals = activity.tally(rows)
