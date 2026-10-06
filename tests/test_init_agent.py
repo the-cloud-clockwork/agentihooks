@@ -605,6 +605,7 @@ def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch,
     from scripts.inbox import channel
 
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (agent, "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
     argv = ["--dir", str(tmp_path), "--agent", agent, "--inbox-channel", "--dry-run", "--", "--model", "opus"]
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
     line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("claude_args="))
