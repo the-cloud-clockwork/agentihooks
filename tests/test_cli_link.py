@@ -73,3 +73,79 @@ def test_uninstall_removes_the_cli_link(wheel_install, monkeypatch):
     assert not link.is_symlink()
     assert target.exists()
     assert printed == [f"  [OK] Removed CLI link: {link}"]
+
+
+def _uv_run(calls, returncode=0, stderr=""):
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, returncode, "", stderr)
+
+    return run
+
+
+def test_a_source_checkout_installs_the_editable_tree(wheel_install, monkeypatch):
+    printed = wheel_install[2]
+    calls = []
+    monkeypatch.setattr(install, "_is_source_checkout", lambda: True)
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/uv")
+    monkeypatch.setattr(subprocess, "run", _uv_run(calls))
+
+    install._install_cli_tool()
+
+    assert calls == [
+        (
+            ["/bin/uv", "tool", "install", "--editable", "--force", "."],
+            {"cwd": str(install.AGENTIHOOKS_ROOT), "capture_output": True, "text": True},
+        )
+    ]
+    assert printed == ["  [OK] CLI installed via: uv tool install --editable ."]
+
+
+def test_a_failed_editable_install_reports_uv(wheel_install, monkeypatch):
+    printed = wheel_install[2]
+    monkeypatch.setattr(install, "_is_source_checkout", lambda: True)
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/uv")
+    monkeypatch.setattr(subprocess, "run", _uv_run([], 1, " boom \n"))
+
+    install._install_cli_tool()
+
+    assert printed == ["  [!!] uv tool install failed: boom"]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stderr", "message"),
+    [
+        (0, "", "  [OK] Uninstalled CLI via: uv tool uninstall agentihooks"),
+        (2, "error: `agentihooks` is Not Installed", "  [--] agentihooks was not installed via uv tool (skipping)"),
+        (2, " disk gone \n", "  [!!] uv tool uninstall failed: disk gone"),
+    ],
+)
+def test_uninstall_runs_uv_then_removes_the_link(wheel_install, monkeypatch, returncode, stderr, message):
+    target, link, printed = wheel_install
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+    calls = []
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/uv")
+    monkeypatch.setattr(subprocess, "run", _uv_run(calls, returncode, stderr))
+
+    install._uninstall_cli_tool()
+
+    assert calls == [(["/bin/uv", "tool", "uninstall", "agentihooks"], {"capture_output": True, "text": True})]
+    assert not link.is_symlink()
+    assert printed == [message, f"  [OK] Removed CLI link: {link}"]
+
+
+def test_uninstall_without_uv_or_link_says_how_to_remove_it(wheel_install, monkeypatch, capsys):
+    printed = wheel_install[2]
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+
+    install._uninstall_cli_tool()
+
+    assert printed == ["  [!!] uv not found — cannot uninstall CLI automatically."]
+    assert capsys.readouterr().out == "       Remove manually: uv tool uninstall agentihooks\n"
+
+
+def test_no_link_and_no_uv_means_no_cli(wheel_install, monkeypatch):
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+
+    assert install._cli_tool_is_installed() is False
