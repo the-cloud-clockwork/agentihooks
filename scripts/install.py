@@ -6387,7 +6387,7 @@ def main() -> None:
         from scripts.terminate_agent import main as terminate_agent_main
 
         raise SystemExit(terminate_agent_main(_argv[1:]))
-    if _argv and _argv[0] in ("gc", "lease", "scratch"):
+    if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
         from scripts.gc_cli import main as gc_main
 
         raise SystemExit(gc_main(_argv))

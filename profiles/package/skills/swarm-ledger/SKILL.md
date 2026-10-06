@@ -76,7 +76,11 @@ deletes it 30 days later. A restored one stays on HOME until it changes again or
 sits 7 more days. Swarm ledgers, and ledgers made before sizes, never move on
 their own.
 
-Slug = `<plan-file-stem>-<YYYY-MM-DD>`. It refuses an overview over 200 words,
+The slug is built by code, never typed: `<plan-file-stem>-<YYYY-MM-DD>` with
+`--plan`, `small-<session>` for a small ledger with no plan, and
+`proof-<swarm code>-<task>-<n>` with `--proof` for a proof swarm made from a swarm
+task session; its herdr workspace carries the same name. `--slug` accepts only a
+built form. It refuses an overview over 200 words,
 a phase description over 100, an empty title, no phases or a missing source.
 It leaves an existing ledger untouched (`"created": false`). Done when it
 prints `"created": true` or names the existing ledger.

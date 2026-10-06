@@ -48,8 +48,12 @@ def test_ledger_url_prints_the_line_without_an_agent_name(up, monkeypatch, capsy
 def test_new_ledger_ends_with_the_page_line(up, monkeypatch, capsys, tmp_path):
     content = tmp_path / "content.json"
     content.write_text(json.dumps(CONTENT))
-    monkeypatch.setattr(sys, "argv", ["new", "--content", str(content), "--slug", "link-plan", "--as", "worker"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["new", "--content", str(content), "--plan", "link-plan.md", "--date", "2026-10-06", "--as", "worker"],
+    )
     new_ledger.main()
     lines = capsys.readouterr().out.strip().splitlines()
     assert json.loads(lines[0])["created"] is True
-    assert lines[-1] == ledger_link.page_line("link-plan")
+    assert lines[-1] == ledger_link.page_line("link-plan-2026-10-06")

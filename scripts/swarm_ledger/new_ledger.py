@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create a ledger from an agent-written content file.
 
-Usage: new_ledger.py --content <content.json> (--plan <plan-file> | --slug <slug>) [--date YYYY-MM-DD]
+Usage: new_ledger.py --content <content.json> [--plan <plan-file> | --proof] [--date YYYY-MM-DD]
                      [--size small|swarm] [--as NAME]
 
 --size: small (default) is one session's work without a swarm; its creator, --as NAME (default
@@ -9,7 +9,9 @@ $AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
-Writes <LEDGER_DIR>/<slug>.html and <slug>.json; slug = <plan-file-stem>-<date>.
+Writes <LEDGER_DIR>/<slug>.html and <slug>.json. The slug is built by scripts.swarm.naming, never typed:
+<plan-file-stem>-<date> for --plan, proof-<swarm code>-<task>-<n> for --proof (a swarm task session),
+small-<session> for a small ledger. --slug accepts only one of those built forms.
 Idempotent: an existing ledger is left untouched and its paths are printed.
 
 Usage: new_ledger.py --upgrade <slug>
@@ -36,9 +38,24 @@ TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
 
 
-def slugify(plan, date):
-    stem = re.sub(r"[^a-z0-9]+", "-", Path(plan).stem.lower()).strip("-") or "plan"
-    return f"{stem}-{date}"
+def built_slug(args):
+    from scripts.swarm import naming
+
+    try:
+        if args.plan:
+            return naming.plan_slug(args.plan, args.date)
+        if args.proof:
+            return naming.proof_slug(os.environ, {path.stem for path in core.LEDGER_DIR.glob("proof-*")})
+        if args.slug is None and args.size == "small":
+            return naming.small_slug(os.environ)
+    except naming.NamingError as error:
+        sys.exit(str(error))
+    if naming.is_built_slug(args.slug):
+        return args.slug
+    sys.exit(
+        "ledger names come from code: give --plan <file>, --proof from a swarm task session, or no name for a "
+        "small ledger"
+    )
 
 
 def words(text):
@@ -211,15 +228,16 @@ def main():
         return upgrade(sys.argv[2])
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--content", required=True)
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--plan")
+    source.add_argument("--proof", action="store_true")
     source.add_argument("--slug")
     parser.add_argument("--date", default=datetime.date.today().isoformat())
     parser.add_argument("--size", choices=ledger_size.SIZES, default="small")
     parser.add_argument("--as", dest="name", default=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
     args = parser.parse_args()
 
-    slug = args.slug or slugify(args.plan, args.date)
+    slug = built_slug(args)
     html_path, json_path = core.paths(slug)
     if html_path.exists():
         print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))

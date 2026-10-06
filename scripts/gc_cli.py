@@ -12,6 +12,7 @@ from hooks.lifecycle.model import ACTIONABLE
 from hooks.lifecycle.run import sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
 from hooks.lifecycle.timer import install_timer, remove_timer
+from scripts.swarm import naming
 
 GB = 1 << 30
 
@@ -32,7 +33,11 @@ def _parser() -> argparse.ArgumentParser:
     lease.add_argument("--kind", choices=("worktree", "ephemeral", "scratch"), default="worktree")
     scratch = sub.add_parser("scratch", help="Create or remove a leased scratch dir under ~/scratchpad")
     scratch.add_argument("action", choices=("new", "rm"))
-    scratch.add_argument("name", help="new: <repo>/<task>; rm: path of the task dir")
+    scratch.add_argument("name", nargs="?", default="", help="new: built from the session; rm: path of the task dir")
+    name = sub.add_parser("name", help="Print the code built name for a new worktree, or check a given one")
+    name.add_argument("kind", choices=("worktree", "tmp"))
+    name.add_argument("--repo", default=".", help="Any checkout of the repository")
+    name.add_argument("--check", default="", help="Exit 1 unless this is a built worktree name for the session")
     return parser
 
 
@@ -65,6 +70,16 @@ def _lease(path: Path, kind: str) -> int:
 
 
 def _scratch_new(name: str) -> int:
+    try:
+        built = naming.scratch(os.environ, os.getcwd())
+    except naming.NamingError:
+        built = ""
+    if built and name and name != built:
+        print(
+            f"scratch: names come from code; this session's task folder is {built} (run: scratch new)", file=sys.stderr
+        )
+        return 1
+    name = built or name
     parts = Path(name).parts
     if not parts or Path(name).is_absolute() or ".." in parts or len(parts) > 3:
         print("scratch: name must be <repo>/<task> under ~/scratchpad", file=sys.stderr)
@@ -73,6 +88,23 @@ def _scratch_new(name: str) -> int:
     path.mkdir(parents=True, exist_ok=True)
     _lease(path, "scratch")
     print(path)
+    return 0
+
+
+def _name(kind: str, repo: str, check: str) -> int:
+    folder = Path(os.environ.get("WORKTREE_ROOT", Path.home() / "dev" / "worktrees")) / naming.repo_name(repo)
+    folder = folder / "_tmp" if kind == "tmp" else folder
+    taken = {path.name for path in folder.iterdir()} if folder.is_dir() else set()
+    try:
+        built = naming.tmp_worktree(os.environ, taken) if kind == "tmp" else naming.worktree(os.environ, taken)
+        if check and not naming.is_worktree(check, os.environ, tmp=kind == "tmp"):
+            print(f"name: names come from code; use {built} (run wt.sh {kind} without a name)", file=sys.stderr)
+            return 1
+    except naming.NamingError as error:
+        print(f"name: {error}", file=sys.stderr)
+        return 3
+    if not check:
+        print(built)
     return 0
 
 
@@ -93,6 +125,8 @@ def main(argv: list[str]) -> int:
         return _lease(Path(args.path).resolve(), args.kind)
     if args.command == "scratch":
         return _scratch_new(args.name) if args.action == "new" else _scratch_rm(args.name)
+    if args.command == "name":
+        return _name(args.kind, args.repo, args.check)
     if args.install_timer or args.remove_timer:
         root = str(Path(__file__).resolve().parents[1])
         print(install_timer(sys.executable, root) if args.install_timer else remove_timer())
