@@ -140,4 +140,7 @@ def test_learned_keeps_the_reason_and_maturity(env, maturity):  # noqa: F811
 def test_the_prompt_requests_one_handoff_document_and_a_learned_reason(lane):
     rendered = prompt.build("sw", "/repo", lane, "successor", {"id": "t1", "title": "task", "description": "task"})
     assert "--recap" not in rendered
+    assert "Handoff v2" in rendered
+    assert "handoff skill" in rendered
+    assert "recap is derived" in rendered
     assert "<lesson because reason>" in rendered

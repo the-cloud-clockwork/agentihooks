@@ -87,10 +87,9 @@ keychain, or provider authentication.
 ## 3. Quota handoff
 
 Run this only when a `QUOTA HANDOFF REQUIRED` directive says so; it gives the
-document path, directory, and name. Write the handoff document first, with
-these sections: goal, done so far (commits, PRs, evidence), in progress, exact
-next steps, repository / worktree / branch, open risks, the operator's standing
-instructions. Then:
+document path, directory, and name. Use the handoff skill to write the Handoff v2
+body and follow the runtime transfer command. The seat recap is derived from
+Done, Stopped at and Next of that document. Submit only the handoff document:
 
 ```bash
 agentihooks init-agent --handoff \
