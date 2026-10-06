@@ -30,6 +30,7 @@ ACT_RE = re.compile(
 NEITHER_RE = re.compile(rf"{SWARM_CMD}(status|verdict)\b")
 REARM_RE = re.compile(r"\bledger\s+watch\b")
 REARM_WINDOW_MS = 30 * 60_000
+REVIVE_MARK_MS = 60_000
 
 
 def default_root():
@@ -69,8 +70,28 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
     entry = {"kind": kind, "at": at}
     if kind == "watch" and REARM_RE.search((tool_input or {}).get("command", "")):
         entry["rearm"] = True
+        if _take_mark(folder / f"{name}.revive", at):
+            entry["revived"] = True
     with open(folder / f"{name}.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
+
+
+def mark_revived(slug, name, root=None, now_ms=None):
+    if not (NAME_RE.match(slug) and NAME_RE.match(name)):
+        return
+    folder = Path(root or default_root()) / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    at = int(time.time() * 1000) if now_ms is None else now_ms
+    (folder / f"{name}.revive").write_text(str(at), encoding="utf-8")
+
+
+def _take_mark(path, at):
+    try:
+        marked = int(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    path.unlink(missing_ok=True)
+    return at - marked <= REVIVE_MARK_MS
 
 
 def _rows(path):
@@ -101,6 +122,8 @@ def since_action(rows):
 def tally(rows):
     found, armed = {"watch": 0, "act": 0}, None
     for entry in rows:
+        if entry.get("revived"):
+            continue
         if entry.get("rearm"):
             if armed is not None and entry["at"] - armed < REARM_WINDOW_MS:
                 continue
