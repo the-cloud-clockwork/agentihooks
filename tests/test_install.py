@@ -1730,7 +1730,12 @@ class TestInitInsideRenderedHome:
             with pytest.raises(SystemExit) as exc:
                 install.cmd_init_unified(self._args())
         assert exc.value.code == 1
-        assert f"would have written the rendered profile home {home}" in capsys.readouterr().err
+        assert capsys.readouterr().err == (
+            f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
+            f"profile home {home} instead of the operator home.\n"
+            "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
+            "AGENTIHOOKS_PROFILE are unset.\n"
+        )
         assert not mock_install.called
         assert not mock_rerender.called
         assert not mock_bashrc.called
