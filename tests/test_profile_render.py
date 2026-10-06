@@ -473,7 +473,57 @@ def test_claude_render_seeds_nothing_it_cannot_read(world, operator):
     out = render.render_claude("rb-role")
 
     claude_json = json.loads((out / ".claude.json").read_text())
-    assert set(claude_json) == ({"mcpServers", "userID"} if operator and "u1" in operator else {"mcpServers"})
+    assert set(claude_json) == (
+        {"mcpServers", "hasCompletedOnboarding", "userID"}
+        if operator and "u1" in operator
+        else {"mcpServers", "hasCompletedOnboarding"}
+    )
+
+
+@pytest.mark.parametrize("role", ["frontend", "engineer"])
+def test_fresh_role_home_completes_onboarding_without_operator_state(world, role):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\n")
+    source = world["home"] / ".claude.json"
+    source.unlink()
+
+    out = render.render_claude(role)
+
+    assert json.loads((out / ".claude.json").read_text())["hasCompletedOnboarding"] is True
+    assert not source.exists()
+
+
+def test_cached_role_home_fills_missing_onboarding_without_resetting_state(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    path = out / ".claude.json"
+    doc = json.loads(path.read_text())
+    del doc["hasCompletedOnboarding"]
+    doc["numStartups"] = 7
+    doc["theme"] = "light"
+    path.write_text(json.dumps(doc))
+    operator = (world["home"] / ".claude.json").read_bytes()
+
+    assert render.render_claude("rb-role") == out
+
+    actual = json.loads(path.read_text())
+    assert actual == {**doc, "hasCompletedOnboarding": True}
+    assert (world["home"] / ".claude.json").read_bytes() == operator
+
+
+def test_role_rerender_preserves_explicit_onboarding_and_runtime_state(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    path = out / ".claude.json"
+    doc = json.loads(path.read_text())
+    doc.update(hasCompletedOnboarding=False, theme="light", numStartups=11)
+    path.write_text(json.dumps(doc))
+
+    assert render.render_claude("rb-role", force=True) == out
+    assert json.loads(path.read_text()) == doc
 
 
 def test_claude_render_gives_each_home_its_own_plans_folder(world):
