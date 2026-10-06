@@ -21,6 +21,7 @@ RESUME_CHECKS, RESUME_CHECK_S = 30, 2
 STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
+PLAN_MODE = ["--permission-mode", "plan"]
 
 
 def _bin():
@@ -113,8 +114,9 @@ class HerdrRuntime:
             picked = model_pick.pick(agent, chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, chosen)
+        mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
         placed = self._launch(
-            config, lane, task["id"], name, [*argv, "--", *_model_args(agent, picked.__dict__, environ)]
+            config, lane, task["id"], name, [*argv, "--", *_model_args(agent, picked.__dict__, environ), *mode]
         )
         return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 

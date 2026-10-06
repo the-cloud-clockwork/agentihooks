@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
 from scripts.swarm.store import AgentRecord
 
 
@@ -216,6 +216,16 @@ def test_spawn_passes_a_claude_lane_model_and_effort_to_init_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "claude", "model": "sonnet", "effort": "max"}})
     assert seen["requested"] == "claude"
     assert _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "max"]
+
+
+def test_a_claude_planner_starts_in_plan_mode(tmp_path):
+    passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "claude"}}, lane="plan")["argv"])
+    assert passed[passed.index("--permission-mode") + 1] == "plan"
+
+
+@pytest.mark.parametrize(("lane", "agent"), [("eng", "claude"), ("ci", "claude"), ("plan", "codex")])
+def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
+    assert "--permission-mode" not in _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
 
 
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
@@ -444,7 +454,8 @@ def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", e
         autonomy="delegate",
     )
     runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
-    return _passed(seen["argv"])
+    passed = _passed(seen["argv"])
+    return passed[:-2] if passed[-2:] == PLAN_MODE else passed
 
 
 SEAT_TASKS = {
