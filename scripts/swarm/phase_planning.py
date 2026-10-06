@@ -5,11 +5,13 @@ Only a running or drained swarm plans. Every write is keyed to facts in the ledg
 
 import os
 
-from scripts.swarm import phase_state, slice_check
+from scripts.swarm import phase_state, slice_check, slice_screen
 from scripts.swarm.ledger_events import SENDER, Mail
 from scripts.swarm_ledger import ledger_comments
 
 ACTIVE = ("running", "drained")
+FULL = "full"
+APPROVED_NOTE = "The slice check and the classifier found nothing."
 COMMENT_WORDS = ledger_comments.LIMITS["comment"]
 TAIL_WORDS = 7
 OPERATOR_REVIEWS = ("manual", "assist")
@@ -61,19 +63,37 @@ def _queue(mail, slug, phase, ledger):
 
 def _open_review(mail, slug, phase, doc, ledger, config):
     pid = phase["id"]
-    problems = slice_check.check(phase, doc, slice_check.Limits.from_env(os.environ))
+    limits = slice_check.Limits.from_env(os.environ)
+    problems = slice_check.check(phase, doc, limits)
+    screen = slice_screen.screen(phase, doc, limits.flag_confidence)
     rounds = (phase.get("review") or {}).get("rounds", 0)
+    size = len(slice_check.slice_ids(slice_check.plan_task(phase, doc)))
+    held = slice_screen.hold(problems, screen) if config.autonomy == FULL else None
+    if held == "":
+        return _approve(mail, slug, phase, ledger, size)
+    tail = f"Not approved automatically because {held}." if held else ""
     ledger.review_phase(slug, pid, "pending")
     if config.autonomy in OPERATOR_REVIEWS:
         ledger.priority(slug, f"phases/{pid}", "Approve the slice planned for this phase or send it back.")
     if config.autonomy != "manual":
         ask = ASSIST_ASK if config.autonomy == "assist" else MASTER_ASK
-        found = " ".join(problems) or "The slice check found no problems."
-        text = f"Review the slice planned for phase {pid} {phase['title']}: {ask}. {found}"
+        found = " ".join([*problems, *screen.flags]) or "The slice check found no problems."
+        text = f"Review the slice planned for phase {pid} {phase['title']}: {ask}. {found} {tail}".rstrip()
         mail.send(f"plan-review:{pid}:{rounds}", mail.master, text)
-    size = len(slice_check.slice_ids(slice_check.plan_task(phase, doc)))
-    ledger.comment_phase(slug, pid, _comment(problems, size), SENDER)
+    ledger.comment_phase(slug, pid, _comment([*problems, *screen.flags], size, bool(problems), tail), SENDER)
     return [f"opened the review of phase {pid}"]
+
+
+def _approve(mail, slug, phase, ledger, size):
+    pid = phase["id"]
+    ledger.review_phase(slug, pid, "approved", note=APPROVED_NOTE)
+    ledger.comment_phase(slug, pid, _comment([], size, tail="Full autonomy approved it."), SENDER)
+    text = (
+        f"For your information: the swarm approved the slice planned for phase {pid} {phase['title']}, "
+        "the slice check and the classifier found nothing."
+    )
+    mail.send(f"plan-approved:{pid}", mail.master, text, fyi=True)
+    return [f"approved the slice of phase {pid}"]
 
 
 def _release_due(phase, doc):
@@ -103,14 +123,16 @@ def _add_release(slug, phase, ledger):
     return [f"added release-{pid} for phase {pid}"]
 
 
-def _comment(problems, size):
-    if not problems:
+def _comment(found, size, faulted=True, tail=""):
+    if faulted and found:
+        lines = ["The slice check found these problems."]
+    else:
         noun = "task" if size == 1 else "tasks"
-        return f"The slice check found no problems in the {size} {noun} of this slice."
-    lines = ["The slice check found these problems."]
-    for line in problems:
-        fits = len(" ".join([*lines, line]).split()) <= COMMENT_WORDS - TAIL_WORDS
+        lines = [f"The slice check found no problems in the {size} {noun} of this slice."]
+    budget = COMMENT_WORDS - TAIL_WORDS - len(tail.split())
+    for line in found:
+        fits = len(" ".join([*lines, line]).split()) <= budget
         if fits and not ledger_comments.problems(line, "comment"):
             lines.append(line)
-    rest = len(problems) - len(lines) + 1
-    return " ".join([*lines, f"And {rest} more in the review item."] if rest else lines)
+    rest = len(found) - len(lines) + 1
+    return " ".join([*lines, *([f"And {rest} more in the review item."] if rest else []), *([tail] if tail else [])])

@@ -15,10 +15,15 @@ CODE_KINDS = ("code", "ci")
 class Limits:
     max_tasks: int = 12
     max_areas: int = 6
+    flag_confidence: float = 0.7
 
     @classmethod
     def from_env(cls, env):
-        return cls(int(env.get("AGENTIHOOKS_PLAN_MAX_TASKS", 12)), int(env.get("AGENTIHOOKS_PLAN_MAX_AREAS", 6)))
+        return cls(
+            int(env.get("AGENTIHOOKS_PLAN_MAX_TASKS", 12)),
+            int(env.get("AGENTIHOOKS_PLAN_MAX_AREAS", 6)),
+            float(env.get("AGENTIHOOKS_PLAN_FLAG_CONFIDENCE", 0.7)),
+        )
 
 
 def slice_ids(plan):

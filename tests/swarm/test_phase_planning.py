@@ -2,9 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from hooks.classifier import Answer, DecisionResult
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
-from scripts.swarm import ledger_client, phase_planning, phase_state
+from scripts.swarm import ledger_client, phase_planning, phase_state, slice_screen
 from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_delivery import FakeHerdr
@@ -210,10 +211,125 @@ def test_delegate_and_full_send_the_review_to_the_master_only(env, autonomy):
     run(store, ledger)
     assert state(SLUG)["priorities"] == []
     [item] = [i for i in items(store, MASTER_SEAT) if "Review" in i.text]
+    held = " Not approved automatically because the classifier did not answer." if autonomy == "full" else ""
     assert item.text == (
         "Review the slice planned for phase p1 Build: approve it or send it back with a note. "
-        "The slice check found no problems."
+        f"The slice check found no problems.{held}"
     )
+
+
+def classify(monkeypatch, *pairs, calibrated=True, source="pplx-decider-v1-27b"):
+    answers = {}
+    for i, (score, confidence, p_yes) in enumerate(pairs):
+        answers[f"size_{i}"] = Answer(type="score", score=score, confidence=confidence)
+        answers[f"serves_{i}"] = Answer(type="noul", noul=p_yes)
+
+    def fake(state, questions, **kwargs):
+        return DecisionResult(answers, source, calibrated=calibrated)
+
+    monkeypatch.setattr(slice_screen, "decide", fake)
+
+
+def review_slice(store, ledger, autonomy, *build):
+    store.update(SLUG, autonomy=autonomy)
+    set_phase("p1", planning="auto")
+    run(store, ledger)
+    slice_done(ledger, *build)
+    return run(store, ledger)
+
+
+def swarm_comment():
+    [comment] = [c for c in phase("p1")["comments"] if c["by"] == "swarm"]
+    return comment["text"]
+
+
+def review_items(store):
+    return [i for i in items(store, MASTER_SEAT) if i.text.startswith("Review the slice")]
+
+
+CLEAN = "The slice check found no problems in the 1 task of this slice."
+ASK = "Review the slice planned for phase p1 Build: approve it or send it back with a note."
+TOO_BIG = "Classifier: task t1 may be too big, several pull requests at confidence 0.90."
+OFF_INTENT = "Classifier: task t1 may be off intent, serves the phase at probability 0.10."
+
+
+def test_full_autonomy_approves_a_clean_slice_with_a_calibrated_answer(env, monkeypatch):
+    store, ledger = env
+    classify(monkeypatch, (1.0, 0.9, 0.9))
+    actions = review_slice(store, ledger, "full", ("t1", DONE_WHEN))
+    run(store, ledger)
+    assert "approved the slice of phase p1" in actions
+    review = phase("p1")["review"]
+    assert (review["state"], review["by"]) == ("approved", "swarm")
+    assert review["note"] == "The slice check and the classifier found nothing."
+    assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "building"
+    assert swarm_comment() == f"{CLEAN} Full autonomy approved it."
+    [item] = [i for i in items(store, MASTER_SEAT) if "approved the slice" in i.text]
+    assert item.fyi is True
+    assert item.text == (
+        "For your information: the swarm approved the slice planned for phase p1 Build, "
+        "the slice check and the classifier found nothing."
+    )
+    assert review_items(store) == [] and state(SLUG)["priorities"] == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "source", "flag", "reason"),
+    [
+        ((2.0, 0.9, 0.9), "pplx-decider-v1-27b", TOO_BIG, "the classifier flagged a task"),
+        ((1.0, 0.9, 0.1), "jev-1.13", OFF_INTENT, "the classifier flagged a task"),
+        ((1.0, 0.9, 0.9), "haiku", "", "the answer came from the fallback haiku"),
+    ],
+)
+def test_full_autonomy_leaves_a_flagged_or_fallback_slice_to_the_master(env, monkeypatch, answer, source, flag, reason):
+    store, ledger = env
+    classify(monkeypatch, answer, calibrated=source != "haiku", source=source)
+    assert not any("approved" in a for a in review_slice(store, ledger, "full", ("t1", DONE_WHEN)))
+    assert phase("p1")["review"]["state"] == "pending"
+    tail = f"Not approved automatically because {reason}."
+    assert swarm_comment() == " ".join(filter(None, [CLEAN, flag, tail]))
+    [item] = review_items(store)
+    assert item.text == f"{ASK} {flag or 'The slice check found no problems.'} {tail}"
+
+
+def test_full_autonomy_never_approves_a_slice_the_check_faults(env, monkeypatch):
+    store, ledger = env
+    classify(monkeypatch, (1.0, 0.9, 0.9))
+    review_slice(store, ledger, "full", ("t1", "Make it work."))
+    assert phase("p1")["review"]["state"] == "pending"
+    assert swarm_comment() == (
+        "The slice check found these problems. Task t1 has a description under 20 words. "
+        "Not approved automatically because the slice check found problems."
+    )
+
+
+def test_the_flag_confidence_comes_from_the_environment(env, monkeypatch):
+    store, ledger = env
+    monkeypatch.setenv("AGENTIHOOKS_PLAN_FLAG_CONFIDENCE", "0.95")
+    classify(monkeypatch, (2.0, 0.9, 0.9))
+    review_slice(store, ledger, "full", ("t1", DONE_WHEN))
+    assert phase("p1")["review"]["state"] == "approved"
+
+
+@pytest.mark.parametrize("autonomy", ["manual", "assist", "delegate"])
+def test_flags_are_advisory_below_full_autonomy(env, monkeypatch, autonomy):
+    store, ledger = env
+    classify(monkeypatch, (2.0, 0.9, 0.1))
+    review_slice(store, ledger, autonomy, ("t1", DONE_WHEN))
+    assert phase("p1")["review"]["state"] == "pending"
+    assert swarm_comment() == f"{CLEAN} {TOO_BIG} {OFF_INTENT}"
+    for item in review_items(store):
+        assert item.text.endswith(f"{TOO_BIG} {OFF_INTENT}")
+
+
+def test_a_long_comment_keeps_the_reason_and_counts_what_it_cut(env, monkeypatch):
+    store, ledger = env
+    classify(monkeypatch, *[(3.0, 0.9, 0.1)] * 3)
+    review_slice(store, ledger, "full", *[(f"t{i}", DONE_WHEN) for i in range(3)])
+    text = swarm_comment()
+    assert len(text.split()) <= 50
+    assert text.endswith("more in the review item. Not approved automatically because the classifier flagged a task.")
+    assert len(review_items(store)[0].text.split(" may ")) == 7
 
 
 def send_back(note, by="operator"):
