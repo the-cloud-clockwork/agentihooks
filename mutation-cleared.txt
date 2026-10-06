@@ -163,6 +163,10 @@
     "reader": "Standards",
     "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
   },
+  "scripts/swarm_ledger/ledger_core.py:scripts.swarm_ledger.ledger_core.x_sync__mutmut_45:2bf422db14b95136fa0fe1fdb2b39a5ae8e90546be926d3d6150b549406d4918": {
+    "reader": "Standards",
+    "reason": "json.dumps treats ensure_ascii as a truth value, so None and False write identical bytes."
+  },
   "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_2:0766c7e16ccc270811e3db18723200a340c54931164ede9f6cd6904a89a9bac3": {
     "reader": "Standards /root/standards",
     "reason": "False and None have the same false truth value in argparse."

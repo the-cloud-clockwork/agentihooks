@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -430,6 +431,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
 
+    def agent_view(self):
+        return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("view") == ["agent"]
+
     def reply_state(self, slug, changes=None, ops=None):
         try:
             state, rejected = core.sync(slug, changes=changes, ops=ops)
@@ -439,11 +443,11 @@ class Handler(BaseHTTPRequestHandler):
             relay_to_inbox(slug, state)
             doctor_phrase(slug, state)
         state["_meta"] = {
-            **state["_meta"],
+            **{k: v for k, v in state["_meta"].items() if k != "seeds"},
             "page_version": core.page_version(),
             "crew": ledger_gate.crew(state["_meta"]),
         }
-        reply = {**with_workspaces(slug, state), "rejected": rejected}
+        reply = {**(state if self.agent_view() else with_workspaces(slug, state)), "rejected": rejected}
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
     def do_OPTIONS(self):
