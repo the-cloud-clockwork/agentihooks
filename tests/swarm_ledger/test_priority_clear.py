@@ -55,3 +55,30 @@ def test_cli_clear_reports_accepted_targets(monkeypatch, capsys, mode):
     assert json.loads(capsys.readouterr().out) == {"cleared": [target], "rejected": []}
     state, _ = core.sync(SLUG)
     assert item not in [p["item"] for p in state["priorities"]]
+
+
+def test_clear_records_its_reason_in_the_history():
+    state = make_ledger()
+    item = f"followups/{state['followups'][0]['id']}"
+    core.sync(SLUG, ops=[add(1, item, "Pick one.")])
+    clear = {"op": "priority_clear", "id": "c", "by": "swarm", "target": "pr-1", "reason": "its item is done"}
+    state, rejected = core.sync(SLUG, ops=[clear])
+    assert rejected == []
+    event = [e for e in state["_meta"]["events"] if e["kind"] == "priority cleared"][-1]
+    assert (event["by"], event["target"], event["reason"]) == ("swarm", item, "its item is done")
+
+
+def test_clear_without_a_reason_records_none():
+    state = make_ledger()
+    item = f"followups/{state['followups'][0]['id']}"
+    core.sync(SLUG, ops=[add(1, item, "Pick one.")])
+    state, _ = core.sync(SLUG, ops=[{"op": "priority_clear", "id": "c", "target": "pr-1"}])
+    assert "reason" not in [e for e in state["_meta"]["events"] if e["kind"] == "priority cleared"][-1]
+
+
+@pytest.mark.parametrize("reason", [3, "", "  "])
+def test_clear_refuses_a_reason_that_is_not_text(reason):
+    import ledger_priorities
+
+    with pytest.raises(ValueError, match="reason"):
+        ledger_priorities.check({"op": "priority_clear", "id": "c", "target": "all", "reason": reason})
