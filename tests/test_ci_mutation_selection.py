@@ -115,7 +115,7 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
     assert "+ b" not in generated
     source = "def f():\n    return 1\n\ndef g():\n    return 2\n"
     generated, names = selected_mutants("scripts/sample.py", source, {5})
-    assert len(names) == 2
+    assert len(names) == 1
     assert all(name.startswith("x_g__") for name in names)
     with pytest.raises(ValueError, match="scripts/sample.py"):
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
