@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -193,6 +194,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", fake_state_dir)
+    # A stale stamp makes SessionStart spawn a detached `agentihooks deps ensure` that mutmut's runner then reaps.
+    (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.config.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
