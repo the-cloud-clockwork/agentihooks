@@ -172,6 +172,7 @@ def test_a_stop_after_the_merge_is_blocked_and_one_on_pending_checks_passes_with
 def test_observe_mode_lets_the_stop_through_and_logs_it(rig):
     rig.answer.write_text(json.dumps(MERGED))
     rig.set_task(state="pr", pr_url=URL)
-    passed = rig.stop({"AGENTIHOOKS_GATE_CLAIM_STOP": "observe"})
+    rig.redis.hset(f"agentihooks:swarm:{SLUG}:config", "gates", json.dumps({"claim-stop": "observe"}))
+    passed = rig.stop({"AGENTIHOOKS_GATE_CLAIM_STOP": "enforce"})
     assert passed.returncode == 0, passed.stderr
     assert [(r["gate"], r["kind"]) for r in rig.rows()] == [("claim-stop", "observe")]
