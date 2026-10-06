@@ -11,7 +11,11 @@ from scripts.profiles import measure
 CLAUDE_STREAM = "\n".join(
     json.dumps(event)
     for event in (
-        {"type": "system", "subtype": "init"},
+        {
+            "type": "system",
+            "subtype": "init",
+            "mcp_servers": [{"name": "serena", "status": "connected"}, {"name": "gateway-tools", "status": "pending"}],
+        },
         {
             "type": "assistant",
             "message": {"usage": {"input_tokens": 2, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 8}},
@@ -75,7 +79,9 @@ def _runner(stdout):
 def test_claude_first_turn_is_the_first_request_input(rendered):
     run, seen = _runner(CLAUDE_STREAM)
     environ = {"AGENTIHOOKS_SWARM": "s", "AGENTIHOOKS_SWARM_TASK": "t", "AGENTIHOOKS_AGENT_NAME": "a", "KEEP": "1"}
-    assert measure.measure("engineer", "claude", frozenset(), environ=environ, run=run) == 60
+    assert measure.measure("engineer", "claude", frozenset(), environ=environ, run=run) == measure.Reading(
+        60, ("gateway-tools",)
+    )
     assert seen["argv"][:2] == ["agentihooks", "claude"]
     assert seen["argv"][-7:] == [
         "-p",
@@ -118,7 +124,9 @@ def test_claude_layer_off_changes_only_that_layer(rendered, layer, check):
 def test_codex_first_turn_and_layer_overrides(rendered):
     run, seen = _runner(CODEX_STREAM)
     off = frozenset({"plugins", "mcp", "persona", "hooks"})
-    assert measure.measure("engineer", "codex", off, environ={"CLAUDE_CONFIG_DIR": "/x"}, run=run) == 81794
+    assert measure.measure("engineer", "codex", off, environ={"CLAUDE_CONFIG_DIR": "/x"}, run=run) == measure.Reading(
+        81794, ()
+    )
     argv = seen["argv"]
     assert argv[:4] == ["agentihooks", "codex", "-p", "engineer"]
     assert argv[-4:] == ["exec", "--json", "--skip-git-repo-check", measure.PROMPT]
@@ -151,11 +159,11 @@ def test_missing_usage_names_the_failure(rendered):
 
 def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
     tokens = {
-        frozenset(): 1000,
-        frozenset({"plugins"}): 700,
-        frozenset({"mcp"}): 900,
-        frozenset({"persona"}): 600,
-        frozenset({"hooks"}): 950,
+        frozenset(): measure.Reading(1000, ("gateway-tools",)),
+        frozenset({"plugins"}): measure.Reading(700, ()),
+        frozenset({"mcp"}): measure.Reading(900, ()),
+        frozenset({"persona"}): measure.Reading(600, ("gateway-tools", "serena")),
+        frozenset({"hooks"}): measure.Reading(950, ()),
     }
     calls = []
 
@@ -168,11 +176,11 @@ def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
     assert calls == [frozenset(), *(frozenset({layer}) for layer in measure.LAYERS)]
     assert capsys.readouterr().out.split("\n") == [
         "engineer (claude) first turn input tokens",
-        "layer    tokens  cost",
-        "full       1000",
+        "layer    tokens  cost  mcp not connected",
+        "full       1000        gateway-tools",
         "plugins     700   300",
         "mcp         900   100",
-        "persona     600   400",
+        "persona     600   400  gateway-tools,serena",
         "hooks       950    50",
         "",
     ]
@@ -180,10 +188,16 @@ def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
 
 def test_single_run_with_layers_off(capsys, monkeypatch):
     seen = []
-    monkeypatch.setattr(measure, "measure", lambda name, agent, off, **kw: seen.append((name, agent, off)) or 42)
+    monkeypatch.setattr(
+        measure,
+        "measure",
+        lambda name, agent, off, **kw: seen.append((name, agent, off)) or measure.Reading(42, ("gateway-tools",)),
+    )
     assert select_profile.dispatch(["profile", "measure", "master", "--agent", "codex", "--without", "mcp"]) == 0
     assert seen == [("master", "codex", frozenset({"mcp"}))]
-    assert capsys.readouterr().out == "master (codex) without mcp: 42 first turn input tokens\n"
+    assert capsys.readouterr().out == (
+        "master (codex) without mcp: 42 first turn input tokens, mcp not connected: gateway-tools\n"
+    )
 
 
 def test_failure_exits_nonzero(capsys, monkeypatch):

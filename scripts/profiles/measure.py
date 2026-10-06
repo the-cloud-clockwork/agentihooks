@@ -9,6 +9,7 @@ import tempfile
 import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import NamedTuple
 
 from scripts import select_profile
 from scripts.targets.codex_target import codex_home
@@ -26,6 +27,11 @@ TIMEOUT_S = 600
 
 class MeasureError(RuntimeError):
     pass
+
+
+class Reading(NamedTuple):
+    tokens: int
+    pending: tuple[str, ...]
 
 
 def _environment(environ: Mapping[str, str]) -> dict[str, str]:
@@ -65,7 +71,8 @@ def _codex_overrides(off: frozenset[str]) -> list[str]:
     return [arg for pair in pairs for arg in ("-c", pair)]
 
 
-def first_turn_tokens(agent: str, stdout: str) -> int | None:
+def first_turn(agent: str, stdout: str) -> Reading | None:
+    pending: tuple[str, ...] = ()
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -73,11 +80,13 @@ def first_turn_tokens(agent: str, stdout: str) -> int | None:
             continue
         if not isinstance(event, dict):
             continue
+        if event.get("subtype") == "init":
+            pending = tuple(s["name"] for s in event.get("mcp_servers", []) if s.get("status") != "connected")
         if agent == "claude" and event.get("type") == "assistant":
             usage = event["message"]["usage"]
-            return sum(usage.get(key, 0) for key in CLAUDE_USAGE)
+            return Reading(sum(usage.get(key, 0) for key in CLAUDE_USAGE), pending)
         if agent == "codex" and event.get("type") == "turn.completed":
-            return event["usage"]["input_tokens"]
+            return Reading(event["usage"]["input_tokens"], pending)
     return None
 
 
@@ -87,7 +96,7 @@ def measure(
     off: frozenset[str],
     environ: Mapping[str, str] | None = None,
     run: Callable = subprocess.run,
-) -> int:
+) -> Reading:
     base = _environment(os.environ if environ is None else environ)
     native = CLAUDE_ARGS if agent == "claude" else [*_codex_overrides(off), *CODEX_ARGS]
     env, flags = select_profile.prepare(name, agent, "", "", native, base)
@@ -105,22 +114,26 @@ def measure(
             text=True,
             timeout=TIMEOUT_S,
         )
-    tokens = first_turn_tokens(agent, result.stdout)
-    if tokens is None:
+    reading = first_turn(agent, result.stdout)
+    if reading is None:
         raise MeasureError(f"no usage in session output: {result.stderr.strip()[-500:]}")
-    return tokens
+    return reading
+
+
+def _row(layer: str, reading: Reading, cost: str) -> str:
+    return f"{layer:<8}{reading.tokens:>7}{cost:>6}  {','.join(reading.pending)}".rstrip()
 
 
 def _breakdown(name: str, agent: str) -> list[str]:
     full = measure(name, agent, frozenset())
     lines = [
         f"{name} ({agent}) first turn input tokens",
-        f"{'layer':<8}{'tokens':>7}{'cost':>6}",
-        f"{'full':<8}{full:>7}",
+        f"{'layer':<8}{'tokens':>7}{'cost':>6}  mcp not connected",
+        _row("full", full, ""),
     ]
     for layer in LAYERS:
-        tokens = measure(name, agent, frozenset({layer}))
-        lines.append(f"{layer:<8}{tokens:>7}{full - tokens:>6}")
+        reading = measure(name, agent, frozenset({layer}))
+        lines.append(_row(layer, reading, str(full.tokens - reading.tokens)))
     return lines
 
 
@@ -136,9 +149,10 @@ def main(args: argparse.Namespace) -> int:
         if args.breakdown:
             lines = _breakdown(args.name, args.agent)
         else:
-            tokens = measure(args.name, args.agent, frozenset(args.without))
+            reading = measure(args.name, args.agent, frozenset(args.without))
             without = f" without {','.join(args.without)}" if args.without else ""
-            lines = [f"{args.name} ({args.agent}){without}: {tokens} first turn input tokens"]
+            pending = f", mcp not connected: {','.join(reading.pending)}" if reading.pending else ""
+            lines = [f"{args.name} ({args.agent}){without}: {reading.tokens} first turn input tokens{pending}"]
     except (MeasureError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
