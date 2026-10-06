@@ -23,6 +23,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
   followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
+  question add TEXT                   ask a question on the ledger; the master answers it or raises it to the operator
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
@@ -310,6 +311,11 @@ def cmd_followup(args):
     print(json.dumps({"followup": args.action}))
 
 
+def cmd_question(args):
+    send(args, "add_item", list="questions", text=args.text)
+    print(json.dumps({"question": args.action}))
+
+
 def cmd_priority(args):
     if args.action == "add":
         if len(args.values) != 2:
@@ -512,6 +518,9 @@ def build_parser():
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
+    question = sub.add_parser("question")
+    question.add_argument("action", choices=["add"])
+    question.add_argument("text")
     scope = sub.add_parser("scope")
     scope.add_argument("item")
     scope.add_argument("state", choices=["in", "out"])
