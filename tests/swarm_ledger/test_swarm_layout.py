@@ -203,15 +203,46 @@ def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_p
     assert page.text("#alert-live").split() == ["eng", "1/3", "ci", "0/1", "plan", "0/1"]
 
 
-def test_capacity_strip_shows_each_cap_and_steps_the_compact_limit(open_page):
+def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     page = open_page()
-    shown = [page.text(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "codex", "compact")]
-    assert shown == ["3", "1", "1", "20%", "600k"]
+    fields = {lane: page.tab.locator(f"#cap-{lane}") for lane in ("eng", "ci", "plan", "codex", "compact")}
+    assert [f.input_value() for f in fields.values()] == ["3", "1", "1", "20", "600"]
+    apply = page.tab.get_by_role("button", name="Apply capacity")
+    assert apply.is_disabled()
+    fields["eng"].fill("5")
+    fields["ci"].fill("2")
+    fields["compact"].fill("700")
     page.tab.get_by_role("button", name="Raise compact limit").click()
-    page.tab.wait_for_function("() => !document.querySelector('[data-swarm=compact_up]').disabled")
     page.tab.get_by_role("button", name="Lower codex share").click()
-    page.tab.wait_for_function("() => !document.querySelector('[data-swarm=codex_down]').disabled")
-    assert page.puts == [{"action": "set", "compact_limit": 650}, {"action": "set", "codex_share": 15}]
+    assert fields["compact"].input_value() == "750"
+    assert fields["codex"].input_value() == "15"
+    page.tab.wait_for_timeout(2500)
+    assert page.puts == []
+    assert fields["eng"].input_value() == "5"
+    apply.click()
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "codex_share": 15, "compact_limit": 750}]
+    assert apply.is_disabled()
+
+
+@pytest.mark.parametrize(
+    ("lane", "typed", "message"),
+    [
+        ("eng", "51", "eng must be a whole number from 0 to 50"),
+        ("ci", "1.5", "ci must be a whole number from 0 to 50"),
+        ("codex", "abc", "codex share must be a whole number from 0 to 100"),
+        ("compact", "90", "compact limit must be a whole number from 100 to 1000"),
+    ],
+)
+def test_an_invalid_capacity_value_is_refused_before_sending(open_page, lane, typed, message):
+    page = open_page()
+    page.tab.locator("#cap-plan").fill("2")
+    page.tab.locator(f"#cap-{lane}").fill(typed)
+    assert page.tab.locator(f"#cap-{lane}").get_attribute("aria-invalid") == "true"
+    page.tab.locator(f"#cap-{lane}").press("Enter")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('Could not')")
+    assert message in page.text("#swarm-note")
+    assert page.puts == []
 
 
 @pytest.mark.parametrize(("limit", "down", "up"), [(100, True, False), (1000, False, True), (600, False, False)])
@@ -219,6 +250,8 @@ def test_compact_limit_steps_stop_at_100_and_1000(open_page, limit, down, up):
     page = open_page(status(compact_limit=limit))
     state = page.tab.eval_on_selector_all("[data-swarm^=compact_]", "bs => bs.map(b => b.disabled)")
     assert state == [down, up]
+    page.tab.locator("#cap-compact").fill("1000")
+    assert page.tab.eval_on_selector_all("[data-swarm^=compact_]", "bs => bs.map(b => b.disabled)") == [False, True]
 
 
 def test_agents_table_lists_the_master_first_and_tasks_block_counts(open_page):

@@ -37,6 +37,7 @@
     ['[data-swarm="codex_up"]', "Send a larger share of new agents to Codex."],
     ['[data-swarm="compact_down"]', "Lower the context size at which an agent writes its handoff."],
     ['[data-swarm="compact_up"]', "Raise the context size at which an agent writes its handoff."],
+    ['[data-swarm="apply"]', "Send every changed capacity value to the swarm in one change."],
     ['[data-swarm="doctor_start"]', "Start a Doctor that watches this swarm and rates each coordination failure."],
     ['[data-swarm="doctor_stop"]', "Stop the Doctor watching this swarm."],
     ["[data-message]", "Open the chat addressed to this agent."],
