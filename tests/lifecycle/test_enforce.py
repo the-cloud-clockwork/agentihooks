@@ -152,3 +152,19 @@ def test_scratch_rm_removes_nested_worktrees_through_git(repo, tmp_path):
     assert "wt" not in git(repo.primary, "worktree", "list")
     with pytest.raises(ActionError):
         remove_scratch(tmp_path / "scratch" / "repo", roots, snap(), 1)
+
+
+def test_scratch_rm_skips_empty_git_marker_and_still_refuses_real_worktree(repo, tmp_path):
+    roots = scratch_root(tmp_path)
+    task = tmp_path / "scratch" / "repo" / "uv-task"
+    marker = task / ".cache" / "uv" / "git-v0" / "checkouts"
+    marker.mkdir(parents=True)
+    (marker / ".git").write_text("")
+    assert refusal(task, roots, snap(), 1) == ""
+    remove_scratch(task, roots, snap(), 1)
+    assert not task.exists()
+    nested = repo.worktree("wt", base=tmp_path / "scratch" / "repo" / "real-task")
+    (nested / "work.txt").write_text("unsaved\n")
+    with pytest.raises(ActionError, match="holds uncommitted or unpushed work"):
+        remove_scratch(nested.parent, roots, snap(), 1)
+    assert nested.exists()
