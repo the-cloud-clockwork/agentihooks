@@ -47,6 +47,8 @@ def test_fakeredis_test_modules_import_without_loading_redis(fakeredis_modules):
     assert probe["loaded"] == []
 
 
-def test_fakeredis_test_modules_share_one_xdist_group(fakeredis_modules):
+def test_fakeredis_test_modules_group_only_shared_cases(fakeredis_modules):
     names, probe = fakeredis_modules
-    assert {name: probe["groups"][name] for name in names} == {name: ["fakeredis"] for name in names}
+    expected = {name: ["fakeredis"] for name in names}
+    expected["tests.inbox.test_pending_set"] = []
+    assert {name: probe["groups"][name] for name in names} == expected
