@@ -6344,6 +6344,14 @@ def main() -> None:
         from scripts.trace_cli import main as trace_main
 
         raise SystemExit(trace_main(_argv[1:]))
+    if _argv and _argv[0] == "classify":
+        from hooks.classifier import cli as classifier_cli
+
+        raise SystemExit(classifier_cli.classify_main(_argv[1:]))
+    if _argv and _argv[0] == "classifier":
+        from hooks.classifier import cli as classifier_cli
+
+        raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6508,6 +6516,8 @@ def main() -> None:
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
+    sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
+    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
