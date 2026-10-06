@@ -55,7 +55,7 @@ def test_inbox_wakes_read_and_prompt_the_agents_pane_id():
     eng = AgentRecord("sw-eng-1", "eng", "t", pane_id="w:p9")
     assert messenger.agent_status(eng) == "idle"
     messenger.prompt(eng, "inbox")
-    assert calls == [["agent", "get", "w:p9"], ["agent", "prompt", "w:p9", "inbox"]]
+    assert calls == [["agent", "get", "w:p9"], ["agent", "prompt", "w:p9", "[swarm delivery] inbox"]]
 
 
 def test_typed_input_reads_the_visible_pane_with_its_styles():
