@@ -25,7 +25,7 @@ def check(op):
 def text(verdict, ask):
     from hooks.context.conditions import contains_condition_signal
 
-    if verdict == "denied" or not ask:
+    if verdict == "denied" or ask is None:
         return verdict
     return f"{verdict}, {CONDITION if contains_condition_signal(ask) else ask}"
 
@@ -37,7 +37,7 @@ def apply(doc, op, ctx):
         return False
     if any(e["id"] == op["id"] for e in item["comments"]):
         return True
-    ask = next((p["text"] for p in doc.get("priorities", []) if p["item"] == op["item"]), "")
+    ask = next((p["text"] for p in doc.get("priorities", []) if p["item"] == op["item"]), None)
     said = text(op["verdict"], ask)
     item["comments"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": said})
     ctx.record("operator", "comment added", op["item"], id=op["id"], text=said)
