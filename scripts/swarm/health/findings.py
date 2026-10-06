@@ -74,7 +74,7 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset(), talk=None):
+def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozenset(), talk=None):
     events = ledger.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in ledger.get("tasks", [])}
     return [
@@ -83,7 +83,7 @@ def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), gree
         *proof_loops(events, tasks, limits),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
-        *stale_claims(events, tasks, now_ms, limits),
+        *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
 
@@ -255,25 +255,22 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
     return found
 
 
-def stale_claims(events, tasks, now_ms, limits):
+def stale_claims(agents, tasks, limits):
     found = []
-    for tid, t in tasks.items():
-        holder = t.get("claimed_by")
-        if t.get("state") not in HELD or not holder:
+    for a in agents:
+        quiet = a.get("quiet_minutes", 0)
+        if quiet < limits.stale_minutes:
             continue
-        seen = [e["at"] for e in events if e.get("target") == f"tasks/{tid}" or e.get("by") == holder]
-        quiet = (now_ms - max(seen)) // MINUTE_MS if seen else 0
-        if quiet >= limits.stale_minutes:
-            found.append(
-                Finding(
-                    "stale claim",
-                    tid,
-                    f"no change for {_plural(quiet, 'minute')}",
-                    (f"task {_title(tasks, tid)}", f"claimed by {holder}"),
-                    f"{_plural(limits.stale_minutes, 'minute')} without a change",
-                    quiet,
-                )
+        found.append(
+            Finding(
+                "stale claim",
+                a["task"],
+                f"no progress for {_plural(quiet, 'minute')}",
+                (f"task {_title(tasks, a['task'])}", f"claimed by {a['name']}"),
+                f"{_plural(limits.stale_minutes, 'minute')} without progress",
+                quiet,
             )
+        )
     return found
 
 

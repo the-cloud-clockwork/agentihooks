@@ -43,7 +43,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, intent, modes, progress
+from scripts.gates import Who, intent, modes, progress, quiet
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -146,7 +146,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
         actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
-        actions += waits.end_pass(store, slug, {t["id"]: t for t in doc["tasks"]}, inbox, ledger_events.view)
+        rows = {t["id"]: t for t in doc["tasks"]}
+        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view)
+        actions += quiet.quiet_pass(store, slug, rows, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -648,6 +650,12 @@ def cmd_wait(store, args):
     )
 
 
+def cmd_progress(store, args):
+    agent = _worker(store, args)
+    line = quiet.report(store, LedgerClient(), args.slug, agent, args.doing, args.ends_when, now_ms())
+    print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
+
+
 def cmd_plan(store, args):
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
     result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, args.action, args.note)
@@ -840,6 +848,9 @@ def build_parser():
     wait.add_argument("minutes", type=int, nargs="?")
     wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
     wait.add_argument("--reason", default="")
+    reported = sub.add_parser("progress")
+    reported.add_argument("--doing", required=True)
+    reported.add_argument("--ends-when", required=True)
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")

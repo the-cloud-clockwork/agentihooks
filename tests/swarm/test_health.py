@@ -44,7 +44,7 @@ def healthy():
 
 
 def run(ledger, agents=(), activity=None, limits=LIMITS):
-    return [f.as_dict() for f in health.findings(ledger, list(agents), activity or {}, NOW, limits)]
+    return [f.as_dict() for f in health.findings(ledger, list(agents), activity or {}, limits)]
 
 
 def test_a_healthy_event_set_produces_no_finding():
@@ -103,14 +103,14 @@ def test_transitions_with_neither_merges_nor_proofs_are_still_ceremony():
 def test_an_agent_whose_open_pull_request_is_green_raises_no_ceremony_finding():
     events = [ev("comment edited", "phases/p1") for _ in range(25)]
     ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
-    found = health.findings(ledger, [], {}, NOW, LIMITS, green={"t1", "gone"})
+    found = health.findings(ledger, [], {}, LIMITS, green={"t1", "gone"})
     assert [f.as_dict() for f in found] == []
 
 
 def test_a_green_pull_request_credits_only_the_agent_that_claimed_it():
     events = [ev("comment edited", "phases/p1", by="sw-eng-2") for _ in range(25)]
     ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
-    found = health.findings(ledger, [], {}, NOW, LIMITS, green={"t1"})
+    found = health.findings(ledger, [], {}, LIMITS, green={"t1"})
     assert [(f.subject, f.evidence) for f in found] == [("sw-eng-2", ("25 ledger transitions", "0 outcomes"))]
 
 
@@ -200,34 +200,38 @@ def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
 def test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim():
     ledger = {"tasks": [task("t1", state="pr", title="Fold the chat panel")], "_meta": {"events": []}}
     idle = [agent(idle_ticks=5)]
-    assert health.findings(ledger, idle, {}, NOW, LIMITS, waiting={"t1"}) == []
-    assert [f.kind for f in health.findings(ledger, idle, {}, NOW, LIMITS)] == ["idle with claim"]
+    assert health.findings(ledger, idle, {}, LIMITS, waiting={"t1"}) == []
+    assert [f.kind for f in health.findings(ledger, idle, {}, LIMITS)] == ["idle with claim"]
 
 
 def test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by():
     ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
-    [idle] = health.findings(ledger, [agent(idle_ticks=4)], {}, NOW, LIMITS)
+    [idle] = health.findings(ledger, [agent(idle_ticks=4)], {}, LIMITS)
     [watch] = health.over_monitoring({"sw-eng-1": {"watch": 40, "act": 2, "since": 33}}, LIMITS)
     assert (idle.id, idle.measure) == ("idle-with-claim/sw-eng-1", 4)
     assert (watch.id, watch.measure) == ("over-monitoring/sw-eng-1", 33)
     assert "measure" not in watch.as_dict()
 
 
-def test_a_claim_with_no_change_names_the_task_its_holder_and_the_quiet_time():
-    events = [ev("task claimed", "tasks/t1", by="swarm", at=NOW - 45 * MIN), ev("joined", at=NOW - 44 * MIN)]
-    ledger = {
-        "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],
-        "_meta": {"events": events},
-    }
-    assert run(ledger) == [
+def test_a_quiet_claim_names_the_task_its_holder_and_the_quiet_time():
+    ledger = {"tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")], "_meta": {"events": []}}
+    assert run(ledger, [{**agent(), "quiet_minutes": 44}]) == [
         {
             "kind": "stale claim",
             "subject": "t1",
-            "summary": "no change for 44 minutes",
+            "summary": "no progress for 44 minutes",
             "evidence": ["task Fold the chat panel", f"claimed by {WORKER}"],
-            "threshold": "30 minutes without a change",
+            "threshold": "30 minutes without progress",
         }
     ]
+    [found] = health.findings(ledger, [{**agent(), "quiet_minutes": 30}], {}, LIMITS)
+    assert (found.id, found.measure) == ("stale-claim/t1", 30)
+
+
+def test_a_claim_quiet_under_the_limit_or_unmeasured_is_not_stale():
+    ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
+    assert run(ledger, [{**agent(), "quiet_minutes": 29}]) == []
+    assert run(ledger, [agent()]) == []
 
 
 def test_over_monitoring_names_the_agent_and_its_counts():
