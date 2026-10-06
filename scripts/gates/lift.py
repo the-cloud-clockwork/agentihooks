@@ -14,7 +14,7 @@ SIGNAL = re.compile(r"\blift\s+(?:the\s+)?([a-z][a-z0-9-]*)\s+gate\b", re.IGNORE
 
 
 def requested(prompt):
-    return {match.group(1).lower() for match in SIGNAL.finditer(prompt or "")}
+    return {match.group(1).lower() for match in SIGNAL.finditer(prompt)}
 
 
 def lift_path(slug, session_id, gate, home=None):
@@ -24,19 +24,20 @@ def lift_path(slug, session_id, gate, home=None):
 def arm(slug, session_id, gate, home=None, now=None):
     path = lift_path(slug, session_id, gate, home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"at": time.time() if now is None else now}), encoding="utf-8")
+    path.write_text(json.dumps({"at": time.time() if now is None else now}))
 
 
 def lifted(slug, session_id, gate, home=None, now=None):
     if not (slug and session_id):
         return False
     try:
-        record = json.loads(lift_path(slug, session_id, gate, home).read_text(encoding="utf-8"))
+        record = json.loads(lift_path(slug, session_id, gate, home).read_text())
     except (OSError, ValueError):
         return False
-    if not isinstance(record, dict):
+    at = record.get("at") if isinstance(record, dict) else None
+    if not isinstance(at, (int, float)):
         return False
-    return (time.time() if now is None else now) - record.get("at", 0) < LIFT_SECONDS
+    return (time.time() if now is None else now) - at < LIFT_SECONDS
 
 
 def post(slug):

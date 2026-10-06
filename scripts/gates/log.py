@@ -39,7 +39,7 @@ class Row:
 def append(slug, row, home=None):
     path = gate_log_path(slug, home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as out:
+    with path.open("a") as out:
         out.write(json.dumps(asdict(row)) + "\n")
 
 

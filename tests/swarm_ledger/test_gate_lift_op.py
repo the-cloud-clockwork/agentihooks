@@ -7,6 +7,8 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.swarm_ledger import ledger_agent_ops  # noqa: E402
+
 SLUG = "gate-lift-2026-01-01"
 
 
@@ -49,3 +51,8 @@ class GateLiftOp(unittest.TestCase):
                 core.check_op(lift(gate=gate))
         core.check_op(lift(gate="watch-budget"))
         core.check_op(lift(gate="x" * 40))
+
+    def test_the_agent_op_check_names_the_missing_gate(self):
+        with self.assertRaisesRegex(ValueError, "^gate_lift needs the gate's name$"):
+            ledger_agent_ops.check(lift(gate=""))
+        ledger_agent_ops.check(lift())

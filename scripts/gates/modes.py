@@ -10,5 +10,5 @@ def env_name(gate_name):
 
 
 def mode(gate, environ):
-    chosen = environ.get(env_name(gate.name), "").strip().lower()
+    chosen = str(environ.get(env_name(gate.name))).strip().lower()
     return chosen if chosen in MODES else gate.default_mode

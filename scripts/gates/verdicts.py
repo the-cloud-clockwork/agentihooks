@@ -26,13 +26,13 @@ class Verdicts:
         path = self.path(subject)
         path.parent.mkdir(parents=True, exist_ok=True)
         staged = path.with_name(f".{path.name}.{os.getpid()}")
-        staged.write_text(json.dumps(record), encoding="utf-8")
+        staged.write_text(json.dumps(record))
         os.replace(staged, path)
         return record
 
     def read(self, subject):
         try:
-            record = json.loads(self.path(subject).read_text(encoding="utf-8"))
+            record = json.loads(self.path(subject).read_text())
         except (OSError, ValueError):
             return None
         return record if isinstance(record, dict) else None

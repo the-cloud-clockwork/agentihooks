@@ -97,6 +97,8 @@ class TestLog:
         assert [r["at"] for r in log.recent(SLUG, 50, tmp_path)] == [7, 8, 9]
         monkeypatch.setattr(log, "TAIL_BYTES", size * 3)
         assert [r["at"] for r in log.recent(SLUG, 50, tmp_path)] == [8, 9]
+        monkeypatch.setattr(log, "TAIL_BYTES", size * 10)
+        assert [r["at"] for r in log.recent(SLUG, 50, tmp_path)] == list(range(10))
 
     def test_recent_default_limit_is_twenty(self, tmp_path):
         for n in range(25):
@@ -167,7 +169,6 @@ class TestLift:
             ("uplift the talk gate", set()),
             ("lift the talk gates", set()),
             ("", set()),
-            (None, set()),
         ],
     )
     def test_requested_names_each_lifted_gate(self, prompt, gates):
@@ -194,8 +195,9 @@ class TestLift:
         path.parent.mkdir(parents=True)
         path.write_text("{")
         assert not lift.lifted(SLUG, SID, "talk", tmp_path, now=1.0)
-        path.write_text("[]")
-        assert not lift.lifted(SLUG, SID, "talk", tmp_path, now=1.0)
+        for record in ("[]", "{}", '{"at": "1"}', '{"at": null}'):
+            path.write_text(record)
+            assert not lift.lifted(SLUG, SID, "talk", tmp_path, now=1.0), record
         lift.arm(SLUG, "", "talk", tmp_path, now=1.0)
         assert not lift.lifted(SLUG, "", "talk", tmp_path, now=1.0)
         assert not lift.lifted("", SID, "talk", tmp_path, now=1.0)
@@ -215,7 +217,14 @@ class TestLift:
         assert [(r["gate"], r["kind"], r["agent"], r["task"]) for r in rows] == [("talk", "lift", ME, TASK)]
         assert rows[0]["reason"] == lift.LIFT_REASON
         assert posted == [{"op": "gate_lift", "id": posted[0]["id"], "by": ME, "gate": "talk"}]
-        assert posted[0]["id"].startswith("gate_lift-")
+        prefix, _, suffix = posted[0]["id"].partition("-")
+        assert prefix == "gate_lift" and len(suffix) == 10 and int(suffix, 16) >= 0
+
+    def test_arm_from_prompt_posts_to_its_swarms_ledger_by_default(self, tmp_path, monkeypatch):
+        posted = []
+        monkeypatch.setattr(lift, "post", lambda slug: lambda op: posted.append((slug, op["gate"])))
+        assert lift.arm_from_prompt("lift the talk gate", SID, WHO, {"talk"}, tmp_path) == ["talk"]
+        assert posted == [(SLUG, "talk")]
 
     def test_arm_from_prompt_posts_after_every_lift_is_armed(self, tmp_path):
         def post(op):

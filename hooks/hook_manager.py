@@ -844,7 +844,7 @@ def on_user_prompt_submit(payload: dict) -> None:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
     if typed:
-        _arm_gate_lifts(payload.get("prompt", ""), session_id)
+        _arm_gate_lifts(payload)
 
     # --- Voice output: detect enable/disable voice signals ---
     try:
@@ -1015,18 +1015,18 @@ def _operator_words(payload: dict) -> bool:
         return False
 
 
-def _arm_gate_lifts(prompt: str, session_id: str) -> None:
+def _arm_gate_lifts(payload: dict) -> None:
     try:
         from scripts.gates.base import Who
         from scripts.gates.entry import GATES
         from scripts.gates.lift import arm_from_prompt
 
-        armed = arm_from_prompt(prompt, session_id, Who.from_env(), GATES)
+        armed = arm_from_prompt(payload["prompt"], payload.get("session_id"), Who.from_env(), GATES)
     except Exception as e:
         log("gate lift: arming or its ledger record failed", {"error": str(e)})
         return
     if armed:
-        log("gates: operator lift armed", {"session_id": session_id, "gates": armed})
+        log("gates: operator lift armed", {"session_id": payload.get("session_id"), "gates": armed})
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:
