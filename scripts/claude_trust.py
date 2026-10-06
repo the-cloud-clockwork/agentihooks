@@ -8,9 +8,9 @@ WAIT_NOTICE = "the session will wait at Claude's folder trust question until som
 
 
 def _config_path(environ: dict[str, str]) -> Path:
-    if environ.get("CLAUDE_CONFIG_DIR"):
-        return Path(environ["CLAUDE_CONFIG_DIR"]).expanduser() / ".claude.json"
-    return Path(environ.get("HOME", str(Path.home()))).expanduser() / ".claude.json"
+    from scripts.claude_config import claude_json
+
+    return claude_json(environ)
 
 
 def allowed(environ: dict[str, str]) -> bool:

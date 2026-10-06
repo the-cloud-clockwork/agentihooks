@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from scripts.claude_config import claude_json
+
 
 def _codex_mcp_configs() -> dict[str, dict]:
     from hooks.targets import codex_home
@@ -57,7 +59,7 @@ def load_all_mcp_configs(project_path: Optional[str] = None) -> dict[str, dict]:
     servers: dict[str, dict] = {}
 
     # User scope: ~/.claude.json
-    user_mcp = Path.home() / ".claude.json"
+    user_mcp = claude_json()
     if user_mcp.exists():
         try:
             data = json.loads(user_mcp.read_text(encoding="utf-8"))

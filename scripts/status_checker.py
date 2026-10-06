@@ -14,11 +14,13 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from scripts.claude_config import claude_home, claude_json
+
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
 AGENTIHOOKS_HOME = Path(os.getenv("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
-CLAUDE_HOME = Path(os.getenv("AGENTIHOOKS_CLAUDE_HOME", str(Path.home() / ".claude")))
+CLAUDE_HOME = claude_home()
 STATE_JSON = AGENTIHOOKS_HOME / "state.json"
 
 # ── Color tags (matching install.py conventions) ────────────────────────
@@ -399,7 +401,7 @@ def _save_tool_cache(server_tools: dict[str, Optional[int]]) -> None:
 def check_mcp() -> dict[str, Any]:
     """Full MCP state: servers, enabled/disabled per project, real tool counts for all."""
     try:
-        user_mcp_path = Path.home() / ".claude.json"
+        user_mcp_path = claude_json()
         user_data = {}
         if user_mcp_path.exists():
             user_data = json.loads(user_mcp_path.read_text(encoding="utf-8"))

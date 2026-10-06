@@ -127,6 +127,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # machine, which is luck, not isolation — an operator who exports it (the
     # installer supports a comma list) would have the whole suite writing into
     # their real codex install.
+    for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME", "AGENTIHOOKS_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     # Same for COPILOT_HOME, read first by targets.copilot_target.copilot_home.
     monkeypatch.delenv("COPILOT_HOME", raising=False)
@@ -248,8 +250,11 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     from targets.copilot_target import CopilotAdapter
 
     from hooks.context.codex_context_pin import catalog_path
+    from scripts.claude_config import claude_home, claude_json
 
     for label, value in (
+        ("claude_home", claude_home()),
+        ("claude_json", claude_json()),
         ("codex model catalog", catalog_path()),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
