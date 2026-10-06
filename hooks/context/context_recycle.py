@@ -4,7 +4,7 @@ import shlex
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT
+from hooks.config import AGENTIHOOKS_HOME, COMPACT_LIMIT, HANDOFF_MARGIN
 from hooks.context.context_usage import used_tokens
 from scripts.codex_context import codex_context
 from scripts.handoff import check as handoff_check
@@ -51,9 +51,13 @@ def _used(session_id: str) -> int | None:
 def _overrun(session_id: str, environ) -> tuple[str, int] | None:
     slug = _swarm_of(os.environ if environ is None else environ)
     used = _used(session_id) if slug and session_id else None
-    if used is None or used < COMPACT_LIMIT * 1000:
+    if used is None or used < _gate_limit() * 1000:
         return None
     return slug, used
+
+
+def _gate_limit() -> int:
+    return COMPACT_LIMIT + HANDOFF_MARGIN
 
 
 def _swarm_of(environ) -> str:
@@ -71,9 +75,9 @@ def over_limit(session_id: str, environ=None) -> str | None:
 def directive(session_id: str, environ=None, now: datetime | None = None) -> str | None:
     slug = _swarm_of(os.environ if environ is None else environ)
     used = _used(session_id) if slug and session_id else None
-    if used is None or used < COMPACT_LIMIT * 800:
+    if used is None or used < COMPACT_LIMIT * 1000:
         return None
-    hard = used >= COMPACT_LIMIT * 1000
+    hard = used >= _gate_limit() * 1000
     stage = "recycle" if hard else "prepare"
     marker = AGENTIHOOKS_HOME / "context_usage" / f"{session_id}.{stage}"
     if marker.exists():
@@ -81,12 +85,12 @@ def directive(session_id: str, environ=None, now: datetime | None = None) -> str
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
     if hard:
-        return _DIRECTIVE.format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+        return _DIRECTIVE.format(used=used // 1000, limit=_gate_limit(), slug=slug)
     deadline = (now or datetime.now(timezone.utc)) + timedelta(minutes=25)
     return (
         f"HANDOFF PREPARATION — this session holds {used // 1000}k tokens. Write your handoff now. "
-        f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {COMPACT_LIMIT}k hard gate, whichever comes first. "
-        + _DIRECTIVE.split("Write a handoff document ", 1)[1].format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+        f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {_gate_limit()}k hard gate, whichever comes first. "
+        + _DIRECTIVE.split("Write a handoff document ", 1)[1].format(used=used // 1000, limit=_gate_limit(), slug=slug)
     )
 
 
@@ -165,7 +169,7 @@ def gate(tool_name: str, tool_input: dict, session_id: str, environ=None) -> str
     command = str(tool_input.get("command") or "")
     if tool_name == "Bash" and _allowed_command(command, slug):
         return _handoff_refusal(command, slug)
-    return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=COMPACT_LIMIT, slug=slug)
+    return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=_gate_limit(), slug=slug)
 
 
 def _resolver(slug: str):

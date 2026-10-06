@@ -150,8 +150,8 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 
 ## Context recycle
 
-At eighty percent of the compact limit, a swarm agent receives a handoff preparation directive. Its deadline is twenty five minutes later or the hard limit, whichever comes first. When its context reaches `AGENTIHOOKS_COMPACT_LIMIT`
-thousand tokens (default 600), a hook tells it to write a handoff document and a recap and run
+When its context reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600), a swarm agent receives a handoff preparation directive. Its deadline is twenty five minutes later or the hard gate, whichever comes first. The hard gate sits `AGENTIHOOKS_HANDOFF_MARGIN`
+thousand tokens above the limit (default 50, so 650 by default); there a hook tells it to write a handoff document and a recap and run
 `agentihooks swarm <id> handoff <doc> --recap <recap>`, then stop. From that point PreToolUse denies every tool call except
 reading files (in the shell too: cat, head, tail, ls, wc, grep, git status, log, diff, show), writing or
 editing files under `~/scratchpad`, `agentihooks swarm <id> handoff <doc> [--recap <recap>]`,
