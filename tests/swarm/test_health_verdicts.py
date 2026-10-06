@@ -130,3 +130,9 @@ def test_the_master_prompt_gives_every_new_finding_a_verdict():
     assert "agentihooks swarm sw --as sw-master-1 verdict <finding id>" in duty
     for value in verdicts.VERDICTS:
         assert value in duty
+
+
+def test_a_shown_finding_carries_when_it_was_first_seen(board):
+    _, store = board
+    assert store.visible([watching(33)], T0, HOUR)[0]["seen_at"] == T0
+    assert store.visible([watching(40)], T0 + 5, HOUR)[0]["seen_at"] == T0

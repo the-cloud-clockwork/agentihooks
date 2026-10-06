@@ -178,3 +178,37 @@ def test_without_registry_entries_the_default_login_keeps_every_session_log(tmp_
     quotas = codex_router.quotas([CodexAccount("default")], {"HOME": str(tmp_path)})
     assert quotas["default"] == codex_quota.latest_codex_quota({"HOME": str(tmp_path)})
     assert quotas["default"].seven_day.used == 46.0
+
+
+def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    agents_quota._page_cache.clear()
+    claude = ProbeResult("tccgma", "ok", "OK", 78.0, QuotaWindow(used=8.0), QuotaWindow(used=22.0))
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(1.0, claude)])
+    monkeypatch.setattr(claude_quota_balancer, "collect_results", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"tccgma": 2})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
+    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: [CodexAccount("default")])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"default": None})
+    quota = agents_quota.page_quota(now=100.0)
+    assert quota["cap"] == 3
+    assert [(r["agent"], r["account"], r["sessions"]) for r in quota["rows"]] == [
+        ("claude", "tccgma", 2),
+        ("codex", "default", 1),
+    ]
+    assert quota["rows"][0]["five_hour_left"] == 92.0
+    assert quota["rows"][0]["seven_day_left"] == 78.0
+    assert quota["rows"][1]["five_hour_left"] is None
+
+
+def test_page_quota_is_reused_for_a_minute(monkeypatch):
+    calls = []
+    agents_quota._page_cache.clear()
+    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: calls.append(now) or {"cap": 3, "rows": [now]})
+    assert agents_quota.page_quota(now=1000.0)["rows"] == [1000.0]
+    assert agents_quota.page_quota(now=1059.0)["rows"] == [1000.0]
+    assert agents_quota.page_quota(now=1060.0)["rows"] == [1060.0]
+    assert calls == [1000.0, 1060.0]

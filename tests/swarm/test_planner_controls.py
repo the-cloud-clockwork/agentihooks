@@ -115,7 +115,7 @@ def test_templates_keep_planner_profile_and_cap():
 def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set"})
-    assert str(caught.value) == "set needs max_eng, max_ci, max_plan or codex_share"
+    assert str(caught.value) == "set needs max_eng, max_ci, max_plan, codex_share, compact_limit or autonomy"
 
 
 def test_create_parser_defaults_to_template_and_parses_integer_cap():

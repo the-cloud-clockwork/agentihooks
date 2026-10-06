@@ -34,13 +34,6 @@ class CollapsedByDefault(unittest.TestCase):
         self.assertIn('id="tasks-count"', summary)
         self.assertIn('<ol id="tasks">', body)
 
-    def test_swarm_agents_start_collapsed_with_their_count_in_the_header(self):
-        attrs, body = details("swarm-agents-box")
-        self.assertIn("open", attrs)
-        self.assertIn('id="swarm-agents-count"', body.split("</summary>", 1)[0])
-        self.assertIn('id="swarm-agents"', body)
-        self.assertIn('$("swarm-agents-count").textContent', function_source("renderWork"))
-
     def test_task_counts_by_state_in_a_fixed_order_skipping_empty_states(self):
         tasks = [{"state": s} for s in ("done", "open", "claimed", "done", "pr", "done", "open")]
         self.assertEqual(

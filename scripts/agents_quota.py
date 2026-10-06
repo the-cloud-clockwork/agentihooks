@@ -8,6 +8,9 @@ from dataclasses import asdict, dataclass
 
 from scripts.claude_quota_balancer import _duration, _percent, _span
 
+PAGE_TTL_S = 60
+_page_cache: dict = {}
+
 
 @dataclass(frozen=True)
 class QuotaRow:
@@ -109,6 +112,25 @@ def _codex(now: float) -> list[QuotaRow]:
 def codex_table() -> str:
     now = time.time()
     return render(_codex(now), int(now))
+
+
+def _page_quota(now: float) -> dict:
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    claude = [result for _, result in claude_quota_balancer.cached_observations()]
+    pool = codex_router.routing_pool(os.environ)
+    rows = claude_rows(claude, account_sessions.sessions_by_account(), "cached") + codex_rows(
+        pool, codex_router.quotas(pool, os.environ), account_sessions.codex_sessions_by_account(), now
+    )
+    return {"cap": account_sessions.max_sessions(), "rows": [asdict(row) for row in rows]}
+
+
+def page_quota(now: float | None = None) -> dict:
+    now = time.time() if now is None else now
+    if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
+        _page_cache.update(at=now, quota=_page_quota(now))
+    return _page_cache["quota"]
 
 
 def main(argv: list[str] | None = None) -> int:
