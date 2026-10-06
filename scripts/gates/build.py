@@ -83,7 +83,7 @@ def _commit_in(rest, directory):
         if word == "-C":
             directory = directory / next(rest, NO_VALUE)
         elif word == "-c":
-            next(rest, NO_VALUE)
+            next(rest, None)
         elif not word.startswith("-"):
             if word == "commit":
                 yield directory, any(arg == "--all" or ALL_SHORT.match(arg) for arg in rest)
