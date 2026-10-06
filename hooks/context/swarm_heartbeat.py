@@ -5,6 +5,8 @@ import time
 
 from scripts.swarm import idle
 
+NOTIFICATION = "<task-notification>"
+
 
 def beat(state, environ=None, redis=None, now_ms=None):
     env = os.environ if environ is None else environ
@@ -26,7 +28,8 @@ def heard(prompt, environ=None, redis=None, now_ms=None):
 
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
-    if not (slug and name) or prompt.strip() in (WAKE_TEXT, NUDGE.format(slug=slug)):
+    text = prompt.strip()
+    if not (slug and name) or text in (WAKE_TEXT, NUDGE.format(slug=slug)) or text.startswith(NOTIFICATION):
         return False
     if redis is None:
         from scripts.swarm.store import redis_client

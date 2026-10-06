@@ -96,6 +96,11 @@ def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width)
     assert tab.locator("#swarm #cap-eng").inner_text() == "3"
     assert tab.locator("#swarm #cap-codex").inner_text() == "30%"
     assert tab.locator("#swarm-alert").is_hidden()
+    assert tab.get_by_text("Needs you", exact=True).count() == 0
+    assert tab.locator("#needs-you-box, #needs-you").count() == 0
+    tab.get_by_role("tab", name="Ledger").click()
+    assert "Choose the first phase" in tab.locator("#priorities").inner_text()
+    tab.get_by_role("tab", name="Swarm").click()
     assert tab.locator("body").evaluate("el => el.scrollWidth") == width, tab.evaluate(
         "() => [...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.getBoundingClientRect().right > innerWidth).map(el => [el.id, el.className, el.getBoundingClientRect().right])"
     )

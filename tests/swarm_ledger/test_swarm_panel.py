@@ -463,7 +463,12 @@ class HealthPanel(unittest.TestCase):
         self.assertIn('swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note:', page)
 
     def test_the_swarm_health_renders_findings_with_the_swarm(self):
-        self.assertIn("renderHealth(sw.findings, now)", function_source("renderSwarm"))
+        source = function_source("renderSwarm")
+        self.assertIn("renderHealth(sw.findings, now)", source)
+        self.assertNotIn("renderNeedsYou", source)
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        self.assertNotIn("needs-you", page)
+        self.assertNotIn("Needs you", page)
 
     def test_health_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")

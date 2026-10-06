@@ -286,9 +286,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 .attach-tray:empty { display: none; }
 .attach-pre { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .attach-note { font-size: var(--fs-meta); color: var(--destructive); text-shadow: var(--glow); overflow-wrap: anywhere; }
-.attach-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; }
-.attach-row .thumb { max-width: 100%; padding: 0; border: 0; }
-.attach-row .thumb img { max-width: 100%; max-height: none; }
+.attach-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 6px; }
 .image-viewer { position: fixed; inset: 16px; width: calc(100vw - 32px); height: calc(100dvh - 32px); max-width: none; max-height: none;
   margin: 0; padding: 16px; border: 0; border-radius: 8px; background: var(--overlay); color: var(--text); }
 .image-viewer[open] { display: flex; flex-direction: column; gap: 12px; }
@@ -588,7 +586,7 @@ input, textarea { caret-color: var(--accent-2); }
   const CHAT_SEEN = `plan-ledger:${SLUG}:chat-seen`;
   const FOLD_KEY = `plan-ledger:${SLUG}:fold`;
   const COMMENTS_KEY = `plan-ledger:${SLUG}:comments`;
-  const TOGGLES_KEY = `plan-ledger:${SLUG}:toggles`;
+  const TOGGLES_KEY = `plan-ledger:${SLUG}:toggles-v2`;
   const PHASE_LABELS = { out_of_scope: "Out of scope", done: "Done", to_plan: "Needs a plan", planning: "Planning", in_review: "Plan in review", building: "Building" };
   const TOKEN = document.querySelector('meta[name="ledger-token"]').content;
   const PAGE = (document.querySelector('meta[name="ledger-page"]') || {}).content;
@@ -613,7 +611,7 @@ input, textarea { caret-color: var(--accent-2); }
   const composing = {};
   const editing = {};
   const savedComments = stored(COMMENTS_KEY, {});
-  const openComments = new Set(savedComments.open || []);
+  const openComments = new Set(savedComments.opened || []);
   const closedComments = new Set(savedComments.closed || []);
   const toggles = stored(TOGGLES_KEY, {});
   let chatSeen = 0;
@@ -1073,7 +1071,7 @@ input, textarea { caret-color: var(--accent-2); }
     const box = h("details", { "data-key": key }, h("summary", {}, `Comments`, h("span", { class: "count", text: count ? `· ${count}` : "" })),
       threadView(`${key}/comments`, list, "thread flat"));
     const shown = toggles[`sec-${key.split("/")[0]}`];
-    box.open = openComments.has(key) || (!closedComments.has(key) && (typeof shown === "boolean" ? shown : !!count));
+    box.open = openComments.has(key) || (!closedComments.has(key) && shown === true);
     box.addEventListener("toggle", () => rememberComment(key, box.open));
     return box;
   }
@@ -1081,7 +1079,7 @@ input, textarea { caret-color: var(--accent-2); }
   function rememberComment(key, open) {
     (open ? openComments : closedComments).add(key);
     (open ? closedComments : openComments).delete(key);
-    store(COMMENTS_KEY, { open: [...openComments], closed: [...closedComments] });
+    store(COMMENTS_KEY, { opened: [...openComments], closed: [...closedComments] });
   }
 
   function scopeDot(key, item) {
