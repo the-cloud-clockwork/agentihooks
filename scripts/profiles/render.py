@@ -49,7 +49,9 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     if bundle is not None:
         head = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True)
         commit = head.stdout.strip()
-    return {"bundle_commit": commit, "chain": [n for n, _ in dirs]}
+    operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
+    plugins = dict(sorted((operator.get("enabledPlugins") or {}).items()))
+    return {"bundle_commit": commit, "chain": [n for n, _ in dirs], "plugins": plugins}
 
 
 def stamp(name: str) -> dict:
