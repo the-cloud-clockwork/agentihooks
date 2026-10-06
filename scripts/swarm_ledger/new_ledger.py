@@ -2,7 +2,7 @@
 """Create a ledger from an agent-written content file.
 
 Usage: new_ledger.py --content <content.json> [--plan <plan-file> | --proof] [--date YYYY-MM-DD]
-                     [--size small|swarm] [--as NAME]
+                     [--size small|swarm] [--as NAME] [--operator-asked WORDS]
 
 --size: small (default) is one session's work without a swarm; its creator, --as NAME (default
 $AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
@@ -13,6 +13,8 @@ Writes <LEDGER_DIR>/<slug>.html and <slug>.json. The slug is built by scripts.sw
 <plan-file-stem>-<date> for --plan, proof-<swarm code>-<task>-<n> for --proof (a swarm task session),
 small-<session> for a small ledger. --slug accepts only one of those built forms.
 Idempotent: an existing ledger is left untouched and its paths are printed.
+In the shared ledger folder only a master seat or the operator creates a ledger, and a small one needs three phases
+unless --operator-asked quotes the operator asking for it. Anywhere else needs a spare LEDGER_PORT.
 
 Usage: new_ledger.py --upgrade <slug>
 Re-renders an existing ledger's page from the current template, keeping its token and
@@ -235,6 +237,7 @@ def main():
     parser.add_argument("--date", default=datetime.date.today().isoformat())
     parser.add_argument("--size", choices=ledger_size.SIZES, default="small")
     parser.add_argument("--as", dest="name", default=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+    parser.add_argument("--operator-asked", default="")
     args = parser.parse_args()
 
     slug = built_slug(args)
@@ -246,7 +249,14 @@ def main():
     small = args.size == "small"
     if small and not ledger_size.AUTHOR_RE.match(args.name):
         sys.exit("a small ledger needs --as NAME: the session that creates it joins it as its worker")
-    create(slug, json.loads(Path(args.content).read_text(encoding="utf-8")), args.size)
+    from scripts.swarm_ledger import ledger_creator
+
+    content = json.loads(Path(args.content).read_text(encoding="utf-8"))
+    tasks = ledger_creator.content_tasks(content) if isinstance(content, dict) else 0
+    refused = ledger_creator.refusal(os.environ, tasks, args.operator_asked, floor=small, folder=core.LEDGER_DIR)
+    if refused:
+        sys.exit(refused)
+    create(slug, content, args.size)
     out = {"slug": slug, "html": str(html_path), "json": str(json_path), "created": True, "size": args.size}
     if small:
         core.sync(slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}])

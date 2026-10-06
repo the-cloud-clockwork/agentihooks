@@ -78,6 +78,22 @@ def test_start_refuses_without_a_linked_bundle_and_creates_nothing(env, monkeypa
     assert state(WATCHED)["sources"] == [] and not pointers(WATCHED)
 
 
+def test_an_engineer_cannot_start_a_doctor_on_the_shared_ledger_folder(env, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_creator
+
+    store, _, _ = env
+    shared = Path.home() / "development-ledger"
+    monkeypatch.setattr(core, "LEDGER_DIR", shared)
+    monkeypatch.setenv("LEDGER_DIR", str(shared))
+    assert new_ledger.create(WATCHED, {"title": "Watched work", "overview": "o", "phases": [{"title": "One"}]})
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "eng")
+    assert doctor.main([WATCHED, "start"]) == 1
+    assert capsys.readouterr().err.strip() == f"doctor: {ledger_creator.CALLER}"
+    assert DOCTOR not in store.slugs()
+    assert not (shared / f"{DOCTOR}.json").exists()
+
+
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0

@@ -1,0 +1,124 @@
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "swarm_ledger"))
+import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_creator  # noqa: E402
+
+pytestmark = pytest.mark.unit
+
+SWARM_KEYS = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME")
+ASKED = "please make a two task ledger for the hotfix"
+
+
+def shared():
+    return Path.home() / "development-ledger"
+
+
+def as_lane(monkeypatch, lane, name=None):
+    for key in SWARM_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    if lane != "operator":
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", lane)
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name or f"{lane}@a1b2c3-0001")
+
+
+def content_file(tmp_path, phases):
+    content = {"title": "Plan", "overview": "o", "phases": [{"title": f"step {n}"} for n in range(phases)]}
+    path = tmp_path / "content.json"
+    path.write_text(json.dumps(content))
+    return path
+
+
+def new(monkeypatch, tmp_path, folder, phases, *extra, size="small"):
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", folder)
+    plan = tmp_path / "creator-plan.md"
+    plan.write_text("plan")
+    content = str(content_file(tmp_path, phases))
+    argv = ["new", "--content", content, "--plan", str(plan), "--size", size, "--as", "tester", *extra]
+    monkeypatch.setattr(sys, "argv", argv)
+    new_ledger.main()
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
+def test_a_swarm_engineer_cannot_create_a_ledger_in_the_shared_folder(monkeypatch, tmp_path, lane):
+    as_lane(monkeypatch, lane)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, shared(), 3)
+    assert str(refused.value) == ledger_creator.CALLER
+    assert not shared().exists() or list(shared().iterdir()) == []
+
+
+@pytest.mark.parametrize("lane", ["master", "operator"])
+def test_a_master_or_the_operator_creates_a_ledger_of_three_tasks(monkeypatch, tmp_path, capsys, lane):
+    as_lane(monkeypatch, lane)
+    new(monkeypatch, tmp_path, shared(), 3)
+    assert json.loads(capsys.readouterr().out.splitlines()[0])["created"] is True
+
+
+@pytest.mark.parametrize("lane", ["master", "operator"])
+def test_fewer_than_three_tasks_is_refused_unless_the_operator_asked(monkeypatch, tmp_path, lane):
+    as_lane(monkeypatch, lane)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, shared(), 2)
+    assert str(refused.value) == ledger_creator.FLOOR.format(need=3, have=2)
+
+
+def test_a_swarm_ledger_leaves_the_floor_to_swarm_create_where_its_tasks_exist(monkeypatch, tmp_path, capsys):
+    as_lane(monkeypatch, "master")
+    new(monkeypatch, tmp_path, shared(), 2, size="swarm")
+    assert json.loads(capsys.readouterr().out.splitlines()[0])["created"] is True
+
+
+def test_the_operator_words_recorded_for_the_master_lift_the_floor(monkeypatch, tmp_path, capsys):
+    from hooks.context import operator_words
+
+    as_lane(monkeypatch, "master")
+    operator_words.record("master@a1b2c3-0001", ASKED)
+    new(monkeypatch, tmp_path, shared(), 2, "--operator-asked", "make a two task ledger")
+    assert json.loads(capsys.readouterr().out.splitlines()[0])["created"] is True
+
+
+@pytest.mark.parametrize("quote", ["words the operator never typed", "two task", ""])
+def test_a_quote_the_operator_did_not_type_keeps_the_floor(monkeypatch, tmp_path, quote):
+    from hooks.context import operator_words
+
+    as_lane(monkeypatch, "master")
+    operator_words.record("master@a1b2c3-0001", ASKED)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, shared(), 2, "--operator-asked", quote)
+    assert str(refused.value) == ledger_creator.FLOOR.format(need=3, have=2)
+
+
+def test_a_proof_ledger_runs_on_a_scratch_folder_and_a_spare_port(monkeypatch, tmp_path, capsys):
+    as_lane(monkeypatch, "eng")
+    monkeypatch.setenv("LEDGER_PORT", "8883")
+    new(monkeypatch, tmp_path, tmp_path / "scratch", 1)
+    out = capsys.readouterr().out.splitlines()
+    assert json.loads(out[0])["created"] is True
+    assert "http://127.0.0.1:8883/" in out[1]
+
+
+@pytest.mark.parametrize("port", ["8765", ""])
+def test_a_scratch_folder_on_the_shared_port_is_refused(monkeypatch, tmp_path, port):
+    as_lane(monkeypatch, "eng")
+    monkeypatch.setenv("LEDGER_PORT", port)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, tmp_path / "scratch", 3)
+    assert str(refused.value) == ledger_creator.PORT
+    assert not (tmp_path / "scratch").exists()
+
+
+def test_swarm_tasks_count_each_waiting_automatic_phase():
+    doc = {
+        "tasks": [{"id": "t1", "phase": "p1"}],
+        "phases": [{"id": "p1", "planning": "manual"}, {"id": "p2", "planning": "auto"}, {"id": "p3"}],
+    }
+    assert ledger_creator.swarm_tasks(doc) == 2
