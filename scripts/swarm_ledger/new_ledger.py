@@ -106,7 +106,10 @@ def check(content):
 
 
 def phase_fields(key: str, item: dict) -> dict:
-    return {name: item[name] for name in ("depends_on", "planning", "release") if key == "phases" and name in item}
+    fields = {name: item[name] for name in ("depends_on", "planning", "release") if key == "phases" and name in item}
+    if isinstance(fields.get("depends_on"), list):
+        fields["depends_on"] = [f"p{value}" if type(value) is int else value for value in fields["depends_on"]]
+    return fields
 
 
 def build_doc(content, size="small"):
