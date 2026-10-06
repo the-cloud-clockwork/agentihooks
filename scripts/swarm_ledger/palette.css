@@ -14,6 +14,7 @@
   --slate-050: #f8fafc;
   --slate-300: #cbd5e1;
   --slate-400: #9aa8bd;
+  --lift-020: rgba(255, 255, 255, .02);
   --lift-045: rgba(255, 255, 255, .045);
   --lift-060: rgba(255, 255, 255, .06);
   --lift-080: rgba(255, 255, 255, .08);
@@ -21,6 +22,7 @@
 
   --canvas: var(--ink-950);
   --backdrop: none;
+  --veil: var(--lift-020);
   --surface-1: var(--lift-045);
   --surface-2: var(--lift-060);
   --hover: var(--lift-080);

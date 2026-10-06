@@ -121,10 +121,10 @@ RESTORE = ICON.format('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>
 HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
 
 
-def ledger_row(s, cells, control):
+def ledger_row(s, cells, control, lead="", attrs=""):
     slug, title, overview = html.escape(s["slug"]), html.escape(s["title"]), html.escape(s["overview"])
     return (
-        f'<li class="row"><a class="title" href="/{slug}" title="{title}">{title}</a>'
+        f'<li class="row"{attrs}>{lead}<a class="title" href="/{slug}" title="{title}">{title}</a>'
         f'<span class="kind">{html.escape(s["size"])}</span><span class="ov" title="{overview}">{overview}</span>'
         f'{cells}<span class="acts">{control.format(slug=slug, title=title)}</span></li>'
     )
@@ -155,6 +155,24 @@ def home_cells(s, state, now):
     )
 
 
+SWARM_RANK = {"running": 0, "paused": 1, "stopping": 1, "drained": 2, "stopped": 3, "closed": 5}
+FOLD = '<button class="fold" type="button" aria-expanded="false" aria-label="Show all of {title}">&#9656;</button>'
+
+
+def swarm_rank(state):
+    return SWARM_RANK.get(state, 4)
+
+
+def home_row(s, state, now):
+    state = "closed" if s["closed_at"] else state
+    attrs = (
+        f' data-slug="{html.escape(s["slug"])}" data-kind="{html.escape(s["size"])}" data-open="{s["open"]}"'
+        f' data-done="{s["done"]}" data-swarm="{swarm_rank(state)}" data-at="{s["updated_at"] or 0}"'
+    )
+    control = (REOPEN if s["closed_at"] else "") + DELETE
+    return ledger_row(s, home_cells(s, state, now), control, FOLD.format(title=html.escape(s["title"])), attrs)
+
+
 def bin_cells(s):
     deleted = time.strftime("%Y-%m-%d", time.localtime(s["deleted_at"] / 1000))
     days = s["days_left"]
@@ -162,7 +180,7 @@ def bin_cells(s):
 
 
 HEADS = {
-    "home": ("Ledger", "Kind", "Overview", ">Open", ">Done", "Swarm", ">Activity", ""),
+    "home": ("", "Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
     "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
 }
 DELETE = (
@@ -179,6 +197,19 @@ RESTORE_BUTTON = (
 )
 
 
+FOLD_ALL = '<button class="act toggle-all" id="fold-all" type="button">Expand all</button>'
+
+
+def head_cell(label):
+    label, _, key = label.partition(":")
+    css = ' class="r"' if label.startswith(">") else ""
+    label = label.removeprefix(">")
+    if not key:
+        return f"<span{css}>{label}</span>"
+    css = ' class="sort r"' if css else ' class="sort"'
+    return f'<button{css} type="button" data-sort="{key}">{label}<i aria-hidden="true">&#8597;</i></button>'
+
+
 def index_page(view="home", now=None):
     now = core.now_ms() if now is None else now
     if view == "bin":
@@ -189,18 +220,12 @@ def index_page(view="home", now=None):
         fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
     else:
         heading, empty = "HOME", "No ledgers yet."
-        total, watermark = "", '<div class="watermark" aria-hidden="true"></div>'
-        rows = [
-            ledger_row(s, home_cells(s, swarm_state(s["slug"]), now), (REOPEN if s["closed_at"] else "") + DELETE)
-            for s in ledger_summaries()
-        ]
+        total, watermark = FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
+        rows = [home_row(s, swarm_state(s["slug"]), now) for s in ledger_summaries()]
         count = len(ledger_bin.entries())
         badge = f'<span class="count">{count}</span>' if count else ""
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
-    head = "".join(
-        f'<span class="r">{label[1:]}</span>' if label.startswith(">") else f"<span>{label}</span>"
-        for label in HEADS[view]
-    )
+    head = "".join(head_cell(label) for label in HEADS[view])
     body = "".join(rows) or f'<li class="empty">{empty}</li>'
     values = {
         "HEADING": heading,
