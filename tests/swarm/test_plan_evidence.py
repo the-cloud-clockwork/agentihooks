@@ -164,11 +164,17 @@ def test_evidence_at_exact_limit_is_complete(monkeypatch):
     )
 
 
-def test_planner_steering_uses_utf8_in_an_ascii_locale(tmp_path):
+def test_planner_steering_uses_utf8_in_an_ascii_locale(tmp_path, monkeypatch):
     import os
     import subprocess
     import sys
 
+    monkeypatch.setattr(ledger_workspace, "folder", lambda slug, task: tmp_path)
+    ledger_workspace.scaffold(
+        "demo",
+        {"id": "plan", "kind": "plan", "phase": "p"},
+        {"overview": "ñ", "phases": [{"id": "p", "title": "Build"}], "tasks": []},
+    )
     code = (
         "from pathlib import Path; from scripts.swarm_ledger import ledger_workspace; "
         f"ledger_workspace.folder = lambda slug, task: Path({str(tmp_path)!r}); "
