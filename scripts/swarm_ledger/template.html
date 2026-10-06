@@ -100,9 +100,9 @@ details.phase-fold > summary::before { align-self: center; }
 .out .item-title, .out .text, .out .desc, .out .num { color: var(--muted); opacity: .6; }
 .out input[type=checkbox] { opacity: .35; cursor: not-allowed; }
 .sync { position: fixed; left: 16px; bottom: 16px; z-index: 10; width: 44px; height: 44px; border-radius: 12px; display: grid;
-  place-content: center; color: var(--signal); cursor: pointer; background: var(--surface-2); border: 1px solid transparent;
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); transition: background .15s, border-color .15s, box-shadow .15s, color .15s; }
-.sync:hover, .sync:focus-visible { background: var(--hover); border-color: var(--edge); box-shadow: 0 0 14px -2px currentColor; outline: none; }
+  place-content: center; color: var(--signal); cursor: pointer; background: transparent; border: 0;
+  transition: background .15s, filter .15s, color .15s; }
+.sync:hover, .sync:focus-visible { background: var(--hover); filter: drop-shadow(0 0 6px currentColor); outline: none; }
 .sync:focus-visible { outline: 1px solid var(--signal); outline-offset: 2px; }
 .sync svg { width: 20px; height: 20px; }
 .prio-head[hidden] { display: none; }
@@ -262,10 +262,10 @@ textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent); }
 .sw-state.paused { color: var(--warn); text-shadow: var(--glow); }
 .sw-state.stopping { color: var(--destructive); text-shadow: var(--glow); }
 .sw-state.drained { color: var(--accent); text-shadow: var(--glow); }
-.sw-btn { background: var(--surface-2); border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; color: var(--accent);
+.sw-btn { background: transparent; border: 0; border-radius: 6px; padding: 4px 10px; color: var(--accent);
   font: inherit; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer;
-  transition: background .15s, border-color .15s, text-shadow .15s, box-shadow .15s; }
-.sw-btn:hover:not(:disabled), .sw-btn:active:not(:disabled) { background: var(--hover); border-color: var(--edge); text-shadow: var(--glow); box-shadow: 0 0 12px -4px currentColor; }
+  transition: background .15s, text-shadow .15s; }
+.sw-btn:hover:not(:disabled), .sw-btn:active:not(:disabled) { background: var(--hover); text-shadow: var(--glow); }
 .sw-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .sw-btn:disabled { opacity: .35; cursor: not-allowed; }
 .sw-btn.danger { color: var(--destructive); }
@@ -414,7 +414,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-head .sw-btn { min-height: 32px; padding: 4px 8px; }
 .sw-modes { padding-left: var(--space-row); border-left: 1px solid var(--rule); }
 .sw-btn.sw-mode { color: var(--muted); }
-.sw-btn.sw-mode[aria-pressed="true"] { color: var(--accent-2); text-shadow: var(--glow); }
+.sw-btn.sw-mode[aria-pressed="true"], .sw-btn.sw-mode:hover:not(:disabled) { color: var(--accent-2); text-shadow: var(--glow); }
 .sw-note { margin: 0; padding: 0 var(--space-row) var(--space-tight); font-size: var(--fs-meta); color: var(--muted); }
 .sw-note:empty { display: none; }
 .sw-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-tight) var(--space-row); font-size: var(--fs-meta); }
@@ -432,6 +432,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
 .sw-pair > .sw-block + .sw-block { border-left: 1px solid var(--rule); }
+@media (min-width: 1024px) { #swarm-row-work { grid-template-columns: minmax(0, max-content) minmax(14rem, 1fr); } }
 .sw-blockhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-row); margin-bottom: var(--space-tight); }
 .sw-count { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); text-shadow: var(--glow); }
 .sw-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
@@ -443,9 +444,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-table .r, #agents-table td:nth-child(7), #quota-table td:nth-child(n+3):nth-child(-n+5) { text-align: right; }
 .sw-table a { color: inherit; text-decoration: none; }
 .sw-table a:hover, .sw-table a:focus-visible { color: var(--accent); text-shadow: var(--glow); }
-#agents-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 #agents-table th, #agents-table td { padding-right: 6px; }
-#agents-table td:nth-child(3), #agents-table td:nth-child(4) { white-space: normal; }
 #agents-table td:has(> .sw-acts) { position: sticky; right: 0; width: 0; padding: 0; }
 .sw-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 4px; padding-left: var(--space-tight);
   background: linear-gradient(var(--surface-2), var(--surface-2)), linear-gradient(var(--surface-1), var(--surface-1)), var(--canvas); opacity: 0; pointer-events: none; }
@@ -455,6 +454,7 @@ input, textarea { caret-color: var(--accent-2); }
   #agents-table td:has(> .sw-acts) { position: static; width: auto; padding: 6px 0; }
   .sw-acts { position: static; padding: 0; background: transparent; opacity: 1; pointer-events: auto; }
 }
+.sw-id { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .sw-table .sw-empty td { white-space: normal; font-size: var(--fs-meta); color: var(--dim); }
 #health-table td:nth-child(3) { min-width: 20ch; white-space: normal; color: var(--text-2); }
 #health-table .hl-pick, #health-table .hl-note { border-bottom-color: transparent; font-size: var(--fs-body); }
@@ -1653,6 +1653,10 @@ input, textarea { caret-color: var(--accent-2); }
     return h("span", { class: `lbl ${tone || String(text).replace(/\s+/g, "-")}`, text });
   }
 
+  function idCell(text) {
+    return h("span", { class: "sw-id", title: text, text });
+  }
+
   function cells(...values) {
     return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
   }
@@ -1750,13 +1754,13 @@ input, textarea { caret-color: var(--accent-2); }
     for (const [lane, text] of Object.entries(capText(values))) $("cap-" + lane).textContent = String(text);
     const agents = agentRows(sw, now);
     $("agents-count").textContent = `${agents.length} live`;
-    $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(a.name, a.lane, a.profile, a.model,
+    $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
       a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
     $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
     kv("swarm-tasks", taskFigures(sw, doc));
     const quota = quotaRows(sw);
     $("quota-count").textContent = `${quota.length} ${quota.length === 1 ? "account" : "accounts"}`;
-    $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(q.account, q.harness, q.five, q.seven, q.sessions, q.here ? label("here", "here") : h("span")))
+    $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(idCell(q.account), q.harness, q.five, q.seven, q.sessions, q.here ? label("here", "here") : h("span")))
       : [emptyRow(6, "No quota observed yet. Run agentihooks balance.")]));
     const doctor = sw.doctor || {};
     $("doctor-state").replaceChildren(label(doctorOn(sw) ? "on" : "off", doctorOn(sw) ? "on" : "off"));
@@ -1781,15 +1785,15 @@ input, textarea { caret-color: var(--accent-2); }
     pick.value = earlier.value || "";
     const note = h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "—", "aria-label": `Verdict note on ${f.kind} ${f.subject}` });
     note.value = earlier.note || "";
-    return cells(f.kind, f.subject, (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
+    return cells(f.kind, idCell(f.subject), (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
   }
 
   function renderHandoffs(rows) {
     $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
-    $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(seatText(r.seat), clock(r.at), r.reason,
+    $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
       r.continuity ? label(r.continuity) : "—", r.binding ? label(r.binding) : "—",
       r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
-        "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor))
+        "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"))
       : [emptyRow(6, "No seats yet. Seats appear when agents start.")]));
   }
 
