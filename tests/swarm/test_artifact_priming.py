@@ -11,7 +11,9 @@ def test_agents_are_told_to_publish_artifacts_as_they_are_produced(lane):
 
     assert (
         "Publish plans, screenshots, reports and proof files as they are produced with "
-        'agentihooks ledger --slug demo --as agent artifact <file> "<title in plain words>"'
+        'agentihooks ledger --slug demo --as agent artifact <file> "<title in plain words>": '
+        "markdown, JSON, SVG or an image for operator review; it opens rendered "
+        "from the artifacts icon on the ledger page."
     ) in text
 
 
