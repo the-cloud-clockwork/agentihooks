@@ -275,6 +275,19 @@ def test_only_the_ten_newest_automatic_snapshots_are_kept(store):
     assert snapshot.path("sw").exists()
 
 
+@pytest.mark.parametrize("slug", ["", ".", "..", "sw/..", "/abs"])
+def test_automatic_pruning_refuses_a_name_that_is_not_one_swarm_folder(store, slug):
+    _running(store, slug=slug, snapshot_minutes=1)
+    shared = snapshot.Path.home() / ".agentihooks" / "swarm" / "snapshots"
+    shared.mkdir(parents=True)
+    planted = [shared / f"auto-{n}.json" for n in range(1, 12)]
+    for file in planted:
+        file.write_text(json.dumps({"taken_at": 0}))
+    with pytest.raises(SwarmError):
+        snapshot.auto(store, slug, 20 * MINUTE, {}, run=_no_git)
+    assert all(file.exists() for file in planted)
+
+
 def test_restore_uses_the_newest_snapshot_unless_pointed_at_another(store):
     _running(store, snapshot_minutes=1)
     store.update("sw", max_eng=3)
