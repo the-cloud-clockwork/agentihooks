@@ -42,6 +42,30 @@ def test_accounts_are_the_default_login_and_every_token_variable():
     assert router.accounts(ENV, run=_status(1))[0] == router.CodexAccount("default", signed_in=False)
 
 
+def test_login_status_and_quota_read_the_profile_codex_home(tmp_path):
+    operator = tmp_path / "operator"
+    day = operator / "sessions" / "2026" / "10" / "06"
+    day.mkdir(parents=True)
+    event = '{"timestamp": "2026-10-06T10:00:00Z", "payload": {"rate_limits": {"primary": {"used_percent": 40, '
+    event += '"window_minutes": 300}}}}\n'
+    (day / f"rollout-x-{'a' * 36}.jsonl").write_text(event)
+    profile = tmp_path / "rendered" / "engineer" / "codex"
+    profile.mkdir(parents=True)
+    (profile / "sessions").symlink_to(operator / "sessions")
+    env = {**ENV, "CODEX_HOME": str(profile)}
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    assert router.default_signed_in(env, run=run)
+    assert seen["CODEX_HOME"] == str(profile)
+    assert router.child_environment(router.CodexAccount("default"), env)["CODEX_HOME"] == str(profile)
+    quota = router.codex_quota.latest_codex_quota(env)
+    assert quota.five_hour.used == 40.0
+
+
 def test_the_most_routing_left_below_the_cap_wins():
     quotas = {"default": _quota(80.0), "alpha": _quota(30.0), "beta": _quota(10.0)}
     assert router.select(_accounts(), quotas, {"beta": 3}, cap=3) == (_accounts()[1], "open")

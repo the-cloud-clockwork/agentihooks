@@ -139,6 +139,25 @@ between targets.
 | MCP | `[mcp_servers.*]` tables in `config.toml` |
 | Transcript | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 
+### Profile homes
+
+`agentihooks select-profile NAME --agent codex` renders
+`~/.agentihooks/profiles/NAME/codex/` and sets `CODEX_HOME` to it. The rendered
+Claude profile is the source; the Codex home is links into it and back to the
+operator home:
+
+| Entry | Points at |
+|---|---|
+| `AGENTS.md` | `../claude/CLAUDE.md` (persona and rules) |
+| `skills/<name>` | `../claude/skills/<name>` |
+| `auth.json`, `sessions`, `history.jsonl`, `session_index.jsonl`, `hooks.json` | the operator `~/.codex` |
+| `config.toml` | generated: the profile's native settings, `sqlite_home` = operator home, the operator's hook trust rekeyed to this home's `hooks.json`, the operator's `[mcp_servers]` limited to the profile's servers, and `~/.agents/skills` switched off |
+
+Codex keys hook trust by the hooks file path and a content hash; the hash does
+not depend on the path (codex-cli 0.160.0, live probe), so rekeyed trust holds.
+Commands are not linked as prompts. The old `~/.codex/NAME.config.toml` files
+are removed when their profile renders.
+
 `config.toml` is written through a **tomlkit round-trip** so operator hand-edits
 outside the managed key set survive every re-init — the TOML analogue of
 `_preserve_personal_keys`. Managed values are recorded under
