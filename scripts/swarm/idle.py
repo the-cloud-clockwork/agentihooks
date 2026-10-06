@@ -48,13 +48,13 @@ def last_prompt(redis, slug, name):
     return int(raw) if raw else None
 
 
-def declare_wait(redis, slug, name, until, reason, at):
+def declare_wait(redis, slug, name, until, reason, at, on=None):
     from scripts.swarm.naming import NameRegistry
 
     name = NameRegistry(redis).resolve(name)
     if until <= at:
         raise SwarmError("a wait needs an end time in the future")
-    entry = {"until": until, "reason": reason, "at": at}
+    entry = {"until": until, "reason": reason, "at": at, **({"on": on} if on else {})}
     redis.set(key(slug, "wait", name), json.dumps(entry), px=until - at)
 
 
@@ -64,6 +64,12 @@ def wait(redis, slug, name):
     name = NameRegistry(redis).resolve(name)
     raw = redis.get(key(slug, "wait", name))
     return json.loads(raw) if raw else None
+
+
+def end_wait(redis, slug, name):
+    from scripts.swarm.naming import NameRegistry
+
+    redis.delete(key(slug, "wait", NameRegistry(redis).resolve(name)))
 
 
 def verdict(pane, heartbeat, wait, now_ms):

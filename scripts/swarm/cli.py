@@ -71,6 +71,7 @@ from scripts.swarm import (
     take_master,
     templates,
     timer,
+    waits,
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
@@ -141,6 +142,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += waits.end_pass(store, slug, {t["id"]: t for t in doc["tasks"]}, inbox, ledger_events.view)
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -579,7 +581,7 @@ def cmd_done(store, args):
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    _retire(store, args.slug, agent, "finished its task and exited")
+    retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
 
@@ -588,18 +590,36 @@ def cmd_block(store, args):
     ledger = LedgerClient()
     ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(args.slug, agent.task, args.note, by=agent.name)
-    _retire(store, args.slug, agent, "blocked its task and exited")
+    retire(store, args.slug, agent, "blocked its task and exited")
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 
 def cmd_wait(store, args):
     agent = _me(store, args)
-    if args.minutes <= 0:
+    held = waits.on(*args.on) if args.on else None
+    if held is None and not (args.minutes and args.minutes > 0):
         raise SwarmError("a wait lasts a whole number of minutes above zero")
+    if held is None and args.minutes > waits.BARE_MAX_MINUTES:
+        raise SwarmError(
+            f"a bare wait lasts at most {waits.BARE_MAX_MINUTES} minutes; wait on checks, a reply or a task with --on"
+        )
+    if held is not None:
+        rows = {t["id"]: t for t in LedgerClient().tasks(args.slug)}
+        get = InboxStore(store.redis).get
+        if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
+            raise SwarmError(problem)
     at = now_ms()
-    until = at + args.minutes * 60_000
-    idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at)
-    print(json.dumps({"agent": agent.name, "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat()}))
+    until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
+    idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
+    print(
+        json.dumps(
+            {
+                "agent": agent.name,
+                "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat(),
+                **({"on": held} if held else {}),
+            }
+        )
+    )
 
 
 def cmd_plan(store, args):
@@ -726,7 +746,7 @@ def _seat(agent):
     return agent.seat
 
 
-def _retire(store, slug, agent, exit_text):
+def retire(store, slug, agent, exit_text):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, "", exit_text)
@@ -785,7 +805,8 @@ def build_parser():
         decision.add_argument("phase")
         decision.add_argument("--note", required=action == "send-back")
     wait = sub.add_parser("wait")
-    wait.add_argument("minutes", type=int)
+    wait.add_argument("minutes", type=int, nargs="?")
+    wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
     wait.add_argument("--reason", default="")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
