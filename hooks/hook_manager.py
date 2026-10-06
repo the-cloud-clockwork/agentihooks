@@ -815,7 +815,7 @@ def on_user_prompt_submit(payload: dict) -> None:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
             if typed and contains_condition_signal(prompt):
-                arm_gate(session_id, "typed")
+                arm_gate(session_id)
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log(

@@ -18,7 +18,7 @@ def _ledger(env):
         return {}
     folder = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
     try:
-        return json.loads((folder / f"{slug}.json").read_text(encoding="utf-8"))
+        return json.loads((folder / f"{slug}.json").read_bytes())
     except (OSError, ValueError):
         return {}
 

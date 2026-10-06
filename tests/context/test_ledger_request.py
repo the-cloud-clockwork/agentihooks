@@ -54,6 +54,11 @@ def test_agent_comments_and_other_tasks_never_open_it(ledger):
     assert find(ledger([comment("c-1", REQUEST, by=MASTER)], other=[comment("c-0", REQUEST)])) is None
 
 
+def test_later_agent_and_deleted_comments_leave_an_earlier_request_standing(ledger):
+    later = [comment("c-2", "on it", by=MASTER), {**comment("c-3", "x"), "deleted": True}]
+    assert find(ledger([comment("c-1", REQUEST, age=120), *later])) == ("ledger", "c-1")
+
+
 def test_a_deleted_operator_comment_never_opens_it(ledger):
     assert find(ledger([{**comment("c-1", REQUEST), "deleted": True}])) is None
 
