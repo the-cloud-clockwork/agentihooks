@@ -70,6 +70,42 @@ def test_a_dead_master_record_is_dropped_without_replace(taker):
     assert [m[0] for m in _masters(store)] == ["master@a1b2c3-0002"]
 
 
+def test_take_master_traces_the_priming_it_printed_into_this_session(taker, monkeypatch):
+    from hooks.context import injection_trace
+
+    store, _, _, _ = taker
+    store.culture.set("sw", "- merge fast")
+    store.memory.learn("master@sw", "m0", "keep the ledger current", 1)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-master")
+    assert run("sw", "take-master") == 0
+    rows = [(r["layer"], r["source"], r["text"]) for r in injection_trace.trace("sess-master")]
+    assert rows == [
+        ("culture", "culture:sw#1", "- merge fast"),
+        ("learned", "learned:master@sw#1", "keep the ledger current"),
+    ]
+
+
+def test_take_master_prints_the_swarm_repo_peer_and_autonomy(taker, capsys):
+    store, _, _, _ = taker
+    store.set_peer("sw", "other-swarm")
+    run("sw", "set", "autonomy=full")
+    capsys.readouterr()
+    assert run("sw", "take-master") == 0
+    out = capsys.readouterr().out
+    assert "working over the repo /repo" in out
+    assert "master@other-swarm" in out
+    assert "This swarm runs at full autonomy" in out
+
+
+def test_take_master_outside_a_claude_session_traces_nothing(taker, monkeypatch):
+    from hooks import config
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    taker[0].culture.set("sw", "- merge fast")
+    assert run("sw", "take-master") == 0
+    assert not (config.AGENTIHOOKS_HOME / "injections").exists()
+
+
 def test_take_master_reopens_a_closed_ledger_and_runs_a_stopped_swarm(taker):
     store, ledger, _, _ = taker
     store.update("sw", state="stopped")

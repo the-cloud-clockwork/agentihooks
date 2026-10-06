@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 from scripts.claude_config import claude_home, claude_json
+from scripts.profiles import sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import enabled_plugins, settings_document
 from scripts.targets.codex_target import codex_home
@@ -182,6 +183,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         not force
         and _read_json(out / STAMP) == current
         and not any(rule.is_symlink() for rule in (out / "rules").iterdir())
+        and sources.path(name, "claude", rendered_root()).is_file()
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)
@@ -190,6 +192,7 @@ def render_claude(name: str, force: bool = False) -> Path | None:
         items = _features(subdir, keep, bundle, dirs)
         if subdir == "rules":
             _render_rules(out / subdir, items)
+            sources.write(sources.path(name, "claude", rendered_root()), sources.rows(bundle, dirs, items))
         else:
             _relink(out / subdir, items)
     _atomic_write(out / "CLAUDE.md", build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER))
@@ -219,11 +222,14 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     bundle, dirs = _i._get_bundle_path(), _chain(name)
     current = _stamp(bundle, dirs)
     path = codex_home() / f"{name}.config.toml"
-    if not force and _codex_stamp(path) == current:
+    manifest = sources.path(name, "codex", rendered_root())
+    if not force and _codex_stamp(path) == current and manifest.is_file():
         return None
     settings = _settings("codex", bundle, dirs)
     doc: dict = {key: settings[key] for key in CODEX_KEYS if key in settings}
-    rules = [("rule", n, p.read_text()) for n, p in _features("rules", _is_doc, bundle, dirs).items()]
+    items = _features("rules", _is_doc, bundle, dirs)
+    sources.write(manifest, sources.rows(bundle, dirs, items))
+    rules = [("rule", n, p.read_text()) for n, p in items.items()]
     doc["developer_instructions"] = build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
     global_config = codex_home() / "config.toml"
     installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}

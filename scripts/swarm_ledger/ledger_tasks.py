@@ -31,6 +31,8 @@ OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
+WORKER_LANES = ("eng", "ci")
+PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 
 
 def check_lane(task: dict) -> None:
@@ -118,6 +120,9 @@ def _add(doc, op, ctx):
         return True
     if not _known(tasks, op.get("depends_on", [])):
         return False
+    if refusal := add_refusal(tasks, op):
+        ctx.refused.append(refusal)
+        return False
     task = {
         "id": op["task"],
         "title": op["title"].strip(),
@@ -140,6 +145,22 @@ def _add(doc, op, ctx):
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
+
+
+def add_refusal(tasks, op):
+    from scripts.swarm.naming import lane_of
+
+    by, lane = op["by"], lane_of(op["by"])
+    if lane in WORKER_LANES:
+        return f"{by} works in the {lane} lane and cannot add tasks: {PROPOSE}"
+    if lane != "plan":
+        return ""
+    plans = [t for t in tasks if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")]
+    if not plans:
+        return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
+    if plans[0].get("phase") != op.get("phase"):
+        return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
+    return ""
 
 
 def _known(tasks, ids):
