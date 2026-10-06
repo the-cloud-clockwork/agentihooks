@@ -187,6 +187,29 @@ class TestIndexCache:
         _state(bundle, profile="beta")
         assert [e["file"] for e in conditions.matching("pre", "Bash", {})] == ["pre-bash-one.sh", "pre-bash-beta.sh"]
 
+    @pytest.mark.parametrize("master_profile", ["master", "master,brain"])
+    def test_session_profile_change_keeps_guards_isolated(self, layers, monkeypatch, master_profile):
+        bundle, global_dir, _ = layers
+        role_dirs = [bundle / "profiles" / role / ".claude" / "conditions" for role in ("engineer", "master")]
+        for role, directory in zip(("engineer", "master"), role_dirs, strict=True):
+            directory.mkdir(parents=True)
+            _write(directory, f"pre-edit-{role}.sh", "echo")
+        _age(profile_chain.state_path(), global_dir, *role_dirs)
+        monkeypatch.setattr(conditions, "_cache_path", REAL_CACHE_PATH)
+        monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+        assert [e["file"] for e in conditions.matching("pre", "Edit", {})] == ["pre-edit-engineer.sh"]
+        engineer_cache = REAL_CACHE_PATH()
+        assert engineer_cache.exists()
+
+        monkeypatch.setenv("AGENTIHOOKS_PROFILE", master_profile)
+        assert [e["file"] for e in conditions.matching("pre", "Edit", {})] == ["pre-edit-master.sh"]
+        assert REAL_CACHE_PATH() != engineer_cache
+        assert REAL_CACHE_PATH().exists()
+
+        monkeypatch.setattr(conditions, "scan_layers", lambda *a: (_ for _ in ()).throw(AssertionError("scanned")))
+        monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+        assert [e["file"] for e in conditions.matching("pre", "Edit", {})] == ["pre-edit-engineer.sh"]
+
     def test_profile_dir_appearing_invalidates(self, layers):
         bundle, _, _ = layers
         _state(bundle, profile="alpha,gamma")
