@@ -26,7 +26,7 @@ def refusal(agent, autonomy, phase, doc):
     return ""
 
 
-def decide(ledger, slug, agent, autonomy, phase_id, action, note=""):
+def decide(ledger, slug, agent, autonomy, phase_id, action, note):
     doc = ledger.state(slug)
     phase = next((p for p in doc["phases"] if p["id"] == phase_id), None)
     if phase is None:

@@ -733,7 +733,7 @@ def build_parser():
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
         decision.add_argument("phase")
-        decision.add_argument("--note", required=action == "send-back", default="")
+        decision.add_argument("--note", required=action == "send-back")
     wait = sub.add_parser("wait")
     wait.add_argument("minutes", type=int)
     wait.add_argument("--reason", default="")

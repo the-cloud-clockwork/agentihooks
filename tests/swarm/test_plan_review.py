@@ -40,9 +40,8 @@ def test_the_operator_decides_at_manual_and_assist(review, capsys, level):
     store, _ = review
     autonomy(store, level)
     code, err = plan(capsys, store, "approve", "p1")
-    assert code == 1
-    assert f"at {level} autonomy the operator decides this plan: {BUTTONS}" in err
-    assert ("post your recommendation as a comment on the phase" in err) == (level == "assist")
+    advice = "; post your recommendation as a comment on the phase" if level == "assist" else ""
+    assert (code, err) == (1, f"swarm: at {level} autonomy the operator decides this plan: {BUTTONS}{advice}")
     assert phase("p1")["review"]["state"] == "pending"
 
 
@@ -50,13 +49,28 @@ def test_the_operator_decides_at_manual_and_assist(review, capsys, level):
 def test_the_master_approves_at_delegate_and_full_and_the_tick_claims_at_once(review, capsys, level):
     store, ledger = review
     autonomy(store, level)
-    code, out = plan(capsys, store, "approve", "p1", "--note", "Looks right")
+    code, out = plan(capsys, store, "approve", "p1")
     assert (code, out) == (0, {"phase": "p1", "state": "approved", "rounds": 0})
+    assert (phase("p1")["review"]["by"], phase("p1")["review"]["note"]) == (MASTER, "")
     assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "building"
     store.update(SLUG, max_eng=1)
     run(store, ledger)
     [t1] = [t for t in state(SLUG)["tasks"] if t["id"] == "t1"]
     assert t1["state"] == "claimed"
+
+
+def test_a_plan_command_needs_its_action(review, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        swarm_cli.main([SLUG, "--as", MASTER, "plan"])
+    assert stopped.value.code == 2
+    assert "approve" in capsys.readouterr().err
+
+
+def test_a_phase_not_yet_planned_is_named_in_plain_words(review, capsys):
+    store, _ = review
+    set_phase("p2", planning="auto")
+    code, err = plan(capsys, store, "approve", "p2")
+    assert (code, err) == (1, "swarm: phase p2 is not in review; it is to plan")
 
 
 def test_only_the_master_reviews_at_delegate(review, capsys):
@@ -114,3 +128,15 @@ def test_master_prompt_names_the_review_rule(level, words):
     text = prompt.build_master("sw", "/repo", "m", {}, autonomy=level)
     assert words in text
     assert plan_review.review_line("agentihooks swarm sw --as m", level) in text
+
+
+def test_review_lines_for_the_operator_levels():
+    me = "agentihooks swarm sw --as m"
+    assert plan_review.review_line(me, "manual") == (
+        "- Review a phase plan in review only with a comment on the phase: at manual autonomy the operator "
+        "approves or sends it back from the ledger page."
+    )
+    assert plan_review.review_line(me, "assist") == (
+        "- When a phase plan is in review, post your recommendation as a comment on the phase: at assist autonomy "
+        "the operator approves or sends it back from the ledger page."
+    )

@@ -25,7 +25,7 @@ def planned():
     make_ledger()
     done = {"state": "done", "claimed_by": "planner", "proof": {"slice": "t1"}}
     update = {"op": "task_update", "id": "plan-done", "by": "planner", "item": "tasks/plan-p1", "fields": done}
-    state, rejected = sync(task_add("plan-p1", "plan", "plan"), task_add("t1"), update)
+    state, rejected = sync(task_add("t1"), task_add("plan-p1", "plan", "plan"), update)
     assert rejected == []
     return state
 
@@ -47,17 +47,30 @@ def test_send_back_reopens_the_plan_task_and_counts_the_round():
     assert record["notes"] == ["Split the parser task"] and record["escalated"] is False
     plan = plan_task(state)
     assert (plan["state"], plan["claimed_by"], plan["done"]) == ("open", "", False)
-    assert any(e["kind"] == "task open" and e["target"] == "tasks/plan-p1" for e in state["_meta"]["events"])
+    assert next(t for t in state["tasks"] if t["id"] == "t1")["state"] == "open"
+    [event] = [e for e in state["_meta"]["events"] if e["kind"] == "task open"]
+    assert (event["by"], event["target"]) == ("master", "tasks/plan-p1")
+    assert state["_meta"]["stamps"]["tasks/plan-p1/state"]["by"] == "master"
 
 
-def test_a_new_pending_review_keeps_rounds_and_notes():
+def test_send_back_of_an_open_plan_task_records_no_reopen():
     planned()
     sync(review("sent_back", note="First note"))
-    state, rejected = sync(review("pending", by="swarm"))
+    state, rejected = sync(review("sent_back", n=1, note="Second note"))
+    assert rejected == [] and state["phases"][0]["review"]["rounds"] == 2
+    assert len([e for e in state["_meta"]["events"] if e["kind"] == "task open"]) == 1
+
+
+def test_a_new_pending_review_keeps_rounds_notes_and_the_phase_ask():
+    planned()
+    ask = {"op": "priority", "id": "ask-p1", "by": "swarm", "item": "phases/p1", "text": "Approve the slice."}
+    sync(review("sent_back", note="First note"))
+    state, rejected = sync(ask, review("pending", by="swarm"))
     assert rejected == []
     record = state["phases"][0]["review"]
     assert (record["state"], record["rounds"], record["notes"]) == ("pending", 1, ["First note"])
     assert "escalated" not in record
+    assert [p["text"] for p in state["priorities"] if p["item"] == "phases/p1"] == ["Approve the slice."]
 
 
 def test_third_send_back_escalates_without_reopening_and_asks_the_operator():
@@ -82,17 +95,18 @@ def test_third_send_back_escalates_without_reopening_and_asks_the_operator():
     assert not [p for p in state["priorities"] if p["item"] == "phases/p1"]
 
 
-def test_approve_keeps_the_rounds_and_clears_the_phase_ask():
+def test_approve_keeps_the_rounds_and_clears_only_the_phase_ask():
     planned()
     ask = {"op": "priority", "id": "ask-p1", "by": "swarm", "item": "phases/p1", "text": "Approve the slice."}
-    sync(ask, review("sent_back", note="Fix it"))
+    other = {"op": "priority", "id": "ask-t1", "by": "swarm", "item": "tasks/t1", "text": "Look at this task."}
+    sync(ask, other, review("sent_back", note="Fix it"))
     sync(ask)
     state, rejected = sync(review("approved", by="operator", note="Looks right"))
     assert rejected == []
     record = state["phases"][0]["review"]
     assert (record["state"], record["rounds"], record["notes"]) == ("approved", 1, ["Fix it"])
     assert plan_task(state)["state"] == "open"
-    assert not [p for p in state["priorities"] if p["item"] == "phases/p1"]
+    assert [p["item"] for p in state["priorities"]] == ["tasks/t1"]
 
 
 def test_send_back_without_a_plan_task_writes_only_the_record():
@@ -112,8 +126,9 @@ def test_send_back_without_a_plan_task_writes_only_the_record():
     ],
 )
 def test_send_back_validation(fields, message):
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError) as refused:
         ledger_phases.check(review("sent_back", **fields))
+    assert str(refused.value) == message
 
 
 def test_round_cap_is_three():
