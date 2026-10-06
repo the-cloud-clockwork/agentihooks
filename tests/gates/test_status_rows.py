@@ -75,3 +75,11 @@ def test_status_text_shows_the_deny_among_thirty_count_rows(monkeypatch, capsys)
     cli.cmd_status(saved(), SimpleNamespace(slug="sw", json=False))
     lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate ")]
     assert lines == ["gate  deny  talk  engineer@1-1  t1  over budget"]
+
+
+def test_decisions_keeps_the_last_twenty_decision_rows_of_the_given_home(tmp_path):
+    for at in range(21):
+        log.append("sw", log.Row.of("talk", "deny", WHO, "Bash", "over budget", now_ms=at), tmp_path)
+        log.append("sw", log.Row.of("reruns", "count", WHO, "Bash", "ci rerun", now_ms=at), tmp_path)
+    assert [r["at"] for r in log.decisions("sw", home=tmp_path)] == list(range(1, 21))
+    assert log.decisions("sw") == []
