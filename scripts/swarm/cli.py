@@ -545,7 +545,7 @@ def cmd_done(store, args):
     if missing:
         flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
         raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
-    refused = done_gate.refusal(row, args.pr or row.get("pr_url", ""), ledger_events.view)
+    refused = done_gate.refusal(row, args.pr or row.get("pr_url"), ledger_events.view)
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}

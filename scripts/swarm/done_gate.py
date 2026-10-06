@@ -34,7 +34,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
     actions = []
     for task_id in _done_by_workers(doc.get("_meta", {}).get("events", []), now_ms):
         task = tasks.get(task_id, {})
-        url = task.get("pr_url", "")
+        url = task.get("pr_url")
         if task.get("state") != "done" or ledger_kinds.kind(task) not in GATED or not url:
             continue
         seen = store.key(slug, "done-merged", url)
@@ -60,10 +60,10 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
 def _done_by_workers(events, now_ms):
     latest = {}
     for event in events:
-        if event.get("kind") == "task done" and event.get("target", "").startswith("tasks/"):
+        if event["kind"] == "task done" and event["target"].startswith("tasks/"):
             latest[event["target"].removeprefix("tasks/")] = event
     return [
         task_id
         for task_id, event in latest.items()
-        if now_ms - event["at"] <= RECHECK_MS and lane_of(event.get("by", "")) in WORKERS
+        if now_ms - event["at"] <= RECHECK_MS and lane_of(event["by"]) in WORKERS
     ]

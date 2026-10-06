@@ -29,8 +29,9 @@ def github(state):
 
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_a_code_or_ci_task_closes_only_on_a_merged_pull_request(kind):
-    task = {"id": "t1", "kind": kind}
-    assert done_gate.refusal(task, URL, github("MERGED")) == ""
+    task, read = {"id": "t1", "kind": kind}, github("MERGED")
+    assert done_gate.refusal(task, URL, read) == ""
+    assert read.seen == [URL]
     assert done_gate.refusal(task, URL, github("OPEN")) == (
         f"pull request {URL} is open, not merged; merge it, then run swarm done again"
     )
@@ -63,9 +64,11 @@ class Ledger:
         self.updates, self.comments = [], []
 
     def update_task(self, slug, task_id, fields, by="swarm"):
+        assert (slug, by) == ("sw", "swarm")
         self.updates.append((task_id, fields))
 
     def comment(self, slug, task_id, text, by):
+        assert slug == "sw"
         self.comments.append((task_id, text, by))
 
 
@@ -86,9 +89,9 @@ def store():
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
-def recheck(store, document, state):
+def recheck(store, document, state, slug="sw"):
     ledger, read = Ledger(), github(state)
-    actions = done_gate.recheck_pass(store, "sw", document, ledger, NOW, read)
+    actions = done_gate.recheck_pass(store, slug, document, ledger, NOW, read)
     return actions, ledger, read
 
 
@@ -113,8 +116,44 @@ def test_a_merged_pull_request_is_read_once(store):
     document = doc([task(), task("t2", kind="ci")], [done("t1", "engineer@a1b2c3-0001"), done("t2", "ci@a1b2c3-0001")])
     actions, ledger, read = recheck(store, document, "MERGED")
     assert (actions, ledger.updates, read.seen) == ([], [], [URL])
+    seen = store.key("sw", "done-merged", URL)
+    assert (store.redis.get(seen), store.redis.ttl(seen)) == ("1", done_gate.SEEN_TTL_S)
     actions, ledger, read = recheck(store, document, "OPEN")
     assert (actions, ledger.updates, read.seen) == ([], [], [])
+
+
+def test_the_merged_mark_belongs_to_one_swarm_and_one_pull_request(store):
+    other = "https://github.com/o/r/pull/10"
+    store.redis.set(store.key("other", "done-merged", URL), 1)
+    store.redis.set(store.key("sw", "done-merged", other), 1)
+    actions, _, read = recheck(store, doc([task()], [done("t1", "engineer@a1b2c3-0001")]), "OPEN")
+    assert (actions, read.seen) == (["task t1 reopened, its pull request is open"], [URL])
+
+
+@pytest.mark.parametrize("skipped", ["merged", "unread", "manual"])
+def test_one_skipped_task_never_stops_the_pass(store, skipped):
+    first = task("t1", pr_url="https://github.com/o/r/pull/1")
+    if skipped == "manual":
+        first["state"] = "open"
+    if skipped == "merged":
+        store.redis.set(store.key("sw", "done-merged", first["pr_url"]), 1)
+    events = [done("t1", "engineer@a1b2c3-0001"), done("t2", "engineer@a1b2c3-0002")]
+    ledger, read = Ledger(), (lambda url: None if skipped == "unread" and url == first["pr_url"] else pull("OPEN"))
+    actions = done_gate.recheck_pass(store, "sw", doc([first, task("t2")], events), ledger, NOW, read)
+    assert actions == ["task t2 reopened, its pull request is open"]
+
+
+def test_a_merged_task_never_stops_the_pass(store):
+    first = task("t1", pr_url="https://github.com/o/r/pull/1")
+    events = [done("t1", "engineer@a1b2c3-0001"), done("t2", "engineer@a1b2c3-0002")]
+    ledger, read = Ledger(), (lambda url: pull("MERGED" if url == first["pr_url"] else "CLOSED"))
+    actions = done_gate.recheck_pass(store, "sw", doc([first, task("t2")], events), ledger, NOW, read)
+    assert actions == ["task t2 reopened, its pull request is closed"]
+
+
+def test_a_ledger_without_tasks_reads_nothing(store):
+    actions, _, read = recheck(store, {"_meta": {"events": [done("t1", "engineer@a1b2c3-0001")]}}, "OPEN")
+    assert (actions, read.seen) == ([], [])
 
 
 def test_an_unread_pull_request_leaves_the_task_done_and_is_read_again(store):
