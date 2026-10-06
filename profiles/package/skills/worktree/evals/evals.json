@@ -1,0 +1,36 @@
+[
+  {
+    "query": "start working on the auth-broker timeout bug in agentihooks-bundle",
+    "files": [],
+    "expected_behavior": [
+      "resolves WT via the SKILL.md's own symlink before calling it",
+      "runs \"$WT\" new with a short kebab-case task name as the first act, before any edit",
+      "treats the cycle as done only once $DEST exists and git -C \"$DEST\" rev-parse --abbrev-ref HEAD prints that name"
+    ]
+  },
+  {
+    "query": "wt new refused: below 50 GB free",
+    "files": [],
+    "expected_behavior": [
+      "answers by finishing existing worktrees with done and running agentihooks gc",
+      "does not raise WT_MIN_FREE_GB or WT_MAX_PER_REPO to get past the refusal"
+    ]
+  },
+  {
+    "query": "I just need to check something against a clean base tree, nothing to keep",
+    "files": [],
+    "expected_behavior": [
+      "creates a tmp worktree with \"$WT\" tmp rather than a plain git worktree add",
+      "removes it with \"$WT\" done once the check is finished, even if the checkout is dirty"
+    ]
+  },
+  {
+    "query": "the PR for this worktree's branch just merged into dev, clean up",
+    "files": [],
+    "expected_behavior": [
+      "runs \"$WT\" done <name> in the same turn as the merge",
+      "reports the blocker by name instead of forcing when the primary checkout is not on a clean dev",
+      "does not run git stash, git reset, git checkout <file>, git restore or git clean to clear the way"
+    ]
+  }
+]

@@ -205,6 +205,20 @@ def test_the_pre_tool_hook_blocks_the_question_tool_with_the_refusal(monkeypatch
     assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
 
 
+def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mode(monkeypatch):
+    from hooks.targets.normalizer import normalize_payload
+
+    for key, value in {**SWARM, "AGENTIHOOKS_TARGET": "codex"}.items():
+        monkeypatch.setenv(key, value)
+    question = {"header": "Plan color", "id": "plan_color", "question": "Red or blue?", "options": []}
+    payload = normalize_payload(
+        {"session_id": "s9", "tool_name": "request_user_input", "tool_input": {"questions": [question]}}
+    )
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+
+
 def test_a_failing_question_check_is_logged_and_lets_the_call_through(monkeypatch):
     logged = []
     monkeypatch.setattr(operator_mode, "question_block", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
