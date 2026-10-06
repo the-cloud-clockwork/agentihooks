@@ -109,7 +109,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = ledger.state(slug)
-        actions += phases.phase_pass(inbox, store, slug, doc, ledger)
+        ticked = phases.phase_pass(inbox, store, slug, doc, ledger)
+        if ticked:
+            ticked += phase_planning.planning_pass(inbox, store, slug, ledger.state(slug), ledger, store.config(slug))
+        actions += ticked
         actions += tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
