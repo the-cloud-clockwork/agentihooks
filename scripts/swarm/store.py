@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm.naming import NameRegistry
+from scripts.swarm.naming import NameRegistry, swarm_name
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -39,6 +39,7 @@ class SwarmConfig:
     code: str = ""
     max_plan: int = 1
     gates: dict = field(default_factory=dict)
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,8 @@ class RedisStore:
     def create(self, config):
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
-        config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
+        code = self.names.mint_code(config.slug, config.slug, config.repo)
+        config = replace(config, code=code, name=swarm_name(code))
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
@@ -108,7 +110,11 @@ class RedisStore:
             raw.get("code", ""),
             int(raw.get("max_plan", 1)),
             json.loads(raw.get("gates") or "{}"),
+            raw.get("name", ""),
         )
+
+    def resolve(self, ref):
+        return self.names.swarm_slug(ref)
 
     def update(self, slug, **changes):
         if changes.get("state", STATES[0]) not in STATES:
@@ -117,7 +123,10 @@ class RedisStore:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
         if not 0 <= changes.get("codex_share", 0) <= 100:
             raise SwarmError("codex share is a percent from 0 to 100")
-        config = replace(self.config(slug), **changes)
+        current = self.config(slug)
+        if current.name and changes.get("name", current.name) != current.name:
+            raise SwarmError(f"swarm {current.name} keeps its name: a swarm name never changes after creation")
+        config = replace(current, **changes)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 
@@ -179,8 +188,9 @@ class RedisStore:
         config = self.config(slug)
         if config.code:
             self.names.adopt(slug, config.code, slug, config.repo)
-            return config
-        return self.update(slug, code=self.names.mint_code(slug, slug, config.repo))
+        else:
+            config = self.update(slug, code=self.names.mint_code(slug, slug, config.repo))
+        return config if config.name else self.update(slug, name=swarm_name(config.code))
 
     def next_name(self, slug, lane, at=0):
         self.ensure_code(slug)

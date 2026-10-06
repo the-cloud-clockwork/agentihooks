@@ -1,5 +1,6 @@
 """ledger and swarm refuse an --as name other than the swarm session's own agent name."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -52,7 +53,7 @@ class TestLedger:
 
 def run_swarm(monkeypatch, argv):
     seen = []
-    monkeypatch.setattr(swarm_cli, "connect", lambda: "store")
+    monkeypatch.setattr(swarm_cli, "connect", lambda: SimpleNamespace(resolve=lambda slug: slug))
     monkeypatch.setattr(swarm_cli, "cmd_status", lambda store, args: seen.append(args.name))
     return swarm_cli.main(argv), seen
 

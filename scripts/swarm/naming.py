@@ -18,6 +18,7 @@ LANES = {kind: lane for lane, kind in TYPES.items()}
 NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
+SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
 _BASE = r"(?:(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
@@ -64,6 +65,16 @@ def build(kind, code, number):
 def parse(name):
     found = NAME_RE.fullmatch(name or "")
     return AgentName(found.group(1), found.group(2), int(found.group(3))) if found else None
+
+
+def swarm_name(code):
+    """The swarm's own name, `swarm@<code>`, the convention its agents' names already follow."""
+    return f"swarm@{code}"
+
+
+def swarm_code(name):
+    found = SWARM_RE.fullmatch(name or "")
+    return found.group(1) if found else ""
 
 
 def legacy_slug(name):
@@ -174,6 +185,10 @@ def _mint():
     return secrets.token_hex(3)
 
 
+def _record(slug, code, ledger, repo):
+    return json.dumps({"swarm": slug, "name": swarm_name(code), "ledger": ledger, "repo": repo})
+
+
 def resolve_name(name):
     from hooks._redis import get_redis
 
@@ -247,10 +262,9 @@ class NameRegistry:
         held = self.code_of(slug)
         if held:
             return held
-        record = json.dumps({"swarm": slug, "ledger": ledger, "repo": repo})
         for _ in range(MINT_ATTEMPTS):
             code = self.mint()
-            if not self.redis.hsetnx(self.key("codes"), code, record):
+            if not self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo)):
                 continue
             if self.redis.hsetnx(self.key("code-of"), slug, code):
                 return code
@@ -260,8 +274,14 @@ class NameRegistry:
 
     def adopt(self, slug, code, ledger, repo):
         """Register a code the swarm record already carries, as after a restore into an emptied Redis."""
-        self.redis.hsetnx(self.key("codes"), code, json.dumps({"swarm": slug, "ledger": ledger, "repo": repo}))
+        self.redis.hsetnx(self.key("codes"), code, _record(slug, code, ledger, repo))
         self.redis.hsetnx(self.key("code-of"), slug, code)
+
+    def swarm_slug(self, ref):
+        """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
+        code = swarm_code(ref)
+        slug = self.swarm(code).get("swarm", "") if code else ""
+        return slug if slug and self.code_of(slug) == code else ref
 
     def release(self, slug):
         """Forget which code a removed swarm held; the code itself stays taken, so its names stay unique."""
