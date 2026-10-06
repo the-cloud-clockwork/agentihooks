@@ -163,6 +163,7 @@ class HerdrRuntime:
             config.repo,
         ]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
+        argv += ["--inbox-channel"] if agent == "claude" else []
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
     def _launch(self, config, lane, task_id, name, argv):

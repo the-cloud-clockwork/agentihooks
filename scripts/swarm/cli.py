@@ -20,6 +20,7 @@ agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or opera
 agentihooks swarm <id> lift AGENT GATE                            operator lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
+agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
@@ -100,6 +101,7 @@ GATE_MODES = modes.MODES
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
+ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 CLOSE_ASK = (
     "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
     'stands, then run: agentihooks swarm {slug} close --note "<your paragraph>". Close retires you too.'
@@ -178,6 +180,12 @@ def cmd_tick(store, args):
                 print(f"{slug}: {action}")
         except Exception as exc:
             print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def cmd_waker(store, args):
+    from scripts.inbox import waker
+
+    waker.run(store, delivery.HerdrMessenger(), now_ms)
 
 
 def cmd_create(store, args):
@@ -754,6 +762,8 @@ def _list_learned(store, slug):
         if kind != "learned":
             continue
         for number, note in enumerate(store.memory.learned(seat), 1):
+            if "retired" in note:
+                continue
             print(f"{seat}\t{number}\t{note['maturity']}\t{note['text']}")
 
 
@@ -763,14 +773,33 @@ def cmd_promote(store, args):
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if args.maturity == CANON and agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_CANON)
-    seat = args.seat if is_seat(args.seat) else seat_address(args.slug, args.seat)
-    if not seat.endswith(f"@{args.slug}"):
-        raise SwarmError(f"{args.seat} is not a seat of swarm {args.slug}")
+    seat = _swarm_seat(args.slug, args.seat)
     try:
         entry = store.memory.promote(seat, args.number, args.maturity, name or "operator", args.reason, now_ms())
     except SeatError as exc:
         raise SwarmError(str(exc)) from exc
     print(json.dumps({"seat": seat, "number": args.number, "maturity": entry["maturity"]}))
+
+
+def cmd_retire(store, args):
+    store.config(args.slug)
+    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    if agent is not None and agent.lane != MASTER:
+        raise SwarmError(ONLY_MASTER_RETIRE)
+    seat = _swarm_seat(args.slug, args.seat)
+    try:
+        store.memory.retire(seat, args.number, name, args.reason, now_ms())
+    except SeatError as exc:
+        raise SwarmError(str(exc)) from exc
+    print(json.dumps({"seat": seat, "number": args.number, "retired": True}))
+
+
+def _swarm_seat(slug, seat):
+    address = seat if is_seat(seat) else seat_address(slug, seat)
+    if not address.endswith(f"@{slug}"):
+        raise SwarmError(f"{seat} is not a seat of swarm {slug}")
+    return address
 
 
 def cmd_culture(store, args):
@@ -888,6 +917,10 @@ def build_parser():
     promote.add_argument("number", type=int)
     promote.add_argument("maturity", choices=MATURITIES)
     promote.add_argument("--reason", required=True)
+    retire = sub.add_parser("retire")
+    retire.add_argument("seat")
+    retire.add_argument("number", type=int)
+    retire.add_argument("--reason", required=True)
     culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
     culture.add_parser("set").add_argument("file")
     culture.add_parser("show")
@@ -899,7 +932,7 @@ def build_parser():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, "autonomy"):

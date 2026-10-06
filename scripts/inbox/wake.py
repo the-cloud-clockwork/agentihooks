@@ -91,6 +91,26 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     return actions
 
 
+def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
+    """The wake step alone, for Codex panes the moment an item lands; Claude sessions take items through the inbox
+    channel, and escalation stays with the tick's wake pass."""
+    actions = []
+    for agent in agents:
+        if agent.harness != "codex" or not agent.pane_id:
+            continue
+        mail = inbox.pending_mail(agent.name)
+        if not mail:
+            continue
+        state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
+        due = [item for item in mail if decide(item, state, inbox.history(item.id), now_ms, window) == WOKEN]
+        if not due or not _wake(herdr, agent, set()):
+            continue
+        for item in due:
+            inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
+            actions.append(f"woke {agent.name} for message {item.id}")
+    return actions
+
+
 def _decided(ref, doc):
     collection, _, item_id = ref.partition(":event:")[2].partition("/")
     row = next((r for r in doc.get(collection, []) if r.get("id") == item_id), {})

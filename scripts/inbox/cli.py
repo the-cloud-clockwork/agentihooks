@@ -23,6 +23,10 @@ from scripts.swarm_ledger import ledger_comments
 
 OPERATOR = "operator"
 
+SWARM = "swarm"
+
+NO_REPLY = "swarm notices take no reply"
+
 FYI = "--fyi"
 
 
@@ -81,6 +85,9 @@ def cmd_read(store, me, args):
 def cmd_reply(store, me, args):
     from scripts.inbox.addresses import check_address
 
+    if store.get(args.id).sender == SWARM:
+        cmd_close(store, me, argparse.Namespace(id=args.id, kind="done", detail=[NO_REPLY]))
+        return
     check_address(store, me, store.get(args.id).sender)
     fyi, words = informational(args.text)
     check_for_operator(store.get(args.id).sender, " ".join(words))

@@ -54,3 +54,15 @@ def first_showing(marks, name, slug, events):
         return [event for event in events if marks.mark(name, write_ref(slug, event))]
     except Exception:
         return list(events)
+
+
+def claim(store, me):
+    """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    marks = SeenMarks(store.redis)
+    shown = []
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
+        if item.ref and not marks.mark(me, item.ref):
+            store.close(item.id, me, "done", SEEN_ON_LEDGER)
+        else:
+            shown.append(item)
+    return shown

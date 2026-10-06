@@ -1,0 +1,6 @@
+[
+  {"query": "What does the watch gate mean?", "files": [], "expected_behavior": ["Run the published docs lookup", "Read only the matching section", "Answer in plain words with the page name and link, or name the documentation gap"]},
+  {"query": "What is the Priorities section on my ledger?", "files": [], "expected_behavior": ["Route through the docs index and headings", "Use the published section rather than local code or recalled rules", "Name the page supporting the answer"]},
+  {"query": "How does the swarm autonomy setting work?", "files": [], "expected_behavior": ["Look up the autonomy section", "Explain only what the section documents", "Propose a follow up if the published site lacks the answer"]},
+  {"query": "What does the hyperdrive swarm setting mean?", "files": [], "expected_behavior": ["State the published docs do not answer this question", "Propose a docs follow up", "Never invent an explanation"]}
+]
