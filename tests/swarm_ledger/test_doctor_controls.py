@@ -55,13 +55,14 @@ class DoctorControls(unittest.TestCase):
         for action, verb in (("doctor_start", "start"), ("doctor_stop", "stop")):
             with (
                 patch.object(server.shutil, "which", return_value="agentihooks"),
-                patch.object(server.subprocess, "run", return_value=completed(0, json.dumps(STATUS))) as run,
+                patch.object(server.subprocess, "run", return_value=completed(0)) as run,
+                patch.object(server, "swarm_status", return_value=STATUS) as status,
             ):
                 code, text = self.put(f"/api/swarm/{SLUG}", {"action": action})
             self.assertEqual(code, 200)
             self.assertEqual(json.loads(text), STATUS)
             self.assertEqual(run.call_args_list[0].args[0][1:], ["doctor", SLUG, verb])
-            self.assertEqual(run.call_args_list[1].args[0][1:], ["swarm", SLUG, "status", "--json"])
+            status.assert_called_with(SLUG)
 
     def test_the_operator_phrase_in_chat_stops_the_doctor(self):
         with (

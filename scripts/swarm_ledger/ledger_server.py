@@ -11,6 +11,7 @@ Idempotent: --ensure on a running server only prints the URL.
 """
 
 import argparse
+import functools
 import html
 import json
 import os
@@ -47,7 +48,7 @@ ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
-CODE_DIRS = (CODE_DIR, ROOT / "scripts" / "inbox", ROOT / "scripts" / "swarm")
+CODE_DIRS = (CODE_DIR, *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor")))
 
 
 def all_summaries():
@@ -228,14 +229,24 @@ def page_for(slug):
     return page
 
 
+@functools.cache
+def swarm_store():
+    from scripts.swarm.store import connect
+
+    return connect()
+
+
 def swarm_status(slug):
-    exe = shutil.which("agentihooks")
-    if not exe:
-        return None
+    from scripts.swarm.status import status_report
+    from scripts.swarm.store import SwarmError
+
     try:
-        done = subprocess.run([exe, "swarm", slug, "status", "--json"], capture_output=True, text=True, timeout=20)
-        return json.loads(done.stdout) if done.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError, ValueError):
+        state = core.loads(core.paths(slug)[1].read_text(encoding="utf-8"))
+        return status_report(swarm_store(), slug, state)
+    except SwarmError:
+        return None
+    except Exception as exc:  # the page keeps its last observed state; the log keeps why this read failed
+        sys.stderr.write(f"swarm status {slug}: {exc}\n")
         return None
 
 

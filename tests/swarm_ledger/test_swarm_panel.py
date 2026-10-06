@@ -10,12 +10,15 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "swarm-panel-2026-01-01"
 STATUS = {
     "config": {"slug": "s", "max_eng": 2, "max_ci": 1, "state": "running"},
@@ -63,32 +66,59 @@ class SwarmPanel(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
 
-    def get(self, slug=SLUG, token=True):
+    def get(self, slug=SLUG, token=True, timeout=None):
         headers = {"Host": f"127.0.0.1:{server.PORT}"}
         if token:
             headers["X-Ledger-Token"] = self.token
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/swarm/{slug}", headers=headers)
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read().decode()
 
-    def test_endpoint_returns_the_status_json_from_the_swarm_cli(self):
+    def live_store(self):
+        import fakeredis
+
+        from scripts.swarm.store import RedisStore, SwarmConfig
+
+        store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        store.create(SwarmConfig(SLUG, "/repo", 2, 1))
+        return store
+
+    def test_endpoint_builds_the_status_in_process_while_the_sync_lock_is_held(self):
+        task = {
+            "op": "task_add",
+            "id": "task_add-panel",
+            "by": "t",
+            "task": "p1",
+            "title": "One",
+            "description": "d",
+            "lane": "eng",
+        }
+        self.assertEqual(core.sync(SLUG, ops=[task])[1], [])
+        refuse = AssertionError("the status read must not call back into the ledger server")
         with (
-            patch.object(server.shutil, "which", return_value="agentihooks"),
-            patch.object(server.subprocess, "run", return_value=completed(0, json.dumps(STATUS))) as run,
+            patch.object(server, "swarm_store", return_value=self.live_store()),
+            patch.object(server.subprocess, "run", side_effect=refuse) as run,
+            patch("scripts.swarm.ledger_client.LedgerClient._call", side_effect=refuse),
+            core.LOCK,
         ):
-            code, body = self.get()
-        self.assertEqual(code, 200)
-        self.assertEqual(json.loads(body), STATUS)
-        self.assertEqual(run.call_args.args[0][1:], ["swarm", SLUG, "status", "--json"])
+            code, body = self.get(timeout=10)
+        self.assertEqual(code, 200, body)
+        status = json.loads(body)
+        self.assertEqual(status["config"]["slug"], SLUG)
+        self.assertEqual(status["agents"], [])
+        self.assertEqual(status["tasks"], {"open": 1, "claimed": 0, "blocked": 0, "pr": 0, "done": 0})
+        run.assert_not_called()
 
     def test_endpoint_is_404_when_the_slug_has_no_swarm(self):
-        with (
-            patch.object(server.shutil, "which", return_value="agentihooks"),
-            patch.object(server.subprocess, "run", return_value=completed(1, "", "swarm: no swarm x")),
-        ):
+        import fakeredis
+
+        from scripts.swarm.store import RedisStore
+
+        empty = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        with patch.object(server, "swarm_store", return_value=empty):
             code, _ = self.get()
         self.assertEqual(code, 404)
 
@@ -116,6 +146,7 @@ class SwarmPanel(unittest.TestCase):
         with (
             patch.object(server.shutil, "which", return_value="agentihooks"),
             patch.object(server.subprocess, "run", return_value=result) as run,
+            patch.object(server, "swarm_status", return_value=STATUS),
         ):
             code, text = self.put(body)
         return code, text, run
@@ -241,7 +272,8 @@ class SwarmPanel(unittest.TestCase):
     def test_unreadable_status_after_a_control_is_502(self):
         with (
             patch.object(server.shutil, "which", return_value="agentihooks"),
-            patch.object(server.subprocess, "run", side_effect=[completed(0), completed(1, "", "gone")]),
+            patch.object(server.subprocess, "run", return_value=completed(0)),
+            patch.object(server, "swarm_status", return_value=None),
         ):
             code, _ = self.put({"action": "start"})
         self.assertEqual(code, 502)
