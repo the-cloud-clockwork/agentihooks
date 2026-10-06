@@ -73,6 +73,7 @@ def claude(*box):
         ("❯ typed\x1b[2m hint\x1b[38;5;9m still hint\x1b[0m", "typed"),
         ("❯ typed\x1b[2m hint", "typed"),
         ("❯ \x1b[?25ltyped", "typed"),
+        ("❯ \x1b[38mcut short", "cut short"),
         ("❯ \x1b[38;5mcut short", "cut short"),
         ("❯ \x1b[38;2;1mcut short", "cut short"),
         ("❯ pick a › b", "pick a › b"),
