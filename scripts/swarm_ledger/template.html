@@ -627,7 +627,7 @@ input, textarea { caret-color: var(--accent-2); }
     d = d && typeof d === "object" ? d : {};
     const list = (name, fields, threads) => (Array.isArray(d[name]) ? d[name] : []).map((i) => {
       const item = { ...i };
-      for (const f of fields) if (item[f] === undefined) item[f] = f === "done" || f === "out_of_scope" ? false : "";
+      for (const f of fields) if (item[f] === undefined && !["depends_on", "planning", "release"].includes(f)) item[f] = f === "done" || f === "out_of_scope" ? false : "";
       for (const t of threads) item[t] = entries(item[t]);
       return item;
     });
@@ -639,7 +639,7 @@ input, textarea { caret-color: var(--accent-2); }
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
       notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
       artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
-      phases: list("phases", ["title", "description", "done", "out_of_scope"], ["comments"]),
+      phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
       tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "done", "out_of_scope"], ["comments"]),
