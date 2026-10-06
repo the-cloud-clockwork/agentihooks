@@ -2,7 +2,6 @@ import json
 import os
 import subprocess
 
-import fakeredis
 import pytest
 
 from hooks import config
@@ -10,6 +9,7 @@ from scripts.doctor import rates_read
 from scripts.doctor.rates import Pull, Window
 from scripts.swarm.store import RedisStore
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
 MIN = 60_000
 URL = "https://github.com/o/r/pull/{}"
 RAW = {
@@ -30,6 +30,12 @@ class Run:
         return subprocess.CompletedProcess(argv, self.code, json.dumps(self.payload), "")
 
 
+def fake_redis():
+    import fakeredis
+
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
 def test_pull_reads_state_merge_time_lines_and_files():
     assert rates_read.pull(RAW) == Pull("MERGED", rates_read.iso_ms("2026-10-06T10:00:00Z"), 10, ("a.py", "b/c.py"))
     assert rates_read.pull({"state": "OPEN", "additions": None}) == Pull("OPEN", None, 0, ())
@@ -48,7 +54,7 @@ def test_fetch_asks_gh_for_the_rate_fields_and_returns_none_on_failure():
 
 
 def test_pulls_are_cached_settled_for_a_week_and_open_for_five_minutes():
-    redis = fakeredis.FakeRedis(decode_responses=True)
+    redis = fake_redis()
     run = Run(RAW)
     first = rates_read.pulls(redis, "sw", [URL.format(1), URL.format(1)], run)
     again = rates_read.pulls(redis, "sw", [URL.format(1)], run)
@@ -61,7 +67,7 @@ def test_pulls_are_cached_settled_for_a_week_and_open_for_five_minutes():
 
 
 def test_an_unreadable_pull_request_is_left_out_and_not_cached():
-    redis = fakeredis.FakeRedis(decode_responses=True)
+    redis = fake_redis()
     assert rates_read.pulls(redis, "sw", [URL.format(3)], Run(RAW, code=1)) == {}
     assert rates_read.pulls(redis, "sw", [URL.format(3)], Run(["not", "a", "pull"])) == {}
     assert redis.keys("*") == []
@@ -99,7 +105,7 @@ class Ledger:
 
 
 def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in_the_span(home, tmp_path):
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = RedisStore(fake_redis())
     store.redis.hset("agentihooks:swarm:sw:findings", "stale-claim/t1", json.dumps({"seen_at": 5, "measure": 40}))
     (home / "swarm-activity" / "sw").mkdir(parents=True)
     (home / "swarm-activity" / "sw" / "sw-eng-1.jsonl").write_text(json.dumps({"kind": "watch", "at": 3}) + "\n")
@@ -136,6 +142,6 @@ def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in
 
 
 def test_a_missing_gate_log_and_ledger_meta_read_as_empty(home, tmp_path):
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store = RedisStore(fake_redis())
     records = rates_read.load(store, Ledger({}), "sw", Window(0, 1), Run(RAW), tmp_path)
     assert (records.events, records.tasks, records.gate_log, records.pulls) == ([], {}, [], {})
