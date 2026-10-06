@@ -81,14 +81,19 @@ def test_the_screen_asks_two_questions_per_slice_task_in_one_phase_slice_call(mo
     assert kwargs == {"purpose": "phase-slice"}
     assert list(questions) == ["size_0", "serves_0", "size_1", "serves_1"]
     assert questions["size_1"].levels == ["trivial", "one pull request", "several pull requests", "a whole phase"]
-    assert questions["serves_0"].type == "noul"
+    assert questions["size_1"].instructions == "How much work is task t2, titled Task t2?"
+    assert questions["serves_0"].instructions == "Does task t1, titled Task t1, serve the phase intent?"
+    assert (questions["serves_0"].true, questions["serves_0"].false) == (
+        "it advances the phase",
+        "it serves something else",
+    )
     assert state == {
         "phase": "Build",
         "intent": "Add the phase field parser.",
         "overview": "Ship phase planning.",
         "tasks": [
-            {"title": "Task t1", "description": "Work t1.", "kind": "ci", "territory": ["scripts"]},
-            {"title": "Task t2", "description": "Work t2.", "kind": "code", "territory": []},
+            {"id": "t1", "title": "Task t1", "description": "Work t1.", "kind": "ci", "territory": ["scripts"]},
+            {"id": "t2", "title": "Task t2", "description": "Work t2.", "kind": "code", "territory": []},
         ],
     }
 

@@ -13,8 +13,8 @@ PURPOSE = "phase-slice"
 SIZES = ["trivial", "one pull request", "several pull requests", "a whole phase"]
 ONE_PR = SIZES.index("one pull request")
 OFF_INTENT = 0.3
-SIZE = Score("How much work is this task?", SIZES)
-SERVES = YesNo("Does this task serve the phase intent?", true="it advances the phase", false="it serves something else")
+SERVES = "it advances the phase"
+ELSEWHERE = "it serves something else"
 
 
 @dataclass(frozen=True)
@@ -33,12 +33,13 @@ def screen(phase, doc, confidence):
     mine = slice_tasks(phase, doc)
     state = {
         "phase": phase["title"],
-        "intent": phase.get("description", ""),
-        "overview": doc.get("overview", ""),
+        "intent": phase["description"],
+        "overview": doc["overview"],
         "tasks": [
             {
-                "title": t.get("title", ""),
-                "description": t.get("description", ""),
+                "id": t["id"],
+                "title": t["title"],
+                "description": t["description"],
                 "kind": ledger_kinds.kind(t),
                 "territory": t.get("territory") or [],
             }
@@ -46,9 +47,10 @@ def screen(phase, doc, confidence):
         ],
     }
     questions = {}
-    for i in range(len(mine)):
-        questions[f"size_{i}"] = SIZE
-        questions[f"serves_{i}"] = SERVES
+    for i, t in enumerate(mine):
+        named = f"task {t['id']}, titled {t['title']}"
+        questions[f"size_{i}"] = Score(f"How much work is {named}?", SIZES)
+        questions[f"serves_{i}"] = YesNo(f"Does {named}, serve the phase intent?", true=SERVES, false=ELSEWHERE)
     try:
         result = decide(state, questions, purpose=PURPOSE)
     except ClassifierError:

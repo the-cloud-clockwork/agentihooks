@@ -70,7 +70,7 @@ def _open_review(mail, slug, phase, doc, ledger, config):
     size = len(slice_check.slice_ids(slice_check.plan_task(phase, doc)))
     held = slice_screen.hold(problems, screen) if config.autonomy == FULL else None
     if held == "":
-        return _approve(mail, slug, phase, ledger, size, rounds)
+        return _approve(mail, slug, phase, ledger, size)
     tail = f"Not approved automatically because {held}." if held else ""
     ledger.review_phase(slug, pid, "pending")
     if config.autonomy in OPERATOR_REVIEWS:
@@ -84,15 +84,15 @@ def _open_review(mail, slug, phase, doc, ledger, config):
     return [f"opened the review of phase {pid}"]
 
 
-def _approve(mail, slug, phase, ledger, size, rounds):
+def _approve(mail, slug, phase, ledger, size):
     pid = phase["id"]
     ledger.review_phase(slug, pid, "approved", note=APPROVED_NOTE)
-    ledger.comment_phase(slug, pid, _comment([], size, False, "Full autonomy approved it."), SENDER)
+    ledger.comment_phase(slug, pid, _comment([], size, tail="Full autonomy approved it."), SENDER)
     text = (
         f"For your information: the swarm approved the slice planned for phase {pid} {phase['title']}, "
         "the slice check and the classifier found nothing."
     )
-    mail.send(f"plan-approved:{pid}:{rounds}", mail.master, text, fyi=True)
+    mail.send(f"plan-approved:{pid}", mail.master, text, fyi=True)
     return [f"approved the slice of phase {pid}"]
 
 
