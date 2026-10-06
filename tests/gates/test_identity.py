@@ -231,6 +231,10 @@ class TestEntry:
         assert code == 1
         assert err == "agentihooks gate: name one gate of: identity\n"
 
+    def test_unknown_gate_lists_every_gate(self, monkeypatch):
+        monkeypatch.setattr(entry, "GATES", {"b": PinnedIdentity(), "a": PinnedIdentity()})
+        assert self.run(["nope"], {}) == (1, "agentihooks gate: name one gate of: a, b\n")
+
     def test_defaults_read_process_stdin_and_environment(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["gate", "identity"])
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {}})))
