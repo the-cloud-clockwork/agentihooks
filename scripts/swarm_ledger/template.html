@@ -369,7 +369,7 @@ section { margin-bottom: var(--space-group); padding: var(--space-row); }
 .sw-btn[hidden] { display: none; }
 .sw-note { text-align: left; white-space: normal; margin-top: var(--space-tight); }
 .sync { left: 16px; right: auto; width: 40px; height: 40px; }
-#chat-fab { left: 16px; right: auto; bottom: 24px; }
+#chat-fab { left: auto; right: 16px; bottom: 16px; }
 #sync { bottom: 80px; }
 #to-top { bottom: 136px; }
 #bell { bottom: 192px; }
@@ -2262,7 +2262,7 @@ input, textarea { caret-color: var(--accent-2); }
     render();
     wireTabs();
     const rail = $("icon-strip");
-    const railButtons = ["home", "art-fab", "bell", "to-top", "sync", "chat-fab"].map($);
+    const railButtons = ["home", "art-fab", "bell", "to-top", "sync"].map($);
     const placeRail = () => {
       for (const btn of railButtons) rail.append(btn);
     };
