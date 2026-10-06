@@ -1,8 +1,8 @@
 ---
 name: init-swarm
 description: >
-  Turn an accepted plan into a running swarm: ledger content with phases, PR
-  sized tasks in the eng and ci lanes, then create and start the swarm. Takes
+  Turn an accepted plan into a running swarm: ledger content with phases, phase dependencies and manual or automatic
+  planning, with PR sized tasks in the eng and ci lanes, then create and start the swarm. Takes
   code plans and plans for ops, troubleshooting, tuning or research work, whose
   tasks carry a kind and a proof contract. Use when the operator says
   "init swarm", "init-swarm", "start a swarm for this plan", or hands over an
@@ -24,11 +24,19 @@ Write `content.json` under `~/scratchpad/<repo>/<task>/`
 (`agentihooks scratch new <repo>/<task>`):
 
 ```json
-{"title": "", "overview": "", "sources": [], "phases": [{"title": "", "description": ""}], "questions": [], "followups": []}
+{"title": "Delivery", "overview": "", "sources": [], "phases": [{"title": "Prepare", "description": "", "planning": "manual"}, {"title": "Build", "description": "", "depends_on": [1], "planning": "auto"}], "questions": [], "followups": []}
 ```
 
-Phases follow the plan's own order. Done when every plan phase is present and
-every source path exists.
+Phases follow the plan's own order. Write `depends_on` as one based phase
+positions: `[1]` waits for the first phase; the ledger resolves it to `p1`.
+Existing phase ids such as `p1` are also accepted. Record only dependencies the
+plan names; independent phases have no dependencies. Set `planning` to `auto`
+for phases the planner will slice when they open, or `manual` for phases whose
+tasks the accepted plan already specifies. Omitted `planning` means manual.
+Leave automatic phases without tasks.
+
+Done when every plan phase, dependency and planning mode is present and every
+source path exists.
 
 ## 2. Build the ledger
 
@@ -40,6 +48,10 @@ Done when it prints the slug (`"created": true`, or the existing ledger's paths)
 The slug is the swarm id below.
 
 ## 3. Add the tasks
+
+Add tasks only to manual phases. Automatic phases stay empty: when their
+dependencies finish, the tick queues one plan task in the plan lane. Its planner
+slices that phase, and review approval releases its build tasks.
 
 One task is sized for one agent in one worktree. A code task is one pull
 request in the lane that owns it: `eng` for code, `ci` for workflows and
@@ -62,9 +74,9 @@ The tick claims a task only once every task in `--depends-on` is done, and never
 while its territory overlaps a claimed or in-review task's. Add the tasks a task
 waits on first; an unknown id is refused. A task without territory never conflicts.
 
-Done when every phase has at least one task, every task names its done
-condition, and every task beyond code carries its kind with `--must`, `--check`
-and `--judge`.
+Done when every manual phase has at least one task, every automatic phase has
+no tasks, every task names its done condition, and every task beyond code
+carries its kind with `--must`, `--check` and `--judge`.
 
 ## 4. Create and start
 
@@ -75,7 +87,8 @@ agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
 
-After create, show the status report before start: the longest dependency chain,
+After create, show the status report before start: automatic phases show
+Needs a plan, or Waits for phase while dependencies remain open. Show the longest dependency chain,
 parallel width and engineer width. These are dependency limits for the whole
 plan; territories and agent caps may reduce concurrency. Start warns when
 engineer width is below the configured engineer cap.

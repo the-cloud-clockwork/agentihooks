@@ -61,5 +61,14 @@
       "The start command warns that engineer width two is below the configured engineer cap four.",
       "The operator receives the dependency report before the swarm starts; territory and agent caps may reduce the reported concurrency."
     ]
+  },
+  {
+    "query": "init swarm for this accepted plan: Prepare is manual with one explicit task. Build is automatic and waits for Prepare. Slice Build only after Prepare closes.",
+    "files": [],
+    "expected_behavior": [
+      "content.json gives Build planning auto and depends_on [1], referring to the first phase by one based position",
+      "Only the manual Prepare phase receives explicit tasks; Build starts with no tasks",
+      "After create and before start status shows Build waiting for Prepare; when Prepare closes the tick queues one planner task for Build"
+    ]
   }
 ]
