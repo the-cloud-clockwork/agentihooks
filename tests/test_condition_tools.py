@@ -306,7 +306,8 @@ class TestCreate:
             ({"matcher": "bad*"}, "invalid characters"),
             ({"name": "has-dash"}, "letters, digits"),
             ({"language": "ruby"}, "language"),
-            ({"step": "stop"}, "unknown step"),
+            ({"step": "start"}, "unknown step"),
+            ({"step": "stop"}, "expected stop-<name>"),
             ({"script": "  "}, "empty"),
             ({"scope": "everywhere"}, "scope must be"),
         ],
@@ -320,6 +321,12 @@ class TestCreate:
         conditions.arm_gate(SID)
         result = _create(language="python", run_async=True, script="print('x')")
         assert result["file"] == "pre-bash.git-guard.async.py"
+
+    @pytest.mark.parametrize("matcher", ["", "any"])
+    def test_a_stop_condition_takes_no_matcher(self, bundle, matcher):
+        conditions.arm_gate(SID)
+        result = _create(step="stop", matcher=matcher, name="idle")
+        assert (result["file"], result["step"], result["matcher"]) == ("stop-idle.sh", "stop", "any")
 
 
 class TestLayers:

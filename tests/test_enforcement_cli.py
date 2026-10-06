@@ -136,3 +136,34 @@ def test_conditions_list_shows_layers_and_matches(tmp_path, monkeypatch, capsys)
     assert "[1 condition(s)]" in out
     assert "Invalid files: 1" in out
     assert "pre Bash 'cd x && git push': pre-bash.git-guard.sh" in out
+
+
+@pytest.fixture
+def one_condition_per_step(tmp_path, monkeypatch):
+    conditions_dir = tmp_path / "bundle" / ".claude" / "conditions"
+    conditions_dir.mkdir(parents=True)
+    for name in ("pre-bash-guard.sh", "post-any-trim.sh", "stop-idle.sh"):
+        (conditions_dir / name).write_text("echo")
+    monkeypatch.setattr(
+        "hooks.context.profile_chain.read_state", lambda: {"bundle": {"path": str(tmp_path / "bundle")}}
+    )
+
+
+@pytest.mark.parametrize("step, name", [("pre", "guard"), ("post", "trim"), ("stop", "idle")])
+def test_conditions_list_filters_by_step(one_condition_per_step, monkeypatch, capsys, step, name):
+    _run(monkeypatch, "conditions", "list", "--step", step)
+    out = capsys.readouterr().out
+    assert "Conditions: 1" in out
+    assert f"  {step:<4}  " in out and name in out
+
+
+def test_conditions_list_without_step_shows_every_step(one_condition_per_step, monkeypatch, capsys):
+    _run(monkeypatch, "conditions", "list")
+    assert "Conditions: 3" in capsys.readouterr().out
+
+
+def test_conditions_list_help_names_the_steps(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, "conditions", "--help")
+    out = " ".join(capsys.readouterr().out.split())
+    assert "--step {pre,post,stop} Only this step" in out

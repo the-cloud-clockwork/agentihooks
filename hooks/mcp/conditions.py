@@ -41,8 +41,9 @@ def register(mcp):
         reason. Exit 2 denies the call (pre) with stderr as the reason.
 
         Args:
-            step: "pre" (before the tool runs) or "post" (after it succeeds).
-            matcher: any, a tool name (bash, edit, write, read, webfetch), mcp,
+            step: "pre" (before the tool runs), "post" (after it succeeds) or
+                "stop" (when the agent stops; exit 2 or decision deny keeps it working).
+            matcher: "" or any for stop; otherwise any, a tool name (bash, edit, write, read, webfetch), mcp,
                 mcp__<server>, mcp__<server>__<tool>, bash.<cli> (e.g. bash.kubectl);
                 join alternatives with "+".
             name: letters, digits and "_" only.
