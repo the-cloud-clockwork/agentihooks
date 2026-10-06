@@ -4,6 +4,8 @@ import sys
 import sysconfig
 from pathlib import Path
 
+from uv import find_uv_bin
+
 REPO = Path(__file__).resolve().parents[1]
 WHEEL_VERSION = "0.0.0.dev4242"
 
@@ -24,7 +26,7 @@ def _tagged_wheel(tmp_path):
     text = pyproject.read_text()
     current = next(line for line in text.splitlines() if line.startswith("version = "))
     pyproject.write_text(text.replace(current, f'version = "{WHEEL_VERSION}"', 1))
-    _run(["uv", "build", "--wheel", "-o", str(tmp_path / "dist"), str(src)])
+    _run([find_uv_bin(), "build", "--wheel", "-o", str(tmp_path / "dist"), str(src)])
     return next((tmp_path / "dist").glob("agentihooks-*.whl"))
 
 
@@ -34,7 +36,7 @@ def _venv_with(tmp_path, wheel):
     python = venv / "bin" / "python"
     site = _run([str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"]).strip()
     Path(site, "suite-deps.pth").write_text(sysconfig.get_path("purelib") + "\n")
-    _run(["uv", "pip", "install", "--python", str(python), "--no-deps", str(wheel)])
+    _run([find_uv_bin(), "pip", "install", "--python", str(python), "--no-deps", str(wheel)])
     return venv / "bin"
 
 
@@ -44,7 +46,7 @@ def test_init_from_a_wheel_leaves_that_wheel_on_the_path(tmp_path):
     home.mkdir()
     uv_dir = tmp_path / "uv"
     uv_dir.mkdir()
-    (uv_dir / "uv").symlink_to(shutil.which("uv"))
+    (uv_dir / "uv").symlink_to(find_uv_bin())
     env = {"HOME": str(home), "PATH": f"{bin_dir}:{uv_dir}:/usr/bin:/bin", "TERM": "dumb"}
 
     _run([str(bin_dir / "agentihooks"), "init"], env=env, cwd=home)
