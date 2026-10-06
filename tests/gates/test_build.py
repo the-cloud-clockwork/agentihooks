@@ -285,7 +285,12 @@ def test_the_refusal_lists_up_to_five_files_whole_and_says_none_for_no_areas():
 
 @pytest.mark.parametrize(
     ("command", "found"),
-    [("git -C", False), ("git -c", False), ("A=1; git commit -m x", True), ("git -c a=b commit", True)],
+    [
+        ("echo commit; git -C", False),
+        ("echo commit; git -c", False),
+        ("A=1; git commit -m x", True),
+        ("git -c a=b commit", True),
+    ],
 )
 def test_trailing_options_and_assignments_parse(command, found):
     assert BuildGate().matches(Call(tool="Bash", tool_input={"command": command})) == found
@@ -305,9 +310,10 @@ class TestMore:
 
     def test_the_unchecked_count_names_the_tool_and_the_paths(self, world):
         world.plan(verdict="unchecked", kept=(True, True, True))
-        assert edit(world, "anywhere/else.py").allowed
+        patch = "*** Begin Patch\n*** Add File: a.py\n+x\n*** Add File: b.py\n+x\n*** End Patch\n"
+        assert world.decide(content=patch).allowed
         row = world.rows()[0]
-        assert (row["tool"], row["reason"]) == ("Edit", "unchecked plan, edit allowed: anywhere/else.py")
+        assert (row["tool"], row["reason"]) == ("Edit", "unchecked plan, edit allowed: a.py, b.py")
 
     def test_the_generator_refusal_names_the_plan_file(self, world):
         world.plan()
