@@ -139,9 +139,9 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   `ledger task add --scaffold` creates it with the task. The ledger page shows
   its latest lines in the task's Contract and proof fold.
 - Every Claude and Codex session whose profile sets `otel.langfuse.enabled`
-  (anton does) is one Langfuse trace in the project its keys belong to
-  (`agent-swarm` on Anton), extended at each Stop with the new turns and tagged
-  with swarm, agent, lane, task and account where set. Setup and checks:
+  is one Langfuse trace in the project its keys belong to, extended at each
+  Stop with the new turns and tagged with swarm, agent, lane, task and account
+  where set. Setup and checks:
   `docs/reference/observability-langfuse.md`.
 - `agentihooks swarm <slug> status` and the ledger page's Swarm health panel
   list health findings, each naming the agent or task, the evidence and the
