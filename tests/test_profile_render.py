@@ -4,7 +4,9 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import tomllib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -675,6 +677,29 @@ def test_codex_render_retires_the_old_profile_config(world):
 
     assert not old.exists()
     assert hand.read_text() == 'model = "hand-written"\n'
+
+
+def test_codex_render_backs_up_an_old_plain_sources_file(world, monkeypatch, request):
+    from scripts.profiles import render
+
+    manifest = render.sources.path("rb-role", "codex", render.rendered_root())
+    old = _write(manifest, '{"old": true}\n')
+    beside = _write(manifest.parent / "notes.json", "hand written\n")
+
+    request.addfinalizer(time.tzset)
+    with monkeypatch.context() as zone:
+        zone.setenv("TZ", "Etc/GMT+12")
+        time.tzset()
+        assert render.render_codex("rb-role") is not None
+        render.render_codex("rb-role", force=True)
+    time.tzset()
+
+    assert os.readlink(manifest) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
+    backups = sorted(old.parent.glob(f"{old.name}.bak.*"))
+    assert [b.read_text() for b in backups] == ['{"old": true}\n']
+    stamp = datetime.strptime(backups[0].name.removeprefix(f"{old.name}.bak."), "%Y%m%d%H%M%S")
+    assert abs(datetime.now(timezone.utc) - stamp.replace(tzinfo=timezone.utc)) < timedelta(minutes=5)
+    assert beside.read_text() == "hand written\n"
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
