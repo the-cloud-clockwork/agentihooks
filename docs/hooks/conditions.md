@@ -118,11 +118,20 @@ and injected context never open the gate. It closes at the end of the turn
 
 - `condition_set` / `condition_clear` are denied in PreToolUse and refused by the
   MCP server itself;
-- `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on any path under
+- `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on a live path under
   `.claude/conditions/` or `.agentihooks/conditions/` are denied;
-- `Bash` commands that touch those folders are denied unless every program in
-  them only reads (`ls`, `cat`, `grep`, `find` without `-delete`/`-exec`, `git
-  add/commit/status/diff/log/push`, …) and nothing is redirected into a file.
+- `Bash` commands that touch a live conditions folder are denied unless every
+  program in them only reads (`ls`, `cat`, `grep`, `find` without
+  `-delete`/`-exec`, `git add/commit/status/diff/log/push`, …) and every redirect
+  target is an ordinary file or a staged condition path.
+
+A conditions path is **staged**, and passes without your request, when it lies
+outside the bundle, profile and runtime layers hooks read now and sits in a git
+checkout on a branch other than `main`, `master`, `dev`, `WT_BASE_BRANCH` or
+origin's HEAD: a worktree file reaches `dev` only through a reviewed pull request
+and goes live only after `agentihooks init`. Every other conditions path is live.
+A relative path counts as staged only when it resolves against the session's
+directory and each `cd` target; a path behind a shell variable counts as live.
 
 The Bash check is a pattern match and cannot see every indirect write; the MCP
 gate and the file-tool gate are exact.
