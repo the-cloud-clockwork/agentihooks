@@ -203,7 +203,7 @@ def cmd_artifact(args):
 
 def cmd_phase(args):
     if args.id in ("add", "set"):
-        import ledger_phase_cli
+        from scripts.swarm_ledger import ledger_phase_cli
 
         kind, fields = ledger_phase_cli.operation(args)
         send(args, kind, **fields)

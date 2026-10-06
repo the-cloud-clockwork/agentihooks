@@ -70,7 +70,7 @@ def check_types(content):
             if not isinstance(i.get(f, ""), str)
         ]
     if not errors:
-        import ledger_phases
+        from scripts.swarm_ledger import ledger_phases
 
         try:
             ledger_phases.validate(

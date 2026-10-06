@@ -367,14 +367,16 @@ def test_dependency_diamond_is_valid_and_self_cycle_is_refused():
 @pytest.mark.parametrize("value", ["yes", "1", "True"])
 def test_cli_release_requires_boolean(value):
     args = ledger.build_parser().parse_args(["phase", "set", "p1", f"release={value}"])
-    with pytest.raises(SystemExit, match="release must be true or false"):
+    with pytest.raises(SystemExit) as error:
         ledger_phase_cli.operation(args)
+    assert str(error.value) == "release must be true or false"
 
 
 def test_cli_set_requires_pairs_and_splits_trimmed_dependencies():
     args = ledger.build_parser().parse_args(["phase", "set", "p1", "bad"])
-    with pytest.raises(SystemExit, match="FIELD=VALUE"):
+    with pytest.raises(SystemExit) as error:
         ledger_phase_cli.operation(args)
+    assert str(error.value) == "phase set takes FIELD=VALUE pairs"
     args = ledger.build_parser().parse_args(["phase", "set", "p1", "depends_on= p2,, p3 ", "release=true"])
     assert ledger_phase_cli.operation(args) == (
         "phase_update",
@@ -439,3 +441,44 @@ def test_cli_reopens_old_phase():
     with patch.object(ledger, "send") as sent:
         ledger.cmd_phase(args)
     sent.assert_called_once_with(args, "set", path="phases/p1/done", value=False)
+
+
+def test_cli_multiline_description_and_multiword_title():
+    args = ledger.build_parser().parse_args(["phase", "add", "p2", "Second", "phase"])
+    assert ledger_phase_cli.operation(args)[1]["title"] == "Second phase"
+    args = ledger.build_parser().parse_args(["phase", "set", "p2", "description=first=second"])
+    assert ledger_phase_cli.operation(args)[1]["fields"] == {"description": "first=second"}
+
+
+def test_optional_fields_edit_independently():
+    make_ledger()
+    state = edit_seed(lambda seed: seed["phases"][0].update(planning="auto", release=True))
+    assert state["phases"][0]["planning"] == "auto"
+    assert state["phases"][0]["release"] is True
+    assert "depends_on" not in state["phases"][0]
+
+
+def test_document_without_phase_list_is_valid():
+    core.validate({})
+
+
+def test_content_preserves_titles_descriptions_and_optional_fields():
+    content = {
+        "title": "Demo",
+        "phases": [
+            {"title": "First", "description": "First intent", "planning": "manual"},
+            {"title": "Second", "description": "Next intent", "release": False},
+        ],
+    }
+    assert new_ledger.check(content) == []
+    assert new_ledger.build_doc(content)["phases"] == [
+        {
+            "id": "p1",
+            "title": "First",
+            "description": "First intent",
+            "done": False,
+            "comments": [],
+            "planning": "manual",
+        },
+        {"id": "p2", "title": "Second", "description": "Next intent", "done": False, "comments": [], "release": False},
+    ]
