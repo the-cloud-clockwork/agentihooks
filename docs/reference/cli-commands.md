@@ -366,6 +366,16 @@ agentihooks quota            # AGENT ACCOUNT STATE SESSIONS 5H LEFT 7D LEFT 7D R
 agentihooks quota --json
 ```
 
+## `agentihooks classify`, `classifier stats`
+
+Ask the LiteLLM decision models typed questions, and read the decision log. Details in
+[Decision classifier](classifier.md).
+
+```bash
+agentihooks classify --state state.json --questions questions.json [--purpose P]
+agentihooks classifier stats [--purpose P]
+```
+
 ## `agentihooks balance`
 
 ```bash

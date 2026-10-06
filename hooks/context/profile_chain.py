@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+
+import yaml
 
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 
@@ -51,21 +54,53 @@ def linked_profiles(state: dict) -> dict[str, Path]:
     return linked
 
 
+def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> list[str]:
+    out = []
+    seen = set()
+    visiting = []
+
+    def visit(name):
+        if name in visiting:
+            raise ValueError(f"Profile inheritance cycle: {' -> '.join(visiting + [name])}")
+        if name in seen:
+            return
+        path = resolve(name)
+        if path is None:
+            raise ValueError(f"Profile '{name}' not found in inheritance chain: {' -> '.join(visiting + [name])}")
+        manifest = path / "profile.yml"
+        data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+        visiting.append(name)
+        for parent in data.get("extends", []):
+            visit(parent)
+        visiting.pop()
+        seen.add(name)
+        out.append(name)
+
+    for name in names:
+        visit(name)
+    return out
+
+
 def profile_candidates(
     bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]
 ) -> list[tuple[str, list[Path]]]:
     """Each chained profile name with its candidate dirs, highest priority first."""
-    out = []
-    for name in (part.strip() for part in (profile_csv or "").split(",")):
-        if not name:
-            continue
-        candidates = [BUILT_IN_PROFILES / name]
+
+    def candidates(name):
+        paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
-            candidates.append(bundle / "profiles" / name)
+            paths.append(bundle / "profiles" / name)
         if name in linked:
-            candidates.append(linked[name])
-        out.append((name, candidates))
-    return out
+            paths.append(linked[name])
+        return paths
+
+    def resolve(name):
+        return next((path for path in candidates(name) if path.is_dir()), None)
+
+    names = [part.strip() for part in (profile_csv or "").split(",") if part.strip()]
+    found = [name for name in names if resolve(name) is not None]
+    expanded = expand_profiles(found, resolve)
+    return [(name, candidates(name)) for name in expanded + [name for name in names if name not in found]]
 
 
 def profile_dirs(bundle: Path | None, profile_csv: str | None, linked: dict[str, Path]) -> list[tuple[str, Path]]:

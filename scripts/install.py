@@ -910,7 +910,7 @@ def _profile_source_label(profile_name: str) -> str:
 def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
     """Resolve a comma-separated profile chain to a list of (name, path) tuples.
 
-    Returns an empty list if any profile in the chain cannot be resolved.
+    Missing chain entries are skipped; invalid inheritance raises ValueError.
     """
     chain = [p.strip() for p in profile_input.split(",") if p.strip()]
     if not chain:
@@ -929,7 +929,10 @@ def _resolve_profile_chain(profile_input: str) -> list[tuple[str, Path]]:
                 _cprint(f"  [WARN] Profile '{name}' in chain '{profile_input}' not found — skipping.")
             continue
         dirs.append((name, d))
-    return dirs
+    from hooks.context.profile_chain import expand_profiles
+
+    resolved = {name: path for name, path in dirs}
+    return [(name, _resolve_profile_dir(name)) for name in expand_profiles(list(resolved), _resolve_profile_dir)]
 
 
 def cmd_bundle(action: str, path: str | None = None, rebase: bool = False) -> None:
@@ -2893,23 +2896,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print("ERROR: No profile specified.", file=sys.stderr)
         sys.exit(1)
 
-    # Validate profiles — drop unresolvable entries with a hint, only exit if all fail
-    profile_dirs: list[tuple[str, Path]] = []
-    linked_names = {e.get("name") for e in _get_linked_profiles()}
-    surviving_chain: list[str] = []
-    for pname in profile_chain:
-        pdir = _resolve_profile_dir(pname)
-        if pdir is None:
-            if pname in linked_names:
-                _cprint(
-                    f"  [WARN] Linked profile '{pname}' path is missing — "
-                    f"run 'agentihooks link-profile unlink {pname}' to clean up. Dropping from chain."
-                )
-            else:
-                _cprint(f"  [WARN] Profile '{pname}' not found — dropping from chain.")
-            continue
-        profile_dirs.append((pname, pdir))
-        surviving_chain.append(pname)
+    try:
+        profile_dirs = _resolve_profile_chain(profile_input)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if not profile_dirs:
         available = _available_profiles()
@@ -2917,7 +2908,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
 
-    profile_chain = surviving_chain
+    profile_chain = [name for name, _ in profile_dirs]
     # In-memory chain string — used for display only. STATE persistence below
     # uses ``profile_input`` (operator intent) so a transient missing profile
     # source (e.g. a git checkout in the bundle repo briefly removing files)
@@ -6353,6 +6344,14 @@ def main() -> None:
         from scripts.trace_cli import main as trace_main
 
         raise SystemExit(trace_main(_argv[1:]))
+    if _argv and _argv[0] == "classify":
+        from hooks.classifier import cli as classifier_cli
+
+        raise SystemExit(classifier_cli.classify_main(_argv[1:]))
+    if _argv and _argv[0] == "classifier":
+        from hooks.classifier import cli as classifier_cli
+
+        raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6517,6 +6516,8 @@ def main() -> None:
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
+    sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
+    sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")

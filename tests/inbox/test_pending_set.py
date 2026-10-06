@@ -3,8 +3,6 @@ import pytest
 import hooks.context.inbox_delivery as delivery
 from scripts.inbox.store import InboxError, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 class CountingRedis:
     def __init__(self, redis):

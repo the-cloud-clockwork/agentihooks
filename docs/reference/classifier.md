@@ -1,0 +1,115 @@
+---
+title: Decision classifier
+parent: Reference
+nav_order: 8
+---
+
+# Decision classifier
+
+`hooks.classifier` asks small decision models typed questions about a state and gets
+calibrated probabilities back. Hooks and scripts call one function, `decide()`; any
+part of agentihooks that needs a cheap yes/no, a pick from options or a score uses it
+with its own `purpose`.
+
+The models are OpenRouter decision models served by LiteLLM on `POST /v1/decisions`:
+`pplx-decider-v1-27b` (262k context), `liquid-d1` and `jev-1.13` (32k each). They
+return no text, only probabilities from one forward pass.
+
+## Calling it
+
+```python
+from hooks.classifier import Choice, Score, YesNo, decide
+
+result = decide(
+    state={"task": title, "kind": kind, "territory": paths},
+    questions={
+        "tier": Choice("Which model tier fits this task?", {"small": "...", "medium": "...", "large": "..."}),
+        "effort": Score("How much reasoning does it need?", ["low", "medium", "high", "max"]),
+        "trivial": YesNo("Is this a one line change?", true="...", false="..."),
+    },
+    purpose="model-pick",
+)
+result.answers["tier"].choice, result.answers["tier"].probabilities, result.answers["tier"].confidence
+result.answers["effort"].score, result.answers["effort"].legend
+result.answers["trivial"].noul      # probability of yes
+result.source                       # the model that answered
+result.calibrated, result.latency_ms, result.cost
+```
+
+| Type | Criteria | Answer fields |
+|---|---|---|
+| `YesNo` (`noul`) | `true` and `false` descriptions | `noul`: probability of yes |
+| `Choice` | `{option: description}`, 1 to 255 options | `choice`, `confidence`, `probabilities` |
+| `Score` | `[level0, level1, ...]`, 1 to 10 levels | `score` (weighted level index), `confidence`, `legend`, `probabilities` |
+
+Question names match `^[a-z][a-z0-9_]{0,63}$`, and a call asks 1 to 128 questions.
+A violation raises `ClassifierInputError` before any network call.
+
+## Failover
+
+Models are tried in the order of `AGENTIHOOKS_CLASSIFIER_MODELS`. A model whose
+context is smaller than the estimated input (4 characters per token) is skipped.
+
+| Response | What happens |
+|---|---|
+| 429, 5xx, other 4xx, timeout, connection error, a non-JSON body, a missing answer | next model |
+| 400 whose message names context or tokens | next model |
+| any other 400 | `ClassifierRequestError`: the caller sent a bad request; no fallback |
+| 401 or 403 | every API model is skipped (they share one key) |
+
+When every API model fails, a marker holds the API down for
+`AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` seconds, so hook callers pay no timeout on every
+tool call. The call then goes to the `fallbacks` backends the caller passed, in
+order. With nothing answering, `decide()` raises `ClassifierUnavailable`, and the
+caller keeps its own default.
+
+A fallback is any object with a `name` and a `decide(DecisionRequest) -> DecisionResult`
+method (the `Backend` protocol) that raises `BackendFailure` when it cannot answer.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AGENTIHOOKS_CLASSIFIER_URL` | none | LiteLLM base address; `/v1/decisions` is appended. Unset means the API is not tried |
+| `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY` | none | The LiteLLM key, read at call time and sent only in the Authorization header. Unset means the API is not tried |
+| `AGENTIHOOKS_CLASSIFIER_MODELS` | `pplx-decider-v1-27b,liquid-d1,jev-1.13` | Model order |
+| `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call |
+| `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` | `120` | How long a failed API stays marked down |
+
+The key never appears in a log line, an exception text or the decision log. It comes
+from the shell (loaded from OpenBao), never from a bundle file.
+
+## Decision log and stats
+
+Every call appends one JSON line to `$AGENTIHOOKS_HOME/classifier/decisions.jsonl`:
+`ts`, `purpose`, `source` (null when nothing answered), `calibrated`, `latency_ms`,
+`cost`, `answers` and a 16 character `state_digest`. The down marker sits next to it
+as `api-down`.
+
+```bash
+agentihooks classifier stats [--purpose model-pick]
+```
+
+prints the call count, unavailable count, calls per source, the fallback rate (share
+of answered calls not answered by a calibrated API model), latency p50, p90 and p99,
+and the total cost.
+
+## Command line
+
+```bash
+agentihooks classify --state state.json --questions questions.json [--purpose P]
+```
+
+`--state` holds JSON, or plain text sent as a string. `--questions` holds the wire
+form, one object per name:
+
+```json
+{
+  "trivial": {"type": "noul", "instructions": "Is this a one line change?", "criteria": {"true": "one line", "false": "more"}},
+  "tier": {"type": "choice", "instructions": "Which tier?", "criteria": {"small": "trivial edits", "large": "architecture"}},
+  "effort": {"type": "score", "instructions": "How much reasoning?", "criteria": ["low", "medium", "high", "max"]}
+}
+```
+
+It prints the result JSON and exits 0; 2 for an input or request error; 1 when no
+backend answered.

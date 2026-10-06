@@ -63,6 +63,22 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
   "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_35:d50ca94a7ad62d23b42962df006ce068499d70ef774a1dc14508a43125c6dc99": {
     "reader": "Standards reviewer /root/standards",
     "reason": "When rounds is absent, changing the type-check default from zero to one preserves integer validation. Supplied rounds is unchanged and the stored review still defaults to zero."
