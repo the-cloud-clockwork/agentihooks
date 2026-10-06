@@ -1,5 +1,6 @@
 import contextlib
 import queue
+import threading
 import time
 from dataclasses import replace
 from types import SimpleNamespace
@@ -204,22 +205,75 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
     assert session(store, scenario)[2] == [first.id, second.id]
 
 
-def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_recheck(store, monkeypatch):
+def _close_idle_session(store, monkeypatch, delay=0, wake=True):
     import anyio
 
-    monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 30.0)
-    claims = []
-    real = channel.claim
-    monkeypatch.setattr(channel, "claim", lambda *args: claims.append(1) or real(*args))
+    entered, release, worker_stopped = threading.Event(), threading.Event(), threading.Event()
+    closed, close_requested = threading.Event(), threading.Event()
+    outcomes = queue.Queue()
+    real_get_message = FakePubSub.get_message
+    real_run_sync = anyio.to_thread.run_sync
+
+    def get_message(pubsub, timeout):
+        if not pubsub.notes.empty():
+            return real_get_message(pubsub, timeout)
+        entered.set()
+        try:
+            assert release.wait(60), "recheck worker stuck during cleanup"
+            return None
+        finally:
+            worker_stopped.set()
+
+    async def run_sync(func, *args, **kwargs):
+        if not wake and kwargs.get("abandon_on_cancel"):
+            kwargs["abandon_on_cancel"] = False
+        return await real_run_sync(func, *args, **kwargs)
 
     async def idle(send, receive):
-        await anyio.sleep(0.5)
-        return len(claims)
+        await real_run_sync(close_requested.wait)
 
-    start = time.monotonic()
-    assert session(store, idle)[2] == 2
-    assert time.monotonic() - start < 10.0
+    def drive():
+        try:
+            if delay:
+                time.sleep(delay)
+            session(store, idle)
+            outcomes.put(None)
+        except BaseException as error:
+            outcomes.put(error)
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+    monkeypatch.setattr(FakePubSub, "get_message", get_message)
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_sync)
+    driver = threading.Thread(target=drive)
+    driver.start()
+    try:
+        assert entered.wait(30), "session never entered the recheck wait"
+        close_requested.set()
+        interrupted = closed.wait(10)
+        assert not worker_stopped.is_set(), "recheck ended before close"
+    finally:
+        close_requested.set()
+        release.set()
+        driver.join(30)
+    assert not driver.is_alive(), "session worker survived close"
+    assert worker_stopped.wait(30), "recheck worker survived cleanup"
+    error = outcomes.get_nowait()
+    if error is not None:
+        raise error
+    assert interrupted, "close did not interrupt the recheck wait"
+
+
+@pytest.mark.parametrize("delay", [0, 2.5], ids=["normal", "delayed-scheduling"])
+def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_recheck(store, monkeypatch, delay):
+    _close_idle_session(store, monkeypatch, delay)
+
+
+def test_idle_close_proof_rejects_a_missing_cancellation_wake(store, monkeypatch):
+    with pytest.raises(AssertionError, match="close did not interrupt the recheck wait"):
+        _close_idle_session(store, monkeypatch, wake=False)
 
 
 def test_serve_runs_the_session_over_stdio(store, monkeypatch):
