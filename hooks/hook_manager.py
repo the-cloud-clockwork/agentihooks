@@ -1027,11 +1027,11 @@ def _operator_words(payload: dict) -> bool:
 def _operator_mode(payload: dict, typed: bool) -> None:
     try:
         from hooks.common import inject_context
-        from hooks.context.operator_mode import OFF_NOTICE, ON_NOTICE, observe
+        from hooks.context.operator_mode import notice
 
-        word = observe(payload.get("session_id", ""), payload.get("prompt", ""), typed)
-        if word:
-            inject_context(ON_NOTICE if word == "on" else OFF_NOTICE, also_log=False, skip_compression=True)
+        text = notice(payload, typed)
+        if text:
+            inject_context(text, also_log=False, skip_compression=True)
     except Exception as e:
         log("operator mode failed", {"error": str(e)})
 

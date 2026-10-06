@@ -1,4 +1,4 @@
-"""Whether the operator is present in a session: a ledger or swarm bound session starts off, typed operator on turns it on.
+"""Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
 On lasts thirty minutes from the operator's last typed message; operator off ends it at once.
 """
@@ -55,6 +55,12 @@ def observe(session_id, prompt, typed, now=None):
     if word or _on(_load(session_id), now):
         _save(session_id, {"on": word != "off", "at": now})
     return word
+
+
+def notice(payload, typed, now=None):
+    """The line a prompt that switched the mode tells the session, or an empty string."""
+    word = observe(payload.get("session_id"), payload.get("prompt"), typed, now)
+    return {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
 
 
 def present(session_id, environ=None, now=None):

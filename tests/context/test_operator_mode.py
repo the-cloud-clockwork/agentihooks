@@ -122,3 +122,29 @@ def test_the_prompt_hook_turns_on_only_the_typed_pane_and_never_a_relayed_one(mo
     assert operator_mode.present("s1", SWARM)
     assert not operator_mode.present("s2", SWARM)
     assert operator_mode.ON_NOTICE in out
+
+
+def test_a_switch_tells_the_session_its_mode_and_any_other_prompt_tells_nothing():
+    assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == operator_mode.ON_NOTICE
+    assert operator_mode.notice({"session_id": "s1", "prompt": "ship it"}, True, now=101) == ""
+    assert (
+        operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=102) == operator_mode.OFF_NOTICE
+    )
+    assert operator_mode.notice({"prompt": "operator on"}, True, now=103) == ""
+    assert operator_mode.notice({"session_id": "s1"}, True, now=104) == ""
+
+
+def test_the_hook_injects_the_notice_uncompressed_and_unlogged(monkeypatch):
+    injected = []
+    monkeypatch.setattr("hooks.common.inject_context", lambda *a, **k: injected.append((a, k)))
+    hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, False)
+    hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, True)
+    assert injected == [((operator_mode.ON_NOTICE,), {"also_log": False, "skip_compression": True})]
+
+
+def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypatch):
+    logged = []
+    monkeypatch.setattr(operator_mode, "notice", lambda payload, typed: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
+    hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, True)
+    assert logged == [("operator mode failed", {"error": "disk full"})]
