@@ -28,6 +28,7 @@ result = decide(
         "trivial": YesNo("Is this a one line change?", true="...", false="..."),
     },
     purpose="model-pick",
+    harness="claude",
 )
 result.answers["tier"].choice, result.answers["tier"].probabilities, result.answers["tier"].confidence
 result.answers["effort"].score, result.answers["effort"].legend
@@ -59,9 +60,23 @@ context is smaller than the estimated input (4 characters per token) is skipped.
 
 When every API model fails, a marker holds the API down for
 `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` seconds, so hook callers pay no timeout on every
-tool call. The call then goes to the `fallbacks` backends the caller passed, in
-order. With nothing answering, `decide()` raises `ClassifierUnavailable`, and the
-caller keeps its own default.
+tool call. The marker retains the failed models and their reasons.
+
+The default fallback uses Haiku for Claude and Luna for Codex. `harness` selects
+it explicitly; otherwise `AGENTIHOOKS_TARGET` selects it, with Claude the default
+for scripts. If a CLI fails, the other is tried. With neither answering,
+`decide()` raises `ClassifierUnavailable`, and the caller keeps its own default.
+An explicit `fallbacks` sequence replaces the built-in backends, including an empty
+sequence to disable CLI calls.
+
+Both CLIs receive a JSON schema requiring a probability for every question option
+or score level. Distributions are validated and normalized; choice, confidence
+and weighted score are derived from them. CLI results have `calibrated=False`.
+Claude runs Haiku without tools or session persistence. Codex runs Luna at low
+effort in read-only mode without the shared daemon, so its hooks inherit the child
+environment. Its model slug is read from the Codex model catalog, defaulting to
+`gpt-6-luna`. Both receive `AGENTIHOOKS_CLASSIFIER_CHILD=1`; the hook manager returns
+before reading stdin, dispatching handlers or registering the child session.
 
 A fallback is any object with a `name` and a `decide(DecisionRequest) -> DecisionResult`
 method (the `Backend` protocol) that raises `BackendFailure` when it cannot answer.
@@ -75,6 +90,8 @@ method (the `Backend` protocol) that raises `BackendFailure` when it cannot answ
 | `AGENTIHOOKS_CLASSIFIER_MODELS` | `pplx-decider-v1-27b,liquid-d1,jev-1.13` | Model order |
 | `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call |
 | `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` | `120` | How long a failed API stays marked down |
+| `AGENTIHOOKS_CLASSIFIER_FALLBACK_TIMEOUT_S` | `60` | Timeout per CLI fallback |
+| `AGENTIHOOKS_CLASSIFIER_LUNA_MODEL` | model catalog, then `gpt-6-luna` | Override the Codex fallback model |
 
 The key never appears in a log line, an exception text or the decision log. It comes
 from the shell (loaded from OpenBao), never from a bundle file.
@@ -83,8 +100,12 @@ from the shell (loaded from OpenBao), never from a bundle file.
 
 Every call appends one JSON line to `$AGENTIHOOKS_HOME/classifier/decisions.jsonl`:
 `ts`, `purpose`, `source` (null when nothing answered), `calibrated`, `latency_ms`,
-`cost`, `answers` and a 16 character `state_digest`. The down marker sits next to it
-as `api-down`.
+`cost`, `answers`, a 16 character `state_digest`, `failures` and `api_down_cached`.
+Each failure holds `model` and `reason`: HTTP status, timeout, connection error,
+parse error, missing CLI or CLI exit status. Raw child output is never logged.
+When `api_down_cached` is true, `failures` includes the API failures retained by
+the down marker, followed by any failed CLI calls. Caller request errors are logged
+before they are raised. The down marker sits next to the log as `api-down`.
 
 ```bash
 agentihooks classifier stats [--purpose model-pick]
@@ -97,7 +118,7 @@ and the total cost.
 ## Command line
 
 ```bash
-agentihooks classify --state state.json --questions questions.json [--purpose P]
+agentihooks classify --state state.json --questions questions.json [--purpose P] [--harness claude|codex]
 ```
 
 `--state` holds JSON, or plain text sent as a string. `--questions` holds the wire

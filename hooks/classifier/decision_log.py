@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,20 @@ def state_digest(state: object) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
-def append(purpose: str, state: object, result: DecisionResult | None, latency_ms: int) -> None:
+def failure_record(model: str, failure: Exception) -> dict:
+    record = {"model": model, "reason": str(failure)}
+    key = os.environ.get("AGENTIHOOKS_CLASSIFIER_LITELLM_KEY", "")
+    return {name: value.replace(key, "[redacted]") if key else value for name, value in record.items()}
+
+
+def append(
+    purpose: str,
+    state: object,
+    result: DecisionResult | None,
+    latency_ms: int,
+    failures: list | None = None,
+    api_down_cached: bool = False,
+) -> None:
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "purpose": purpose,
@@ -30,6 +44,8 @@ def append(purpose: str, state: object, result: DecisionResult | None, latency_m
         "cost": result.cost if result else None,
         "answers": result.to_dict()["answers"] if result else {},
         "state_digest": state_digest(state),
+        "failures": failures or [],
+        "api_down_cached": api_down_cached,
     }
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)

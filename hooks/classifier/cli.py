@@ -24,10 +24,11 @@ def classify_main(argv: list) -> int:
     parser.add_argument("--state", required=True, help="File holding the state: JSON, or plain text")
     parser.add_argument("--questions", required=True, help="JSON file of named questions: type, instructions, criteria")
     parser.add_argument("--purpose", default="cli", help="Caller name recorded in the decision log")
+    parser.add_argument("--harness", choices=("claude", "codex"), help="CLI fallback target")
     args = parser.parse_args(argv)
     try:
         questions = questions_from_wire(json.loads(Path(args.questions).read_text()))
-        result = decide(_read_state(args.state), questions, purpose=args.purpose)
+        result = decide(_read_state(args.state), questions, purpose=args.purpose, harness=args.harness)
     except (ClassifierInputError, ClassifierRequestError) as error:
         print(f"classify: {error}", file=sys.stderr)
         return 2

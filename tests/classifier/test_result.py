@@ -10,7 +10,7 @@ QUESTIONS = {"a": YesNo("q", true="t", false="f"), "b": YesNo("q", true="t", fal
 def test_every_missing_answer_is_named():
     with pytest.raises(BackendFailure) as err:
         parse_answers({"answers": {}}, QUESTIONS, "jev-1.13")
-    assert str(err.value) == "jev-1.13: no answer for a, b"
+    assert str(err.value) == "jev-1.13: parse error, no answer for a, b"
 
 
 def test_answers_without_a_payload_key_are_missing():
