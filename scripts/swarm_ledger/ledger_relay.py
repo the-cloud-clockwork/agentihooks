@@ -35,13 +35,13 @@ def verified(by, quote):
 
 def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
-    item = next((i for i in doc.get(name, []) if i["id"] == item_id), None)
+    item = next((i for i in doc[name] if i["id"] == item_id), None)
     if item is None:
         return False
     thread = "answers" if name == "questions" else "comments"
-    if any(e["id"] == op["id"] for e in item.setdefault(thread, [])):
+    if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    master = ctx.meta.get("members", {}).get(op["by"], {}).get("role") == "orchestrator"
+    master = ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator"
     words = verified(op["by"], op["quote"]) if master else ""
     if not words:
         return False

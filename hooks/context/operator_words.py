@@ -26,7 +26,7 @@ def _norm(text):
 
 def _load(name, now):
     try:
-        data = json.loads(_path(name).read_text(encoding="utf-8"))
+        data = json.loads(_path(name).read_text())
     except (OSError, ValueError):
         data = {}
     rows = [r for r in data.get("rows", []) if now - r["at"] < TTL_SEC]
@@ -37,7 +37,7 @@ def _save(name, data):
     path = _path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
+    tmp.write_text(json.dumps(data))
     os.replace(tmp, path)
 
 
@@ -71,8 +71,8 @@ def _opening(name, session, now):
 
 def heard_prompt(prompt, environ=None, now=None, session=""):
     env = os.environ if environ is None else environ
-    name, slug = env.get("AGENTIHOOKS_AGENT_NAME", ""), env.get("AGENTIHOOKS_SWARM", "")
-    if not name or not is_operator_prompt(prompt or "", slug):
+    name, slug = env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM")
+    if not name or not is_operator_prompt(prompt, slug):
         return False
     now = time.time() if now is None else now
     if slug and _opening(name, session, now):
@@ -92,10 +92,10 @@ def heard_answer(payload, environ=None, now=None):
     if payload.get("tool_name") != "AskUserQuestion":
         return False
     env = os.environ if environ is None else environ
-    return record(env.get("AGENTIHOOKS_AGENT_NAME", ""), _answer_words(payload), now)
+    return record(env.get("AGENTIHOOKS_AGENT_NAME"), _answer_words(payload), now)
 
 
 def heard(payload, environ=None, now=None):
     if "prompt" in payload:
-        return heard_prompt(payload["prompt"], environ, now, payload.get("session_id", ""))
+        return heard_prompt(payload["prompt"], environ, now, payload.get("session_id"))
     return heard_answer(payload, environ, now)
