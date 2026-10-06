@@ -56,6 +56,7 @@ ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
+LOGO = ROOT / "media" / "agentihooks-logo.png"
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
@@ -113,8 +114,13 @@ HOME_STYLE = (
     "font:13px/1.6 ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);"
     "background-image:var(--backdrop);background-attachment:fixed}"
     "::selection{background:var(--selection);color:var(--text)}"
-    "main{padding:32px clamp(16px,3vw,48px) 96px}"
-    "header{display:flex;align-items:baseline;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}"
+    "main{position:relative;z-index:1;padding:32px clamp(16px,3vw,48px) 96px}"
+    "header{display:flex;align-items:center;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}"
+    ".logo{flex:none;width:22px;height:22px;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}"
+    ".brand{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;"
+    "color:var(--text)}"
+    ".watermark{position:fixed;top:50%;left:50%;width:50vmin;height:50vmin;transform:translate(-50%,-50%);"
+    "opacity:.05;pointer-events:none;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}"
     "h1{display:flex;align-items:center;gap:10px;margin:0;font-size:12px;font-weight:700;letter-spacing:.16em;"
     "text-transform:uppercase;color:var(--text)}"
     "h1::before{content:'';width:2px;height:14px;background:var(--signal);box-shadow:0 0 8px var(--signal)}"
@@ -255,9 +261,12 @@ def index_page(view="home", now=None):
     if view == "bin":
         heading, empty = "BIN", "The bin is empty."
         rows = [ledger_row(s, bin_cells(s), RESTORE_BUTTON) for s in bin_summaries(now)]
+        total = f'<span class="total">{len(rows)} ledger{"" if len(rows) == 1 else "s"}</span>'
+        watermark = ""
         fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
     else:
         heading, empty = "HOME", "No ledgers yet."
+        total, watermark = "", '<div class="watermark" aria-hidden="true"></div>'
         rows = [
             ledger_row(s, home_cells(s, swarm_state(s["slug"]), now), (REOPEN if s["closed_at"] else "") + DELETE)
             for s in ledger_summaries()
@@ -265,7 +274,6 @@ def index_page(view="home", now=None):
         count = len(ledger_bin.entries())
         badge = f'<span class="count">{count}</span>' if count else ""
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
-    total = f'<span class="total">{len(rows)} ledger{"" if len(rows) == 1 else "s"}</span>'
     head = "".join(
         f'<span class="r">{label[1:]}</span>' if label.startswith(">") else f"<span>{label}</span>"
         for label in HEADS[view]
@@ -274,7 +282,8 @@ def index_page(view="home", now=None):
     return (
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{heading}</title><style>{core.PALETTE.read_text(encoding='utf-8')}{HOME_STYLE}</style>"
-        f'<main class="{view}"><header><h1>{heading}</h1>{total}</header>'
+        f'{watermark}<main class="{view}"><header><span class="logo" aria-hidden="true"></span>'
+        f'<span class="brand">agentihooks</span><h1>{heading}</h1>{total}</header>'
         f'<div class="row head" aria-hidden="true">{head}</div><ul>{body}</ul></main>{fab}{BIN_SCRIPT}'
         f"<script>{core.TOOLTIPS.read_text(encoding='utf-8')}</script>"
     )
@@ -594,6 +603,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if route == "/healthz":
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
+        if route == "/logo.png":
+            return self.send_logo()
         if route.startswith("/media/"):
             return self.send_media(*route.removeprefix("/media/").partition("/")[::2])
         if route.startswith("/artifacts/"):
@@ -653,6 +664,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
+
+    def send_logo(self):
+        try:
+            data = LOGO.read_bytes()
+        except OSError:
+            return self.send(404, "no logo", "text/plain")
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_media(self, slug, media_id, store=ledger_media):
         try:
