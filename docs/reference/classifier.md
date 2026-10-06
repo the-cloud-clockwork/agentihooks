@@ -140,20 +140,21 @@ backend answered.
 
 ## Auto swarm lanes
 
-When a lane's model or effort is `auto`, the spawn runtime classifies the task
-following harness routing, using its title, description, kind and territory size.
-Explicit model and effort values remain unchanged. Decisions use purpose
-`model-pick` in the classifier log.
+When an eng or ci lane's effort is `auto`, the spawn runtime asks the classifier
+how much reasoning the task needs, following harness routing, using its title,
+description, kind and territory size. The answer only raises effort above the
+launch default (`high` unless `AGENTIHOOKS_CLAUDE_EFFORT` or
+`AGENTIHOOKS_CODEX_EFFORT` names another): Claude launches high or max, Codex high
+or xhigh. A launch default outside those levels is kept without asking. The
+classifier never picks a model: a lane model of `auto` launches the harness
+default, opus for Claude and gpt-6.1-sol for Codex unless
+`AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit
+model and effort values remain unchanged, and master and plan seats never consult
+the classifier. Decisions use purpose `model-pick` in the classifier log.
 
-`AGENTIHOOKS_MODEL_TIERS_CLAUDE` and `AGENTIHOOKS_MODEL_TIERS_CODEX` accept comma
-separated `small=model,medium=model,large=model` overrides. Unspecified tiers
-retain their defaults: Claude uses sonnet, opus, opus; Codex uses gpt-6-luna,
-gpt-6.1-sol, gpt-6.1-sol. Effort rounds and clamps to low, medium, high and max
-for Claude, or low, medium, high and xhigh for Codex.
-
-`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The minimum confidence
-across the requested auto fields must meet it; otherwise the lane keeps its
-launch defaults. An unavailable classifier also preserves those defaults.
+`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The effort answer's
+confidence must meet it; otherwise the lane keeps its launch defaults. An
+unavailable classifier also preserves those defaults.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,
 and an explicit or unavailable pick records `lane-default` without confidence.

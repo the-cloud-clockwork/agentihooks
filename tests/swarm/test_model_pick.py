@@ -6,21 +6,15 @@ from hooks.classifier import Answer, DecisionResult
 from scripts.swarm import model_pick
 
 
-def decision(tier="small", score=0, confidence=0.9):
-    return DecisionResult(
-        {
-            "tier": Answer("choice", choice=tier, confidence=confidence),
-            "effort": Answer("score", score=score, confidence=confidence),
-        },
-        "pplx-decider-v1-27b",
-    )
+def decision(score=0, confidence=0.9):
+    return DecisionResult({"effort": Answer("score", score=score, confidence=confidence)}, "pplx-decider-v1-27b")
 
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
-@pytest.mark.parametrize("harness,expected", [("claude", "sonnet"), ("codex", "gpt-6-luna")])
-def test_auto_lane_picks_task_model_and_effort(monkeypatch, harness, expected):
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_auto_lane_asks_only_for_effort_and_keeps_the_lane_model(monkeypatch, harness):
     calls = []
 
     def decide(state, questions, **kwargs):
@@ -31,17 +25,17 @@ def test_auto_lane_picks_task_model_and_effort(monkeypatch, harness, expected):
     task = {"title": "Fix typo", "description": "One word", "kind": "research", "territory": ["docs", "rules"]}
     picked = model_pick.pick(harness, {"model": "auto", "effort": "auto"}, task, {})
     assert (picked.model, picked.effort, picked.source, picked.confidence) == (
-        expected,
-        "low",
+        "auto",
+        "high",
         "pplx-decider-v1-27b",
         0.9,
     )
     assert calls[0][0] == {"title": "Fix typo", "description": "One word", "kind": "research", "territory_size": 2}
     assert calls[0][2] == {"purpose": "model-pick", "harness": harness}
-    assert set(calls[0][1]) == {"tier", "effort"}
+    assert set(calls[0][1]) == {"effort"}
 
 
-@pytest.mark.parametrize("confidence,expected", [(0.59, ("auto", "auto")), (0.6, ("sonnet", "low"))])
+@pytest.mark.parametrize("confidence,expected", [(0.59, ("auto", "auto")), (0.6, ("auto", "high"))])
 def test_confidence_floor_preserves_lane_default(monkeypatch, confidence, expected):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(confidence=confidence))
     picked = model_pick.pick("claude", {"model": "auto", "effort": "auto"}, {}, {})
@@ -56,8 +50,8 @@ def test_classifier_unavailable_keeps_default(monkeypatch):
         raise ClassifierUnavailable("offline")
 
     monkeypatch.setattr(model_pick, "decide", unavailable)
-    picked = model_pick.pick("codex", {"model": "auto", "effort": "high"}, {}, {})
-    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", "high", "lane-default", None)
+    picked = model_pick.pick("codex", {"model": "auto", "effort": "auto"}, {}, {})
+    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", "auto", "lane-default", None)
 
 
 def test_explicit_lane_never_calls_classifier(monkeypatch):
@@ -79,18 +73,37 @@ def test_explicit_lane_never_calls_classifier(monkeypatch):
 )
 def test_effort_rounds_and_clamps_without_changing_fixed_model(monkeypatch, harness, score, expected):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=score))
-    picked = model_pick.pick(harness, {"model": "fixed", "effort": "auto"}, {}, {})
+    floor = {f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
+    picked = model_pick.pick(harness, {"model": "fixed", "effort": "auto"}, {}, floor)
     assert (picked.model, picked.effort) == ("fixed", expected)
 
 
-@pytest.mark.parametrize("harness,default", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
-def test_tier_maps_override_named_defaults(monkeypatch, harness, default):
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(tier="large"))
-    env = {f"AGENTIHOOKS_MODEL_TIERS_{harness.upper()}": "small=custom, large=big"}
-    picked = model_pick.pick(harness, {"model": "auto", "effort": "high"}, {}, env)
-    assert (picked.model, picked.effort) == ("big", "high")
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(tier="medium"))
-    assert model_pick.pick(harness, {"model": "auto"}, {}, env).model == default
+@pytest.mark.parametrize(
+    "harness,score,expected",
+    [
+        ("claude", -1, "high"),
+        ("claude", 1.6, "high"),
+        ("claude", 2.6, "max"),
+        ("codex", 0, "high"),
+        ("codex", 3, "xhigh"),
+    ],
+)
+def test_an_effort_answer_only_raises_the_default_effort(monkeypatch, harness, score, expected):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=score))
+    assert model_pick.pick(harness, {"model": "auto", "effort": "auto"}, {}, {}).effort == expected
+
+
+def test_a_configured_default_effort_is_the_floor(monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=2))
+    picked = model_pick.pick("claude", {"model": "auto", "effort": "auto"}, {}, {"AGENTIHOOKS_CLAUDE_EFFORT": "max"})
+    assert (picked.model, picked.effort) == ("auto", "max")
+
+
+def test_a_default_effort_the_classifier_cannot_rank_is_kept_without_asking(monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("an unranked default asked the classifier"))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_CLAUDE_EFFORT": "xhigh"})
+    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", "auto", "lane-default", None)
 
 
 def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
@@ -101,12 +114,14 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
     from scripts.swarm.tick import _placed
 
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision())
+    for key in ("AGENTIHOOKS_CLAUDE_MODEL", "AGENTIHOOKS_CLAUDE_EFFORT"):
+        monkeypatch.delenv(key, raising=False)
     seen = []
 
     def launch(argv, **kwargs):
         seen.extend(argv)
         return SimpleNamespace(
-            returncode=0, stdout="status=started\nroute_status=routed\nmodel=sonnet\neffort=low\n", stderr=""
+            returncode=0, stdout="status=started\nroute_status=routed\nmodel=opus\neffort=high\n", stderr=""
         )
 
     runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *a: ("claude", "quota"))
@@ -119,15 +134,15 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
         autonomy="delegate",
     )
     placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "Fix typo"})
-    assert seen[seen.index("--model") + 1] == "sonnet"
-    assert seen[seen.index("--effort") + 1] == "low"
+    assert seen[seen.index("--model") + 1] == "opus"
+    assert seen[seen.index("--effort") + 1] == "high"
     assert (placed.model_source, placed.model_confidence) == ("pplx-decider-v1-27b", 0.9)
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.put_agent("sw", _placed(AgentRecord("engineer", "eng", "t1"), placed))
     record = saved.agents("sw")[0]
     assert (record.model, record.effort, record.model_source, record.model_confidence) == (
-        "sonnet",
-        "low",
+        "opus",
+        "high",
         "pplx-decider-v1-27b",
         0.9,
     )
@@ -158,32 +173,16 @@ def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
     assert (agent["model_source"], agent["model_confidence"]) == ("jev-1.13", 0.72)
 
 
-@pytest.mark.parametrize("raw", ["unknown=x", "small", "small=", "small=x,", "=model"])
-def test_invalid_tier_map_names_the_configuration_error(raw):
-    with pytest.raises(ValueError, match="^model tiers must be small=model,medium=model,large=model$"):
-        model_pick.tier_models("claude", {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": raw})
-
-
-def test_tier_maps_keep_defaults_and_do_not_mutate_them():
-    assert model_pick.tier_models("claude", {}) == {"small": "sonnet", "medium": "opus", "large": "opus"}
-    assert model_pick.tier_models("codex", {"AGENTIHOOKS_MODEL_TIERS_CODEX": "small=custom"}) == {
-        "small": "custom",
-        "medium": "gpt-6.1-sol",
-        "large": "gpt-6.1-sol",
-    }
-    assert model_pick.tier_models("codex", {})["small"] == "gpt-6-luna"
-
-
-def test_each_auto_field_asks_only_its_question(monkeypatch):
+def test_only_an_auto_effort_asks_the_classifier(monkeypatch):
     calls = []
 
     def decide(state, questions, **kwargs):
         calls.append((state, questions))
-        return decision(score=2, confidence=0.8)
+        return decision(score=3, confidence=0.8)
 
     monkeypatch.setattr(model_pick, "decide", decide)
     picked = model_pick.pick("claude", {"model": "fixed", "effort": "auto"}, {}, {})
-    assert (picked.model, picked.effort) == ("fixed", "high")
+    assert (picked.model, picked.effort) == ("fixed", "max")
     assert set(calls[0][1]) == {"effort"}
     assert calls[0][0] == {"title": "", "description": "", "kind": "code", "territory_size": 0}
     assert calls[0][1]["effort"].levels == ["low", "medium", "high", "max"]
@@ -194,30 +193,21 @@ def test_each_auto_field_asks_only_its_question(monkeypatch):
         "source",
         "confidence",
     }
-    assert set(calls[1][1]) == {"tier"}
-    assert calls[1][1]["tier"].instructions == "Which model tier fits this task?"
-    assert calls[1][1]["tier"].options == {
-        "small": "Routine, narrowly scoped task with a clear solution",
-        "medium": "Task requiring analysis across several components",
-        "large": "Complex architecture or uncertain system design",
-    }
+    assert len(calls) == 1
 
 
-def test_confidence_uses_minimum_requested_answer_and_configured_floor(monkeypatch):
-    result = DecisionResult(
-        {"tier": Answer("choice", choice="small", confidence=0.95), "effort": Answer("score", score=0, confidence=0.7)},
-        "haiku",
-        calibrated=False,
+def test_a_configured_confidence_floor_keeps_the_default_below_it(monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision(score=3, confidence=0.7))
+    lane = {"model": "auto", "effort": "auto"}
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "0.8"})
+    assert (picked.model, picked.effort, picked.source, picked.confidence) == (
+        "auto",
+        "auto",
+        "pplx-decider-v1-27b",
+        0.7,
     )
-    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: result)
-    picked = model_pick.pick(
-        "claude", {"model": "auto", "effort": "auto"}, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "0.8"}
-    )
-    assert (picked.model, picked.effort, picked.source, picked.confidence) == ("auto", "auto", "haiku", 0.7)
-    picked = model_pick.pick(
-        "claude", {"model": "auto", "effort": "high"}, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "0.8"}
-    )
-    assert (picked.model, picked.effort, picked.confidence) == ("sonnet", "high", 0.95)
+    picked = model_pick.pick("claude", lane, {}, {"AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE": "0.7"})
+    assert (picked.model, picked.effort, picked.confidence) == ("auto", "max", 0.7)
 
 
 def test_caller_error_is_not_hidden(monkeypatch):
@@ -228,32 +218,13 @@ def test_caller_error_is_not_hidden(monkeypatch):
 
     monkeypatch.setattr(model_pick, "decide", broken)
     with pytest.raises(ClassifierRequestError, match="bad question"):
-        model_pick.pick("claude", {"model": "auto"}, {}, {})
+        model_pick.pick("claude", {"effort": "auto"}, {}, {})
 
 
 def test_absent_lane_has_no_classifier_metadata(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     picked = model_pick.pick("claude", {}, {}, {})
     assert (picked.model, picked.effort, picked.source, picked.confidence) == ("", "", "lane-default", None)
-
-
-def test_invalid_tier_configuration_is_visible_before_low_confidence_or_unavailability(monkeypatch):
-    from hooks.classifier import ClassifierUnavailable
-
-    def unavailable(*args, **kwargs):
-        raise ClassifierUnavailable("offline")
-
-    for backend in (lambda *a, **kw: decision(confidence=0.1), unavailable):
-        monkeypatch.setattr(model_pick, "decide", backend)
-        with pytest.raises(ValueError, match="model tiers"):
-            model_pick.pick("claude", {"model": "auto"}, {}, {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": "unknown=x"})
-
-
-def test_tier_model_name_keeps_equals_after_first_separator():
-    assert (
-        model_pick.tier_models("claude", {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": "small=custom=version"})["small"]
-        == "custom=version"
-    )
 
 
 def test_spawn_timeout_names_and_retires_the_failed_agent(tmp_path):
