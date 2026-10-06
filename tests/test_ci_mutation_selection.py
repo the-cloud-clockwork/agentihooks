@@ -173,6 +173,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert stream.getvalue().endswith("generated = True\n")
         namespace = {"__file__": str(project / "scripts/sample.py")}
         cwd = Path.cwd()
+        engine_config.Config.reset()
         exec(stream.getvalue(), namespace)
         assert namespace["generated"] is True
         assert namespace["__doc__"] == "sample contract"
