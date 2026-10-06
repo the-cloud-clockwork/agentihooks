@@ -1,0 +1,29 @@
+[
+  {
+    "query": "triage the priorities",
+    "files": [],
+    "expected_behavior": [
+      "runs list_priorities.py with the ledger slug and --clear-resolved before asking anything",
+      "asks the open priorities with AskUserQuestion in rounds of at most four questions, one per priority, each with a Later option",
+      "never tells the operator to open the ledger page or type in another pane"
+    ]
+  },
+  {
+    "query": "go through the priorities; approve the queue merge, and the port follow up is decided: use 8800",
+    "files": [],
+    "expected_behavior": [
+      "writes plan.json in a scratch work folder, not in /tmp or the repository",
+      "maps the merge approval to a relay entry whose quote is the operator's own words and the follow up to a followup-done entry with the decision as text",
+      "runs apply_answers.py with the plan and reports per group how many were answered, kept or failed"
+    ]
+  },
+  {
+    "query": "clear the priorities, I'll decide the broker question later",
+    "files": [],
+    "expected_behavior": [
+      "maps the deferred broker question to a keep entry so its priority stays listed",
+      "reruns list_priorities.py after applying and stops when only kept or failed items remain open",
+      "names the kept broker question in plain words in the final report"
+    ]
+  }
+]

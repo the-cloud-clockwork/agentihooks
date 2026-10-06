@@ -1,0 +1,309 @@
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+WT = Path(__file__).resolve().parents[1] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
+BASH = shutil.which("bash")
+
+ISOLATED_TOOLS = ["git", "basename", "dirname", "mkdir", "awk", "rmdir", "df", "mktemp"]
+
+
+def _isolated_bin(dest):
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in ISOLATED_TOOLS:
+        real = shutil.which(name)
+        assert real, f"required tool not found: {name}"
+        os.symlink(real, dest / name)
+    return dest
+
+
+def _git(repo, *args, env=None):
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+
+class WtBase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="wt-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        root = Path(self.tmp)
+
+        gitenv = dict(os.environ)
+        gitenv.update(
+            {
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "test@example.com",
+                "HOME": str(root / "home"),
+            }
+        )
+        (root / "home").mkdir()
+
+        seed = root / "seed"
+        _git(root, "init", "--quiet", "-b", "dev", str(seed), env=gitenv)
+        (seed / "README.md").write_text("seed\n")
+        _git(seed, "add", "README.md", env=gitenv)
+        _git(seed, "commit", "--quiet", "-m", "initial", env=gitenv)
+
+        self.origin = root / "origin.git"
+        _git(root, "init", "--quiet", "--bare", str(self.origin), env=gitenv)
+        _git(seed, "remote", "add", "origin", str(self.origin), env=gitenv)
+        _git(seed, "push", "--quiet", "origin", "dev", env=gitenv)
+        _git(self.origin, "symbolic-ref", "HEAD", "refs/heads/dev", env=gitenv)
+
+        self.primary = root / "primary"
+        _git(root, "clone", "--quiet", str(self.origin), str(self.primary), env=gitenv)
+        _git(self.primary, "checkout", "--quiet", "dev", env=gitenv)
+
+        self.worktree_root = root / "worktrees"
+        self.bin = _isolated_bin(root / "bin")
+        self.env = {
+            "PATH": str(self.bin),
+            "HOME": str(root / "home"),
+            "WORKTREE_ROOT": str(self.worktree_root),
+            "WT_MIN_FREE_GB": "0",
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+        self.gitenv = gitenv
+
+    def run_wt(self, *args):
+        return subprocess.run(
+            [BASH, str(WT), *args],
+            cwd=str(self.primary),
+            env=self.env,
+            capture_output=True,
+            text=True,
+        )
+
+    def branch_of(self, path):
+        return subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            env=self.gitenv,
+        ).stdout.strip()
+
+    def branch_exists(self, name):
+        return (
+            subprocess.run(
+                ["git", "-C", str(self.primary), "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+                env=self.gitenv,
+            ).returncode
+            == 0
+        )
+
+
+class New(WtBase):
+    def test_new_creates_worktree_on_branch_and_prints_path(self):
+        result = self.run_wt("new", "feature-x", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = Path(result.stdout.strip())
+        self.assertEqual(dest, self.worktree_root / "primary" / "feature-x")
+        self.assertTrue(dest.is_dir())
+        self.assertEqual(self.branch_of(dest), "feature-x")
+
+    def test_new_refuses_protected_names(self):
+        for name in ("dev", "main", "master"):
+            result = self.run_wt("new", name, "--repo", str(self.primary))
+            self.assertNotEqual(result.returncode, 0, name)
+            self.assertIn("protected branch name", result.stderr)
+
+
+class Ls(WtBase):
+    def test_ls_lists_the_new_worktree(self):
+        created = self.run_wt("new", "list-me", "--repo", str(self.primary))
+        dest = created.stdout.strip()
+        result = self.run_wt("ls", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(dest, result.stdout)
+        self.assertIn("list-me", result.stdout)
+
+
+class Done(WtBase):
+    def _new(self, name):
+        return Path(self.run_wt("new", name, "--repo", str(self.primary)).stdout.strip())
+
+    def test_done_refuses_a_dirty_worktree(self):
+        dest = self._new("dirty-one")
+        (dest / "scratch.txt").write_text("uncommitted\n")
+        result = self.run_wt("done", "dirty-one", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uncommitted changes", result.stderr)
+        self.assertTrue(dest.is_dir())
+
+    def test_done_force_removes_a_dirty_worktree(self):
+        dest = self._new("dirty-two")
+        (dest / "scratch.txt").write_text("uncommitted\n")
+        result = self.run_wt("done", "dirty-two", "--repo", str(self.primary), "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+
+    def test_done_deletes_branch_already_merged_into_dev(self):
+        dest = self._new("merged-one")
+        result = self.run_wt("done", "merged-one", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("merged-one"))
+        self.assertIn("and branch merged-one", result.stdout)
+
+    def test_done_keeps_an_unmerged_branch_without_gh(self):
+        dest = self._new("unmerged-one")
+        (dest / "new-file.txt").write_text("extra\n")
+        _git(dest, "add", "new-file.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "extra commit", env=self.gitenv)
+        result = self.run_wt("done", "unmerged-one", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertTrue(self.branch_exists("unmerged-one"))
+        self.assertIn("kept", result.stderr)
+
+
+class Limits(WtBase):
+    def test_new_refuses_below_the_free_space_floor(self):
+        self.env["WT_MIN_FREE_GB"] = "999999"
+        result = self.run_wt("new", "too-full", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("below the 999999 GB floor", result.stderr)
+        self.assertFalse((self.worktree_root / "primary" / "too-full").exists())
+
+    def test_new_and_tmp_refuse_at_the_per_repo_cap(self):
+        self.env["WT_MAX_PER_REPO"] = "1"
+        self.assertEqual(self.run_wt("new", "first", "--repo", str(self.primary)).returncode, 0)
+        for args in (("new", "second"), ("tmp", "third")):
+            result = self.run_wt(*args, "--repo", str(self.primary))
+            self.assertNotEqual(result.returncode, 0, args)
+            self.assertIn("already has 1 worktrees (cap 1", result.stderr)
+
+
+class Tmp(WtBase):
+    def test_tmp_is_detached_and_done_removes_it_even_when_dirty(self):
+        result = self.run_wt("tmp", "plant", "--repo", str(self.primary), "--from", "origin/dev")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = Path(result.stdout.strip())
+        self.assertEqual(dest.parent, self.worktree_root / "primary" / "_tmp")
+        self.assertTrue(dest.name.startswith("plant-"))
+        self.assertEqual(self.branch_of(dest), "HEAD")
+        (dest / "planted.txt").write_text("fault\n")
+        removed = self.run_wt("done", str(dest))
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse((self.worktree_root / "primary" / "_tmp").exists())
+
+    def test_tmp_rejects_an_unknown_ref(self):
+        result = self.run_wt("tmp", "bad", "--repo", str(self.primary), "--from", "no-such-ref")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(list((self.worktree_root / "primary" / "_tmp").iterdir()), [])
+
+
+class BaseBranch(WtBase):
+    def setUp(self):
+        super().setUp()
+        _git(self.primary, "checkout", "--quiet", "-b", "trunk", env=self.gitenv)
+        (self.primary / "trunk.txt").write_text("trunk only\n")
+        _git(self.primary, "add", "trunk.txt", env=self.gitenv)
+        _git(self.primary, "commit", "--quiet", "-m", "trunk", env=self.gitenv)
+        _git(self.primary, "push", "--quiet", "origin", "trunk", env=self.gitenv)
+        self.env["WT_BASE_BRANCH"] = "trunk"
+
+    def test_new_cuts_from_the_configured_base_branch(self):
+        result = self.run_wt("new", "on-trunk", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((Path(result.stdout.strip()) / "trunk.txt").is_file())
+
+    def test_the_base_branch_is_a_protected_name(self):
+        result = self.run_wt("new", "trunk", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("protected branch name", result.stderr)
+
+    def test_ls_and_done_follow_the_base_branch(self):
+        self.run_wt("new", "follow", "--repo", str(self.primary))
+        listed = self.run_wt("ls", "--repo", str(self.primary))
+        self.assertIn("vs origin/trunk", listed.stdout)
+        done = self.run_wt("done", "follow", "--repo", str(self.primary))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("local trunk synced to origin/trunk", done.stdout)
+        self.assertIn("and branch follow", done.stdout)
+
+    def test_tmp_defaults_to_the_base_branch(self):
+        result = self.run_wt("tmp", "probe", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((Path(result.stdout.strip()) / "trunk.txt").is_file())
+
+
+class Lease(WtBase):
+    def test_new_and_tmp_record_the_owner_through_agentihooks(self):
+        log = Path(self.tmp) / "lease.log"
+        fake = self.bin / "agentihooks"
+        fake.write_text(f'#!{BASH}\necho "$@" >> {log}\n')
+        fake.chmod(0o755)
+        new = self.run_wt("new", "owned", "--repo", str(self.primary)).stdout.strip()
+        tmp = self.run_wt("tmp", "probe", "--repo", str(self.primary)).stdout.strip()
+        leases = [line for line in log.read_text().splitlines() if line.startswith("lease ")]
+        self.assertEqual(leases, [f"lease {new} --kind worktree", f"lease {tmp} --kind ephemeral"])
+
+    def test_done_releases_the_worktree_serena_backend_before_removing_it(self):
+        log = Path(self.tmp) / "lease.log"
+        fake = self.bin / "agentihooks"
+        fake.write_text(f'#!{BASH}\necho "$@" >> {log}\n')
+        fake.chmod(0o755)
+        new = self.run_wt("new", "released", "--repo", str(self.primary)).stdout.strip()
+        self.run_wt("done", "released", "--repo", str(self.primary))
+        self.assertIn(f"serena release {new}", log.read_text().splitlines())
+
+
+NAMER = """#!{bash}
+[[ "$1" == name ]] || exit 0
+base=engineer-a1b2c3-0002
+if [[ -n "${{NO_SESSION:-}}" ]]; then echo "name: no session" >&2; exit 3; fi
+if [[ "$2" == tmp ]]; then built="$base-tmp-1"; else built="$base"; fi
+check=""
+while [[ $# -gt 0 ]]; do [[ "$1" == --check ]] && check="$2"; shift; done
+if [[ -z "$check" ]]; then echo "$built"; exit 0; fi
+[[ "$check" == "$base" || "$check" == "$base"-* ]] && exit 0
+echo "name: names come from code; use $built" >&2
+exit 1
+"""
+
+
+class Names(WtBase):
+    def setUp(self):
+        super().setUp()
+        fake = self.bin / "agentihooks"
+        fake.write_text(NAMER.format(bash=BASH))
+        fake.chmod(0o755)
+
+    def test_new_without_a_name_takes_the_built_name(self):
+        result = self.run_wt("new", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        dest = Path(result.stdout.strip())
+        self.assertEqual(dest, self.worktree_root / "primary" / "engineer-a1b2c3-0002")
+        self.assertEqual(self.branch_of(dest), "engineer-a1b2c3-0002")
+
+    def test_new_refuses_a_name_the_session_did_not_build(self):
+        result = self.run_wt("new", "my-feature", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("names come from code", result.stderr)
+        self.assertFalse((self.worktree_root / "primary" / "my-feature").exists())
+
+    def test_tmp_without_a_name_takes_the_built_name_exactly(self):
+        result = self.run_wt("tmp", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            Path(result.stdout.strip()), self.worktree_root / "primary" / "_tmp" / "engineer-a1b2c3-0002-tmp-1"
+        )
+
+    def test_a_given_name_stands_outside_an_agent_session(self):
+        self.env["NO_SESSION"] = "1"
+        result = self.run_wt("new", "operator-fix", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).name, "operator-fix")
+
+
+if __name__ == "__main__":
+    unittest.main()

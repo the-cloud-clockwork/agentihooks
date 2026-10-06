@@ -84,6 +84,13 @@ aliases the body into `content`/`new_string` and lifts the target path out of
 translating, along with a list-shaped `command` (0.147) and a code-mode freeform
 `input` program.
 
+The question tool arrives as `request_user_input` with a Claude-shaped
+`{"questions": [...]}` input and is mapped to `AskUserQuestion`, so the
+operator-away refusal covers Codex. 0.160.0 offers it in Plan mode, and in
+Default mode only with the `default_mode_request_user_input` feature on; the
+hook sees it and an exit 2 block refuses it in both (verified live, 2026-10-06).
+Its `tool_response` is a JSON string, so answer-reading code sees no answers.
+
 0.154.0 also sends `transcript_path`, so `codex_rollout_path()` is now a
 fallback rather than the only source.
 

@@ -15,10 +15,15 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       must be marked artifact requested, or ENTRY names his message that asked
                                       (task defaults to your swarm task). Proofs go on the task proof and the PR
   artifact-purge                      delete every artifact and trash row of the ledger with their files
+  publish-plan PATH --phase IDS [--title T] [--repo OWNER/NAME]
+                                      publish an accepted plan: a GitHub issue where the repo has issues, else a
+                                      ledger artifact; links it on each phase, comments the phase, and every task
+                                      added to those phases carries the link
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
   followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
+  question add TEXT                   ask a question on the ledger; the master answers it or raises it to the operator
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
@@ -33,7 +38,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       AskUserQuestion answer this session recorded in the last hour
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
-  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
+  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
            [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
@@ -71,6 +76,7 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_kinds  # noqa: E402
 import ledger_link  # noqa: E402
+import ledger_publish  # noqa: E402
 import ledger_tasks  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
@@ -228,6 +234,43 @@ def cmd_artifact(args):
         sys.exit("rejected: join the ledger first and name a task it holds")
 
 
+def cmd_publish_plan(args):
+    phases = comma_list(args.phase)
+    if not phases:
+        sys.exit("publish-plan needs --phase with the ids of the phases the plan fills")
+    title = args.title or ledger_publish.title_of(Path(args.path).read_text(encoding="utf-8"), phases)
+
+    def artifact(path, title):
+        file = upload_artifact(args.slug, args.name, path)
+        task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+        send(args, "artifact_add", task=task, title=title, file=file, plan=True)
+        return f"{BASE}/artifacts/{args.slug}/{file['id']}"
+
+    try:
+        url, where = ledger_publish.publish(args.path, title, args.repo, artifact)
+    except ledger_publish.PublishError as exc:
+        sys.exit(str(exc))
+    ops = []
+    for phase in phases:
+        ops.append(op("phase_update", args, item=f"phases/{phase}", fields={"plan_url": url}))
+        text = (
+            f"Plan published as a GitHub issue: {url}" if where == "issue" else f"Plan published on the ledger: {url}"
+        )
+        ops.append(
+            {
+                "op": "add",
+                "thread": f"phases/{phase}/comments",
+                "id": f"c-{uuid.uuid4().hex[:10]}",
+                "text": text,
+                "by": args.name,
+            }
+        )
+    state = call(args.slug, ops)
+    if state.get("rejected"):
+        sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
+    print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+
+
 def cmd_artifact_purge(args):
     state = send(args, "artifact_purge")
     event = next(e for e in reversed(state["_meta"]["events"]) if e["kind"] == "artifacts purged")
@@ -266,6 +309,11 @@ def cmd_followup(args):
     else:
         send(args, "set", **with_status(args, path=f"followups/{args.value}/done", value=args.action == "done"))
     print(json.dumps({"followup": args.action}))
+
+
+def cmd_question(args):
+    send(args, "add_item", list="questions", text=args.text)
+    print(json.dumps({"question": args.action}))
 
 
 def cmd_priority(args):
@@ -372,6 +420,10 @@ def cmd_task(args):
             lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
+        if args.profile:
+            lists["profile"] = args.profile
+        if args.plan:
+            lists["plan_url"] = args.plan
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -468,6 +520,9 @@ def build_parser():
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
+    question = sub.add_parser("question")
+    question.add_argument("action", choices=["add"])
+    question.add_argument("text")
     scope = sub.add_parser("scope")
     scope.add_argument("item")
     scope.add_argument("state", choices=["in", "out"])
@@ -511,6 +566,13 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
+    task.add_argument("--profile")
+    task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
+    publish = sub.add_parser("publish-plan")
+    publish.add_argument("path")
+    publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
+    publish.add_argument("--title", default="", help="default the plan's first heading")
+    publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
     return parser
 
 

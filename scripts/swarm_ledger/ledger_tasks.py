@@ -25,15 +25,21 @@ UPDATABLE = (
     "workspace",
     "awaiting",
     "artifact",
+    "profile",
+    "plan_url",
 )
 BOOL_FIELDS = ("artifact",)
 LIST_FIELDS = ("depends_on", "territory")
 OBJECT_FIELDS = ("contract", "proof")
-URL_FIELDS = ("issue_url", "pr_url")
+URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 WORKER_LANES = ("eng", "ci")
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
+PUBLISH = (
+    "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
+    "task set <id> plan_url=<link>"
+)
 
 
 def check_lane(task: dict) -> None:
@@ -59,6 +65,8 @@ def check(op):
             raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
         check_bools(op)
+        check_profile(op)
+        check_urls(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -78,6 +86,7 @@ def check(op):
         raise ValueError(f"state must be one of {STATES}")
     check_lists(fields)
     check_bools(fields)
+    check_profile(fields)
     check_urls(fields)
     ledger_kinds.check(fields)
 
@@ -95,6 +104,13 @@ def check_bools(fields):
             raise ValueError(f"{key} must be true or false")
 
 
+def check_profile(fields):
+    if "profile" in fields and not (
+        fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
+    ):
+        raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
+
+
 def check_urls(fields):
     for key in URL_FIELDS:
         if fields.get(key) and not URL_RE.match(fields[key]):
@@ -109,6 +125,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
     check_lists(task)
     check_urls(task)
+    check_profile(task)
     ledger_kinds.check(task)
     check_lane(task)
     if task.get("state") == "done" and ledger_kinds.unmet(task):
@@ -144,9 +161,12 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile"):
         if key in op:
             task[key] = op[key]
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
+    if plan_url := op.get("plan_url") or phase.get("plan_url"):
+        task["plan_url"] = plan_url
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -177,8 +197,12 @@ def next_id(tasks):
     return f"t{max(numbers, default=0) + 1}"
 
 
+def slice_ids(task: dict) -> list[str]:
+    return [item.strip() for item in task["proof"]["slice"].split(",")]
+
+
 def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
-    ids = [item.strip() for item in task["proof"]["slice"].split(",")]
+    ids = slice_ids(task)
     known = {item["id"]: item for item in tasks}
     return [
         item or "<empty>"
@@ -187,6 +211,11 @@ def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
         or known[item].get("phase") != task.get("phase")
         or ledger_kinds.kind(known[item]) == "plan"
     ]
+
+
+def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
+    ids = set(slice_ids(task))
+    return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
 
 
 def _update(doc, op, ctx):
@@ -204,6 +233,9 @@ def _update(doc, op, ctx):
         bad = invalid_slice(after, doc["tasks"])
         if bad:
             ctx.refused.append(f"{op['item']} has invalid slice task ids: {', '.join(bad)}")
+            return False
+        if unlinked := unlinked_slice(after, doc["tasks"]):
+            ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
             return False
     changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
     task.update(changed)

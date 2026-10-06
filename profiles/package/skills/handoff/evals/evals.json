@@ -1,0 +1,29 @@
+[
+  {
+    "query": "The swarm injected HANDOFF PREPARATION at my compact limit. Prepare my handoff.",
+    "files": [],
+    "expected_behavior": [
+      "Writes short Markdown with the Handoff v2 title, six ordered headings and the completion marker as the last line before the stated deadline or hard gate.",
+      "Leaves runtime identity and resources to the envelope and uses resolving addresses in Read first.",
+      "Provides Done evidence or labels a bullet hypothesis, names unknown gaps, and does not author a separate recap."
+    ]
+  },
+  {
+    "query": "I am the successor after a swarm handoff. What must I read and confirm?",
+    "files": [],
+    "expected_behavior": [
+      "Reads the runtime envelope, handoff body and ranked Read first addresses before older recaps, preserving named gaps.",
+      "Confirms the first Next action exactly as written with confirm-handoff.",
+      "Checks continuity and live binding separately rather than treating a launched session as confirmed continuity."
+    ]
+  },
+  {
+    "query": "Restore could not resume the old conversation and the seat is awaiting decision. Continue the handoff.",
+    "files": [],
+    "expected_behavior": [
+      "Reports the named gap and leaves the seat awaiting decision until the master or operator chooses resume or fresh.",
+      "Uses restore-decision for that explicit choice rather than silently starting fresh.",
+      "Keeps recovery facts runtime authored and requires a learned note to include a because clause."
+    ]
+  }
+]

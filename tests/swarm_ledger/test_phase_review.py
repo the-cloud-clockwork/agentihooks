@@ -18,7 +18,7 @@ def sync(*ops):
 
 def task_add(task, lane="eng", kind="code"):
     return {"op": "task_add", "id": f"add-{task}", "by": "planner", "task": task, "title": f"Task {task}",
-            "lane": lane, "kind": kind, "phase": "p1"}  # fmt: skip
+            "lane": lane, "kind": kind, "phase": "p1", "plan_url": "https://github.com/acme/app/issues/1"}  # fmt: skip
 
 
 def planned():

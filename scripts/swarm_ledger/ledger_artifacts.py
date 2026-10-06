@@ -135,8 +135,10 @@ def check(op):
 
 
 def check_add(op):
-    if not ADD_KEYS <= set(op) <= ADD_KEYS | {"request"}:
-        raise ValueError("artifact_add takes id, by, task, title, file and an optional request")
+    if not ADD_KEYS <= set(op) <= ADD_KEYS | {"request", "plan"}:
+        raise ValueError("artifact_add takes id, by, task, title, file and an optional request or plan")
+    if "plan" in op and op["plan"] is not True:
+        raise ValueError("plan must be true, marking a published plan")
     if not isinstance(op["by"], str) or not AUTHOR_RE.match(op["by"]) or op["by"] == "operator":
         raise ValueError("artifact_add needs `by`, an agent name other than operator")
     if not isinstance(op["task"], str) or not TASK_RE.match(op["task"]):
@@ -167,13 +169,15 @@ def _add(doc, op, ctx):
     task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
     if op["by"] not in ctx.meta["members"] or (op["task"] and task is None):
         return False
-    if not (task and task.get("artifact") is True) and not operator_asked(doc, op.get("request")):
+    requested = op.get("plan") is True or (task and task.get("artifact") is True)
+    if not requested and not operator_asked(doc, op.get("request")):
         ctx.refused.append(REFUSED)
         return False
     title = op["title"].strip()
     row = {"id": op["id"], "title": title, "by": op["by"], "task": op["task"], "at": ctx.at, "file": op["file"]}
-    if "request" in op:
-        row["request"] = op["request"]
+    for key in ("request", "plan"):
+        if key in op:
+            row[key] = op[key]
     rows.append(row)
     ctx.stamp("artifacts", op["by"])
     ctx.record(
