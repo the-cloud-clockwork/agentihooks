@@ -425,13 +425,20 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
 .sw-alert-kinds { letter-spacing: .06em; color: var(--warn); text-shadow: var(--glow); }
 .sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
-.sw-capacity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-group); }
+.sw-capacity { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-tight); }
+.sw-caps, .sw-gates { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
+.sw-caps { column-gap: var(--space-tight); }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
-.sw-cap { display: inline-flex; align-items: center; gap: 6px; }
-.sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
-.sw-gates { display: contents; }
-.sw-num { min-width: 4ch; text-align: right; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
-.sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
+.sw-cap { display: inline-flex; align-items: center; gap: 2px; }
+.sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.sw-field { display: inline-flex; align-items: baseline; gap: 2px; }
+.sw-num { field-sizing: content; min-width: 2ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-1); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
+@supports not (field-sizing: content) { .sw-num { width: 4ch; } }
+.sw-num:hover { background: var(--hover); }
+.sw-num:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sw-num[aria-invalid="true"] { color: var(--destructive); text-shadow: var(--glow); }
+.sw-unit { font-size: var(--fs-meta); color: var(--muted); }
+.sw-btn.sw-step { min-width: 24px; min-height: 28px; padding: 0; background: transparent; font-size: var(--fs-item); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
 .sw-pair > .sw-block ~ .sw-block { border-left: 1px solid var(--rule); }
@@ -509,8 +516,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   .sw-grip { display: none; }
   .sw-modes, .sw-layout { padding-left: 0; border-left: 0; }
   .sw-live { margin-left: 0; }
-  .sw-capacity { gap: var(--space-tight) var(--space-row); }
-  .sw-capacity .sw-label { flex-basis: 100%; }
   .sw-actions { margin-left: 0; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -565,11 +570,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
 <div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
 <div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
-<div class="sw-cap"><span class="sw-cap-name">eng</span><span class="sw-num" id="cap-eng"></span><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">ci</span><span class="sw-num" id="cap-ci"></span><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<div class="sw-caps"><div class="sw-cap"><span class="sw-cap-name">eng</span><label class="sw-field"><input class="sw-num" id="cap-eng" type="text" inputmode="numeric" autocomplete="off" data-cap="max_eng" aria-label="Engineer cap"></label><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">ci</span><label class="sw-field"><input class="sw-num" id="cap-ci" type="text" inputmode="numeric" autocomplete="off" data-cap="max_ci" aria-label="CI cap"></label><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">plan</span><label class="sw-field"><input class="sw-num" id="cap-plan" type="text" inputmode="numeric" autocomplete="off" data-cap="max_plan" aria-label="Planner cap"></label><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">codex share</span><label class="sw-field"><input class="sw-num" id="cap-codex" type="text" inputmode="numeric" autocomplete="off" data-cap="codex_share" aria-label="Codex share"><span class="sw-unit">%</span></label><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">compact limit</span><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
@@ -1596,7 +1602,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
   const GATE_MODES = ["enforce", "observe", "off"];
-  const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100], compact: ["compact_limit", 50, 100, 1000] };
+  const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100, "codex share"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
   const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -1604,6 +1610,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   let swarmReadError = false;
   let pending = "";
   let noteTimer = 0;
+  let capDraft = {};
 
   async function pollSwarm() {
     try {
@@ -1637,7 +1644,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 
   function capStep(values, lane, up) {
     const [key, step, low, high] = STEPS[lane];
-    return { action: "set", [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
+    return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
+  }
+
+  function capChanges(values, draft) {
+    const body = { action: "set" }, bad = [];
+    for (const [lane, [key, , low, high, name]] of Object.entries(STEPS)) {
+      if (!(key in draft)) continue;
+      const text = String(draft[key]).trim();
+      const value = /^\d+$/.test(text) ? Number(text) : NaN;
+      if (!(value >= low && value <= high)) bad.push(`${name || lane} must be a whole number from ${low} to ${high}`);
+      else if (value !== Number(values[key])) body[key] = value;
+    }
+    return { body, bad };
+  }
+
+  function capCurrent() {
+    return { ...capValues(swarm), ...capDraft };
   }
 
   function capBounds(values) {
@@ -1652,7 +1675,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
-      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict", lift: "Lift the gate" }[action] || action;
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1669,7 +1692,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 
   function renderControls() {
     const config = swarm ? swarm.config : {};
-    const off = swarm ? { ...swarmControls(config.state), ...capBounds(capValues(swarm)) } : swarmControls("");
+    const changes = swarm ? capChanges(capValues(swarm), capDraft) : { body: {}, bad: [] };
+    const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
     for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
       const action = btn.dataset.swarm;
       btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -1682,6 +1706,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       btn.disabled = !swarm || !!pending;
     }
     for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
+    for (const input of $("capacity-box").querySelectorAll("input[data-cap]")) {
+      if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
+      input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
+      input.disabled = !swarm || pending === "apply";
+    }
   }
 
   function renderGates(sw) {
@@ -1700,6 +1729,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
       if (resp.ok) {
         swarm = await resp.json();
+        if (op === "apply") capDraft = {};
         showNote("done", op);
       } else {
         showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
@@ -1741,7 +1771,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
     const step = action.match(/^(eng|ci|plan|codex|compact)_(up|down)$/);
-    if (step) return swarmControl(capStep(capValues(swarm), step[1], step[2] === "up"), action);
+    if (step) {
+      const change = capStep(capCurrent(), step[1], step[2] === "up");
+      Object.assign(capDraft, change);
+      $("cap-" + step[1]).value = Object.values(change)[0];
+      return renderControls();
+    }
+    if (action === "apply") return applyCaps();
     const consequence = {
       stop_now: "Retire every agent now. Work in progress stays in its worktree.",
       close: "Write the summary, retire every agent and close this ledger. Reopen brings it back.",
@@ -1749,6 +1785,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     }[action];
     if (consequence && !confirm(consequence)) return;
     swarmControl({ action });
+  });
+
+  function applyCaps() {
+    const { body, bad } = capChanges(capValues(swarm), capDraft);
+    if (bad.length) return showNote("error", "apply", bad.join("; "));
+    if (Object.keys(body).length > 1) swarmControl(body, "apply");
+  }
+
+  $("capacity-box").addEventListener("input", (event) => {
+    const input = event.target.closest("input[data-cap]");
+    if (!input) return;
+    capDraft[input.dataset.cap] = input.value;
+    renderControls();
+  });
+
+  $("capacity-box").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.closest("input[data-cap]") && swarm && !pending) applyCaps();
   });
 
   $("health").addEventListener("change", (event) => {
@@ -1781,10 +1834,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function liveCaps(sw) {
     const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
     return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
-  }
-
-  function capText(values) {
-    return { eng: values.max_eng, ci: values.max_ci, plan: values.max_plan, codex: `${values.codex_share ?? 0}%`, compact: values.compact_limit ? `${values.compact_limit}k` : "—" };
   }
 
   function modelText(a) {
@@ -1858,12 +1907,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));
       return;
     }
-    const now = Date.now(), open = openFindings(sw), values = capValues(sw);
+    const now = Date.now(), open = openFindings(sw);
     $("swarm-alert").hidden = !open.length;
     $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
     $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
     $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
-    for (const [lane, text] of Object.entries(capText(values))) $("cap-" + lane).textContent = String(text);
     const agents = agentRows(sw, now);
     $("agents-count").textContent = `${agents.length} live`;
     $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
