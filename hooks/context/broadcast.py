@@ -61,7 +61,7 @@ from hooks.config import (
     BROADCAST_MIN_INTERVAL_SEC,
     BROADCAST_PERSISTENT_THROTTLE,
 )
-from hooks.context import injection_trace
+from hooks.context import injection_trace, quarantine
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
 
@@ -565,6 +565,16 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
 # ---------------------------------------------------------------------------
 
 
+def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
+    return quarantine.keep(
+        session_id,
+        "broadcast",
+        msgs,
+        lambda m: [m.get("id"), (m.get("origin") or {}).get("id")],
+        lambda m: m.get("message"),
+    )
+
+
 def get_pending_broadcasts(session_id: str) -> list[dict]:
     """Return broadcasts the session has not yet seen.
 
@@ -589,7 +599,7 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
             pending.append(m)
         elif session_id not in m.get("delivered_to", []):
             pending.append(m)
-    return pending
+    return _admitted(session_id, pending)
 
 
 def get_critical_broadcasts(session_id: str) -> list[dict]:
@@ -601,7 +611,7 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
     """
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
-    return [
+    critical = [
         m
         for m in msgs
         if m.get("severity") == "critical"
@@ -610,13 +620,14 @@ def get_critical_broadcasts(session_id: str) -> list[dict]:
         and _message_matches_channel(m, channels)
         and session_id not in m.get("acknowledged_by", [])
     ]
+    return _admitted(session_id, critical)
 
 
 def get_unseen_broadcasts(session_id: str, *, claim: bool = False) -> list[dict]:
     def select(msgs: list[dict]) -> list[dict]:
         channels = _get_session_channels(session_id)
         session = _load_sessions().get(session_id, {})
-        return [
+        unseen = [
             msg
             for msg in msgs
             if not _is_expired(msg)
@@ -625,6 +636,7 @@ def get_unseen_broadcasts(session_id: str, *, claim: bool = False) -> list[dict]
             and session_id not in msg.get("acknowledged_by", [])
             and session_id not in msg.get("delivered_to", [])
         ]
+        return _admitted(session_id, unseen)
 
     if not claim:
         return select(_load_broadcasts(cleanup=True))
@@ -664,7 +676,7 @@ def get_pretool_broadcasts(session_id: str) -> list[dict]:
             continue
         if BROADCAST_CRITICAL_ON_PRETOOL and _SEVERITY_RANK.get(m.get("severity", "info"), 9) <= min_rank:
             out[m["id"]] = m
-    return list(out.values())
+    return _admitted(session_id, list(out.values()))
 
 
 def claim_delivery(session_id: str, message_id: str) -> bool:

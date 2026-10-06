@@ -274,6 +274,7 @@ def handoff_lines(task):
 
 def learned_lines(learned):
     rank = {maturity: -level for level, maturity in enumerate(MATURITIES)}
+    learned = [note for note in learned if not note.get("withheld")]
     shown = sorted((note for note in learned if note["maturity"] != "data"), key=lambda note: rank[note["maturity"]])
     data = len(learned) - len(shown)
     counted = [f"{data} data entries are kept on the seat and not shown."] if data else []

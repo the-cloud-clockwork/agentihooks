@@ -121,3 +121,58 @@ def test_a_bundle_without_a_shared_claude_dir_reads_its_root_claude_md(tmp_path)
     _write(bundle / "CLAUDE.md", "ROOT DIRECTIVE\n")
     _write(bundle / ".claude" / "claude.md", "WRONG CASE\n")
     assert sources.doctrine_files(bundle, []) == [bundle / "CLAUDE.md"]
+
+
+def _correct_passage(bundle, rel, quote):
+    from hooks.context import injection_trace
+
+    source = f"bundle/{rel}"
+    injection_trace.record("sess-render", "rule", source, quote, {"repo": str(bundle), "path": rel, "blob": ""})
+    injection_trace.correct("sess-render", source, "/repos/qitp", "belongs to another repo", quote)
+
+
+def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeypatch):
+    import tomllib
+
+    from scripts.profiles import render
+    from scripts.targets.codex_target import codex_home
+
+    monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
+    out = render.render_claude("rb-role")
+    assert render.render_claude("rb-role") is None
+    _correct_passage(bundle, "profiles/rb-kit/.claude/rules/role-rule.md", "ROLE RULE MARKER")
+    _correct_passage(bundle, "profiles/rb-role/CLAUDE.md", "ROLE PERSONA MARKER")
+
+    assert render.render_claude("rb-role") == out
+
+    notice = "> CORRECTION: the passage above is marked wrong for the qitp repo: belongs to another repo."
+    assert (out / "rules" / "role-rule.md").read_text().startswith(f"ROLE RULE MARKER\n\n{notice}")
+    assert f"ROLE PERSONA MARKER\n\n{notice}" in (out / "CLAUDE.md").read_text()
+    assert notice not in (out / "rules" / "bundle-rule.md").read_text()
+    render.render_codex("rb-role")
+    codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
+    assert f"ROLE RULE MARKER\n\n{notice}" in codex and f"ROLE PERSONA MARKER\n\n{notice}" in codex
+
+
+def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypatch):
+    import tomllib
+
+    from scripts.profiles import render
+    from scripts.targets.codex_target import codex_home
+
+    monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
+    rel = "profiles/rb-kit/.claude/rules/role-rule.md"
+    _correct_passage(bundle, rel, "ROLE RULE MARKER")
+    _correct_passage(bundle, rel, "ROLE RULE MARKER")
+
+    out = render.render_claude("rb-role")
+    render.render_codex("rb-role")
+
+    held = (
+        f"> CORRECTION: bundle/{rel} was marked wrong more than once and is held whole until the operator releases it."
+    )
+    assert (out / "rules" / "role-rule.md").read_text() == f"{held}\n"
+    assert (out / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
+    codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
+    assert f"<!-- rule: role-rule.md (rule) -->\n{held}" in codex
+    assert "ROLE RULE MARKER" not in codex

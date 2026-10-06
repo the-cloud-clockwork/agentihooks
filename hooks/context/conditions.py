@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hooks.context import injection_trace, profile_chain, tool_matcher
+from hooks.context import injection_trace, profile_chain, quarantine, tool_matcher
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
@@ -452,10 +452,13 @@ def merge(step: str, payload: dict, runs: list[tuple[dict, dict]]) -> StepResult
             result.reasons.append(f"[condition {label}] {(run.get('stderr') or '').strip() or 'blocked'}")
             continue
         out = _parse_stdout(run.get("stdout", ""))
-        if out.get("context"):
+        session = str(payload.get("session_id") or "")
+        if out.get("context") and quarantine.keep(
+            session, "condition", [label], lambda f: [f], lambda f: out["context"]
+        ):
             result.contexts.append(f"[condition {label}]\n{out['context']}")
             locator = {"layer": entry.get("source", ""), "file": entry.get("path", "")}
-            injection_trace.record(str(payload.get("session_id") or ""), "condition", label, out["context"], locator)
+            injection_trace.record(session, "condition", label, out["context"], locator)
         if step == "pre" and isinstance(out.get("tool_input"), dict):
             result.input_patch.update(out["tool_input"])
             result.input_writers.append(label)

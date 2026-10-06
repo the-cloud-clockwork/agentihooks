@@ -126,7 +126,7 @@ def trace(session_id: str) -> list[dict]:
     return _read(_session_path(session_id))
 
 
-def correct(session_id: str, source: str, repo: str, reason: str, quote: str = "") -> dict:
+def correct(session_id: str, source: str, repo: str, reason: str, quote: str = "", status: str = "") -> dict:
     received = [row for row in trace(session_id) if row.get("source") == source]
     if not received:
         raise ValueError(f"session {session_id} never received a directive from {source}")
@@ -143,6 +143,8 @@ def correct(session_id: str, source: str, repo: str, reason: str, quote: str = "
     if quote:
         _check_quote(row, quote)
         row["quote"] = quote
+    if status:
+        row["status"] = status
     _append(_corrections_path(), row)
     return row
 
