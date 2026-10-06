@@ -84,6 +84,17 @@ def test_the_id_label_is_bare_red_glowing_text_in_the_priorities_red(tab):
     assert "color: var(--destructive)" in css_rule(".prio-link")
 
 
+def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
+    tab.locator("#priorities .prio-link").click()
+    label = tab.locator("#item-tasks-rb3c .task-id")
+    label.wait_for(state="visible")
+    label.focus()
+    tab.keyboard.press("Tab")
+    tab.keyboard.press("Shift+Tab")
+    assert label.evaluate("el => el.matches(':focus-visible')")
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+
+
 def test_a_priorities_link_opens_the_folded_tasks_and_scrolls_to_the_card(tab):
     assert not tab.locator("#item-tasks-rb3c").is_visible()
     tab.locator("#priorities .prio-link").click()
@@ -101,7 +112,15 @@ def test_a_task_id_in_chat_links_to_its_card(tab):
         ["rb3c", "#item-tasks-rb3c"],
         ["one", "#item-tasks-one"],
     ]
-    assert "merged, " in tab.locator("#chat-log .entry-body").inner_text()
+    assert "merged, " in tab.locator("#chat-log .entry-body").text_content()
+    assert not tab.locator("#item-tasks-rb3c").is_visible()
+    tab.locator("#chat-fab").click()
+    links.first.click()
+    tab.locator("#item-tasks-rb3c").wait_for(state="visible")
+    tab.wait_for_function(
+        "() => { const r = document.getElementById('item-tasks-rb3c').getBoundingClientRect();"
+        " return r.top >= 0 && r.bottom <= innerHeight; }"
+    )
 
 
 def test_the_outline_lists_each_task_by_id_and_title(tab):
