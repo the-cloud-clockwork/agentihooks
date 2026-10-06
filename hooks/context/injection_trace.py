@@ -12,6 +12,7 @@ from pathlib import Path
 
 _TEXT_MAX = 300
 _ENFORCEMENT_LAYER = {"bundle": "bundle", "profile": "profile"}
+FILE_LAYERS = ("rule", "doctrine")
 
 
 def _home() -> Path:
@@ -87,6 +88,36 @@ def record_broadcast(session_id: str, msg: dict) -> None:
     record(session_id, layer, msg.get("id", ""), text, locator)
 
 
+def record_rows(session_id: str, rows: list[dict]) -> None:
+    held = {(row.get("layer"), row.get("source")) for row in trace(session_id)}
+    for row in rows:
+        if (row.get("layer"), row.get("source")) not in held:
+            record(session_id, row["layer"], row["source"], row["text"], row["locator"])
+
+
+def _manifest(path: Path) -> list[dict]:
+    try:
+        rows = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def manifests(environ, target: str) -> list[Path]:
+    found = []
+    if environ.get("AGENTIHOOKS_PROFILE"):
+        found.append(_home() / "profiles" / environ["AGENTIHOOKS_PROFILE"] / f"{target}.sources.json")
+    slug, name = environ.get("AGENTIHOOKS_SWARM"), environ.get("AGENTIHOOKS_AGENT_NAME")
+    if slug and name:
+        found.append(_home() / "swarm" / slug / "prompts" / f"{name}.sources.json")
+    return found
+
+
+def record_session_start(session_id: str, environ, target: str) -> None:
+    for path in manifests(environ, target):
+        record_rows(session_id, _manifest(path))
+
+
 def format_locator(locator: dict | None) -> str:
     return " ".join(f"{key}={value}" for key, value in (locator or {}).items())
 
@@ -95,7 +126,7 @@ def trace(session_id: str) -> list[dict]:
     return _read(_session_path(session_id))
 
 
-def correct(session_id: str, source: str, repo: str, reason: str) -> dict:
+def correct(session_id: str, source: str, repo: str, reason: str, quote: str = "") -> dict:
     received = [row for row in trace(session_id) if row.get("source") == source]
     if not received:
         raise ValueError(f"session {session_id} never received a directive from {source}")
@@ -109,8 +140,25 @@ def correct(session_id: str, source: str, repo: str, reason: str) -> dict:
         "repo": repo,
         "reason": reason,
     }
+    if quote:
+        _check_quote(row, quote)
+        row["quote"] = quote
     _append(_corrections_path(), row)
     return row
+
+
+def _check_quote(row: dict, quote: str) -> None:
+    if row["layer"] not in FILE_LAYERS:
+        raise ValueError(
+            f"--quote names a passage of a rule or doctrine file; {row['source']} is a {row['layer']} directive"
+        )
+    file = Path(row["locator"]["repo"]) / row["locator"]["path"]
+    try:
+        text = file.read_text()
+    except OSError as e:
+        raise ValueError(f"cannot read {file} to find the quoted passage: {e}") from e
+    if " ".join(quote.split()) not in " ".join(text.split()):
+        raise ValueError(f"the quoted passage is not in {file}")
 
 
 def corrections() -> list[dict]:

@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
-from scripts.swarm import model_pick, naming, prompt
+from scripts.swarm import model_pick, naming, priming_trace, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
@@ -106,6 +106,7 @@ class HerdrRuntime:
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
+        priming_trace.write(self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", chosen.get("profile", DEFAULT_PROFILES[lane]))
         if lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)

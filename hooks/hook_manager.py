@@ -400,6 +400,14 @@ def on_session_start(payload: dict) -> None:
     except Exception as e:
         log("enforcement session start failed", {"error": str(e)})
 
+    try:
+        from hooks.context.injection_trace import record_session_start
+        from hooks.targets import current_target as _trace_target
+
+        record_session_start(session_id, os.environ, _trace_target())
+    except Exception as e:
+        log("injection trace session start failed", {"error": str(e)})
+
     from hooks.config import MCP_HYGIENE_ENABLED
 
     if MCP_HYGIENE_ENABLED:
