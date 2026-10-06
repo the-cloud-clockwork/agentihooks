@@ -66,12 +66,17 @@ def test_explicit_plan_link_wins_over_the_phase_and_can_be_set_later(plan_ledger
 def test_slice_is_refused_while_a_slice_task_carries_no_plan_link(plan_ledger):
     add(plan_ledger, "plan", lane="plan", kind="plan")
     add(plan_ledger, "build")
-    state, _ = update(plan_ledger, state="done", proof={"slice": "build"})
+    add(plan_ledger, "check")
+    state, rejected = update(plan_ledger, state="done", proof={"slice": "build,check"})
+    assert rejected == ["finish-plan"]
     assert task(state, "plan")["state"] == "open"
-    assert any("publish the plan" in w for w in state["_meta"]["warnings"])
+    assert state["_meta"]["warnings"] == [
+        f"tasks/plan slice tasks carry no plan link: build, check. {ledger_tasks.PUBLISH}"
+    ]
     phase_plan(plan_ledger)
     add(plan_ledger, "ship")
-    state, _ = update(plan_ledger, state="done", proof={"slice": "ship"})
+    state, rejected = update(plan_ledger, state="done", proof={"slice": "ship"})
+    assert rejected == []
     assert task(state, "plan")["state"] == "done"
 
 
@@ -106,7 +111,10 @@ def test_artifact_check_takes_a_plan_flag_and_keeps_its_other_rules():
     op = {"op": "artifact_add", "id": "art-1", "by": "planner", "task": "plan", "title": "Plan", "file": file}
     ledger_artifacts.check(dict(op))
     ledger_artifacts.check({**op, "plan": True, "request": "m-1"})
-    for bad in ({"plan": False}, {"plan": 1}, {"by": "operator"}, {"by": 5}, {"by": "1bad"}, {"extra": 1}):
+    with pytest.raises(ValueError) as raised:
+        ledger_artifacts.check({**op, "plan": False})
+    assert str(raised.value) == "plan must be true, marking a published plan"
+    for bad in ({"plan": 1}, {"by": "operator"}, {"by": 5}, {"by": "1bad"}, {"extra": 1}):
         with pytest.raises(ValueError):
             ledger_artifacts.check({**op, **bad})
 
@@ -304,22 +312,59 @@ def test_publish_plan_exits_when_the_ledger_refuses(plan_ledger, tmp_path, monke
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize(
+    ("state", "message"),
+    [
+        ({"rejected": ["x"], "_meta": {"warnings": ["first", "second"]}}, "first; second"),
+        ({"rejected": ["x"], "_meta": {}}, "rejected: ['x']"),
+        ({"rejected": ["x"]}, "rejected: ['x']"),
+    ],
+)
+def test_publish_plan_exits_with_the_ledger_warnings(tmp_path, monkeypatch, state, message):
+    plan = tmp_path / "plan.md"
+    plan.write_text("no heading\n", encoding="utf-8")
+    titles = []
+    monkeypatch.setattr(
+        ledger.ledger_publish, "publish", lambda path, title, *a: titles.append(title) or (PLAN, "issue")
+    )
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: state)
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--phase", "p1,p2"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == message
+    assert titles == ["Plan for phases p1, p2"]
+
+
+def test_publish_plan_artifact_outside_a_swarm_task_names_no_task(plan_ledger, tmp_path, monkeypatch):
+    core.sync(plan_ledger, ops=[{"op": "join", "id": "join-planner", "by": "planner", "role": "member"}])
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Master plan\n", encoding="utf-8")
+    file = {"id": f"{'c' * 64}.md", "type": "text/markdown", "size": 14}
+    monkeypatch.setattr(ledger.ledger_publish, "has_issues", lambda repo, run=None: False)
+    monkeypatch.setattr(ledger, "upload_artifact", lambda slug, name, path: file)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    cli(monkeypatch, plan_ledger, "publish-plan", str(plan), "--phase", "p1")
+    [row] = core.sync(plan_ledger)[0]["artifacts"]
+    assert (row["task"], row["title"]) == ("", "Master plan")
+
+
 def test_publish_plan_parser_names_its_options():
     parser = ledger.build_parser()
-    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices["publish-plan"]
-    text = " ".join(sub.format_help().split())
-    for words in (
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
+    helps = {a.dest: a.help for a in commands["publish-plan"]._actions}
+    assert (helps["phase"], helps["title"], helps["repo"]) == (
         "comma separated ids of the phases the plan fills",
         "default the plan's first heading",
         "OWNER/NAME for the issue; default the current repo",
-    ):
-        assert words in text
+    )
     args = parser.parse_args(["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--phase", "p1"])
     assert (args.path, args.phase, args.title, args.repo) == ("plan.md", "p1", "", "")
     with pytest.raises(SystemExit):
         parser.parse_args(["--slug", "s", "--as", "planner", "publish-plan", "plan.md"])
-    task = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices["task"]
-    assert "link to the published plan; default the phase's plan link" in " ".join(task.format_help().split())
+    plan = next(a for a in commands["task"]._actions if a.dest == "plan")
+    assert plan.help == "link to the published plan; default the phase's plan link"
     assert parser.parse_args(["--slug", "s", "--as", "m", "task", "add", "t1", "Build"]).plan == ""
 
 
