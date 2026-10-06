@@ -384,7 +384,7 @@ def research_steps(me, led, name, phase):
     ]
 
 
-def plan_steps(me, led, name, phase):
+def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
         "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",

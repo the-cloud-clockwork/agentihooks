@@ -4,7 +4,7 @@ import os
 
 def _dependencies(phase, phases):
     pending = list(phase.get("depends_on", []))
-    seen = {phase.get("id")}
+    seen = {phase["id"]}
     while pending:
         phase_id = pending.pop(0)
         if phase_id in seen:
@@ -23,18 +23,18 @@ def _bounded(title, text, limit):
 
 def evidence(task: dict, doc: dict) -> str:
     limit = int(os.environ.get("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", "6000"))
-    phases = {phase["id"]: phase for phase in doc.get("phases", [])}
+    phases = {phase["id"]: phase for phase in doc["phases"]}
     phase = phases[task["phase"]]
     lines = [
         "Plan evidence",
-        _bounded("Project intent", doc.get("overview", ""), limit),
+        _bounded("Project intent", doc["overview"], limit),
         _bounded("Mission intent", f"{phase['title']}\n{phase.get('description', '')}", limit),
     ]
     for dependency in _dependencies(phase, phases):
         title = dependency["title"]
         tasks = [
             {key: row.get(key, "") for key in ("title", "state", "pr_url", "proof")}
-            for row in doc.get("tasks", [])
+            for row in doc["tasks"]
             if row.get("phase") == dependency["id"]
         ]
         lines.append(_bounded(f"Dependency tasks for {title}", json.dumps(tasks, ensure_ascii=False), limit))

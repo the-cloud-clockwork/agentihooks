@@ -43,6 +43,8 @@ def test_planner_steering_carries_transitive_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger_workspace, "folder", lambda slug, task_id: tmp_path / task_id)
     folder = ledger_workspace.scaffold("demo", task, doc)
     text = (folder / "steering.md").read_text()
+    assert (folder / "progress.md").read_text() == ""
+    assert (folder / "proof.md").read_text() == ""
     for expected in (
         "Project intent",
         "Current phase",
@@ -102,3 +104,61 @@ def test_planner_evidence_default_cap_and_dependency_comments(monkeypatch):
     assert "Kept" in text and "Deleted" not in text
     assert "Review note" not in text
     assert "x" * 6000 not in text
+
+
+def test_plan_evidence_text_includes_each_dependency_and_review():
+    task = {"id": "plan", "title": "Slice", "kind": "plan", "phase": "current"}
+    doc = {
+        "overview": "Intent",
+        "phases": [
+            {
+                "id": "current",
+                "title": "Current",
+                "description": "Mission",
+                "depends_on": ["a", "a", "b"],
+                "review": {"state": "sent_back", "note": "Revise"},
+            },
+            {"id": "a", "title": "Alpha", "depends_on": ["current"], "comments": [{"text": "One"}, {"text": "Two"}]},
+            {"id": "b", "title": "Beta"},
+        ],
+        "tasks": [
+            {"phase": "a", "title": "Diseño", "state": "done"},
+            {
+                "phase": "b",
+                "title": "Build",
+                "state": "pr",
+                "pr_url": "https://example.com/pr",
+                "proof": {"output": "Passed"},
+            },
+        ],
+    }
+    assert ledger_workspace.steering(task, doc) == (
+        "# plan: Slice\n\nPlan evidence\n\nProject intent\nIntent\n\nMission intent\nCurrent\nMission\n\n"
+        'Dependency tasks for Alpha\n[{"title": "Diseño", "state": "done", "pr_url": "", "proof": ""}]\n\n'
+        "Last five comments for Alpha\nOne\nTwo\n\n"
+        'Dependency tasks for Beta\n[{"title": "Build", "state": "pr", "pr_url": "https://example.com/pr", "proof": {"output": "Passed"}}]\n\n'
+        "Last five comments for Beta\n\n\nReview note\nRevise\n"
+    )
+
+
+def test_plan_evidence_without_dependencies_or_review_note():
+    task = {"id": "plan", "title": "Slice", "kind": "plan", "phase": "current"}
+    doc = {
+        "overview": "Intent",
+        "phases": [{"id": "current", "title": "Current", "review": {"state": "sent_back"}}],
+        "tasks": [],
+    }
+    assert (
+        ledger_workspace.steering(task, doc)
+        == "# plan: Slice\n\nPlan evidence\n\nProject intent\nIntent\n\nMission intent\nCurrent\n\n\nReview note\n\n"
+    )
+
+
+def test_evidence_at_exact_limit_is_complete(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", "6")
+    task = {"id": "plan", "title": "Slice", "kind": "plan", "phase": "current"}
+    doc = {"overview": "Intent", "phases": [{"id": "current", "title": "Now", "description": "Go"}], "tasks": []}
+    assert (
+        ledger_workspace.steering(task, doc)
+        == "# plan: Slice\n\nPlan evidence\n\nProject intent\nIntent\n\nMission intent\nNow\nGo\n"
+    )

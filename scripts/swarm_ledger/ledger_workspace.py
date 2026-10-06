@@ -16,7 +16,7 @@ def folder(slug, task_id):
     return Path.home() / ".agentihooks" / "swarm" / slug / "tasks" / task_id
 
 
-def scaffold(slug, task, doc=None):
+def scaffold(slug: str, task: dict, doc: dict | None = None) -> Path:
     path = folder(slug, task["id"])
     path.mkdir(parents=True, exist_ok=True)
     for name, text in (("steering.md", steering(task, doc)), ("progress.md", ""), ("proof.md", "")):
@@ -31,7 +31,7 @@ def scaffold(slug, task, doc=None):
     return path
 
 
-def steering(task, doc=None):
+def steering(task: dict, doc: dict | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]
