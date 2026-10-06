@@ -207,7 +207,7 @@ def patch_refusal(text: str) -> str:
 
     norm = _norm(text)
     for row in trace_sweep.open_corrections():
-        found, whole = needle(row), _norm(row["text"])
+        found, whole = needle(row), _norm(row.get("text") or "")
         if (found and found in norm) or (whole and whole == norm):
             return REFUSED_PATCH.format(source=row["source"], reason=row["reason"])
     return ""
