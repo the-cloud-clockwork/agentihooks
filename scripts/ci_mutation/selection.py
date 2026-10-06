@@ -9,7 +9,7 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
 
     from scripts.ci_mutation.report import mutation_lines
 
-    module, mutations, ignored_classes, ignored_functions = create_mutations(filename, source)
+    module, mutations, _, _ = create_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
     selected = []
     for mutation in mutations:
@@ -23,7 +23,7 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
         )
         if changed.intersection(lines):
             selected.append(mutation)
-    code, names = combine_mutations_to_source(module, selected, ignored_classes, ignored_functions)
+    code, names = combine_mutations_to_source(module, selected)
     return code, list(names)
 
 

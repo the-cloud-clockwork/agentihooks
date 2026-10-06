@@ -16,7 +16,11 @@ def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, m
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks/__init__.py").touch()
     (tmp_path / "scripts/__init__.py").touch()
-    shutil.copytree(Path(__file__).parents[1] / "scripts/ci_mutation", tmp_path / "scripts/ci_mutation")
+    shutil.copytree(
+        Path(__file__).parents[1] / "scripts/ci_mutation",
+        tmp_path / "scripts/ci_mutation",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     (tmp_path / "scripts/sample.py").write_text(
         "def covered(value):\n    return value + 1\n\ndef untested(value):\n    return value + 2\n"
     )
@@ -41,7 +45,24 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
     selection = tmp_path / "lines.json"
     selection.write_text(json.dumps({"scripts/sample.py": [2, 5], "hooks/other.py": []}))
-    runner = SimpleNamespace(collect_or_load_stats=lambda test_runner: None)
+    test_runner = object()
+    data = SimpleNamespace(exit_code_by_key={"selected": None})
+    loaded = []
+
+    def load():
+        loaded.append(True)
+
+    def mutation_data(*, path):
+        assert path in {Path("scripts/sample.py"), Path("hooks/other.py")}
+        return data
+
+    def collect_stats(value):
+        assert value is test_runner
+        assert loaded
+        return "collected"
+
+    data.load = load
+    runner = SimpleNamespace(collect_or_load_stats=collect_stats, SourceFileMutationData=mutation_data)
     mutmut = SimpleNamespace(__main__=runner)
 
     def cli(args):
@@ -51,6 +72,11 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert names == ["selected"]
         assert stream.getvalue() == "generated"
         assert calls == [("scripts/sample.py", "source", {2, 5})]
+        assert runner.collect_or_load_stats(test_runner) == "collected"
+        data.exit_code_by_key = {}
+        with pytest.raises(SystemExit) as empty:
+            runner.collect_or_load_stats(test_runner)
+        assert empty.value.code == 0
         assert "scripts" not in sys.modules
         assert "scripts.ci_mutation" not in sys.modules
         raise SystemExit(7)
@@ -87,3 +113,9 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
     generated, names = selected_mutants("scripts/sample.py", source, {1})
     assert names == []
     assert "+ b" not in generated
+    source = "def f():\n    return 1\n\ndef g():\n    return 2\n"
+    generated, names = selected_mutants("scripts/sample.py", source, {5})
+    assert len(names) == 2
+    assert all(name.startswith("x_g__") for name in names)
+    with pytest.raises(ValueError, match="scripts/sample.py"):
+        selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
