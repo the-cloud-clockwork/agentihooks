@@ -136,6 +136,20 @@ class TestCodexToolNames:
         payload = normalize_payload({"tool_name": "request_user_input", "tool_input": {"questions": questions}})
         assert payload["tool_name"] == "AskUserQuestion"
         assert payload["tool_input"] == {"questions": questions}
+        assert "tool_response" not in payload
+
+    def test_question_answers_string_takes_the_claude_answers_shape(self, codex):
+        answer = '{"answers":{"plan_color":{"answers":["Red","Blue"]},"size":{"answers":[]}}}'
+        payload = normalize_payload({"tool_name": "request_user_input", "tool_response": answer})
+        assert payload["tool_response"] == {"answers": {"plan_color": "Red, Blue", "size": ""}}
+        assert payload["tool_output"] == payload["tool_response"]
+
+    def test_question_response_that_is_not_answers_json_is_kept(self, codex):
+        for response in ("request_user_input is unavailable in Default mode", "[1]", '{"answers": []}'):
+            payload = normalize_payload({"tool_name": "request_user_input", "tool_response": response})
+            assert payload["tool_response"] == response
+        shell = normalize_payload({"tool_name": "exec", "tool_response": '{"answers":{"q":{"answers":["a"]}}}'})
+        assert shell["tool_response"] == '{"answers":{"q":{"answers":["a"]}}}'
 
     def test_list_command_becomes_a_string(self, codex):
         payload = normalize_payload({"tool_name": "shell", "tool_input": {"command": ["ls", "a b"]}})

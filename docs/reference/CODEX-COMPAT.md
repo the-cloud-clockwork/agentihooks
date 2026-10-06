@@ -89,7 +89,10 @@ The question tool arrives as `request_user_input` with a Claude-shaped
 operator-away refusal covers Codex. 0.160.0 offers it in Plan mode, and in
 Default mode only with the `default_mode_request_user_input` feature on; the
 hook sees it and an exit 2 block refuses it in both (verified live, 2026-10-06).
-Its `tool_response` is a JSON string, so answer-reading code sees no answers.
+Its `tool_response` is a JSON string, `{"answers": {<id>: {"answers": [...]}}}`;
+`normalize_payload` turns it into Claude's `{"answers": {<id>: "a, b"}}`, so the
+operator words recorder and the release, branch and PR signal detection read a
+Codex answer like a Claude one.
 
 0.154.0 also sends `transcript_path`, so `codex_rollout_path()` is now a
 fallback rather than the only source.
