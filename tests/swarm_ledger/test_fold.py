@@ -25,6 +25,7 @@ SECTIONS = {
     "Handoff outcomes": False,
     "Chat": True,
     "Notifications": True,
+    "Artifacts": True,
 }
 
 
