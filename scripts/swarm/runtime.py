@@ -11,6 +11,7 @@ from pathlib import Path
 from scripts import agent_choice
 from scripts.swarm import naming, prompt
 from scripts.swarm.store import SwarmConfig, codex_split
+from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
@@ -94,14 +95,21 @@ class HerdrRuntime:
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
-        argv = self._argv(config, name, agent, text, f"{name}.md")
+        argv = self._argv(config, name, agent, text, f"{name}.md", chosen.get("profile", DEFAULT_PROFILES[lane]))
         return self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, chosen)])
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         from scripts.init_agent import model_flags
 
-        argv = self._argv(config, agent.name, agent.harness, text, f"{agent.name}-restored.md")
+        argv = self._argv(
+            config,
+            agent.name,
+            agent.harness,
+            text,
+            f"{agent.name}-restored.md",
+            agent.profile or DEFAULT_PROFILES[agent.lane],
+        )
         flags = (["--route", agent.account] if agent.account else []) + model_flags(
             agent.harness, agent.model, agent.effort
         )
@@ -119,7 +127,7 @@ class HerdrRuntime:
             self.sleep(RESUME_CHECK_S)
         return False
 
-    def _argv(self, config, name, agent, text, prompt_name):
+    def _argv(self, config, name, agent, text, prompt_name, profile):
         path = self.home / config.slug / "prompts" / prompt_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -135,7 +143,7 @@ class HerdrRuntime:
             config.repo,
         ]
         argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
-        return [*argv, "--prompt-file", str(path)]
+        return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
     def _launch(self, config, lane, task_id, name, argv):
         agent = argv[argv.index("--agent") + 1]
@@ -169,6 +177,7 @@ class HerdrRuntime:
             fields.get("model", ""),
             fields.get("effort", ""),
             fields.get("placement", ""),
+            fields.get("profile", ""),
         )
 
     def recover(self, name: str) -> Placed:

@@ -414,10 +414,11 @@ def cmd_status(store, args):
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
+    print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation")
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}"
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
