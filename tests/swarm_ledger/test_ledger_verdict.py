@@ -127,6 +127,48 @@ def test_check_refuses(op, message):
     assert str(caught.value) == message
 
 
+def test_check_passes_a_well_formed_verdict():
+    for said in ledger_verdict.VERDICTS:
+        assert ledger_verdict.check({"op": "verdict", "id": "v", "item": "tasks/t1", "verdict": said}) is None
+
+
+class StubCtx:
+    def __init__(self):
+        self.at, self.meta, self.events, self.stamps = 5, {}, [], []
+
+    def record(self, by, kind, target, **extra):
+        self.events.append((by, kind, target, extra))
+
+    def stamp(self, path, by):
+        self.stamps.append((path, by))
+
+
+def stub_doc(**task):
+    return {"phases": [], "tasks": [{"id": "t1", "comments": [], **task}]}
+
+
+def test_apply_stamps_the_comment_thread_and_clears_the_items_priority():
+    doc, ctx = stub_doc(), StubCtx()
+    doc["priorities"] = [{"id": "p1", "item": "tasks/t1", "text": "Pick a disk", "by": "eng-1"}]
+    assert ledger_verdict.apply(doc, verdict("tasks/t1", "approved"), ctx) is True
+    assert doc["tasks"][0]["comments"] == [{"id": "v-1", "by": "operator", "at": 5, "text": "approved, Pick a disk"}]
+    assert ctx.stamps == [("tasks/t1/comments", "operator")]
+    assert doc["priorities"] == []
+    assert [e[1] for e in ctx.events] == ["comment added", "priority cleared"]
+
+
+def test_apply_works_on_a_ledger_without_priorities():
+    doc, ctx = stub_doc(), StubCtx()
+    assert ledger_verdict.apply(doc, verdict("tasks/t1", "denied"), ctx) is True
+    assert doc["tasks"][0]["comments"][0]["text"] == "denied"
+
+
+def test_apply_refuses_a_deleted_item():
+    doc, ctx = stub_doc(deleted=True), StubCtx()
+    assert ledger_verdict.apply(doc, verdict("tasks/t1", "approved"), ctx) is False
+    assert doc["tasks"][0]["comments"] == []
+
+
 def test_an_approved_condition_ask_opens_the_condition_gate_for_that_task(monkeypatch):
     make_ledger()
     core.sync(SLUG, ops=[priority("tasks/t1", CONDITION_ASK)])
