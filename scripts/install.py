@@ -2862,6 +2862,22 @@ def _build_otel_env(profile_data: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _skill_dir_filter() -> Callable[[Path], bool]:
+    named: set[Path] = set()
+
+    def is_skill_dir(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        if (path / "SKILL.md").is_file():
+            return True
+        if path.resolve() not in named:
+            named.add(path.resolve())
+            _cprint(f"  [--] Skipped skill folder with no SKILL.md: {path}")
+        return False
+
+    return is_skill_dir
+
+
 def install_global(args: argparse.Namespace) -> None:
     with _sync_lock():
         _install_global_inner(args)
@@ -3010,7 +3026,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
 
     for subdir, label, filter_fn in [
-        ("skills", "skill", lambda p: p.is_dir()),
+        ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
@@ -6334,10 +6350,10 @@ def main() -> None:
         from hooks.classifier import cli as classifier_cli
 
         raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
-    if _argv and _argv[0] == "profile":
-        from scripts.profiles.render import main as profile_main
+    if _argv and _argv[0] in ("profile", "select-profile"):
+        from scripts.select_profile import dispatch
 
-        raise SystemExit(profile_main(_argv[1:]))
+        raise SystemExit(dispatch(_argv))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6481,9 +6497,9 @@ def main() -> None:
         default=None,
         help="Edit only this target's chain (default: every installed target). Ignored by unlink.",
     )
-
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
+    sub.add_parser("select-profile", help="Select a profile, model and effort for one routed run")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("run-in-terminal", help="Run a command in a new herdr tab or terminal")

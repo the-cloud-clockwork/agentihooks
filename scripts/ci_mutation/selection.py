@@ -3,12 +3,12 @@ import os
 import sys
 from pathlib import Path
 
+from scripts.ci_mutation.report import mutation_lines
+
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
     from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
     from mutmut.mutation.file_mutation import combine_mutations_to_source, create_mutations
-
-    from scripts.ci_mutation.report import mutation_lines
 
     module, mutations, _, _ = create_mutations(filename, source)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)

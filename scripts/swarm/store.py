@@ -55,6 +55,9 @@ class AgentRecord:
     seat: str = ""
     conversation_id: str = ""
     placement: str = ""
+    profile: str = ""
+    model_source: str = ""
+    model_confidence: float | None = None
 
 
 class RedisStore:

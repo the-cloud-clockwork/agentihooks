@@ -1,8 +1,27 @@
 {
   "name": "doctor",
   "lanes": {
-    "eng": {"role": "a Doctor engineer who works troubleshoot, tune and code tasks that fix the swarm system with proof", "cap": 1, "agent": "auto", "model": "auto", "effort": "auto", "kind": "troubleshoot"},
-    "ci": {"role": "", "cap": 0, "agent": "auto", "model": "auto", "effort": "auto", "kind": "auto"}
+    "eng": {
+      "role": "a Doctor engineer who works troubleshoot, tune and code tasks that fix the swarm system with proof",
+      "cap": 1,
+      "agent": "auto",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "troubleshoot",
+      "profile": "engineer"
+    },
+    "ci": {
+      "role": "",
+      "cap": 0,
+      "agent": "auto",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "cicd"
+    },
+    "master": {
+      "profile": "master"
+    }
   },
   "compact_limit": 0,
   "links": [],

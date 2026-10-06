@@ -384,6 +384,7 @@ class SwarmPanel(unittest.TestCase):
                 {
                     "name": "s-eng-7",
                     "lane": "eng",
+                    "profile": "unknown",
                     "model": "opus high",
                     "account": "acct",
                     "task": "Handoff at the compact limit",
@@ -397,6 +398,7 @@ class SwarmPanel(unittest.TestCase):
                 {
                     "name": "s-ci-4",
                     "lane": "ci",
+                    "profile": "unknown",
                     "model": "unknown",
                     "account": "",
                     "task": "Split the suite across more runners",

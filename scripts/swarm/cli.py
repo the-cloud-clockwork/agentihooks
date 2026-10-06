@@ -101,19 +101,19 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
-        actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        inbox = InboxStore(store.redis)
+        actions = phases.phase_pass(inbox, store, slug, ledger.state(slug), ledger)
+        actions += tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
             actions += doctor.timer(store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
-        inbox = InboxStore(store.redis)
         delivery.migrate_outbox(store, slug, inbox)
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
-        actions += phases.phase_pass(inbox, store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
@@ -414,10 +414,11 @@ def cmd_status(store, args):
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
+    print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tModel source\tConfidence")
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")

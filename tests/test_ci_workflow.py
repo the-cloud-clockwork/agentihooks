@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -11,7 +12,6 @@ import yaml
 from _pytest.config import default_plugins
 
 from tests import refresh_durations
-from tests.conftest import COLLECTED_NODEIDS
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
 pytestmark = pytest.mark.unit
@@ -218,14 +218,124 @@ def test_unit_pins_an_exact_uv_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
 
 
-def test_stored_durations_cover_the_collected_suite(request):
-    collected = request.config.stash[COLLECTED_NODEIDS]
+def test_stored_durations_cover_the_collected_suite():
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q", "-n", "0", "-o", "addopts="],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    collected = [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line]
+    assert collected, result.stdout
     stored = json.loads((_ROOT / ".test_durations").read_text())
-    missing = [nodeid for nodeid in collected if nodeid.split("@", 1)[0] not in stored]
+    missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
     assert len(missing) * 10 <= len(collected), (
         f"{len(missing)} of {len(collected)} tests have no stored duration; "
         "refresh them with: python -m tests.refresh_durations"
     )
+
+
+@pytest.mark.parametrize("missing", [0, 5, 10, 11, 100])
+def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, monkeypatch, missing):
+    nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_probe.py").write_text("\n".join(f"def test_{i}(): pass" for i in range(100)))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--shard 1/4")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    if missing <= 10:
+        test_stored_durations_cover_the_collected_suite()
+    else:
+        with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
+            test_stored_durations_cover_the_collected_suite()
+
+
+def test_dev_push_refreshes_stored_durations_after_tests_pass():
+    workflow = _workflow()
+    job = workflow["jobs"]["refresh-durations"]
+    assert job["needs"] == ["unit", "lint"]
+    assert job["if"] == "github.event_name == 'push'"
+    assert job["permissions"] == {"contents": "write", "actions": "read"}
+    steps = job["steps"]
+    assert (
+        next(step for step in steps if step.get("uses") == "actions/checkout@v4")["with"]["ref"] == "${{ github.sha }}"
+    )
+    command = next(step["run"] for step in steps if step.get("name") == "Refresh measured durations")
+    assert 'python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"' in command
+    assert "tests-passed-$TREE" in command
+    assert "git add .test_durations" in command
+    assert "git push origin HEAD:dev" in command
+
+
+@pytest.mark.parametrize("moved,source", [("before", "42"), ("during", "42"), ("never", "42"), ("never", "")])
+def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, moved, source):
+    command = next(
+        step["run"]
+        for step in _workflow()["jobs"]["refresh-durations"]["steps"]
+        if step.get("name") == "Refresh measured durations"
+    )
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    scripts = {
+        "git": """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "git $*" >> "$COMMAND_LOG"
+case "$1 $2" in
+  "rev-parse origin/dev") cat "$REMOTE_STATE" ;;
+  "diff --cached") exit 1 ;;
+  "push origin")
+    if [[ "$MOVED" == "during" ]]; then echo newer > "$REMOTE_STATE"; exit 1; fi ;;
+esac
+""",
+        "gh": """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$SOURCE_RUN"
+""",
+        "python": """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "python $*" >> "$COMMAND_LOG"
+echo measured > .test_durations
+""",
+    }
+    for name, script in scripts.items():
+        path = tools / name
+        path.write_text(script)
+        path.chmod(0o755)
+    log = tmp_path / "commands"
+    remote = tmp_path / "remote"
+    remote.write_text("newer" if moved == "before" else "tested")
+    stored = tmp_path / ".test_durations"
+    stored.write_text("original")
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "COMMAND_LOG": str(log),
+        "REMOTE_STATE": str(remote),
+        "SOURCE_RUN": source,
+        "GITHUB_SHA": "tested",
+        "GITHUB_RUN_ID": "43",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "TREE": "tree",
+        "MOVED": moved,
+    }
+    result = subprocess.run(["bash", "-e", "-c", command], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log.read_text()
+    assert "pull --rebase" not in calls
+    if moved == "before":
+        assert "python " not in calls
+        assert "push origin" not in calls
+        assert stored.read_text() == "original"
+    elif moved == "during":
+        assert "dev moved" in result.stdout
+    else:
+        assert f"python -m tests.refresh_durations --ci-run {source or '43'}" in calls
+        assert "push origin HEAD:dev" in calls
+        assert stored.read_text() == "measured\n"
 
 
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():
@@ -281,6 +391,20 @@ def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, mo
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["1", "2", "3"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci", "3"])
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
+
+
+def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, monkeypatch):
+    def download(run_ids, folder):
+        assert run_ids == ["42"]
+        for version, seconds in [("3.11", 1.0), ("3.12", 3.0)]:
+            path = folder / "42" / f"durations-{version}-1"
+            path.mkdir(parents=True)
+            (path / "durations.json").write_text(json.dumps({"t.py::a": seconds}))
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "ci_download", download)
+    refresh_durations.main(["--ci-run", "42"])
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
 
 
