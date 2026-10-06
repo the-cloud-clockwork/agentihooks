@@ -39,6 +39,7 @@ SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(
 PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
 TEMPLATE = Path(__file__).resolve().parent / "template.html"
 PALETTE = TEMPLATE.with_name("palette.css")
+TOOLTIPS = TEMPLATE.with_name("tooltips.js")
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = {
@@ -288,7 +289,7 @@ def watch_path(slug, name):
 
 
 def page_version():
-    return hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes()).hexdigest()[:12]
+    return hashlib.sha256(TEMPLATE.read_bytes() + PALETTE.read_bytes() + TOOLTIPS.read_bytes()).hexdigest()[:12]
 
 
 def read_token(html):
