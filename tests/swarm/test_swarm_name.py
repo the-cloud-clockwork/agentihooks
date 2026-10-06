@@ -54,13 +54,13 @@ def test_a_removed_swarm_name_no_longer_resolves(store):
     assert store.resolve(name) == name
 
 
-def test_the_name_never_changes_after_creation(store):
-    name = store.config("sw").name
-    with pytest.raises(SwarmError) as refused:
-        store.update("sw", name="swarm@ffffff")
-    assert str(refused.value) == f"swarm {name} keeps its name: a swarm name never changes after creation"
-    assert store.config("sw").name == name
-    assert store.update("sw", state="paused").name == f"swarm@{store.config('sw').code}"
+def test_the_name_is_derived_from_the_code_and_never_changes(store):
+    config = store.config("sw")
+    assert config.name == f"swarm@{config.code}"
+    assert store.update("sw", state="paused").name == config.name
+    assert store.ensure_code("sw").name == config.name
+    assert "name" not in store.redis.hgetall(store.key("sw", "config"))
+    assert SwarmConfig("x", "/r", 1, 1).name == ""
 
 
 def test_rename_migrates_an_existing_swarm_keeping_agents_claims_and_seats(env, monkeypatch):  # noqa: F811
@@ -77,7 +77,8 @@ def test_rename_migrates_an_existing_swarm_keeping_agents_claims_and_seats(env, 
     store.claim("old", "t1", agent, 30_000)
     store.seats.occupy(seat, agent, 1)
     item = InboxStore(store.redis).send("operator", seat, "carry on")
-    store.redis.hdel(store.key("old", "config"), "name")
+    store.redis.hset(store.key("old", "config"), "code", "")
+    store.names.release("old")
     assert store.config("old").name == ""
     assert run("rename") == 0
     config = store.config("old")
@@ -99,7 +100,7 @@ def test_status_list_and_names_show_the_swarm_name(env, capsys):  # noqa: F811
     run("sw", "status", "--json")
     assert json.loads(capsys.readouterr().out)["config"]["name"] == name
     store.create(SwarmConfig("old", "/repo", 1, 0))
-    store.redis.hdel(store.key("old", "config"), "name")
+    store.redis.hset(store.key("old", "config"), "code", "")
     run("list")
     assert capsys.readouterr().out.splitlines() == [
         "-\told\trunning\teng 1\tci 0\tplan 1\tagents 0\t/repo",
@@ -142,7 +143,7 @@ def test_a_swarm_registry_emptied_by_a_restore_is_adopted_with_its_name(store):
 def test_status_of_a_swarm_not_yet_named_marks_the_name_missing(env, capsys):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    store.redis.hdel(store.key("sw", "config"), "name")
+    store.redis.hset(store.key("sw", "config"), "code", "")
     capsys.readouterr()
     run("sw", "status")
     assert capsys.readouterr().out.splitlines()[0].startswith("-  sw  paused  eng 2")

@@ -21,7 +21,7 @@ def config(**kw):
 
 def test_create_then_read_config_and_list(store):
     store.create(config())
-    assert store.config("smoke") == config(state="running", code="a1b2c3", name="swarm@a1b2c3")
+    assert store.config("smoke") == config(state="running", code="a1b2c3")
     assert store.slugs() == ["smoke"]
 
 

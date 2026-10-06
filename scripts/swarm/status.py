@@ -132,7 +132,7 @@ def status_report(store, slug, state):
     handed = transfers.list_transfers(store, slug)
     active = lift.active(gate_log.recent(slug, limit=None), now_ms())
     return {
-        "config": {**config.__dict__, "codex_share": codex_split(config, os.environ)[0]},
+        "config": {**config.__dict__, "name": config.name, "codex_share": codex_split(config, os.environ)[0]},
         "agents": [
             {
                 **a.__dict__,
