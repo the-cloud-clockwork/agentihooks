@@ -162,7 +162,7 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
     monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
     monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
-    rows, error = mutate_file(tmp_path, "hooks/sample.py", tmp_path / "work", ["tests/test_sample.py"], 20)
+    rows, error = mutate_file(tmp_path, "hooks/sample.py", tmp_path / "work", ["tests/test_sample.py"], 20, {2})
     expected = reason
     if reason.startswith("mutmut failed"):
         expected += f"; see {tmp_path / 'work/run.log'}"
@@ -170,7 +170,13 @@ def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monk
         expected += f"; see {tmp_path / 'work/report.log'}"
     assert error == expected
     assert rows == ([{"status": "killed"}] if reason == "" else [])
-    assert commands[0] == [sys.executable, "-m", "mutmut", "run", "--max-children", "1"]
+    assert commands[0] == [
+        sys.executable,
+        "-m",
+        "scripts.ci_mutation.selection",
+        str(tmp_path / "work/changed-lines.json"),
+    ]
+    assert json.loads((tmp_path / "work/changed-lines.json").read_text()) == {"hooks/sample.py": [2]}
     if len(commands) == 2:
         assert commands[1] == [
             sys.executable,
@@ -193,7 +199,7 @@ def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
     (tmp_path / "tests/test_sample.py").write_text("pass\n")
     row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc"}
 
-    def mutate(root, path, work, tests, deadline):
+    def mutate(root, path, work, tests, deadline, lines):
         assert root == tmp_path
         assert path == "hooks/sample.py"
         assert work.parent == tmp_path / "output"
