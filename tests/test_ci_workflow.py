@@ -230,3 +230,20 @@ def test_stored_durations_cover_the_collected_suite(request):
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():
     runs = [{"a": 0.1, "b": 1.0}, {"a": 2.5, "b": 1.2}, {"a": 0.2, "b": 1.1}]
     assert median_durations(runs) == {"a": 0.2, "b": 1.1}
+
+
+def test_mutation_job_runs_independently_and_keeps_its_evidence():
+    spec = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())
+    job = spec["jobs"]["mutation"]
+    assert "needs" not in job
+    assert job["timeout-minutes"] == 20
+    steps = job["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["fetch-depth"] == 0
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    run = next(step for step in steps if step.get("name") == "Mutate changed Python files")
+    assert run["env"]["BASE"] == "${{ github.event.pull_request.base.sha }}"
+    assert run["run"] == 'python -m scripts.ci_mutation --base "$BASE" --budget 1080'
+    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
+    assert artifact["if"] == "always()"
+    assert artifact["with"]["include-hidden-files"] is True
