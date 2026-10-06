@@ -1622,7 +1622,17 @@ def on_pre_tool_use(payload: dict) -> None:
             _pretool_blocks.insert(0, _drained)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    if _credential_rewrite or _cond_decision in ("allow", "ask"):
+    from hooks.context import planner_plan
+
+    if planner_plan.accepts(tool_name):
+        emit_permission_decision(
+            "PreToolUse",
+            "allow",
+            planner_plan.REASON,
+            updated_input=tool_input,
+            additional_context="\n\n".join(_pretool_blocks) or None,
+        )
+    elif _credential_rewrite or _cond_decision in ("allow", "ask"):
         _updated, _note = _credential_rewrite or ({}, "")
         _rewritten = bool(_credential_rewrite) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
