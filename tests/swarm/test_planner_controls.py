@@ -115,7 +115,30 @@ def test_templates_keep_planner_profile_and_cap():
 def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set"})
-    assert str(caught.value) == "set needs max_eng, max_ci, max_plan or codex_share"
+    assert str(caught.value) == "set needs max_eng, max_ci, max_plan, codex_share, compact_limit or autonomy"
+
+
+@pytest.mark.parametrize("limit", [100, 650, 1000])
+def test_page_control_sets_the_compact_limit(limit):
+    assert ledger_server.control_argv({"action": "set", "compact_limit": limit}) == ["set", f"compact-limit={limit}"]
+
+
+@pytest.mark.parametrize("limit", [0, 99, 1001])
+def test_page_refuses_a_compact_limit_outside_100_to_1000(limit):
+    with pytest.raises(ValueError) as caught:
+        ledger_server.control_argv({"action": "set", "compact_limit": limit})
+    assert str(caught.value) == "compact_limit must be a whole number from 100 to 1000"
+
+
+@pytest.mark.parametrize("mode", ["manual", "assist", "delegate", "full"])
+def test_page_control_sets_each_autonomy_mode(mode):
+    assert ledger_server.control_argv({"action": "set", "autonomy": mode}) == ["set", f"autonomy={mode}"]
+
+
+def test_page_refuses_an_unknown_autonomy_mode():
+    with pytest.raises(ValueError) as caught:
+        ledger_server.control_argv({"action": "set", "autonomy": "auto"})
+    assert str(caught.value) == "autonomy must be one of manual, assist, delegate, full"
 
 
 def test_create_parser_defaults_to_template_and_parses_integer_cap():

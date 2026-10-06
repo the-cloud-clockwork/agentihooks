@@ -3,27 +3,19 @@ import subprocess
 from pathlib import Path
 
 
-def test_agent_card_shows_waiting_and_prompt_as_text():
+def test_an_agent_at_a_startup_prompt_shows_waiting_in_its_row():
     page = (Path(__file__).parents[2] / "scripts/swarm_ledger/template.html").read_text()
     functions = [
         "function " + name + "(" + page.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
-        for name in ("span", "swarmCards", "swarmCard")
+        for name in ("span", "modelText", "agentRows")
     ]
     js = (
         "\n".join(functions)
         + """
-const doc = {tasks: []};
-function h(tag, attrs, ...children) { return {tag, attrs, children: children.filter(Boolean)}; }
-function collapsible() {}
-const cards = swarmCards({agents: [{name: 'engineer', lane: 'eng', status: 'waiting',
-  input_prompt: 'Allow external CLAUDE.md file imports?'}]}, [], {}, 0);
-console.log(JSON.stringify(swarmCard(cards[0])));
+const rows = agentRows({agents: [{name: 'engineer', lane: 'eng', status: 'waiting',
+  input_prompt: 'Allow external CLAUDE.md file imports?'}]}, 0);
+console.log(JSON.stringify(rows));
 """
     )
-    tree = json.loads(subprocess.check_output(["node", "-e", js], text=True))
-
-    def texts(node):
-        return [node["attrs"].get("text")] + [text for child in node["children"] for text in texts(child)]
-
-    assert "Waiting on input" in texts(tree)
-    assert "Prompt: Allow external CLAUDE.md file imports?" in texts(tree)
+    rows = json.loads(subprocess.check_output(["node", "-e", js], text=True))
+    assert rows[0]["state"] == "waiting"

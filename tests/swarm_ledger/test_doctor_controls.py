@@ -75,26 +75,20 @@ class DoctorControls(unittest.TestCase):
 
     def test_the_panel_carries_doctor_buttons(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        box = page.split('id="doctor-box"', 1)[1].split("</section>", 1)[0]
+        box = page.split('id="doctor-box"', 1)[1].split('id="health-box"', 1)[0]
         self.assertIn('data-swarm="doctor_start"', box)
         self.assertIn('data-swarm="doctor_stop"', box)
 
-    def test_doctor_buttons_follow_the_peer(self):
-        out = run_js(["doctorControls"], '[doctorControls({peer: ""}), doctorControls({peer: "watch-doctor"})]')
-        self.assertEqual(
-            out, [{"doctor_start": False, "doctor_stop": True}, {"doctor_start": True, "doctor_stop": False}]
+    def test_doctor_buttons_follow_the_doctor_slug(self):
+        out = run_js(
+            ["doctorOn"], '[doctorOn({doctor: {slug: ""}}), doctorOn({doctor: {slug: "watch-doctor"}}), doctorOn(null)]'
         )
+        self.assertEqual(out, [False, True, False])
 
     def test_stop_doctor_asks_for_a_confirm_and_names_itself(self):
-        out = run_js(
-            ["controlClick", "opNote"],
-            '[controlClick("doctor_stop", ""), controlClick("doctor_stop", "doctor_stop"), opNote("done", "doctor_start")]',
-        )
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        self.assertIn('if (action === "doctor_stop" && !confirm(', page)
+        out = run_js(["opNote"], '[opNote("done", "doctor_start"), opNote("pending", "doctor_stop")]')
         self.assertEqual(
-            out,
-            [
-                {"send": False, "armed": "doctor_stop"},
-                {"send": True, "armed": ""},
-                {"cls": "ok", "text": "Start doctor: done"},
-            ],
+            out, [{"cls": "ok", "text": "Start doctor: done"}, {"cls": "pending", "text": "Stop doctor: sending"}]
         )

@@ -147,12 +147,6 @@ class ClosedPage(unittest.TestCase):
         self.assertIn("closed_at:", page.split("function withDefaults(", 1)[1].split("\n  }\n", 1)[0])
         self.assertIn("closedText(doc.closed_at)", page)
 
-    def test_the_swarm_panel_has_a_close_button_that_asks_for_a_confirm(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        self.assertIn('data-swarm="close"', page)
-        click = page.split("  function controlClick(", 1)[1].split("\n  }\n", 1)[0]
-        self.assertIn('"close"', click)
-
 
 class Home(unittest.TestCase):
     def test_home_lists_closed_ledgers_apart_from_active_ones(self):

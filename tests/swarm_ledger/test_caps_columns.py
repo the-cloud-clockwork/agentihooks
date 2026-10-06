@@ -26,18 +26,12 @@ def caps_boxes(browser, width):
         tab.set_content(html)
         return tab.evaluate(
             """() => {
-              document.getElementById("swarm-box").hidden = false;
-              for (const [id, v] of [["cap-eng", 3], ["cap-ci", 1], ["cap-codex", 30]]) document.getElementById(id).value = v;
-              document.getElementById("codex-split").textContent = "1/3 spawns · 33% actual";
-              const box = (sel) => [...document.querySelectorAll(sel)].map((el) => {
-                const r = el.getBoundingClientRect();
-                return { left: r.left, right: r.right, width: r.width };
-              });
+              document.getElementById("swarm").hidden = false;
+              for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20%"], ["cap-compact", "600k"]]) document.getElementById(id).textContent = v;
+              const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
-                down: box('.sw-caps [data-swarm$="_down"]'),
-                num: box(".sw-caps .sw-cap"),
-                up: box('.sw-caps [data-swarm$="_up"]'),
-                caps: document.querySelector(".sw-caps").getBoundingClientRect().right,
+                caps: [...document.querySelectorAll("#capacity-box .sw-cap")].map((cap) => [...cap.children].map(box)),
+                strip: box(document.getElementById("capacity-box")),
               };
             }"""
         )
@@ -45,16 +39,13 @@ def caps_boxes(browser, width):
         tab.close()
 
 
-def same(values):
-    return max(values) - min(values) <= 0.5
-
-
 @pytest.mark.parametrize("width", [1300, 390])
-def test_caps_rows_put_minus_number_and_plus_in_straight_columns(browser, width):
+def test_each_cap_keeps_its_name_value_minus_and_plus_on_one_line_inside_the_strip(browser, width):
     boxes = caps_boxes(browser, width)
-    assert len(boxes["down"]) == len(boxes["num"]) == len(boxes["up"]) == 4
-    assert same([b["left"] for b in boxes["down"]]), boxes["down"]
-    assert same([b["left"] for b in boxes["num"]]), boxes["num"]
-    assert same([b["width"] for b in boxes["num"]]), boxes["num"]
-    assert same([b["left"] for b in boxes["up"]]), boxes["up"]
-    assert max(b["right"] for b in boxes["up"]) <= boxes["caps"]
+    assert len(boxes["caps"]) == 5
+    for name, value, minus, plus in boxes["caps"]:
+        middle = (value["top"] + value["bottom"]) / 2
+        for part in (name, minus, plus):
+            assert part["top"] <= middle <= part["bottom"]
+        assert name["right"] <= value["left"] <= value["right"] <= minus["left"] <= minus["right"] <= plus["left"]
+        assert plus["right"] <= boxes["strip"]["right"]

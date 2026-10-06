@@ -24,5 +24,5 @@ def test_tab_body_ends_at_the_window_bottom_and_side_panels_do_not_scroll(tab, w
     assert rect["y"] > 0
     assert rect["y"] + rect["height"] == 584
     assert tab.evaluate("window.scrollY") == 0
-    for selector in ["#agents-box", "#capacity-box", "#health-box"]:
+    for selector in ["#agents-box", "#capacity-box", "#health-box", "#handoff-box"]:
         assert tab.locator(selector).evaluate("el => getComputedStyle(el).overflowY") == "visible"

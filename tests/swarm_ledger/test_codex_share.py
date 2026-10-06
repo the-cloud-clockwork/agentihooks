@@ -5,13 +5,12 @@ from tests.swarm_ledger.test_tabs import SWARM, browser, tab
 __all__ = ["browser", "tab"]
 
 
-def test_page_shows_current_share_and_live_split(tab):
+def test_page_shows_the_current_share(tab):
     tab.get_by_role("tab", name="Swarm").click()
-    assert tab.locator("#cap-codex").input_value() == "30"
-    assert "So far 6 of 19 started on Codex (31%)." in tab.locator("#codex-split").inner_text()
+    assert tab.locator("#cap-codex").inner_text() == "30%"
 
 
-def test_codex_steps_are_five_and_apply_sends_the_draft(tab):
+def test_a_codex_step_sends_the_share_five_points_away_at_once(tab):
     sent = []
 
     def receive(route):
@@ -22,12 +21,10 @@ def test_codex_steps_are_five_and_apply_sends_the_draft(tab):
     tab.route("**/api/swarm/**", receive)
     tab.get_by_role("tab", name="Swarm").click()
     tab.locator('[data-swarm="codex_up"]').click()
-    tab.locator('[data-swarm="eng_up"]').click()
-    assert tab.locator("#cap-codex").input_value() == "35"
-    assert tab.locator("#cap-eng").input_value() == "4"
-    tab.locator('[data-swarm="set"]').click()
     tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
-    assert sent[-1] == {"action": "set", "max_eng": 4, "max_ci": 1, "max_plan": 0, "codex_share": 35}
+    tab.locator('[data-swarm="eng_up"]').click()
+    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Raise eng cap: done')")
+    assert sent == [{"action": "set", "codex_share": 35}, {"action": "set", "max_eng": 4}]
 
 
 @pytest.mark.parametrize(
@@ -40,18 +37,19 @@ def test_codex_steps_are_five_and_apply_sends_the_draft(tab):
     ],
 )
 def test_codex_step_bounds(tab, share, action, disabled, expected):
+    sent = []
     sw = {**SWARM, "config": {**SWARM["config"], "codex_share": share}}
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=sw))
+
+    def receive(route):
+        if route.request.method == "PUT":
+            sent.append(route.request.post_data_json)
+        route.fulfill(json=sw)
+
+    tab.route("**/api/swarm/**", receive)
     tab.reload()
     tab.get_by_role("tab", name="Swarm").click()
     if share in (0, 100):
         assert tab.locator(f'[data-swarm="{disabled}"]').is_disabled()
     tab.locator(f'[data-swarm="{action}"]').click()
-    assert tab.locator("#cap-codex").input_value() == str(expected)
-
-
-def test_no_spawns_shows_zero_actual_percent(tab):
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json={**SWARM, "spawns": {}}))
-    tab.reload()
-    tab.get_by_role("tab", name="Swarm").click()
-    assert "So far 0 of 0 started on Codex (0%)." in tab.locator("#codex-split").inner_text()
+    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
+    assert sent == [{"action": "set", "codex_share": expected}]
