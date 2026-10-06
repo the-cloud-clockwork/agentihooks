@@ -39,6 +39,8 @@ def status(**changes):
             "max_plan": 1,
             "codex_share": 20,
             "autonomy": "delegate",
+            "effort_min": "medium",
+            "effort_max": "high",
         },
         "last_tick": NOW_MS - 12_000,
         "compact_limit": 600,
@@ -253,6 +255,19 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert apply.is_disabled()
 
 
+def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
+    page = open_page(width=1920)
+    floor, ceiling = page.tab.locator("#cap-effort_min"), page.tab.locator("#cap-effort_max")
+    assert (floor.input_value(), ceiling.input_value()) == ("medium", "high")
+    assert floor.bounding_box()["y"] == page.tab.locator("#cap-eng").bounding_box()["y"]
+    page.tab.get_by_role("button", name="Raise effort ceiling").click()
+    assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
+    floor.fill("low")
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('done')")
+    assert page.puts == [{"action": "set", "effort_min": "low", "effort_max": "max"}]
+
+
 @pytest.mark.parametrize(
     ("lane", "typed", "message"),
     [
@@ -275,7 +290,7 @@ def test_an_invalid_capacity_value_is_refused_before_sending(open_page, lane, ty
 
 def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
     page = open_page(status(gate_modes={"talk": "observe", "watch": "enforce"}))
-    page.tab.set_viewport_size({"width": 1440, "height": 900})
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
     boxes = page.tab.evaluate(
         """() => {
           const box = (el) => el.getBoundingClientRect();
@@ -285,7 +300,7 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 6
+    assert len(boxes["row"]) == 8
     middle = (boxes["row"][0][0] + boxes["row"][0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in boxes["row"])
     assert boxes["gates"] >= max(bottom for _, bottom in boxes["row"])

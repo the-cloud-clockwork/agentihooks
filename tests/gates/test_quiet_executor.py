@@ -25,7 +25,8 @@ quiet = importlib.import_module(f"{PACKAGE}.quiet")
 SHIM = (
     "#!/usr/bin/env bash\n"
     '[ -e "$HOME/.agentihooks/swarm/$AGENTIHOOKS_SWARM/gates/quiet/$AGENTIHOOKS_AGENT_NAME" ] || exit 0\n'
-    f"exec {sys.executable} -m {PACKAGE} quiet\n"
+    # mutmut's trampoline finds its config only from the checkout root.
+    f'cd "{ROOT}" && exec {sys.executable} -m {PACKAGE} quiet\n'
 )
 LS = {"command": "ls", "description": "probe"}
 LEDGER = {"command": f"agentihooks ledger --slug {SLUG} --as {ME} comment tasks/t1 'on it'", "description": "probe"}

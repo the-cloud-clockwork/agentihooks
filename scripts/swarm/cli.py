@@ -14,6 +14,7 @@ agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (o
 agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
 agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
+agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
@@ -96,6 +97,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
+EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 TICK_LOCK_MS = 10 * 60 * 1000
@@ -374,13 +376,16 @@ def cmd_set(store, args):
         if key == "autonomy":
             changes["autonomy"] = value
             continue
+        if key in EFFORT_KEYS:
+            changes[EFFORT_KEYS[key]] = value
+            continue
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
-                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)} "
-                f"or {', '.join(LANE_KEYS)}=<value>"
+                f"set takes {', '.join(SETTABLE)}=<whole number>, autonomy={'|'.join(AUTONOMY)}, "
+                f"effort-min=E, effort-max=E or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
@@ -399,6 +404,8 @@ def cmd_set(store, args):
                 "codex_share": config.codex_share,
                 "codex_min_week_left": config.codex_min_week_left,
                 "snapshot_minutes": config.snapshot_minutes,
+                "effort_min": config.effort_min,
+                "effort_max": config.effort_max,
                 "lanes": config.lanes,
             }
         )
@@ -476,7 +483,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  repo {config.repo}  {_share(store, config)}"
+        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}  {_share(store, config)}"
     )
     print(
         "gate modes  "
@@ -942,7 +949,7 @@ def main(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
-        if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, "autonomy"):
+        if len(argv) > 1 and argv[1].partition("=")[0] in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, "autonomy"):
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]

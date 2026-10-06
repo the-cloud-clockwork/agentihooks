@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
 from hooks.classifier import ClassifierUnavailable, Score, decide
-
-EFFORTS = {"claude": ("low", "medium", "high", "max"), "codex": ("low", "medium", "high", "xhigh")}
+from scripts.swarm.effort_range import EFFORTS
 
 
 @dataclass(frozen=True)
