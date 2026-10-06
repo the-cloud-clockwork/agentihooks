@@ -393,6 +393,23 @@ def test_a_drained_swarm_without_a_master_starts_one_and_no_engineers(store):
     assert store.config("sw").state == "drained"
 
 
+@pytest.mark.parametrize(
+    "sender, text",
+    [
+        ("swarm", "swarm added a follow-up on ledger sw: A message to master@sw is still unread"),
+        ("engineer@a1b2c3-0002", "a question for the master"),
+    ],
+)
+def test_only_the_operator_wakes_a_stopped_swarm(store, sender, text):
+    from scripts.inbox.store import InboxStore
+
+    store.update("sw", state="stopped")
+    InboxStore(store.redis).send(sender, "master@sw", text)
+    runtime = FakeRuntime()
+    assert tick("sw", store, tasks(("t1", "eng")), runtime, 1) == []
+    assert runtime.masters == [] and store.config("sw").state == "stopped"
+
+
 def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     store.update("sw", state="stopped")
     runtime = FakeRuntime()
