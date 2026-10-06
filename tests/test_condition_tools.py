@@ -438,6 +438,17 @@ class TestLiveFolders:
         write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
         assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
 
+    def test_every_branch_lookup_is_bounded_in_time(self, checkouts, monkeypatch):
+        real_run, timeouts = subprocess.run, []
+
+        def timed(argv, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return real_run(argv, **kwargs)
+
+        monkeypatch.setattr(conditions.subprocess, "run", timed)
+        conditions.write_guard("Write", {"file_path": f"{checkouts['worktree']}/.claude/conditions/a.sh"}, SID)
+        assert timeouts and all(t is not None and 0 < t <= 5 for t in timeouts)
+
     def test_a_chained_profile_folder_not_created_yet_is_live(self, checkouts):
         _state(checkouts["bundle"], "alpha,gamma")
         write = {"file_path": f"{checkouts['bundle']}/profiles/gamma/.claude/conditions/pre-bash-x.sh"}

@@ -566,5 +566,25 @@
   "scripts/skill_links.py:scripts.skill_links.x_repair__mutmut_12:006ff0d8d23d31f02ed9cff652cf641d86cf1c5cc5798763bbb7a5518ffb2f35": {
     "reader": "standards_reader",
     "reason": "The existing global install record helper defaults its target to claude, so omitting the explicit claude argument selects the same record and preserves output."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__git_out__mutmut_17:7e83af62eb5a9556bbfc625512b67cce33a0a983daf72c5be3a31b0cf2f14941": {
+    "reader": "Standards",
+    "reason": "The timeout bounds only a hung git; a timeout of four seconds takes the same path as three, and the TimeoutExpired path is tested."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__read_only_shell__mutmut_6:34f007662439ddc94e96969768aeb55d806d4123526217d22f8a7d36ba4a2f3d": {
+    "reader": "Standards",
+    "reason": "The stripped text is used only for the redirect count and targets; the replacement holds no redirect sign and is never a target, and heads come from the raw command."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_11:8ae8489f0af9364207071bfabe5a22a308624d7d8ea659719e87617ed7c0402d": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_13:9c8cd87ccec233a4d42979c4a21eca3f276bb47d2648d9aa1c952bced3d41132": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_16:f4539d9897457d7a59f3b0adf7bfbf1155ad5f54a96da0c00fbb27a5d8ddb3e9": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
   }
 }
