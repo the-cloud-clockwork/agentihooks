@@ -205,4 +205,4 @@ def test_harness_help_and_valid_choices(monkeypatch, tmp_path, capsys, harness):
     with pytest.raises(SystemExit) as help_exit:
         cli.classify_main(["--help"])
     assert help_exit.value.code == 0
-    assert "CLI fallback target" in capsys.readouterr().out
+    assert any(line.rstrip().endswith("  CLI fallback target") for line in capsys.readouterr().out.splitlines())
