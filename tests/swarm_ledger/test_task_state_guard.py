@@ -44,3 +44,11 @@ def test_a_guarded_reopen_applies_while_the_state_is_listed():
 def test_a_guard_naming_no_task_state_is_refused(if_state):
     with pytest.raises(ValueError, match="if_state"):
         update(ledger("pr"), REOPEN, if_state)
+
+
+@pytest.mark.parametrize(("if_state", "after"), [(["open"], "claimed"), (["pr"], None)])
+def test_a_task_with_no_state_is_guarded_as_open(if_state, after):
+    doc = ledger("open")
+    del doc["tasks"][0]["state"]
+    update(doc, {"state": "claimed", "claimed_by": "eng-2"}, if_state)
+    assert doc["tasks"][0].get("state") == after
