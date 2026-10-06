@@ -467,7 +467,9 @@ def cmd_prompt(args):
     me = "agentihooks ledger"
     print(
         f"You are a member of crew ledger `{args.slug}` as `{args.name}`. Run once: {me} --slug {args.slug} "
-        f"--as {args.name} join. Then keep a Monitor on: {me} watch {args.slug} --as {args.name}. Act on every OPERATOR "
+        f"--as {args.name} join. In a swarm, operator writes reach you as inbox messages at your next tool call and "
+        f"the swarm wakes you when idle; a ledger without a swarm needs a Monitor on: {me} watch {args.slug} --as "
+        f"{args.name}. Act on every OPERATOR "
         f"line, then run `{me} --slug {args.slug} --as {args.name} ack`. Record progress with the commands in "
         f"`{me} --help` (phase, followup, comment, scope, say, time-left). The orchestrator maintains Time Left as one remaining duration "
         'with `time-left "3h 20m"` on joining and whenever progress or blockers change it. Write for the operator in plain words: '

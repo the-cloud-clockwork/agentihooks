@@ -6,8 +6,8 @@ description: >
   checkboxes, open questions with answer boxes, operator notes, follow-ups, and a
   comments dropdown under every item. Saves to localStorage and
   ~/development-ledger/<slug>.json through a local server. Every agent working that
-  plan follows the ledger: it watches the JSON under a Monitor, acts on the
-  operator's checks, answers and notes, and records phase states and follow-ups in
+  plan follows the ledger: operator writes reach it through the inbox in a swarm
+  or a ledger watch outside one, it acts on the operator's checks, answers and notes, and records phase states and follow-ups in
   the HTML as work lands. Use when the user says "swarm ledger", "make a ledger for
   this plan", "ledger this plan", or when you work a plan that already has a ledger.
 argument-hint: "<plan-file> [other development documents ...]"
@@ -124,10 +124,11 @@ All commands are `agentihooks ledger --slug <slug> --as <name> <command>`.
 ### B1. Join, watch
 
 1. `join` (orchestrator: `join --role orchestrator`). A hook binds this session to the ledger.
-2. Start a `Monitor` (persistent when offered) on
-   `agentihooks ledger watch <slug> --as <name> --since-rev <last handled rev, or omit>`.
-   The orchestrator's Monitor is mandatory: a hook cannot wake an idle session, and the gate
-   refuses its stop while the watcher heartbeat is stale. Restart with `--since-rev` to replay.
+2. In a swarm, skip the watch: every operator write reaches you as an inbox message at your next
+   tool call, and the tick wakes your pane when it sits idle. A ledger without a swarm has no
+   inbox, so an idle session hears of the operator only through a `Monitor` (persistent when
+   offered) on `agentihooks ledger watch <slug> --as <name> --since-rev <last handled rev, or omit>`.
+   Restart with `--since-rev` to replay.
 
 Each line is one operator event:
 
@@ -141,7 +142,7 @@ OPERATOR rev=17 checked phases/p2
 OPERATOR rev=18 message added on chat [m-3c4d]: "text" | REPLY RULES: <chat_instructions>
 ```
 
-plus `SEED_ERROR <message>` and `WARNING <message>`. Done when the Monitor printed `WATCHING`.
+plus `SEED_ERROR <message>` and `WARNING <message>`. Done when `join` answered, and with a watch when it printed `WATCHING`.
 
 ### B2. Act on operator events, then ack (AI-JUDGMENT)
 
@@ -214,15 +215,14 @@ For a bound session the hooks do the following; each is tunable in the ledger's 
 
 - every tool result and prompt: unhandled operator events you owe are injected, up to 5;
 - after `nudge_after_calls` tool calls without a ledger command: a reminder to record progress;
-- Stop is blocked while events are unhandled, `stop_after_calls` calls passed without a ledger
-  command, or (orchestrator) the watcher is not running; after `stop_blocks` blocks it lets the
-  stop through and logs `gate bypassed` in the ledger for the operator;
+- Stop is blocked while events are unhandled or `stop_after_calls` calls passed without a ledger
+  command; after `stop_blocks` blocks it lets the stop through and logs `gate bypassed` in the ledger for the operator;
 - any error, an unreadable ledger or a stopped server lets everything through; a ledger with every
   phase and follow-up done is not gated.
 
 ### B5. Close
 
-When every phase is done and every follow-up closed, `leave`, then stop your Monitor.
+When every phase is done and every follow-up closed, `leave`, then stop any watch you started.
 Done when `status` no longer lists you.
 
 ## Part C — Run a swarm over a ledger
@@ -308,7 +308,7 @@ Every change to `template.html` keeps these:
   completion never recalculate it. Other Stats are computed in the page; started uses
   `_meta.created_at`, the ledger's earliest recorded timestamp.
 - Chat is the `chat` thread (last 500 messages); each send is one event, so
-  the orchestrator's watcher sees it within seconds.
+  it reaches the orchestrator through the inbox (or a watch, outside a swarm) within seconds.
 - The page polls the server every 2 s and redraws agent changes, keeping the
   cursor and any message not yet sent. Original sources are collapsed by
   default.
