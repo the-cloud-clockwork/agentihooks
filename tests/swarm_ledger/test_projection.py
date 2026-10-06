@@ -126,11 +126,13 @@ class TimeLeft(unittest.TestCase):
         from tests.swarm_ledger.test_fold import function_source
 
         script = """
-const nodes = {}; const $ = id => nodes[id] ||= {};
+const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].textContent = rows.join(" · ");}};
+const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(" ");
+const when = () => "";
 const inScope = list => list;
 const activeAgents = () => 0;
 let meta = {created_at: Date.now() - 3600000};
-let doc = {phases: [{done: true}, {done: false}], followups: [], time_left_minutes: 200};
+let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
         script += function_source("span") + function_source("renderStats")
         script += """

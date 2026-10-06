@@ -49,15 +49,15 @@ def tab(browser):
 def test_tabs_keep_the_shell_fixed_and_scroll_only_the_active_body(tab):
     assert tab.get_by_role("tab", name="Ledger").count() == 1
     assert tab.get_by_role("tab", name="Swarm").count() == 1
-    tab.locator("#ledger").evaluate("el => el.scrollTop = 600")
+    tab.locator("#main-content").evaluate("el => el.scrollTop = 600")
     assert tab.locator("header").bounding_box()["y"] == 0
     assert tab.evaluate("window.scrollY") == 0
-    assert tab.locator("#ledger").evaluate("el => el.scrollTop") == 600
+    assert tab.locator("#main-content").evaluate("el => el.scrollTop") == 600
     assert tab.evaluate("""() => [...document.querySelectorAll('body *')].filter(el => {
         const style = getComputedStyle(el);
         return el.getClientRects().length && ['auto', 'scroll'].includes(style.overflowY)
           && el.scrollHeight > el.clientHeight;
-    }).map(el => el.id)""") == ["ledger"]
+    }).map(el => el.id)""") == ["outline", "main-content"]
 
 
 def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
@@ -71,13 +71,13 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#ledger")
     assert tab.locator("#ledger").is_visible()
-    tab.locator("#ledger").evaluate("el => el.scrollTop = 600")
     tab.get_by_role("tab", name="Ledger").focus()
+    tab.locator("#main-content").evaluate("el => el.scrollTop = 600")
     tab.keyboard.press("ArrowRight")
     assert tab.locator("#swarm").is_visible()
     tab.keyboard.press("Home")
     assert tab.locator("#ledger").is_visible()
-    assert tab.locator("#ledger").evaluate("el => el.scrollTop") == 600
+    assert tab.locator("#main-content").evaluate("el => el.scrollTop") == 600
     tab.keyboard.press("End")
     assert tab.locator("#swarm").is_visible()
     tab.goto(URL + "#item-phases-p20")
@@ -105,8 +105,8 @@ def test_swarm_contains_the_operational_panels_and_controls_do_not_cover_text(ta
         "() => [...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.getBoundingClientRect().right > innerWidth).map(el => [el.id, el.className, el.getBoundingClientRect().right])"
     )
     if width == 390:
-        assert tab.locator("#chat-fab").evaluate("el => !!el.closest('header')")
-        assert tab.locator("#bell").evaluate("el => !!el.closest('header')")
+        assert tab.locator("#chat-fab").evaluate("el => !!el.closest('#icon-strip')")
+        assert tab.locator("#bell").evaluate("el => !!el.closest('#icon-strip')")
 
 
 def test_plan_shape_shows_only_labelled_counts_for_open_dependencies(tab):

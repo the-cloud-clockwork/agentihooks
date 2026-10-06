@@ -487,6 +487,25 @@ input, textarea { caret-color: var(--accent-2); }
   .summary-strip { gap: var(--space-tight); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+.workspace { display: flex; flex: 1; min-height: 0; gap: 16px; padding: 16px; margin-left: calc(-1 * var(--gutter)); }
+#icon-strip { flex: 0 0 56px; overflow-x: hidden; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; padding-top: 8px; }
+#icon-strip .sync { position: relative; inset: auto; flex: none; }
+.workspace > .outline { display: block; position: static; z-index: auto; align-self: stretch; flex: 0 0 224px; min-height: 0; overflow-y: auto; }
+#main-content { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; }
+#main-content > .overview { margin: 0 0 16px; }
+#main-content > .tabs { padding: 0; }
+#main-content > .tab-body { padding: 16px 0; overflow: visible; }
+.ledger-layout { display: block; max-width: none; margin: 0; }
+.jump-menu { display: none; }
+#stats-column { flex: 0 0 280px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#stats-column section { padding: 16px; margin: 0; }
+#stats { margin: 0; }
+#stats .stat { grid-template-columns: minmax(0, 1fr) auto; }
+@media (max-width: 1023px) {
+  .workspace { margin-left: 0; overflow-x: auto; }
+  .workspace > .outline { flex-basis: 180px; }
+  #main-content { flex: 1 0 360px; }
+}
 </style>
 </head>
 <body>
@@ -498,10 +517,10 @@ input, textarea { caret-color: var(--accent-2); }
     </div>
     <div class="status" id="status" role="status">loading</div>
   </header>
-  <div class="tabs" role="tablist" aria-label="Ledger views"><button class="tab" id="tab-ledger" role="tab" aria-controls="ledger" aria-selected="true">Ledger</button><button class="tab" id="tab-swarm" role="tab" aria-controls="swarm" aria-selected="false" tabindex="-1">Swarm</button></div>
   <div class="banner" id="banner"></div>
   <div class="closed-banner" id="closed-banner" role="status" hidden><span id="closed-label"></span> <button class="sw-btn" type="button" data-swarm="reopen">Reopen</button></div>
-<div class="tab-body" id="ledger" role="tabpanel" aria-labelledby="tab-ledger"><div class="ledger-layout"><nav class="outline" id="outline" aria-label="Outline"></nav><div class="col"><details class="fold overview" id="overview-box"><summary>Overview</summary><p id="overview"></p></details><div class="summary-strip"><div id="stats"></div><button class="link" id="stats-sync" type="button" aria-label="Ask master to recheck">Ask master to recheck</button></div><div class="sec-tools"><label class="jump-menu">Jump to <select id="jump-to" aria-label="Jump to section"></select></label><button class="link" type="button" id="sections-all"></button><button class="link" type="button" id="comments-all">Show all comments</button></div><section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
+<div class="workspace"><div id="icon-strip" aria-label="Page actions"></div><nav class="outline" id="outline" aria-label="Outline"></nav><div id="main-content"><details class="fold overview" id="overview-box" open><summary>Overview</summary><p id="overview"></p></details>  <div class="tabs" id="view-tabs" role="tablist" aria-label="Ledger views"><button class="tab" id="tab-ledger" role="tab" aria-controls="ledger" aria-selected="true">Ledger</button><button class="tab" id="tab-swarm" role="tab" aria-controls="swarm" aria-selected="false" tabindex="-1">Swarm</button></div>
+<div class="tab-body" id="ledger" role="tabpanel" aria-labelledby="tab-ledger"><div class="ledger-layout"><div class="col"><div class="sec-tools"><label class="jump-menu">Jump to <select id="jump-to" aria-label="Jump to section"></select></label><button class="link" type="button" id="sections-all"></button><button class="link" type="button" id="comments-all">Show all comments</button></div><section id="sec-priorities" data-outline="priorities"><details class="sources-box fold" id="prio-box"><summary>Priorities <span class="count" id="prio-count"></span></summary>
     <div class="prio-head"><button class="link danger" id="prio-clear-all" type="button">Clear all</button></div><ul id="priorities"></ul></details></section>
 <section id="sec-questions" data-outline="questions"><details class="sources-box fold" id="questions-box" open><summary>Open questions <span class="count" id="questions-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="questions"></ol></details></section>
 <section id="sec-phases" data-outline="phases"><details class="sources-box fold" id="phases-box" open><summary>Plan phases <span class="count" id="phases-count"></span><span class="end"><button class="link" type="button" data-comments>Show all comments</button></span></summary><ol id="phases"></ol></details></section>
@@ -532,6 +551,7 @@ input, textarea { caret-color: var(--accent-2); }
 <section id="restore-box" hidden><details class="sources-box fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><p class="hint" id="restore-summary"></p><ul class="sw-list" id="swarm-restore"></ul></details></section>
 </div></div></div>
 
+</div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask master to recheck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
 </main>
 <button class="sync" id="sync" type="button" title="Sync the crew" aria-label="Sync the crew">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
@@ -612,6 +632,7 @@ input, textarea { caret-color: var(--accent-2); }
   const toggles = stored(TOGGLES_KEY, {});
   let chatSeen = 0;
   let outlinePick = null;
+  const tabScroll = {};
   let outlineFrame = 0;
   const $ = (id) => document.getElementById(id);
 
@@ -1215,7 +1236,7 @@ input, textarea { caret-color: var(--accent-2); }
     document.title = doc.title;
     $("title").textContent = doc.title;
     $("overview").textContent = doc.overview;
-    $("overview-box").querySelector("summary").textContent = doc.overview || "Overview";
+    $("overview-box").querySelector("summary").textContent = "Overview";
     $("closed-label").textContent = closedText(doc.closed_at);
     $("closed-banner").hidden = !doc.closed_at;
     $("sources-count").textContent = headCount([[doc.sources.length]]);
@@ -1294,16 +1315,25 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function renderStats() {
-    const phases = inScope(doc.phases), ups = inScope(doc.followups);
-    const total = phases.length, done = phases.filter((p) => p.done).length;
-    const started = meta.created_at, left = doc.time_left_minutes;
+    const phases = inScope(doc.phases), ups = inScope(doc.followups), tasks = inScope(doc.tasks);
+    const total = phases.length, done = phases.filter((p) => p.done).length, upsDone = ups.filter((f) => f.done).length;
+    const out = ["phases", "questions", "followups"].reduce((n, l) => n + doc[l].length - inScope(doc[l]).length, 0);
+    const started = meta.created_at, elapsed = started ? Date.now() - started : null;
+    const left = doc.time_left_minutes;
     const leftText = left === null ? "not set" : span(left * 60000);
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
-    $("stats").textContent = [
-      `Phases ${done} / ${total}`, `Follow-ups ${ups.filter((f) => !f.done).length} open`,
-      `Time left ${leftText}`, `Last activity ${last ? span(Date.now() - last) + " ago" : "not recorded"}`,
-      started ? `Started ${new Date(started).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}, running ${span(Date.now() - started)}` : "Started not recorded"
-    ].join(" · ");
+    const pct = total ? Math.round(100 * done / total) : 0;
+    const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", {}, value, extra));
+    $("stats").replaceChildren(
+      row("Started", started ? when(started) : "—"),
+      row("Elapsed", elapsed === null ? "—" : span(elapsed)),
+      row("Time left", leftText),
+      row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
+      row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
+      row("Follow-ups", `${upsDone} / ${ups.length}`),
+      ...(out ? [row("Out of scope", String(out))] : []),
+      row("Agents · 2 h", String(activeAgents())),
+      row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
     $("active-agents").textContent = `Agents active in the last 2 hours: ${activeAgents()}`;
   }
 
@@ -1893,12 +1923,15 @@ input, textarea { caret-color: var(--accent-2); }
 
   function selectTab(id, updateHash = true) {
     if (!["ledger", "swarm"].includes(id)) return;
+    const previous = document.querySelector('[role="tab"][aria-selected="true"]').getAttribute("aria-controls");
+    if (previous !== id) tabScroll[previous] = $("main-content").scrollTop;
     for (const name of ["ledger", "swarm"]) {
       const active = name === id;
       $(name).hidden = !active;
       $("tab-" + name).setAttribute("aria-selected", String(active));
       $("tab-" + name).tabIndex = active ? 0 : -1;
     }
+    if (previous !== id) $("main-content").scrollTop = tabScroll[id] || 0;
     store(`plan-ledger:${SLUG}:tab`, id);
     if (updateHash) history.replaceState(null, "", "#" + id);
   }
@@ -1922,7 +1955,7 @@ input, textarea { caret-color: var(--accent-2); }
         if (next === undefined) return;
         ev.preventDefault();
         tabs[next].click();
-        tabs[next].focus();
+        tabs[next].focus({ preventScroll: true });
       });
     }
     window.addEventListener("hashchange", openHash);
@@ -2174,7 +2207,7 @@ input, textarea { caret-color: var(--accent-2); }
     });
     $("title-input").addEventListener("input", () => { $("title-error").textContent = ""; });
     $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
-    $("to-top").addEventListener("click", () => document.querySelector(".tab-body:not([hidden])").scrollTo({ top: 0, behavior: "smooth" }));
+    $("to-top").addEventListener("click", () => $("main-content").scrollTo({ top: 0, behavior: "smooth" }));
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
     $("notif-close").addEventListener("click", () => showNotifications(false));
     $("art-fab").addEventListener("click", () => showArtifacts($("art-panel").hidden));
@@ -2249,12 +2282,10 @@ input, textarea { caret-color: var(--accent-2); }
     }, true);
     render();
     wireTabs();
-    const rail = h("div", { class: "header-actions", id: "header-actions" });
-    document.querySelector("header").append(rail);
-    const railButtons = ["home", "bell", "to-top", "sync", "art-fab", "chat-fab"].map($);
+    const rail = $("icon-strip");
+    const railButtons = ["home", "art-fab", "bell", "to-top", "sync", "chat-fab"].map($);
     const placeRail = () => {
-      const narrow = innerWidth < 1024;
-      for (const btn of railButtons) (narrow ? rail : document.body).append(btn);
+      for (const btn of railButtons) rail.append(btn);
     };
     const grid = document.querySelector(".swarm-grid");
     const workColumn = h("div", { class: "swarm-work-column" });
@@ -2274,7 +2305,7 @@ input, textarea { caret-color: var(--accent-2); }
     placePanels();
     window.addEventListener("resize", placePanels);
     $("filter-clear").addEventListener("click", () => { workFilter = ""; renderSwarm(swarm); });
-    $("ledger").addEventListener("scroll", markOutline, { passive: true });
+    $("main-content").addEventListener("scroll", markOutline, { passive: true });
     poll();
     pollSwarm();
     setInterval(poll, POLL_MS);

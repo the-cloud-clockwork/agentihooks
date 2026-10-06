@@ -26,6 +26,7 @@ SECTIONS = {
     "Chat": True,
     "Notifications": True,
     "Artifacts": True,
+    "Stats": True,
 }
 
 
