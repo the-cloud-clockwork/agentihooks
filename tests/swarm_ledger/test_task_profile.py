@@ -4,7 +4,7 @@ from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
 
 SLUG = "taskprofile-2026-01-01"
-REFUSED = "profile must be a profile name"
+REFUSED = "^profile must be a profile name such as frontend, or empty for the lane profile$"
 
 
 @pytest.fixture(autouse=True)
