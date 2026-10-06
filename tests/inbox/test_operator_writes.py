@@ -90,7 +90,7 @@ def test_a_reply_on_a_phase_goes_to_the_master(swarm):
         write(5, "notes", kind="note added"),
         write(5, "phases/p2", kind="checked", text=None),
         write(5, "followups/f1", kind="unchecked", text=None),
-        write(5, "", kind="sync requested", text="Operator sync."),
+        write(5, "", kind="stats sync requested", text="Operator stats sync."),
         write(5, "title", kind="title changed", text="New title"),
     ],
 )
@@ -98,6 +98,14 @@ def test_answers_notes_and_checks_go_to_the_master(swarm, event):
     _, inbox = swarm
     relay(swarm, {k: v for k, v in event.items() if v is not None})
     assert len(pending(inbox, MASTER_SEAT)) == 1
+
+
+def test_a_sync_order_is_one_item_for_every_live_agent(swarm):
+    store, inbox = swarm
+    store.put_agent(SLUG, AgentRecord("sw-eng-2", "eng", "t3", state="finished", seat=f"eng-2@{SLUG}"))
+    relay(swarm, write(5, "", kind="sync requested", text="Operator sync."))
+    assert [len(pending(inbox, a.seat)) for a in (ENG, CI, BOSS)] == [1, 1, 1]
+    assert pending(inbox, f"eng-2@{SLUG}") == []
 
 
 def test_a_check_on_a_task_goes_to_its_agent(swarm):

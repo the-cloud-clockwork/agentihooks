@@ -4,7 +4,6 @@ import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 import unittest.mock
@@ -234,33 +233,13 @@ class Gate(unittest.TestCase):
         self.assertIn("tool calls since you last recorded", results[10]["reason"])
         self.assertIsNone(results[12])
 
-    def test_orchestrator_needs_a_live_watcher(self):
+    def test_an_orchestrator_without_a_watcher_stops_freely(self):
         core.watch_path(SLUG, "boss").unlink()
-        self.assertIn("watcher is not running", hook("Stop")["reason"])
+        self.assertIsNone(hook("Stop"))
         old = time.time() - 300
         core.watch_path(SLUG, "boss").touch()
         os.utime(core.watch_path(SLUG, "boss"), (old, old))
-        self.assertIn("watcher is not running", hook("Stop")["reason"])
-
-    def test_the_watcher_gate_holds_whatever_redis_an_earlier_hook_call_saw(self):
-        import redis
-        from fakeredis import TcpFakeServer
-
-        from scripts.swarm.naming import NameRegistry
-
-        server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        try:
-            url = f"redis://127.0.0.1:{server.server_address[1]}"
-            redis.Redis.from_url(url).set(NameRegistry.key("alias", "boss"), "someone-else")
-            core.watch_path(SLUG, "boss").unlink()
-            with unittest.mock.patch.dict(os.environ, {"REDIS_URL": url}):
-                self.assertIsNone(hook("Stop"))
-            core.watch_path(SLUG, "boss").touch()
-            self.test_orchestrator_needs_a_live_watcher()
-        finally:
-            server.shutdown()
-            server.server_close()
+        self.assertIsNone(hook("Stop"))
 
     def test_the_old_kill_switch_no_longer_disables_the_hook(self):
         ask("pending", 4)

@@ -7,11 +7,14 @@ from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
 
 OPERATOR = "operator"
+SYNC_ORDER = "sync requested"
 SENT_TTL_S = 30 * 24 * 3600
 
 
 def addresses(slug, event, doc, agents):
     live = [a for a in agents if a.state != "finished"]
+    if event.get("kind") == SYNC_ORDER:
+        return [a.seat or a.name for a in live]
     target = event.get("target", "")
     found = []
     if target == "chat" or target.startswith("notes/"):
