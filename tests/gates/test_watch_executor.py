@@ -76,6 +76,9 @@ def hook(tmp_path):
     def kinds():
         return [json.loads(line)["kind"] for line in recorded.read_text().splitlines()]
 
+    def revived():
+        return [bool(json.loads(line).get("revived")) for line in recorded.read_text().splitlines()]
+
     def rows():
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
@@ -85,7 +88,7 @@ def hook(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
 
-    run.seed, run.rows, run.beat, run.kinds = seed, rows, beat, kinds
+    run.seed, run.rows, run.beat, run.kinds, run.revived = seed, rows, beat, kinds, revived
     return run
 
 
@@ -109,6 +112,16 @@ def test_a_rearm_with_no_live_watcher_passes_and_one_with_a_live_watcher_is_deni
     assert hook(tool="Monitor", tool_input=REARM).returncode == 0
     hook.beat()
     assert hook(tool="Monitor", tool_input=REARM).returncode == 2
+
+
+def test_a_rearm_let_through_for_a_dead_watcher_is_recorded_as_revived_and_not_counted(hook):
+    hook.seed(20)
+    assert hook(tool="Monitor", tool_input=REARM).returncode == 0
+    assert hook.kinds() == ["watch"] * 21
+    assert hook.revived() == [False] * 20 + [True]
+    denied = hook()
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    assert "watch budget: 20 watch calls since your last action (limit 20)" in denied.stderr
 
 
 def test_observe_mode_lets_the_watch_through_and_logs_it(hook):
