@@ -95,11 +95,26 @@ Files written into the bundle or a repository are ordinary working-tree changes:
 commit them the usual way to keep them.
 
 **The gate.** Agents never create, change or remove conditions on their own.
-The `UserPromptSubmit` hook arms a per-session gate only when the `prompt` field —
-the text you typed — contains one of the phrases above, not negated (*don't add a
-condition* does not arm it). Tool output, files, broadcasts and injected context
-never arm it. The gate closes at the end of the turn (`Stop`) and after an hour at
-most. While it is closed:
+A per-session gate opens on your request from one of three sources, each checked
+in code, and the hook log records which one opened it (`typed`, `ledger` or
+`relay`, with the ledger comment id):
+
+- **Typed**: the `UserPromptSubmit` hook arms it when the prompt you typed in that
+  session contains one of the phrases above, not negated (*don't add a condition*
+  does not arm it). The phrase may name the condition: *set the no code edits
+  conditions*. Background task notifications (a ledger watch event), inbox wakes,
+  idle nudges and a swarm agent's launch or handoff prompt never arm it.
+- **Ledger comment**: in a swarm agent's session, your comment holding such a
+  phrase on that agent's own task on the ledger page, posted within the hour.
+  Agent comments never count.
+- **Master relay**: the master's `agentihooks ledger relay tasks/<id> "<text>"
+  --quote "<your words>"` onto that task. It counts only while the master session
+  holds your words, typed in its pane under thirty minutes ago, and they hold such
+  a phrase; the relay's own text never counts.
+
+The last two are checked at the gated tool call. Tool output, files, broadcasts
+and injected context never open the gate. It closes at the end of the turn
+(`Stop`) and after an hour at most. While it is closed:
 
 - `condition_set` / `condition_clear` are denied in PreToolUse and refused by the
   MCP server itself;

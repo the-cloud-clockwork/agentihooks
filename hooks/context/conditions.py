@@ -584,13 +584,18 @@ def post_effect(payload: dict) -> PostEffect | None:
 
 
 # ---------------------------------------------------------------------------
-# Operator gate — conditions are created or removed only when the operator's
-# own prompt this turn asks for it
+# Operator gate — conditions are created or removed only when the operator
+# asks: his prompt this turn, his ledger comment or the master's relay of it
 # ---------------------------------------------------------------------------
 
+_DETERMINER = r"(?:a|an|the|this|that|these|those|new|another|one|my)"
+_NOT_A_NAME = (
+    r"(?:about|after|and|are|at|before|by|for|from|how|if|in|into|is|of|on|or|to|what|when|where|which|who|why|with)"
+)
 _SIGNAL = re.compile(
     r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
-    r"\s+(?:up\s+)?(?:(?:a|an|the|this|that|these|those|new|another|one|my)\s+)*conditions?\b",
+    rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
+    rf"(?:(?!(?:{_DETERMINER}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
     re.IGNORECASE,
 )
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
@@ -623,8 +628,10 @@ _READ_ONLY_GIT = frozenset({"add", "commit", "status", "log", "diff", "show", "p
 _HARMLESS_REDIRECT = re.compile(r"\d*>&\d+|&?\d*>\s*/dev/null")
 _GATE_TTL_SEC = 3600
 GATE_MESSAGE = (
-    "BLOCKED: conditions are created, changed or removed only when the operator's own prompt this turn "
-    "asks for it (e.g. 'set a condition ...'). Never create one on your own initiative."
+    "BLOCKED: conditions are created, changed or removed only when the operator asks: the operator's own prompt "
+    "this turn (e.g. 'set a condition ...'), his comment on this agent's ledger task, or the master's "
+    "'agentihooks ledger relay' onto that task of words he typed in the master pane under thirty minutes ago. "
+    "Never create one on your own initiative."
 )
 
 
@@ -647,12 +654,15 @@ def _gate_path(session_id: str) -> Path:
     return runtime_dir() / ".gate" / safe
 
 
-def arm_gate(session_id: str) -> None:
+def arm_gate(session_id: str, source: str = "typed", ref: str = "") -> None:
     if not session_id:
         return
+    from hooks.common import log
+
     path = _gate_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(int(time.time())))
+    path.write_text(json.dumps({"source": source, "ref": ref}))
+    log("conditions: operator gate opened", {"session_id": session_id, "source": source, "ref": ref})
 
 
 def disarm_gate(session_id: str) -> None:
@@ -667,6 +677,16 @@ def is_armed(session_id: str) -> bool:
         return time.time() - _gate_path(session_id).stat().st_mtime < _GATE_TTL_SEC
     except OSError:
         return False
+
+
+def gate_source(session_id: str) -> dict:
+    if not is_armed(session_id):
+        return {}
+    try:
+        record = json.loads(_gate_path(session_id).read_text())
+    except (OSError, ValueError):
+        return {}
+    return record if isinstance(record, dict) else {}
 
 
 def _touches_conditions(text: str) -> bool:
@@ -687,8 +707,21 @@ def _read_only_shell(command: str) -> bool:
     return heads <= (_READ_ONLY_HEADS | {"find"})
 
 
+def _requested_on_task(session_id: str) -> bool:
+    """Open the gate from the operator's comment or the master's relay on this agent's ledger task."""
+    from hooks.context import ledger_request
+
+    try:
+        opened = ledger_request.find(contains_condition_signal)
+    except Exception:  # the hook lets a raising guard through, so a lookup that fails must refuse
+        return False
+    if opened:
+        arm_gate(session_id, *opened)
+    return bool(opened)
+
+
 def write_guard(tool_name: str, tool_input: dict | None, session_id: str) -> str | None:
-    """Block an agent touching condition files or tools unless the operator armed this turn."""
+    """Block an agent touching condition files or tools unless the operator asked: this turn or on its task."""
     name = tool_name or ""
     tool_input = tool_input or {}
     touches = bool(_CONDITION_TOOL.search(name))
@@ -699,7 +732,7 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str) -> str
         command = str(tool_input.get("command") or "")
         touches = bool(_NEAR_CONDITIONS.search(command) or _touches_conditions(command))
         touches = touches and not _read_only_shell(command)
-    if touches and not is_armed(session_id):
+    if touches and not is_armed(session_id) and not _requested_on_task(session_id):
         return GATE_MESSAGE
     return None
 

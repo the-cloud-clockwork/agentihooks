@@ -685,7 +685,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
     _swarm_heartbeat("working", payload.get("prompt", ""))
-    _operator_words(payload)
+    typed = _operator_words(payload)
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -814,9 +814,8 @@ def on_user_prompt_submit(payload: dict) -> None:
         if prompt:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
-            if contains_condition_signal(prompt):
-                arm_gate(session_id)
-                log("conditions: operator gate armed this turn", {"session_id": session_id})
+            if typed and contains_condition_signal(prompt):
+                arm_gate(session_id, "typed")
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_release_signal(prompt):
                 set_release_signal(session_id)
                 log(
@@ -1003,13 +1002,14 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
         log("swarm heartbeat failed", {"error": str(e)})
 
 
-def _operator_words(payload: dict) -> None:
+def _operator_words(payload: dict) -> bool:
     try:
-        from hooks.context.operator_words import heard
+        from hooks.context.operator_words import typed
 
-        heard(payload)
+        return typed(payload)
     except Exception as e:
         log("operator words record failed", {"error": str(e)})
+        return False
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:

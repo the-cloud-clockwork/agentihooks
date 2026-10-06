@@ -52,11 +52,12 @@ def record(name, words, now=None):
     return True
 
 
-def matching(name, quote, now=None):
-    """The latest recorded words that hold the quote, or an empty string."""
+def matching(name, quote, now=None, within=TTL_SEC):
+    """The latest words recorded under `within` seconds ago that hold the quote, or an empty string."""
     needle = _norm(quote)
-    rows = _load(name, time.time() if now is None else now)["rows"] if needle else []
-    return next((r["words"] for r in reversed(rows) if needle in _norm(r["words"])), "")
+    now = time.time() if now is None else now
+    rows = _load(name, now)["rows"] if needle else []
+    return next((r["words"] for r in reversed(rows) if needle in _norm(r["words"]) and now - r["at"] < within), "")
 
 
 def _opening(name, session, now):
@@ -99,3 +100,11 @@ def heard(payload, environ=None, now=None):
     if "prompt" in payload:
         return heard_prompt(payload["prompt"], environ, now, payload.get("session_id"))
     return heard_answer(payload, environ, now)
+
+
+def typed(payload, environ=None, now=None):
+    """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt."""
+    env = os.environ if environ is None else environ
+    if env.get("AGENTIHOOKS_AGENT_NAME"):
+        return heard(payload, env, now)
+    return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))
