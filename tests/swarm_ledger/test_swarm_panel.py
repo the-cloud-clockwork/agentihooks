@@ -714,7 +714,10 @@ class HealthPanel(unittest.TestCase):
     def test_the_swarm_health_renders_findings_with_the_swarm(self):
         source = function_source("renderSwarm")
         self.assertIn("renderHealth(sw.findings)", source)
-        self.assertIn("renderNeedsYou(sw)", source)
+        self.assertNotIn("renderNeedsYou", source)
+        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        self.assertNotIn("needs-you", page)
+        self.assertNotIn("Needs you", page)
 
     def test_health_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
