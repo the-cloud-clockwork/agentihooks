@@ -114,7 +114,12 @@ details.phase-fold > summary::before { align-self: center; }
 .task-id { color: var(--destructive); font-weight: 700; text-decoration: none; text-shadow: var(--glow); }
 .item-title > .task-id { margin-right: .5em; }
 .task-id:hover, .task-id:focus-visible { text-decoration: underline; }
-.prio-text { flex: 1; min-width: 0; }
+.prio-body { flex: 1; min-width: 0; }
+.prio-head-line { display: flex; gap: .5em; align-items: baseline; }
+.prio-title { min-width: 0; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.prio-title:hover, .prio-title:focus-visible { text-decoration: underline; }
+.prio-title.gone { color: var(--muted); font-style: italic; }
+.prio-text { margin-top: 2px; color: var(--text-2); }
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { from { background: var(--hover); } to { background: transparent; } }
 .mini-sync { background: none; border: 0; padding: 0; color: var(--signal); cursor: pointer; display: grid; place-content: center; transition: color .15s; }
@@ -1474,16 +1479,31 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     queue({ op: "priority_clear", id: newId("clear"), target });
   }
 
+  const PRIORITY_KINDS = { tasks: ["title", "task"], phases: ["title", "phase"], questions: ["text", "question"], followups: ["text", "follow up"] };
+
+  function prioritySubject(item) {
+    const [list, id] = item.split("/");
+    const [field, noun] = PRIORITY_KINDS[list];
+    const found = doc[list].find((i) => i.id === id && !i.deleted);
+    const label = field === "title" ? id : noun;
+    return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  }
+
   function renderPriorities() {
     const list = doc.priorities;
     $("prio-count").textContent = headCount([[list.length]]);
     $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
     if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
     document.querySelector(".prio-head").hidden = !list.length;
-    $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio", id: `item-priorities-${p.id}` },
-      h("a", { class: "prio-link", href: `#item-${p.item.replace("/", "-")}`, text: `#${p.item.split("/")[1]}`, on: { click: (ev) => jumpTo(ev, p.item) } }),
-      h("span", { class: "prio-text", text: p.text }),
-      h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }))));
+    $("priorities").replaceChildren(...list.map((p) => {
+      const { label, title, gone } = prioritySubject(p.item);
+      const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
+      return h("li", { class: "prio", id: `item-priorities-${p.id}` },
+        h("div", { class: "prio-body" },
+          h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
+          h("div", { class: "prio-text", text: p.text })),
+        h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
+    }));
     if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
   }
 
