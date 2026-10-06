@@ -57,6 +57,7 @@ from scripts.swarm import (
     phase_planning,
     phase_state,
     phases,
+    plan_review,
     prompt,
     snapshot,
     take_master,
@@ -552,6 +553,12 @@ def cmd_wait(store, args):
     print(json.dumps({"agent": agent.name, "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat()}))
 
 
+def cmd_plan(store, args):
+    agent, autonomy = _me(store, args), store.config(args.slug).autonomy
+    result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, args.action, args.note)
+    print(json.dumps(result))
+
+
 def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
@@ -722,6 +729,11 @@ def build_parser():
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
+    plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
+    for action in plan_review.DECISIONS:
+        decision = plan.add_parser(action)
+        decision.add_argument("phase")
+        decision.add_argument("--note", required=action == "send-back", default="")
     wait = sub.add_parser("wait")
     wait.add_argument("minutes", type=int)
     wait.add_argument("--reason", default="")

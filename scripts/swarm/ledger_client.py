@@ -58,8 +58,9 @@ class LedgerClient:
     def comment_phase(self, slug, phase_id, text, by):
         self._call(slug, [_op("add", by, thread=f"phases/{phase_id}/comments", text=text)])
 
-    def review_phase(self, slug, phase_id, state, rounds, by="swarm"):
-        self._call(slug, [_op("phase_review", by, item=f"phases/{phase_id}", state=state, rounds=rounds)])
+    def review_phase(self, slug, phase_id, state, by="swarm", note=""):
+        fields = {"item": f"phases/{phase_id}", "state": state, **({"note": note} if note else {})}
+        self._call(slug, [_op("phase_review", by, **fields)])
 
     def say(self, slug, text, by=None):
         op = _op("add", by, thread="chat", text=text)

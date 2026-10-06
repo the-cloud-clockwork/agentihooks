@@ -25,9 +25,14 @@ def planning_pass(inbox, store, slug, doc, ledger, config):
         stage = phase_state.lifecycle(phase, doc)
         if stage == "to_plan":
             actions += _queue(mail, slug, phase, ledger)
-        elif stage == "in_review" and not phase.get("review"):
+        elif stage == "in_review" and _unreviewed(phase):
             actions += _open_review(mail, slug, phase, doc, ledger, config)
     return actions
+
+
+def _unreviewed(phase):
+    review = phase.get("review") or {}
+    return not review or review.get("state") == "sent_back" and not review.get("escalated")
 
 
 def _queue(mail, slug, phase, ledger):
@@ -50,14 +55,15 @@ def _queue(mail, slug, phase, ledger):
 def _open_review(mail, slug, phase, doc, ledger, config):
     pid = phase["id"]
     problems = slice_check.check(phase, doc, slice_check.Limits.from_env(os.environ))
-    ledger.review_phase(slug, pid, "pending", 0)
+    rounds = (phase.get("review") or {}).get("rounds", 0)
+    ledger.review_phase(slug, pid, "pending")
     if config.autonomy in OPERATOR_REVIEWS:
         ledger.priority(slug, f"phases/{pid}", "Approve the slice planned for this phase or send it back.")
     if config.autonomy != "manual":
         ask = ASSIST_ASK if config.autonomy == "assist" else MASTER_ASK
         found = " ".join(problems) or "The slice check found no problems."
         text = f"Review the slice planned for phase {pid} {phase['title']}: {ask}. {found}"
-        mail.send(f"plan-review:{pid}", mail.master, text)
+        mail.send(f"plan-review:{pid}:{rounds}", mail.master, text)
     size = len(slice_check.slice_ids(slice_check.plan_task(phase, doc)))
     ledger.comment_phase(slug, pid, _comment(problems, size), SENDER)
     return [f"opened the review of phase {pid}"]
