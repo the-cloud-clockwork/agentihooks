@@ -159,7 +159,13 @@ def test_name_worktree_prints_the_next_free_name_and_checks_a_given_one(tmp_path
     assert capsys.readouterr().out.strip() == "engineer-a1b2c3-0002-tmp-1"
     assert gc_cli.main(["name", "worktree", "--repo", str(primary), "--check", "engineer-a1b2c3-0002"]) == 0
     assert gc_cli.main(["name", "worktree", "--repo", str(primary), "--check", "my-branch"]) == 1
-    assert "engineer-a1b2c3-0002-2" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "name: names come from code; use engineer-a1b2c3-0002-2 (run wt.sh new without a name)\n"
+    )
+    assert gc_cli.main(["name", "tmp", "--repo", str(primary), "--check", "my-branch"]) == 1
+    assert capsys.readouterr().err == (
+        "name: names come from code; use engineer-a1b2c3-0002-tmp-1 (run wt.sh tmp without a name)\n"
+    )
 
 
 def test_name_reads_the_default_worktree_root_and_the_current_repo(tmp_path, monkeypatch, capsys, repo):
