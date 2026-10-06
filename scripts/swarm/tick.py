@@ -4,11 +4,15 @@ Scaling up is immediate; scaling down happens only as agents finish, so a lowere
 Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
+import os
 from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
 
 from scripts.doctor import priming
+from scripts.gates import Who, modes
+from scripts.gates import claims as claim_cap
+from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
@@ -53,6 +57,7 @@ class Placed:
 class Ledger(Protocol):
     def state(self, slug: str) -> dict: ...
     def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm") -> None: ...
+    def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
     def bin_closed(self, slug: str, closed_at: int) -> bool: ...
@@ -288,6 +293,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
             if not runtime.has_capacity():
                 return actions + ["every agent is at its session cap, waiting"]
+            if blocked := _lives_spent(slug, store, ledger, rows, task):
+                actions.append(blocked)
+                continue
             name = store.next_name(slug, lane, now_ms)
             if not store.claim(slug, task["id"], name, LEASE_MS):
                 continue
@@ -319,9 +327,38 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 return actions
             store.put_agent(slug, _placed(record, placed))
             store.count_spawn(slug, placed.harness)
+            store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
             actions.append(f"spawned {name} for {task['id']}")
     return actions
+
+
+def _lives_spent(slug, store, ledger, rows, task):
+    try:
+        return _claim_cap(slug, store, ledger, rows, task)
+    except Exception as exc:  # a crashed gate lets the claim through, counted in the gate log
+        who = Who(name="swarm", task=task["id"])
+        gate_log.append(
+            slug, gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
+        )
+        return ""
+
+
+def _claim_cap(slug, store, ledger, rows, task):
+    lives, mode = store.claims(slug, task["id"]), modes.mode(claim_cap.GATE, os.environ)
+    if lives < claim_cap.CAP or mode == "off":
+        return ""
+    last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
+    reason = claim_cap.refusal(lives, last, slug, task["id"])
+    kind = "observe" if mode == "observe" else "deny"
+    gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
+    if kind == "observe":
+        return ""
+    ledger.comment(slug, task["id"], reason, by="swarm")
+    ledger.update_task(slug, task["id"], {"state": "blocked"})
+    rows[task["id"]].update(state="blocked")
+    store.reset_claims(slug, task["id"])
+    return f"blocked {task['id']}: {reason}"
 
 
 def primed(store, slug, seat, task):

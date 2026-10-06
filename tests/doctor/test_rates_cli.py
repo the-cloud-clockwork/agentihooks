@@ -46,7 +46,10 @@ def test_rates_prints_the_window_before_and_after_a_time_as_json(loaded, env, ca
     assert isinstance(loaded["ledger"], swarm_cli.LedgerClient)
     assert found["rates"]["before"]["ceremony"] == {"talk writes": 1, "outcomes": 0, "talk per outcome": None}
     assert found["rates"]["after"]["ceremony"] == {"talk writes": 0, "outcomes": 1, "talk per outcome": 0.0}
-    assert found["gates"] == {"before": {}, "after": {"talk": {"deny": 1, "observe": 0, "lift": 0, "fail-open": 0}}}
+    assert found["gates"] == {
+        "before": {},
+        "after": {"talk": {"deny": 1, "observe": 0, "lift": 0, "fail-open": 0, "count": 0}},
+    }
     assert found["events from"] == AT_MS - HOUR
 
 
@@ -102,6 +105,7 @@ def test_rates_without_a_time_prints_one_window_ending_now_as_a_table(loaded, ca
         ["observe", "0"],
         ["lift", "0"],
         ["fail-open", "0"],
+        ["count", "0"],
     ]
 
 
