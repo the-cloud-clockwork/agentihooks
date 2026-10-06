@@ -32,6 +32,7 @@ def test_cli_contract_and_result(monkeypatch, backend):
         seen.append((args, kwargs))
         assert kwargs["env"]["AGENTIHOOKS_CLASSIFIER_CHILD"] == "1"
         assert "CLAUDECODE" not in kwargs["env"]
+        assert Path(kwargs["cwd"]).parent == fallbacks.log_path().parent / "children"
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
         assert kwargs["timeout"] == 17.5
@@ -42,12 +43,15 @@ def test_cli_contract_and_result(monkeypatch, backend):
             assert args[args.index("--output-format") + 1] == "json"
             assert args[args.index("--tools") + 1] == ""
             assert "--no-session-persistence" in args
-            assert "--system-prompt" in args
+            assert args[args.index("--system-prompt") + 1] == fallbacks.PROMPT
+            assert "--strict-mcp-config" in args
+            assert json.loads(args[args.index("--mcp-config") + 1]) == {"mcpServers": {}}
             schema = json.loads(args[args.index("--json-schema") + 1])
             output = json.dumps({"structured_output": OUTPUT})
         else:
             assert args[:5] == ["codex", "--no-daemon", "exec", "-m", "gpt-6-luna"]
-            assert 'model_reasoning_effort="low"' in args
+            assert args[5:7] == ["-c", 'model_reasoning_effort="low"']
+            assert args[-3:] == ["--ephemeral", "-c", f"developer_instructions={json.dumps(fallbacks.PROMPT)}"]
             assert args[args.index("--sandbox") + 1] == "read-only"
             assert "--skip-git-repo-check" in args
             schema = json.loads(Path(args[args.index("--output-schema") + 1]).read_text())
@@ -81,7 +85,7 @@ def test_transport_failure_is_safe(monkeypatch, backend, failure, reason):
         raise failure
 
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
-    with pytest.raises(BackendFailure, match=reason) as error:
+    with pytest.raises(BackendFailure, match=f"^{reason}$") as error:
         backend().decide(REQUEST)
     assert "private" not in str(error.value)
 
@@ -90,17 +94,17 @@ def test_transport_failure_is_safe(monkeypatch, backend, failure, reason):
     "output,code,reason",
     [
         ("private output", 7, "CLI status 7"),
-        ("private output", 0, "parse error"),
+        ("private output", 0, "parse error: invalid CLI output"),
         (json.dumps({"is_error": True, "result": "private"}), 0, "CLI error"),
-        (json.dumps({"result": "not json"}), 0, "parse error"),
-        (json.dumps({"structured_output": {}}), 0, "parse error"),
+        (json.dumps({"result": "not json"}), 0, "parse error: invalid CLI output"),
+        (json.dumps({"structured_output": {}}), 0, "parse error: invalid answers"),
     ],
 )
 def test_bad_claude_output_is_safe(monkeypatch, output, code, reason):
     from hooks.classifier import fallbacks
 
     monkeypatch.setattr(fallbacks.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=code, stdout=output))
-    with pytest.raises(BackendFailure, match=reason) as error:
+    with pytest.raises(BackendFailure, match=f"^{reason}$") as error:
         ClaudeCliBackend().decide(REQUEST)
     assert "private" not in str(error.value)
 
@@ -120,7 +124,7 @@ def test_codex_missing_output_is_parse_error(monkeypatch):
     from hooks.classifier import fallbacks
 
     monkeypatch.setattr(fallbacks.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=""))
-    with pytest.raises(BackendFailure, match="parse error"):
+    with pytest.raises(BackendFailure, match="^parse error: invalid CLI output$"):
         CodexCliBackend().decide(REQUEST)
 
 

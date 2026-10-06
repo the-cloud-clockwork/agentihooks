@@ -61,7 +61,7 @@ def _ask_fallbacks(request: DecisionRequest, fallbacks: Sequence[Backend], failu
         try:
             return backend.decide(request)
         except BackendFailure as failure:
-            failures.append(decision_log.failure_record(backend.name, failure))
+            failures.append(decision_log.failure_record(getattr(backend, "model", backend.name), failure))
     return None
 
 

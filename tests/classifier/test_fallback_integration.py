@@ -6,7 +6,8 @@ from urllib.error import URLError
 
 import pytest
 
-from hooks.classifier import YesNo, api, cli, decide, decision_log, down_cache, fallbacks
+from hooks.classifier import YesNo, api, cli, core, decision_log, down_cache, fallbacks
+from hooks.classifier.core import decide
 from hooks.classifier.errors import BackendFailure, ClassifierRequestError, ClassifierUnavailable
 from tests.classifier.fakes import FakeUrlopen, http_error, ok
 
@@ -72,7 +73,10 @@ def test_api_failure_reason_is_logged(monkeypatch, failure, reason):
         failure = io.BytesIO(json.dumps(failure).encode())
     monkeypatch.setattr(api, "urlopen", FakeUrlopen({"first": failure, "second": ok()}))
     assert decide("typo", QUESTIONS, purpose="test").source == "second"
-    assert reason in _lines()[0]["failures"][0]["reason"]
+    actual = _lines()[0]["failures"][0]["reason"]
+    assert actual.startswith(f"first: {reason}")
+    if reason != "parse error":
+        assert actual == f"first: {reason}"
     assert "private" not in json.dumps(_lines())
 
 
@@ -98,7 +102,7 @@ def test_missing_preferred_cli_tries_other(monkeypatch):
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
     assert decide("typo", QUESTIONS, purpose="missing", harness="codex").source == "haiku"
     assert seen == ["codex", "claude"]
-    assert _lines()[0]["failures"] == [{"model": "luna", "reason": "CLI missing"}]
+    assert _lines()[0]["failures"] == [{"model": "gpt-6-luna", "reason": "CLI missing"}]
 
 
 def test_both_missing_raises_with_failure_log(monkeypatch):
@@ -107,7 +111,7 @@ def test_both_missing_raises_with_failure_log(monkeypatch):
         decide("typo", QUESTIONS, purpose="missing", harness="claude")
     assert _lines()[0]["failures"] == [
         {"model": "haiku", "reason": "CLI missing"},
-        {"model": "luna", "reason": "CLI missing"},
+        {"model": "gpt-6-luna", "reason": "CLI missing"},
     ]
     assert _lines()[0]["source"] is None
 
@@ -154,3 +158,51 @@ def test_legacy_down_marker_keeps_cache_and_does_not_break_fallback(monkeypatch,
     else:
         down_cache.marker_path().write_text(contents)
     assert down_cache.failures() == []
+
+
+@pytest.mark.parametrize(
+    "catalog,override,expected",
+    [
+        ({"models": [{"slug": "catalog-luna"}]}, None, "catalog-luna"),
+        ({"models": [{"slug": "catalog-luna"}]}, "override-luna", "override-luna"),
+    ],
+)
+def test_failed_codex_logs_selected_slug(monkeypatch, tmp_path, catalog, override, expected):
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "models_cache.json").write_text(json.dumps(catalog))
+    if override:
+        monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_LUNA_MODEL", override)
+    else:
+        monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_LUNA_MODEL", raising=False)
+    with pytest.raises(ClassifierUnavailable):
+        core.decide("typo", QUESTIONS, purpose="model", harness="codex")
+    assert _lines()[0]["failures"][0] == {"model": expected, "reason": "CLI missing"}
+
+
+def test_redaction_without_key_does_not_replace_text(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_LITELLM_KEY")
+    assert decision_log.failure_record("XXXX", BackendFailure("XXXX refused")) == {
+        "model": "XXXX",
+        "reason": "XXXX refused",
+    }
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_harness_help_and_valid_choices(monkeypatch, tmp_path, capsys, harness):
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL")
+    monkeypatch.setattr(fallbacks.subprocess, "run", _child)
+    state, questions = tmp_path / "state", tmp_path / "questions"
+    state.write_text('"typo"')
+    questions.write_text(
+        json.dumps({"trivial": {"type": "noul", "instructions": "q", "criteria": {"true": "t", "false": "f"}}})
+    )
+    args = ["--state", str(state), "--questions", str(questions)]
+    assert cli.classify_main([*args, "--harness", harness]) == 0
+    with pytest.raises(SystemExit) as error:
+        cli.classify_main([*args, "--harness", "invalid"])
+    assert error.value.code == 2
+    with pytest.raises(SystemExit) as help_exit:
+        cli.classify_main(["--help"])
+    assert help_exit.value.code == 0
+    assert "CLI fallback target" in capsys.readouterr().out

@@ -93,6 +93,9 @@ class ClaudeCliBackend:
 class CodexCliBackend:
     name = "luna"
 
+    def __init__(self):
+        self.model = luna_model()
+
     def decide(self, request: DecisionRequest) -> DecisionResult:
         with _workspace() as directory:
             cwd = Path(directory)
@@ -104,7 +107,7 @@ class CodexCliBackend:
                 "--no-daemon",
                 "exec",
                 "-m",
-                luna_model(),
+                self.model,
                 "-c",
                 'model_reasoning_effort="low"',
                 "--sandbox",

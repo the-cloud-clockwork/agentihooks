@@ -63,13 +63,13 @@ def test_normalizes_and_derives_answers():
 
 @pytest.mark.parametrize("value", [None, [], {}, {"answers": []}, {"answers": {"yes": {"noul": 0.1}}}])
 def test_rejects_wrong_shape(value):
-    with pytest.raises(BackendFailure, match="parse error"):
+    with pytest.raises(BackendFailure, match="^parse error"):
         normalize_answers(value, QUESTIONS)
 
 
-@pytest.mark.parametrize("value", [-0.1, 1.1, math.nan, math.inf, "0.2", True, None])
+@pytest.mark.parametrize("value", [-0.1, 1.1, 10**400, math.nan, math.inf, "0.2", True, None])
 def test_rejects_invalid_yes_probability(value):
-    with pytest.raises(BackendFailure, match="parse error"):
+    with pytest.raises(BackendFailure, match="^parse error"):
         normalize_answers({"answers": {"yes": {"noul": value}}}, {"yes": QUESTIONS["yes"]})
 
 
@@ -88,7 +88,7 @@ def test_rejects_invalid_yes_probability(value):
     ],
 )
 def test_rejects_invalid_distribution(value):
-    with pytest.raises(BackendFailure, match="parse error"):
+    with pytest.raises(BackendFailure, match="^parse error"):
         normalize_answers({"answers": {"tier": {"probabilities": value}}}, {"tier": QUESTIONS["tier"]})
 
 

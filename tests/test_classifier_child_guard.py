@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from hooks import hook_manager
+from hooks.classifier.child import skip_classifier_child
 
 
 def test_classifier_child_returns_before_stdin_dispatch_and_telemetry(monkeypatch):
@@ -33,3 +34,14 @@ def test_ordinary_hook_still_dispatches(monkeypatch, value):
     monkeypatch.setattr(hook_manager.os, "_exit", Mock())
     hook_manager.main()
     handler.assert_called_once_with({"hook_event_name": "SessionStart"})
+
+
+@pytest.mark.parametrize("value", [None, "0", "1", "true"])
+def test_child_guard_calls_handler_only_for_ordinary_sessions(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_CHILD", value)
+    handler = Mock()
+    skip_classifier_child(handler)()
+    assert handler.call_count == (0 if value == "1" else 1)

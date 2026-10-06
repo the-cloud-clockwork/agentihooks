@@ -25,7 +25,7 @@ def answer_schema(questions: dict) -> dict:
 
 
 def _probability(value: object) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+    if type(value) not in (int, float) or not 0 <= value <= 1 or not math.isfinite(value):
         raise BackendFailure("parse error: invalid probability")
     return float(value)
 
