@@ -80,11 +80,10 @@ async def _push(store, me, write, ready, pubsub):
         await anyio.to_thread.run_sync(lambda: pubsub.get_message(timeout=RECHECK_S), abandon_on_cancel=True)
 
 
-async def serve(store, me):
+async def run(store, me, read, write):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import NotificationOptions, Server
-    from mcp.server.stdio import stdio_server
 
     server, ready = Server(NAME, instructions=_instructions(me)), anyio.Event()
 
@@ -97,16 +96,22 @@ async def serve(store, me):
     async def call_tool(name, arguments):
         return [types.TextContent(type="text", text=answer(store, me, arguments["item_id"], arguments["text"]))]
 
-    pubsub = store.redis.pubsub(ignore_subscribe_messages=True)
+    pubsub = store.redis.pubsub()
     pubsub.subscribe(NOTIFY)
     options = server.create_initialization_options(
         NotificationOptions(), experimental_capabilities={"claude/channel": {}}
     )
+    async with anyio.create_task_group() as group:
+        group.start_soon(_push, store, me, write, ready, pubsub)
+        await server.run(read, write, options)
+        group.cancel_scope.cancel()
+
+
+async def serve(store, me):
+    from mcp.server.stdio import stdio_server
+
     async with stdio_server() as (read, write):
-        async with anyio.create_task_group() as group:
-            group.start_soon(_push, store, me, write, ready, pubsub)
-            await server.run(read, write, options)
-            group.cancel_scope.cancel()
+        await run(store, me, read, write)
 
 
 def main():

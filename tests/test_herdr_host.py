@@ -211,6 +211,24 @@ def test_the_agent_is_named_in_herdr_once_it_reports_its_route(monkeypatch, tmp_
     assert "account=ncgma" in out and "agent_name=eng-a" in out
 
 
+def test_a_channel_launch_reports_the_warning_answered_in_its_pane(monkeypatch, tmp_path, capsys):
+    answered = []
+    monkeypatch.setattr(herdr_host, "open_pane", lambda *a: herdr_host.Placement("w1", "w1:t3", "w1:p7"))
+
+    def run(pane, launcher, environ):
+        launcher.with_suffix(".started").touch()
+        launcher.with_suffix(".route").write_text("status=routed\naccount=ncgma\n")
+
+    monkeypatch.setattr(herdr_host, "run", run)
+    monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: True)
+    monkeypatch.setattr(herdr_host, "answer", lambda pane, text, environ, ms: answered.append((pane, environ)) or True)
+
+    rc, _ = _main(monkeypatch, tmp_path, "--agent", "claude", "--inbox-channel")
+
+    assert rc == 0 and "channel_warning=answered" in capsys.readouterr().out.splitlines()
+    assert [(pane, environ["HOME"]) for pane, environ in answered] == [("w1:p7", str(tmp_path))]
+
+
 def test_renaming_waits_until_herdr_detects_the_agent(monkeypatch):
     attempts = []
 
@@ -236,11 +254,11 @@ def test_renaming_gives_up_when_no_agent_appears(monkeypatch):
 
 def test_answer_waits_for_the_text_then_presses_enter(monkeypatch):
     calls = []
-    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append(args) or {})
-    assert herdr_host.answer("w1:p2", "local development", {}, 5000)
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append((args, environ)) or {})
+    assert herdr_host.answer("w1:p2", "local development", {"K": "v"}, 5000)
     assert calls == [
-        ["pane", "wait-output", "w1:p2", "--match", "local development", "--timeout", "5000"],
-        ["pane", "send-keys", "w1:p2", "Enter"],
+        (["pane", "wait-output", "w1:p2", "--match", "local development", "--timeout", "5000"], {"K": "v"}),
+        (["pane", "send-keys", "w1:p2", "Enter"], {"K": "v"}),
     ]
 
 

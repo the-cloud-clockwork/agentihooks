@@ -23,7 +23,7 @@ def wake_all(store, inbox, herdr, now_ms, window, quiet=wake.DEFAULT_QUIET_S * 1
 def run(store, herdr, now_ms, environ=None):
     env = os.environ if environ is None else environ
     inbox = InboxStore(store.redis)
-    pubsub = store.redis.pubsub(ignore_subscribe_messages=True)
+    pubsub = store.redis.pubsub()
     pubsub.subscribe(NOTIFY)
     while True:
         if pubsub.get_message(timeout=RECHECK_S) is None:
