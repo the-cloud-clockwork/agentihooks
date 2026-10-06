@@ -769,6 +769,11 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
 
     task = {"id": "t1", "title": "x", "phase": "p1"}
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", task, autonomy="assist")
+    push = [line for line in text.splitlines() if line.startswith("5. ")]
+    assert push == [
+        "5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: "
+        "agentihooks swarm sw pr <pr url>"
+    ]
     ask = next(line for line in text.splitlines() if line.startswith("6. "))
     assert ask == (
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
