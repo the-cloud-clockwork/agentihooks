@@ -14,6 +14,7 @@ READY = ("idle", "done")
 OPERATOR = "operator"
 BY = "swarm"
 LEGACY_PREFIX = "[swarm chat] "
+MARK = "[swarm delivery]"
 REFUSED = (
     "The ledger page refused to show your message {id} to the operator: {reason}. "
     "Rewrite it in plain words and send it again."
@@ -33,13 +34,18 @@ class HerdrMessenger:
         return found.get("agent_status") or found.get("status") or "unknown"
 
     def prompt(self, agent, text):
-        self.herdr(["agent", "prompt", self.target(agent), text])
+        self.herdr(["agent", "prompt", self.target(agent), marked(text)])
 
     def typed_input(self, agent):
         from scripts.swarm.pane import typed_input
 
         capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
         return typed_input(capture["text"])
+
+
+def marked(text):
+    """A prompt the swarm types into a pane, marked so the hooks never count it as the operator's."""
+    return f"{MARK} {text}"
 
 
 def recipients(store, slug, to, sender):

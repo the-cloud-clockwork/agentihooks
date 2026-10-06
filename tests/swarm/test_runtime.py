@@ -48,7 +48,7 @@ def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
     eng = AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9")
     assert runtime.status(eng) == "idle"
     runtime.nudge(eng, "wake")
-    assert prompts == [["agent", "prompt", "w:p9", "wake"]]
+    assert prompts == [["agent", "prompt", "w:p9", "[swarm delivery] wake"]]
 
 
 class NamedPanes:

@@ -694,6 +694,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     log("User prompt submitted", {"session_id": session_id})
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
+    _operator_mode(payload, typed)
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -1021,6 +1022,18 @@ def _operator_words(payload: dict) -> bool:
     except Exception as e:
         log("operator words record failed", {"error": str(e)})
         return False
+
+
+def _operator_mode(payload: dict, typed: bool) -> None:
+    try:
+        from hooks.common import inject_context
+        from hooks.context.operator_mode import OFF_NOTICE, ON_NOTICE, observe
+
+        word = observe(payload.get("session_id", ""), payload.get("prompt", ""), typed)
+        if word:
+            inject_context(ON_NOTICE if word == "on" else OFF_NOTICE, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("operator mode failed", {"error": str(e)})
 
 
 def _arm_gate_lifts(payload: dict) -> None:
