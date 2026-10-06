@@ -10,6 +10,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 URL = "https://github.com/o/r/pull/7"
 PENDING = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpending\t0\thttps://x/2\n"
 PASSED = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpass\t12s\thttps://x/2\n"
+SKIPPED = PASSED + "refresh-durations\tskipping\t0\thttps://x/3\n"
 
 
 def runner(out, code=0, seen=None):
@@ -61,3 +62,61 @@ def test_a_cached_probe_asks_github_once_per_ttl():
     assert [probe(URL), probe(URL)] == [True, True]
     assert len(seen) == 1
     assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:{URL}") <= checks.CACHE_SECONDS
+
+
+def test_a_pull_request_whose_checks_all_passed_or_skipped_is_green():
+    seen = []
+    assert checks.passing(URL, runner(SKIPPED, 0, seen)) is True
+    assert seen == [["gh", "pr", "checks", URL]]
+
+
+def test_pending_failed_empty_or_unreadable_checks_are_not_green():
+    assert checks.passing(URL, runner(PENDING, 8)) is False
+    assert checks.passing(URL, runner(PASSED, 1)) is False
+    assert checks.passing(URL, runner("lint\tfail\t8s\thttps://x/1\n", 1)) is False
+    assert checks.passing(URL, runner("refresh-durations\tskipping\t0\thttps://x/3\n")) is False
+    assert checks.passing(URL, runner("", 1)) is False
+    assert checks.passing(URL, raising) is False
+
+
+def test_only_tasks_in_pull_request_state_with_a_link_are_probed_for_green():
+    tasks = [
+        {"id": "t1", "state": "pr", "pr_url": URL},
+        {"id": "t2", "state": "pr", "pr_url": ""},
+        {"id": "t3", "state": "done", "pr_url": URL},
+        {"id": "t4", "state": "pr", "pr_url": "https://github.com/o/r/pull/8"},
+    ]
+    seen = []
+    assert checks.green(tasks, lambda url: seen.append(url) or url == URL) == {"t1"}
+    assert seen == [URL, "https://github.com/o/r/pull/8"]
+
+
+def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key():
+    import fakeredis
+
+    redis, seen = fakeredis.FakeRedis(decode_responses=True), []
+    probe = checks.cached_green(redis, "agentihooks:swarm:sw:checks", run=runner(PASSED, 0, seen))
+    assert [probe(URL), probe(URL)] == [True, True]
+    assert len(seen) == 1
+    assert redis.get(f"agentihooks:swarm:sw:checks:green:{URL}") == "1"
+    assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
+
+
+def test_status_raises_no_ceremony_for_the_owner_of_a_green_open_pull_request(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import status
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("green-proof", "/repo", max_eng=1, max_ci=0)
+    store.create(config)
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    tasks = [{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": URL}]
+    at = status.now_ms()
+    events = [{"kind": "comment edited", "target": "phases/p1", "by": "sw-eng-1", "at": at} for _ in range(25)]
+    key = f"{store.key('green-proof', 'checks')}:green:{URL}"
+    store.redis.set(key, "0")
+    assert [f["kind"] for f in status.findings(store, "green-proof", config, tasks, events)] == ["ceremony"]
+    store.redis.set(key, "1")
+    assert status.findings(store, "green-proof", config, tasks, events) == []

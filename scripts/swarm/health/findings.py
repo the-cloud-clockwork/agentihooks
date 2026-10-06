@@ -74,11 +74,11 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset()):
+def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset()):
     events = ledger.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in ledger.get("tasks", [])}
     return [
-        *ceremony(events, tasks, limits),
+        *ceremony(events, tasks, limits, green),
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
         *idle_with_claim(agents, tasks, limits, waiting),
@@ -114,13 +114,14 @@ def _outcome(task):
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
 
 
-def ceremony(events, tasks, limits):
+def ceremony(events, tasks, limits, green=frozenset()):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
+    delivering = {tasks[tid].get("claimed_by") for tid in green if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
-        if not naming.lane_of(by):
+        if not naming.lane_of(by) or by in delivering:
             continue
         outcomes = len(finished) if _is_master(by) else closed[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
