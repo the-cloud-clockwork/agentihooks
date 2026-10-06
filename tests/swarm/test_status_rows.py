@@ -106,6 +106,32 @@ def test_done_today_counts_tasks_marked_done_since_local_midnight_once_each():
     assert status.done_today(tasks, events, MIDNIGHT) == 1
 
 
+def test_done_today_needs_a_done_task_and_a_done_event_from_midnight_on():
+    events = [
+        {"kind": "task done", "target": "tasks/a", "at": MIDNIGHT - 1},
+        {"kind": "task done", "target": "tasks/b", "at": MIDNIGHT},
+        {"kind": "task done", "target": "tasks/c", "at": MIDNIGHT + HOUR},
+        {"kind": "task done", "target": "tasks/e", "at": MIDNIGHT + HOUR},
+        {"kind": "task pr", "target": "tasks/d", "at": MIDNIGHT + HOUR},
+    ]
+    tasks = [{"id": i, "state": "done"} for i in "abde"] + [{"id": "c", "state": "open"}]
+    assert status.done_today(tasks, events, MIDNIGHT) == 2
+
+
+def test_local_midnight_is_the_start_of_today_in_milliseconds():
+    import time
+
+    assert status.local_midnight_ms() == int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)) * 1000)
+
+
+def test_seat_rows_default_to_empty_text_without_a_name_or_binding():
+    rows = status.handoff_rows([{"seat": "eng-1@sw", "at": 1}], [{"seat": "eng-2@sw", "state": "awaiting-decision"}])
+    assert [(r["seat"], r["binding"], r["successor"], r["awaiting"]) for r in rows] == [
+        ("eng-1@sw", "", "", ""),
+        ("eng-2@sw", "live", "", ""),
+    ]
+
+
 def test_doctor_is_not_running_without_a_peer(store):
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     assert status.doctor_report(store, "sw") == {"slug": "", "state": "not running", "last_check": 0, "findings": 0}
@@ -127,6 +153,13 @@ def test_doctor_reports_its_state_last_pass_and_findings(store):
     }
 
 
+def test_a_doctor_before_its_first_pass_has_no_last_check(store):
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.create(SwarmConfig("sw-doctor", "/repo", 1, 0))
+    store.set_peer("sw", "sw-doctor")
+    assert status.doctor_report(store, "sw")["last_check"] == 0
+
+
 def test_doctor_whose_swarm_is_gone_reads_not_running(store):
     store.create(SwarmConfig("sw", "/repo", 1, 1))
     store.set_peer("sw", "sw-doctor")
@@ -146,10 +179,16 @@ def test_status_report_carries_the_page_rows_without_handoff_text(store, monkeyp
     store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw"))
     store.redis.hset(store.key("sw", "transfers"), "r1", json.dumps({**transfer("eng-1@sw", 5), "id": "r1"}))
     monkeypatch.setattr(status, "page_quota", lambda: {"cap": 3, "rows": [{"account": "a"}]})
-    report = status.status_report(store, "sw", {"tasks": [], "_meta": {"events": []}})
+    now = status.local_midnight_ms() + 1
+    state = {
+        "tasks": [{"id": "t1", "state": "done"}],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/t1", "at": now, "by": "sw-eng-1"}]},
+    }
+    report = status.status_report(store, "sw", state)
     assert report["compact_limit"] == 250
+    assert report["transfers"][0]["seat"] == "eng-1@sw"
+    assert report["done_today"] == 1
     assert report["quota"] == {"cap": 3, "rows": [{"account": "a"}]}
     assert report["doctor"]["state"] == "not running"
     assert report["handoffs"][0]["seat"] == "eng-1@sw"
-    assert report["done_today"] == 0
     assert "long text" not in json.dumps(report["handoffs"])

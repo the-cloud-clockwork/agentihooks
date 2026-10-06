@@ -204,6 +204,27 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     assert quota["rows"][1]["five_hour_left"] is None
 
 
+def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    agents_quota._page_cache.clear()
+    claude = ProbeResult("tccgma", "ok", "OK", 78.0, QuotaWindow(used=8.0), QuotaWindow(used=22.0))
+    quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", WEEK))
+    pool = [CodexAccount("default")]
+    seen = []
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [(1.0, claude)])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "max_sessions", lambda: 3)
+    monkeypatch.setattr(codex_router, "routing_pool", lambda environ: seen.append(environ) or pool)
+    monkeypatch.setattr(codex_router, "quotas", lambda p, environ: seen.append((p, environ)) or {"default": quota})
+    rows = agents_quota.page_quota(now=quota.observed_at + 120)["rows"]
+    assert seen == [os.environ, (pool, os.environ)]
+    assert [r["source"] for r in rows] == ["cached", "session-log 2m ago"]
+    assert rows[1]["seven_day_left"] == 54.0
+
+
 def test_page_quota_is_reused_for_a_minute(monkeypatch):
     calls = []
     agents_quota._page_cache.clear()
