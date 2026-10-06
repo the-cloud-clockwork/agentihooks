@@ -1,5 +1,9 @@
 import re
 import sys
+import threading
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -132,7 +136,12 @@ def test_the_header_names_each_column_and_counts_the_ledgers(updated_at):
     make("header-b")
     page = server.index_page()
     count = len(server.ledger_summaries())
-    assert f'<header><h1>HOME</h1><span class="total">{count} ledgers</span></header>' in page
+    assert count > 1
+    assert (
+        '<header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>HOME</h1></header>'
+        in page
+    )
+    assert 'class="total"' not in page
     head = re.search(r'<div class="row head" aria-hidden="true">(.*?)</div>', page).group(1)
     assert head == (
         '<span>Ledger</span><span>Kind</span><span>Overview</span><span class="r">Open</span>'
@@ -151,7 +160,11 @@ def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
     assert f'<span class="deleted">{date}</span><span class="left">1 day left</span>' in found
     assert f'<button class="act restore" type="button" data-act="restore" data-slug="{SLUG}"' in found
     assert "Restore</button>" in found
-    assert '<main class="bin"><header><h1>BIN</h1><span class="total">1 ledger</span></header>' in page
+    assert (
+        '<main class="bin"><header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>BIN</h1><span class="total">1 ledger</span></header>'
+        in page
+    )
+    assert 'class="watermark"' not in page
     assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in page
     assert 'id="home-fab" href="/"' in page
     assert server.bin_cells({"deleted_at": updated_at, "days_left": 30}).endswith(">30 days left</span>")
@@ -280,3 +293,53 @@ def test_home_bins_closed_ledgers_without_a_swarm_before_it_renders():
     assert sent[0][0] == 200
     assert 'href="/served-closed"' not in sent[0][1]
     assert "served-closed" in ledger_bin.entries()
+
+
+def test_home_carries_the_logo_as_a_faint_centred_watermark_that_never_takes_clicks(updated_at):
+    page = server.index_page()
+    assert '<div class="watermark" aria-hidden="true"></div><main class="home">' in page
+    mark = rule(".watermark")
+    for part in ("position:fixed", "top:50%", "left:50%", "translate(-50%,-50%)", "width:50vmin", "height:50vmin"):
+        assert part in mark
+    assert "pointer-events:none" in mark
+    assert float(re.search(r"opacity:([.\d]+)", mark).group(1)) <= 0.08
+    assert "position:relative" in rule("main") and "z-index:1" in rule("main")
+
+
+def test_the_logo_is_a_palette_coloured_mask_of_the_served_png():
+    for selector in (".logo", ".watermark"):
+        assert "background:var(--logo)" in rule(selector)
+        assert "mask:url(/logo.png) center/contain no-repeat" in rule(selector)
+    assert "--logo: var(" in core.PALETTE.read_text(encoding="utf-8")
+
+
+def test_ledger_pages_show_the_logo_left_of_the_title_and_no_watermark():
+    template = core.TEMPLATE.read_text(encoding="utf-8")
+    assert (
+        '<div class="masthead"><span class="logo" aria-hidden="true"></span><div>\n      <div class="title-row"'
+        in template
+    )
+    assert "watermark" not in template
+    assert "agentihooks</span>" not in template and ">HOME<" not in template
+    css = re.search(r"\.logo \{([^}]*)\}", template).group(1)
+    assert "background: var(--logo)" in css and "mask: url(/logo.png) center/contain no-repeat" in css
+
+
+def test_the_server_serves_the_repo_logo_png():
+    assert server.LOGO == server.ROOT / "media" / "agentihooks-logo.png"
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_address[1]}/logo.png", headers={"Host": f"127.0.0.1:{server.PORT}"}
+        )
+        with urllib.request.urlopen(req) as resp:
+            assert resp.headers["Content-Type"] == "image/png"
+            assert resp.read() == server.LOGO.read_bytes()
+        with patch.object(server, "LOGO", server.ROOT / "media" / "missing.png"):
+            with pytest.raises(urllib.error.HTTPError) as missing:
+                urllib.request.urlopen(req)
+        assert missing.value.code == 404
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
