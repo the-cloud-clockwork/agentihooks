@@ -193,6 +193,22 @@ def _relink(dst: Path, items: dict[str, Path]) -> None:
         (dst / name).symlink_to(src)
 
 
+def _link_commands(skills: Path, commands: Path) -> None:
+    for old in skills.iterdir():
+        if old.is_dir() and not old.is_symlink() and [p.name for p in old.iterdir()] == ["SKILL.md"]:
+            (old / "SKILL.md").unlink()
+            old.rmdir()
+    if not commands.is_dir():
+        return
+    for command in sorted(commands.iterdir()):
+        skill = skills / command.stem
+        # Codex skips a symlinked SKILL.md and one without frontmatter; a hardlink keeps it the Claude file.
+        if skill.exists() or not command.read_text().startswith("---"):
+            continue
+        skill.mkdir()
+        (skill / "SKILL.md").hardlink_to(command.resolve())
+
+
 def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
@@ -307,6 +323,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     out.mkdir(exist_ok=True)
     _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
+    _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
         _link(out / item, operator / item)
     _link(manifest, sources.path(name, "claude", rendered_root()))
