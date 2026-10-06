@@ -11,6 +11,7 @@ Idempotent: --ensure on a running server only prints the URL.
 """
 
 import argparse
+import errno
 import functools
 import html
 import json
@@ -18,6 +19,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -44,6 +46,7 @@ HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
+SERVER_WAIT = 5.0
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
@@ -658,9 +661,9 @@ def watch_seeds(interval=2.0):
         time.sleep(interval)
 
 
-def serving_dir():
+def serving_dir(timeout: float = 1):
     try:
-        with urllib.request.urlopen(f"{BASE}/healthz", timeout=1) as resp:
+        with urllib.request.urlopen(f"{BASE}/healthz", timeout=timeout) as resp:
             return json.loads(resp.read()).get("dir")
     except (OSError, ValueError):
         return None
@@ -681,28 +684,51 @@ def serve():
     server.serve_forever()
 
 
+def port_held() -> bool:
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((HOST, PORT))
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            return True
+    return False
+
+
+def server_process_alive() -> bool:
+    try:
+        pid = int(PIDFILE.read_text())
+        return b"ledger_server.py" in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except (OSError, ValueError):
+        return False
+
+
 def ensure():
     check_address()
+    deadline = time.monotonic() + SERVER_WAIT
+    started = False
     running = serving_dir()
-    if running and running != str(core.LEDGER_DIR):
-        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; stop that ledger server first")
-    if not running:
-        core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-        core.rotate_if_full(LOGFILE)
-        with open(LOGFILE, "a") as log:
-            subprocess.Popen(
-                [sys.executable, os.path.abspath(__file__), "--serve"],
-                stdout=log,
-                stderr=log,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        for _ in range(50):
-            if serving_dir():
-                break
-            time.sleep(0.1)
-        else:
+    while not running:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
+        if not started and not port_held() and not server_process_alive():
+            core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+            core.rotate_if_full(LOGFILE)
+            with open(LOGFILE, "a") as log:
+                subprocess.Popen(
+                    [sys.executable, os.path.abspath(__file__), "--serve"],
+                    stdout=log,
+                    stderr=log,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            started = True
+        time.sleep(min(0.1, remaining))
+        running = serving_dir(timeout=min(1, remaining))
+    if running != str(core.LEDGER_DIR):
+        sys.exit(f"{BASE} already serves {running}, not {core.LEDGER_DIR}; stop that ledger server first")
     print(BASE)
 
 
