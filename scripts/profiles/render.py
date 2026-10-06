@@ -370,7 +370,7 @@ def _render_scratch(args: argparse.Namespace) -> int:
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
-    argv = [sys.executable, "-m", __name__, "render", args.name, "--target", args.target]
+    argv = [sys.executable, "-m", "scripts.profiles.render", "render", args.name, "--target", args.target]
     # The child resolves the agentihooks home, bundle and corrections store at import, so only a fresh process sees them.
     cwd = Path(__file__).resolve().parents[2]
     return subprocess.run([*argv, *(["--force"] if args.force else [])], env=env, cwd=cwd).returncode
