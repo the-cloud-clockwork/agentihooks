@@ -14,8 +14,14 @@ def env_name(gate_name):
 
 
 def mode(gate, environ, gates=None):
-    chosen = environ.get(env_name(gate.name)) if gates is None else gates.get(gate.name)
-    chosen = str(chosen).strip().lower()
+    if gates is not None:
+        return configured(gate, gates)
+    chosen = str(environ.get(env_name(gate.name))).strip().lower()
+    return chosen if chosen in MODES else gate.default_mode
+
+
+def configured(gate, gates):
+    chosen = str(gates.get(gate.name)).strip().lower()
     return chosen if chosen in MODES else gate.default_mode
 
 

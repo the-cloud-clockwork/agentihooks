@@ -608,7 +608,7 @@ def cmd_trace_plan(store, args):
     state = trace_plan.intent(ledger.state(args.slug), agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.mode(trace_plan.GATE, os.environ, store.config(args.slug).gates)
+    mode = modes.configured(trace_plan.GATE, store.config(args.slug).gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:

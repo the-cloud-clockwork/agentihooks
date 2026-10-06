@@ -2,8 +2,6 @@
 
 import io
 import json
-import sys
-from pathlib import Path
 
 import pytest
 import redis
@@ -14,11 +12,9 @@ from scripts.gates.claims import GATE as CLAIMS
 from scripts.swarm import cli, status
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.trace_plan import GATE as TRACE_PLAN
+from scripts.swarm_ledger import ledger_server
 from tests.gates.test_runtime import SLUG, SWARM_ENV, Stub
 from tests.swarm.test_cli import env, run  # noqa: F401
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import ledger_server  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 STUB_ENV = "AGENTIHOOKS_GATE_STUB"
@@ -49,6 +45,12 @@ class TestModeReader:
     def test_an_unknown_config_value_keeps_the_default(self):
         assert modes.mode(Stub(), {}, {"stub": "loud"}) == "enforce"
 
+    @pytest.mark.parametrize(
+        ("gates", "chosen"), [({"stub": " Observe "}, "observe"), ({}, "enforce"), ({"stub": 1}, "enforce")]
+    )
+    def test_configured_reads_only_the_swarm_config(self, gates, chosen):
+        assert modes.configured(Stub(), gates) == chosen
+
     def test_outside_a_swarm_the_environment_still_picks_the_mode(self):
         assert modes.mode(Stub(), {STUB_ENV: "observe"}, None) == "observe"
         assert modes.mode(Stub(), {STUB_ENV: "observe"}) == "observe"
@@ -58,10 +60,14 @@ class TestSwarmGates:
     def test_no_swarm_reads_none(self):
         assert modes.swarm_gates("", {}) is None
 
-    def test_reads_the_named_swarm_config(self, store, monkeypatch):
+    def test_reads_the_named_swarm_config_from_the_redis_the_environment_names(self, store, monkeypatch):
         store.update("demo", gates={"watch": "off"})
-        monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: store.redis)
-        assert modes.swarm_gates("demo", {}) == {"watch": "off"}
+        seen, environ = [], {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6379/12"}
+        monkeypatch.setattr(
+            "scripts.swarm.store.redis_client", lambda environ=None: seen.append(environ) or store.redis
+        )
+        assert modes.swarm_gates("demo", environ) == {"watch": "off"}
+        assert seen == [environ]
 
     @pytest.mark.parametrize("slug", ["demo", "gone"])
     def test_an_unreadable_config_falls_back_to_the_environment(self, store, monkeypatch, slug):
@@ -77,11 +83,12 @@ class TestSwarmGates:
 class TestEntry:
     def run(self, gate, environ, gates, tmp_path, monkeypatch):
         monkeypatch.setitem(entry.GATES, gate.name, gate)
-        seen = []
-        monkeypatch.setattr(modes, "swarm_gates", lambda swarm, environ: seen.append(swarm) or gates)
+        reads = []
+        monkeypatch.setattr(modes, "swarm_gates", lambda swarm, given: reads.append((swarm, given)) or gates)
         payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "session_id": "sid-1"}
         code = entry.main([gate.name], io.StringIO(json.dumps(payload)), environ, tmp_path)
-        return code, seen
+        assert all(given is environ for _, given in reads)
+        return code, [swarm for swarm, _ in reads]
 
     def test_observe_in_the_swarm_config_logs_the_deny_although_the_agent_environment_says_enforce(
         self, tmp_path, monkeypatch
