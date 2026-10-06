@@ -1,0 +1,2 @@
+name: planner
+description: "Swarm planner: slices a phase into pull request sized tasks, builds nothing"
