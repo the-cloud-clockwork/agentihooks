@@ -1,6 +1,7 @@
 import json
 
 import ledger_core as core
+import pytest
 
 from scripts.swarm_ledger import ledger
 from tests.swarm_ledger.test_priorities import SLUG, make_ledger
@@ -27,3 +28,10 @@ def test_question_add_puts_the_question_on_the_ledger_as_an_agent_event(monkeypa
         f"questions/{question['id']}",
         "Which port should the service use?",
     )
+
+
+def test_question_takes_only_the_add_action(capsys):
+    with pytest.raises(SystemExit) as exc:
+        ledger.build_parser().parse_args(["--slug", SLUG, "--as", "eng-1@demo", "question", "remove", "Which port?"])
+    assert exc.value.code == 2
+    assert "invalid choice: 'remove'" in " ".join(capsys.readouterr().err.split()).replace('"', "'")
