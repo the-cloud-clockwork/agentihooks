@@ -10,7 +10,9 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-import redis
+import pytest
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -241,6 +243,7 @@ class Gate(unittest.TestCase):
         self.assertIn("watcher is not running", hook("Stop")["reason"])
 
     def test_the_watcher_gate_holds_whatever_redis_an_earlier_hook_call_saw(self):
+        import redis
         from fakeredis import TcpFakeServer
 
         from scripts.swarm.naming import NameRegistry
