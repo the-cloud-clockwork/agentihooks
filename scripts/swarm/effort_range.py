@@ -18,7 +18,7 @@ def level(effort):
 
 
 def of(config):
-    return getattr(config, "effort_min", "") or DEFAULT[0], getattr(config, "effort_max", "") or DEFAULT[1]
+    return getattr(config, "effort_min", DEFAULT[0]), getattr(config, "effort_max", DEFAULT[1])
 
 
 def clamp(harness, effort, bounds):
@@ -36,7 +36,7 @@ def refusal(bounds, lanes):
     if rank(low) > rank(high):
         return f"effort-min {low} is above effort-max {high}"
     for name, lane in sorted(lanes.items()):
-        found = rank(lane.get("effort", ""))
+        found = rank(lane.get("effort"))
         if found is not None and not rank(low) <= found <= rank(high):
             return f"lane {name} effort {lane['effort']} is outside the swarm effort range {low} to {high}"
     return None

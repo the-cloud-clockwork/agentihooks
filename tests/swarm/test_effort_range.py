@@ -165,3 +165,56 @@ def test_create_refuses_a_template_lane_effort_outside_the_range(env, tmp_path, 
     assert run("sw", "create", "--repo", "/repo", "--template", "hot") == 1
     assert "outside the swarm effort range medium to high" in capsys.readouterr().err
     assert store.slugs() == []
+
+
+def test_set_reports_the_range_takes_bare_pairs_and_a_one_level_range(env, capsys):  # noqa: F811
+    import json
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    assert run("sw", "effort-min=high", "max-eng-agents=3") == 0
+    out = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert (out["effort_min"], out["effort_max"], out["max_eng"]) == ("high", "high", 3)
+    assert run("sw", "effort-max=max") == 0
+    assert store.config("sw").effort_max == "max"
+
+
+def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F811
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    assert run("sw", "set", "colour=red") == 1
+    assert "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E or eng-role, " in capsys.readouterr().err
+    assert run("sw", "set", "effort-min=huge") == 1
+    assert "one of low, medium, high, max, Codex xhigh standing for max" in capsys.readouterr().err
+
+
+def test_a_lane_without_an_effort_passes_the_range():
+    assert effort_range.refusal(effort_range.DEFAULT, {"eng": {}, "ci": {"effort": "auto"}}) is None
+
+
+@pytest.mark.parametrize(
+    "agent,args,expected",
+    [
+        (
+            "claude",
+            ["--effort", "max", "--model", "opus", "--resume", "c0"],
+            ["--model", "opus", "--resume", "c0", "--effort", "high"],
+        ),
+        ("claude", ["--name", "x", "--effort=low"], ["--name", "x", "--effort", "medium"]),
+        (
+            "codex",
+            ["-c", 'model_reasoning_effort="xhigh"', "-c", "other=1", "-m", "g"],
+            ["-c", "other=1", "-m", "g", "-c", 'model_reasoning_effort="high"'],
+        ),
+        (
+            "codex",
+            ["model_reasoning_effort=low", "resume", "-c"],
+            ["resume", "-c", "-c", 'model_reasoning_effort="medium"'],
+        ),
+    ],
+)
+def test_launch_args_keep_every_other_arg_and_carry_one_clamped_effort(agent, args, expected):
+    environ = {"AGENTIHOOKS_SWARM_LANE": "eng"}
+    assert effort_range.launch_args(agent, args, environ) == expected
+    assert effort_range.launch_args(agent, args, {}) == args
