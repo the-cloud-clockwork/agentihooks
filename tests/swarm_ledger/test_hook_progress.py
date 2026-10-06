@@ -127,6 +127,15 @@ def test_stop_blocks_at_exactly_the_call_limit(hook, capsys):
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
 
 
+def test_stop_holds_while_plan_mode_is_on(hook, capsys):
+    hook.session["calls"] = 12
+    hook.module.on_stop({"permission_mode": "plan"}, hook.session, hook.state, hook.sfile)
+    assert capsys.readouterr().out == ""
+    assert hook.session["blocks"] == 0
+    hook.module.on_stop({"permission_mode": "default"}, hook.session, hook.state, hook.sfile)
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
 def test_a_first_outcome_at_any_time_is_seen_on_a_fresh_session(hook):
     hook.marks.outcome(ME, "pushed", now_ms=1)
     assert hook.module.outcome_seen(hook.session) is True
