@@ -100,6 +100,9 @@ def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key():
     assert len(seen) == 1
     assert redis.get(f"agentihooks:swarm:sw:checks:green:{URL}") == "1"
     assert 0 < redis.ttl(f"agentihooks:swarm:sw:checks:green:{URL}") <= checks.CACHE_SECONDS
+    red = checks.cached_green(redis, "agentihooks:swarm:sw:checks", run=runner(PENDING, 8))
+    assert [red("https://github.com/o/r/pull/8"), red("https://github.com/o/r/pull/8")] == [False, False]
+    assert redis.get("agentihooks:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
 
 
 def test_status_raises_no_ceremony_for_the_owner_of_a_green_open_pull_request(monkeypatch):
