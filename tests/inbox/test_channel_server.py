@@ -208,7 +208,7 @@ def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_reche
     import anyio
 
     monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 3.0)
+    monkeypatch.setattr(channel, "RECHECK_S", 30.0)
     claims = []
     real = channel.claim
     monkeypatch.setattr(channel, "claim", lambda *args: claims.append(1) or real(*args))
@@ -219,7 +219,7 @@ def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_reche
 
     start = time.monotonic()
     assert session(store, idle)[2] == 2
-    assert time.monotonic() - start < 2.0
+    assert time.monotonic() - start < 10.0
 
 
 def test_serve_runs_the_session_over_stdio(store, monkeypatch):

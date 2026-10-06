@@ -100,6 +100,9 @@
     [".act.del", "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days."],
     [".act.reopen", "Reopen this closed ledger so a fresh master picks it up."],
     [".act.restore", "Restore this ledger from the bin to HOME."],
+    ["button.fold", "Show this ledger's full title and overview, or fold it back to one line."],
+    ["#fold-all", "Open or fold every ledger row at once."],
+    ["button.sort", "Sort the ledgers by this column. Click again to reverse the order."],
     ["#bin-fab", "Open the bin: deleted ledgers, kept thirty days."],
     ["#home-fab", "Back to HOME, the list of every ledger."],
   ];
