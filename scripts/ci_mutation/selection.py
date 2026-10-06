@@ -39,12 +39,14 @@ def run_selected(selection: Path) -> None:
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
+            f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
             "_mutmut_cwd = _mutmut_os.getcwd()\n"
             "try:\n"
-            f"    _mutmut_os.chdir({str(Path.cwd())!r})\n"
+            "    _mutmut_os.chdir(_mutmut_root)\n"
             "    from mutmut.configuration import Config as _mutmut_Config\n"
             "    _mutmut_config = _mutmut_Config.get()\n"
-            f"    _mutmut_config.source_paths = [(_mutmut_Path({str(Path.cwd() / 'mutants')!r}) / path).resolve() for path in _mutmut_config.source_paths]\n"
+            "    if _mutmut_root.name == 'mutants':\n"
+            "        _mutmut_config.source_paths = [(_mutmut_root / path).resolve() for path in _mutmut_config.source_paths]\n"
             "finally:\n"
             "    _mutmut_os.chdir(_mutmut_cwd)\n"
         )

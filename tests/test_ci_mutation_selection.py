@@ -1,6 +1,6 @@
-import ast
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -93,16 +93,26 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
     (tmp_path / "tests/test_store.py").write_text(test)
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     store = tmp_path / "scripts/swarm/store.py"
-    function = next(
-        node
-        for node in ast.parse(store.read_text()).body
-        if isinstance(node, ast.FunctionDef) and node.name == "_whole"
-    )
-    if fault:
-        store.write_text(
-            store.read_text().replace("return int(raw) if raw else None", "return int(raw) + 1 if raw else None")
-        )
-    report = run_gate(tmp_path, {"scripts/swarm/store.py": {function.end_lineno}}, tmp_path / "evidence", 30)
+
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("-c", f"init.defaultBranch={tmp_path.name}", "init")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    git("add", "scripts/swarm/store.py")
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    replacement = "return int(raw) + 1 if raw else None" if fault else "return None if not raw else int(raw)"
+    store.write_text(store.read_text().replace("return int(raw) if raw else None", replacement))
+    git("add", "scripts/swarm/store.py")
+    git("commit", "-m", "changed store")
+    output = tmp_path / "evidence"
+    command = [sys.executable, "-m", "scripts.ci_mutation", "--base", base, "--output", str(output), "--budget", "30"]
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True)
+    report = json.loads((output / "report.json").read_text())
+    assert result.returncode == int(fault), result.stdout + result.stderr
+    assert report["files"] == [] if fault else report["files"][0]["path"] == "scripts/swarm/store.py"
     logs = "\n".join(path.read_text() for path in (tmp_path / "evidence").glob("*/run.log"))
     assert "FileNotFoundError" not in logs
     if fault:
@@ -116,8 +126,15 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
 
 
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch):
+    from mutmut import configuration as engine_config
+
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setattr(engine_config, "_config", None)
+    project = tmp_path / "mutants"
+    (project / "scripts").mkdir(parents=True)
+    (project / "hooks").mkdir()
+    (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     selection = tmp_path / "lines.json"
     selection.write_text(json.dumps({"scripts/sample.py": [2, 5], "hooks/other.py": []}))
@@ -153,7 +170,14 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         stream = __import__("io").StringIO()
         names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
         assert names == ["selected"]
-        assert stream.getvalue().endswith("generated")
+        assert stream.getvalue().endswith("generated = True\n")
+        namespace = {"__file__": str(project / "scripts/sample.py")}
+        cwd = Path.cwd()
+        exec(stream.getvalue(), namespace)
+        assert namespace["generated"] is True
+        assert namespace["__doc__"] == "sample contract"
+        assert Path.cwd() == cwd
+        assert engine_config.Config.get().source_paths == [project / "hooks"]
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.collect_or_load_stats(test_runner) == "collected"
         assert config.source_paths == [Path("hooks/")]
@@ -169,7 +193,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
     def selected(filename, source, lines):
         calls.append((filename, source, lines))
-        return "generated", ["selected"]
+        return '"""sample contract"""\nfrom __future__ import annotations\ngenerated = True\n', ["selected"]
 
     monkeypatch.setattr("scripts.ci_mutation.selection.selected_mutants", selected)
     runner.cli = cli
