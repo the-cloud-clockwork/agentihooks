@@ -113,6 +113,7 @@ def _rewrites(words):
 
 class PinnedIdentity:
     name = "identity"
+    default_mode = "enforce"
 
     def matches(self, call):
         return call.tool == "Bash" and "agentihooks" in call.command

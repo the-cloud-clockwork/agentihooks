@@ -56,6 +56,7 @@ class Decision:
 @runtime_checkable
 class Gate(Protocol):
     name: str
+    default_mode: str
 
     def matches(self, call: Call) -> bool: ...
 

@@ -15,6 +15,7 @@ STATE_PATH_RE = re.compile(
 )
 FLAG_EVENTS = ("needs the operator", "no longer needs the operator")
 TEXT_ITEM_RE = re.compile(r"^(questions|followups)/[^/]+$")
+GATE_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 MAX_TEXT = 20000
 
 
@@ -51,6 +52,8 @@ def check(op):
         ledger_comments.check(op["text"], "item")
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
+    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate") or "")):
+        raise ValueError("gate_lift needs the gate's name")
     if "status" in op:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
@@ -171,6 +174,11 @@ def _gate_bypass(doc, op, ctx):
     return True
 
 
+def _gate_lift(doc, op, ctx):
+    ctx.record(op["by"], "gate lifted", "", text=f"the operator lifted the {op['gate']} gate for one hour")
+    return True
+
+
 HANDLERS = {
     "join": _join,
     "leave": _leave,
@@ -180,6 +188,7 @@ HANDLERS = {
     "add_item": _add_item,
     "retext": _retext,
     "gate_bypass": _gate_bypass,
+    "gate_lift": _gate_lift,
 }
 
 

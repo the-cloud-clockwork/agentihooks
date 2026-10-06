@@ -42,6 +42,7 @@ from pathlib import Path
 
 from scripts.doctor import priming
 from scripts.gates import Who
+from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
@@ -454,6 +455,8 @@ def cmd_status(store, args):
             print(f"  - {entry}")
         print(f"  threshold {f['threshold']}")
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+    for row in gate_log.recent(args.slug):
+        print(f"gate  {row.get('kind')}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}")
 
 
 def cmd_names(store, args):

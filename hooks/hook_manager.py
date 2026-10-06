@@ -843,6 +843,9 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
+    if typed:
+        _arm_gate_lifts(payload.get("prompt", ""), session_id)
+
     # --- Voice output: detect enable/disable voice signals ---
     try:
         from hooks.config import VOICE_ENABLED
@@ -1010,6 +1013,20 @@ def _operator_words(payload: dict) -> bool:
     except Exception as e:
         log("operator words record failed", {"error": str(e)})
         return False
+
+
+def _arm_gate_lifts(prompt: str, session_id: str) -> None:
+    try:
+        from scripts.gates.base import Who
+        from scripts.gates.entry import GATES
+        from scripts.gates.lift import arm_from_prompt
+
+        armed = arm_from_prompt(prompt, session_id, Who.from_env(), GATES)
+    except Exception as e:
+        log("gate lift: arming or its ledger record failed", {"error": str(e)})
+        return
+    if armed:
+        log("gates: operator lift armed", {"session_id": session_id, "gates": armed})
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:
