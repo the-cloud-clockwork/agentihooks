@@ -625,6 +625,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   <ul class="notif-list" id="notifs"></ul>
 </details></section>
 <script id="ledger-data" type="application/json">__LEDGER_DATA__</script>
+<script>/*__LEDGER_TOOLTIPS__*/</script>
 <script>
 (() => {
   const SLUG = "__LEDGER_SLUG__";
@@ -1554,10 +1555,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("sync-badge").hidden = !pending;
     $("sync-badge").textContent = String(pending);
     const waiting = pending ? `${pending} of ${crew.length} agents have not synced yet` : "";
-    $("sync").title = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
+    $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
     const statsWait = cooldown("stats_sync", "stats sync requested");
     $("stats-sync").disabled = !!statsWait;
-    $("stats-sync").title = statsWait ? `Stats check ${statsWait}` : "Ask master to recheck";
+    $("stats-sync").ariaLabel = statsWait ? `Stats check ${statsWait}` : "Ask master to recheck";
   }
 
   function sendSync(op, buttonId) {

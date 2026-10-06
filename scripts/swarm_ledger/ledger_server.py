@@ -272,6 +272,7 @@ def index_page(view="home", now=None):
         f"<title>{heading}</title><style>{core.PALETTE.read_text(encoding='utf-8')}{HOME_STYLE}</style>"
         f'<main class="{view}"><header><h1>{heading}</h1>{total}</header>'
         f'<div class="row head" aria-hidden="true">{head}</div><ul>{body}</ul></main>{fab}{BIN_SCRIPT}'
+        f"<script>{core.TOOLTIPS.read_text(encoding='utf-8')}</script>"
     )
 
 
