@@ -39,6 +39,7 @@ from scripts.swarm import cli as swarm
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_creator
 
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,6 +134,9 @@ def cmd_start(store, args):
     bundle = linked_bundle()
     if bundle is None:
         raise SwarmError("rig doctor needs a linked bundle for its rules: link one with agentihooks init --bundle DIR")
+    refused = ledger_creator.swarm_refusal(os.environ)
+    if refused:
+        raise SwarmError(refused)
     slug, doctor = args.slug, doctor_slug(args.slug)
     if not swarm.SLUG_RE.match(doctor):
         raise SwarmError(f"the Doctor swarm id {doctor} is not a swarm id: lowercase letters, digits and dashes")

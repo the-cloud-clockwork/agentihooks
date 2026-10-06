@@ -122,7 +122,10 @@ def _woken(slug, config, store, ledger):
     if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
         priming.cancel_master_items(inbox, slug)
         return False
-    return any(not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF)) for item in waiting)
+    return any(
+        item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+        for item in waiting
+    )
 
 
 def _drop(slug, store, ledger, rows, agent):

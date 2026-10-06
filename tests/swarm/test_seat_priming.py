@@ -21,7 +21,8 @@ def _eng(**task):
     return prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0005", {"id": "t1", "title": "x", "phase": "p1", **task})
 
 
-def test_the_successor_prompt_carries_the_chain_in_order():
+def test_the_successor_prompt_carries_the_chain_in_order(monkeypatch):
+    monkeypatch.delenv("LEDGER_DIR")
     text = _eng(seat="eng-1@sw", handoff="handoff doc text", recaps=RECAPS, learned=LEARNED)
     order = [text.index(part) for part in ("handoff doc text", "latest recap text", "learned note text")]
     assert order == sorted(order) and order[-1] < text.index("older recap text")

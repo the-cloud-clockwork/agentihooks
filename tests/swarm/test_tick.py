@@ -393,6 +393,33 @@ def test_a_drained_swarm_without_a_master_starts_one_and_no_engineers(store):
     assert store.config("sw").state == "drained"
 
 
+@pytest.mark.parametrize(
+    "sender, text",
+    [
+        ("swarm", "swarm added a follow-up on ledger sw: A message to master@sw is still unread"),
+        ("engineer@a1b2c3-0002", "a question for the master"),
+    ],
+)
+def test_only_the_operator_wakes_a_stopped_swarm(store, sender, text):
+    from scripts.inbox.store import InboxStore
+
+    store.update("sw", state="stopped")
+    InboxStore(store.redis).send(sender, "master@sw", text)
+    runtime = FakeRuntime()
+    assert tick("sw", store, tasks(("t1", "eng")), runtime, 1) == []
+    assert runtime.masters == [] and store.config("sw").state == "stopped"
+
+
+@pytest.mark.parametrize("ref, wakes", [("ledger:note", True), ("swarm-control:stop", False)])
+def test_an_operator_fyi_wakes_a_stopped_swarm_unless_it_is_a_control_notice(store, ref, wakes):
+    from scripts.inbox.store import InboxStore
+
+    store.update("sw", state="stopped")
+    InboxStore(store.redis).send("operator", "master@sw", "for your information", ref=ref, fyi=True)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert (store.config("sw").state == "paused") is wakes
+
+
 def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     store.update("sw", state="stopped")
     runtime = FakeRuntime()
