@@ -208,3 +208,63 @@ def test_the_swarm_state_comes_from_the_swarm_config():
 def test_home_cells_escape_an_unknown_state():
     cells = server.home_cells({"closed_at": None, "open": 0, "done": 0, "updated_at": None}, "<b>", 0)
     assert '<span class="state s-&lt;b&gt;">&lt;b&gt;</span>' in cells
+
+
+class Swarms:
+    def __init__(self, known=(), error=None):
+        self.known, self.error = set(known), error
+
+    def config(self, slug):
+        if self.error:
+            raise self.error
+        if slug not in self.known:
+            raise SwarmError(f"no swarm {slug}")
+        return type("Config", (), {"state": "stopping"})()
+
+
+def closed(slug):
+    make(slug)
+    core.sync(slug, ops=[{"op": "close", "id": "c1", "by": "swarm"}])
+    return core.sync(slug)[0]["closed_at"]
+
+
+def test_a_closed_ledger_without_a_swarm_goes_to_the_bin():
+    closed_at = closed("orphan-closed")
+    make("open-one")
+    with patch.object(server, "swarm_store", return_value=Swarms()):
+        server.bin_closed_without_swarm(now=closed_at + 5)
+    assert ledger_bin.entries()["orphan-closed"] == closed_at + 5
+    assert "open-one" not in ledger_bin.entries()
+
+
+def test_a_closed_ledger_whose_swarm_is_still_stopping_stays_for_the_tick():
+    closed("still-stopping")
+    with patch.object(server, "swarm_store", return_value=Swarms({"still-stopping"})):
+        server.bin_closed_without_swarm()
+    assert "still-stopping" not in ledger_bin.entries()
+
+
+def test_an_unreachable_swarm_store_bins_nothing():
+    closed("unreachable")
+    with patch.object(server, "swarm_store", side_effect=SwarmError("Redis is unreachable")):
+        server.bin_closed_without_swarm()
+    with (
+        patch.object(server, "swarm_store", return_value=Swarms(error=ConnectionError("refused"))),
+        patch.object(server.sys, "stderr") as err,
+    ):
+        server.bin_closed_without_swarm()
+    err.write.assert_called_once_with("bin closed ledgers: refused\n")
+    assert "unreachable" not in ledger_bin.entries()
+
+
+def test_home_bins_closed_ledgers_without_a_swarm_before_it_renders():
+    closed("served-closed")
+    handler = server.Handler.__new__(server.Handler)
+    handler.path, handler.headers = "/", {"Host": f"127.0.0.1:{server.PORT}"}
+    sent = []
+    handler.send = lambda code, body, ctype: sent.append((code, body))
+    with patch.object(server, "swarm_store", return_value=Swarms()):
+        handler.do_GET()
+    assert sent[0][0] == 200
+    assert 'href="/served-closed"' not in sent[0][1]
+    assert "served-closed" in ledger_bin.entries()
