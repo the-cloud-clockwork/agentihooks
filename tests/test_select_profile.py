@@ -14,7 +14,7 @@ def profile(monkeypatch, tmp_path):
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "render", renderer)
     monkeypatch.setattr(select_profile.profiles, "rendered_root", lambda: tmp_path / "rendered")
-    monkeypatch.setattr(select_profile.profiles, "channels", lambda name: "amygdala,brain")
+    monkeypatch.setattr(select_profile.profiles, "channels", {"engineer": "amygdala,brain", "qa": "amygdala,brain"}.get)
     return tmp_path, renderer
 
 

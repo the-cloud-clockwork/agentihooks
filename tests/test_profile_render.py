@@ -225,6 +225,25 @@ def test_brain_joins_the_profile_channels_once(world):
     assert render.channels("rb-role") == "brain,amygdala"
 
 
+def test_brain_reaches_a_chain_that_declares_no_env(world):
+    from scripts.profiles import render
+
+    (world["bundle"] / ".claude" / "settings.overrides.json").write_text("{}")
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "brain"
+    assert render.channels("rb-role") == "brain"
+
+
+def test_channels_read_the_bundle_layer(world):
+    from scripts.profiles import render
+
+    overrides = {"env": {"AGENTIHOOKS_BASE_CHANNELS": "amygdala"}}
+    (world["bundle"] / ".claude" / "settings.overrides.json").write_text(json.dumps(overrides))
+
+    assert render.channels("rb-role") == "amygdala,brain"
+
+
 def test_claude_render_excludes_default_home_instructions(world):
     from scripts.profiles import render
 
