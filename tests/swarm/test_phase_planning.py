@@ -334,13 +334,18 @@ def finish_release(ledger, pid="p1"):
 def test_a_release_phase_gets_one_release_task_on_the_tick_its_build_tasks_are_done(env):
     store, ledger = env
     build_task(ledger, "t1")
+    build_task(ledger, "t9", pid="p2", done=False)
     set_phase("p1", release=True)
     actions = run(store, ledger)
     run(store, ledger)
     [release] = [t for t in tasks("p1") if t["id"] != "t1"]
     assert (release["id"], release["lane"], release["kind"], release["state"]) == ("release-p1", "eng", "ops", "open")
     assert release["title"] == "Release phase Build"
-    assert "changelog" in release["description"] and "Build" in release["description"]
+    assert release["description"] == (
+        "Release phase p1 Build: post the phase summary as a comment on the phase, and merge a changelog entry into "
+        "dev in every repo the phase touched. Version bumps and the release dance stay with the operator."
+    )
+    assert release["contract"] == phase_planning.RELEASE_CONTRACT
     assert set(release["contract"]) == {"must", "check", "judge"}
     assert "added release-p1 for phase p1" in actions
     assert phase("p1")["done"] is False
@@ -400,9 +405,32 @@ def test_the_phase_ticks_after_its_release_task_and_the_dependent_phase_waits_fo
     finish_release(ledger)
     actions = run(store, ledger)
     assert "phase p1 ticked" in actions
+    assert not any("added release" in a for a in actions)
     assert phase("p1")["done"] is True
     assert phase_state.lifecycle(phase("p2"), state(SLUG)) == "building"
     assert [t["id"] for t in tasks("p1")] == ["t1", "release-p1"]
+
+
+def test_an_out_of_scope_open_task_does_not_hold_the_release_task_back(env):
+    store, ledger = env
+    build_task(ledger, "t1")
+    build_task(ledger, "t2", done=False)
+    core.sync(
+        SLUG, ops=[{"op": "set", "id": "oos-t2", "by": "engineer", "path": "tasks/t2/out_of_scope", "value": True}]
+    )
+    set_phase("p1", release=True)
+    run(store, ledger)
+    assert [t["id"] for t in tasks("p1")] == ["t1", "t2", "release-p1"]
+
+
+def test_a_plan_task_and_a_release_task_are_added_in_the_same_pass(env):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    build_task(ledger, "t2", pid="p2")
+    set_phase("p2", release=True)
+    actions = run(store, ledger)
+    assert "queued plan-p1 for phase p1" in actions
+    assert "added release-p2 for phase p2" in actions
 
 
 def test_a_phase_title_the_ledger_would_refuse_gets_a_plain_release_title(env):
