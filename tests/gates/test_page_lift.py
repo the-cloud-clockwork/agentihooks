@@ -47,9 +47,21 @@ class TestLiftAgent:
         lift.arm(SLUG, ME, "talk", tmp_path)
         assert not lift.agent_lifted(SLUG, ME, "talk", tmp_path)
 
-    def test_nameless_agent_reads_not_lifted(self, tmp_path):
+    def test_nameless_agent_or_swarm_reads_not_lifted_even_when_armed(self, tmp_path):
+        lift.lift_agent(Who(name="", swarm=SLUG), "watch", tmp_path)
+        lift.lift_agent(Who(name=ME, swarm=""), "watch", tmp_path)
         assert not lift.agent_lifted(SLUG, "", "watch", tmp_path)
         assert not lift.agent_lifted("", ME, "watch", tmp_path)
+
+    def test_agent_lift_path_sits_under_the_swarm_home_lifts_agents_folder(self, tmp_path):
+        path = lift.agent_lift_path(SLUG, ME, "watch", tmp_path)
+        assert path == tmp_path / SLUG / "gates" / "lifts" / "agents" / ME / "watch"
+
+    def test_a_second_lift_rearms_the_same_gate(self, tmp_path):
+        lift.lift_agent(WHO, "watch", tmp_path, now=100.0)
+        lift.lift_agent(WHO, "watch", tmp_path, now=5000.0)
+        assert lift.agent_lifted(SLUG, ME, "watch", tmp_path, now=5000.0 + lift.LIFT_SECONDS - 1)
+        assert [r[1] for r in rows(tmp_path)] == ["lift", "lift"]
 
 
 class TestEntryHonoursAgentLift:
@@ -98,6 +110,11 @@ class TestActive:
         ]
         assert lift.active(recent, now) == {}
 
+    def test_a_row_without_a_time_is_not_active(self):
+        row = self.row("watch", "deny", 0)
+        del row["at"]
+        assert lift.active([row], HOUR_MS) == {}
+
     def test_gates_list_in_name_order_per_agent(self):
         now = 10 * HOUR_MS
         recent = [self.row("watch", "deny", now), self.row("identity", "deny", now), self.row("watch", "deny", now)]
@@ -107,6 +124,13 @@ class TestActive:
 class TestStatus:
     def test_each_agent_carries_its_active_gates(self):
         log.append(SLUG, log.Row.of("watch", "deny", WHO))
+        report = status.status_report(saved(), SLUG, {"tasks": []})
+        assert [a["gates"] for a in report["agents"]] == [[{"gate": "watch", "lifted": False}]]
+
+    def test_a_deny_behind_more_than_twenty_rows_still_counts(self):
+        log.append(SLUG, log.Row.of("watch", "deny", WHO))
+        for _ in range(25):
+            log.append(SLUG, log.Row.of("subagents", "count", WHO))
         report = status.status_report(saved(), SLUG, {"tasks": []})
         assert [a["gates"] for a in report["agents"]] == [[{"gate": "watch", "lifted": False}]]
 
@@ -122,7 +146,7 @@ class TestCommand:
     def test_the_operator_lifts_a_gate_for_an_agent(self, monkeypatch, capsys):
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
         self.lift(saved())
-        assert json.loads(capsys.readouterr().out) == {"agent": ME, "gate": "watch", "minutes": 60}
+        assert capsys.readouterr().out == json.dumps({"agent": ME, "gate": "watch", "minutes": 60}) + "\n"
         assert lift.agent_lifted(SLUG, ME, "watch")
         assert rows() == [("watch", "lift", ME, TASK, lift.LIFT_REASON)]
 
@@ -133,14 +157,18 @@ class TestCommand:
 
     def test_an_agent_cannot_lift_a_gate(self, monkeypatch):
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)
-        with pytest.raises(SwarmError, match="only the operator"):
+        refusal = "only the operator lifts a gate, from the ledger page or by typing it in the agent's pane"
+        with pytest.raises(SwarmError, match=f"^{refusal}$"):
             self.lift(saved())
         assert rows() == []
 
-    @pytest.mark.parametrize("agent,gate", [("engineer@9-9", "watch"), (ME, "bogus")])
-    def test_unknown_agent_or_gate_is_refused(self, monkeypatch, agent, gate):
+    @pytest.mark.parametrize(
+        "agent,gate,refusal",
+        [("engineer@9-9", "watch", "engineer@9-9 is not in this swarm"), (ME, "bogus", "no gate named bogus")],
+    )
+    def test_unknown_agent_or_gate_is_refused(self, monkeypatch, agent, gate, refusal):
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
-        with pytest.raises(SwarmError):
+        with pytest.raises(SwarmError, match=f"^{refusal}$"):
             self.lift(saved(), gate=gate, agent=agent)
         assert rows() == []
 
@@ -154,18 +182,19 @@ class TestServerRoute:
         from scripts.swarm_ledger.ledger_server import control_argv
 
         assert control_argv({"action": "lift", "agent": ME, "gate": "watch-budget"}) == ["lift", ME, "watch-budget"]
+        assert control_argv({"action": "lift", "agent": "Eng@X", "gate": "talk"}) == ["lift", "Eng@X", "talk"]
 
     @pytest.mark.parametrize(
-        "body",
+        "body,refusal",
         [
-            {"action": "lift", "agent": "--as", "gate": "watch"},
-            {"action": "lift", "agent": ME, "gate": "../x"},
-            {"action": "lift", "agent": ME},
-            {"action": "lift", "gate": "watch"},
+            ({"action": "lift", "agent": "--as", "gate": "watch"}, "A lift needs an agent name"),
+            ({"action": "lift", "agent": ME, "gate": "../x"}, "A lift needs the gate's name"),
+            ({"action": "lift", "agent": ME}, "A lift needs the gate's name"),
+            ({"action": "lift", "gate": "watch"}, "A lift needs an agent name"),
         ],
     )
-    def test_bad_lifts_are_refused(self, body):
+    def test_bad_lifts_are_refused(self, body, refusal):
         from scripts.swarm_ledger.ledger_server import control_argv
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=f"^{refusal}$"):
             control_argv(body)

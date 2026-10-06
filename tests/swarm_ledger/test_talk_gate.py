@@ -306,6 +306,19 @@ def at_budget(redis, by=ENG):
 CHAT = {"op": "add", "thread": "chat", "id": "m1", "text": "hi", "by": ENG}
 
 
+def test_a_page_lift_holds_one_hour_on_the_ledger_clock(redis, tmp_path):
+    from scripts.gates import lift
+    from scripts.gates.base import Who
+
+    mode(redis, "enforce")
+    at_budget(redis)
+    at, who = 10_000_000, Who(name=ENG, swarm=SLUG)
+    lift.lift_agent(who, "talk", tmp_path, now=at / 1000 - lift.LIFT_SECONDS + 1)
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT, at=at)[0] is True
+    lift.lift_agent(who, "talk", tmp_path, now=at / 1000 - lift.LIFT_SECONDS)
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT, at=at)[0] is False
+
+
 def test_an_operator_event_on_a_task_the_agent_claimed_is_owed(redis, tmp_path):
     mode(redis, "enforce")
     at_budget(redis)
