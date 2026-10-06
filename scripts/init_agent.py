@@ -112,6 +112,12 @@ def _swarm_exports(environ: dict[str, str]) -> str:
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
 
 
+def _config_home_export(environ: dict[str, str]) -> str:
+    # A herdr pane inherits the herdr server's environment, not the caller's, so trust lands where Claude reads only if pinned.
+    home = environ.get("CLAUDE_CONFIG_DIR")
+    return f"export CLAUDE_CONFIG_DIR={shlex.quote(home)}\n" if home else "unset CLAUDE_CONFIG_DIR\n"
+
+
 def _codex_otel_args(environ: dict[str, str]) -> list[str]:
     collector = _collector(environ)
     if not collector:
@@ -248,6 +254,7 @@ def _write_launcher(
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
         f"{_telemetry_exports(name, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"

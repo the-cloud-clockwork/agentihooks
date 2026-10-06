@@ -19,7 +19,7 @@ def render(task):
     stubs = (
         "const openComments = new Set(); const closedComments = new Set();"
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean), addEventListener() {} });"
-        "const scopeDot = () => null; const commentsView = (key) => ({ tag: 'comments', attrs: { key }, kids: [] });"
+        "const itemActions = () => null; const commentsView = (key) => ({ tag: 'comments', attrs: { key }, kids: [] });"
         "const ser = (n) => (n && typeof n === 'object' ? [n.tag, n.attrs.class || '', n.attrs.text || '', n.kids.map(ser)] : n);"
     )
     script = (

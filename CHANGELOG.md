@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Shared `read-docs` skill answers operator questions from matching published
+  documentation sections and proposes follow ups for missing answers.
+
 ### Fixed
 
 - Swarm exits settle delivered and read inbox items, preserve transferred work,

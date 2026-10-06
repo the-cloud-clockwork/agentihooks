@@ -1,6 +1,6 @@
 from hooks.lifecycle.lease import add_holder, admin_dir
 from hooks.lifecycle.model import Holder, Root
-from hooks.lifecycle.worktrees import classify, discover
+from hooks.lifecycle.worktrees import classify, discover, nested_worktrees
 
 from .conftest import age, git, process, snap
 
@@ -85,6 +85,16 @@ def test_discover_finds_tmp_and_nested_scratch_worktrees(repo, tmp_path):
     found = {path for path, _root in discover(roots)}
     assert {top, tmp, nested} <= found
     assert repo.primary not in found
+
+
+def test_nested_worktrees_skips_plain_dirs_and_empty_git_markers(repo, tmp_path):
+    task = tmp_path / "scratch" / "proj" / "task-1"
+    marker = task / ".cache" / "uv" / "checkout"
+    marker.mkdir(parents=True)
+    (marker / ".git").write_text("")
+    (task / "notes").mkdir()
+    real = repo.worktree("wt", base=task / "deep")
+    assert nested_worktrees(task) == [real]
 
 
 def test_discover_follows_git_registry_to_deeply_nested_worktrees(repo, tmp_path):

@@ -1,8 +1,9 @@
+import json
 from dataclasses import replace
 
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import cli, prompt
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
@@ -257,6 +258,68 @@ def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  
         "eng-1@sw\t1\tnote\tlesson one because it held",
         "eng-1@sw\t2\tinsight\tlesson two because it held twice",
     ]
+
+
+def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(env, capsys, monkeypatch):  # noqa: F811
+    swarm, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "retire", "eng-1", "1", "--reason", "stale") == 1
+    assert cli.ONLY_MASTER_RETIRE in capsys.readouterr().err
+    assert run("sw", "--as", "master@a1b2c3-0001", "retire", "eng-1@other", "1", "--reason", "x") == 1
+    assert run("sw", "--as", "master@a1b2c3-0001", "retire", "eng-1", "1", "--reason", "stale") == 0
+    assert swarm.memory.learned("eng-1@sw")[0]["retired"]["by"] == "master@a1b2c3-0001"
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    assert run("sw", "retire", "eng-1@sw", "2", "--reason", "the operator says so") == 0
+    assert swarm.memory.learned("eng-1@sw")[1]["retired"]["by"] == "operator"
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson three because it held")
+    capsys.readouterr()
+    assert run("sw", "learned") == 0
+    assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t3\tnote\tlesson three because it held"]
+
+
+def test_retire_reports_what_it_did_and_names_each_refusal(env, capsys, monkeypatch):  # noqa: F811
+    swarm, _, _ = env
+    monkeypatch.setattr(cli, "now_ms", lambda: 7_000)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    capsys.readouterr()
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 1
+    assert cli.ONLY_MASTER_RETIRE in capsys.readouterr().err
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1b2c3-0001")
+    assert run("sw", "retire", "eng-1@other", "1", "--reason", "x") == 1
+    assert "eng-1@other is not a seat of swarm sw" in capsys.readouterr().err
+    assert run("sw", "retire", "eng-1", "9", "--reason", "x") == 1
+    assert "seat eng-1@sw has no learned note 9" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        run("sw", "retire", "eng-1", "1")
+    capsys.readouterr()
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 0
+    assert json.loads(capsys.readouterr().out) == {"seat": "eng-1@sw", "number": 1, "retired": True}
+    assert swarm.memory.learned("eng-1@sw")[0]["retired"] == {
+        "by": "master@a1b2c3-0001",
+        "reason": "stale",
+        "at": 7_000,
+    }
+
+
+def test_a_retired_note_no_longer_reaches_the_next_master(store):  # noqa: F811
+    runtime = FakeRuntime()
+    tick("sw", store, tasks(), runtime, 1)
+    (old,) = masters(store)
+    store.memory.learn(old.seat, old.name, 'say "enable voice" because the operator asked once', at=1)
+    store.memory.learn(old.seat, old.name, "keep caps at four because the operator said so", at=2)
+    store.memory.retire(old.seat, 1, "operator", "it flips voice on every new master", at=3)
+    store.put_agent("sw", replace(old, state="finished"))
+    tick("sw", store, tasks(), runtime, 2)
+    name, primed = runtime.masters[-1]
+    text = prompt.build("sw", "/repo", MASTER, name, {**primed, "id": MASTER})
+    assert "keep caps at four" in text
+    assert "enable voice" not in text
 
 
 def test_culture_set_and_show_survive_swarm_remove(env, tmp_path, capsys):  # noqa: F811

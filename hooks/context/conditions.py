@@ -639,9 +639,46 @@ _READ_ONLY_HEADS = frozenset(
         "cd",
         "echo",
         "agentihooks",
+        "sed",
+        "nl",
+        "cut",
+        "tr",
+        "printf",
+        "printenv",
+        "date",
+        "basename",
+        "dirname",
+        "realpath",
+        "readlink",
+        "sha256sum",
+        "md5sum",
+        "true",
+        "test",
+        "for",
+        "done",
+        "fi",
     }
 )
-_READ_ONLY_GIT = frozenset({"add", "commit", "status", "log", "diff", "show", "push", "ls-files", "blame", "fetch"})
+_READ_ONLY_GIT = frozenset(
+    {
+        "add",
+        "commit",
+        "status",
+        "log",
+        "diff",
+        "show",
+        "push",
+        "ls-files",
+        "blame",
+        "fetch",
+        "branch",
+        "rev-parse",
+        "ls-tree",
+        "cat-file",
+        "grep",
+    }
+)
+_SED_WRITE = re.compile(r"\bsed\b[^|;&\n]*?(?:\s-[a-zA-Z]*i|\s--in-place|[\s'\"/;}0-9$][wW]\s)")
 _HARMLESS_REDIRECT = re.compile(r"\d*>&\d+|&?\d*>\s*/dev/null")
 _GATE_TTL_SEC = 3600
 GATE_MESSAGE = (
@@ -713,7 +750,7 @@ def _touches_conditions(text: str) -> bool:
 def _read_only_shell(command: str) -> bool:
     if ">" in _HARMLESS_REDIRECT.sub("", command):
         return False
-    if re.search(r"\s-(?:delete|exec)\b", command):
+    if re.search(r"\s-(?:delete|exec)\b", command) or _SED_WRITE.search(command):
         return False
     heads = tool_matcher.command_heads(command)
     if "git" in heads:

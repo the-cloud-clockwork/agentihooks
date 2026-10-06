@@ -868,7 +868,7 @@ def on_user_prompt_submit(payload: dict) -> None:
             )
 
             prompt = payload.get("prompt", "")
-            if prompt:
+            if prompt and typed:
                 if contains_enable_signal(prompt):
                     set_voice_enabled(session_id)
                     log(
@@ -925,7 +925,7 @@ def on_user_prompt_submit(payload: dict) -> None:
             if prompt:
                 from hooks.common import inject_banner
 
-                if _ctl_disable(prompt):
+                if typed and _ctl_disable(prompt):
                     set_controls_disabled(session_id)
                     log(
                         "controls_toggle: bypass mode ACTIVE",
@@ -937,7 +937,7 @@ def on_user_prompt_submit(payload: dict) -> None:
                         "for this session and all spawned subagents. Direct push to main and "
                         "commit-on-main remain blocked. Say 'enable controls' to restore.",
                     )
-                elif _ctl_enable(prompt):
+                elif typed and _ctl_enable(prompt):
                     clear_controls_disabled(session_id, force=True)
                     log(
                         "controls_toggle: bypass mode CLEARED",

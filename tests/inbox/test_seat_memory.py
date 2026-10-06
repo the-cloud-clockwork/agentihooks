@@ -83,6 +83,38 @@ def test_promote_refuses_anything_but_a_raise_with_a_reason(memory, number, matu
     assert memory.learned("eng-1@rig")[0]["maturity"] == "note"
 
 
+def test_retire_marks_a_note_and_keeps_every_number(memory):
+    memory.learn("eng-1@rig", "rig-eng-1", "first", at=1)
+    memory.learn("eng-1@rig", "rig-eng-1", "second", at=2)
+    memory.retire("eng-1@rig", 1, "operator", "it quotes the voice keyword", at=5)
+    first, second = memory.learned("eng-1@rig")
+    assert first["retired"] == {"by": "operator", "reason": "it quotes the voice keyword", "at": 5}
+    assert (second["text"], "retired" in second) == ("second", False)
+
+
+@pytest.mark.parametrize(
+    ("number", "reason", "refusal"),
+    [
+        (2, "no entry 2", "^seat eng-1@rig has no learned note 2$"),
+        (0, "x", "^seat eng-1@rig has no learned note 0$"),
+        (1, "  ", "^a retirement needs a reason$"),
+    ],
+)
+def test_retire_refuses_a_missing_note_or_an_empty_reason(memory, number, reason, refusal):
+    memory.learn("eng-1@rig", "rig-eng-1", "only", at=1)
+    with pytest.raises(SeatError, match=refusal):
+        memory.retire("eng-1@rig", number, "operator", reason, at=2)
+    assert "retired" not in memory.learned("eng-1@rig")[0]
+
+
+def test_a_retired_note_cannot_be_retired_again(memory):
+    memory.learn("eng-1@rig", "rig-eng-1", "only", at=1)
+    memory.retire("eng-1@rig", 1, "operator", "stale", at=2)
+    with pytest.raises(SeatError, match="^learned note 1 is already retired$"):
+        memory.retire("eng-1@rig", 1, "master@a1-1", "again", at=3)
+    assert memory.learned("eng-1@rig")[0]["retired"]["by"] == "operator"
+
+
 def test_a_swarm_culture_is_empty_until_set_and_kept_per_swarm():
     import fakeredis
 
