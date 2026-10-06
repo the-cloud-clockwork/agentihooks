@@ -74,11 +74,11 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset()):
+def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset(), talk=None):
     events = ledger.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in ledger.get("tasks", [])}
     return [
-        *ceremony(events, tasks, limits, green),
+        *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
         *idle_with_claim(agents, tasks, limits, waiting),
@@ -114,14 +114,14 @@ def _outcome(task):
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
 
 
-def ceremony(events, tasks, limits, green=frozenset()):
+def ceremony(events, tasks, limits, green=frozenset(), talk=None):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
     delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
-        if not naming.lane_of(by) or by in delivering:
+        if not naming.lane_of(by) or by in delivering or (talk is not None and _is_worker(by)):
             continue
         outcomes = len(finished) if _is_master(by) else closed[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
@@ -135,7 +135,24 @@ def ceremony(events, tasks, limits, green=frozenset()):
                     count,
                 )
             )
-    return found
+    return found + over_budget(talk or {})
+
+
+def over_budget(talk):
+    from scripts.gates.talk import BUDGET
+
+    return [
+        Finding(
+            "ceremony",
+            by,
+            "talked past the budget since its last outcome",
+            (f"{_plural(count, 'talk write')} since its last outcome",),
+            f"more than {BUDGET} talk writes between outcomes",
+            count,
+        )
+        for by, count in sorted(talk.items())
+        if _is_worker(by) and count > BUDGET
+    ]
 
 
 def _gain(task):
@@ -260,23 +277,33 @@ def stale_claims(events, tasks, now_ms, limits):
     return found
 
 
+def watch_limits(by, limits):
+    if _is_master(by):
+        return limits.master_watch_min, limits.master_watch_ratio
+    return limits.watch_min, limits.watch_ratio
+
+
+def over_watched(counts, least, ratio):
+    return counts["since"] > least and counts["watch"] / max(counts["act"], 1) > ratio
+
+
 def over_monitoring(activity, limits):
     found = []
     for by, counts in sorted(activity.items()):
-        watch, act = counts.get("watch", 0), counts.get("act", 0)
-        if _is_master(by):
-            least, ratio = limits.master_watch_min, limits.master_watch_ratio
-        else:
-            least, ratio = limits.watch_min, limits.watch_ratio
-        if watch >= least and watch / max(act, 1) > ratio:
+        least, ratio = watch_limits(by, limits)
+        if over_watched(counts, least, ratio):
             found.append(
                 Finding(
                     "over monitoring",
                     by,
                     "more watch calls than actions",
-                    (f"{watch} watch calls", _plural(act, "action")),
-                    f"at least {least} watch calls and more than {ratio} per action",
-                    watch,
+                    (
+                        f"{counts['since']} watch calls since the last action",
+                        f"{counts['watch']} watch calls",
+                        _plural(counts["act"], "action"),
+                    ),
+                    f"more than {least} watch calls since the last action and more than {ratio} per action",
+                    counts["since"],
                 )
             )
     return found

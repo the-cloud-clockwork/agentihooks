@@ -198,8 +198,83 @@ def test_a_binned_ledger_stops_its_swarm_and_the_tick_leaves_it_alone(env):
     assert store.agents("sw") == [] and sorted(rt.closed) == panes and rt.live == set()
     assert rt.closed_spaces == ["sw"]
     store.update("sw", state="running")
-    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, skipped"]
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert store.agents("sw") == [] and len(rt.spawned) == 2 and len(rt.masters) == 1
+
+
+@pytest.mark.parametrize("state", ["running", "stopping"])
+def test_one_tick_after_binning_leaves_no_agent_and_no_space(env, state):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert {a.lane for a in store.agents("sw")} == {"master", "eng", "ci"}
+    store.update("sw", state=state)
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
+    assert store.config("sw").state == "stopped"
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "open")
+
+
+def test_a_binned_ledger_keeps_retiring_until_no_agent_is_left(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    stuck = [a.name for a in store.agents("sw") if a.lane != "ci"]
+    rt.stuck = set(stuck)
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [
+        f"the ledger is in the bin, still retiring {stuck[0]}, {stuck[1]}"
+    ]
+    assert [a.name for a in store.agents("sw")] == stuck and rt.closed_spaces == []
+    assert store.config("sw").state == "stopping"
+    rt.stuck = set()
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.closed_spaces == ["sw"]
+
+
+def test_binning_releases_and_reopens_only_this_swarms_claims(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert {store.claimant("sw", t) for t in ("t1", "t2")} == {a.name for a in store.agents("sw") if a.lane != "master"}
+    tasks, update = ledger.tasks, ledger.update_task
+    ledger.tasks = lambda slug: tasks(slug) if slug == "sw" else []
+    ledger.update_task = lambda slug, task_id, fields, by="swarm": slug == "sw" and update(slug, task_id, fields, by)
+    states, retire = [], rt.retire
+    rt.retire = lambda agent, live: states.append(store.config("sw").state) or retire(agent, live)
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, None, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert states == ["stopping", "stopping", "stopping"]
+    assert [(ledger.rows[t]["state"], ledger.rows[t]["claimed_by"]) for t in ("t1", "t2")] == [
+        ("open", ""),
+        ("open", ""),
+    ]
+    assert (store.claimant("sw", "t1"), store.claimant("sw", "t2")) == (None, None)
+
+
+def test_stop_now_prints_its_state_and_who_is_still_running(env, capsys):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    stuck = next(a.name for a in store.agents("sw") if a.lane == "master")
+    rt.stuck = {stuck}
+    capsys.readouterr()
+    assert run("sw", "stop", "--now") == 0
+    assert capsys.readouterr().out == json.dumps({"swarm": "sw", "state": "stopping", "still_running": [stuck]}) + "\n"
+
+
+@pytest.mark.parametrize("state", ["running", "paused", "stopped"])
+def test_a_binned_ledger_never_gets_a_new_spawn(env, state):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", state=state)
+    ledger.bin = {"sw"}
+    InboxStore(store.redis).send("operator", "master@sw", "wake up")
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert rt.spawned == [] and rt.masters == [] and store.agents("sw") == []
+    assert store.config("sw").state == "stopped"
 
 
 def test_restoring_from_the_bin_leaves_the_swarm_stopped(env):
@@ -861,11 +936,29 @@ def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_z
     assert run("sw", "remove") == 0
     assert store.slugs() == ["other"]
     assert cli.activity.counts("sw") == {}
-    assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0}}
+    assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0, "since": 1}}
     run("sw", "create", "--repo", "/repo")
     assert cli.activity.counts("sw") == {}
     assert store.next_name("sw", "eng") == "engineer@a1b2c5-0001"
     assert store.next_name("other", "eng") == "engineer@a1b2c4-0002"
+
+
+@pytest.mark.parametrize("slug", ["", "*", "s?", "[sw]"])
+def test_remove_refuses_an_empty_or_glob_name_and_every_swarm_survives(env, monkeypatch, tmp_path, slug):
+    store, _, _ = env
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    cli.activity.record("Monitor", {}, {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-eng-1"})
+    store.redis.hset(store.key(slug, "config"), mapping=store.redis.hgetall(store.key("sw", "config")))
+    keys = set(store.redis.keys("*"))
+    with pytest.raises(SwarmError, match="refusing to remove swarm .*: an empty or pattern name"):
+        store.remove(slug)
+    with pytest.raises(SwarmError, match="no swarm Xsw"):
+        store.remove("Xsw")
+    assert run(slug, "remove") == 1
+    assert set(store.redis.keys("*")) == keys
+    assert store.slugs() == ["sw"]
+    assert cli.activity.counts("sw") == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
 
 
 def _idle_finding(env, monkeypatch, tmp_path):

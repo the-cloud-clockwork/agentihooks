@@ -48,6 +48,15 @@ def test_a_task_claim_is_exclusive_until_released(store):
     assert store.claim("smoke", "t1", "engineer@a1b2c3-0002", lease_ms=60_000)
 
 
+def test_claims_count_agent_lives_per_task_until_reset(store):
+    store.create(config())
+    assert store.claims("smoke", "t1") == 0
+    assert [store.count_claim("smoke", "t1") for _ in range(3)] == [1, 2, 3]
+    store.count_claim("smoke", "t2")
+    store.reset_claims("smoke", "t1")
+    assert (store.claims("smoke", "t1"), store.claims("smoke", "t2")) == (0, 1)
+
+
 def test_a_lapsed_lease_frees_the_claim(store):
     store.create(config())
     store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)

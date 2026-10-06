@@ -50,7 +50,10 @@ def test_record_counts_only_swarm_bound_sessions(tmp_path):
     activity.record("Monitor", {}, {"AGENTIHOOKS_SWARM": "sw"}, tmp_path)
     activity.record("Monitor", {}, {**BOUND, "AGENTIHOOKS_AGENT_NAME": "sw-eng-2"}, tmp_path)
     activity.record("Monitor", {}, {**BOUND, "AGENTIHOOKS_SWARM": "other"}, tmp_path)
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 2, "act": 1}, "sw-eng-2": {"watch": 1, "act": 0}}
+    assert activity.counts("sw", tmp_path) == {
+        "sw-eng-1": {"watch": 2, "act": 1, "since": 0},
+        "sw-eng-2": {"watch": 1, "act": 0, "since": 1},
+    }
 
 
 def test_an_unsafe_name_or_a_missing_folder_records_and_counts_nothing(tmp_path):
@@ -69,13 +72,13 @@ def test_the_pre_tool_hook_records_a_bound_session(monkeypatch, tmp_path):
     hook_manager.on_pre_tool_use(
         {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "sleep 1"}, "cwd": "/"}
     )
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0}}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
 
 
 def test_a_torn_line_is_skipped_and_the_rest_still_counts(tmp_path):
     (tmp_path / "sw").mkdir()
     (tmp_path / "sw" / "sw-eng-1.jsonl").write_text('{"kind": "watch"}\n{"kind": "wa\n{"kind": "act"}\n')
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 1}}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 1, "since": 0}}
 
 
 def test_an_unbound_session_never_classifies(monkeypatch, tmp_path):
@@ -94,13 +97,13 @@ REARM = {"command": "agentihooks ledger watch sw --as sw-master-1"}
 def test_re_arming_a_ledger_watch_counts_one_watch_per_expiry_window(tmp_path):
     for minute in (0, 1, 2, 29, 30, 31, 61):
         activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=minute * 60_000)
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 3, "act": 0}}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 3, "act": 0, "since": 3}}
 
 
 def test_other_watches_count_every_call(tmp_path):
     for second in range(4):
         activity.record("Bash", {"command": "gh pr checks 3"}, BOUND, tmp_path, now_ms=second * 1000)
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 4, "act": 0}}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 4, "act": 0, "since": 4}}
 
 
 def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_does(tmp_path):
@@ -109,7 +112,8 @@ def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_doe
     activity.record("Edit", {"file_path": "a.py"}, BOUND, tmp_path, now_ms=32 * 60_000)
     rows = activity.entries("sw", tmp_path)
     assert [row["at"] for row in rows["sw-eng-1"]] == [0, 60_000, 31 * 60_000, 32 * 60_000]
-    assert activity.tally(rows["sw-eng-1"]) == {"watch": 2, "act": 1} == activity.counts("sw", tmp_path)["sw-eng-1"]
+    assert activity.tally(rows["sw-eng-1"]) == {"watch": 2, "act": 1}
+    assert activity.counts("sw", tmp_path)["sw-eng-1"] == {"watch": 2, "act": 1, "since": 0}
     assert activity.tally(rows["sw-eng-1"][1:]) == {"watch": 2, "act": 1}
     assert activity.entries("missing", tmp_path) == {}
 
@@ -117,7 +121,7 @@ def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_doe
 def test_an_agent_named_with_its_seat_code_is_recorded(tmp_path):
     named = {**BOUND, "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0101"}
     activity.record("Bash", {"command": "gh pr checks 3"}, named, tmp_path, now_ms=0)
-    assert activity.counts("sw", tmp_path) == {"engineer@323133-0101": {"watch": 1, "act": 0}}
+    assert activity.counts("sw", tmp_path) == {"engineer@323133-0101": {"watch": 1, "act": 0, "since": 1}}
     activity.record("Bash", {"command": "gh pr checks 3"}, {**named, "AGENTIHOOKS_AGENT_NAME": "a/../b"}, tmp_path)
     assert list(activity.counts("sw", tmp_path)) == ["engineer@323133-0101"]
 
@@ -137,7 +141,7 @@ def test_a_master_doing_ledger_writes_and_watches_does_not_trip_over_monitoring(
         )
         activity.record("Bash", {"command": 'agentihooks msg reply m1 "done"'}, master, tmp_path, now_ms=at)
     counts = activity.counts("sw", tmp_path)
-    assert counts == {"sw-master-1": {"watch": 16, "act": 16}}
+    assert counts == {"sw-master-1": {"watch": 16, "act": 16, "since": 0}}
     assert health.over_monitoring(counts, health.Limits()) == []
 
 
@@ -146,5 +150,45 @@ def test_the_first_hook_event_of_each_agent_is_kept_whatever_the_tool(tmp_path):
     activity.record("Edit", {}, BOUND, tmp_path, now_ms=9_000)
     activity.record("Read", {}, {**BOUND, "AGENTIHOOKS_AGENT_NAME": "sw-eng-2"}, tmp_path, now_ms=7_000)
     assert activity.first_events("sw", tmp_path) == {"sw-eng-1": 5_000, "sw-eng-2": 7_000}
-    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1}}
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 1, "since": 0}}
     assert activity.first_events("none", tmp_path / "missing") == {}
+
+
+def test_since_action_counts_only_the_watches_after_the_last_action():
+    watch, act = {"kind": "watch", "at": 0}, {"kind": "act", "at": 0}
+    assert activity.since_action([]) == 0
+    assert activity.since_action([watch, watch]) == 2
+    assert activity.since_action([watch, act, watch, act]) == 0
+    assert activity.since_action([watch, act, watch, watch, act, watch]) == 1
+
+
+def test_since_action_collapses_re_arms_as_tally_does():
+    rearm = [{"kind": "watch", "rearm": True, "at": minute * 60_000} for minute in (0, 1, 31)]
+    assert activity.since_action([{"kind": "act", "at": 0}, *rearm]) == 2
+
+
+def test_rows_of_reads_one_agents_rows(tmp_path):
+    activity.record("Monitor", {}, BOUND, tmp_path, now_ms=1)
+    activity.record("Edit", {}, {**BOUND, "AGENTIHOOKS_AGENT_NAME": "sw-eng-2"}, tmp_path, now_ms=2)
+    assert activity.rows_of("sw", "sw-eng-1", tmp_path) == [{"kind": "watch", "at": 1}]
+    assert activity.rows_of("sw", "sw-eng-3", tmp_path) == []
+    assert activity.rows_of("none", "sw-eng-1", tmp_path / "missing") == []
+
+
+@pytest.mark.parametrize("slug", ["", ".", "..", "sw/..", "sw/eng", "absolute"])
+def test_clear_refuses_a_name_that_is_not_one_folder_under_the_root(tmp_path, slug):
+    root = tmp_path / "activity"
+    activity.record("Monitor", {}, BOUND, root)
+    with pytest.raises(ValueError, match="refusing to clear swarm activity for .*: not one folder under"):
+        activity.clear(str(tmp_path) if slug == "absolute" else slug, root)
+    assert activity.counts("sw", root) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_clear_removes_only_the_named_swarm(tmp_path):
+    root = tmp_path / "activity"
+    activity.record("Monitor", {}, BOUND, root)
+    activity.record("Monitor", {}, {**BOUND, "AGENTIHOOKS_SWARM": "other"}, root)
+    activity.clear("sw", root)
+    activity.clear("sw", root)
+    assert activity.counts("sw", root) == {}
+    assert activity.counts("other", root) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}

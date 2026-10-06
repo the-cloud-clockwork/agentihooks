@@ -105,21 +105,28 @@ def test_a_cached_green_probe_asks_github_once_per_ttl_under_its_own_key():
     assert redis.get("agentihooks:swarm:sw:checks:green:https://github.com/o/r/pull/8") == "0"
 
 
-def test_status_raises_no_ceremony_for_the_owner_of_a_green_open_pull_request(monkeypatch):
+def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):
     import fakeredis
 
+    from scripts.gates.progress import Progress
     from scripts.swarm import status
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("green-proof", "/repo", max_eng=1, max_ci=0)
     store.create(config)
+    store.put_agent("green-proof", AgentRecord("sw-eng-1", "eng", "t1"))
     monkeypatch.setattr(status.activity, "counts", lambda slug: {})
     tasks = [{"id": "t1", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": URL}]
     at = status.now_ms()
     events = [{"kind": "comment edited", "target": "phases/p1", "by": "sw-eng-1", "at": at} for _ in range(25)]
-    key = f"{store.key('green-proof', 'checks')}:green:{URL}"
-    store.redis.set(key, "0")
-    assert [f["kind"] for f in status.findings(store, "green-proof", config, tasks, events)] == ["ceremony"]
-    store.redis.set(key, "1")
+    store.redis.set(f"{store.key('green-proof', 'checks')}:green:{URL}", "0")
+    marks = Progress(store.redis, "green-proof")
+    for _ in range(10):
+        marks.talk("sw-eng-1")
     assert status.findings(store, "green-proof", config, tasks, events) == []
+    marks.talk("sw-eng-1")
+    found = status.findings(store, "green-proof", config, tasks, events)
+    assert [(f["kind"], f["subject"], f["evidence"]) for f in found] == [
+        ("ceremony", "sw-eng-1", ["11 talk writes since its last outcome"])
+    ]

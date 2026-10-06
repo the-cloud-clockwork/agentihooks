@@ -152,18 +152,54 @@ def touched(command):
     return is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
 
 
+def restart(session):
+    session.update(calls=0, nudge_calls=0, blocks=0, bypass_posted=False)
+
+
+def progress_of(session):
+    from scripts.gates.progress import Progress
+    from scripts.swarm.store import redis_client
+
+    return Progress(redis_client(), session["slug"])
+
+
+def note_outcome(session, kind):
+    try:
+        progress_of(session).outcome(session["name"], kind)
+    except Exception as exc:  # the tool call stands whatever Redis does
+        log(f"outcome not recorded: {exc}")
+
+
+def outcome_seen(session):
+    try:
+        at = progress_of(session).read(session["name"]).outcome_at
+    except Exception as exc:  # no signal reads as no outcome
+        log(f"progress unreadable: {exc}")
+        return False
+    if at <= session.get("outcome_at", 0):
+        return False
+    session["outcome_at"] = at
+    restart(session)
+    return True
+
+
 def on_tool(payload, session, state, sfile):
     import ledger_gate
 
+    from scripts.gates.progress import outcome_of
+
     command = (payload.get("tool_input") or {}).get("command") if payload.get("tool_name") == "Bash" else None
-    if touched(command):
-        session.update(calls=0, nudge_calls=0, blocks=0, bypass_posted=False)
-    else:
+    kind = outcome_of(command)
+    if kind:
+        note_outcome(session, kind)
+    if touched(command) or kind:
+        restart(session)
+    elif not payload.get("agent_id"):
         session["calls"] += 1
     pol = ledger_gate.policy(state)
     owed = ledger_gate.unhandled_for(state["_meta"], session["name"], state.get("tasks", []))
     top = max((e["rev"] for e in owed), default=0)
-    idle = session["calls"] - session["nudge_calls"] >= pol["nudge_after_calls"]
+    idle = session["calls"] - session["nudge_calls"] >= pol["nudge_after_calls"] and not outcome_seen(session)
     if owed and top > session["nudged_rev"]:
         session["nudged_rev"] = top
         fresh = first_shown(session, owed)
@@ -193,7 +229,7 @@ def stop_reasons(session, state):
     reasons = []
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
-    if session["calls"] >= pol["stop_after_calls"]:
+    if session["calls"] >= pol["stop_after_calls"] and not outcome_seen(session):
         reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
     beat = core.watch_path(session["slug"], session["name"])
     member = state["_meta"].get("members", {}).get(session["name"], {})
@@ -227,6 +263,7 @@ def post_bypass(session, unhandled):
 def on_stop(payload, session, state, sfile):
     reasons, unhandled, pol = stop_reasons(session, state)
     if not reasons:
+        write_session(sfile, session)
         return
     if session["blocks"] >= pol["stop_blocks"]:
         if not session["bypass_posted"]:

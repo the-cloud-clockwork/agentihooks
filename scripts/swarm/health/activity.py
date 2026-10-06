@@ -73,18 +73,29 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
         f.write(json.dumps(entry) + "\n")
 
 
+def _rows(path):
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
 def entries(slug, root=None):
     folder = Path(root or default_root()) / slug
-    found = {}
-    for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
-        rows = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                continue
-        found[path.stem] = rows
-    return found
+    return {path.stem: _rows(path) for path in (sorted(folder.glob("*.jsonl")) if folder.is_dir() else [])}
+
+
+def rows_of(slug, name, root=None):
+    path = Path(root or default_root()) / slug / f"{name}.jsonl"
+    return _rows(path) if path.is_file() else []
+
+
+def since_action(rows):
+    last = max((index for index, entry in enumerate(rows) if entry.get("kind") == "act"), default=-1)
+    return tally(rows[last + 1 :])["watch"]
 
 
 def tally(rows):
@@ -100,7 +111,7 @@ def tally(rows):
 
 
 def counts(slug, root=None):
-    return {name: tally(rows) for name, rows in entries(slug, root).items()}
+    return {name: {**tally(rows), "since": since_action(rows)} for name, rows in entries(slug, root).items()}
 
 
 def first_events(slug, root=None):
@@ -115,4 +126,8 @@ def first_events(slug, root=None):
 
 
 def clear(slug, root=None):
-    shutil.rmtree(Path(root or default_root()) / slug, ignore_errors=True)
+    base = Path(root or default_root()).resolve()
+    folder = (base / slug).resolve()
+    if folder.parent != base:
+        raise ValueError(f"refusing to clear swarm activity for {slug!r}: not one folder under {base}")
+    shutil.rmtree(folder, ignore_errors=True)

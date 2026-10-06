@@ -43,6 +43,8 @@ import ledger_size  # noqa: E402
 import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
+from scripts.gates import talk  # noqa: E402
+
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
@@ -535,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply_state(self, slug, changes=None, ops=None):
         try:
-            state, rejected = core.sync(slug, changes=changes, ops=ops)
+            state, rejected = core.sync(slug, changes=changes, ops=ops, gate=talk.Budget(slug) if ops else None)
         except (ValueError, OSError) as exc:
             return self.send(500, f"ledger unreadable: {exc}", "text/plain")
         if changes or ops:

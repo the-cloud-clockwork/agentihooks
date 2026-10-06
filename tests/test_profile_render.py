@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plans", "plugins", ".credentials.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json"}
 
 
 def _write(path: Path, text: str) -> Path:
@@ -292,6 +292,18 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_gives_each_home_its_own_plans_folder(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    assert (out / "plans").is_dir() and not (out / "plans").is_symlink()
+
+    (out / "plans").rmdir()
+    (out / "plans").symlink_to(world["home"] / ".claude" / "plans")
+    render.render_claude("rb-role", force=True)
+    assert (out / "plans").is_dir() and not (out / "plans").is_symlink()
 
 
 def test_claude_render_from_inside_a_rendered_home(world, monkeypatch):

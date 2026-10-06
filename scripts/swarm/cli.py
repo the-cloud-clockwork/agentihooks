@@ -42,7 +42,8 @@ from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who
+from scripts.gates import Who, progress
+from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
@@ -90,6 +91,8 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
+GATE_KEYS = {"talk-gate": "talk"}
+GATE_MODES = ("enforce", "observe", "off")
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -105,12 +108,17 @@ def now_ms():
 
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     ledger = ledger or LedgerClient()
-    if ledger.binned(slug):
-        return ["the ledger is in the bin, skipped"]
     lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
+        if ledger.binned(slug):
+            _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
+            return [
+                f"the ledger is in the bin, still retiring {', '.join(left)}"
+                if left
+                else "the ledger is in the bin, stopped"
+            ]
         inbox = InboxStore(store.redis)
         doc = ledger.state(slug)
         actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
@@ -132,6 +140,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -227,23 +236,27 @@ def cmd_stop(store, args):
     if not args.now:
         _state(store, args, "stopping")
         return
-    store.update(args.slug, state="stopping")
-    runtime, ledger = HerdrRuntime(), LedgerClient()
-    rows = {t["id"]: t for t in ledger.tasks(args.slug)}
+    config, left = stop_now(store, args.slug, HerdrRuntime(), LedgerClient())
+    print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
+
+
+def stop_now(store, slug, runtime, ledger):
+    store.update(slug, state="stopping")
+    rows = {t["id"]: t for t in ledger.tasks(slug)}
     live, left = runtime.live_names(), []
-    for agent in store.agents(args.slug):
+    for agent in store.agents(slug):
         if not runtime.retire(agent, agent.name in live):
             left.append(agent.name)
             continue
-        store.release(args.slug, agent.task, agent.name)
-        store.drop_agent(args.slug, agent.name)
+        store.release(slug, agent.task, agent.name)
+        store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
-            ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
-    config = store.update(args.slug, state="stopping" if left else "stopped")
+            ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+    config = store.update(slug, state="stopping" if left else "stopped")
     if not left:
         runtime.close_space(config)
-    print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
+    return config, left
 
 
 def _live_master(store, slug, live):
@@ -322,6 +335,15 @@ def cmd_take_master(store, args):
     store.clear_handoff(args.slug, MASTER)
 
 
+def gate_mode(key, value, environ=None):
+    env = os.environ if environ is None else environ
+    if env.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
+        raise SwarmError(f"only the operator sets {key}, from the ledger page or his own terminal")
+    if value not in GATE_MODES:
+        raise SwarmError(f"{key} takes {'|'.join(GATE_MODES)}")
+    return {GATE_KEYS[key]: value}
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     for pair in args.pairs:
@@ -333,6 +355,9 @@ def cmd_set(store, args):
             continue
         if key == "autonomy":
             changes["autonomy"] = value
+            continue
+        if key in GATE_KEYS:
+            changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
@@ -454,6 +479,8 @@ def cmd_status(store, args):
             print(f"  - {entry}")
         print(f"  threshold {f['threshold']}")
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+    for row in gate_log.recent(args.slug):
+        print(f"gate  {row.get('kind')}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}")
 
 
 def cmd_names(store, args):
@@ -559,8 +586,8 @@ def cmd_done(store, args):
 def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
+    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     _retire(store, args.slug, agent, "blocked its task and exited")
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 

@@ -193,6 +193,7 @@ def test_the_session_start_hook_records_the_manifests_for_its_target(monkeypatch
     monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
     monkeypatch.setattr(common, "inject_context", lambda *a, **k: None)
     monkeypatch.setattr(injection_trace, "record_session_start", lambda *args: calls.append(args))
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", lambda: False)
     hook_manager.on_session_start({"hook_event_name": "SessionStart", "session_id": SID, "cwd": "/tmp"})
     [(session, environ, target)] = calls
     assert (session, environ["AGENTIHOOKS_PROFILE"], target) == (SID, "engineer", "codex")

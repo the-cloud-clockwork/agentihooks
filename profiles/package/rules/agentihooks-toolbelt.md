@@ -105,7 +105,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> done --pr <url>` |
 | A swarm agent waits at its prompt on checks, a deploy or a reply | `agentihooks swarm <slug> wait <minutes> --reason "<what>"`; the tick neither nudges nor retires it until the wait ends |
 | A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
-| HANDOFF PREPARATION at eighty percent of `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Use the handoff skill to write the Handoff v2 body before its twenty five minute deadline or the hard limit, whichever comes first. Submit only the document: `agentihooks swarm <slug> handoff <doc>`, then stop. The runtime supplies the envelope; the seat recap is derived from Done, Stopped at and Next. A successor reads the envelope and ranked Read first list before older recaps, with the swarm culture, latest derived recap and learned notes. A lesson for every later occupant: `agentihooks swarm <slug> learned "<lesson because reason>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the hard limit on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
+| HANDOFF PREPARATION at `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Use the handoff skill to write the Handoff v2 body before its twenty five minute deadline or the hard gate `AGENTIHOOKS_HANDOFF_MARGIN` above the limit (default 50), whichever comes first. Submit only the document: `agentihooks swarm <slug> handoff <doc>`, then stop. The runtime supplies the envelope; the seat recap is derived from Done, Stopped at and Next. A successor reads the envelope and ranked Read first list before older recaps, with the swarm culture, latest derived recap and learned notes. A lesson for every later occupant: `agentihooks swarm <slug> learned "<lesson because reason>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the hard gate on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
 
 - Each swarm keeps one master, `master@<code>-<n>`: the tick starts it, respawns
   it and recycles it through a handoff. It answers unaddressed page chat, keeps the
@@ -149,8 +149,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   itself whose stated `--gain` never rose; proof loop, a task over `RERUNS` (2)
   reruns or `REVIEW_ROUNDS` (3) moves to pr; idle with claim, `IDLE_TICKS` (3)
   idle ticks on a claimed task; stale claim, `STALE_MINUTES` (30) with no change;
-  over monitoring, at least `WATCH_MIN` (20) watch calls and over `WATCH_RATIO`
-  (5) per action, for the master `MASTER_WATCH_MIN` (60) and
+  over monitoring, over `WATCH_MIN` (20) watch calls since the last action and
+  over `WATCH_RATIO` (5) per action, for the master `MASTER_WATCH_MIN` (60) and
   `MASTER_WATCH_RATIO` (15), counted at each swarm agent's tool calls. Ledger and swarm
   writes and `msg reply` count as actions, a re-armed ledger watch as one watch
   per 30 minutes, `status` and `verdict` as neither; idle ticks do not count
