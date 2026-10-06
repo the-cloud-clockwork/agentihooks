@@ -731,6 +731,20 @@ def test_patch_refusal_names_the_open_correction():
     assert quarantine.patch_refusal(OTHER) == ""
 
 
+def test_patch_refusal_skips_correction_without_text(monkeypatch):
+    row = {"source": "missing-text", "reason": "old correction"}
+    monkeypatch.setattr(injection_trace, "trace", lambda session: [{"source": "missing-text"}])
+    monkeypatch.setattr(trace_sweep, "open_corrections", lambda: [row])
+
+    assert quarantine.patch_refusal(OTHER) == ""
+
+    monkeypatch.setattr(trace_sweep, "open_corrections", lambda: [row, {**row, "source": "bad-1", "text": TEXT}])
+    assert quarantine.patch_refusal(TEXT) == (
+        "this text carries a directive under correction (bad-1: old correction); fix it at its source instead "
+        "of restating it here"
+    )
+
+
 def test_patch_refusal_follows_a_quoted_passage(tmp_path):
     _file_correction(tmp_path, "the test suite on this machine")
     assert quarantine.patch_refusal("never touch the test suite on this machine because") != ""

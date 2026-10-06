@@ -62,7 +62,7 @@ def _needle(correction: dict) -> str:
         received = [
             r for r in injection_trace.trace(correction.get("session", "")) if r["source"] == correction["source"]
         ]
-        text = received[-1]["text"] if received else ""
+        text = received[-1].get("text", "") if received else ""
     needle = _norm(re.sub(r"^From [^:]+: ", "", _norm(text)))[:_NEEDLE_MAX]
     return needle if len(needle) >= _NEEDLE_MIN else ""
 
