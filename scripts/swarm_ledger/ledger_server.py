@@ -36,6 +36,7 @@ import ledger_bin  # noqa: E402
 import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate  # noqa: E402
+import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 import ledger_size  # noqa: E402
@@ -573,6 +574,8 @@ class Handler(BaseHTTPRequestHandler):
             bin_closed_without_swarm()
             view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
             return self.send(200, index_page(view), "text/html; charset=utf-8")
+        if route == "/api/layout":
+            return self.send(200, json.dumps(ledger_layout.read()), "application/json")
         if route.startswith("/api/swarm/"):
             slug = slug.removeprefix("swarm/")
             if not self.exists(slug):
@@ -607,6 +610,20 @@ class Handler(BaseHTTPRequestHandler):
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")
+
+    def put_layout(self):
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:
+            return self.send(403, "origin not allowed", "text/plain")
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return self.send(415, "Content-Type must be application/json", "text/plain")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= MAX_BODY:
+                raise ValueError("body size out of range")
+            saved = ledger_layout.write(ledger_layout.loads(self.rfile.read(length)))
+        except ValueError as exc:
+            return self.send(400, str(exc), "text/plain")
+        return self.send(200, json.dumps(saved), "application/json")
 
     def send_media(self, slug, media_id, store=ledger_media):
         try:
@@ -704,6 +721,8 @@ class Handler(BaseHTTPRequestHandler):
         slug = self.slug()
         if self.refused():
             return None
+        if self.path.split("?", 1)[0] == "/api/layout":
+            return self.put_layout()
         if self.path.startswith("/api/swarm/"):
             return self.put_swarm(slug.removeprefix("swarm/"))
         if not self.path.startswith("/api/") or not self.exists(slug):

@@ -430,12 +430,35 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
 .sw-num { min-width: 4ch; text-align: right; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
 .sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
-.sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 0; }
+.sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
-.sw-pair > .sw-block + .sw-block { border-left: 1px solid var(--rule); }
-@media (min-width: 1024px) { #swarm-row-work { grid-template-columns: minmax(0, max-content) minmax(14rem, 1fr); } }
+.sw-pair > .sw-block ~ .sw-block { border-left: 1px solid var(--rule); }
+@media (min-width: 1024px) {
+  #swarm-row-work { grid-template-columns: minmax(0, max-content) 0 minmax(14rem, 1fr); }
+  #swarm-box .sw-pair.split { grid-template-columns: minmax(14rem, var(--split)) 0 minmax(14rem, 1fr); }
+  #swarm-box .sized { height: var(--h); overflow: hidden; }
+  #swarm-box .sw-capacity.sized { overflow-y: auto; align-content: flex-start; }
+  #swarm-box .sw-pair.sized { grid-template-rows: minmax(0, 1fr); }
+  #swarm-box .sw-block.sized, #swarm-box .sw-pair.sized > .sw-block { display: flex; flex-direction: column; min-height: 0; }
+  #swarm-box .sized .sw-blockhead, #swarm-box .sized .sw-end { flex: none; }
+  #swarm-box .sized .sw-scroll, #swarm-box .sized .sw-kv { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+}
+.sw-grip { position: relative; z-index: 1; touch-action: none; outline: none; }
+.sw-grip-y { height: 12px; margin: -6px 0; cursor: row-resize; }
+.sw-grip-x { width: 12px; margin: 0 -6px; cursor: col-resize; }
+.sw-grip::after { content: ""; position: absolute; background: var(--grip); color: var(--grip); opacity: 0; transition: opacity .15s ease-out; }
+.sw-grip-y::after { left: 0; right: 0; top: 5px; height: 2px; }
+.sw-grip-x::after { top: 0; bottom: 0; left: 5px; width: 2px; }
+.sw-grip:hover::after, .sw-grip.dragging::after, .sw-grip:focus-visible::after { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.sw-grip:focus-visible { outline: 1px dashed var(--accent); outline-offset: -2px; }
+body.resizing-y { cursor: row-resize; user-select: none; }
+body.resizing-x { cursor: col-resize; user-select: none; }
+.sw-layout { padding-left: var(--space-row); border-left: 1px solid var(--rule); }
+.sw-btn.sw-reset { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.sw-btn.sw-reset:hover:not(:disabled) { color: var(--accent-2); }
+.sw-reset svg { width: 14px; height: 14px; }
 .sw-blockhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-row); margin-bottom: var(--space-tight); }
-.sw-count { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); text-shadow: var(--glow); }
+.sw-count { white-space: nowrap; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); text-shadow: var(--glow); }
 .sw-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
 .sw-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
 .sw-table th { padding: 0 10px 6px 0; text-align: left; font-size: var(--fs-meta); font-weight: 400; letter-spacing: .08em; color: var(--muted); white-space: nowrap; }
@@ -480,8 +503,9 @@ input, textarea { caret-color: var(--accent-2); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 1023px) {
   .sw-pair { grid-template-columns: minmax(0, 1fr); }
-  .sw-pair > .sw-block + .sw-block { border-left: 0; border-top: 1px solid var(--rule); }
-  .sw-modes { padding-left: 0; border-left: 0; }
+  .sw-pair > .sw-block ~ .sw-block { border-left: 0; border-top: 1px solid var(--rule); }
+  .sw-grip { display: none; }
+  .sw-modes, .sw-layout { padding-left: 0; border-left: 0; }
   .sw-live { margin-left: 0; }
   .sw-capacity { gap: var(--space-tight) var(--space-row); }
   .sw-capacity .sw-label { flex-basis: 100%; }
@@ -534,7 +558,8 @@ input, textarea { caret-color: var(--accent-2); }
 <div class="tab-body" id="swarm" role="tabpanel" aria-labelledby="tab-swarm" hidden><div id="swarm-box">
 <div class="sw-row sw-head" id="swarm-head"><h2 class="sw-title"><span class="sw-word">Swarm</span><span class="sw-sep" aria-hidden="true">·</span><span id="swarm-name"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-state" id="swarm-state"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-tick" id="swarm-tick"></span></h2>
 <div class="sw-actions"><div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">start</button><button class="sw-btn" type="button" data-swarm="pause">pause</button><button class="sw-btn" type="button" data-swarm="stop">stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">stop now</button><button class="sw-btn danger" type="button" data-swarm="close">close ledger</button></div>
-<div class="sw-ctl sw-modes" id="swarm-modes" role="group" aria-label="Autonomy"><button class="sw-btn sw-mode" type="button" data-autonomy="manual" aria-pressed="false">manual</button><button class="sw-btn sw-mode" type="button" data-autonomy="assist" aria-pressed="false">assist</button><button class="sw-btn sw-mode" type="button" data-autonomy="delegate" aria-pressed="false">delegate</button><button class="sw-btn sw-mode" type="button" data-autonomy="full" aria-pressed="false">full</button></div></div></div>
+<div class="sw-ctl sw-modes" id="swarm-modes" role="group" aria-label="Autonomy"><button class="sw-btn sw-mode" type="button" data-autonomy="manual" aria-pressed="false">manual</button><button class="sw-btn sw-mode" type="button" data-autonomy="assist" aria-pressed="false">assist</button><button class="sw-btn sw-mode" type="button" data-autonomy="delegate" aria-pressed="false">delegate</button><button class="sw-btn sw-mode" type="button" data-autonomy="full" aria-pressed="false">full</button></div>
+<div class="sw-ctl sw-layout"><button class="sw-btn sw-reset" id="layout-reset" type="button" title="Restore the default panel sizes on every ledger" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>reset layout</button></div></div></div>
 <p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
 <div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
 <div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
@@ -543,12 +568,17 @@ input, textarea { caret-color: var(--accent-2); }
 <div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
-<div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
+<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Tasks split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-work" role="separator" aria-orientation="horizontal" aria-label="Resize the Agents and Tasks height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-accounts"><div class="sw-block" id="quota-box"><div class="sw-blockhead"><h3>Quota</h3><span class="sw-count" id="quota-count"></span></div><div class="sw-scroll"><table class="sw-table" id="quota-table"><thead><tr><th>account</th><th>harness</th><th class="r">5h left</th><th class="r">7d left</th><th class="r">sessions</th><th><span class="sr-only">routing</span></th></tr></thead><tbody id="swarm-quota"></tbody></table></div></div>
-<div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
+<div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-accounts" role="separator" aria-orientation="vertical" aria-label="Move the Quota and Doctor split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="swarm-row-accounts" role="separator" aria-orientation="horizontal" aria-label="Resize the Quota and Doctor height" tabindex="0"></div>
 <div class="sw-row sw-block" id="health-box"><div class="sw-blockhead"><h3>Health</h3><span class="sw-count" id="health-count"></span></div><div class="sw-scroll"><table class="sw-table" id="health-table"><thead><tr><th>finding</th><th>subject</th><th>evidence</th><th>threshold</th><th>seen</th><th>verdict</th><th>note</th></tr></thead><tbody id="health"></tbody></table></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="health-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Health height" tabindex="0"></div>
 <div class="sw-row sw-block" id="handoff-box"><div class="sw-blockhead"><h3>Handoff outcomes</h3><span class="sw-count" id="handoff-count"></span></div><div class="sw-scroll"><table class="sw-table" id="handoff-table"><thead><tr><th>seat</th><th>last handoff</th><th>reason</th><th>continuity</th><th>binding</th><th>successor</th></tr></thead><tbody id="swarm-handoffs"></tbody></table></div></div>
+<div class="sw-grip sw-grip-y" data-grip="height" data-row="handoff-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Handoff outcomes height" tabindex="0"></div>
 </div></div>
 
 </div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask master to recheck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
@@ -617,6 +647,10 @@ input, textarea { caret-color: var(--accent-2); }
   const OFFLINE = "saved in this browser only — ledger server offline";
   const NOUN = { comments: "comment", answers: "answer", notes: "note" };
   const MEDIA_API = API.replace(`/api/${SLUG}`, `/api/media/${SLUG}`);
+  const LAYOUT_API = API.replace(`/api/${SLUG}`, "/api/layout");
+  const LAYOUT_KEY = "plan-ledger:swarm-layout";
+  const LAYOUT_LIMITS = { height: [48, 4000, 1], split: [15, 85, 10] };
+  const GRIP_STEPS = { height: { ArrowUp: -16, ArrowDown: 16 }, split: { ArrowLeft: -2, ArrowRight: 2 } };
   const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
   const MAX_ATTACH = 6;
   const attaching = {};
@@ -2201,6 +2235,95 @@ input, textarea { caret-color: var(--accent-2); }
     }
   }
 
+  let layout = {};
+  let layoutSave = 0;
+
+  function applyLayout(next) {
+    layout = next && typeof next === "object" && !Array.isArray(next) ? next : {};
+    for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) {
+      const row = $(grip.dataset.row), value = (layout[row.id] || {})[grip.dataset.grip];
+      const [cls, prop, unit] = grip.dataset.grip === "height" ? ["sized", "--h", "px"] : ["split", "--split", "%"];
+      row.classList.toggle(cls, typeof value === "number");
+      if (typeof value === "number") row.style.setProperty(prop, value + unit);
+      else row.style.removeProperty(prop);
+      if (grip.dataset.grip === "split") {
+        if (typeof value === "number") grip.setAttribute("aria-valuenow", String(value));
+        else grip.removeAttribute("aria-valuenow");
+      }
+    }
+    $("layout-reset").disabled = !Object.keys(layout).length;
+  }
+
+  function mirrorLayout() {
+    try {
+      if (Object.keys(layout).length) localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+      else localStorage.removeItem(LAYOUT_KEY);
+    } catch (e) { /* storage blocked: the server copy paints after its read */ }
+  }
+
+  function saveLayout(delay) {
+    clearTimeout(layoutSave);
+    layoutSave = setTimeout(() => {
+      layoutSave = 0;
+      fetch(LAYOUT_API, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) }).catch(() => {});
+    }, delay);
+  }
+
+  function setLayout(next, delay = 300) {
+    applyLayout(next);
+    mirrorLayout();
+    saveLayout(delay);
+  }
+
+  function gripValue(row, kind) {
+    const box = row.getBoundingClientRect();
+    return kind === "height" ? box.height : 100 * row.firstElementChild.getBoundingClientRect().width / box.width;
+  }
+
+  function resize(row, kind, value) {
+    const [low, high, scale] = LAYOUT_LIMITS[kind];
+    const size = Math.round(Math.min(high, Math.max(low, value)) * scale) / scale;
+    setLayout({ ...layout, [row.id]: { ...layout[row.id], [kind]: size } });
+  }
+
+  function wireGrip(grip) {
+    const row = $(grip.dataset.row), kind = grip.dataset.grip;
+    grip.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      grip.setPointerCapture(ev.pointerId);
+      const box = row.getBoundingClientRect(), y0 = ev.clientY, mode = kind === "height" ? "resizing-y" : "resizing-x";
+      const move = (e) => resize(row, kind, kind === "height" ? box.height + e.clientY - y0 : 100 * (e.clientX - box.left) / box.width);
+      grip.classList.add("dragging");
+      document.body.classList.add(mode);
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("lostpointercapture", () => {
+        grip.removeEventListener("pointermove", move);
+        grip.classList.remove("dragging");
+        document.body.classList.remove(mode);
+      }, { once: true });
+    });
+    grip.addEventListener("keydown", (ev) => {
+      const step = GRIP_STEPS[kind][ev.key];
+      if (!step) return;
+      ev.preventDefault();
+      resize(row, kind, gripValue(row, kind) + step * (ev.shiftKey ? 4 : 1));
+    });
+  }
+
+  function startLayout() {
+    applyLayout(stored(LAYOUT_KEY, {}));
+    for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) wireGrip(grip);
+    $("layout-reset").addEventListener("click", () => setLayout({}, 0));
+    fetch(LAYOUT_API, { cache: "no-store" })
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((saved) => {
+        if (saved && !layoutSave) { applyLayout(saved); mirrorLayout(); }
+      })
+      .catch(() => {})
+      .finally(() => { document.documentElement.dataset.layout = "ready"; });
+  }
+
   function start() {
     let seed = null;
     try { seed = JSON.parse(document.getElementById("ledger-data").textContent); } catch (e) { seedBroken = true; }
@@ -2213,6 +2336,7 @@ input, textarea { caret-color: var(--accent-2); }
       applyChecks(doc);
     }
     if (seedBroken) banner(["This page's embedded copy was unreadable; loading the server's copy."]);
+    startLayout();
     $("sync").addEventListener("click", () => sendSync("sync", "sync"));
     $("stats-sync").addEventListener("click", () => sendSync("stats_sync", "stats-sync"));
     $("title-edit").addEventListener("click", () => editTitle(true));
