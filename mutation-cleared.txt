@@ -509,11 +509,11 @@
   },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_1:22c036ec25caa9297fe7ec7adc4e062a2b37bf413c1d29cce86032f8ee4907a6": {
     "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
   },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_3:27ea0c4ceebdf02082cc8d9f1216648744f9179bf5c9da88f3b7025a20993eff": {
     "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   },
   "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_4:b9c9543d038e1b0a69b604664227b815ca5136cbf40f82e9f8b9f7e6926461d6": {
     "reader": "Standards",
