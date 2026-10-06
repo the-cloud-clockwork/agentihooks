@@ -125,6 +125,18 @@ def test_the_tick_that_adds_a_plan_task_does_not_tick_its_phase_done(env):
     assert not any("is done" in i.text for i in items(store, MASTER_SEAT))
 
 
+def test_the_tick_that_finishes_a_phase_queues_the_plan_of_the_phase_waiting_on_it(env):
+    store, ledger = env
+    ledger.add_task(SLUG, {"task": "t1", "title": "Early work", "lane": "eng", "phase": "p1"}, "init-swarm")
+    ledger.update_task(SLUG, "t1", {"state": "done"})
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    actions = run(store, ledger)
+    assert phase("p1")["done"] is True
+    assert [t["id"] for t in tasks("p2")] == ["plan-p2"]
+    assert "drained" not in actions and store.config(SLUG).state == "running"
+    assert not any("no task left" in c["text"] for c in state(SLUG)["chat"])
+
+
 def test_a_finished_slice_gets_its_check_comment_and_a_pending_review_once(env):
     store, ledger = env
     set_phase("p1", planning="auto")
