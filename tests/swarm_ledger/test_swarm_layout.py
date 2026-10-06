@@ -238,6 +238,17 @@ def test_agents_table_lists_the_master_first_and_tasks_block_counts(open_page):
     ]
 
 
+@pytest.mark.parametrize("width", [1440, 390])
+def test_agents_table_fits_its_column_with_full_length_agent_names(open_page, width):
+    payload = status()
+    for agent, name in zip(payload["agents"], ["master@323133-0004", "engineer@323133-0072"]):
+        agent["name"] = name
+    page = open_page(payload, width)
+    fit = page.tab.eval_on_selector("#agents-box .sw-scroll", "el => [el.scrollWidth, el.clientWidth]")
+    assert fit[0] <= fit[1], fit
+    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+
+
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
