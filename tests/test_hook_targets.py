@@ -136,6 +136,7 @@ class TestCodexToolNames:
         payload = normalize_payload({"tool_name": "request_user_input", "tool_input": {"questions": questions}})
         assert payload["tool_name"] == "AskUserQuestion"
         assert payload["tool_input"] == {"questions": questions}
+        assert "tool_response" not in payload
 
     def test_question_answers_string_takes_the_claude_answers_shape(self, codex):
         answer = '{"answers":{"plan_color":{"answers":["Red","Blue"]},"size":{"answers":[]}}}'
