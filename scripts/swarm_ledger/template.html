@@ -441,12 +441,15 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-table a { color: inherit; text-decoration: none; }
 .sw-table a:hover, .sw-table a:focus-visible { color: var(--accent); text-shadow: var(--glow); }
 #agents-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
-#agents-table td:has(> .sw-acts) { position: relative; width: 0; padding: 0; }
-.sw-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 4px; padding-left: var(--space-tight); background: var(--surface-2); opacity: 0; pointer-events: none; }
+#agents-table th, #agents-table td { padding-right: 6px; }
+#agents-table td:nth-child(3), #agents-table td:nth-child(4) { white-space: normal; }
+#agents-table td:has(> .sw-acts) { position: sticky; right: 0; width: 0; padding: 0; }
+.sw-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 4px; padding-left: var(--space-tight);
+  background: linear-gradient(var(--surface-2), var(--surface-2)), linear-gradient(var(--surface-1), var(--surface-1)), var(--canvas); opacity: 0; pointer-events: none; }
 #agents-table tr:hover .sw-acts, #agents-table tr:focus-within .sw-acts { opacity: 1; pointer-events: auto; }
 .sw-acts .sw-btn { min-height: 28px; padding: 2px 8px; }
 @media (hover: none), (pointer: coarse) {
-  #agents-table td:has(> .sw-acts) { width: auto; padding: 6px 0; }
+  #agents-table td:has(> .sw-acts) { position: static; width: auto; padding: 6px 0; }
   .sw-acts { position: static; padding: 0; background: transparent; opacity: 1; pointer-events: auto; }
 }
 .sw-table .sw-empty td { white-space: normal; font-size: var(--fs-meta); color: var(--dim); }
@@ -479,10 +482,6 @@ input, textarea { caret-color: var(--accent-2); }
   .sw-capacity { gap: var(--space-tight) var(--space-row); }
   .sw-capacity .sw-label { flex-basis: 100%; }
   .sw-actions { margin-left: 0; justify-content: flex-start; }
-}
-@media (max-width: 600px) {
-  #agents-table th, #agents-table td { padding-right: 6px; }
-  #agents-table td:nth-child(3), #agents-table td:nth-child(4) { white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 .workspace { display: flex; flex: 1; min-height: 0; gap: 16px; padding: 16px; margin-left: calc(-1 * var(--gutter)); }
