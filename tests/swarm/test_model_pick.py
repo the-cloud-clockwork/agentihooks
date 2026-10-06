@@ -16,6 +16,9 @@ def decision(tier="small", score=0, confidence=0.9):
     )
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 @pytest.mark.parametrize("harness,expected", [("claude", "sonnet"), ("codex", "gpt-6-luna")])
 def test_auto_lane_picks_task_model_and_effort(monkeypatch, harness, expected):
     calls = []
@@ -25,7 +28,7 @@ def test_auto_lane_picks_task_model_and_effort(monkeypatch, harness, expected):
         return decision()
 
     monkeypatch.setattr(model_pick, "decide", decide)
-    task = {"title": "Fix typo", "description": "One word", "kind": "code", "territory": ["docs", "rules"]}
+    task = {"title": "Fix typo", "description": "One word", "kind": "research", "territory": ["docs", "rules"]}
     picked = model_pick.pick(harness, {"model": "auto", "effort": "auto"}, task, {})
     assert (picked.model, picked.effort, picked.source, picked.confidence) == (
         expected,
@@ -33,7 +36,7 @@ def test_auto_lane_picks_task_model_and_effort(monkeypatch, harness, expected):
         "pplx-decider-v1-27b",
         0.9,
     )
-    assert calls[0][0] == {"title": "Fix typo", "description": "One word", "kind": "code", "territory_size": 2}
+    assert calls[0][0] == {"title": "Fix typo", "description": "One word", "kind": "research", "territory_size": 2}
     assert calls[0][2] == {"purpose": "model-pick", "harness": harness}
     assert set(calls[0][1]) == {"tier", "effort"}
 
@@ -147,13 +150,17 @@ def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Model source\tConfidence" in output
     assert "\tjev-1.13\t0.72" in output
-    agent = status.status_report(saved, "sw", {"tasks": []})["agents"][0]
+    saved.put_agent("sw", AgentRecord("old", "ci", "t"))
+    cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
+    old = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("old\t"))
+    assert old.split("\t")[-2:] == ["-", "-"]
+    agent = next(a for a in status.status_report(saved, "sw", {"tasks": []})["agents"] if a["name"] == "a")
     assert (agent["model_source"], agent["model_confidence"]) == ("jev-1.13", 0.72)
 
 
 @pytest.mark.parametrize("raw", ["unknown=x", "small", "small=", "small=x,", "=model"])
 def test_invalid_tier_map_names_the_configuration_error(raw):
-    with pytest.raises(ValueError, match="model tiers"):
+    with pytest.raises(ValueError, match="^model tiers must be small=model,medium=model,large=model$"):
         model_pick.tier_models("claude", {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": raw})
 
 
@@ -180,6 +187,7 @@ def test_each_auto_field_asks_only_its_question(monkeypatch):
     assert set(calls[0][1]) == {"effort"}
     assert calls[0][0] == {"title": "", "description": "", "kind": "code", "territory_size": 0}
     assert calls[0][1]["effort"].levels == ["low", "medium", "high", "max"]
+    assert calls[0][1]["effort"].instructions == "How much reasoning does this task need?"
     assert set(model_pick.pick("claude", {"model": "auto", "effort": "high"}, {}, {}).__dict__) == {
         "model",
         "effort",
@@ -187,6 +195,7 @@ def test_each_auto_field_asks_only_its_question(monkeypatch):
         "confidence",
     }
     assert set(calls[1][1]) == {"tier"}
+    assert calls[1][1]["tier"].instructions == "Which model tier fits this task?"
     assert calls[1][1]["tier"].options == {
         "small": "Routine, narrowly scoped task with a clear solution",
         "medium": "Task requiring analysis across several components",
@@ -226,3 +235,42 @@ def test_absent_lane_has_no_classifier_metadata(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("missing lane called classifier"))
     picked = model_pick.pick("claude", {}, {}, {})
     assert (picked.model, picked.effort, picked.source, picked.confidence) == ("", "", "lane-default", None)
+
+
+def test_invalid_tier_configuration_is_visible_before_low_confidence_or_unavailability(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("offline")
+
+    for backend in (lambda *a, **kw: decision(confidence=0.1), unavailable):
+        monkeypatch.setattr(model_pick, "decide", backend)
+        with pytest.raises(ValueError, match="model tiers"):
+            model_pick.pick("claude", {"model": "auto"}, {}, {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": "unknown=x"})
+
+
+def test_tier_model_name_keeps_equals_after_first_separator():
+    assert (
+        model_pick.tier_models("claude", {"AGENTIHOOKS_MODEL_TIERS_CLAUDE": "small=custom=version"})["small"]
+        == "custom=version"
+    )
+
+
+def test_spawn_timeout_names_and_retires_the_failed_agent(tmp_path):
+    import subprocess
+
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import SpawnError
+
+    def timeout(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 90)
+
+    runtime = HerdrRuntime(home=tmp_path, run=timeout, choose=lambda *a: ("claude", "quota"))
+    retired = []
+    runtime._terminate = retired.append
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    with pytest.raises(SpawnError, match="init-agent timed out for engineer@a1b2c3-0001"):
+        runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t", "title": "x"})
+    assert retired == ["engineer@a1b2c3-0001"]

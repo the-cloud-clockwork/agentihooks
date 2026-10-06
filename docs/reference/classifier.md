@@ -137,3 +137,23 @@ form, one object per name:
 
 It prints the result JSON and exits 0; 2 for an input or request error; 1 when no
 backend answered.
+
+## Auto swarm lanes
+
+When a lane's model or effort is `auto`, the spawn runtime classifies the task
+following harness routing, using its title, description, kind and territory size.
+Explicit model and effort values remain unchanged. Decisions use purpose
+`model-pick` in the classifier log.
+
+`AGENTIHOOKS_MODEL_TIERS_CLAUDE` and `AGENTIHOOKS_MODEL_TIERS_CODEX` accept comma
+separated `small=model,medium=model,large=model` overrides. Unspecified tiers
+retain their defaults: Claude uses sonnet, opus, opus; Codex uses gpt-6-luna,
+gpt-6.1-sol, gpt-6.1-sol. Effort rounds and clamps to low, medium, high and max
+for Claude, or low, medium, high and xhigh for Codex.
+
+`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The minimum confidence
+across the requested auto fields must meet it; otherwise the lane keeps its
+launch defaults. An unavailable classifier also preserves those defaults.
+Agent records, swarm status and the page carry `model_source` and
+`model_confidence`; low confidence retains the attempted classifier's metadata,
+and an explicit or unavailable pick records `lane-default` without confidence.

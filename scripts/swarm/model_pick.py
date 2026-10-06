@@ -19,7 +19,7 @@ class ModelPick:
 
 def tier_models(harness: str, environ: dict) -> dict:
     models = dict(MODEL_TIERS[harness])
-    raw = environ.get(f"AGENTIHOOKS_MODEL_TIERS_{harness.upper()}", "")
+    raw = environ.get(f"AGENTIHOOKS_MODEL_TIERS_{harness.upper()}")
     if not raw:
         return models
     for entry in raw.split(","):
@@ -32,6 +32,7 @@ def tier_models(harness: str, environ: dict) -> dict:
 
 def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    models = tier_models(harness, environ) if default.model == "auto" else {}
     questions = {}
     if default.model == "auto":
         questions["tier"] = Choice(
@@ -64,7 +65,7 @@ def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     if confidence < float(environ.get("AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE", "0.6")):
         return ModelPick(default.model, default.effort, result.source, confidence)
     return ModelPick(
-        tier_models(harness, environ)[result.answers["tier"].choice] if default.model == "auto" else default.model,
+        models[result.answers["tier"].choice] if default.model == "auto" else default.model,
         EFFORTS[harness][round(max(0, min(3, result.answers["effort"].score)))]
         if default.effort == "auto"
         else default.effort,
