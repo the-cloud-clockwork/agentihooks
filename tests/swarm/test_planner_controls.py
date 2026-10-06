@@ -1,7 +1,6 @@
 import json
 from dataclasses import asdict
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, prompt, templates
@@ -12,8 +11,13 @@ from scripts.swarm_ledger import ledger_server, ledger_tasks
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 @pytest.fixture
 def store():
+    import fakeredis
+
     found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     found.create(SwarmConfig("sw", "/repo", 1, 1, state="paused"))
     return found
@@ -113,3 +117,11 @@ def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set"})
     assert str(caught.value) == "set needs max_eng, max_ci, max_plan or codex_share"
+
+
+def test_create_parser_defaults_to_template_and_parses_integer_cap():
+    parser = cli.build_parser()
+    assert parser.parse_args(["sw", "create", "--repo", "/repo"]).max_plan_agents is None
+    assert parser.parse_args(["sw", "create", "--repo", "/repo", "--max-plan-agents", "0"]).max_plan_agents == 0
+    with pytest.raises(SystemExit):
+        parser.parse_args(["sw", "create", "--repo", "/repo", "--max-plan-agents", "invalid"])
