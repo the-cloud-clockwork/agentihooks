@@ -54,7 +54,10 @@ def record(session_id: str, layer: str, source: str, text: str, locator: dict | 
     if not session_id:
         return
     try:
+        from hooks.context.profile_chain import active_profile, read_state
+
         row = {
+            "profile": active_profile(read_state()) or "",
             "at": _now(),
             "layer": layer,
             "source": source,

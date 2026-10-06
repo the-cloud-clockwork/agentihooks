@@ -29,6 +29,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.claude_config import claude_json
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows
@@ -355,7 +357,7 @@ def configured_port() -> int:
 def _client_entry() -> dict | None:
     """The agentihooks MCP entry as ~/.claude.json actually declares it."""
     try:
-        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+        data = json.loads((claude_json()).read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
     from scripts.targets._common import MCP_SERVER_NAME
