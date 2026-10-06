@@ -311,6 +311,8 @@ def cmd_task(args):
             fields[key] = comma_list(fields[key])
     for dotted in [key for key in fields if "." in key]:
         name, _, sub = dotted.partition(".")
+        if not isinstance(fields.get(name, {}), dict):
+            sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))

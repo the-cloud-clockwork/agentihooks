@@ -142,3 +142,14 @@ class KindCli(unittest.TestCase):
         with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
             ledger.cmd_task(ledger.build_parser().parse_args(argv))
         self.assertEqual(sent[0][1]["fields"], {"state": "pr", "pr_url": "https://github.com/o/r/pull/1"})
+
+    def test_task_set_refuses_a_plain_and_a_dotted_proof_together(self):
+        import ledger
+
+        sent = []
+        argv = ["--slug", SLUG, "--as", "x", "task", "set", "t1", "proof=ran it", "proof.command=kubectl get pods"]
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            with self.assertRaises(SystemExit) as exit_:
+                ledger.cmd_task(ledger.build_parser().parse_args(argv))
+        self.assertIn("not both", str(exit_.exception.code))
+        self.assertEqual(sent, [])
