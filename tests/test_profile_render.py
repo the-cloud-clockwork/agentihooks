@@ -200,6 +200,29 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
+def test_claude_render_enables_operator_fleet_and_chain_plugins(world):
+    from scripts.profiles import render
+
+    home, bundle = world["home"], world["bundle"]
+    operator = {"mine@m": True, "off@m": False, "fleet@m": False}
+    _write(home / ".claude" / "settings.json", json.dumps({"model": "opus", "enabledPlugins": operator}))
+    plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
+    deps = [{**plugin, "id": "fleet@m"}, {**plugin, "id": "muted@m"}, {**plugin, "id": "gone@m", "state": "absent"}]
+    _write(bundle / "deps.json", json.dumps({"deps": deps}))
+    kit = {"enabledPlugins": {"kit@m": True, "off@m": True, "muted@m": False}}
+    _write(bundle / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {
+        "mine@m": True,
+        "off@m": True,
+        "fleet@m": True,
+        "muted@m": False,
+        "kit@m": True,
+    }
+
+
 def test_claude_render_excludes_default_home_instructions(world):
     from scripts.profiles import render
 

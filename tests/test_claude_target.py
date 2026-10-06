@@ -72,6 +72,33 @@ def test_write_settings_writes_the_settings_document():
     assert json.loads(path.read_text())["env"] == {"A": "1"}
 
 
+def test_write_settings_keeps_operator_plugins_and_enables_fleet_plugins(tmp_path):
+    from scripts.targets._common import _install_module
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    _i = _install_module()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
+    deps = [{**plugin, "id": "fleet@m"}, {**plugin, "id": "muted@m"}, {**plugin, "id": "gone@m", "state": "absent"}]
+    (bundle / "deps.json").write_text(json.dumps({"deps": deps}))
+    _i._save_state({"bundle": {"path": str(bundle)}})
+    operator = {"mine@m": True, "off@m": False, "fleet@m": False, "layer@m": False}
+    existing = {_i.MANAGED_BY_KEY: _i.MANAGED_BY_VALUE, "enabledPlugins": operator}
+    _i.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    (_i.CLAUDE_HOME / "settings.json").write_text(json.dumps(existing))
+
+    path = ClaudeAdapter().write_settings({"enabledPlugins": {"layer@m": True, "muted@m": False}})
+
+    assert json.loads(path.read_text())["enabledPlugins"] == {
+        "mine@m": True,
+        "off@m": False,
+        "fleet@m": True,
+        "layer@m": True,
+        "muted@m": False,
+    }
+
+
 def test_installed_claude_rules_stay_inside_global_home(tmp_path):
     from scripts.targets.claude_target import ClaudeAdapter
 

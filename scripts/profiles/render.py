@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts.claude_config import claude_home, claude_json
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
-from scripts.targets.claude_target import settings_document
+from scripts.targets.claude_target import enabled_plugins, settings_document
 from scripts.targets.codex_target import codex_home
 
 SHARED = ("projects", "sessions", "todos", "plans", "plugins", ".credentials.json")
@@ -94,9 +94,13 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     personal = _i.load_json(global_settings) if global_settings.exists() else {}
     # Claude reads the default home as an ancestor project folder when the working folder sits under it.
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
+    settings = settings_document(doc)
     return {
         **{k: personal[k] for k in _i.PERSONAL_KEYS if k in personal},
-        **settings_document(doc),
+        **settings,
+        "enabledPlugins": enabled_plugins(
+            personal.get("enabledPlugins") or {}, settings.get("enabledPlugins") or {}, bundle
+        ),
         "claudeMdExcludes": excludes,
     }
 

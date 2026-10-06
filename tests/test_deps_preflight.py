@@ -82,6 +82,21 @@ def test_unknown_kind_is_rejected():
         deps_preflight.parse({"deps": [{"id": "x", "kind": "apt", "check": ["true"]}]})
 
 
+def test_fleet_plugins_are_the_present_claude_plugins(env, tmp_path):
+    plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
+    env["write"](
+        [
+            {**plugin, "id": "kept@m"},
+            {**plugin, "id": "gone@m", "state": "absent"},
+            {**_tool(env), "id": "kept-tool"},
+            {**plugin, "id": "also@m"},
+        ]
+    )
+    assert deps_preflight.fleet_plugins(tmp_path) == ["kept@m", "also@m"]
+    assert deps_preflight.fleet_plugins(tmp_path / "no-bundle") == []
+    assert deps_preflight.fleet_plugins(None) == []
+
+
 def test_launch_runs_the_preflight_before_taking_the_route_lock():
     source = inspect.getsource(install.cmd_claude)
     assert source.index("deps_ensure()") < source.index("route_lock_path =")
