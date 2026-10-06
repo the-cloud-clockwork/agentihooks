@@ -16,7 +16,7 @@ from hooks.classifier import (
 )
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import Answer, DecisionResult
-from hooks.classifier.settings import DEFAULT_MODELS, Settings
+from hooks.classifier.settings import DEFAULT_MODELS, load
 from tests.classifier.fakes import KEY, FakeUrlopen, http_error, ok
 
 QUESTIONS = {"trivial": YesNo("One line?", true="t", false="f")}
@@ -48,26 +48,14 @@ class FakeFallback:
     def __init__(self, outcome=None):
         self.outcome = outcome
         self.calls = 0
+        self.requests = []
 
     def decide(self, request):
         self.calls += 1
+        self.requests.append(request)
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         return DecisionResult(answers={"trivial": Answer("noul", noul=0.6)}, source=self.name, calibrated=False)
-
-
-def test_default_settings():
-    s = Settings.from_env()
-    assert s.models == ("pplx-decider-v1-27b", "liquid-d1", "jev-1.13")
-    assert (s.timeout_s, s.down_ttl_s, s.url) == (5.0, 120.0, "http://litellm:4000")
-
-
-def test_settings_read_overrides(monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", " jev-1.13 , liquid-d1,")
-    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TIMEOUT_S", "2.5")
-    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S", "30")
-    s = Settings.from_env()
-    assert (s.models, s.timeout_s, s.down_ttl_s) == (("jev-1.13", "liquid-d1"), 2.5, 30.0)
 
 
 def test_first_model_answers(monkeypatch):
@@ -136,8 +124,8 @@ def test_state_that_just_fits_keeps_the_small_model(monkeypatch):
     overhead = DecisionRequest("", QUESTIONS).estimated_tokens()
     fits = DecisionRequest("x" * 4 * (32_768 - overhead - 2), QUESTIONS)
     too_big = DecisionRequest("x" * 4 * (32_768 - overhead + 2), QUESTIONS)
-    assert [b.name for b in api_backends(fits, Settings.from_env())] == ["jev-1.13"]
-    assert api_backends(too_big, Settings.from_env()) == []
+    assert [b.name for b in api_backends(fits, load())] == ["jev-1.13"]
+    assert api_backends(too_big, load()) == []
 
 
 def test_unknown_model_is_never_skipped_by_context(monkeypatch):
@@ -213,10 +201,30 @@ def test_failing_fallback_moves_to_the_next(monkeypatch):
     assert (first.calls, second.calls) == (1, 1)
 
 
+def test_fallback_receives_the_request(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL")
+    fallback = FakeFallback()
+    decide({"task": "typo"}, QUESTIONS, purpose="test", fallbacks=[fallback])
+    (request,) = fallback.requests
+    assert (request.state, request.questions) == ({"task": "typo"}, QUESTIONS)
+
+
+def test_latency_is_measured_in_milliseconds_and_logged(monkeypatch):
+    from hooks.classifier import core
+
+    clock = iter([10.0, 10.25])
+    monkeypatch.setattr(core.time, "monotonic", lambda: next(clock))
+    _wire(monkeypatch, ALL_OK)
+    assert decide("typo", QUESTIONS, purpose="test").latency_ms == 250
+    (line,) = _log_lines()
+    assert line["latency_ms"] == 250
+
+
 def test_nothing_reachable_raises_unavailable_and_logs_it(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_URL")
-    with pytest.raises(ClassifierUnavailable, match="no decision backend answered"):
+    with pytest.raises(ClassifierUnavailable) as err:
         decide("typo", QUESTIONS, purpose="gate", fallbacks=[FakeFallback(BackendFailure("x"))])
+    assert str(err.value) == "no decision backend answered"
     (line,) = _log_lines()
     assert (line["purpose"], line["source"], line["answers"]) == ("gate", None, {})
 

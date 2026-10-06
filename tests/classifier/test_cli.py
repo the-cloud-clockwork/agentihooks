@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -142,3 +143,71 @@ def test_install_dispatches_both_commands(monkeypatch):
             install.main()
         assert done.value.code == 0
     assert seen == [("classify", ["--state", "s"]), ("classifier", ["stats"])]
+
+
+@pytest.mark.parametrize(
+    ("main", "argv", "expected"),
+    [
+        (
+            "classify_main",
+            ["--help"],
+            [
+                "agentihooks classify",
+                "Ask the decision models typed questions",
+                "File holding the state: JSON, or plain text",
+                "JSON file of named questions: type, instructions, criteria",
+                "Caller name recorded in the decision log",
+            ],
+        ),
+        (
+            "classifier_main",
+            ["--help"],
+            [
+                "agentihooks classifier",
+                "Decision classifier records",
+                "Counts, sources, fallback rate and latency from the decision log",
+            ],
+        ),
+        ("classifier_main", ["stats", "--help"], ["agentihooks classifier stats", "Only calls made for this purpose"]),
+    ],
+)
+def test_help_text(capsys, main, argv, expected):
+    with pytest.raises(SystemExit) as done:
+        getattr(cli, main)(argv)
+    assert done.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    for text in expected:
+        assert re.search(rf"(^|[\s\[]){re.escape(text)}($|[\s\]:])", out), text
+
+
+@pytest.mark.parametrize("missing", ["--state", "--questions"])
+def test_classify_requires_state_and_questions(files, missing):
+    state, questions = files
+    argv = {"--state": str(state), "--questions": str(questions)}
+    argv.pop(missing)
+    with pytest.raises(SystemExit) as done:
+        cli.classify_main([part for pair in argv.items() for part in pair])
+    assert done.value.code == 2
+
+
+def test_classifier_needs_a_subcommand(capsys):
+    with pytest.raises(SystemExit) as done:
+        cli.classifier_main([])
+    assert done.value.code == 2
+    assert "the following arguments are required: command" in capsys.readouterr().err
+
+
+def test_classify_records_its_purpose_and_prints_indented_json(monkeypatch, files, capsys):
+    from hooks.classifier import decision_log
+
+    monkeypatch.setattr(api, "urlopen", FakeUrlopen({m: ok() for m in DEFAULT_MODELS}))
+    state, questions = files
+    cli.classify_main(["--state", str(state), "--questions", str(questions)])
+    cli.classify_main(["--state", str(state), "--questions", str(questions), "--purpose", "smoke"])
+    assert [e["purpose"] for e in decision_log.read()] == ["cli", "smoke"]
+    assert capsys.readouterr().out.startswith('{\n  "source"')
+
+
+def test_stats_prints_indented_json(capsys):
+    cli.classifier_main(["stats"])
+    assert capsys.readouterr().out.startswith('{\n  "purpose"')

@@ -21,7 +21,7 @@ def is_down(ttl_s: float) -> bool:
 def mark_down() -> None:
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(time.time()))
+    path.touch()
 
 
 def clear() -> None:

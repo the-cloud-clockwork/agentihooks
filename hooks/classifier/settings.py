@@ -20,16 +20,16 @@ class Settings:
     timeout_s: float
     down_ttl_s: float
 
-    @classmethod
-    def from_env(cls) -> Settings:
-        models = os.environ.get("AGENTIHOOKS_CLASSIFIER_MODELS", "")
-        return cls(
-            url=os.environ.get("AGENTIHOOKS_CLASSIFIER_URL", "").strip(),
-            models=tuple(m.strip() for m in models.split(",") if m.strip()) or DEFAULT_MODELS,
-            timeout_s=float(os.environ.get("AGENTIHOOKS_CLASSIFIER_TIMEOUT_S", "5")),
-            down_ttl_s=float(os.environ.get("AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S", "120")),
-        )
 
-    @property
-    def api_configured(self) -> bool:
-        return bool(self.url and os.environ.get(KEY_VAR))
+def load() -> Settings:
+    models = os.environ.get("AGENTIHOOKS_CLASSIFIER_MODELS", "")
+    return Settings(
+        url=os.environ.get("AGENTIHOOKS_CLASSIFIER_URL", "").strip(),
+        models=tuple(m.strip() for m in models.split(",") if m.strip()) or DEFAULT_MODELS,
+        timeout_s=float(os.environ.get("AGENTIHOOKS_CLASSIFIER_TIMEOUT_S", "5")),
+        down_ttl_s=float(os.environ.get("AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S", "120")),
+    )
+
+
+def api_configured(settings: Settings) -> bool:
+    return bool(settings.url and os.environ.get(KEY_VAR))

@@ -1,7 +1,7 @@
 import pytest
 
 from hooks.classifier import Choice, ClassifierInputError, Score, YesNo
-from hooks.classifier.questions import validate, wire_questions
+from hooks.classifier.questions import questions_from_wire, validate, wire_questions
 
 
 def test_each_type_renders_its_wire_shape():
@@ -75,3 +75,17 @@ def test_score_without_levels_is_refused():
 def test_unknown_question_object_is_refused():
     with pytest.raises(ClassifierInputError, match="YesNo, Choice or Score"):
         validate({"x": {"type": "noul"}})
+
+
+def test_one_level_score_and_one_option_choice_pass():
+    validate({"lvl": Score("q", ["only"]), "pick": Choice("q", {"only": "o"})})
+
+
+def test_wire_errors_name_the_question_and_the_fault():
+    with pytest.raises(ClassifierInputError, match="question 'x' needs type, instructions and criteria"):
+        questions_from_wire({"x": {"type": "noul"}})
+    with pytest.raises(ClassifierInputError, match="question 'y' has unknown type 'rank'"):
+        questions_from_wire({"y": {"type": "rank", "instructions": "q", "criteria": []}})
+    with pytest.raises(ClassifierInputError) as err:
+        questions_from_wire([])
+    assert str(err.value) == "questions must be a JSON object of named questions"

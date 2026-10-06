@@ -7,7 +7,7 @@ import pytest
 from hooks.classifier import Choice, ClassifierRequestError, Score, YesNo, api
 from hooks.classifier.errors import BackendFailure
 from hooks.classifier.result import DecisionRequest
-from tests.classifier.fakes import KEY, FakeUrlopen, http_error, ok, payload
+from tests.classifier.fakes import KEY, FakeUrlopen, HttpFailure, http_error, ok, payload
 
 QUESTIONS = {
     "tier": Choice("Which tier?", {"small": "s", "large": "l"}),
@@ -118,10 +118,7 @@ def test_other_400_is_a_caller_bug_with_the_key_redacted(monkeypatch):
 
 
 def test_400_with_unreadable_body_is_a_caller_bug(monkeypatch):
-    import io
-
-    error = urllib.error.HTTPError("http://x", 400, "Bad Request", {}, io.BytesIO(b"not json"))
-    backend, _ = _backend(monkeypatch, error)
+    backend, _ = _backend(monkeypatch, HttpFailure(400, b"not json"))
     with pytest.raises(ClassifierRequestError, match="not json"):
         backend.decide(DecisionRequest("s", QUESTIONS))
 
@@ -146,3 +143,72 @@ def test_estimated_tokens_is_four_characters_per_token():
         }
     )
     assert request.estimated_tokens() == len(wire) // 4
+
+
+@pytest.mark.parametrize(
+    ("outcome", "message"),
+    [
+        (http_error(401), "pplx-decider-v1-27b: HTTP 401, key refused"),
+        (http_error(503), "pplx-decider-v1-27b: HTTP 503"),
+        (http_error(400, "context window exceeded"), "pplx-decider-v1-27b: HTTP 400, input too long"),
+        (urllib.error.URLError("refused"), "pplx-decider-v1-27b: unreachable (URLError)"),
+    ],
+)
+def test_failure_messages_name_the_model_and_the_cause(monkeypatch, outcome, message):
+    backend, _ = _backend(monkeypatch, outcome)
+    with pytest.raises(BackendFailure) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == message
+
+
+def test_non_json_message_names_the_model(monkeypatch):
+    from tests.classifier.fakes import Response
+
+    backend, _ = _backend(monkeypatch, Response(b"<html>"))
+    with pytest.raises(BackendFailure) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == "pplx-decider-v1-27b: response is not JSON"
+
+
+def test_missing_answer_message_names_the_model(monkeypatch):
+    body = payload()
+    del body["answers"]["trivial"]
+    backend, _ = _backend(monkeypatch, ok(body))
+    with pytest.raises(BackendFailure) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == "pplx-decider-v1-27b: no answer for trivial"
+
+
+def test_caller_bug_carries_only_the_error_message(monkeypatch):
+    backend, _ = _backend(monkeypatch, http_error(400, f"invalid_union near {KEY}"))
+    with pytest.raises(ClassifierRequestError) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == "pplx-decider-v1-27b: HTTP 400: invalid_union near [redacted]"
+
+
+def test_caller_bug_message_is_capped_at_500_characters(monkeypatch):
+    backend, _ = _backend(monkeypatch, http_error(400, "x" * 600))
+    with pytest.raises(ClassifierRequestError) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == "pplx-decider-v1-27b: HTTP 400: " + "x" * 500
+
+
+def test_undecodable_error_body_is_replaced_not_raised(monkeypatch):
+    backend, _ = _backend(monkeypatch, HttpFailure(400, b"\xff bad request"))
+    with pytest.raises(ClassifierRequestError) as err:
+        backend.decide(DecisionRequest("s", QUESTIONS))
+    assert str(err.value) == "pplx-decider-v1-27b: HTTP 400: � bad request"
+
+
+def test_base_url_keeps_its_path_and_drops_trailing_slashes(monkeypatch):
+    fake = FakeUrlopen({"jev-1.13": ok()})
+    monkeypatch.setattr(api, "urlopen", fake)
+    api.DecisionsApiBackend("jev-1.13", "http://litellm:4000/X//", 5.0).decide(DecisionRequest("s", QUESTIONS))
+    assert fake.calls[0]["url"] == "http://litellm:4000/X/v1/decisions"
+
+
+def test_unset_key_sends_an_empty_bearer(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_LITELLM_KEY")
+    backend, fake = _backend(monkeypatch, ok())
+    backend.decide(DecisionRequest("s", QUESTIONS))
+    assert fake.calls[0]["headers"]["Authorization"] == "Bearer "

@@ -15,7 +15,7 @@ LENGTH_ERROR = re.compile(r"context|token", re.IGNORECASE)
 
 
 def _error_message(error: HTTPError) -> str:
-    text = error.read().decode("utf-8", "replace")
+    text = error.read().decode(errors="replace")
     try:
         return str(json.loads(text)["error"]["message"])
     except (ValueError, KeyError, TypeError):

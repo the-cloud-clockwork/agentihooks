@@ -42,9 +42,18 @@ def ok(body=None):
     return Response(json.dumps(body if body is not None else payload()).encode())
 
 
+class HttpFailure(Exception):
+    def __init__(self, code, body):
+        super().__init__(code)
+        self.code = code
+        self.body = body
+
+    def build(self):
+        return urllib.error.HTTPError("http://x/v1/decisions", self.code, "err", {}, io.BytesIO(self.body))
+
+
 def http_error(code, message="boom"):
-    body = json.dumps({"error": {"message": message}}).encode()
-    return urllib.error.HTTPError("http://x/v1/decisions", code, "err", {}, io.BytesIO(body))
+    return HttpFailure(code, json.dumps({"error": {"message": message}}).encode())
 
 
 class FakeUrlopen:
@@ -64,6 +73,8 @@ class FakeUrlopen:
             }
         )
         outcome = self.script[body["model"]]
+        if isinstance(outcome, HttpFailure):
+            raise outcome.build()
         if isinstance(outcome, BaseException):
             raise outcome
         return Response(outcome.getvalue())

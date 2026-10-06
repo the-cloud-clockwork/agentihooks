@@ -10,7 +10,7 @@ from hooks.classifier.api import DecisionsApiBackend
 from hooks.classifier.errors import BackendFailure, ClassifierUnavailable
 from hooks.classifier.questions import validate
 from hooks.classifier.result import DecisionRequest, DecisionResult
-from hooks.classifier.settings import MODEL_CONTEXT_TOKENS, Settings
+from hooks.classifier.settings import MODEL_CONTEXT_TOKENS, Settings, api_configured, load
 
 
 class Backend(Protocol):
@@ -29,7 +29,7 @@ def api_backends(request: DecisionRequest, settings: Settings) -> list:
 
 
 def _ask_api(request: DecisionRequest, settings: Settings) -> DecisionResult | None:
-    if not settings.api_configured or down_cache.is_down(settings.down_ttl_s):
+    if not api_configured(settings) or down_cache.is_down(settings.down_ttl_s):
         return None
     backends = api_backends(request, settings)
     for backend in backends:
@@ -62,7 +62,7 @@ def decide(
     validate(questions)
     request = DecisionRequest(state, questions)
     started = time.monotonic()
-    result = _ask_api(request, Settings.from_env()) or _ask_fallbacks(request, fallbacks)
+    result = _ask_api(request, load()) or _ask_fallbacks(request, fallbacks)
     latency_ms = int((time.monotonic() - started) * 1000)
     decision_log.append(purpose, state, result, latency_ms)
     if result is None:

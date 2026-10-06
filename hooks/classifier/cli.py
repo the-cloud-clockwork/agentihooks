@@ -42,7 +42,7 @@ def classifier_main(argv: list) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks classifier", description="Decision classifier records")
     commands = parser.add_subparsers(dest="command", required=True)
     stats_parser = commands.add_parser("stats", help="Counts, sources, fallback rate and latency from the decision log")
-    stats_parser.add_argument("--purpose", default=None, help="Only calls made for this purpose")
+    stats_parser.add_argument("--purpose", help="Only calls made for this purpose")
     args = parser.parse_args(argv)
     print(json.dumps(decision_log.stats(args.purpose), indent=2))
     return 0
