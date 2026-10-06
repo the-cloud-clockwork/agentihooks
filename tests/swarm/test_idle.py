@@ -78,7 +78,7 @@ def test_the_hook_connects_with_the_session_environment_and_stamps_the_clock(red
 
     seen = []
     monkeypatch.setattr(store, "redis_client", lambda env: seen.append(env) or redis)
-    monkeypatch.setattr(swarm_heartbeat.time, "time_ns", lambda: 5_000_123_456)
+    monkeypatch.setattr(swarm_heartbeat.time, "time_ns", lambda: 1_791_275_228_240_123_456)
     swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-master-1"}
     assert swarm_heartbeat.heard("hold on", environ=swarm) is True
-    assert seen == [swarm] and idle.last_prompt(redis, "sw", "sw-master-1") == 5_000
+    assert seen == [swarm] and idle.last_prompt(redis, "sw", "sw-master-1") == 1_791_275_228_240

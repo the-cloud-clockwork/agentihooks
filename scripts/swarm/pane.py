@@ -56,12 +56,11 @@ def _undimmed(text):
 
 
 def _faint_after(faint, params):
-    codes = [int(code) if code else 0 for code in params.split(";")]
-    i = 0
-    while i < len(codes):
-        if codes[i] in (38, 48, 58):
-            i += 3 if codes[i + 1 : i + 2] == [5] else 5
+    codes = iter([int(code) if code else 0 for code in params.split(";")])
+    for code in codes:
+        if code in (38, 48, 58):
+            for _ in range(1 if next(codes, None) == 5 else 3):
+                next(codes, None)
             continue
-        faint = (faint or codes[i] == 2) and codes[i] not in (0, 22)
-        i += 1
+        faint = (faint or code == 2) and code not in (0, 22)
     return faint
