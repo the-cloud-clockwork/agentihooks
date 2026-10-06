@@ -341,6 +341,7 @@ def test_the_cli_routes_a_crew_verb_to_the_crew_and_leaves_the_hook_doctor_alone
         ["verdict", "health/f1", "established", "--note", "checked"],
         ["task", "health/f1", "--fix", "tune"],
         ["measure", "health/f1"],
+        ["rates", "--at", "2026-10-06T10:00Z", "--json"],
         ["intervene", "message", "--to", "master@watch", "--text", "hi"],
     ],
 )

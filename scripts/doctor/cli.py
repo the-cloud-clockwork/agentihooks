@@ -11,6 +11,10 @@ agentihooks doctor <slug> task FINDING --fix code|tune
                                                an established or early-real finding becomes a troubleshoot task and
                                                a fix task naming the number to move
 agentihooks doctor <slug> measure FINDING      run the detectors once and print the finding's number, 0 when gone
+agentihooks doctor <slug> rates [--hours N] [--at TIME] [--json]
+                                               each coordination failure's number and the gate log counts over the
+                                               last N hours (24), or the N hours before and after TIME side by side;
+                                               works on any swarm ledger, with or without a Doctor
 agentihooks doctor <slug> intervene ACTION [--to ADDRESS] [--text TEXT] [--file FILE]
                                                apply a merged fix to the watched swarm: pull-dev, restart-ledger-server,
                                                refresh-rules, culture, handoff-at-stop or message; logged on both ledgers
@@ -25,9 +29,10 @@ import os
 import re
 import sys
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.doctor import detect, interventions, loop
+from scripts.doctor import detect, interventions, loop, rates, rates_read
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
@@ -111,9 +116,14 @@ def _pair(store, slug, doctor):
         InboxStore(store.redis).send(f"master@{doctor}", f"master@{slug}", OPENING.format(doctor=doctor))
 
 
-def _pair_of(store, slug):
+def _watched(store, slug):
     if slug.endswith(SUFFIX) and slug in store.slugs() and store.config(slug).template == TEMPLATE:
-        slug = next((s for s in store.slugs() if doctor_slug(s) == slug), slug.removesuffix(SUFFIX))
+        return next((s for s in store.slugs() if doctor_slug(s) == slug), slug.removesuffix(SUFFIX))
+    return slug
+
+
+def _pair_of(store, slug):
+    slug = _watched(store, slug)
     doctor = doctor_slug(slug)
     if doctor not in store.slugs():
         raise SwarmError(f"no Doctor watches {slug}; start one with agentihooks doctor {slug} start")
@@ -244,6 +254,27 @@ def cmd_measure(store, args):
     print(f"{args.finding} {next((f.measure for f in found if f.id == args.finding), 0)}")
 
 
+def _at_ms(text):
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise SwarmError(f"--at takes an ISO time such as 2026-10-06T12:00Z, not {text}") from exc
+    return int((when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp() * 1000)
+
+
+def cmd_rates(store, args):
+    now = swarm.now_ms()
+    at = _at_ms(args.at) if args.at else None
+    if args.hours <= 0:
+        raise SwarmError("--hours must be more than zero")
+    if at is not None and at >= now:
+        raise SwarmError("--at must be in the past: the after window ends now")
+    wins = rates.windows(now, args.hours, at)
+    span = rates.Window(min(w.start for w in wins.values()), max(w.end for w in wins.values()))
+    found = rates.report(rates_read.load(store, swarm.LedgerClient(), _watched(store, args.slug), span), wins)
+    print(json.dumps(found) if args.json else rates.table(found))
+
+
 def cmd_intervene(store, args):
     slug, doctor = _pair_of(store, args.slug)
     ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor, _name())
@@ -267,6 +298,10 @@ def build_parser():
     task.add_argument("finding")
     task.add_argument("--fix", required=True, choices=loop.FIXES)
     sub.add_parser("measure").add_argument("finding")
+    rated = sub.add_parser("rates")
+    rated.add_argument("--hours", type=float, default=24)
+    rated.add_argument("--at")
+    rated.add_argument("--json", action="store_true")
     intervene = sub.add_parser("intervene")
     intervene.add_argument("action")
     for flag in ("--to", "--text", "--file"):
@@ -281,6 +316,7 @@ COMMANDS = {
     "verdict": cmd_verdict,
     "task": cmd_task,
     "measure": cmd_measure,
+    "rates": cmd_rates,
     "intervene": cmd_intervene,
 }
 
