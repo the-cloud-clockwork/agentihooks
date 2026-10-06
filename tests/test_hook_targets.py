@@ -131,6 +131,12 @@ class TestCodexToolNames:
         for name in ("exec", "shell", "local_shell", "unified_exec"):
             assert normalize_payload({"tool_name": name, "tool_input": {}})["tool_name"] == "Bash"
 
+    def test_question_tool_maps_to_ask_user_question(self, codex):
+        questions = [{"id": "plan_color", "question": "Red or blue?", "options": []}]
+        payload = normalize_payload({"tool_name": "request_user_input", "tool_input": {"questions": questions}})
+        assert payload["tool_name"] == "AskUserQuestion"
+        assert payload["tool_input"] == {"questions": questions}
+
     def test_list_command_becomes_a_string(self, codex):
         payload = normalize_payload({"tool_name": "shell", "tool_input": {"command": ["ls", "a b"]}})
         assert payload["tool_input"]["command"] == "ls 'a b'"

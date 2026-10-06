@@ -329,6 +329,7 @@ _CODEX_TOOL_NAMES = {
     "local_shell": "Bash",
     "unified_exec": "Bash",
     "read_file": "Read",
+    "request_user_input": "AskUserQuestion",
 }
 
 # `*** Add File: path` / `*** Update File: path` / `*** Delete File: path`
