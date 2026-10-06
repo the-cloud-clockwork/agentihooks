@@ -77,6 +77,20 @@ class LedgerClient:
     def priority(self, slug, item, text):
         self._call(slug, [_op("priority", "swarm", item=item, text=text)])
 
+    def clear_priority(self, slug, priority_id, reason):
+        self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
+
+    def comment_item(self, slug, item, text):
+        self._call(slug, [_op("add", "swarm", thread=f"{item}/comments", text=text)])
+
+    def mark_done(self, slug, item):
+        self._call(slug, [_op("set", "swarm", path=f"{item}/done", value=True)])
+
+    def answer_as_operator(self, slug, question, text):
+        op = _op("add", None, thread=f"{question}/answers", text=text)
+        op.pop("by")
+        self._call(slug, [op])
+
     def add_source(self, slug, source, by):
         self._call(slug, [_op("source_add", by, source=source)])
 
