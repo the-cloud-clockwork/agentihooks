@@ -273,6 +273,7 @@ def test_init_checks_role_instructions_when_state_has_no_profile(tmp_path, monke
     saved.write_text("<!-- profile: planner -->\n")
     state = {"managed_claude_md": str(saved)} if managed else {}
     monkeypatch.setattr(install, "_load_state", lambda: state)
+    monkeypatch.setattr(install, "install_global", lambda args: pytest.fail("Persona check must stop installation"))
     with pytest.raises(SystemExit) as error:
         install.cmd_init_unified(Namespace(profile=None, target="claude", force=False, clean=False))
     assert error.value.code == 1
