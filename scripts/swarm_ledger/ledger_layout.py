@@ -42,7 +42,7 @@ def check(body):
 
 def read():
     try:
-        return check(core.loads(path().read_text(encoding="utf-8")))
+        return check(core.loads(path().read_bytes()))
     except (OSError, ValueError):
         return {}
 
@@ -56,6 +56,5 @@ def loads(data):
 
 def write(body):
     layout = check(body)
-    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     core.atomic_write(path(), json.dumps(layout))
     return layout

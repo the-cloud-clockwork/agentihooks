@@ -1,17 +1,16 @@
+import http.client
 import json
-import sys
 import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import ledger_core as core  # noqa: E402
-import ledger_layout as layout  # noqa: E402
-import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import ledger_layout as layout
+from scripts.swarm_ledger import ledger_server as server
+
+core = layout.core
 
 SAVED = {
     "capacity-box": {"height": 120},
@@ -38,17 +37,45 @@ def port():
     httpd.server_close()
 
 
-def call(port, method="GET", body=None, origin=f"http://127.0.0.1:{server.PORT}", ctype="application/json"):
+def send(port, method="GET", body=None, origin=f"http://127.0.0.1:{server.PORT}", ctype="application/json", query=""):
     headers = {"Host": f"127.0.0.1:{server.PORT}", "Content-Type": ctype}
     if origin:
         headers["Origin"] = origin
     data = None if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode())
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/layout", data=data, method=method, headers=headers)
+    url = f"http://127.0.0.1:{port}/api/layout{query}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status, resp.read().decode()
+            return resp.status, resp.read().decode(), resp.headers.get("Content-Type")
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode()
+        return exc.code, exc.read().decode(), exc.headers.get("Content-Type")
+
+
+def call(port, method="GET", body=None, **options):
+    return send(port, method, body, **options)[:2]
+
+
+def test_the_route_answers_json_and_ignores_a_query(port):
+    assert send(port, query="?v=1") == (200, "{}", "application/json")
+    assert send(port, "PUT", SAVED, query="?v=1") == (200, json.dumps(SAVED), "application/json")
+    assert call(port, query="?v=2") == (200, json.dumps(SAVED))
+
+
+def test_the_route_takes_a_body_up_to_the_size_limit(port):
+    assert call(port, "PUT", b"{}" + b" " * (server.MAX_BODY - 2)) == (200, "{}")
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.putrequest("PUT", "/api/layout", skip_host=True)
+    for name, value in (
+        ("Host", f"127.0.0.1:{server.PORT}"),
+        ("Origin", f"http://127.0.0.1:{server.PORT}"),
+        ("Content-Type", "application/json"),
+        ("Content-Length", str(server.MAX_BODY + 1)),
+    ):
+        conn.putheader(name, value)
+    conn.endheaders()
+    reply = conn.getresponse()
+    assert (reply.status, reply.read().decode()) == (400, "body size out of range")
+    conn.close()
 
 
 def test_the_layout_lives_in_one_file_in_the_ledger_folder():
@@ -74,6 +101,14 @@ def test_an_empty_layout_resets_to_the_defaults():
     layout.write(SAVED)
     assert layout.write({}) == {}
     assert layout.read() == {}
+
+
+def test_an_empty_body_reads_as_the_defaults_and_a_broken_one_is_refused():
+    assert layout.loads(b"") == {}
+    assert layout.loads(b'{"health-box": {"height": 90}}') == {"health-box": {"height": 90}}
+    with pytest.raises(ValueError) as error:
+        layout.loads(b"{oops")
+    assert str(error.value) == "body is not JSON"
 
 
 def test_an_unreadable_file_reads_as_the_defaults():
@@ -117,6 +152,9 @@ def test_the_route_reads_the_defaults_then_the_saved_layout(port):
     assert call(port, "PUT", SAVED) == (200, json.dumps(SAVED))
     assert json.loads(call(port)[1]) == SAVED
     assert call(port, "PUT", {}) == (200, "{}")
+    assert call(port) == (200, "{}")
+    call(port, "PUT", SAVED)
+    assert call(port, "PUT", b"") == (200, "{}")
     assert call(port) == (200, "{}")
 
 
