@@ -17,6 +17,11 @@ def test_real_import_capture_with_ansi():
     assert selection_prompt(f"\x1b[32m{capture}\x1b[0m") == "Allow external CLAUDE.md file imports?"
 
 
+def test_selection_dialog_can_have_a_cancel_footer_after_confirmation():
+    text = "Do you trust the files in this folder?\n❯ 1. Yes\n  2. No\nEnter to confirm\nEsc to cancel"
+    assert selection_prompt(text) == "Do you trust the files in this folder?"
+
+
 @pytest.mark.parametrize(
     "text",
     [
