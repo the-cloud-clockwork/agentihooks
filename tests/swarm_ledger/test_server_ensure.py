@@ -83,15 +83,25 @@ def isolated_server(tmp_path, monkeypatch):
     return tmp_path
 
 
-@pytest.mark.timeout(1)
 def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
     with socket.socket() as held:
         held.bind(("127.0.0.1", 0))
         monkeypatch.setattr(server, "PORT", held.getsockname()[1])
         monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{server.PORT}")
-        before = time.monotonic()
-        with patch.object(server.subprocess, "Popen") as start, pytest.raises(SystemExit, match="did not answer"):
+        clock = time.monotonic
+        before = clock()
+
+        def bounded_clock():
+            now = clock()
+            assert now - before < 0.5
+            return now
+
+        with (
+            patch.object(server.time, "monotonic", side_effect=bounded_clock),
+            patch.object(server.subprocess, "Popen") as start,
+            pytest.raises(SystemExit, match="did not answer"),
+        ):
             server.ensure()
         assert time.monotonic() - before < 0.5
         start.assert_not_called()
@@ -195,3 +205,16 @@ def test_health_requests_use_short_timeouts(isolated_server):
     ):
         server.ensure()
     assert ready.call_args.kwargs["timeout"] == 1
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_live_reexec_with_an_empty_command_line_waits(isolated_server, unreadable):
+    server.PIDFILE.write_text(str(os.getpid()))
+    with (
+        patch.object(server, "port_held", return_value=False),
+        patch.object(Path, "read_bytes", return_value=b"", side_effect=OSError() if unreadable else None),
+        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]),
+        patch.object(server.subprocess, "Popen") as start,
+    ):
+        server.ensure()
+    start.assert_not_called()

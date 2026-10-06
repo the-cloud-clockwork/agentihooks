@@ -699,9 +699,14 @@ def port_held() -> bool:
 def server_process_alive() -> bool:
     try:
         pid = int(PIDFILE.read_text())
-        return b"ledger_server.py" in Path(f"/proc/{pid}/cmdline").read_bytes()
+        os.kill(pid, 0)
     except (OSError, ValueError):
         return False
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return True
+    return not cmdline or b"ledger_server.py" in cmdline
 
 
 def ensure():
