@@ -5856,9 +5856,9 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     from hooks.context.rules_refresh import (
         _delete_marker,
         _load_marker,
-        collect_profile_rules,
         write_refresh_marker,
     )
+    from scripts.targets.claude_target import refresh_rules
 
     profile = args.profile or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5881,7 +5881,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print(f"[ERROR] No rules found at {rules_dir} / {claude_md} / {claude_local_md}. Is agentihooks installed?")
         sys.exit(1)
 
-    payload = collect_profile_rules(rules_dir, claude_md, claude_local_md)
+    payload = refresh_rules(rules_dir, claude_md, claude_local_md, args.dry_run)
 
     if args.dry_run:
         import hashlib as _hash

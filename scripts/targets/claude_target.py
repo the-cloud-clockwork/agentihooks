@@ -120,7 +120,7 @@ def _install_rule_files(dst: Path, layers: list[tuple[str, Path]], filter_fn) ->
             items.update(
                 {item.name: item for item in src.iterdir() if filter_fn(item) and not item.name.startswith(".")}
             )
-    dst.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(exist_ok=True)
     records = []
     for name, src in sorted(items.items()):
         path = dst / name
@@ -129,6 +129,24 @@ def _install_rule_files(dst: Path, layers: list[tuple[str, Path]], filter_fn) ->
         _atomic_write(path, src.read_text())
         records.append((path, src, "rules"))
     _i._state_record_links(records)
+
+
+def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: bool) -> str:
+    from hooks.context.rules_refresh import collect_profile_rules
+    from scripts.profiles.render import render_claude, rendered_root
+    from scripts.targets._common import _atomic_write
+
+    if not dry_run:
+        home = rules_dir.parent
+        if home == rendered_root() / home.parent.name / "claude":
+            render_claude(home.parent.name, force=True)
+        else:
+            _i = _install_module()
+            for link, entry in _i._state_links().items():
+                path = Path(link)
+                if path.parent == rules_dir and path.is_file() and not path.is_symlink():
+                    _atomic_write(path, Path(entry["target"]).read_text())
+    return collect_profile_rules(rules_dir, claude_md, local_md)
 
 
 class ClaudeAdapter:

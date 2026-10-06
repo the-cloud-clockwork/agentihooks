@@ -166,6 +166,30 @@ def test_claude_render_refreshes_copied_rules(world):
     assert (rules / "bundle-rule.md").read_text() == "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n"
 
 
+def test_refresh_rules_updates_rendered_profile_copies(world, monkeypatch):
+    from argparse import Namespace
+
+    import install
+
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(out))
+    source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
+    _write(source, "UPDATED RENDERED RULE\n")
+    seen = []
+
+    def capture(profile, payload):
+        seen.append(payload)
+        return {"marker_path": str(out / "marker"), "pending_count": 0, "content_hash": "proof"}
+
+    monkeypatch.setattr("hooks.context.rules_refresh.write_refresh_marker", capture)
+    install._cmd_refresh_rules(Namespace(profile="rb-role", clear=False, dry_run=False))
+
+    assert (out / "rules" / "bundle-rule.md").read_text() == "UPDATED RENDERED RULE\n"
+    assert "UPDATED RENDERED RULE" in seen[0]
+
+
 def test_claude_render_settings(world):
     from scripts.profiles import render
 

@@ -2,6 +2,8 @@ import copy
 import json
 import re
 
+import install
+
 from scripts.targets.claude_target import settings_document
 
 TOKEN = "ghp_" + "d" * 36
@@ -61,10 +63,8 @@ def test_write_settings_writes_the_settings_document():
 
 
 def test_installed_claude_rules_stay_inside_global_home(tmp_path):
-    from scripts.targets._common import _install_module
     from scripts.targets.claude_target import ClaudeAdapter
 
-    install = _install_module()
     source = tmp_path / "rules"
     source.mkdir()
     (source / "rule.md").write_text("GLOBAL RULE\n")
@@ -83,10 +83,8 @@ def test_installed_claude_rules_stay_inside_global_home(tmp_path):
 
 
 def test_installed_claude_rules_refresh_and_preserve_foreign_files(tmp_path, capsys):
-    from scripts.targets._common import _install_module
     from scripts.targets.claude_target import ClaudeAdapter
 
-    install = _install_module()
     adapter = ClaudeAdapter()
     source = tmp_path / "source"
     source.mkdir()
@@ -126,10 +124,8 @@ def test_uninstall_removes_copied_claude_rules_as_last_artifact(tmp_path, monkey
     from argparse import Namespace
     from types import SimpleNamespace
 
-    from scripts.targets._common import _install_module
     from scripts.targets.claude_target import ClaudeAdapter
 
-    install = _install_module()
     source = tmp_path / "rules"
     source.mkdir()
     (source / "rule.md").write_text("RULE\n")
@@ -149,3 +145,45 @@ def test_uninstall_removes_copied_claude_rules_as_last_artifact(tmp_path, monkey
     assert not (rules / "rule.md").exists()
     assert (rules / "user-one.md").read_text() == "USER ONE\n"
     assert (rules / "user-two.md").read_text() == "USER TWO\n"
+
+
+def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    source = tmp_path / "rules"
+    source.mkdir()
+    (source / "rule.md").write_text("OLD RULE\n")
+    ClaudeAdapter().install_features("rules", [("rule", source)], lambda path: path.suffix == ".md")
+    (source / "rule.md").write_text("NEW RULE\n")
+    rules = install.CLAUDE_HOME / "rules"
+    (rules / "folder").mkdir()
+    (rules / "linked.md").symlink_to(source / "rule.md")
+    outside = install.CLAUDE_HOME / "commands" / "copied.md"
+    outside.parent.mkdir()
+    outside.write_text("COMMAND\n")
+    install._state_record_links(
+        [
+            (rules / "folder", source / "rule.md", "rules"),
+            (rules / "linked.md", source / "rule.md", "rules"),
+            (outside, source / "rule.md", "commands"),
+        ]
+    )
+    seen = []
+
+    def capture(profile, payload):
+        seen.append(payload)
+        return {"marker_path": str(tmp_path / "marker"), "pending_count": 0, "content_hash": "proof"}
+
+    monkeypatch.setattr("hooks.context.rules_refresh.write_refresh_marker", capture)
+    install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=True))
+    assert (install.CLAUDE_HOME / "rules" / "rule.md").read_text() == "OLD RULE\n"
+    install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
+
+    assert (install.CLAUDE_HOME / "rules" / "rule.md").read_text() == "NEW RULE\n"
+    assert "NEW RULE" in seen[0]
+    assert "OLD RULE" not in seen[0]
+    assert (rules / "folder").is_dir()
+    assert (rules / "linked.md").is_symlink()
+    assert outside.read_text() == "COMMAND\n"
