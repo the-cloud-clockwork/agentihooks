@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from scripts.gates import Call, Gate, Who
+from scripts.gates.budget import Budget
 from scripts.gates.reruns import RerunBudget, Target, exempt, gh_jobs, refusal, targets
 from scripts.gates.verdicts import Verdicts
 
@@ -83,6 +84,13 @@ def test_every_counted_rerun_writes_a_count_row(tmp_path):
     assert [(r["gate"], r["kind"], r["agent"], r["task"], r["tool"], r["reason"]) for r in rows(tmp_path)] == [
         ("reruns", "count", ME.name, "t1", "Bash", f"CI reruns 1 of 2 on head {HEAD[:12]}")
     ]
+    assert Budget("demo", "reruns", tmp_path).spent(HEAD, "reruns") == 1
+
+
+def test_an_exempt_rerun_does_not_stop_the_next_one_in_the_command_from_counting(tmp_path):
+    gate = gate_over({"1": FAILED, "9": NO_RUNNER})
+    assert gate.decide(bash("gh run rerun 9 && gh run rerun 1"), ME, state(tmp_path)).allowed
+    assert len(rows(tmp_path)) == 1
 
 
 def test_each_head_has_its_own_budget(tmp_path):

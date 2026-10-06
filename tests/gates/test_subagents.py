@@ -1,6 +1,7 @@
 import json
 
 from scripts.gates import Call, Gate, Who
+from scripts.gates.budget import Budget
 from scripts.gates.subagents import SubagentBudget, refusal
 from scripts.gates.verdicts import Verdicts
 
@@ -62,6 +63,8 @@ def test_each_allowed_call_writes_a_count_row_and_a_refused_one_does_not(tmp_pat
         ("subagents", "count", ME.name, "t1", "Agent", "sub-agent launches 1 of 1 for task t1"),
         ("subagents", "count", ME.name, "t1", "SendMessage", "sub-agent continuations 1 of 1 for task t1"),
     ]
+    budget = Budget("demo", "subagents", tmp_path)
+    assert (budget.spent("t1", "launches"), budget.spent("t1", "continuations")) == (1, 1)
 
 
 def test_each_task_has_its_own_budget(tmp_path):

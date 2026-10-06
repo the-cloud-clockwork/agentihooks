@@ -89,7 +89,7 @@ class RerunBudget:
             found = self.jobs(target) if target.run or target.job else []
             if not found or exempt(found):
                 continue
-            head = str(found[0].get("head_sha") or "")
+            head = found[0]["head_sha"]
             allowed, spent = Budget(state.slug, self.name, state.home).spend(head, "reruns", self.cap)
             if not allowed:
                 return Decision.deny(refusal(who.swarm, head, self.cap))
