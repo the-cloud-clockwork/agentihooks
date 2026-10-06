@@ -245,6 +245,16 @@ def render(target: str, name: str, force: bool = False) -> Path | None:
     return renderers[target](name, force=force)
 
 
+def rendered_profiles(target: str) -> list[str]:
+    if target == "claude":
+        return sorted(home.parent.name for home in rendered_root().glob("*/claude"))
+    if target == "codex":
+        return sorted(
+            p.name.removesuffix(".config.toml") for p in codex_home().glob("*.config.toml") if _codex_stamp(p)
+        )
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks profile")
     commands = parser.add_subparsers(required=True)
