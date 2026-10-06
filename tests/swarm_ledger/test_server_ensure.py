@@ -1,4 +1,5 @@
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -9,6 +10,17 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm_ledger import ledger_server as server
+
+
+@pytest.fixture(autouse=True)
+def safe_process_signals(monkeypatch):
+    kill = server.os.kill
+
+    def send(pid, sig):
+        assert sig in (0, signal.SIGTERM, signal.SIGKILL)
+        return kill(pid, sig)
+
+    monkeypatch.setattr(server.os, "kill", send)
 
 
 @pytest.mark.parametrize("release_socket", [False, True])
