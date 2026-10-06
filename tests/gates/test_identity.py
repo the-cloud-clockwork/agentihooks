@@ -229,7 +229,7 @@ class TestEntry:
     def test_unknown_gate_exits_one(self, argv):
         code, err = self.run(argv, {})
         assert code == 1
-        assert err == "agentihooks gate: name one gate of: identity\n"
+        assert err == "agentihooks gate: name one gate of: identity, reruns, subagents\n"
 
     def test_unknown_gate_lists_every_gate(self, monkeypatch):
         monkeypatch.setattr(entry, "GATES", {"b": PinnedIdentity(), "a": PinnedIdentity()})
@@ -243,7 +243,8 @@ class TestEntry:
         assert entry.main() == 0
 
     def test_registry_names_each_gate(self):
-        assert entry.GATES == {"identity": entry.GATES["identity"]}
+        assert sorted(entry.GATES) == ["identity", "reruns", "subagents"]
+        assert all(name == gate.name for name, gate in entry.GATES.items())
         assert isinstance(entry.GATES["identity"], PinnedIdentity)
 
 

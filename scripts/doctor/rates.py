@@ -16,7 +16,7 @@ MINUTE_MS = 60_000
 HOUR_MS = 60 * MINUTE_MS
 TALK = ("comment added", "comment edited", "message added")
 OUTCOMES = ("task pr", "task done")
-GATE_KINDS = ("deny", "observe", "lift", "fail-open")
+GATE_KINDS = ("deny", "observe", "lift", "fail-open", "count")
 GATE_FIELDS = {"at", "gate", "kind"}
 MERGED = "MERGED"
 
@@ -128,7 +128,17 @@ def proof_loops(records, window):
         "tasks claimed": len({_task(e) for e in claims}),
         "claims per task": ratio(len(claims), len(tasks)),
         "review rounds per task": ratio(len(moves), len(tasks)),
+        "CI reruns per task": ratio(_spends(records, window, "reruns"), len(tasks)),
+        "sub-agent calls per task": ratio(_spends(records, window, "subagents"), len(tasks)),
     }
+
+
+def _spends(records, window, gate):
+    return sum(
+        1
+        for row in records.gate_log
+        if row.get("gate") == gate and row.get("kind") == "count" and window.holds(row.get("at", -1))
+    )
 
 
 def inherited_rules(records, window):

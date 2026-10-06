@@ -1,0 +1,19 @@
+from scripts.gates import modes
+from scripts.gates.claims import CAP, GATE, refusal
+from scripts.swarm_ledger.ledger_comments import problems
+
+
+def test_the_cap_is_three_lives_and_ships_enforcing():
+    assert (CAP, GATE.name, GATE.default_mode) == (3, "claims", "enforce")
+    assert modes.env_name(GATE.name) == "AGENTIHOOKS_GATE_CLAIMS"
+
+
+def test_the_summary_names_the_lives_the_cap_the_last_handoff_reason_and_the_way_out():
+    assert refusal(3, "recycle") == (
+        "The swarm blocked this task before a fourth agent life: it was claimed 3 times and the cap is 3. "
+        "Last handoff reason: recycle. Change its scope or split it, then reopen it for three more lives."
+    )
+
+
+def test_the_summary_passes_the_ledger_comment_check():
+    assert problems(refusal(3, "none"), "comment") == []
