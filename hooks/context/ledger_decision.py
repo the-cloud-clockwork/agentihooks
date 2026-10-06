@@ -22,6 +22,13 @@ SWARM_DIRECTIVE = (
     "creates the swarm and starts it. The swarm's agents implement the plan and its master never edits code, "
     f"so do not implement it here. Only if the operator says no swarm, run `{DECLINE}`."
 )
+PHASES_DIRECTIVE = (
+    "LEDGER DECISION: the operator accepted a plan and this session is bound to the ledger {slug}, so the plan "
+    "continues that ledger. Add it there as new phases now, without asking: write the plan's phases list in the "
+    "init swarm shape to a file, then run `agentihooks ledger --slug {slug} --as {name} plan phases <phases.json>`. "
+    "The phases land planned manually and in review. Never start a new swarm for this plan, and do not implement "
+    "it here."
+)
 SMALL_DIRECTIVE = (
     "LEDGER DECISION: the operator's rule puts this work on a small ledger ({reason}) and no ledger is bound to "
     "this session. Create it before any other tool call, even for a one line fix: the operator made this call, "
@@ -36,14 +43,17 @@ def directive(payload, environ=None):
     env = os.environ if environ is None else environ
     session_id = payload.get("session_id") or ""
     kind = _kind(payload)
-    if not (kind and session_id) or env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id):
+    if not (kind and session_id):
+        return ""
+    binding = _binding(env, session_id)
+    if binding and kind != "plan":
         return ""
     with _session_state(session_id) as state:
         if kind == "decline":
             state["declined"] = True
         if state.get("declined"):
             return ""
-        trigger, text = _outcome(kind, payload, state)
+        trigger, text = _outcome(kind, payload, state, binding)
         fired = state.setdefault("fired", [])
         if not trigger or trigger in fired or "plan" in fired:
             return ""
@@ -69,9 +79,9 @@ def _kind(payload):
     return "decline" if _declined(payload) else None
 
 
-def _outcome(kind, payload, state):
+def _outcome(kind, payload, state, binding=None):
     if kind == "plan":
-        return "plan", SWARM_DIRECTIVE
+        return "plan", PHASES_DIRECTIVE.format(**binding) if binding else SWARM_DIRECTIVE
     if kind == "prompt":
         return "prompt", SMALL_DIRECTIVE.format(
             reason="the operator asked to troubleshoot, debug, investigate or refactor"
@@ -100,6 +110,21 @@ def _declined(payload):
 def _bound(env, session_id):
     ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
     return (ledgers / ".sessions" / f"{session_id}.json").exists()
+
+
+def _binding(env, session_id):
+    if not (_bound(env, session_id) or env.get("AGENTIHOOKS_SWARM")):
+        return None
+    ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    try:
+        bound = json.loads((ledgers / ".sessions" / f"{session_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        bound = {}
+    bound = bound if isinstance(bound, dict) else {}
+    return {
+        "slug": bound.get("slug") or env.get("AGENTIHOOKS_SWARM") or "<slug>",
+        "name": bound.get("name") or env.get("AGENTIHOOKS_AGENT_NAME") or "<your name>",
+    }
 
 
 @contextmanager

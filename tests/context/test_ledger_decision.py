@@ -189,19 +189,45 @@ def test_an_accepted_plan_is_not_followed_by_a_small_ledger(capsys, monkeypatch)
     assert MARK not in run(todos(4), capsys, "claude", monkeypatch)
 
 
-def test_a_swarm_agent_gets_nothing(capsys, monkeypatch):
+def test_a_swarm_agent_gets_no_small_ledger(capsys, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "swarm-buildout")
-    assert MARK not in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
-    assert MARK not in run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
     assert MARK not in run(prompt("debug the gate"), capsys, "claude", monkeypatch)
+    assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
 
 
-def test_a_session_bound_to_a_ledger_gets_nothing(isolated, capsys, monkeypatch):
-    session = RECORDED["codex_plan_accept"]["session_id"]
-    (isolated / ".sessions" / f"{session}.json").write_text(json.dumps({"slug": "x", "name": "y"}), encoding="utf-8")
-    assert MARK not in run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
+def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(capsys, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "swarm-buildout")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@323133-1")
+    out = run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
+    assert MARK in out
+    assert "agentihooks ledger --slug swarm-buildout --as master@323133-1 plan phases" in out
+    assert "init-swarm" not in out
+
+
+def test_a_session_bound_to_a_ledger_gets_no_small_ledger(isolated, capsys, monkeypatch):
     (isolated / ".sessions" / "s1.json").write_text(json.dumps({"slug": "x", "name": "y"}), encoding="utf-8")
     assert MARK not in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
+    assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
+
+
+def test_a_bound_master_appends_its_plan_to_its_own_ledger(isolated, capsys, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other-swarm")
+    session = RECORDED["claude_plan_accept"]["session_id"]
+    binding = {"slug": "rig-grade-swarm", "name": "master@323133-0001", "role": "master"}
+    (isolated / ".sessions" / f"{session}.json").write_text(json.dumps(binding), encoding="utf-8")
+    out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
+    assert MARK in out
+    assert "agentihooks ledger --slug rig-grade-swarm --as master@323133-0001 plan phases <phases.json>" in out
+    assert "init-swarm" not in out
+    assert "without asking" in out
+    assert MARK not in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
+
+
+def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch):
+    (isolated / ".sessions" / "other.json").write_text(json.dumps({"slug": "x", "name": "y"}), encoding="utf-8")
+    out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
+    assert "init-swarm" in out
+    assert "plan phases" not in out
 
 
 def test_a_recorded_decline_silences_the_session(capsys, monkeypatch):

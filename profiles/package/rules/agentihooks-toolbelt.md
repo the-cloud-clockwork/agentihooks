@@ -86,8 +86,10 @@ directive once per session for each trigger. Act on it at once, without asking:
   small`), join it as its worker and keep it current.
 - **Nothing** — a trivial request gets no directive and no ledger.
 
-Swarm agents and sessions already bound to a ledger never get a directive. When
-the operator declines, run `agentihooks ledger decline`; the hook stays silent
+A swarm agent or a session already bound to a ledger gets no small ledger
+directive. When it accepts a plan, the directive names its own ledger: append the
+plan there as new phases with `agentihooks ledger --slug <slug> --as <name> plan
+phases <file>`, never a new swarm. When the operator declines, run `agentihooks ledger decline`; the hook stays silent
 for the rest of that session.
 
 ## Swarms and ledgers
