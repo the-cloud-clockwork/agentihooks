@@ -24,8 +24,8 @@ def test_role_renders_with_its_role_file_and_no_bundle(world, role):
 
     persona = (out / "CLAUDE.md").read_text()
     assert (ROLES / role / "CLAUDE.md").read_text().strip() in persona
-    rule = ROLES / role / ".claude" / "rules" / f"{role}-role.md"
-    assert (out / "rules" / f"{role}-role.md").read_text() == rule.read_text()
+    rule = (ROLES / role / ".claude" / "rules" / f"{role}-role.md").read_text()
+    assert f"<!-- rule: {role}-role.md (rule) -->\n{rule.strip()}" in persona
     assert json.loads((out / render.STAMP).read_text())["chain"] == [role]
     assert "mcpServers" not in json.loads((out / "settings.json").read_text())
     assert not (ROLES / role / ".claude" / ".mcp.json").exists()
