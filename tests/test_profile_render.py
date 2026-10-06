@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -769,7 +770,7 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\](?!\S)"
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
 
 
@@ -817,3 +818,107 @@ def test_bundle_overlay_extending_package_role_sits_on_top(world, package_role):
     env = json.loads((out / "settings.json").read_text())["env"]
     assert (env["PACKAGE_FLAG"], env["WINNER"]) == ("1", "bundle")
     assert json.loads((out / render.STAMP).read_text())["chain"] == ["package:rb-pkg", "rb-pkg"]
+
+
+def _scratch_bundle(world, tmp_path: Path) -> Path:
+    bundle = tmp_path / "scratch-bundle"
+    shutil.copytree(world["bundle"], bundle)
+    _write(bundle / "profiles" / "rb-role" / "CLAUDE.md", "SCRATCH PERSONA MARKER\n")
+    return bundle
+
+
+def test_scratch_render_writes_only_under_its_home(world, tmp_path, capfd):
+    from scripts.profiles import render
+
+    live = render.render_claude("rb-role")
+    before = _tree_hashes(render.rendered_root(), tmp_path / "none")
+    links = sorted((p, p.readlink()) for p in render.rendered_root().rglob("*") if p.is_symlink())
+    bundle, out = _scratch_bundle(world, tmp_path), tmp_path / "scratch-home"
+    capfd.readouterr()
+
+    assert render.main(["render", "rb-role", "--out", str(out), "--bundle", str(bundle)]) == 0
+
+    home = out / "profiles" / "rb-role" / "claude"
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert "SCRATCH PERSONA MARKER" in (home / "CLAUDE.md").read_text()
+    assert "SCRATCH PERSONA MARKER" not in (live / "CLAUDE.md").read_text()
+    assert _tree_hashes(render.rendered_root(), tmp_path / "none") == before
+    assert sorted((p, p.readlink()) for p in render.rendered_root().rglob("*") if p.is_symlink()) == links
+    assert {item: (home / item).readlink() for item in SHARED} == {
+        item: Path.home() / ".claude" / item for item in SHARED
+    }
+
+
+def test_scratch_render_reads_corrections_from_its_own_home(world, tmp_path, monkeypatch):
+    from hooks.context import injection_trace
+    from scripts.profiles import render, sources
+
+    monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
+    bundle, out = _scratch_bundle(world, tmp_path), tmp_path / "scratch-home"
+    rule = sources.source(bundle / ".claude" / "rules" / "bundle-rule.md")
+    with monkeypatch.context() as scratch:
+        scratch.setattr("hooks.config.AGENTIHOOKS_HOME", out)
+        injection_trace.record("proof-1", "rule", rule, "BUNDLE RULE MARKER", {})
+        injection_trace.correct("proof-1", rule, "/repos/proof", "a planted proof correction")
+
+    assert render.main(["render", "rb-role", "--out", str(out), "--bundle", str(bundle)]) == 0
+
+    notice = "> CORRECTION: this file is marked wrong for the proof repo: a planted proof correction."
+    assert notice in (out / "profiles" / "rb-role" / "claude" / "CLAUDE.md").read_text()
+    assert "CORRECTION" not in (render.render_claude("rb-role", force=True) / "CLAUDE.md").read_text()
+
+
+def test_scratch_render_defaults_to_the_linked_bundle_and_passes_force(world, tmp_path, capfd):
+    from scripts.profiles import render
+
+    out = tmp_path / "scratch-home"
+    home = out / "profiles" / "rb-role" / "claude"
+
+    assert render.main(["render", "rb-role", "--out", str(out)]) == 0
+    assert "ROLE PERSONA MARKER" in (home / "CLAUDE.md").read_text()
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert render.main(["render", "rb-role", "--out", str(out)]) == 0
+    assert capfd.readouterr().out.endswith("rb-role (claude) is up to date\n")
+    assert render.main(["render", "rb-role", "--out", str(out), "--force"]) == 0
+    assert capfd.readouterr().out.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert not (render.rendered_root() / "rb-role").exists()
+
+
+def test_scratch_render_refuses_a_bundle_without_a_home(world, tmp_path, capsys):
+    from scripts.profiles import render
+
+    with pytest.raises(SystemExit):
+        render.main(["render", "rb-role", "--bundle", str(world["bundle"])])
+    assert "--bundle needs --out" in capsys.readouterr().err
+    assert not render.rendered_root().exists()
+
+
+def test_scratch_render_runs_this_checkout_in_a_child(world, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    calls = []
+    monkeypatch.setattr(
+        render.subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 3)
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert render.main(["render", "rb-role", "--target", "codex", "--out", "rel-home"]) == 3
+
+    ((argv, kw),) = calls
+    assert argv[1:] == ["-m", "scripts.profiles.render", "render", "rb-role", "--target", "codex"]
+    assert Path(kw["cwd"]) / "scripts" / "profiles" / "render.py" == Path(render.__file__).resolve()
+    assert kw["env"]["AGENTIHOOKS_HOME"] == str(tmp_path / "rel-home")
+    assert kw["env"]["AGENTIHOOKS_BUNDLE_PATH"] == str(world["bundle"])
+
+
+def test_scratch_render_options_are_documented(capsys):
+    from scripts.profiles import render
+
+    with pytest.raises(SystemExit):
+        render.main(["render", "--help"])
+    out = _flat(capsys.readouterr().out)
+    assert "--out OUT Render into this scratch agentihooks home, not the live one" in out
+    assert "--bundle BUNDLE Bundle for --out (default: the linked bundle)" in out
+    with pytest.raises(SystemExit):
+        render.main(["render", "rb-role", "--bundle", "b"])
+    assert capsys.readouterr().err.endswith("render: error: --bundle needs --out\n")
