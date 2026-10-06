@@ -228,9 +228,10 @@ def test_idle_counts_idle_ticks_per_task_claimed_or_ticking_in_the_window():
         {"gate": "idle-ticks", "kind": "deny", "task": "t5", "at": 115 * MIN},
         {"gate": "quiet", "kind": "count", "task": "t6", "at": 116 * MIN},
         {"gate": "idle-ticks", "kind": "count", "at": 117 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "", "at": 118 * MIN},
     ]
     got = rates.idle(recs(events=events, gate_log=log), WIN)
-    assert (got["idle ticks"], got["idle ticks per claimed task"]) == (5, 1.67)
+    assert (got["idle ticks"], got["idle ticks per claimed task"]) == (6, 2.0)
 
 
 def test_stale_counts_findings_and_their_quiet_minutes():

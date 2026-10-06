@@ -18,6 +18,7 @@ TALK = ("comment added", "comment edited", "message added")
 OUTCOMES = ("task pr", "task done")
 GATE_KINDS = ("deny", "observe", "lift", "fail-open", "count")
 GATE_FIELDS = {"at", "gate", "kind"}
+TICK_FIELDS = GATE_FIELDS | {"task"}
 MERGED = "MERGED"
 IDLE_TICKS = "idle-ticks"
 QUIET = "quiet"
@@ -182,10 +183,10 @@ def _ticking(records, window):
     return {
         row["task"]
         for row in records.gate_log
-        if GATE_FIELDS <= row.keys()
+        if TICK_FIELDS <= row.keys()
         and window.holds(row["at"])
         and (row["gate"], row["kind"]) == (IDLE_TICKS, "count")
-        and row.get("task")
+        and row["task"]
     }
 
 

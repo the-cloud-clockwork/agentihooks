@@ -60,7 +60,7 @@ def quiet_minutes(redis, slug, agents, rows, now_ms):
             continue
         signal = last_signal(redis, slug, agent)
         if signal:
-            found[agent.name] = max(0, now_ms - signal) // MINUTE_MS
+            found[agent.name] = (now_ms - signal) // MINUTE_MS
     return found
 
 
@@ -71,29 +71,26 @@ def refusal(slug, task_id, minutes):
     )
 
 
-def _flagged(flags):
-    folder = flags.path("_").parent
+def _flagged(slug, home):
+    folder = log.gates_dir(slug, home) / NAME
     return {path.name for path in folder.iterdir() if not path.name.startswith(".")} if folder.is_dir() else set()
 
 
 def quiet_pass(store, slug, rows, now_ms, home=None):
-    agents, flags, actions = store.agents(slug), Verdicts(slug, NAME, home), []
-    quiet = quiet_minutes(store.redis, slug, agents, rows, now_ms)
-    for agent in agents:
-        minutes = quiet.get(agent.name, 0)
-        if minutes < QUIET_MINUTES or flags.read(agent.name) is not None:
+    agents, flags, actions = {a.name: a for a in store.agents(slug)}, Verdicts(slug, NAME, home), []
+    quiet = quiet_minutes(store.redis, slug, agents.values(), rows, now_ms)
+    standing = {name for name, minutes in quiet.items() if minutes >= QUIET_MINUTES}
+    for name in sorted(standing):
+        if flags.read(name) is not None:
             continue
+        agent, minutes = agents[name], quiet[name]
         reason = refusal(slug, agent.task, minutes)
-        flags.write(agent.name, NAME, reason, now_ms)
-        who = Who(name=agent.name, swarm=slug, lane=agent.lane, task=agent.task)
-        log.append(slug, log.Row.of(NAME, "count", who, reason=reason, now_ms=now_ms), home)
-        actions.append(
-            f"raised the quiet flag on {agent.name}: {minutes} minutes with no progress on task {agent.task}"
-        )
-    for name in sorted(_flagged(flags)):
-        if quiet.get(name, 0) < QUIET_MINUTES:
-            flags.clear(name)
-            actions.append(f"cleared the quiet flag on {name}")
+        flags.write(name, NAME, reason, now_ms)
+        log.append(slug, log.Row.of(NAME, "count", Who(name=name, task=agent.task), reason=reason, now_ms=now_ms), home)
+        actions.append(f"raised the quiet flag on {name}: {minutes} minutes with no progress on task {agent.task}")
+    for name in sorted(_flagged(slug, home) - standing):
+        flags.clear(name)
+        actions.append(f"cleared the quiet flag on {name}")
     return actions
 
 
@@ -113,8 +110,8 @@ def report(store, ledger, slug, agent, status, now_ms, home=None):
     ledger.comment(slug, agent.task, line, agent.name)
     path = ledger_workspace.folder(slug, agent.task) / "progress.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as out:
-        out.write(f"{datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat()} {line}\n")
+    with path.open("ab") as out:
+        out.write(f"{datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat()} {line}\n".encode())
     Verdicts(slug, NAME, home).clear(agent.name)
     return line
 

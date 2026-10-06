@@ -120,7 +120,13 @@ def test_quiet_minutes_run_from_the_latest_progress_signal(rig):
     path.write_text("tests written\n")
     os.utime(path, (0, (NOW - 5 * MIN) / 1000))
     assert rig.minutes() == {ME: 5}
-    assert rig.minutes(NOW - 6 * MIN) == {ME: 0}
+    assert rig.minutes(NOW - 6 * MIN) == {ME: -1}
+
+
+def test_an_agent_skipped_first_never_stops_the_next_from_being_measured(rig):
+    me = rig.store.agents(SLUG)[0]
+    planner = AgentRecord(name="planner@100001-0001", lane="plan", task="t1", started_at=1)
+    assert gate.quiet_minutes(rig.store.redis, SLUG, [planner, me], rig.rows, NOW) == {ME: 40}
 
 
 def test_a_checked_wait_is_never_quiet_and_a_bare_or_ended_one_is(rig):
@@ -188,9 +194,19 @@ def test_the_tick_raises_the_flag_at_thirty_minutes_once_and_clears_it_on_progre
     assert rig.flags.read(ME) is None
 
 
-def test_the_tick_raises_the_flag_at_exactly_thirty_minutes(rig):
+def test_the_tick_raises_the_flag_at_exactly_thirty_minutes_and_keeps_it(rig):
     assert rig.run(NOW - 10 * MIN - 1) == []
     assert rig.run(NOW - 10 * MIN)[0].startswith(f"raised the quiet flag on {ME}: 30 minutes")
+    assert rig.run(NOW - 10 * MIN) == []
+    assert rig.flags.read(ME) is not None
+
+
+def test_an_agent_already_flagged_never_stops_the_next_from_being_raised(rig):
+    rig.store.put_agent(SLUG, AgentRecord(name=OTHER, lane="eng", task="t2", started_at=NOW - 50 * MIN))
+    rig.rows["t2"] = {"id": "t2", "state": "claimed", "claimed_by": OTHER}
+    rig.flags.write(ME, "quiet", FLAG)
+    assert rig.run() == [f"raised the quiet flag on {OTHER}: 50 minutes with no progress on task t2"]
+    assert rig.flags.read(ME)["reason"] == FLAG
 
 
 def test_the_tick_clears_a_flag_whose_agent_left_the_swarm(rig):
