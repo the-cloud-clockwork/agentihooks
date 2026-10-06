@@ -214,3 +214,10 @@ def test_a_failure_without_a_pair_opens_a_follow_up_naming_the_test():
     assert create[:4] == ["issue", "create", "--title", "Test fails in one process: tests/test_b.py::test_v"]
     assert "it fails when run alone" in _body(create)
     assert "python -m pytest -n 0 tests/test_b.py::test_v" in _body(create)
+
+
+def test_a_follow_up_title_fits_the_github_limit():
+    finding = {"victim": "tests/test_b.py::test_" + "v" * 300, "polluter": "tests/test_a.py::test_p"}
+    title, body = leaks.followup(finding, "https://example.test/runs/4")
+    assert len(title) == leaks.GITHUB_TITLE_LIMIT
+    assert finding["victim"] in body
