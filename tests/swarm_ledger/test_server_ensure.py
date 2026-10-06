@@ -230,3 +230,44 @@ def test_live_reexec_with_an_empty_command_line_waits(isolated_server, unreadabl
     ):
         server.ensure()
     start.assert_not_called()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "freebsd"])
+def test_reload_without_linux_process_files_does_not_start_another(isolated_server, platform):
+    server.PIDFILE.write_text(str(os.getpid()))
+    with (
+        patch.object(server.sys, "platform", platform),
+        patch.object(server, "port_held", return_value=False),
+        patch.object(Path, "read_bytes", side_effect=FileNotFoundError()) as process_files,
+        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]),
+        patch.object(server.subprocess, "Popen") as start,
+    ):
+        server.ensure()
+    start.assert_not_called()
+    process_files.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "cmdline, alive", [(b"python ledger_server.py --serve", True), (b"python unrelated.py", False)]
+)
+def test_linux_server_identity_is_preserved(isolated_server, cmdline, alive):
+    server.PIDFILE.write_text(str(os.getpid()))
+    with (
+        patch.object(server.sys, "platform", "linux"),
+        patch.object(Path, "read_bytes", return_value=cmdline) as process_files,
+    ):
+        assert server.server_process_alive() is alive
+    process_files.assert_called_once_with()
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_dead_server_pid_is_not_alive(isolated_server, platform):
+    server.PIDFILE.write_text("999999")
+    with (
+        patch.object(server.sys, "platform", platform),
+        patch.object(server.os, "kill", side_effect=ProcessLookupError()) as probe,
+        patch.object(Path, "read_bytes") as process_files,
+    ):
+        assert server.server_process_alive() is False
+    probe.assert_called_once_with(999999, 0)
+    process_files.assert_not_called()

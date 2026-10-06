@@ -702,6 +702,8 @@ def server_process_alive() -> bool:
         os.kill(pid, 0)
     except (OSError, ValueError):
         return False
+    if sys.platform != "linux":
+        return True
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
