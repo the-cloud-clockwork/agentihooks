@@ -65,4 +65,4 @@ def recent(slug, limit=20, home=None):
             continue
         if isinstance(row, dict):
             rows.append(row)
-    return rows[-limit:]
+    return rows if limit is None else rows[-limit:]

@@ -10,7 +10,7 @@ import pytest
 from scripts.gates import entry
 from scripts.gates.base import Call, Gate, Who
 from scripts.gates.watch import WatchBudget, watcher_alive
-from scripts.swarm.health import activity
+from scripts.swarm.health import activity, findings
 
 ENG, CI, MASTER, SLUG = "sw-eng-1", "sw-ci-1", "sw-master-1", "sw"
 CHECKS = {"command": "gh pr checks 12"}
@@ -176,6 +176,22 @@ class TestDecide:
     def test_a_live_watcher_does_not_free_other_watch_calls(self, gate):
         made(gate, watch=20)
         assert not decide(gate).allowed
+
+    def test_a_rearm_let_through_for_a_dead_watcher_leaves_the_budget_and_health_unchanged(self, gate):
+        made(gate, watch=20)
+        assert decide(gate, tool="Monitor", tool_input=REARM).allowed
+        made(gate, watch=1, rearm=True)
+        counts = activity.counts(SLUG, gate.root)[ENG]
+        assert counts == {"watch": 20, "act": 0, "since": 20}
+        assert not findings.over_watched(counts, *findings.watch_limits(ENG, findings.limits({})))
+        assert not decide(gate).allowed
+
+    def test_a_rearm_with_a_live_watcher_still_counts(self, gate):
+        made(gate, watch=19)
+        beat(gate)
+        assert decide(gate, tool="Monitor", tool_input=REARM).allowed
+        made(gate, watch=1, rearm=True)
+        assert activity.counts(SLUG, gate.root)[ENG] == {"watch": 20, "act": 0, "since": 20}
 
 
 class TestWatcherAlive:

@@ -146,9 +146,10 @@ def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeyp
     assert render.render_claude("rb-role") == out
 
     notice = "> CORRECTION: the passage above is marked wrong for the qitp repo: belongs to another repo."
-    assert (out / "rules" / "role-rule.md").read_text().startswith(f"ROLE RULE MARKER\n\n{notice}")
-    assert f"ROLE PERSONA MARKER\n\n{notice}" in (out / "CLAUDE.md").read_text()
-    assert notice not in (out / "rules" / "bundle-rule.md").read_text()
+    persona = (out / "CLAUDE.md").read_text()
+    assert f"ROLE RULE MARKER\n\n{notice}" in persona
+    assert f"ROLE PERSONA MARKER\n\n{notice}" in persona
+    assert f"BUNDLE RULE MARKER\n\n{notice}" not in persona
     render.render_codex("rb-role")
     codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
     assert f"ROLE RULE MARKER\n\n{notice}" in codex and f"ROLE PERSONA MARKER\n\n{notice}" in codex
@@ -171,8 +172,10 @@ def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypa
     held = (
         f"> CORRECTION: bundle/{rel} was marked wrong more than once and is held whole until the operator releases it."
     )
-    assert (out / "rules" / "role-rule.md").read_text() == f"{held}\n"
-    assert (out / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
+    persona = (out / "CLAUDE.md").read_text()
+    assert f"<!-- rule: role-rule.md (rule) -->\n{held}\n" in persona
+    assert "<!-- rule: bundle-rule.md (rule) -->\nBUNDLE RULE MARKER\n" in persona
+    assert "ROLE RULE MARKER" not in persona
     codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
     assert f"<!-- rule: role-rule.md (rule) -->\n{held}" in codex
     assert "ROLE RULE MARKER" not in codex

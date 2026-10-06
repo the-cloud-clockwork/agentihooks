@@ -17,6 +17,7 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
+agentihooks swarm <id> lift AGENT GATE                            operator lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
@@ -43,7 +44,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, intent, modes, progress
+from scripts.gates import Who, catalog, intent, modes, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -94,8 +95,8 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
-GATE_KEYS = {"talk-gate": "talk", "intent-gate": intent.NAME}
-GATE_MODES = ("enforce", "observe", "off")
+GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
+GATE_MODES = modes.MODES
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -536,6 +537,21 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
+def cmd_lift(store, args):
+    from scripts.gates import entry, lift
+
+    store.config(args.slug)
+    if os.environ.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
+        raise SwarmError("only the operator lifts a gate, from the ledger page or by typing it in the agent's pane")
+    agent = next((a for a in store.agents(args.slug) if a.name == args.agent), None)
+    if agent is None:
+        raise SwarmError(f"{args.agent} is not in this swarm")
+    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
+        raise SwarmError(f"no gate named {args.gate}")
+    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate)
+    print(json.dumps({"agent": agent.name, "gate": args.gate, "minutes": lift.LIFT_SECONDS // 60}))
+
+
 def cmd_send_message(store, args):
     store.config(args.slug)
     LedgerClient().say(args.slug, args.text)
@@ -610,7 +626,7 @@ def cmd_trace_plan(store, args):
     state = trace_plan.intent(ledger.state(args.slug), agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.mode(trace_plan.GATE, os.environ)
+    mode = modes.configured(trace_plan.GATE, store.config(args.slug).gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:
@@ -823,6 +839,9 @@ def build_parser():
     verdict.add_argument("verdict")
     verdict.add_argument("--note", default="")
     sub.add_parser("send-message").add_argument("text")
+    lift = sub.add_parser("lift")
+    lift.add_argument("agent")
+    lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
     done = sub.add_parser("done")

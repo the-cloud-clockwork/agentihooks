@@ -109,64 +109,58 @@ def test_claude_render_tree(world, capsys):
     skills = {p.name for p in (out / "skills").iterdir()}
     assert skills == package_skills | {"role-skill", "bundle-skill"}
     assert all((out / "skills" / name).is_symlink() for name in skills)
-    rules = {p.name for p in (out / "rules").iterdir()}
-    assert {"role-rule.md", "bundle-rule.md"} <= rules
-    assert not {"README.md", "notes.txt"} & rules
-    assert (out / "rules" / "role-rule.md").read_text() == "ROLE RULE MARKER\n"
+    assert not (out / "rules").exists()
     persona = (out / "CLAUDE.md").read_text()
     for marker in ("BUNDLE DIRECTIVE MARKER", "BASE PERSONA MARKER", "ROLE PERSONA MARKER"):
         assert marker in persona
-    assert "ROLE RULE MARKER" not in persona
+    assert "KIT README" not in persona and "KIT NOTES" not in persona
     assert persona.startswith(render.HEADER)
     assert persona.endswith(f"\n\n{render.FOOTER}\n")
 
 
-def test_claude_render_rules_stay_inside_profile_home(world):
-    from scripts.profiles import render
+def test_claude_render_folds_every_rule_into_claude_md(world):
+    from scripts.profiles import render, sources
 
     out = render.render_claude("rb-role")
 
-    rules = list((out / "rules").iterdir())
-    assert rules
-    assert all(path.resolve().is_relative_to(out) for path in rules)
-    assert (out / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
-    assert (out / "rules" / "role-rule.md").read_text() == "ROLE RULE MARKER\n"
+    persona = (out / "CLAUDE.md").read_text()
+    assert "<!-- rule: bundle-rule.md (rule) -->\nBUNDLE RULE MARKER" in persona
+    assert "<!-- rule: role-rule.md (rule) -->\nROLE RULE MARKER" in persona
+    assert persona.index("ROLE PERSONA MARKER") < persona.index("ROLE RULE MARKER")
+    assert not (out / "rules").exists()
+    rows = json.loads(sources.path("rb-role", "claude", render.rendered_root()).read_text())
+    ruled = {Path(row["locator"]["path"]).name for row in rows if row["layer"] == "rule"}
+    assert {"bundle-rule.md", "role-rule.md"} <= ruled
 
 
-def test_claude_render_upgrades_cached_external_rules(world):
+def test_claude_render_drops_the_rules_folder_of_an_earlier_render(world):
     from scripts.profiles import render
 
     out = render.render_claude("rb-role")
-    rule = out / "rules" / "role-rule.md"
-    rule.unlink()
-    rule.symlink_to(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "rules" / "role-rule.md")
+    _write(out / "rules" / "role-rule.md", "OLD COPIED RULE\n")
+    (out / "rules" / "linked.md").symlink_to(world["bundle"] / ".claude" / "rules" / "bundle-rule.md")
     (out / render.STAMP).write_text(json.dumps(render.stamp("rb-role")))
 
     assert render.render_claude("rb-role") == out
-    assert rule.resolve().is_relative_to(out)
-    assert rule.read_text() == "ROLE RULE MARKER\n"
+    assert not (out / "rules").exists()
+    assert (world["bundle"] / ".claude" / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
     assert render.render_claude("rb-role") is None
 
 
-def test_claude_render_refreshes_copied_rules(world):
+def test_claude_render_refreshes_folded_rules(world):
     from scripts.profiles import render
 
     out = render.render_claude("rb-role")
-    rules = out / "rules"
-    _write(rules / "stale.md", "STALE RULE\n")
-    (rules / "broken.md").symlink_to(out / "missing.md")
-    (rules / "local-folder").mkdir()
     source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
     _write(source, "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n")
 
     assert render.render_claude("rb-role", force=True) == out
-    assert not (rules / "stale.md").exists()
-    assert not (rules / "broken.md").is_symlink()
-    assert (rules / "local-folder").is_dir()
-    assert (rules / "bundle-rule.md").read_text() == "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n"
+    persona = (out / "CLAUDE.md").read_text()
+    assert "UPDATED BUNDLE RULE" in persona
+    assert "BUNDLE RULE MARKER" not in persona
 
 
-def test_refresh_rules_updates_rendered_profile_copies(world, monkeypatch):
+def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     from scripts.profiles import render
     from scripts.targets.claude_target import refresh_rules
 
@@ -178,10 +172,25 @@ def test_refresh_rules_updates_rendered_profile_copies(world, monkeypatch):
 
     payload = refresh_rules(out / "rules", out / "CLAUDE.md", out / "CLAUDE.local.md", False)
 
-    assert (out / "rules" / "bundle-rule.md").read_text() == "UPDATED RENDERED RULE\n"
+    assert "UPDATED RENDERED RULE" in (out / "CLAUDE.md").read_text()
+    assert not (out / "rules").exists()
     assert "UPDATED RENDERED RULE" in payload
     assert "ROLE PERSONA MARKER" in payload
     assert "ROLE LOCAL OVERRIDE" in payload
+
+
+def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
+    from hooks.context import claude_md_sanity
+    from hooks.hook_manager import BlockAction
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    monkeypatch.setattr(claude_md_sanity, "get_max_lines", lambda session_id: 3)
+    edit = {"old_string": "ROLE RULE MARKER", "new_string": "ROLE RULE MARKER\nMORE"}
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": str(out / "CLAUDE.md"), **edit}}
+
+    with pytest.raises(BlockAction, match="CLAUDE.md cap of 3 lines"):
+        claude_md_sanity.check_claude_md_write(payload)
 
 
 def test_claude_render_settings(world):
@@ -200,27 +209,89 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
-def test_claude_render_enables_operator_fleet_and_chain_plugins(world):
+def test_claude_render_enables_only_the_chain_plugins(world):
     from scripts.profiles import render
 
     home, bundle = world["home"], world["bundle"]
-    operator = {"mine@m": True, "off@m": False, "fleet@m": False}
-    _write(home / ".claude" / "settings.json", json.dumps({"model": "opus", "enabledPlugins": operator}))
+    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False}}
+    _write(home / ".claude" / "settings.json", json.dumps(operator))
     plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
-    deps = [{**plugin, "id": "fleet@m"}, {**plugin, "id": "muted@m"}, {**plugin, "id": "gone@m", "state": "absent"}]
-    _write(bundle / "deps.json", json.dumps({"deps": deps}))
-    kit = {"enabledPlugins": {"kit@m": True, "off@m": True, "muted@m": False}}
+    _write(bundle / "deps.json", json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
+    kit = {"enabledPlugins": {"kit@m": True, "muted@m": False}}
     _write(bundle / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
 
     out = render.render_claude("rb-role")
 
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"kit@m": True}
+    assert json.loads((home / ".claude" / "settings.json").read_text()) == operator
+
+
+MATTPOCOCK, PLAYWRIGHT = "mattpocock-skills@claude-plugins-official", "playwright@claude-plugins-official"
+
+
+@pytest.mark.parametrize(
+    ("role", "plugins"),
+    [("engineer", [MATTPOCOCK]), ("cicd", [MATTPOCOCK]), ("planner", [MATTPOCOCK]), ("master", [PLAYWRIGHT])],
+)
+def test_claude_render_enables_the_role_defaults(world, role, plugins):
+    from scripts.profiles import render
+
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [rb-base]\n")
+
+    out = render.render_claude(role)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == dict.fromkeys(plugins, True)
+
+
+@pytest.mark.parametrize(
+    ("layer", "plugins"),
+    [
+        ({"impeccable@impeccable": True}, {MATTPOCOCK: True, "impeccable@impeccable": True}),
+        ({MATTPOCOCK: False, "own@m": True}, {"own@m": True}),
+    ],
+)
+def test_a_same_name_profile_extends_or_replaces_the_role_defaults(world, layer, plugins):
+    from scripts.profiles import render
+
+    engineer = world["bundle"] / "profiles" / "engineer"
+    _write(engineer / "profile.yml", "name: engineer\n")
+    _write(engineer / ".claude" / "settings.overrides.json", json.dumps({"enabledPlugins": layer}))
+
+    out = render.render_claude("engineer")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == plugins
+
+
+def test_a_profile_extending_a_role_keeps_its_defaults(world):
+    from scripts.profiles import render
+
+    profiles = world["bundle"] / "profiles"
+    _write(profiles / "engineer" / "profile.yml", "name: engineer\n")
+    _write(profiles / "rb-front" / "profile.yml", "name: rb-front\nextends: [engineer]\n")
+    front = {"enabledPlugins": {"frontend-design@claude-plugins-official": True}}
+    _write(profiles / "rb-front" / ".claude" / "settings.overrides.json", json.dumps(front))
+
+    out = render.render_claude("rb-front")
+
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {
-        "mine@m": True,
-        "off@m": True,
-        "fleet@m": True,
-        "muted@m": False,
-        "kit@m": True,
+        MATTPOCOCK: True,
+        "frontend-design@claude-plugins-official": True,
     }
+
+
+def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+    from scripts.profiles import render
+
+    roles = tmp_path / "package-roles"
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    _write(roles / "master" / "profile.yml", "name: master\n")
+    world["install"]._save_state({})
+
+    out = render.render_claude("package:master")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {PLAYWRIGHT: True}
 
 
 def test_claude_render_subscribes_every_profile_to_brain(world):
@@ -292,6 +363,47 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_seeds_only_startup_state_from_the_default_home(world):
+    from scripts.profiles import render
+
+    project = {"hasTrustDialogAccepted": True, "mcpServers": {"own": {"command": "x"}}, "enabledMcpjsonServers": ["a"]}
+    operator = {
+        "hasCompletedOnboarding": True,
+        "userID": "u1",
+        "numStartups": 40,
+        "claudeAiMcpEverConnected": True,
+        "mcpServers": {"google-gmail": {"type": "http", "url": "https://gmail.example"}},
+        "projects": {"/w": project},
+    }
+    _write(world["home"] / ".claude.json", json.dumps(operator))
+
+    out = render.render_claude("rb-role")
+
+    claude_json = json.loads((out / ".claude.json").read_text())
+    assert {k: v for k, v in claude_json.items() if k != "mcpServers"} == {
+        "hasCompletedOnboarding": True,
+        "userID": "u1",
+        "projects": {"/w": {"hasTrustDialogAccepted": True}},
+    }
+    assert "google-gmail" not in claude_json["mcpServers"]
+
+
+@pytest.mark.parametrize("operator", [None, "not json", json.dumps({"projects": ["/w"], "userID": "u1"})])
+def test_claude_render_seeds_nothing_it_cannot_read(world, operator):
+    from scripts.profiles import render
+
+    path = world["home"] / ".claude.json"
+    if operator is None:
+        path.unlink()
+    else:
+        path.write_text(operator)
+
+    out = render.render_claude("rb-role")
+
+    claude_json = json.loads((out / ".claude.json").read_text())
+    assert set(claude_json) == ({"mcpServers", "userID"} if operator and "u1" in operator else {"mcpServers"})
 
 
 def test_claude_render_gives_each_home_its_own_plans_folder(world):
@@ -430,28 +542,28 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_stamp_redoes_render_when_operator_plugins_change(world, target):
+def test_stamp_ignores_operator_plugins(world, target):
     from scripts.profiles import render
 
     settings = world["home"] / ".claude" / "settings.json"
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
     assert render.render(target, "rb-role") is not None
-    assert render.render(target, "rb-role") is None
 
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
-    assert render.stamp("rb-role")["plugins"] == {"later@m": True, "mine@m": True}
-    assert render.render(target, "rb-role") is not None
     assert render.render(target, "rb-role") is None
 
 
-def test_stamp_reads_operator_plugins_from_the_default_home(world, monkeypatch, tmp_path):
-    from scripts.profiles import render
+def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
+    from scripts.profiles import plugins, render
 
-    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
-    _write(tmp_path / "rendered" / "settings.json", json.dumps({"enabledPlugins": {"other@m": True}}))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "rendered"))
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [rb-role]\n")
+    assert render.stamp("rb-role")["plugins"] == {}
+    assert render.stamp("master")["plugins"] == {PLAYWRIGHT: True}
+    assert render.render("claude", "master") is not None
 
-    assert render.stamp("rb-role")["plugins"] == {"mine@m": True}
+    monkeypatch.setitem(plugins.ROLE_PLUGINS, "master", ("other@m",))
+    assert render.stamp("master")["plugins"] == {"other@m": True}
+    assert render.render("claude", "master") is not None
 
 
 def test_rendered_profiles_lists_the_homes_each_target_has(world):
@@ -586,7 +698,7 @@ def test_package_role_renders_with_no_bundle_linked(world, package_role):
     assert "PACKAGE PERSONA MARKER" in (out / "CLAUDE.md").read_text()
     assert json.loads((out / "settings.json").read_text())["env"]["PACKAGE_FLAG"] == "1"
     assert json.loads((out / ".claude.json").read_text())["mcpServers"]["pkg-srv"] == {"command": "pkg-server"}
-    assert (out / "rules" / "pkg-rule.md").read_text() == "PACKAGE RULE MARKER\n"
+    assert "PACKAGE RULE MARKER" in (out / "CLAUDE.md").read_text()
     assert json.loads((out / render.STAMP).read_text())["chain"] == ["rb-pkg"]
 
 
