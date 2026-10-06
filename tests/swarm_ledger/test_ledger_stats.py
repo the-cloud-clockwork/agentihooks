@@ -241,14 +241,17 @@ class TestReviewBounds:
         done = [task(tid, "done") for tid in ("a", "b", "c", "d")]
         return doc(
             phases=[{"id": "p1", "title": "One", "done": False}],
-            followups=[{"id": "f1", "text": "check disk.", "done": False}, {"id": "f2", "text": "rotate logs"}],
+            followups=[
+                {"id": "f1", "text": "check disk.", "done": False},
+                {"id": "f2", "text": "rotate logs on host X"},
+            ],
             tasks=[*done, task("e", "open"), task("f", "open", depends_on=["e"])],
             time_left_minutes=time_left,
         )
 
     def test_the_chain_bounds_the_review_when_it_is_longer(self):
         assert ledger_stats.review(self.ledger(60), self.closes(True), NOW).split(". ")[2:6] == [
-            "Undecided follow-ups: check disk; rotate logs",
+            "Undecided follow-ups: check disk; rotate logs on host X",
             "Tasks: 2 open, 0 claimed, 0 pr",
             "Close rate: 4 tasks in the last hour",
             "Time left: the page shows 1h 0m, computed 1h 0m from 2 remaining at 4 an hour and a chain of 2 "
@@ -278,17 +281,19 @@ class TestReviewBounds:
 
 
 class TestStatsSyncEvent:
-    def ctx(self):
-        return ledger_core.Context({"rev": 0, "stamps": {}, "events": [], "members": {}}, NOW)
+    def ctx(self, events=()):
+        return ledger_core.Context({"rev": 0, "stamps": {}, "events": list(events), "members": {}}, NOW)
 
     def test_the_stats_sync_event_carries_the_computed_review(self):
-        d = doc(phases=[{"id": "p1", "title": "One", "done": False}], tasks=[task("a", "done")])
-        ctx = self.ctx()
+        d = doc(phases=[{"id": "p1", "title": "One", "done": False}], tasks=[task("a", "done"), task("b", "open")])
+        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
         assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "s1"}, ctx) is True
-        assert [(e["kind"], e["id"], e["text"]) for e in ctx.events] == [
-            ("stats sync requested", "s1", ledger_stats.review(d, ctx.meta, NOW))
+        text = ledger_stats.review(d, ctx.meta, NOW)
+        assert [{k: e[k] for k in ("by", "kind", "target", "id", "text")} for e in ctx.events] == [
+            {"by": "operator", "kind": "stats sync requested", "target": "", "id": "s1", "text": text}
         ]
-        assert "Stale phases: p1 One is open with every task done. " in ctx.events[0]["text"]
+        assert "Stale phases: p1 One is open with every task done. " not in text
+        assert "Close rate: 1 task in the last hour. " in text
 
     def test_the_crew_sync_keeps_its_own_summary(self):
         ctx = self.ctx()
