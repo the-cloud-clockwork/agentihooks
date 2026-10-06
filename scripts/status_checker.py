@@ -14,10 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from scripts.claude_config import claude_home, claude_json
-
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
+
+from scripts.claude_config import claude_home, claude_json
 
 AGENTIHOOKS_HOME = Path(os.getenv("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
 CLAUDE_HOME = claude_home()

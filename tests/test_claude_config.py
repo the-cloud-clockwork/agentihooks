@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,9 +43,7 @@ def test_json_precedence(environ, suffix):
 
 
 def test_config_readers(tmp_path, monkeypatch):
-    import install
-
-    from scripts import claude_quota_balancer, claude_trust, mcp_daemon, mcp_reporter, status_checker
+    from scripts import claude_quota_balancer, claude_trust, install, mcp_daemon, mcp_reporter, status_checker
 
     home = tmp_path / "role"
     home.mkdir()
@@ -64,6 +64,14 @@ def test_config_readers(tmp_path, monkeypatch):
     assert status_checker.check_mcp()["servers"]["agentihooks"]["tools"] == 1
 
 
+def test_trust_uses_supplied_environment(tmp_path, monkeypatch):
+    from scripts.claude_trust import _config_path
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "running"))
+    assert _config_path({"CLAUDE_CONFIG_DIR": str(tmp_path / "supplied")}) == tmp_path / "supplied" / ".claude.json"
+    assert _config_path({"HOME": str(tmp_path / "supplied")}) == tmp_path / "supplied" / ".claude.json"
+
+
 def test_model_explicit_path_and_flags(tmp_path, monkeypatch):
     from scripts.claude_quota_balancer import requested_model
 
@@ -76,10 +84,9 @@ def test_model_explicit_path_and_flags(tmp_path, monkeypatch):
 
 
 def test_profile_detection_and_project_data(tmp_path, monkeypatch):
-    import install
-
     from hooks.context import project_bridge, project_sessions
     from hooks.context.broadcast import encode_cwd
+    from scripts import install
 
     home = tmp_path / "role"
     home.mkdir()
@@ -164,6 +171,14 @@ def test_profile_trace_and_consumers(tmp_path, monkeypatch):
     assert row["locator"]["store"] == str(role / "enforcements.json")
 
 
+def test_trace_without_profile(monkeypatch):
+    from hooks.context import injection_trace, profile_chain
+
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    injection_trace.record("empty-profile-session", "bundle", "source", "text")
+    assert injection_trace.trace("empty-profile-session")[0]["profile"] == ""
+
+
 def test_resolver_is_isolated(monkeypatch):
     from hooks.context.profile_chain import active_profile
     from scripts.claude_config import claude_home, claude_json
@@ -173,3 +188,74 @@ def test_resolver_is_isolated(monkeypatch):
     assert claude_home() == Path.home() / ".claude"
     assert claude_json() == Path.home() / ".claude.json"
     assert active_profile({}) is None
+
+
+def test_status_script_starts_without_installed_package():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "status_checker.py"
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", f"import runpy; runpy.run_path({str(path)!r}, run_name='probe')"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("command", ["lint-claude", "extract-skill"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_document_commands_read_role_home(tmp_path, monkeypatch, command, explicit):
+    from scripts import claude_linter, install
+
+    home = tmp_path / "role"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    source = Path.home() / "explicit.md" if explicit else home / "CLAUDE.md"
+    source.write_text("# Role instructions\n")
+    seen = []
+    monkeypatch.setattr(claude_linter, "lint_report", lambda path: seen.append(path))
+    monkeypatch.setattr(claude_linter, "format_report", lambda report: "checked")
+    monkeypatch.setattr(claude_linter, "extract_to_skill", lambda path, *args: seen.append(path))
+    args = ["agentihooks", command]
+    if command == "extract-skill":
+        args += ["Role instructions", "--name", "role"]
+        if explicit:
+            args += ["--source", "~/explicit.md"]
+    elif explicit:
+        args += ["~/explicit.md"]
+    monkeypatch.setattr(sys, "argv", args)
+    install.main()
+    assert seen == [source]
+
+
+def test_init_checks_role_instructions_when_state_has_no_profile(tmp_path, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from scripts import install
+
+    home = tmp_path / "role"
+    home.mkdir()
+    (home / "CLAUDE.md").write_text("<!-- profile: engineer -->\n")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setattr(install, "_load_state", lambda: {})
+    with pytest.raises(SystemExit) as error:
+        install.cmd_init_unified(Namespace(profile=None, target="claude", force=False, clean=False))
+    assert error.value.code == 1
+    assert "agentihooks init --profile engineer" in capsys.readouterr().err
+
+
+def test_daemon_reads_unicode_config_in_non_utf8_locale(tmp_path, monkeypatch):
+    import locale
+
+    from scripts.mcp_daemon import _client_entry
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    entry = {"command": "engineer-ñ"}
+    (tmp_path / ".claude.json").write_text(
+        json.dumps({"mcpServers": {"agentihooks": entry}}, ensure_ascii=False), encoding="utf-8"
+    )
+    original = locale.setlocale(locale.LC_CTYPE)
+    try:
+        locale.setlocale(locale.LC_CTYPE, "C")
+        assert _client_entry() == entry
+    finally:
+        locale.setlocale(locale.LC_CTYPE, original)
