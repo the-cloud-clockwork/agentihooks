@@ -216,23 +216,44 @@ def test_delegate_and_full_send_the_review_to_the_master_only(env, autonomy):
     )
 
 
-def test_a_phase_already_reviewed_is_not_reviewed_again(env):
+def send_back(note, by="operator"):
+    op = {"op": "phase_review", "id": f"back-{note}", "by": by, "item": "phases/p1", "state": "sent_back", "note": note}
+    core.check_op(op)
+    assert core.sync(SLUG, ops=[op])[1] == []
+
+
+def test_a_sent_back_slice_is_reviewed_again_once_the_planner_finishes(env):
     store, ledger = env
     set_phase("p1", planning="auto")
     run(store, ledger)
     slice_done(ledger, ("t1", DONE_WHEN))
-    review = {
-        "op": "phase_review",
-        "id": "rv",
-        "by": "operator",
-        "item": "phases/p1",
-        "state": "sent_back",
-        "rounds": 1,
-    }
-    assert core.sync(SLUG, ops=[review])[1] == []
     run(store, ledger)
+    send_back("Split the parser task")
+    run(store, ledger)
+    assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "planning"
     assert phase("p1")["review"]["state"] == "sent_back"
-    assert not any(c["by"] == "swarm" for c in phase("p1")["comments"])
+    ledger.update_task(SLUG, "plan-p1", {"state": "done"})
+    run(store, ledger)
+    review = phase("p1")["review"]
+    assert (review["state"], review["rounds"], review["notes"]) == ("pending", 1, ["Split the parser task"])
+    assert len([i for i in items(store, MASTER_SEAT) if i.text.startswith("Review the slice")]) == 2
+
+
+def test_an_escalated_review_is_not_reopened(env):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    run(store, ledger)
+    slice_done(ledger, ("t1", DONE_WHEN))
+    for n in range(3):
+        run(store, ledger)
+        send_back(f"Note {n}")
+        ledger.update_task(SLUG, "plan-p1", {"state": "done"})
+    assert phase("p1")["review"]["escalated"] is True
+    ledger.update_task(SLUG, "plan-p1", {"state": "done"})
+    run(store, ledger)
+    review = phase("p1")["review"]
+    assert (review["state"], review["rounds"], review["escalated"]) == ("sent_back", 3, True)
+    assert len([i for i in items(store, MASTER_SEAT) if i.text.startswith("Review the slice")]) == 3
 
 
 def test_the_pass_returns_what_it_did(env):
@@ -303,18 +324,25 @@ def test_ledger_client_writes_a_phase_comment_and_a_review_record(monkeypatch):
     )
     client = ledger_client.LedgerClient()
     client.comment_phase("demo", "p1", "Slice checked.", "swarm")
-    client.review_phase("demo", "p1", "pending", 0)
-    [[comment], [review]] = sent
+    client.review_phase("demo", "p1", "pending")
+    client.review_phase("demo", "p1", "sent_back", by="master@a1b2c3-0001", note="Split it")
+    [[comment], [review], [back]] = sent
     assert {k: comment[k] for k in ("op", "by", "thread", "text")} == {
         "op": "add",
         "by": "swarm",
         "thread": "phases/p1/comments",
         "text": "Slice checked.",
     }
-    assert {k: review[k] for k in ("op", "by", "item", "state", "rounds")} == {
+    assert {k: v for k, v in review.items() if k != "id"} == {
         "op": "phase_review",
         "by": "swarm",
         "item": "phases/p1",
         "state": "pending",
-        "rounds": 0,
+    }
+    assert {k: v for k, v in back.items() if k != "id"} == {
+        "op": "phase_review",
+        "by": "master@a1b2c3-0001",
+        "item": "phases/p1",
+        "state": "sent_back",
+        "note": "Split it",
     }

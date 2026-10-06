@@ -294,5 +294,13 @@
   "scripts/swarm/slice_check.py:scripts.swarm.slice_check.x__task__mutmut_11:ba393c0fa500035d35fae755c4bfdb362d38932e495d22a7752b9b01fbaf4419": {
     "reader": "Standards",
     "reason": "Any default description under twenty words yields the same under twenty words problem line; an empty and an XXXX default both returned it."
+  },
+  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_3:013146ed3e90e52f4d04638c2bef67bbddf2feeb4dbd9da39e3cb2730acdc3c3": {
+    "reader": "Standards",
+    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
+  },
+  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_5:bdc5ca81647e17a4b7402b00bc2fd3afd7eb5ab58a954af5a2a118110724599a": {
+    "reader": "Standards",
+    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
   }
 }
