@@ -482,3 +482,119 @@ def test_content_preserves_titles_descriptions_and_optional_fields():
         },
         {"id": "p2", "title": "Second", "description": "Next intent", "done": False, "comments": [], "release": False},
     ]
+
+
+@pytest.mark.parametrize(
+    "kind,fields,message",
+    [
+        ("phase_update", {"fields": {"title": 1}}, "title must be a string"),
+        ("phase_update", {"fields": {"description": 1}}, "description must be a string"),
+        ("phase_update", {"fields": {"depends_on": "p1"}}, "depends_on must be a list of nonempty phase ids"),
+        ("phase_update", {"fields": {"planning": "bad"}}, "planning must be manual or auto"),
+        ("phase_update", {"fields": {"release": 1}}, "release must be a boolean"),
+        ("phase_add", {"by": ""}, "phase ops need by, an agent name or operator"),
+        ("phase_add", {"phase": ""}, "phase_add needs a phase id"),
+        ("phase_add", {"title": ""}, "phase_add needs a title"),
+        ("phase_update", {"item": ""}, "phase ops need item phases/<id>"),
+        (
+            "phase_update",
+            {"fields": {"review": {}}},
+            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release')",
+        ),
+        ("phase_review", {"title": "bad"}, "phase_review writes only the review record"),
+        ("phase_review", {"state": "bad"}, "review state must be one of ('pending', 'approved', 'sent_back')"),
+        ("phase_review", {"rounds": -1}, "review rounds must be a nonnegative integer"),
+        ("phase_review", {"note": 1}, "review note must be a string"),
+        ("phase_review", {"escalated": 1}, "review escalated must be a boolean"),
+    ],
+)
+def test_phase_diagnostics_explain_the_refusal(kind, fields, message):
+    values = {"phase": "p2", "title": "Second"} if kind == "phase_add" else {"item": "phases/p1"}
+    if kind == "phase_review":
+        values["state"] = "pending"
+    with pytest.raises(ValueError) as error:
+        core.check_op(operation(kind, **{**values, **fields}))
+    assert str(error.value) == message
+
+
+def test_unknown_dependencies_are_named_together():
+    make_ledger()
+    state, rejected = apply("phase_add", phase="p2", title="Second", depends_on=["absent", "missing"])
+    assert rejected == ["phase-operation"]
+    assert "phase p2 depends on unknown phases: absent, missing" in state["_meta"]["warnings"]
+
+
+def test_phase_operations_record_actor_events_and_stamps():
+    make_ledger()
+    state, _ = apply("phase_add", phase="p2", title="Second")
+    assert state["_meta"]["events"][-1] == {
+        "rev": state["_meta"]["rev"],
+        "at": state["_meta"]["updated_at"],
+        "by": "engineer",
+        "kind": "added",
+        "target": "phases/p2",
+        "text": "Second",
+    }
+    state, _ = apply("phase_update", item="phases/p2", fields={"planning": "auto"})
+    assert state["_meta"]["events"][-1] == {
+        "rev": state["_meta"]["rev"],
+        "at": state["_meta"]["updated_at"],
+        "by": "engineer",
+        "kind": "planning changed",
+        "target": "phases/p2",
+    }
+    assert state["_meta"]["stamps"]["phases/p2/planning"] == {
+        "at": state["_meta"]["updated_at"],
+        "rev": state["_meta"]["rev"],
+        "by": "engineer",
+    }
+
+
+def test_seed_added_phase_can_complete_a_concurrent_cycle():
+    make_ledger([{"title": "First"}, {"title": "Second"}])
+    html, _ = core.paths(SLUG)
+    stale = html.read_text()
+    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
+    seed = core.parse_seed(stale)
+    seed["phases"].append({"id": "p3", "title": "Third", "depends_on": ["p1"]})
+    seed["phases"][1]["depends_on"] = ["p3"]
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
+    state = core.sync(SLUG)[0]
+    assert [p["id"] for p in state["phases"]] == ["p1", "p2"]
+    assert "phase dependency cycle: p1 -> p2 -> p3 -> p1" in state["_meta"]["warnings"]
+
+
+def test_concurrently_added_phase_seed_uses_current_dependencies():
+    make_ledger([{"title": "First"}, {"title": "Second"}])
+    html, _ = core.paths(SLUG)
+    stale = html.read_text()
+    apply("phase_add", phase="p3", title="Third", depends_on=["p1"])
+    seed = core.parse_seed(stale)
+    seed["phases"].append({"id": "p3", "title": "Third"})
+    seed["phases"][0]["depends_on"] = ["p3"]
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
+    state = core.sync(SLUG)[0]
+    assert "depends_on" not in state["phases"][0]
+    assert "phase dependency cycle: p1 -> p3 -> p1" in state["_meta"]["warnings"]
+
+
+def test_stale_explicit_dependency_default_cannot_hide_a_cycle():
+    make_ledger([{"title": "First", "depends_on": []}, {"title": "Second", "depends_on": []}])
+    html, _ = core.paths(SLUG)
+    stale = html.read_text()
+    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
+    seed = core.parse_seed(stale)
+    seed["phases"][1]["depends_on"] = ["p1"]
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
+    state = core.sync(SLUG)[0]
+    assert state["phases"][0]["depends_on"] == ["p2"]
+    assert state["phases"][1]["depends_on"] == []
+    assert "phase dependency cycle: p1 -> p2 -> p1" in state["_meta"]["warnings"]
+
+
+def test_omitting_an_optional_seed_field_preserves_current_value():
+    make_ledger([{"title": "First", "depends_on": [], "planning": "auto", "release": True}])
+    state = edit_seed(lambda seed: [seed["phases"][0].pop(k) for k in ("depends_on", "planning", "release")])
+    assert state["phases"][0]["depends_on"] == []
+    assert state["phases"][0]["planning"] == "auto"
+    assert state["phases"][0]["release"] is True
