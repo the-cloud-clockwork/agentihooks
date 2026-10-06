@@ -84,6 +84,9 @@ class RedisStore:
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
+        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+        if refused:
+            raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
         config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))

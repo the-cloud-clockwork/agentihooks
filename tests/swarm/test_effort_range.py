@@ -152,3 +152,16 @@ def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "effort-max=xhigh") == 0
     assert store.config("sw").effort_max == "max"
+
+
+def test_create_refuses_a_template_lane_effort_outside_the_range(env, tmp_path, monkeypatch, capsys):  # noqa: F811
+    import json
+
+    store, _, _ = env
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    (tmp_path / "swarm-templates").mkdir()
+    lanes = {"eng": {"effort": "max"}}
+    (tmp_path / "swarm-templates" / "hot.json").write_text(json.dumps({"name": "hot", "lanes": lanes}))
+    assert run("sw", "create", "--repo", "/repo", "--template", "hot") == 1
+    assert "outside the swarm effort range medium to high" in capsys.readouterr().err
+    assert store.slugs() == []
