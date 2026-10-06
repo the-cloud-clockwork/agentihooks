@@ -588,14 +588,15 @@ def post_effect(payload: dict) -> PostEffect | None:
 # asks: his prompt this turn, his ledger comment or the master's relay of it
 # ---------------------------------------------------------------------------
 
-_DETERMINER = r"(?:a|an|the|this|that|these|those|new|another|one|my)"
+_ARTICLE = r"a|an|the|this|that|these|those|my"
+_DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
 _NOT_A_NAME = (
     r"(?:about|after|and|are|at|before|by|for|from|how|if|in|into|is|of|on|or|to|what|when|where|which|who|why|with)"
 )
 _SIGNAL = re.compile(
     r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
     rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
-    rf"(?:(?!(?:a|an|the|this|that|these|those|my|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
+    rf"(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
     re.IGNORECASE,
 )
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
