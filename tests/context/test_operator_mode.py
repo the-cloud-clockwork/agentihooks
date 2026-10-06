@@ -132,6 +132,8 @@ def test_a_switch_tells_the_session_its_mode_and_any_other_prompt_tells_nothing(
     )
     assert operator_mode.notice({"prompt": "operator on"}, True, now=103) == ""
     assert operator_mode.notice({"session_id": "s1"}, True, now=104) == ""
+    operator_mode.notice({"session_id": "s2", "prompt": "operator on"}, True, now=100)
+    assert not operator_mode.present("s2", SWARM, now=100 + WINDOW)
 
 
 def test_the_hook_injects_the_notice_uncompressed_and_unlogged(monkeypatch):
