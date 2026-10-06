@@ -125,7 +125,10 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
         assert report["failed"] is False
 
 
-def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "header", ["", '"""sample contract"""\n', '"""sample contract"""\nfrom __future__ import annotations\n']
+)
+def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch, header):
     from mutmut import configuration as engine_config
 
     from scripts.ci_mutation.selection import run_selected
@@ -171,12 +174,19 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
         assert names == ["selected"]
         assert stream.getvalue().endswith("generated = True\n")
-        namespace = {"__file__": str(project / "scripts/sample.py")}
+        observations = []
+
+        def observe():
+            assert engine_config.Config.get().source_paths == [project / "hooks"]
+            observations.append(Path.cwd())
+
+        namespace = {"__file__": str(project / "scripts/sample.py"), "observe": observe}
         cwd = Path.cwd()
         engine_config.Config.reset()
         exec(stream.getvalue(), namespace)
         assert namespace["generated"] is True
-        assert namespace["__doc__"] == "sample contract"
+        assert observations == [cwd]
+        assert namespace.get("__doc__") == ("sample contract" if header else None)
         assert Path.cwd() == cwd
         assert engine_config.Config.get().source_paths == [project / "hooks"]
         assert calls == [("scripts/sample.py", "source", {2, 5})]
@@ -194,7 +204,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
     def selected(filename, source, lines):
         calls.append((filename, source, lines))
-        return '"""sample contract"""\nfrom __future__ import annotations\ngenerated = True\n', ["selected"]
+        return header + "observe()\ngenerated = True\n", ["selected"]
 
     monkeypatch.setattr("scripts.ci_mutation.selection.selected_mutants", selected)
     runner.cli = cli
