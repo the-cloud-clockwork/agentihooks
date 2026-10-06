@@ -610,5 +610,21 @@
   "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_16:f4539d9897457d7a59f3b0adf7bfbf1155ad5f54a96da0c00fbb27a5d8ddb3e9": {
     "reader": "Standards",
     "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_parse__mutmut_3:263bf3ec69ce3470d3ef19936de50aabb005e6ca3ba04cf56bf0ea01d528adf0": {
+    "reader": "Standards",
+    "reason": "Levels never contain a colon, so partition and rpartition yield the same refused or accepted pair."
+  },
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x__without_effort__mutmut_8:5504daec29b77ca155b65a24cb546dfb3958aba296ea0ec3b87f7fcaf77d5178": {
+    "reader": "Standards",
+    "reason": "The trailing sentinel is only tested with startswith model_reasoning_effort=, which both empty and XXXX fail."
+  },
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x__without_effort__mutmut_9:5a3550bfb58a11243f8958a6c6146203aa011e63500d3d948161a4695c2f7d3e": {
+    "reader": "Standards",
+    "reason": "The reset skip value is only read by a truthiness test, where False and None are both falsy."
+  },
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_launch_args__mutmut_24:9ffc31b7d6da93b43614465a396a4068ee6a84aa97955600fc38668a8ed82ded": {
+    "reader": "Standards",
+    "reason": "parse of an empty and of an unknown range string both return the default range."
   }
 }

@@ -84,6 +84,9 @@ def check(op):
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
+    guard = op.get("if_state", [])
+    if not isinstance(guard, list) or not all(state in STATES for state in guard):
+        raise ValueError(f"if_state must be a list of states from {STATES}")
     check_lists(fields)
     check_bools(fields)
     check_profile(fields)
@@ -224,6 +227,8 @@ def _update(doc, op, ctx):
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", [])):
         return False
+    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
+        return True
     after = {**task, **op["fields"]}
     check_lane(after)
     if after.get("state") == "done" and ledger_kinds.unmet(after):

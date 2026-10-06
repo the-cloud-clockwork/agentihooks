@@ -408,7 +408,9 @@ class SwarmPanel(unittest.TestCase):
 
     def run_js(self, names, expr):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        consts = "".join(m + "\n" for m in re.findall(r"^  const (?:STEPS|LIVE_LANES) = .*;$", page, re.M))
+        consts = "".join(
+            m + "\n" for m in re.findall(r"^  const (?:STEPS|LIVE_LANES|EFFORTS|EFFORT_CAPS) = .*;$", page, re.M)
+        )
         script = (
             consts
             + "".join(function_source(n) + "\n" for n in names)
@@ -513,8 +515,64 @@ class SwarmPanel(unittest.TestCase):
                 "codex_up": True,
                 "compact_down": True,
                 "compact_up": False,
+                "effort_min_down": True,
+                "effort_min_up": True,
+                "effort_max_down": True,
+                "effort_max_up": True,
             },
         )
+
+    def test_effort_steps_move_one_level_and_never_cross(self):
+        values = {"effort_min": "medium", "effort_max": "high"}
+        steps = [("effort_min", False), ("effort_min", True), ("effort_max", True), ("effort_max", False)]
+        out = self.run_js(
+            ["capStep"],
+            "[" + ",".join(f"capStep({json.dumps(values)}, '{key}', {str(up).lower()})" for key, up in steps) + "]",
+        )
+        self.assertEqual(
+            out, [{"effort_min": "low"}, {"effort_min": "high"}, {"effort_max": "max"}, {"effort_max": "medium"}]
+        )
+        meet = {"effort_min": "high", "effort_max": "high"}
+        out = self.run_js(["capStep"], f"[capStep({json.dumps(meet)}, 'effort_min', true)]")
+        self.assertEqual(out, [{"effort_min": "high"}])
+        edges = {"effort_min": "low", "effort_max": "max"}
+        out = self.run_js(["capBounds"], f"capBounds({json.dumps(edges)})")
+        self.assertEqual(
+            {k: v for k, v in out.items() if k.startswith("effort")},
+            {"effort_min_down": True, "effort_min_up": False, "effort_max_down": False, "effort_max_up": True},
+        )
+
+    def test_apply_sends_a_changed_effort_range_and_refuses_a_bad_one(self):
+        values = {"max_eng": 2, "effort_min": "medium", "effort_max": "high"}
+        drafts = [
+            {"effort_min": "low", "effort_max": " max "},
+            {"effort_min": "huge"},
+            {"effort_min": "max"},
+            {"effort_max": "high"},
+        ]
+        out = self.run_js(["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d))")
+        self.assertEqual(
+            out,
+            [
+                {"body": {"action": "set", "effort_min": "low", "effort_max": "max"}, "bad": []},
+                {"body": {"action": "set"}, "bad": ["effort floor must be one of low, medium, high, max"]},
+                {
+                    "body": {"action": "set", "effort_min": "max"},
+                    "bad": ["effort floor must not be above the effort ceiling"],
+                },
+                {"body": {"action": "set"}, "bad": []},
+            ],
+        )
+
+    def test_set_passes_the_effort_range_and_refuses_an_unknown_level(self):
+        code, _, run = self.control({"action": "set", "effort_min": "low", "effort_max": "max"})
+        self.assertEqual(code, 200)
+        self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "effort-min=low", "effort-max=max"])
+        for level in ("xhigh", "", 3, None):
+            code, text, run = self.control({"action": "set", "effort_max": level})
+            self.assertEqual(code, 400, level)
+            self.assertIn("effort_max must be one of low, medium, high, max", text)
+            run.assert_not_called()
 
     def test_a_one_lane_set_runs_only_that_lane(self):
         code, _, run = self.control({"action": "set", "max_ci": 2})

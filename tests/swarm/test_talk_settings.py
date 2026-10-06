@@ -37,7 +37,7 @@ def test_an_agent_cannot_set_a_gate_mode(env, monkeypatch, capsys):  # noqa: F81
 
 
 def test_an_unknown_gate_mode_is_refused():
-    with pytest.raises(SwarmError, match=r"talk-gate takes enforce\|observe\|off"):
+    with pytest.raises(SwarmError, match=r"talk-gate takes deny, log only, skip"):
         cli.gate_mode("talk-gate", "loud", {})
     assert cli.gate_mode("talk-gate", "off", {"AGENTIHOOKS_AGENT_NAME": "operator"}) == {"talk": "off"}
 

@@ -447,7 +447,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-caps { column-gap: var(--space-tight); }
 .sw-gates { --gate-w: calc(30.5ch + 3 * var(--space-tight)); display: grid; grid-template-columns: repeat(auto-fill, var(--gate-w)); gap: var(--space-tight) var(--space-row); max-width: calc(5 * var(--gate-w) + 4 * var(--space-row)); font-size: var(--fs-meta); }
 #gates-label, .sw-gates { grid-column: 1 / -1; }
-.sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 7.5ch 7.5ch 3.5ch; gap: var(--space-tight); align-items: center; }
+.sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 5.5ch 8ch 5ch; gap: var(--space-tight); align-items: center; }
 .sw-gate .sw-cap-name { margin: 0; text-align: right; white-space: nowrap; }
 .sw-gate .sw-mode { min-height: 28px; text-align: left; padding: 4px 0; font-size: inherit; }
 @media (max-width: 1599px) { .sw-caps { grid-column: 1 / -1; } }
@@ -602,6 +602,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <div class="sw-cap"><span class="sw-cap-name">plan</span><label class="sw-field"><input class="sw-num" id="cap-plan" type="text" inputmode="numeric" autocomplete="off" data-cap="max_plan" aria-label="Planner cap"></label><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">codex share</span><label class="sw-field"><input class="sw-num" id="cap-codex" type="text" inputmode="numeric" autocomplete="off" data-cap="codex_share" aria-label="Codex share"><span class="sw-unit">%</span></label><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">compact limit</span><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">effort min</span><label class="sw-field"><input class="sw-num" id="cap-effort_min" type="text" autocomplete="off" data-cap="effort_min" aria-label="Effort floor"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_min_down" aria-label="Lower effort floor">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="effort_min_up" aria-label="Raise effort floor">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">effort max</span><label class="sw-field"><input class="sw-num" id="cap-effort_max" type="text" autocomplete="off" data-cap="effort_max" aria-label="Effort ceiling"></label><button class="sw-btn sw-step" type="button" data-swarm="effort_max_down" aria-label="Lower effort ceiling">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="effort_max_up" aria-label="Raise effort ceiling">+</button></div>
 <button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
@@ -1662,7 +1664,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
   const GATE_MODES = ["enforce", "observe", "off"];
+  const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
   const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100, "codex share"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
+  const EFFORTS = ["low", "medium", "high", "max"];
+  const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
   const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -1703,6 +1708,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function capStep(values, lane, up) {
+    if (lane in EFFORT_CAPS) {
+      const [low, high] = lane === "effort_min" ? [0, EFFORTS.indexOf(values.effort_max)] : [EFFORTS.indexOf(values.effort_min), EFFORTS.length - 1];
+      return { [lane]: EFFORTS[Math.min(high, Math.max(low, EFFORTS.indexOf(values[lane]) + (up ? 1 : -1)))] };
+    }
     const [key, step, low, high] = STEPS[lane];
     return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
   }
@@ -1716,6 +1725,15 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       if (!(value >= low && value <= high)) bad.push(`${name || lane} must be a whole number from ${low} to ${high}`);
       else if (value !== Number(values[key])) body[key] = value;
     }
+    const range = { ...values, ...draft };
+    for (const [key, name] of Object.entries(EFFORT_CAPS)) {
+      if (!(key in draft)) continue;
+      const value = String(draft[key]).trim();
+      if (!EFFORTS.includes(value)) bad.push(`${name} must be one of ${EFFORTS.join(", ")}`);
+      else if (value !== values[key]) body[key] = value;
+    }
+    const [floor, ceiling] = [range.effort_min, range.effort_max].map((v) => EFFORTS.indexOf(String(v).trim()));
+    if (floor >= 0 && ceiling >= 0 && floor > ceiling) bad.push("effort floor must not be above the effort ceiling");
     return { body, bad };
   }
 
@@ -1729,13 +1747,16 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       off[`${lane}_down`] = !(Number(values[key]) > low);
       off[`${lane}_up`] = !(Number(values[key]) < high);
     }
+    const low = EFFORTS.indexOf(values.effort_min), high = EFFORTS.indexOf(values.effort_max);
+    Object.assign(off, { effort_min_down: !(low > 0), effort_min_up: !(low >= 0 && low < high), effort_max_down: !(high > low && low >= 0), effort_max_up: !(high >= 0 && high < EFFORTS.length - 1) });
     return off;
   }
 
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
-      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit",
+      effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1781,7 +1802,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("swarm-gates").dataset.modes = modes;
     $("swarm-gates").replaceChildren(...gates.map(([name, mode]) => h("div", { class: "sw-cap sw-gate", role: "group", "aria-label": `${name} gate mode` },
       h("span", { class: "sw-cap-name", "data-gate-name": name, text: name }),
-      ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode), text: m })))));
+      ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode || GATE_LABELS[m] === mode), text: GATE_LABELS[m] })))));
   }
 
   async function swarmControl(body, op = body.action) {
@@ -1851,7 +1872,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const btn = event.target.closest("button[data-swarm]");
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
-    const step = action.match(/^(eng|ci|plan|codex|compact)_(up|down)$/);
+    const step = action.match(/^(eng|ci|plan|codex|compact|effort_min|effort_max)_(up|down)$/);
     if (step) {
       const change = capStep(capCurrent(), step[1], step[2] === "up");
       Object.assign(capDraft, change);

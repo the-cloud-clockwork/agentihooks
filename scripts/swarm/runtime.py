@@ -10,7 +10,7 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.profiles import plugins
-from scripts.swarm import model_pick, naming, priming_trace, prompt
+from scripts.swarm import effort_range, model_pick, naming, priming_trace, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
@@ -37,11 +37,12 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
-def _model_args(agent, chosen, environ):
+def _model_args(agent, chosen, environ, bounds):
     from scripts.init_agent import model_effort, model_flags
 
     model, effort = model_effort(agent, [], environ)
-    return model_flags(agent, _set(chosen.get("model")) or model, _set(chosen.get("effort")) or effort)
+    effort = effort_range.clamp(agent, _set(chosen.get("effort")) or effort, bounds)
+    return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
 
 def _lane_default(lane, agent, chosen):
@@ -116,7 +117,11 @@ class HerdrRuntime:
             picked = _lane_default(lane, agent, chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []
         placed = self._launch(
-            config, lane, task["id"], name, [*argv, "--", *_model_args(agent, picked.__dict__, environ), *mode]
+            config,
+            lane,
+            task["id"],
+            name,
+            [*argv, "--", *_model_args(agent, picked.__dict__, environ, effort_range.of(config)), *mode],
         )
         return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 
@@ -132,7 +137,7 @@ class HerdrRuntime:
         )
         picked = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
         route = ["--route", agent.account] if agent.account else []
-        model = _model_args(agent.harness, picked.__dict__, dict(os.environ))
+        model = _model_args(agent.harness, picked.__dict__, dict(os.environ), effort_range.of(config))
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
@@ -180,6 +185,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
+                    effort_range.VARIABLE: ":".join(effort_range.of(config)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )

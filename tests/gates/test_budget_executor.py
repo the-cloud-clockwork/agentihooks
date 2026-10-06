@@ -115,10 +115,10 @@ def test_a_third_continuation_is_refused_and_a_second_allowed(hook):
     assert [hook("SendMessage", {"to": "reader", "message": "again"}).returncode for _ in range(3)] == [0, 0, 2]
 
 
-def test_the_sub_agent_counter_ships_in_observe(hook):
-    observe = {"AGENTIHOOKS_GATE_SUBAGENTS": ""}
-    assert [hook("Agent", launch("x"), observe).returncode for _ in range(3)] == [0, 0, 0]
-    assert [r["kind"] for r in hook.rows()] == ["count", "count", "observe"]
+def test_the_sub_agent_counter_enforces_by_default(hook):
+    unset = {"AGENTIHOOKS_GATE_SUBAGENTS": ""}
+    assert [hook("Agent", launch("x"), unset).returncode for _ in range(3)] == [0, 0, 2]
+    assert [r["kind"] for r in hook.rows()] == ["count", "count", "deny"]
 
 
 def test_a_third_rerun_of_a_failed_job_is_refused(hook):
