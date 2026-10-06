@@ -10,6 +10,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
   say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
   comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
+  artifact PATH TITLE [--task ID]     publish a markdown, JSON, SVG or image file for operator review; it opens
+                                      rendered from the page's artifacts list (task defaults to your swarm task)
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -30,7 +32,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task;
+                                      proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
+                                      proof.command=C proof.output=O
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
 
@@ -43,6 +47,7 @@ Env: LEDGER_DIR, LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765).
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -148,18 +153,31 @@ def cmd_say(args):
 
 
 def upload_image(slug: str, name: str, path: str) -> dict:
+    return upload(slug, name, path, "media", {})
+
+
+def upload_artifact(slug: str, name: str, path: str) -> dict:
+    return upload(slug, name, path, "artifacts", {"X-Artifact-Name": Path(path).name})
+
+
+def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
     token = core.read_token(core.paths(slug)[0].read_text(encoding="utf-8")) or ""
     req = urllib.request.Request(
-        f"{BASE}/api/media/{slug}",
+        f"{BASE}/api/{route}/{slug}",
         data=Path(path).read_bytes(),
-        headers={"X-Ledger-Token": token, "X-Ledger-Agent": name, "Content-Type": "application/octet-stream"},
+        headers={
+            "X-Ledger-Token": token,
+            "X-Ledger-Agent": name,
+            "Content-Type": "application/octet-stream",
+            **extra,
+        },
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
-        sys.exit(f"server refused image: {exc.code} {exc.read().decode(errors='replace')}")
+        sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")
 
 
 def cmd_comment(args):
@@ -170,6 +188,15 @@ def cmd_comment(args):
         entry["attachments"] = attachments
     state = call(args.slug, [entry])
     print(json.dumps({"posted": not state.get("rejected")}))
+
+
+def cmd_artifact(args):
+    file = upload_artifact(args.slug, args.name, args.path)
+    task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file)])
+    print(json.dumps({"published": not state.get("rejected")}))
+    if state.get("rejected"):
+        sys.exit("rejected: join the ledger first and name a task it holds")
 
 
 def cmd_phase(args):
@@ -307,6 +334,11 @@ def cmd_task(args):
     for key in ("depends_on", "territory"):
         if key in fields:
             fields[key] = comma_list(fields[key])
+    for dotted in [key for key in fields if "." in key]:
+        name, _, sub = dotted.partition(".")
+        if not isinstance(fields.get(name, {}), dict):
+            sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
+        fields.setdefault(name, {})[sub] = fields.pop(dotted)
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))
 
@@ -352,6 +384,10 @@ def build_parser():
             parser_.add_argument(
                 "--image", action="append", default=[], help="image path to upload; repeat for several"
             )
+    artifact = sub.add_parser("artifact")
+    artifact.add_argument("path")
+    artifact.add_argument("title")
+    artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state", choices=["done", "open"])

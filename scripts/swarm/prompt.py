@@ -170,6 +170,9 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
         waiting_line(led),
+        f"Publish every document or image that needs operator review (proposal, design, plan, proof) with {led} "
+        'artifact <file> "<title in plain words>": markdown, JSON, SVG or an image; the operator reads it rendered '
+        "from the artifacts icon on the ledger page.",
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",

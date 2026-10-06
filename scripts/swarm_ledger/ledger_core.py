@@ -66,6 +66,7 @@ THREADS = {
 }
 SCALARS = ("title", "overview", "sources", "orchestrator", "chat_instructions", "policy", "time_left_minutes")
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass")
+ARTIFACT_OPS = ("artifact_add",)
 OPERATOR_THREADS = re.compile(r"^(notes|questions/[^/]+/answers)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 NOUN = {"comments": "comment", "answers": "answer", "notes": "note", "chat": "message"}
@@ -161,6 +162,7 @@ def normalize(doc):
     doc.setdefault("chat", [])
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
+    doc.setdefault("artifacts", [])
     doc.setdefault("tasks", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
@@ -533,6 +535,10 @@ def apply_op(doc, op, ctx):
         return record_sync(doc, op, ctx)
     if op["op"] in EXTENSION_OPS:
         return EXTENSION_OPS[op["op"]].apply(doc, op, ctx)
+    if op["op"] in ARTIFACT_OPS:
+        import ledger_artifacts
+
+        return ledger_artifacts.apply(doc, op, ctx)
     thread = get_thread(doc, op["thread"])
     if thread is None:
         return False
@@ -582,6 +588,7 @@ def check_op(op):
         *SYNC_KINDS,
         *EXTENSION_OPS,
         *AGENT_OPS,
+        *ARTIFACT_OPS,
     ):
         raise ValueError("each op needs op add, edit, delete, clear, sync or an agent op")
     if not isinstance(op.get("id"), str) or not op["id"]:
@@ -592,6 +599,10 @@ def check_op(op):
         return None
     if op["op"] in EXTENSION_OPS:
         return EXTENSION_OPS[op["op"]].check(op)
+    if op["op"] in ARTIFACT_OPS:
+        import ledger_artifacts
+
+        return ledger_artifacts.check(op)
     if op["op"] in AGENT_OPS:
         import ledger_agent_ops
 
