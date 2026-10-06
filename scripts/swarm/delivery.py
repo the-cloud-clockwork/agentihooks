@@ -35,6 +35,12 @@ class HerdrMessenger:
     def prompt(self, agent, text):
         self.herdr(["agent", "prompt", self.target(agent), text])
 
+    def typed_input(self, agent):
+        from scripts.swarm.pane import typed_input
+
+        capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+        return typed_input(capture.get("text", ""))
+
 
 def recipients(store, slug, to, sender):
     to, sender = store.names.resolve(to), store.names.resolve(sender)

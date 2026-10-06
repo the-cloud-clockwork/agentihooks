@@ -56,3 +56,16 @@ def test_the_hook_heartbeat_is_written_only_for_a_swarm_agent(redis):
     assert swarm_heartbeat.beat(idle.IDLE, environ=swarm, redis=redis, now_ms=NOW) is True
     assert idle.heartbeat(redis, "sw", "sw-eng-1") == {"state": "idle", "at": NOW}
     assert swarm_heartbeat.beat(idle.WORKING, environ={"AGENTIHOOKS_AGENT_NAME": "x"}, redis=redis) is False
+
+
+def test_the_hook_records_operator_prompts_but_not_the_ones_the_swarm_types(redis):
+    from scripts.inbox.wake import WAKE_TEXT
+    from scripts.swarm.tick import NUDGE
+
+    swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-master-1"}
+    assert swarm_heartbeat.heard(WAKE_TEXT, environ=swarm, redis=redis, now_ms=NOW) is False
+    assert swarm_heartbeat.heard(NUDGE.format(slug="sw"), environ=swarm, redis=redis, now_ms=NOW) is False
+    assert idle.last_prompt(redis, "sw", "sw-master-1") is None
+    assert swarm_heartbeat.heard("hold on", environ=swarm, redis=redis, now_ms=NOW) is True
+    assert idle.last_prompt(redis, "sw", "sw-master-1") == NOW
+    assert swarm_heartbeat.heard("hold on", environ={"AGENTIHOOKS_AGENT_NAME": "x"}, redis=redis) is False

@@ -58,6 +58,14 @@ def test_inbox_wakes_read_and_prompt_the_agents_pane_id():
     assert calls == [["agent", "get", "w:p9"], ["agent", "prompt", "w:p9", "inbox"]]
 
 
+def test_typed_input_reads_the_visible_pane_with_its_styles():
+    calls = []
+    capture = {"text": "─────\n❯\xa0\x1b[2mTry this\x1b[0m half typed\n─────"}
+    messenger = delivery.HerdrMessenger(herdr=lambda args: calls.append(args) or capture)
+    assert messenger.typed_input(AgentRecord("sw-eng-1", "eng", "t", pane_id="w:p9")) == "half typed"
+    assert calls == [["pane", "read", "w:p9", "--source", "visible", "--format", "ansi"]]
+
+
 def inbox(store, address):
     return [(i.sender, i.text, i.state) for i in InboxStore(store.redis).inbox(address)]
 

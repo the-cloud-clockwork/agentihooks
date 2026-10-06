@@ -124,7 +124,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
-        actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
+        actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ))
         taken = snapshot.auto(store, slug, now_ms(), os.environ)
         store.redis.set(store.key(slug, "last-tick"), now_ms())
         return actions + ([f"took automatic snapshot {taken.name}"] if taken else [])

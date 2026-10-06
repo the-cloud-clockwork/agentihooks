@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm.pane import selection_prompt
+from scripts.swarm.pane import selection_prompt, typed_input
 
 
 @pytest.mark.parametrize("arrow", ["❯", "›", "→", ">"])
@@ -35,3 +35,39 @@ def test_selection_dialog_can_have_a_cancel_footer_after_confirmation():
 )
 def test_non_dialog_content_is_not_waiting(text):
     assert selection_prompt(text) == ""
+
+
+RULE = "\x1b[0m\x1b[38;2;136;136;136m" + "─" * 40
+ECHO = (
+    "\x1b[38;2;153;153;153m\x1b[48;2;55;55;55m❯ \x1b[0m\x1b[38;2;255;255;255m\x1b[48;2;55;55;55mhow is the swarm\x1b[0m"
+)
+STATUS = "  \x1b[38;2;153;153;153m25% | Opus 5.5\x1b[0m\n  ⏵⏵ bypass permissions on"
+
+
+def claude(*box):
+    return "\n".join([ECHO, "", "  The swarm runs four agents.", "", RULE, *box, RULE, STATUS])
+
+
+@pytest.mark.parametrize(
+    "capture, typed",
+    [
+        (claude("❯\xa0"), ""),
+        (claude('❯\xa0\x1b[2mTry "fix lint errors"\x1b[0m'), ""),
+        (claude("❯\xa0wait, pause the"), "wait, pause the"),
+        (claude("❯\xa0\x1b[38;2;255;255;255mfirst line\x1b[0m", "  second line"), "first line\nsecond line"),
+        (claude("❯\xa0", "  still typing"), "still typing"),
+        ("Working on code\n› \x1b[2mAsk Codex to do anything\x1b[0m\n  100% context left", ""),
+        ("Working on code\n› stop after this\n  100% context left", "stop after this"),
+        ("", ""),
+        ("  The swarm runs four agents.", ""),
+        ("❯ \x1b[2mhint\x1b[22mtyped", "typed"),
+        ("❯ \x1b[2mhint\x1b[mtyped", "typed"),
+        ("❯ \x1b[38;5;2mgreen\x1b[0m", "green"),
+        ("❯ \x1b[48;5;2mshaded\x1b[0m", "shaded"),
+        ("❯ \x1b[58;2;1;2;3munderlined\x1b[0m", "underlined"),
+        ("❯ \x1b[1;2mbold hint\x1b[0m", ""),
+        ("❯ typed\x1b[2m hint\n" + RULE + "\nstatus\x1b[0m", "typed"),
+    ],
+)
+def test_typed_input_is_the_text_on_the_last_input_line_without_dim_hints(capture, typed):
+    assert typed_input(capture) == typed

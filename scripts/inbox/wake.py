@@ -8,6 +8,7 @@ from dataclasses import replace
 
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
+from scripts.swarm import idle
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import ledger_comments
@@ -15,6 +16,9 @@ from scripts.swarm_ledger import ledger_comments
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
 DEFAULT_WINDOW_S = 300
+QUIET_ENV = "AGENTIHOOKS_INBOX_QUIET_S"
+DEFAULT_QUIET_S = 180
+IN_USE = "in use"
 BY = "swarm"
 WAKE_TEXT = "You have unread inbox messages: run agentihooks msg inbox, then read and close each one."
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
@@ -22,6 +26,10 @@ WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator
 
 def window_ms(environ):
     return int(environ.get(WINDOW_ENV) or DEFAULT_WINDOW_S) * 1000
+
+
+def quiet_ms(environ):
+    return int(environ.get(QUIET_ENV) or DEFAULT_QUIET_S) * 1000
 
 
 def decide(item, pane, history, now_ms, window):
@@ -41,7 +49,7 @@ def decide(item, pane, history, now_ms, window):
     return TO_MASTER if due and item.sender != BY else None
 
 
-def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
+def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     names = {a.name for a in agents}
     panes = {a.name: a for a in agents if a.pane_id}
     boss = next((a for a in agents if a.lane == MASTER), None)
@@ -65,7 +73,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
             continue
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
-            statuses[agent.name] = _status(herdr, agent)
+            statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
@@ -110,6 +118,24 @@ def _status(herdr, agent):
         return herdr.agent_status(agent)
     except Exception:
         return "unknown"
+
+
+def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
+    """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text."""
+    state = _status(herdr, agent)
+    if state not in READY:
+        return state
+    last = idle.last_prompt(redis, slug, agent.name)
+    if last is not None and now_ms - last < quiet:
+        return IN_USE
+    return IN_USE if _typing(herdr, agent) else state
+
+
+def _typing(herdr, agent):
+    try:
+        return herdr.typed_input(agent)
+    except Exception:
+        return ""
 
 
 def _wake(herdr, agent, prompted):

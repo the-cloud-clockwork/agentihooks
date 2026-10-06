@@ -33,6 +33,21 @@ def heartbeat(redis, slug, name):
     return json.loads(raw) if raw else None
 
 
+def prompted(redis, slug, name, at):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
+    redis.set(key(slug, "prompt", name), at, ex=BEAT_TTL_S)
+
+
+def last_prompt(redis, slug, name):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
+    raw = redis.get(key(slug, "prompt", name))
+    return int(raw) if raw else None
+
+
 def declare_wait(redis, slug, name, until, reason, at):
     from scripts.swarm.naming import NameRegistry
 
