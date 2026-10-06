@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
+from scripts.profiles import plugins
 from scripts.swarm import model_pick, naming, priming_trace, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
@@ -95,20 +96,19 @@ class HerdrRuntime:
 
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
+        profile = task.get("profile") or chosen.get("profile", DEFAULT_PROFILES[lane])
+        requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         if spawns is None:
-            agent, reason = self.choose(_set(chosen.get("agent")), environ)
+            agent, reason = self.choose(requested, environ)
         else:
             share, floor = codex_split(config, environ)
-            agent, reason = agent_choice.choose_shared(
-                _set(chosen.get("agent")), environ, spawns, share, floor, choose=self.choose
-            )
+            agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
         if reason == agent_choice.ALL_FULL:
             raise SpawnError(reason)
         text = prompt.build(
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         priming_trace.write(self.home, config.slug, name, task)
-        profile = task.get("profile") or chosen.get("profile", DEFAULT_PROFILES[lane])
         argv = self._argv(config, name, agent, text, f"{name}.md", profile)
         if lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)

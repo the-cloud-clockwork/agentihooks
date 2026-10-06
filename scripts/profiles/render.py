@@ -4,10 +4,12 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import quarantine
@@ -37,6 +39,21 @@ FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc))
 
 def rendered_root() -> Path:
     return _install_module().AGENTIHOOKS_STATE_DIR / "profiles"
+
+
+def live_root() -> Path:
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+
+
+def _refuse_live_render_from_another_checkout(name: str) -> None:
+    _i = _install_module()
+    running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
+    if running == installed or not rendered_root().resolve().is_relative_to(live_root().resolve()):
+        return
+    raise ValueError(
+        f"this run comes from {running}, not the installed agentihooks at {installed}, so it renders only "
+        f"into a scratch home: agentihooks profile render {name} --out <dir>"
+    )
 
 
 def _global_env() -> dict[str, str]:
@@ -84,7 +101,8 @@ def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path
 
 def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     _i = _install_module()
-    doc = _i.substitute_paths(_i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target]))
+    base = _i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target])
+    doc = _i.substitute_paths(base, dst=str(_i.install_root()))
     doc = _i.substitute_paths(doc, "__PYTHON__", str(_i._detect_venv() or sys.executable))
     for root in _roots(bundle, dirs):
         path = _i._native_layer_path(root, target, _i._NATIVE_SETTINGS_NAME)
@@ -176,6 +194,22 @@ def _relink(dst: Path, items: dict[str, Path]) -> None:
         (dst / name).symlink_to(src)
 
 
+def _link_commands(skills: Path, commands: Path) -> None:
+    for old in skills.iterdir():
+        if old.is_dir() and not old.is_symlink() and [p.name for p in old.iterdir()] == ["SKILL.md"]:
+            (old / "SKILL.md").unlink()
+            old.rmdir()
+    if not commands.is_dir():
+        return
+    for command in sorted(commands.iterdir()):
+        skill = skills / command.stem
+        # Codex skips a symlinked SKILL.md and one without frontmatter; a hardlink keeps it the Claude file.
+        if skill.exists() or not command.read_text().startswith("---"):
+            continue
+        skill.mkdir()
+        (skill / "SKILL.md").hardlink_to(command.resolve())
+
+
 def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
@@ -191,6 +225,7 @@ def _read_json(path: Path) -> dict | None:
 
 
 def render_claude(name: str, force: bool = False) -> Path | None:
+    _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
     current = _stamp(bundle, dirs)
@@ -249,6 +284,8 @@ def _operator_codex_home() -> Path:
 def _link(link: Path, target: Path) -> None:
     if link.is_symlink():
         link.unlink()
+    elif link.exists():
+        shutil.move(link, link.with_name(f"{link.name}.bak.{datetime.now(timezone.utc):%Y%m%d%H%M%S}"))
     link.symlink_to(target)
 
 
@@ -289,6 +326,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     out.mkdir(exist_ok=True)
     _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
+    _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
         _link(out / item, operator / item)
     _link(manifest, sources.path(name, "claude", rendered_root()))

@@ -364,6 +364,15 @@ def _codex_tool_call(name: str, args: Any) -> tuple[str, dict[str, Any]]:
     return mapped, args
 
 
+def _codex_answers(resp: Any) -> Any:
+    """Codex question answers, a JSON string of ``{id: {"answers": [...]}}``, in Claude's ``{id: "a, b"}`` shape."""
+    try:
+        answers = json.loads(resp)["answers"]
+        return {"answers": {qid: ", ".join(answer["answers"]) for qid, answer in answers.items()}}
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return resp
+
+
 def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if is_copilot():
         return _normalize_copilot(payload)
@@ -375,6 +384,9 @@ def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         payload["tool_name"] = name
         if args:
             payload["tool_input"] = args
+
+    if payload.get("tool_name") == "AskUserQuestion" and "tool_response" in payload:
+        payload["tool_response"] = _codex_answers(payload["tool_response"])
 
     # Some handlers read the older ``tool_output`` / ``tool_result`` aliases.
     resp = payload.get("tool_response")

@@ -21,3 +21,15 @@ def role_defaults(chain: list[str]) -> dict[str, bool]:
 
 def allowed(chain: list[str], layered: dict) -> dict[str, bool]:
     return {plugin: True for plugin, on in {**role_defaults(chain), **layered}.items() if on}
+
+
+def claude_only(name: str) -> bool:
+    """True when a profile of the chain enables a plugin in its own Claude layer: Codex has no plugins."""
+    from scripts.targets._common import _install_module
+
+    _i = _install_module()
+    for _, root in _i._resolve_profile_chain(name):
+        path = _i._native_layer_path(root, "claude", _i._NATIVE_SETTINGS_NAME)
+        if path and any((_i._load_native_layer(path).get("enabledPlugins") or {}).values()):
+            return True
+    return False
