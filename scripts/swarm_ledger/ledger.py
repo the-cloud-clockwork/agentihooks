@@ -25,6 +25,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
+  relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
+                                      or his comment on another item; WORDS must be in an operator prompt or
+                                      AskUserQuestion answer this session recorded in the last hour
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
@@ -252,6 +255,17 @@ def cmd_priority(args):
         sys.exit(1)
 
 
+def cmd_relay(args):
+    import ledger_relay
+
+    if not ledger_relay.verified(args.name, args.quote):
+        sys.exit(
+            "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
+        )
+    send(args, "relay", item=args.item, text=args.text, quote=args.quote)
+    print(json.dumps({"relayed": True, "item": args.item}))
+
+
 def cmd_scope(args):
     send(args, "set", **with_status(args, path=f"{args.item}/out_of_scope", value=args.state == "out"))
     print(json.dumps({"item": args.item, "scope": args.state}))
@@ -429,6 +443,10 @@ def build_parser():
     priority.add_argument("action", choices=["add", "clear"])
     priority.add_argument("values", nargs="*")
     priority.add_argument("--all", action="store_true")
+    relay = sub.add_parser("relay")
+    relay.add_argument("item")
+    relay.add_argument("text")
+    relay.add_argument("--quote", required=True)
     sub.add_parser("time-left").add_argument("minutes", type=_duration)
     sub.add_parser("claim").add_argument("item")
     task = sub.add_parser("task")

@@ -442,5 +442,9 @@
   "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
     "reader": "Standards",
     "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."
+  },
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
+    "reader": "Standards",
+    "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
   }
 }
