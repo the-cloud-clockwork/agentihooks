@@ -1625,6 +1625,7 @@ def on_pre_tool_use(payload: dict) -> None:
     from hooks.context import planner_plan
 
     if planner_plan.accepts(tool_name):
+        # Claude Code keeps the plan approval prompt for an allow that does not return the tool input.
         emit_permission_decision(
             "PreToolUse",
             "allow",

@@ -8,10 +8,6 @@ REASON = "Swarm planner: the ledger plan review approves this plan, not the pane
 
 
 def accepts(tool_name: str, environ=None, target: str | None = None) -> bool:
-    """True when this tool call is a swarm planner's plan exit.
-
-    The host only skips its approval prompt when the allow carries the tool input back as the updated input.
-    """
     env = os.environ if environ is None else environ
     return (
         bool(env.get("AGENTIHOOKS_SWARM"))
