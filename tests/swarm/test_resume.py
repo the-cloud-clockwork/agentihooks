@@ -67,6 +67,7 @@ class ResumingRuntime(FakeRuntime):
             model="opus",
             effort="high",
             model_source="lane-default",
+            model_confidence=0.5,
         )
 
 
@@ -114,11 +115,11 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     assert "Before acting, re-read" in text
 
 
-def test_a_resumed_agent_record_takes_the_model_and_effort_it_relaunched_with(store, tmp_path):
+def test_a_resumed_agent_record_takes_the_model_effort_and_source_its_relaunch_reports(store, tmp_path):
     saved(store, tmp_path, model="sonnet", effort="low", model_source="luna", model_confidence=0.99)
     restore(store, ResumingRuntime())
     eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
-    assert (eng.model, eng.effort, eng.model_source, eng.model_confidence) == ("opus", "high", "lane-default", None)
+    assert (eng.model, eng.effort, eng.model_source, eng.model_confidence) == ("opus", "high", "lane-default", 0.5)
 
 
 def test_a_resume_that_fails_to_start_leaves_the_agent_to_start_fresh_with_the_reason(store, tmp_path):

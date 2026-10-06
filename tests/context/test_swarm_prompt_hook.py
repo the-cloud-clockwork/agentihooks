@@ -32,12 +32,14 @@ def test_user_prompt_submit_hands_its_prompt_to_the_heartbeat(monkeypatch, paylo
 
 
 @pytest.mark.parametrize("model", [{"model": "gpt-6.1-sol"}, {}])
-@pytest.mark.parametrize("handler, event", [("on_pre_tool_use", "PreToolUse"), ("on_stop", "Stop")])
-def test_a_hook_reports_the_model_its_payload_names_and_none_without_one(monkeypatch, handler, event, model):
+@pytest.mark.parametrize(
+    "handler, event, state", [("on_pre_tool_use", "PreToolUse", "working"), ("on_stop", "Stop", "idle")]
+)
+def test_a_hook_beats_and_reports_the_model_its_payload_names(monkeypatch, handler, event, state, model):
     seen = []
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
-    monkeypatch.setattr(swarm_heartbeat, "beat", lambda state: None)
-    monkeypatch.setattr(swarm_heartbeat, "report", lambda reported: seen.append(reported))
+    monkeypatch.setattr(swarm_heartbeat, "beat", lambda beaten: seen.append(("beat", beaten)))
+    monkeypatch.setattr(swarm_heartbeat, "report", lambda reported: seen.append(("report", reported)))
     payload = {"hook_event_name": event, "session_id": "s1", "cwd": "/", "transcript_path": "", **model}
     getattr(hook_manager, handler)({**payload, "tool_name": "Bash", "tool_input": {"command": "true"}})
-    assert seen == [model.get("model", "")]
+    assert seen == [("beat", state), ("report", model.get("model", ""))]

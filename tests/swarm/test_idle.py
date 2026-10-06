@@ -68,7 +68,21 @@ def test_a_session_model_is_reported_only_by_a_swarm_agent_that_names_one(redis)
     assert session_model.get(redis, "sw", "sw-eng-1") is None
     assert swarm_heartbeat.report("opus", "high", environ=swarm, redis=redis, now_ms=NOW) is True
     assert session_model.get(redis, "sw", "sw-eng-1") == {"model": "opus", "effort": "high", "at": NOW}
-    assert 0 < redis.ttl(session_model.key("sw", "sw-eng-1")) <= session_model.TTL_S
+    assert 0 < redis.ttl("agentihooks:swarm:sw:session-model:sw-eng-1") <= session_model.TTL_S
+
+
+def test_a_codex_report_without_effort_reaches_the_swarm_redis_stamped_now(redis, monkeypatch):
+    import time
+
+    from scripts.swarm import session_model, store
+
+    swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-eng-1"}
+    monkeypatch.setattr(store, "redis_client", lambda environ: redis if environ is swarm else None)
+    before = time.time_ns() // 1_000_000
+    assert swarm_heartbeat.report("gpt-6.1-sol", environ=swarm) is True
+    reported = session_model.get(redis, "sw", "sw-eng-1")
+    assert (reported["model"], reported["effort"]) == ("gpt-6.1-sol", "")
+    assert isinstance(reported["at"], int) and before <= reported["at"] <= time.time_ns() // 1_000_000
 
 
 def test_the_hook_records_operator_prompts_but_not_the_ones_the_swarm_types(redis):

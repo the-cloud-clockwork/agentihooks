@@ -41,7 +41,7 @@ def heard(prompt, environ=None, redis=None, now_ms=None):
 
 def report(model, effort="", environ=None, redis=None, now_ms=None):
     env = os.environ if environ is None else environ
-    slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
+    slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
     if not (slug and name and model):
         return False
     if redis is None:

@@ -134,7 +134,7 @@ class HerdrRuntime:
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(replace(agent, pane_id=placed.pane_id), True)
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
-        return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
+        return replace(placed, model_source=picked.source)
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

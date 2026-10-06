@@ -108,16 +108,20 @@ def test_statusline_shows_the_effort_beside_the_model(monkeypatch, capsys, effor
 
 
 @pytest.mark.parametrize(
-    "model, reported",
-    [({"id": "claude-opus-5-5", "display_name": "Opus 5.5"}, ("claude-opus-5-5", "high")), ({}, ("", "high"))],
+    "model, effort, reported",
+    [
+        ({"id": "claude-opus-5-5", "display_name": "Opus 5.5"}, {"level": "high"}, ("claude-opus-5-5", "high")),
+        ({"id": "claude-opus-5-5", "display_name": "Opus 5.5"}, None, ("claude-opus-5-5", None)),
+        ({}, {"level": "high"}, (None, "high")),
+    ],
 )
-def test_the_statusline_reports_the_live_model_and_effort_to_the_swarm(monkeypatch, capsys, model, reported):
+def test_the_statusline_reports_the_live_model_and_effort_to_the_swarm(monkeypatch, capsys, model, effort, reported):
     from hooks import statusline
     from hooks.context import swarm_heartbeat
 
     seen = []
     monkeypatch.setattr(swarm_heartbeat, "report", lambda *args: seen.append(args))
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({**MODEL_PAYLOAD, "model": model})))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({**MODEL_PAYLOAD, "model": model, "effort": effort})))
     statusline.main()
 
     assert seen == [reported]

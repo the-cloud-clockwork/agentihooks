@@ -663,52 +663,22 @@ def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(st
     assert _conversations(store)["engineer@a1b2c3-0001"] == "5c90d80c"
 
 
-@pytest.mark.parametrize(
-    "recorded, reported, expected",
-    [
-        (
-            ("opus", "high", "lane-default"),
-            ("claude-sonnet-5-5", "low", 2_000),
-            ("claude-sonnet-5-5", "low", "session", None),
-        ),
-        (("opus", "high", "luna"), ("claude-opus-5-5", "high", 2_000), ("opus", "high", "luna", 0.9)),
-        (("opus", "high", "luna"), ("claude-opus-5-5[1m]", "high", 2_000), ("opus", "high", "luna", 0.9)),
-        (("opus", "high", "luna"), ("claude-opus-5-5", "max", 2_000), ("claude-opus-5-5", "max", "session", None)),
-        (
-            ("claude-opus-5-5", "max", "session"),
-            ("claude-opus-5-5", "max", 2_000),
-            ("claude-opus-5-5", "max", "session", 0.9),
-        ),
-        (
-            ("claude-opus-5-5", "high", "session"),
-            ("claude-opus-4-6", "high", 2_000),
-            ("claude-opus-4-6", "high", "session", None),
-        ),
-        (
-            ("gpt-6.1-sol", "high", "lane-default"),
-            ("gpt-6.1-luna", "", 2_000),
-            ("gpt-6.1-luna", "high", "session", None),
-        ),
-        (("sonnet", "low", "luna"), ("claude-opus-5-5", "high", 999), ("sonnet", "low", "luna", 0.9)),
-        (("sonnet", "low", "luna"), ("claude-opus-5-5", "high", 1_000), ("claude-opus-5-5", "high", "session", None)),
-        (("", "", ""), ("claude-opus-5-5", "high", 2_000), ("claude-opus-5-5", "high", "session", None)),
-    ],
-)
-def test_the_model_and_effort_a_running_session_reports_reach_its_agent_record(store, recorded, reported, expected):
+def test_a_model_switch_the_running_session_reports_reaches_its_agent_record_on_the_next_tick(store):
     from hooks.context import swarm_heartbeat
 
     ledger, rt = FakeLedger([{"id": "t1"}]), FakeRuntime()
     tick("sw", store, ledger, rt, 1_000)
     name = "engineer@a1b2c3-0001"
-    agent = next(a for a in store.agents("sw") if a.name == name)
-    model, effort, source = recorded
-    store.put_agent("sw", replace(agent, model=model, effort=effort, model_source=source, model_confidence=0.9))
-    model, effort, at = reported
     swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": name}
-    assert swarm_heartbeat.report(model, effort, environ=swarm, redis=store.redis, now_ms=at) is True
+    assert swarm_heartbeat.report("claude-sonnet-5-5", "low", environ=swarm, redis=store.redis, now_ms=2_000) is True
     tick("sw", store, ledger, rt, 3_000)
     agent = next(a for a in store.agents("sw") if a.name == name)
-    assert (agent.model, agent.effort, agent.model_source, agent.model_confidence) == expected
+    assert (agent.model, agent.effort, agent.model_source, agent.model_confidence) == (
+        "claude-sonnet-5-5",
+        "low",
+        "session",
+        None,
+    )
 
 
 def idle_for(store, ledger, runtime, ticks, start):

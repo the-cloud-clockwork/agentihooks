@@ -193,11 +193,11 @@ def main() -> None:
             except Exception:
                 pass
 
-        effort = (payload.get("effort") or {}).get("level", "")
+        effort = (payload.get("effort") or {}).get("level")
         try:
             from hooks.context.swarm_heartbeat import report
 
-            report(model_data.get("id", ""), effort)
+            report(model_data.get("id"), effort)
         except Exception:
             pass
 
@@ -209,7 +209,7 @@ def main() -> None:
         total = ctx_size
 
         # Model
-        model_name = " ".join(filter(None, (model_data.get("display_name", ""), effort)))
+        model_name = " ".join(filter(None, (model_data.get("display_name"), effort)))
 
         # Cost
         cost_usd = cost_data.get("total_cost_usd")
