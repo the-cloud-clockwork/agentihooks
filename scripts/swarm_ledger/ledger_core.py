@@ -69,7 +69,7 @@ THREADS = {
 }
 SCALARS = ("title", "overview", "sources", "orchestrator", "chat_instructions", "policy", "time_left_minutes")
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass")
-ARTIFACT_OPS = ("artifact_add",)
+ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 OPERATOR_THREADS = re.compile(r"^(notes|questions/[^/]+/answers)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 NOUN = {"comments": "comment", "answers": "answer", "notes": "note", "chat": "message"}
@@ -168,6 +168,7 @@ def normalize(doc):
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
     doc.setdefault("artifacts", [])
+    doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:
@@ -352,7 +353,7 @@ class Context:
     def __init__(self, meta, at):
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
-        self.meta, self.dirty, self.refused = meta, False, []
+        self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
 
     def record(self, by, kind, target, **extra):
         self.events.append({"rev": self.rev, "at": self.at, "by": by, "kind": kind, "target": target, **extra})
@@ -714,8 +715,10 @@ def sync(slug, changes=None, ops=None):
             )
         rejected = apply_changes(doc, changes or [], ctx)
         rejected += [op["id"] for op in ops or [] if not apply_op(doc, op, ctx)]
+        import ledger_artifacts
         import ledger_media
 
+        ledger_artifacts.sweep(slug, doc, ctx)
         ledger_media.attach_paths(slug, doc, ctx.events)
         ledger_priorities.derive(doc, ctx)
         ledger_notifications.derive(doc, ctx)

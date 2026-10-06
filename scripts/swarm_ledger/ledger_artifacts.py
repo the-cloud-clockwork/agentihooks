@@ -7,9 +7,18 @@ import xml.etree.ElementTree as ET
 from pathlib import PurePath
 
 import ledger_comments
+import ledger_core as core
 import ledger_media as media
 
-OPS = ("artifact_add",)
+OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
+TRASH = "artifact_trash"
+KEEP_DAYS = 30
+DAY_MS = 24 * 60 * 60 * 1000
+REFUSED = (
+    "an artifact is only a file the operator asked for: mark its task as artifact requested or name his message "
+    "with request, and proofs go on the task proof and the pull request"
+)
+ADD_KEYS = {"op", "id", "by", "task", "title", "file"}
 MAX_BYTES = 8 << 20
 MAX_TITLE = 200
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -114,12 +123,26 @@ def resolve(slug, ops):
 
 
 def check(op):
-    if set(op) != {"op", "id", "by", "task", "title", "file"}:
-        raise ValueError("artifact_add takes id, by, task, title and file")
+    if op["op"] == "artifact_add":
+        return check_add(op)
+    if op["op"] == "artifact_purge":
+        if set(op) != {"op", "id", "by"} or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":
+            raise ValueError("artifact_purge takes id and by, an agent name other than operator")
+        return None
+    if set(op) != {"op", "id", "target"} or not isinstance(op["target"], str) or not op["target"]:
+        raise ValueError(f"{op['op']} is the operator's and takes only id and target, an artifact id")
+    return None
+
+
+def check_add(op):
+    if not ADD_KEYS <= set(op) <= ADD_KEYS | {"request"}:
+        raise ValueError("artifact_add takes id, by, task, title, file and an optional request")
     if not isinstance(op["by"], str) or not AUTHOR_RE.match(op["by"]) or op["by"] == "operator":
         raise ValueError("artifact_add needs `by`, an agent name other than operator")
     if not isinstance(op["task"], str) or not TASK_RE.match(op["task"]):
         raise ValueError("task must be a task id or empty")
+    if "request" in op and (not isinstance(op["request"], str) or not op["request"]):
+        raise ValueError("request must be the id of the operator message that asked for the file")
     if not isinstance(op["title"], str) or not op["title"].strip() or len(op["title"]) > MAX_TITLE:
         raise ValueError(f"title must be text of at most {MAX_TITLE} characters")
     if not isinstance(op["file"], dict) or not ID_RE.match(str(op["file"].get("id"))):
@@ -127,17 +150,90 @@ def check(op):
     ledger_comments.check(op["title"], "item")
 
 
-def apply(doc, op, ctx):
+def operator_asked(doc, entry_id):
+    if not entry_id:
+        return False
+    return any(
+        entry.get("id") == entry_id and entry.get("by") == "operator" and not entry.get("deleted")
+        for _, thread in core.thread_paths(doc)
+        for entry in thread
+    )
+
+
+def _add(doc, op, ctx):
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
-    known = {task["id"] for task in doc.get("tasks", [])}
-    if op["by"] not in ctx.meta.get("members", {}) or (op["task"] and op["task"] not in known):
+    task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
+    if op["by"] not in ctx.meta["members"] or (op["task"] and task is None):
+        return False
+    if not (task and task.get("artifact") is True) and not operator_asked(doc, op.get("request")):
+        ctx.refused.append(REFUSED)
         return False
     title = op["title"].strip()
-    rows.append({"id": op["id"], "title": title, "by": op["by"], "task": op["task"], "at": ctx.at, "file": op["file"]})
+    row = {"id": op["id"], "title": title, "by": op["by"], "task": op["task"], "at": ctx.at, "file": op["file"]}
+    if "request" in op:
+        row["request"] = op["request"]
+    rows.append(row)
     ctx.stamp("artifacts", op["by"])
     ctx.record(
         op["by"], "artifact added", f"tasks/{op['task']}" if op["task"] else "artifacts", id=op["id"], text=title
     )
     return True
+
+
+def _move(doc, op, ctx, source, dest):
+    row = next((r for r in doc[source] if r["id"] == op["target"]), None)
+    if row is None:
+        return any(r["id"] == op["target"] for r in doc[dest])
+    doc[source].remove(row)
+    if dest == TRASH:
+        row["deleted_at"] = ctx.at
+    else:
+        del row["deleted_at"]
+    doc[dest].append(row)
+    kind = "artifact deleted" if dest == TRASH else "artifact restored"
+    ctx.record("operator", kind, "artifacts", id=row["id"], text=row["title"])
+    return True
+
+
+def _purge(doc, op, ctx):
+    if op["by"] not in ctx.meta["members"]:
+        return False
+    rows = doc["artifacts"] + doc[TRASH]
+    doc["artifacts"], doc[TRASH] = [], []
+    ctx.dropped.extend(row["file"]["id"] for row in rows)
+    ctx.record(op["by"], "artifacts purged", "artifacts", id=op["id"], count=len(rows))
+    return True
+
+
+def apply(doc, op, ctx):
+    if op["op"] == "artifact_add":
+        return _add(doc, op, ctx)
+    if op["op"] == "artifact_purge":
+        return _purge(doc, op, ctx)
+    if op["op"] == "artifact_delete":
+        return _move(doc, op, ctx, "artifacts", TRASH)
+    return _move(doc, op, ctx, TRASH, "artifacts")
+
+
+def in_use(doc):
+    used = {row["file"]["id"] for key in ("artifacts", TRASH) for row in doc[key]}
+    for _, thread in core.thread_paths(doc):
+        for entry in thread:
+            used.update(att["id"] for att in entry.get("attachments", []))
+    return used
+
+
+def sweep(slug, doc, ctx):
+    trash = doc[TRASH]
+    expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
+    if expired:
+        doc[TRASH] = [row for row in trash if row not in expired]
+        ctx.dirty = True
+    dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
+    if not dropped:
+        return
+    used = in_use(doc)
+    for file_id in dropped - used:
+        (media.folder(slug) / file_id).unlink(missing_ok=True)
