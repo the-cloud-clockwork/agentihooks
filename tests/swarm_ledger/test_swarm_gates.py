@@ -24,14 +24,14 @@ def test_every_gate_shows_its_current_mode_inside_the_capacity_row(open_page):
         "off": ["false", "false", "true"],
     }
     assert groups(page) == [
-        [f"{name} gate mode", name, [[m, p] for m, p in zip(("enforce", "observe", "off"), pressed[mode])]]
+        [f"{name} gate mode", name, [[m, p] for m, p in zip(("deny", "log only", "skip"), pressed[mode])]]
         for name, mode in MODES.items()
     ]
 
 
 def test_a_click_sets_that_gate_mode_through_the_swarm_control(open_page):
     page = open_page(status(gate_modes=MODES))
-    page.tab.locator('#swarm-gates [aria-label="identity gate mode"] button', has_text="observe").click()
+    page.tab.locator('#swarm-gates [aria-label="identity gate mode"] button', has_text="log only").click()
     page.tab.wait_for_function("() => !document.querySelector('#swarm-gates button').disabled")
     assert page.puts == [{"action": "set", "gates": {"identity": "observe"}}]
     assert page.text("#swarm-note") == "Set gate mode: done"

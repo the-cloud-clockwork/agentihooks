@@ -356,8 +356,9 @@ def gate_mode(key, value, environ=None):
     env = os.environ if environ is None else environ
     if env.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
         raise SwarmError(f"only the operator sets {key}, from the ledger page or his own terminal")
+    value = modes.normalize(value)
     if value not in GATE_MODES:
-        raise SwarmError(f"{key} takes {'|'.join(GATE_MODES)}")
+        raise SwarmError(f"{key} takes {', '.join(modes.LABELS.values())}")
     return {GATE_KEYS[key]: value}
 
 
@@ -477,6 +478,10 @@ def cmd_status(store, args):
     print(
         f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  repo {config.repo}  {_share(store, config)}"
     )
+    print(
+        "gate modes  "
+        + "  ".join(f"{name}={modes.label(mode)}" for name, mode in catalog.current(config.gates).items())
+    )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
@@ -497,7 +502,9 @@ def cmd_status(store, args):
         print(f"  threshold {f['threshold']}")
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
     for row in gate_log.decisions(args.slug):
-        print(f"gate  {row.get('kind')}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}")
+        print(
+            f"gate  {modes.label(row.get('kind', ''))}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
+        )
 
 
 def cmd_names(store, args):

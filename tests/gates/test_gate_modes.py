@@ -136,7 +136,9 @@ class TestCatalog:
     def test_status_reports_the_current_mode_of_every_gate(self, store):
         store.update("demo", gates={"watch": "observe"})
         report = status.status_report(store, "demo", {"tasks": [], "_meta": {"events": []}})
-        assert report["gate_modes"] == {**catalog.defaults(), "watch": "observe"}
+        assert report["gate_modes"] == {
+            name: modes.label(mode) for name, mode in {**catalog.defaults(), "watch": "observe"}.items()
+        }
 
 
 class TestSwarmSet:
@@ -160,7 +162,7 @@ class TestSwarmSet:
 
     def test_an_unknown_gate_key_is_refused(self):
         assert "nope-gate" not in cli.GATE_KEYS
-        with pytest.raises(SwarmError, match="watch-gate takes enforce"):
+        with pytest.raises(SwarmError, match="watch-gate takes deny"):
             cli.gate_mode("watch-gate", "loud", {})
 
 
@@ -177,7 +179,12 @@ class TestServerControl:
         "gates", [{"nope": "off"}, {"talk": "loud"}, ["talk"], {"talk": None}, {"-x": "off"}, {}], ids=str
     )
     def test_an_unknown_gate_or_mode_is_refused(self, gates):
-        refusal = f"gates maps a gate of {', '.join(catalog.defaults())} to enforce, observe, off"
+        refusal = f"gates maps a gate of {', '.join(catalog.defaults())} to deny, log only, skip"
         with pytest.raises(ValueError) as caught:
             ledger_server.control_argv({"action": "set", "gates": gates})
         assert str(caught.value) == refusal
+
+
+@pytest.mark.parametrize("mode", ["deny", "log only", "skip"])
+def test_page_gate_control_accepts_new_mode_names(mode):
+    assert ledger_server.control_argv({"action": "set", "gates": {"watch": mode}}) == ["set", f"watch-gate={mode}"]

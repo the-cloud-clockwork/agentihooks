@@ -46,8 +46,8 @@ def test_status_text_prints_one_line_per_recent_gate_row(monkeypatch, capsys):
     log.append("sw", log.Row.of("talk", "observe", WHO, "Bash", "over budget", now_ms=5))
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
     cli.cmd_status(saved(), SimpleNamespace(slug="sw", json=False))
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate ")]
-    assert lines == ["gate  observe  talk  engineer@1-1  t1  over budget"]
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate  ")]
+    assert lines == ["gate  log only  talk  engineer@1-1  t1  over budget"]
 
 
 def _a_deny_among_thirty_count_rows():
@@ -63,7 +63,7 @@ def test_status_report_lists_only_decision_rows_and_keeps_count_rows_in_the_log(
     log.append("sw", log.Row.of("talk", "lift", WHO, reason="lifted", now_ms=32))
     log.append("sw", log.Row.of("talk", "fail-open", WHO, "Bash", "crashed", now_ms=33))
     gates = status.status_report(saved(), "sw", {"tasks": []})["gates"]
-    assert [(r["kind"], r["at"]) for r in gates] == [("deny", 1), ("observe", 31), ("lift", 32), ("fail-open", 33)]
+    assert [(r["kind"], r["at"]) for r in gates] == [("deny", 1), ("log only", 31), ("lift", 32), ("fail-open", 33)]
     assert [r["kind"] for r in log.recent("sw", limit=None)].count("count") == 30
 
 
@@ -73,7 +73,7 @@ def test_status_text_shows_the_deny_among_thirty_count_rows(monkeypatch, capsys)
     _a_deny_among_thirty_count_rows()
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
     cli.cmd_status(saved(), SimpleNamespace(slug="sw", json=False))
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate ")]
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate  ")]
     assert lines == ["gate  deny  talk  engineer@1-1  t1  over budget"]
 
 
