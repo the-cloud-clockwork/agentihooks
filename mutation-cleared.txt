@@ -11,6 +11,10 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
+  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_collect_results__mutmut_15:4c31ff4c9cef31a75436241f29437b57349c727663afc691a4458e551ea2a764": {
+    "reader": "Standards",
+    "reason": "Click parses true and TRUE identically; both current mutmut result commands returned the same 12827 bytes."
+  },
   "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_mutation_lines__mutmut_6:73518390e47e0dc254e1f244bd729b7d61bfe9279039c4890e43747b6a54cfc7": {
     "reader": "Standards",
     "reason": "SequenceMatcher treats False and None identically for autojunk; repeated line opcodes are unchanged."
