@@ -54,7 +54,7 @@ ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
-CODE_DIRS = (CODE_DIR, *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor")))
+CODE_DIRS = (CODE_DIR, *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")))
 
 
 def all_summaries():

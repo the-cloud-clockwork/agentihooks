@@ -498,9 +498,13 @@ def build_parser():
 
 
 def main():
+    from scripts.gates import Who
+    from scripts.gates.identity import refusal
     from scripts.swarm.naming import resolve_name
 
     args = build_parser().parse_args()
+    if text := refusal(args.name, Who.from_env()):
+        sys.exit(f"agentihooks ledger: {text}")
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command == "url"):
         sys.exit("--slug and --as are required")
