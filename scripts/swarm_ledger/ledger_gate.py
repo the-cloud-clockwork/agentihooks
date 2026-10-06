@@ -105,19 +105,6 @@ def sync_summary(doc, meta):
     )
 
 
-def stats_summary(doc, meta):
-    """The operator's stats check, for the orchestrator: what the page shows now, and what to verify."""
-    live = lambda name: [i for i in doc.get(name, []) if not i.get("out_of_scope")]  # noqa: E731
-    phases, followups = live("phases"), live("followups")
-    left = doc.get("time_left_minutes")
-    shown = "not set" if left is None else f"{left // 60}h {left % 60}m"
-    return (
-        f"Operator stats check. The page shows {sum(1 for i in phases if i.get('done'))} of {len(phases)} phases done, "
-        f"{sum(1 for i in followups if i.get('done'))} of {len(followups)} follow-ups done, time left {shown}. "
-        "Check every phase and follow-up state and the time left against the real work, fix what is stale, then ack."
-    )
-
-
 def crew(meta):
     return [
         {
