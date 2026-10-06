@@ -253,6 +253,11 @@ details.panel-fold[open]::details-content { display: flex; flex-direction: colum
 .link { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; transition: color .15s; }
 .link:hover, .link:focus-visible { color: var(--accent); text-shadow: var(--glow); outline: none; }
 .link.danger:hover, .link.danger:focus-visible { color: var(--destructive); }
+.link.approve { color: var(--positive); }
+.link.deny { color: var(--destructive); }
+.link.approve:hover, .link.approve:focus-visible, .link.deny:hover, .link.deny:focus-visible { color: currentColor; text-shadow: var(--glow); }
+.row > .item-actions { margin-left: auto; }
+.item-actions { flex: none; display: inline-flex; align-items: center; gap: 14px; }
 .link:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 .add { margin-top: 6px; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; transition: color .15s; }
 .add:hover, .add:focus-visible { color: var(--accent); text-shadow: var(--glow); outline: none; }
@@ -749,6 +754,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       d.priorities = op.target === "all" ? [] : d.priorities.filter((p) => p.id !== op.target);
       return;
     }
+    if (op.op === "verdict") {
+      const [list, id] = op.item.split("/");
+      const item = itemOf(d, list, id);
+      if (item && !item.comments.some((e) => e.id === op.id)) item.comments.push({ id: op.id, by: "operator", at: Date.now(), text: op.verdict, sending: true });
+      d.priorities = d.priorities.filter((p) => p.item !== op.item);
+      return;
+    }
     if (op.op === "phase_review") {
       const phase = itemOf(d, "phases", op.item.split("/")[1]);
       if (phase) phase.review = { ...(phase.review || {}), state: op.state, note: op.note || "", escalated: false };
@@ -1198,6 +1210,14 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       } } });
   }
 
+  function verdictButton(item, verdict, cls, text) {
+    return h("button", { class: `link ${cls}`, type: "button", text, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
+  }
+
+  function itemActions(key, item) {
+    return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
+  }
+
   function itemClass(item) {
     return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "");
   }
@@ -1209,7 +1229,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     box.addEventListener("change", () => toggle(key, box.checked, "done"));
     const body = h("div", {}, h("div", { class: "text", text: titleText }),
       descText ? h("p", { class: "desc", text: descText }) : null);
-    const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, scopeDot(key, item));
+    const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-${list}-${item.id}` }, row, commentsView(key, item.comments));
   }
 
@@ -1260,14 +1280,14 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       item.description ? h("p", { class: "desc", text: item.description }) : null, phaseReview(item));
     fold.open = !closedComments.has(`${key}/row`);
     fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
-    const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), scopeDot(key, item));
+    const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-phases-${item.id}` }, row, commentsView(key, item.comments));
   }
 
   function questionRow(item, n) {
     const key = `questions/${item.id}`;
     const row = h("div", { class: "row" }, h("span", { class: "num", text: `${n}.` }), h("div", { class: "item-title", text: item.text }),
-      scopeDot(key, item));
+      itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-questions-${item.id}` }, row, threadView(`${key}/answers`, item.answers, "thread"),
       commentsView(key, item.comments));
   }
@@ -1326,7 +1346,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const body = h("div", {}, h("div", { class: "item-title" }, taskLink(item.id), h("span", { text: item.title })),
       item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
       waits ? h("p", { class: "desc", text: waits }) : null);
-    const row = h("div", { class: "row" }, body, scopeDot(key, item));
+    const row = h("div", { class: "row" }, body, itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
   }
 
@@ -1502,6 +1522,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
         h("div", { class: "prio-body" },
           h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
           h("div", { class: "prio-text", text: p.text })),
+        verdictButton(p.item, "approved", "approve", "Approve"),
         h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
     }));
     if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
