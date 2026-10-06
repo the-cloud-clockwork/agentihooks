@@ -82,7 +82,8 @@ def test_each_row_carries_title_kind_counts_swarm_state_and_last_activity(update
     assert '<span class="state s-running">running</span>' in found
     assert re.search(r'<time class="when" datetime="[^"]+" title="[^"]+">5m ago</time>', found)
     assert re.search(r'<span class="ov" title="A long overview[^"]*">A long overview', found)
-    assert 'data-act="delete" data-slug="rows-2026-01-03"' in found
+    assert '<span class="acts"><button class="act del" type="button" data-act="delete"' in found
+    assert 'data-slug="rows-2026-01-03" title="Move to the bin" aria-label="Move Rows plan to the bin">' in found
     assert 'data-act="reopen"' not in found
 
 
@@ -136,6 +137,7 @@ def test_the_header_names_each_column_and_counts_the_ledgers(updated_at):
         '<span class="r">Done</span><span>Swarm</span><span class="r">Activity</span><span></span>'
     )
     assert '<main class="home">' in page
+    assert '</li><li class="row">' in page
 
 
 def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
@@ -175,6 +177,9 @@ def test_activity_in_the_future_reads_just_now_and_unknown_when_missing():
     stamp = server.activity(MINUTE, 3 * MINUTE)
     assert stamp.startswith('<time class="when" datetime="1970-01-01T00:01:00Z" title="1970-01-01 ')
     assert stamp.endswith('">2m ago</time>')
+    at = 1_791_290_000_000
+    local = server.time.strftime("%Y-%m-%d %H:%M", server.time.localtime(at / 1000))
+    assert f'title="{local}">just now</time>' in server.activity(at, at)
 
 
 def test_the_swarm_state_comes_from_the_swarm_config():
@@ -183,6 +188,7 @@ def test_the_swarm_state_comes_from_the_swarm_config():
             self.error = error
 
         def config(self, slug):
+            assert slug == "sw"
             if self.error:
                 raise self.error
             return type("Config", (), {"state": "paused"})()

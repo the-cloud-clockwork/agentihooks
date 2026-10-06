@@ -69,7 +69,7 @@ def all_summaries():
         except (ValueError, OSError):
             continue
         items = [i for i in doc.get("tasks") or doc.get("phases") or [] if not i.get("out_of_scope")]
-        done = sum(1 for i in items if i.get("state") == "done" or i.get("done") is True)
+        done = sum(1 for i in items if i.get("done") is True)
         found.append(
             {
                 "slug": path.stem,
@@ -79,7 +79,7 @@ def all_summaries():
                 "size": ledger_size.size_of(doc),
                 "open": len(items) - done,
                 "done": done,
-                "updated_at": meta.get("updated_at") or meta.get("created_at"),
+                "updated_at": meta.get("updated_at"),
             }
         )
     return found
@@ -195,7 +195,7 @@ def ledger_row(s, cells, control):
 
 
 def ago(at, now):
-    minutes = max(0, now - at) // 60000
+    minutes = (now - at) // 60000
     for unit, size in (("d", 1440), ("h", 60), ("m", 1)):
         if minutes >= size:
             return f"{minutes // size}{unit} ago"
