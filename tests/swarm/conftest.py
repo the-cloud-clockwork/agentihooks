@@ -1,6 +1,7 @@
 import pytest
 
 from hooks.classifier import ClassifierUnavailable
+from scripts.gates import intent
 from scripts.swarm import model_pick, priority_sweep, slice_screen, trace_plan
 
 
@@ -14,3 +15,6 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(trace_plan, "decide", unavailable)
     monkeypatch.setattr(priority_sweep, "decide", unavailable)
     monkeypatch.setattr(priority_sweep.ledger_events, "view", lambda url: None)
+    monkeypatch.setattr(intent, "decide", unavailable)
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
+    monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)
