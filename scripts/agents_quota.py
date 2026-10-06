@@ -156,7 +156,7 @@ def page_quota(now: float | None = None) -> dict:
 def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> str:
     with _refresh_lock:
         now = time.time() if now is None else now
-        if now - _last_refresh.get("at", float("-inf")) < REFRESH_MIN_S:
+        if "at" in _last_refresh and now - _last_refresh["at"] < REFRESH_MIN_S:
             return ""
         error = probe()
         if not error:
