@@ -51,14 +51,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # The venv links to the exact interpreter and the editable install to this
-      # checkout path, so both belong to the key.
+      # The venv links to the exact interpreter, so its version belongs to the key.
+      # It lives outside the checkout: tests scan modules loaded from the repo root.
       - name: Restore the test environment
         if: steps.lookup.outputs.skip != 'true'
         id: venv
         uses: actions/cache@v4
         with:
-          path: .venv
+          path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock', '.github/test-excludes.txt') }}
 
       - name: Set up uv
@@ -76,12 +76,12 @@ jobs:
       - name: Install dependencies
         if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         run: |
-          uv venv .venv
-          uv pip install --python .venv/bin/python --excludes .github/test-excludes.txt -e ".[dev,all]"
+          uv venv "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Use the test environment
         if: steps.lookup.outputs.skip != 'true'
-        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
