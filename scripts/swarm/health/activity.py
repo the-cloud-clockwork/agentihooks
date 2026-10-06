@@ -7,7 +7,7 @@ import shutil
 import time
 from pathlib import Path
 
-NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
+NAME_RE = re.compile(r"^[A-Za-z0-9][\w.@-]{0,63}$")
 WATCH_TOOLS = ("Monitor", "TaskOutput", "BashOutput")
 ACT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 SERENA_EDITS = (

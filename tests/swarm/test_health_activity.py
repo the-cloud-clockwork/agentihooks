@@ -114,6 +114,14 @@ def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_doe
     assert activity.entries("missing", tmp_path) == {}
 
 
+def test_an_agent_named_with_its_seat_code_is_recorded(tmp_path):
+    named = {**BOUND, "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0101"}
+    activity.record("Bash", {"command": "gh pr checks 3"}, named, tmp_path, now_ms=0)
+    assert activity.counts("sw", tmp_path) == {"engineer@323133-0101": {"watch": 1, "act": 0}}
+    activity.record("Bash", {"command": "gh pr checks 3"}, {**named, "AGENTIHOOKS_AGENT_NAME": "a/../b"}, tmp_path)
+    assert list(activity.counts("sw", tmp_path)) == ["engineer@323133-0101"]
+
+
 def test_a_master_doing_ledger_writes_and_watches_does_not_trip_over_monitoring(tmp_path):
     from scripts.swarm.health import findings as health
 

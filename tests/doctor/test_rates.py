@@ -126,7 +126,7 @@ def test_proof_loops_count_claims_and_pr_moves_per_task():
     assert rates.proof_loops(recs(events=events), WIN) == {
         "tasks claimed": 2,
         "claims per task": 1.5,
-        "pr moves per task": 1.5,
+        "review rounds per task": 1.5,
     }
 
 

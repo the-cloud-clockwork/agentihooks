@@ -122,7 +122,7 @@ def proof_loops(records, window):
     return {
         "tasks claimed": len({_task(e) for e in claims}),
         "claims per task": ratio(len(claims), len(tasks)),
-        "pr moves per task": ratio(len(moves), len(tasks)),
+        "review rounds per task": ratio(len(moves), len(tasks)),
     }
 
 
