@@ -453,7 +453,10 @@ def build_persona(
     managed_footer: str,
 ) -> str:
     """Assemble the managed region of a compiled instruction file."""
-    parts: list[str] = [managed_header, identity_preamble(profile_chain)]
+    from hooks.context.profile_chain import inherited
+
+    parents = inherited(profile_dirs)
+    parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
     if bundle_dir:
         bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
