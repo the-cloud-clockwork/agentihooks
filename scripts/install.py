@@ -2862,6 +2862,22 @@ def _build_otel_env(profile_data: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _skill_dir_filter() -> Callable[[Path], bool]:
+    named: set[Path] = set()
+
+    def is_skill_dir(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        if (path / "SKILL.md").is_file():
+            return True
+        if path.resolve() not in named:
+            named.add(path.resolve())
+            _cprint(f"  [--] Skipped skill folder with no SKILL.md: {path}")
+        return False
+
+    return is_skill_dir
+
+
 def install_global(args: argparse.Namespace) -> None:
     with _sync_lock():
         _install_global_inner(args)
@@ -3010,7 +3026,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
 
     for subdir, label, filter_fn in [
-        ("skills", "skill", lambda p: p.is_dir()),
+        ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
