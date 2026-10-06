@@ -94,6 +94,17 @@ def test_an_engineer_cannot_start_a_doctor_on_the_shared_ledger_folder(env, monk
     assert not (shared / f"{DOCTOR}.json").exists()
 
 
+def test_a_proof_doctor_on_a_scratch_folder_needs_its_own_redis(env, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_creator
+
+    store, _, tmp = env
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL")
+    assert doctor.main([WATCHED, "start"]) == 1
+    assert capsys.readouterr().err.strip() == f"doctor: {ledger_creator.REDIS}"
+    assert DOCTOR not in store.slugs()
+    assert not (tmp / f"{DOCTOR}.json").exists()
+
+
 def test_start_links_both_ledgers_starts_the_doctor_and_registers_peer_masters(env):
     store, rt, tmp = env
     assert doctor.main([WATCHED, "start"]) == 0

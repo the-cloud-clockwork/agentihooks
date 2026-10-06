@@ -162,12 +162,9 @@ def cmd_create(store, args):
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
-    refused = ledger_creator.refusal(
-        os.environ,
-        ledger_creator.swarm_tasks(ledger.state(args.slug)),
-        getattr(args, "operator_asked", ""),
-        swarm=True,
-        floor=args.template != priming.TEMPLATE,
+    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
+    refused = ledger_creator.creator_refusal(os.environ, True) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
     )
     if refused:
         raise SwarmError(refused)
@@ -723,7 +720,7 @@ def build_parser():
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
-    create.add_argument("--operator-asked", default="")
+    create.add_argument("--operator-asked")
     for plain in ("start", "pause", "remove", "snapshot", "url", "reopen", "rename"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")

@@ -237,7 +237,7 @@ def main():
     parser.add_argument("--date", default=datetime.date.today().isoformat())
     parser.add_argument("--size", choices=ledger_size.SIZES, default="small")
     parser.add_argument("--as", dest="name", default=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""))
-    parser.add_argument("--operator-asked", default="")
+    parser.add_argument("--operator-asked")
     args = parser.parse_args()
 
     slug = built_slug(args)
@@ -251,9 +251,11 @@ def main():
         sys.exit("a small ledger needs --as NAME: the session that creates it joins it as its worker")
     from scripts.swarm_ledger import ledger_creator
 
-    content = json.loads(Path(args.content).read_text(encoding="utf-8"))
+    content = json.loads(Path(args.content).read_bytes())
     tasks = ledger_creator.content_tasks(content) if isinstance(content, dict) else 0
-    refused = ledger_creator.refusal(os.environ, tasks, args.operator_asked, floor=small, folder=core.LEDGER_DIR)
+    refused = ledger_creator.creator_refusal(os.environ, False) or (
+        small and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
+    )
     if refused:
         sys.exit(refused)
     create(slug, content, args.size)

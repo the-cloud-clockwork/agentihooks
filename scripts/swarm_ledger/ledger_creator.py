@@ -22,10 +22,10 @@ FLOOR = (
 )
 
 
-def caller(environ) -> str:
+def caller(environ):
     if not environ.get("AGENTIHOOKS_SWARM"):
         return "operator"
-    return environ.get("AGENTIHOOKS_SWARM_LANE") or "agent"
+    return environ.get("AGENTIHOOKS_SWARM_LANE")
 
 
 def operator_asked(environ, quote) -> bool:
@@ -39,9 +39,18 @@ def operator_asked(environ, quote) -> bool:
     return bool(operator_words.matching(name, quote))
 
 
-def _scratch_refusal(environ, swarm) -> str:
+def shared(environ) -> bool:
+    from scripts.swarm_ledger.ledger_link import shared_directory
+
+    return shared_directory(Path(environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser())
+
+
+def creator_refusal(environ, swarm) -> str:
+    """Why this session may not create a ledger, or a swarm when `swarm`, here; an empty string when it may."""
     from scripts.swarm.store import DEFAULT_URL
 
+    if shared(environ):
+        return "" if caller(environ) in CREATORS else CALLER
     if (environ.get("LEDGER_PORT") or SHARED_PORT) == SHARED_PORT:
         return PORT
     if swarm and environ.get("AGENTIHOOKS_SWARM_REDIS_URL", "") in ("", DEFAULT_URL):
@@ -49,18 +58,11 @@ def _scratch_refusal(environ, swarm) -> str:
     return ""
 
 
-def refusal(environ, tasks, asked="", swarm=False, floor=True, folder=None) -> str:
-    """Why this session may not create a ledger (or a swarm) holding this many tasks, or an empty string."""
-    from scripts.swarm_ledger.ledger_link import shared_directory
-
-    folder = folder or Path(environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    if not shared_directory(Path(folder)):
-        return _scratch_refusal(environ, swarm)
-    if caller(environ) not in CREATORS:
-        return CALLER
-    if floor and tasks < MIN_TASKS and not operator_asked(environ, asked):
-        return FLOOR.format(need=MIN_TASKS, have=tasks)
-    return ""
+def floor_refusal(environ, tasks, asked) -> str:
+    """Why a ledger or swarm in the shared folder holds too few tasks; an empty string when it holds enough."""
+    if tasks >= MIN_TASKS or not shared(environ) or operator_asked(environ, asked):
+        return ""
+    return FLOOR.format(need=MIN_TASKS, have=tasks)
 
 
 def content_tasks(content) -> int:

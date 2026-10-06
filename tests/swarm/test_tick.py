@@ -410,6 +410,16 @@ def test_only_the_operator_wakes_a_stopped_swarm(store, sender, text):
     assert runtime.masters == [] and store.config("sw").state == "stopped"
 
 
+@pytest.mark.parametrize("ref, wakes", [("ledger:note", True), ("swarm-control:stop", False)])
+def test_an_operator_fyi_wakes_a_stopped_swarm_unless_it_is_a_control_notice(store, ref, wakes):
+    from scripts.inbox.store import InboxStore
+
+    store.update("sw", state="stopped")
+    InboxStore(store.redis).send("operator", "master@sw", "for your information", ref=ref, fyi=True)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert (store.config("sw").state == "paused") is wakes
+
+
 def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     store.update("sw", state="stopped")
     runtime = FakeRuntime()

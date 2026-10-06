@@ -41,6 +41,16 @@ def test_a_master_swarm_of_two_tasks_needs_the_operator_to_ask(env, monkeypatch,
     assert refused(capsys, ledger_creator.FLOOR.format(need=3, have=2)) and "sw" not in store.slugs()
 
 
+def test_the_operator_words_recorded_for_the_master_lift_the_swarm_floor(env, monkeypatch):
+    from hooks.context import operator_words
+
+    store, _, _ = env
+    as_lane(monkeypatch, "master")
+    operator_words.record("master@ffffff-0001", "go ahead with a two task swarm")
+    assert run("sw", "create", "--repo", "/repo", "--operator-asked", "a two task swarm") == 0
+    assert "sw" in store.slugs()
+
+
 @pytest.mark.parametrize("lane", ["master", "operator"])
 def test_a_waiting_automatic_phase_counts_toward_three_tasks(env, monkeypatch, lane):
     store, ledger, _ = env
