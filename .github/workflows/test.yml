@@ -46,12 +46,29 @@ jobs:
 
       - name: Set up Python ${{ matrix.python-version }}
         if: steps.lookup.outputs.skip != 'true'
+        id: python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Set up uv
+      # Dependencies resolve unpinned (no lock file is tracked), so the key rolls
+      # daily to pick up new releases. The venv lives outside the checkout: tests
+      # scan modules loaded from the repo root.
+      - name: Stamp the day
         if: steps.lookup.outputs.skip != 'true'
+        id: day
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the test environment
+        if: steps.lookup.outputs.skip != 'true'
+        id: venv
+        uses: actions/cache@v4
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+
+      - name: Set up uv
+        if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -63,9 +80,14 @@ jobs:
       # (~/.local), whose bin dir is not on PATH, so `pytest` and `ruff`
       # resolved to "command not found" while the packages were installed fine.
       - name: Install dependencies
-        if: steps.lookup.outputs.skip != 'true'
+        if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         run: |
-          uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+          uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Use the test environment
+        if: steps.lookup.outputs.skip != 'true'
+        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune

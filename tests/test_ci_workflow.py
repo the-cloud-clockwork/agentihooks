@@ -86,7 +86,42 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
-    assert install["run"].strip() == 'uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"'
+    assert install["run"].strip().splitlines() == [
+        'uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"',
+        'uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+    ]
+
+
+def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
+    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache"))
+    _, python = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/setup-python"))
+    key = cache["with"]["key"]
+    assert cache["with"]["path"] == "~/venv"
+    assert "${{ runner.os }}" in key
+    assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
+    assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
+    _, day = _unit_step_index(lambda s: s.get("id") == "day")
+    assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
+    assert "${{ steps.day.outputs.date }}" in key
+    assert "matrix.shard" not in key
+
+
+def test_a_restored_venv_skips_uv_and_the_install():
+    _, cache = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/cache"))
+    hit = f"steps.{cache['id']}.outputs.cache-hit != 'true'"
+    for predicate in (
+        lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"),
+        lambda s: s.get("name") == "Install dependencies",
+    ):
+        _, step = _unit_step_index(predicate)
+        assert step["if"] == f"steps.lookup.outputs.skip != 'true' && {hit}"
+
+
+def test_unit_tests_run_from_the_venv():
+    path_index, path = _unit_step_index(lambda s: "GITHUB_PATH" in s.get("run", ""))
+    run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    assert path["run"].strip() == 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"'
+    assert path_index < run_index
 
 
 def test_unit_install_excludes_playwright_and_the_grpc_exporter():
@@ -196,7 +231,7 @@ def test_each_job_looks_up_the_pushed_tree_first(job):
 def test_every_later_step_skips_when_the_tree_already_passed(job):
     later = _workflow()["jobs"][job]["steps"][1:]
     assert later
-    assert all(s.get("if") == "steps.lookup.outputs.skip != 'true'" for s in later), later
+    assert all(s.get("if", "").startswith("steps.lookup.outputs.skip != 'true'") for s in later), later
 
 
 def test_pull_requests_record_the_tested_tree_after_unit_and_lint_pass():

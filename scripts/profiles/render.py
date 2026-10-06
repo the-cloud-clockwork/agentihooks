@@ -270,12 +270,17 @@ def rendered_profiles(target: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks profile")
-    commands = parser.add_subparsers(required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
     render_cmd = commands.add_parser("render", help="Render a profile into its own home for one harness")
     render_cmd.add_argument("name")
     render_cmd.add_argument("--target", choices=("claude", "codex", "copilot"), default="claude")
     render_cmd.add_argument("--force", action="store_true")
+    from scripts.profiles import measure
+
+    measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
     args = parser.parse_args(argv)
+    if args.command == "measure":
+        return measure.main(args)
     if args.target == "copilot":
         print("copilot per-run profiles are not supported", file=sys.stderr)
         return 2
