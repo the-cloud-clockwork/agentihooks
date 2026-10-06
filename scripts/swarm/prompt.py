@@ -73,6 +73,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
+        f"Publish plans, screenshots, reports and proof files as they are produced with {led} "
+        'artifact <file> "<title in plain words>": markdown, JSON, SVG or an image; the operator reads it rendered '
+        "from the artifacts icon on the ledger page.",
         *peer_lines(task.get("peer", "")),
         *priming.master_lines(slug, task.get("peer", "")),
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
@@ -170,7 +173,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
         waiting_line(led),
-        f"Publish every document or image that needs operator review (proposal, design, plan, proof) with {led} "
+        f"Publish plans, screenshots, reports and proof files as they are produced with {led} "
         'artifact <file> "<title in plain words>": markdown, JSON, SVG or an image; the operator reads it rendered '
         "from the artifacts icon on the ledger page.",
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
