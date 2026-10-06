@@ -943,6 +943,22 @@ def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_z
     assert store.next_name("other", "eng") == "engineer@a1b2c4-0002"
 
 
+@pytest.mark.parametrize("slug", ["", "*", "s?", "[sw]"])
+def test_remove_refuses_an_empty_or_glob_name_and_every_swarm_survives(env, monkeypatch, tmp_path, slug):
+    store, _, _ = env
+    monkeypatch.setattr(cli.activity, "default_root", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    cli.activity.record("Monitor", {}, {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-eng-1"})
+    store.redis.hset(store.key(slug, "config"), mapping=store.redis.hgetall(store.key("sw", "config")))
+    keys = set(store.redis.keys("*"))
+    with pytest.raises(SwarmError):
+        store.remove(slug)
+    assert run(slug, "remove") == 1
+    assert set(store.redis.keys("*")) == keys
+    assert store.slugs() == ["sw"]
+    assert cli.activity.counts("sw") == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
 def _idle_finding(env, monkeypatch, tmp_path):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")

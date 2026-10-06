@@ -230,6 +230,8 @@ class RedisStore:
         self.redis.delete(self.key(slug, "peer"))
 
     def remove(self, slug):
+        if not slug or set(slug) & set("*?[]\\"):
+            raise SwarmError(f"refusing to remove swarm {slug!r}: an empty or pattern name would match other swarms")
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")

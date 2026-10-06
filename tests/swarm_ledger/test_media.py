@@ -98,6 +98,16 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(ledger_bin.purge_expired(now=30 * DAY_MS + 1), ["pictured"])
         self.assertFalse(folder.exists())
 
+    def test_purge_refuses_a_name_that_is_not_a_ledger_slug(self):
+        make_ledger("kept")
+        media.store("kept", png())
+        (core.LEDGER_DIR / ".media").mkdir(exist_ok=True)
+        for bad in ("", "..", "kept/..", "../" + core.LEDGER_DIR.name, None):
+            with self.assertRaises(ValueError):
+                media.purge(bad)
+        self.assertTrue(any((core.LEDGER_DIR / "kept.media").iterdir()))
+        self.assertTrue((core.LEDGER_DIR / ".media").is_dir())
+
 
 class Endpoint(unittest.TestCase):
     @classmethod

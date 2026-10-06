@@ -122,4 +122,6 @@ def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
 
 
 def purge(slug):
+    if not isinstance(slug, str) or not core.SLUG_RE.match(slug):
+        raise ValueError(f"refusing to purge media for {slug!r}: not a ledger slug")
     shutil.rmtree(folder(slug), ignore_errors=True)
