@@ -206,7 +206,7 @@ def render(target: str, name: str, force: bool = False) -> Path | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks profile")
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(required=True)
     render_cmd = commands.add_parser("render", help="Render a profile into its own home for one harness")
     render_cmd.add_argument("name")
     render_cmd.add_argument("--target", choices=("claude", "codex", "copilot"), default="claude")

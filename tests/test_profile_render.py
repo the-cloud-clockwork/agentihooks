@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -211,6 +212,7 @@ def test_codex_render_writes_one_layered_profile(world):
     for marker in ("BUNDLE DIRECTIVE MARKER", "BASE PERSONA MARKER", "ROLE RULE MARKER", "BUNDLE RULE MARKER"):
         assert marker in instructions
     assert "<!-- rule: role-rule.md (rule) -->" in instructions
+    assert instructions.endswith(f"\n\n{render.FOOTER}\n")
     assert "KIT README" not in instructions
     assert doc["sandbox_mode"] == "workspace-write"
     assert doc["approval_policy"] == "never"
@@ -222,11 +224,14 @@ def test_codex_render_writes_one_layered_profile(world):
     assert render.render_codex("rb-role") is None
 
 
-def test_codex_render_without_global_config_or_skills(world):
+@pytest.mark.parametrize("config", [None, 'model = "gpt"\n'])
+def test_codex_render_without_global_servers_or_skills(world, config):
     from scripts.profiles import render
 
     home = world["home"]
     (home / ".codex" / "config.toml").unlink()
+    if config:
+        _write(home / ".codex" / "config.toml", config)
     for skill in (home / ".agents" / "skills").iterdir():
         skill.unlink() if skill.is_file() else skill.rmdir()
 
@@ -340,4 +345,5 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    assert "Render a profile into its own home: render NAME --target claude|codex [--force]" in capsys.readouterr().out
+    line = r"\n +profile +Render a profile into its own home: render NAME --target claude\|codex \[--force\]\n"
+    assert re.search(line, capsys.readouterr().out)
