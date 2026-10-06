@@ -221,7 +221,6 @@ def on_prompt(payload, session, state, sfile):
 
 
 def stop_reasons(session, state):
-    import ledger_core as core
     import ledger_gate
 
     pol = ledger_gate.policy(state)
@@ -231,14 +230,6 @@ def stop_reasons(session, state):
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
     if session["calls"] >= pol["stop_after_calls"] and not outcome_seen(session):
         reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
-    beat = core.watch_path(session["slug"], session["name"])
-    member = state["_meta"].get("members", {}).get(session["name"], {})
-    if member.get("role") == "orchestrator" and (
-        not beat.exists() or time.time() - beat.stat().st_mtime > ledger_gate.WATCH_STALE_SECONDS
-    ):
-        reasons.append(
-            f"your watcher is not running: start a Monitor on {CLI} watch {session['slug']} --as {session['name']}"
-        )
     return reasons, len(owed), pol
 
 

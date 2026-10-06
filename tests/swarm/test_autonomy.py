@@ -79,7 +79,7 @@ def test_spawn_hands_agents_the_level(tmp_path, monkeypatch):
 def test_delegate_is_todays_prompt_for_every_lane():
     for lane in ("eng", "ci", MASTER):
         assert build("delegate", lane) == build(lane=lane)
-    assert "6. Merge on green checks, then wt.sh done." in build("delegate")
+    assert "Merge on green checks, then wt.sh done." in build("delegate")
 
 
 def test_manual_opens_a_draft_and_stops_for_the_operator():
@@ -94,7 +94,7 @@ def test_assist_waits_for_an_operator_approval_line_before_merging():
     text = build("assist")
     assert "open the pull request into dev" in text and "draft" not in text.split("5. ", 1)[1].split("\n", 1)[0]
     assert "Merge only after an OPERATOR line on the ledger approves it" in text
-    assert 'agentihooks ledger --slug sw --as sw-eng-1 comment phases/p1 "' in text
+    assert 'agentihooks ledger --slug sw --as sw-eng-1 comment tasks/t1 "<plain words: what the pull request' in text
     assert "agentihooks swarm sw done --pr <pr url>" in text
     assert "Merge on green checks" not in text
 

@@ -99,7 +99,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 |---|---|
 | Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full codex-share=PCT codex-min-week-left=PCT`; the ledger page swarm panel writes the same ops. An `auto` lane sends `codex-share` percent (default 30) of the swarm's spawns to Codex while Codex has `codex-min-week-left` percent (default 5) of its week left; `status` shows the share |
-| Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, a `Monitor` on `agentihooks ledger watch <slug> --as <name>`, act on every OPERATOR line, then `ack` |
+| Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
 | A question while the operator is away (the question tool is refused until he types `operator on` in the pane) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
@@ -203,7 +203,7 @@ ledger page chat line becomes an item from `operator` for its addressee (the mas
 when unaddressed) and stays on the page. Every other operator write on the page (comment,
 reply, answer, note, check) becomes an item too: for the agent that claimed its task, else
 for the master, whom a stopped swarm starts for it. Each write reaches you once, through the
-inbox, the ledger hook or the ledger watch. A reply to `operator` is posted on the
+inbox or the ledger hook; an operator sync order reaches every live agent. A reply to `operator` is posted on the
 ledger page chat and closed done.
 
 | Trigger | Action |

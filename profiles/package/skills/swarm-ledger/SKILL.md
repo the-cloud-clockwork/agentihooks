@@ -124,10 +124,11 @@ All commands are `agentihooks ledger --slug <slug> --as <name> <command>`.
 ### B1. Join, watch
 
 1. `join` (orchestrator: `join --role orchestrator`). A hook binds this session to the ledger.
-2. Start a `Monitor` (persistent when offered) on
-   `agentihooks ledger watch <slug> --as <name> --since-rev <last handled rev, or omit>`.
-   The orchestrator's Monitor is mandatory: a hook cannot wake an idle session, and the gate
-   refuses its stop while the watcher heartbeat is stale. Restart with `--since-rev` to replay.
+2. In a swarm, skip the watch: every operator write reaches you as an inbox message at your next
+   tool call, and the tick wakes your pane when it sits idle. A ledger without a swarm has no
+   inbox, so an idle session hears of the operator only through a `Monitor` (persistent when
+   offered) on `agentihooks ledger watch <slug> --as <name> --since-rev <last handled rev, or omit>`.
+   Restart with `--since-rev` to replay.
 
 Each line is one operator event:
 
@@ -141,7 +142,7 @@ OPERATOR rev=17 checked phases/p2
 OPERATOR rev=18 message added on chat [m-3c4d]: "text" | REPLY RULES: <chat_instructions>
 ```
 
-plus `SEED_ERROR <message>` and `WARNING <message>`. Done when the Monitor printed `WATCHING`.
+plus `SEED_ERROR <message>` and `WARNING <message>`. Done when `join` answered, and with a watch when it printed `WATCHING`.
 
 ### B2. Act on operator events, then ack (AI-JUDGMENT)
 
@@ -222,7 +223,7 @@ For a bound session the hooks do the following; each is tunable in the ledger's 
 
 ### B5. Close
 
-When every phase is done and every follow-up closed, `leave`, then stop your Monitor.
+When every phase is done and every follow-up closed, `leave`, then stop any watch you started.
 Done when `status` no longer lists you.
 
 ## Part C — Run a swarm over a ledger

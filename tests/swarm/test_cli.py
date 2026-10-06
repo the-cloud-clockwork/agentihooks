@@ -731,18 +731,44 @@ def test_status_text_lists_each_phase_lifecycle_and_the_tasks_it_holds(env, caps
     assert "phase p1  building" in lines and "phase p2  waiting  holds t2, t3" in lines
 
 
-def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():
+def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     led = "agentihooks ledger --slug sw --as engineer@a1b2c3-0001"
     assert f"{led} join" in text
-    assert "agentihooks ledger watch sw --as engineer@a1b2c3-0001" in text
+    assert "ledger watch" not in text and "keep a Monitor" not in text
+    assert "inbox" in text
     assert f"{led} ack" in text
     assert f"{led} comment phases/p1" in text
     assert f"{led} followup add" in text
     assert text.index(f"{led} join") < text.index("Work it end to end")
     assert text.index(f"{led} leave") < text.index("agentihooks swarm sw done --pr")
+
+
+def test_agent_prompt_waits_on_checks_through_the_swarm():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
+    merge = next(line for line in text.splitlines() if line.startswith("6. "))
+    assert "agentihooks swarm sw wait --on checks <pr url>" in merge
+
+
+def test_master_prompt_needs_no_ledger_watch():
+    from scripts.swarm import prompt
+
+    text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master"})
+    assert "ledger watch" not in text and "keep a Monitor" not in text
+
+
+def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm():
+    from scripts.swarm import prompt
+
+    task = {"id": "t1", "title": "x", "phase": "p1"}
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", task, autonomy="assist")
+    assert "agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1" in text
+    assert 'agentihooks swarm sw wait 60 --reason "operator merge approval"' in text
+    assert "ledger watch" not in text and "keep a Monitor" not in text
 
 
 def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave_then_done():
@@ -796,7 +822,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
     led = "agentihooks ledger --slug sw --as master@a1b2c3-0002"
     for needle in (
         f"{led} join --role orchestrator",
-        "agentihooks ledger watch sw --as master@a1b2c3-0002",
         f"{led} ack",
         f"{led} task add",
         f"{led} time-left",
