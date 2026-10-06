@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/layout"
 NOW_MS = 1_791_300_000_000
+NOW_S = NOW_MS // 1000
 DOC = {
     "title": "Layout proof",
     "overview": "o",
@@ -70,10 +71,35 @@ def status(**changes):
         "findings": [],
         "quota": {
             "cap": 3,
+            "probed_at": NOW_S - 120,
             "rows": [
-                {"agent": "claude", "account": "tccgma", "five_hour_left": 92.4, "seven_day_left": 78, "sessions": 2},
-                {"agent": "claude", "account": "luna", "five_hour_left": 64, "seven_day_left": 51, "sessions": 1},
-                {"agent": "codex", "account": "default", "five_hour_left": None, "seven_day_left": 61, "sessions": 0},
+                {
+                    "agent": "claude",
+                    "account": "tccgma",
+                    "five_hour_left": 92.4,
+                    "five_hour_resets_at": NOW_S + 53 * 60,
+                    "seven_day_left": 78,
+                    "seven_day_resets_at": NOW_S + 4 * 86400 + 15 * 3600,
+                    "sessions": 2,
+                },
+                {
+                    "agent": "claude",
+                    "account": "luna",
+                    "five_hour_left": 64,
+                    "five_hour_resets_at": NOW_S + 2 * 3600 + 5 * 60,
+                    "seven_day_left": 51,
+                    "seven_day_resets_at": NOW_S + 6 * 86400,
+                    "sessions": 1,
+                },
+                {
+                    "agent": "codex",
+                    "account": "default",
+                    "five_hour_left": None,
+                    "five_hour_resets_at": None,
+                    "seven_day_left": 61,
+                    "seven_day_resets_at": NOW_S + 3 * 86400 + 10 * 3600,
+                    "sessions": 0,
+                },
             ],
         },
         "doctor": {"slug": "", "state": "not running", "last_check": 0, "findings": 0},
@@ -83,11 +109,13 @@ def status(**changes):
 
 
 class Page:
-    def __init__(self, browser, payload, width, **options):
+    def __init__(self, browser, payload, width, clock=False, **options):
         self.payload, self.puts = payload, []
         html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
         html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
+        if clock:
+            self.context.clock.install(time=NOW_MS)
         self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         self.tab = self.context.new_page()
@@ -123,8 +151,8 @@ class Page:
 def open_page(browser):
     pages = []
 
-    def make(payload=None, width=1440, **options):
-        page = Page(browser, payload or status(), width, **options)
+    def make(payload=None, width=1440, clock=False, **options):
+        page = Page(browser, payload or status(), width, clock, **options)
         pages.append(page)
         return page
 
@@ -348,11 +376,44 @@ def test_every_button_is_flat_at_rest(open_page):
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
     page = open_page()
     assert page.table("swarm-quota") == [
-        ["tccgma", "claude", "92%", "78%", "2/3", ""],
-        ["luna", "claude", "64%", "51%", "1/3", "HERE"],
-        ["default", "codex", "—", "61%", "0/3", ""],
+        ["tccgma", "claude", "92%", "53m", "78%", "4d15h", "2/3", ""],
+        ["luna", "claude", "64%", "2h05m", "51%", "6d00h", "1/3", "MASTER"],
+        ["default", "codex", "—", "—", "61%", "3d10h", "0/3", ""],
     ]
-    assert page.text("#quota-count").lower() == "3 accounts"
+    assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
+
+
+def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open_page):
+    page = open_page()
+    button = page.tab.locator("#quota-box .sw-blockhead #quota-refresh")
+    assert button.get_attribute("aria-label") == "Refresh quota"
+    assert "sw-btn" in button.get_attribute("class")
+    look = button.evaluate(
+        """b => { const s = getComputedStyle(b), probe = document.createElement("i");
+          probe.style.color = "var(--accent)"; document.body.append(probe);
+          const accent = getComputedStyle(probe).color; probe.remove();
+          return [s.color === accent, s.backgroundColor, s.borderStyle]; }"""
+    )
+    assert look == [True, "rgba(0, 0, 0, 0)", "none"]
+    fresh = status()
+    fresh["quota"] = {**fresh["quota"], "probed_at": NOW_S}
+    page.payload = fresh
+    button.click()
+    page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('probed 0s ago')")
+    assert page.puts == [{"action": "quota_refresh"}]
+
+
+def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
+    page = open_page(clock=True)
+    page.tab.clock.run_for(299_000)
+    page.tab.wait_for_timeout(200)
+    assert {"action": "quota_refresh"} not in page.puts
+    page.tab.clock.run_for(2_000)
+    for _ in range(50):
+        if {"action": "quota_refresh"} in page.puts:
+            break
+        page.tab.wait_for_timeout(50)
+    assert page.puts.count({"action": "quota_refresh"}) == 1
 
 
 def test_doctor_block_offers_start_while_off_and_links_its_ledger_while_on(open_page):

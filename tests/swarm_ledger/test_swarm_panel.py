@@ -15,8 +15,9 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "swarm-panel-2026-01-01"
@@ -280,6 +281,60 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 502)
         run.assert_not_called()
 
+    def test_quota_refresh_probes_every_account_and_answers_fresh_status(self):
+        from scripts import agents_quota
+
+        agents_quota._last_refresh.clear()
+        agents_quota._page_cache.update(at=0.0, quota={"rows": []})
+        with (
+            patch.object(server.shutil, "which", return_value="agentihooks"),
+            patch.object(server.subprocess, "run", return_value=completed(0, "[]")) as run,
+            patch.object(server, "swarm_status", return_value=STATUS) as status,
+        ):
+            code, text = self.put({"action": "quota_refresh"})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(text), STATUS)
+        self.assertEqual(run.call_args_list[0].args[0][1:], ["quota", "--refresh", "--json"])
+        status.assert_called_once_with(SLUG)
+        self.assertEqual(agents_quota._page_cache, {})
+        code, _, again = self.control({"action": "quota_refresh"})
+        self.assertEqual(code, 200)
+        again.assert_not_called()
+
+    def test_a_failed_quota_probe_is_502_with_its_message(self):
+        from scripts import agents_quota
+
+        agents_quota._last_refresh.clear()
+        code, text, _ = self.control({"action": "quota_refresh"}, completed(1, err="no Claude account"))
+        self.assertEqual((code, text), (502, "no Claude account"))
+
+    def test_quota_refresh_answers_the_status_of_its_own_ledger(self):
+        from scripts import agents_quota
+
+        with (
+            patch.object(agents_quota, "refresh_page_quota", return_value=""),
+            patch.object(server, "swarm_status", return_value=STATUS) as status,
+        ):
+            self.assertEqual(server.refresh_quota(SLUG), (STATUS, ""))
+        status.assert_called_once_with(SLUG)
+        with (
+            patch.object(agents_quota, "refresh_page_quota", return_value=""),
+            patch.object(server, "swarm_status", return_value=None),
+        ):
+            self.assertEqual(server.refresh_quota(SLUG), (None, "swarm status unreadable after the quota probe"))
+        with (
+            patch.object(agents_quota, "refresh_page_quota", return_value="probe timed out"),
+            patch.object(server, "swarm_status") as status,
+        ):
+            self.assertEqual(server.refresh_quota(SLUG), (None, "probe timed out"))
+        status.assert_not_called()
+
+    def test_doctor_controls_run_the_doctor_command(self):
+        for action, verb in (("doctor_start", "start"), ("doctor_stop", "stop")):
+            code, _, run = self.control({"action": action})
+            self.assertEqual(code, 200)
+            self.assertEqual(run.call_args_list[0].args[0][1:], ["doctor", SLUG, verb])
+
     def test_control_needs_the_ledger_token(self):
         with patch.object(server.subprocess, "run") as run:
             code, _ = self.put({"action": "start"}, token=False)
@@ -476,6 +531,38 @@ class SwarmPanel(unittest.TestCase):
     def test_seat_names_read_as_lane_and_number_and_the_master_seat_stays_whole(self):
         out = self.run_js(["seatText"], '["master@rig", "eng-2@rig", "ci-1@rig"].map(seatText)')
         self.assertEqual(out, ["master@rig", "eng 2", "ci 1"])
+
+
+def test_the_quota_probe_runs_a_live_refresh_of_every_account():
+    with (
+        patch.object(server.shutil, "which", return_value="/bin/agentihooks") as which,
+        patch.object(server.subprocess, "run", return_value=completed(0, "[]")) as run,
+    ):
+        assert server.probe_quota() == ""
+    which.assert_called_once_with("agentihooks")
+    run.assert_called_once_with(
+        ["/bin/agentihooks", "quota", "--refresh", "--json"], capture_output=True, text=True, timeout=120
+    )
+
+
+def test_a_quota_probe_failure_names_its_cause():
+    with patch.object(server.shutil, "which", return_value=None), patch.object(server.subprocess, "run") as run:
+        assert server.probe_quota() == "agentihooks is not on PATH"
+    run.assert_not_called()
+    timeout = subprocess.TimeoutExpired(["agentihooks"], 120)
+    cases = [
+        (completed(1, " out\n", " boom\n"), "boom"),
+        (completed(1, " out\n", ""), "out"),
+        (completed(1), "quota probe failed"),
+        (timeout, str(timeout)),
+    ]
+    for result, expected in cases:
+        effect = {"side_effect": result} if isinstance(result, Exception) else {"return_value": result}
+        with (
+            patch.object(server.shutil, "which", return_value="agentihooks"),
+            patch.object(server.subprocess, "run", **effect),
+        ):
+            assert server.probe_quota() == expected
 
 
 if __name__ == "__main__":
