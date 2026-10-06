@@ -31,13 +31,12 @@ def mutation_lines(original: str, mutated: str, start: int) -> set[int]:
     return lines
 
 
-def function_start(source: str, name: str, class_name: str | None) -> int:
+def function_start(source: str, original: str, class_name: str | None) -> int:
     nodes = ast.parse(source).body
     if class_name is not None:
         nodes = next(node.body for node in nodes if isinstance(node, ast.ClassDef) and node.name == class_name)
-    function = next(
-        node for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
-    )
+    expected = ast.dump(ast.parse(original).body[0])
+    function = next(node for node in nodes if ast.dump(node) == expected)
     return min([function.lineno] + [node.lineno for node in function.decorator_list])
 
 
@@ -58,10 +57,10 @@ def collect_results(path: Path) -> list[dict]:
     for key, status in results:
         row = {"name": key, "status": status, "lines": [], "fingerprint": ""}
         if status != "killed":
-            name, class_name = orig_function_and_class_names_from_key(key)
+            _, class_name = orig_function_and_class_names_from_key(key)
             original = cst.Module([read_original_function(module, key)]).code.strip()
             mutated = cst.Module([read_mutant_function(module, key)]).code.strip()
-            start = function_start(source, name, class_name)
+            start = function_start(source, original, class_name)
             row["lines"] = sorted(mutation_lines(original, mutated, start))
             row["fingerprint"] = hashlib.sha256((original + "\0" + mutated).encode()).hexdigest()
         rows.append(row)

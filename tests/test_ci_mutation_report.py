@@ -52,8 +52,8 @@ def test_function_offsets_cover_decorated_methods_and_async_functions():
     from scripts.ci_mutation.report import function_start
 
     source = "\nclass Example:\n    @decorator\n    def f(self):\n        return 1\n\nasync def run():\n    return 2\n"
-    assert function_start(source, "f", "Example") == 3
-    assert function_start(source, "run", None) == 7
+    assert function_start(source, "@decorator\ndef f(self):\n    return 1", "Example") == 3
+    assert function_start(source, "async def run():\n    return 2", None) == 7
 
 
 def test_report_reads_real_mutmut_metadata_and_maps_original_lines(tmp_path, monkeypatch):
@@ -129,7 +129,7 @@ def test_function_offset_selects_named_class_and_function():
     from scripts.ci_mutation.report import function_start
 
     source = "class Other:\n    def f(self):\n        return 1\n\nclass Example:\n    def other(self):\n        return 1\n    def f(self):\n        return 2\n"
-    assert function_start(source, "f", "Example") == 8
+    assert function_start(source, "def f(self):\n    return 2", "Example") == 8
 
 
 def test_report_maps_a_method_mutant_back_to_its_class(tmp_path, monkeypatch):
@@ -152,3 +152,29 @@ def test_report_maps_a_method_mutant_back_to_its_class(tmp_path, monkeypatch):
     (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
     monkeypatch.chdir(tmp_path)
     assert collect_results(Path("hooks/sample.py"))[0]["lines"] == [3]
+
+
+@pytest.mark.parametrize("method", [False, True])
+def test_report_maps_overloaded_implementations_instead_of_stubs(tmp_path, monkeypatch, method):
+    import json
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (tmp_path / name).mkdir(parents=True)
+    if method:
+        source = "from typing import overload\nclass Example:\n    @overload\n    def value(self) -> int: ...\n    def value(self):\n        return 7\n"
+        generated = "class Example:\n    def xǁExampleǁvalue__mutmut_orig(self):\n        return 7\n    def xǁExampleǁvalue__mutmut_1(self):\n        return 8\n"
+        key = "hooks.sample.xǁExampleǁvalue__mutmut_1"
+    else:
+        source = "from typing import overload\n@overload\ndef value() -> int: ...\n\ndef value():\n    return 7\n"
+        generated = "def x_value__mutmut_orig():\n    return 7\n\ndef x_value__mutmut_1():\n    return 8\n"
+        key = "hooks.sample.x_value__mutmut_1"
+    (tmp_path / "hooks/sample.py").write_text(source)
+    (tmp_path / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    (tmp_path / "mutants/hooks/sample.py").write_text(generated)
+    meta = {"exit_code_by_key": {key: 0}, "durations_by_key": {}, "estimated_durations_by_key": {}}
+    (tmp_path / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    monkeypatch.chdir(tmp_path)
+    rows = collect_results(Path("hooks/sample.py"))
+    assert rows[0]["lines"] == [6]
+    assert evaluate("hooks/sample.py", rows, {6}, {})["failures"] == rows
