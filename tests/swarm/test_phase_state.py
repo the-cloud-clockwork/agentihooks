@@ -1,0 +1,163 @@
+import pytest
+
+from scripts.swarm import phase_state
+from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.tick import tick
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+def doc(phases, tasks=()):
+    return {"phases": list(phases), "tasks": list(tasks)}
+
+
+def plan(phase, state="open"):
+    return {"id": f"plan-{phase}", "phase": phase, "kind": "plan", "lane": "plan", "state": state}
+
+
+@pytest.mark.parametrize(
+    ("phase", "tasks", "expected"),
+    [
+        ({"id": "p2", "out_of_scope": True, "done": True}, [], "out_of_scope"),
+        ({"id": "p2", "done": True, "depends_on": ["p1"]}, [], "done"),
+        ({"id": "p2", "depends_on": ["p1"], "planning": "auto"}, [], "waiting"),
+        ({"id": "p2", "depends_on": ["gone"]}, [], "waiting"),
+        ({"id": "p2", "planning": "auto"}, [], "to_plan"),
+        ({"id": "p2", "planning": "auto"}, [plan("p3")], "to_plan"),
+        ({"id": "p2", "planning": "auto"}, [{"id": "t", "phase": "p2", "kind": "code"}], "to_plan"),
+        ({"id": "p2", "planning": "auto"}, [plan("p2")], "planning"),
+        ({"id": "p2", "planning": "auto", "review": {"state": "approved"}}, [plan("p2")], "planning"),
+        ({"id": "p2", "planning": "auto"}, [plan("p2", "done")], "in_review"),
+        ({"id": "p2", "planning": "auto", "review": {"state": "sent_back"}}, [plan("p2", "done")], "in_review"),
+        ({"id": "p2", "planning": "auto", "review": {"state": "approved"}}, [plan("p2", "done")], "building"),
+        ({"id": "p2", "depends_on": ["p0"]}, [], "building"),
+        ({"id": "p2", "planning": "manual"}, [], "building"),
+    ],
+)
+def test_lifecycle_row(phase, tasks, expected):
+    phases = [{"id": "p0", "done": True}, {"id": "p1"}, phase]
+    assert phase_state.lifecycle(phase, doc(phases, tasks)) == expected
+
+
+@pytest.mark.parametrize(
+    ("task", "admitted"),
+    [
+        ({"id": "t", "phase": ""}, True),
+        ({"id": "t"}, True),
+        ({"id": "t", "phase": "nowhere"}, True),
+        ({"id": "t", "phase": "build"}, True),
+        ({"id": "t", "phase": "wait"}, False),
+        ({"id": "t", "phase": "done"}, False),
+        ({"id": "t", "phase": "slice"}, False),
+        (plan("slice"), True),
+        (plan("build"), False),
+        (plan("wait"), False),
+    ],
+)
+def test_admits_only_building_tasks_and_the_planning_plan_task(task, admitted):
+    phases = [
+        {"id": "build"},
+        {"id": "wait", "depends_on": ["build"]},
+        {"id": "done", "done": True},
+        {"id": "slice", "planning": "auto"},
+    ]
+    assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
+
+
+def test_a_ledger_without_a_phases_list_holds_nothing():
+    old = {"tasks": [{"id": "t", "phase": "p1", "state": "open"}]}
+    assert phase_state.lifecycle({"id": "p1", "depends_on": ["p0"]}, old) == "waiting"
+    assert phase_state.admits(old["tasks"][0], old) is True
+    assert phase_state.report(old) == []
+
+
+@pytest.fixture
+def store():
+    import fakeredis
+
+    s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, state="running"))
+    return s
+
+
+def spawned(runtime):
+    return [task for _, _, task in runtime.spawned]
+
+
+def test_a_task_in_a_waiting_phase_is_claimed_on_the_tick_after_its_phase_is_done(store):
+    ledger = FakeLedger([{"id": "a", "phase": "p1", "state": "done"}, {"id": "b", "phase": "p2"}])
+    ledger.phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == [] and store.config("sw").state == "drained"
+    ledger.phases[0]["done"] = True
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["b"]
+
+
+def test_an_auto_phase_holds_its_tasks_until_the_plan_is_approved(store):
+    ledger = FakeLedger([{**plan("p1", "done"), "lane": "eng"}, {"id": "b", "phase": "p1"}])
+    ledger.phases = [{"id": "p1", "planning": "auto", "review": {"state": "sent_back"}}]
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == []
+    ledger.phases[0]["review"] = {"state": "approved"}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["b"]
+
+
+def test_the_plan_task_is_claimed_only_while_its_phase_is_planning(store):
+    ledger = FakeLedger([{**plan("p1"), "lane": "eng"}, {"id": "b", "phase": "p1"}])
+    ledger.phases = [{"id": "p1", "planning": "auto", "depends_on": ["p0"]}, {"id": "p0"}]
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == []
+    ledger.phases[1]["done"] = True
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["plan-p1"]
+
+
+class OwnLedger(FakeLedger):
+    def state(self, slug):
+        return super().state(slug) if slug == "sw" else {"tasks": [], "phases": []}
+
+
+def test_tasks_with_no_phase_or_an_unknown_phase_claim_as_today(store):
+    ledger = OwnLedger([{"id": "a"}, {"id": "b", "phase": "missing"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned(runtime) == ["a", "b"]
+
+
+def test_a_swarm_with_no_free_slot_but_a_building_task_stays_running(store):
+    store.update("sw", max_eng=0)
+    ledger = FakeLedger([{"id": "a", "phase": "p1"}])
+    ledger.phases = [{"id": "p1"}]
+    tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert store.config("sw").state == "running"
+
+
+def test_held_lists_each_open_task_a_phase_holds_with_its_state():
+    phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]
+    tasks = [
+        {"id": "a", "phase": "p1", "state": "open"},
+        {"id": "b", "phase": "p2", "state": "open"},
+        {"id": "c", "phase": "p2", "state": "done"},
+        {"id": "d", "phase": "p2", "state": "open", "out_of_scope": True},
+    ]
+    assert phase_state.report(doc(phases, tasks)) == [("p1", "building", []), ("p2", "waiting", ["b"])]
+
+
+def test_phase_pass_never_ticks_a_phase_to_plan_or_planning(store):
+    from scripts.swarm import phases
+
+    class Ledger:
+        ticked = []
+
+        def set_phase(self, slug, phase_id, done, status):
+            self.ticked.append(phase_id)
+
+    data = doc([{"id": "p1", "planning": "auto"}, {"id": "p2", "planning": "auto"}], [plan("p2")])
+    assert [phase_state.lifecycle(p, data) for p in data["phases"]] == ["to_plan", "planning"]
+    assert phases.phase_pass(None, store, "sw", data, Ledger()) == [] and Ledger.ticked == []
