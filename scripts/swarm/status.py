@@ -7,6 +7,8 @@ from datetime import date, datetime
 
 from scripts.agents_quota import page_quota
 from scripts.gates import log as gate_log
+from scripts.gates import progress
+from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import snapshot
@@ -55,10 +57,16 @@ def findings(store, slug, config, tasks, events):
                 checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
             ),
             checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
+            talk_since_outcome(store, slug, rows),
         ),
         now_ms(),
         limits.cooldown_minutes * 60_000,
     )
+
+
+def talk_since_outcome(store, slug, rows):
+    marks = progress.Progress(store.redis, slug)
+    return {row["name"]: marks.read(row["name"]).talk for row in rows if row.get("lane") in WORKER_LANES}
 
 
 def compact_limit(config):
