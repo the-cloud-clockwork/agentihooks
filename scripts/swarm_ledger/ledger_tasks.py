@@ -8,6 +8,7 @@ import ledger_kinds
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
+MINTED_RE = re.compile(r"t(\d+)")
 LANES = ("eng", "ci", "plan")
 STATES = ("open", "claimed", "blocked", "pr", "done")
 UPDATABLE = (
@@ -116,8 +117,12 @@ def check_task(task):
 
 def _add(doc, op, ctx):
     tasks = doc.setdefault("tasks", [])
-    if any(t["id"] == op["task"] for t in tasks):
-        return True
+    if taken := next((t for t in tasks if t["id"] == op["task"]), None):
+        ctx.refused.append(
+            f'task {taken["id"]} already exists as "{taken["title"]}" ({taken.get("state", "open")}): '
+            "pick another id, or pass - as the id to mint one"
+        )
+        return False
     if not _known(tasks, op.get("depends_on", [])):
         return False
     if refusal := add_refusal(tasks, op):
@@ -165,6 +170,11 @@ def add_refusal(tasks, op):
 
 def _known(tasks, ids):
     return set(ids) <= {t["id"] for t in tasks}
+
+
+def next_id(tasks):
+    numbers = [int(match.group(1)) for t in tasks if (match := MINTED_RE.fullmatch(t["id"]))]
+    return f"t{max(numbers, default=0) + 1}"
 
 
 def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
