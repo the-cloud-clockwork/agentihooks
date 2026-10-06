@@ -66,3 +66,23 @@ def test_statusline_names_selected_run_profile(monkeypatch, capsys):
     plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
     assert "agentihooks: zz-selected  settings:zz-selected" in plain
+
+
+@pytest.mark.parametrize(
+    "channels,enabled,shown",
+    [
+        (("brain", "amygdala"), True, "overlay:brain"),
+        (("amygdala",), True, "overlay:none"),
+        (("brain",), False, "overlay:none"),
+    ],
+)
+def test_statusline_names_the_brain_overlay(monkeypatch, capsys, channels, enabled, shown):
+    from hooks import config, statusline
+
+    monkeypatch.setattr(config, "BASE_CHANNELS", channels)
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "statusline-brain"})))
+    statusline.main()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+
+    assert f"  {shown}  channels:{','.join(channels)}" in plain

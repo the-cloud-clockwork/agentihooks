@@ -16,6 +16,7 @@ from scripts.targets.codex_target import codex_home
 SHARED = ("projects", "sessions", "todos", "plans", "plugins", ".credentials.json")
 CODEX_KEYS = ("model", "model_reasoning_effort", "sandbox_mode", "approval_policy")
 STAMP = ".agentihooks-render.json"
+CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
 FOOTER = "<!-- end agentihooks rendered profile -->"
 
@@ -87,6 +88,8 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
 
     _i = _install_module()
     doc = _settings("claude", bundle, dirs)
+    env = doc["env"]
+    env[CHANNELS] = _with_brain(env.get(CHANNELS, ""))
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
     default_home = claude_home(_global_env())
@@ -99,6 +102,16 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         **settings_document(doc),
         "claudeMdExcludes": excludes,
     }
+
+
+def _with_brain(channels: str) -> str:
+    names = [name.strip() for name in channels.split(",") if name.strip()]
+    return ",".join(names if BRAIN in names else [*names, BRAIN])
+
+
+def channels(name: str) -> str:
+    env = _settings("claude", _install_module()._get_bundle_path(), _chain(name))["env"]
+    return _with_brain(env.get(CHANNELS, ""))
 
 
 def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
