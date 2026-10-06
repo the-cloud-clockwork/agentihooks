@@ -19,7 +19,8 @@ class Runner:
 
 
 @pytest.fixture
-def runner(monkeypatch):
+def runner(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERDR_CONFIG_PATH", str(tmp_path / "herdr-config.toml"))
     run = Runner("claude: not installed (/x)\ncodex: current (v8) (/y)\n")
     monkeypatch.setattr(herdr_setup.subprocess, "run", run)
     monkeypatch.setattr(herdr_setup, "binary", lambda: "/bin/herdr")
@@ -88,3 +89,48 @@ def test_init_runs_the_herdr_step_once_for_all_targets(monkeypatch):
     install.main()
     assert len(calls) == len(install.SUPPORTED_TARGETS)
     assert steps == ["no"]
+
+
+def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
+    path = tmp_path / "herdr" / "config.toml"
+    if existing is not None:
+        path.parent.mkdir(parents=True)
+        path.write_text(existing, encoding="utf-8")
+    monkeypatch.setenv("HERDR_CONFIG_PATH", str(path))
+    assert herdr_setup.configure() == 0
+    return path.read_text(encoding="utf-8")
+
+
+def test_configure_adds_a_ui_section_that_turns_copy_on_select_off(monkeypatch, runner, tmp_path, capsys):
+    text = _configured(monkeypatch, runner, tmp_path, 'onboarding = false\n\n[theme]\nname = "one-dark"\n')
+    assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n'
+    assert ["/bin/herdr", "server", "reload-config"] in runner.calls
+    printed = capsys.readouterr().out.splitlines()[-1]
+    assert printed == f"[herdr] config: copy_on_select = false in {tmp_path / 'herdr' / 'config.toml'}"
+
+
+def test_configure_merges_copy_on_select_into_an_existing_ui_section(monkeypatch, runner, tmp_path):
+    existing = "# mine\n[ui]\nconfirm_close = true\n\n[ui.sound]\nenabled = false\n"
+    text = _configured(monkeypatch, runner, tmp_path, existing)
+    assert text == "# mine\n[ui]\nconfirm_close = true\ncopy_on_select = false\n\n[ui.sound]\nenabled = false\n"
+    assert ["/bin/herdr", "server", "reload-config"] in runner.calls
+
+
+def test_configure_keeps_copy_on_select_the_operator_turned_on(monkeypatch, runner, tmp_path):
+    existing = "[ui]\ncopy_on_select = true\n"
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+    assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
+
+
+def test_configure_creates_a_missing_config(monkeypatch, runner, tmp_path):
+    assert _configured(monkeypatch, runner, tmp_path, None) == "[ui]\ncopy_on_select = false\n"
+
+
+def test_the_config_path_follows_herdr(monkeypatch, tmp_path):
+    monkeypatch.delenv("HERDR_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert herdr_setup.config_path() == herdr_setup.Path.home() / ".config" / "herdr" / "config.toml"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert herdr_setup.config_path() == tmp_path / "xdg" / "herdr" / "config.toml"
+    monkeypatch.setenv("HERDR_CONFIG_PATH", str(tmp_path / "own.toml"))
+    assert herdr_setup.config_path() == tmp_path / "own.toml"
