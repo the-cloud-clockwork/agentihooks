@@ -32,8 +32,12 @@ class FakeLedger:
             "followups": [],
         }
 
-    def update_task(self, slug, task_id, fields, by="swarm"):
-        self.rows[task_id].update(fields)
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        assert slug == "sw"
+        row = self.rows[task_id]
+        if not if_state or row["state"] in if_state:
+            row.update(fields)
+        return dict(row)
 
     def notify(self, slug, text):
         self.notes.append(text)
@@ -253,12 +257,84 @@ def test_a_reclaimed_task_is_in_pr_state_only_when_it_has_a_pull_request(store, 
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == (state, "engineer@a1b2c3-0002")
 
 
+class DoneMidTick(FakeLedger):
+    def __init__(self, tasks):
+        super().__init__(tasks)
+        self.closing = None
+
+    def state(self, slug):
+        snapshot = {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
+        if self.closing:
+            self.closing()
+            self.closing = None
+        return snapshot
+
+
+def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(store):
+    ledger, runtime = (
+        DoneMidTick([{"id": "t1", "lane": "eng", "pr_url": "https://github.com/o/r/pull/3"}]),
+        FakeRuntime(),
+    )
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = workers(store)[0]
+
+    def swarm_done():
+        ledger.rows["t1"].update(state="done", done=True)
+        store.release("sw", "t1", agent.name)
+        store.put_agent("sw", replace(agent, state="finished"))
+
+    ledger.closing = swarm_done
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("done", agent.name)
+    assert runtime.spawned == [("eng", agent.name, "t1")]
+    assert actions == [f"retired {agent.name}", "drained"]
+
+
+def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
+    ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("done", "")
+    assert store.claimant("sw", "t1") is None
+    assert runtime.spawned == [("eng", "engineer@a1b2c3-0002", "t2")]
+    assert [a.task for a in workers(store)] == ["t2"]
+    assert actions == [
+        "spawned master master@a1b2c3-0001",
+        "task t1 is done on the ledger, not claimed",
+        "spawned engineer@a1b2c3-0002 for t2",
+    ]
+
+
+def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    for _ in range(3):
+        store.count_claim("sw", "t1")
+    ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], runtime.spawned) == ("done", [])
+    assert actions == ["spawned master master@a1b2c3-0001", "task t1 is done on the ledger, not claimed", "drained"]
+
+
 def test_a_claimed_task_without_an_agent_is_reopened(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert "task t1 had no agent, reopened" in actions
+
+
+def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused")
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", started_at=1_000))
+    runtime.live.add("engineer@a1b2c3-0009")
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
+    assert "task t1 had no agent, reopened" not in actions
 
 
 def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
