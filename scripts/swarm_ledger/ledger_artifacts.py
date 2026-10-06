@@ -1,0 +1,143 @@
+"""Files agents publish for operator review: stored by content hash beside the ledger media, listed in `artifacts`."""
+
+import hashlib
+import json
+import re
+import xml.etree.ElementTree as ET
+from pathlib import PurePath
+
+import ledger_comments
+import ledger_media as media
+
+OPS = ("artifact_add",)
+MAX_BYTES = 8 << 20
+MAX_TITLE = 200
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+TEXT_TYPES = {"md": "text/markdown", "json": "application/json", "svg": "image/svg+xml"}
+SUFFIXES = {".md": "md", ".markdown": "md", ".json": "json", ".svg": "svg"}
+TYPES = {**TEXT_TYPES, "png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "gif": "image/gif"}
+ID_RE = re.compile(rf"^[0-9a-f]{{64}}\.({'|'.join(TYPES)})$")
+AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
+TASK_RE = re.compile(r"^[^/\s]{0,64}$")
+DROPPED = {"script", "foreignObject", "iframe", "object", "embed", "handler", "listener"}
+
+ET.register_namespace("", SVG_NS)
+ET.register_namespace("xlink", XLINK_NS)
+
+
+def _local(name):
+    return name.rsplit("}", 1)[-1]
+
+
+def sanitize_svg(text):
+    """The SVG without scripts, event handlers, embedded documents or links that leave the drawing."""
+    if "<!ENTITY" in text or "<!DOCTYPE" in text:
+        raise media.Refused(415, "an SVG may not declare a doctype or entities")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise media.Refused(415, f"the SVG does not parse: {exc}") from exc
+    if root.tag != f"{{{SVG_NS}}}svg":
+        raise media.Refused(415, "an SVG needs an svg root in the SVG namespace")
+    for node in list(root.iter()):
+        for child in list(node):
+            if _local(child.tag) in DROPPED:
+                node.remove(child)
+        for attr, value in list(node.attrib.items()):
+            name, value = _local(attr).lower(), value.strip().lower()
+            if name.startswith("on") or (name == "href" and not value.startswith(("#", "data:image/"))):
+                del node.attrib[attr]
+    return ET.tostring(root, encoding="unicode").encode("utf-8")
+
+
+def _text(name, data):
+    ext = SUFFIXES.get(PurePath(name or "").suffix.lower())
+    if ext is None:
+        raise media.Refused(415, "only markdown, JSON, SVG, PNG, JPEG, WebP or GIF files are accepted")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise media.Refused(415, "the file is not UTF-8 text") from exc
+    if ext == "json":
+        try:
+            json.loads(text)
+        except ValueError as exc:
+            raise media.Refused(415, f"the file is not valid JSON: {exc}") from exc
+    if ext == "svg":
+        data = sanitize_svg(text)
+    return ext, data, {"type": TEXT_TYPES[ext]}
+
+
+def store(slug, name, data):
+    if len(data) > MAX_BYTES:
+        raise media.Refused(413, f"an artifact may be at most {MAX_BYTES >> 20} MB")
+    try:
+        kind, width, height = media.inspect(data)
+        ext, fields = media.EXTENSIONS[kind], {"type": kind, "width": width, "height": height}
+    except media.Refused:
+        ext, data, fields = _text(name, data)
+    artifact_id = f"{hashlib.sha256(data).hexdigest()}.{ext}"
+    path = media.folder(slug) / artifact_id
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    return {"id": artifact_id, **fields, "size": len(data)}
+
+
+def path_of(slug, artifact_id):
+    if not isinstance(artifact_id, str) or not ID_RE.match(artifact_id):
+        raise ValueError("not an artifact id")
+    path = media.folder(slug) / artifact_id
+    if not path.is_file():
+        raise ValueError(f"no stored artifact {artifact_id}")
+    return path
+
+
+def entry(slug, artifact_id):
+    data = path_of(slug, artifact_id).read_bytes()
+    ext = artifact_id.rsplit(".", 1)[1]
+    if ext in TEXT_TYPES:
+        return {"id": artifact_id, "type": TEXT_TYPES[ext], "size": len(data)}
+    kind, width, height = media.inspect(data)
+    return {"id": artifact_id, "type": kind, "width": width, "height": height, "size": len(data)}
+
+
+def resolve(slug, ops):
+    """Each published file rebuilt from the store, so the JSON holds only what the server measured."""
+    for op in ops:
+        if op.get("op") == "artifact_add":
+            op["file"] = entry(slug, op["file"]["id"])
+    return ops
+
+
+def check(op):
+    if set(op) != {"op", "id", "by", "task", "title", "file"}:
+        raise ValueError("artifact_add takes id, by, task, title and file")
+    if not isinstance(op["by"], str) or not AUTHOR_RE.match(op["by"]) or op["by"] == "operator":
+        raise ValueError("artifact_add needs `by`, an agent name other than operator")
+    if not isinstance(op["task"], str) or not TASK_RE.match(op["task"]):
+        raise ValueError("task must be a task id or empty")
+    if not isinstance(op["title"], str) or not op["title"].strip() or len(op["title"]) > MAX_TITLE:
+        raise ValueError(f"title must be text of at most {MAX_TITLE} characters")
+    if not isinstance(op["file"], dict) or not ID_RE.match(str(op["file"].get("id"))):
+        raise ValueError("file needs a stored artifact id")
+    ledger_comments.check(op["title"], "item")
+
+
+def apply(doc, op, ctx):
+    rows = doc.setdefault("artifacts", [])
+    if any(row["id"] == op["id"] for row in rows):
+        return True
+    known = {task["id"] for task in doc.get("tasks", [])}
+    if op["by"] not in ctx.meta.get("members", {}) or (op["task"] and op["task"] not in known):
+        return False
+    title = op["title"].strip()
+    rows.append({"id": op["id"], "title": title, "by": op["by"], "task": op["task"], "at": ctx.at, "file": op["file"]})
+    ctx.stamp("artifacts", op["by"])
+    ctx.record(
+        op["by"], "artifact added", f"tasks/{op['task']}" if op["task"] else "artifacts", id=op["id"], text=title
+    )
+    return True
