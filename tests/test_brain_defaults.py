@@ -12,6 +12,10 @@ still enables the reader on its own.
 """
 
 import importlib
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +56,34 @@ def brain_env(tmp_path, monkeypatch):
     import hooks.config as config
 
     importlib.reload(config)
+
+
+@pytest.mark.parametrize("preset", [{}, {"BRAIN_CHANNEL": "operator"}], ids=["unset", "set"])
+def test_no_brain_setting_outlives_the_fixture(tmp_path, preset):
+    root = Path(__file__).resolve().parent.parent
+    expected = {key: preset.get(key) for key in _BRAIN_KEYS}
+    after = tmp_path / "test_after_brain_defaults.py"
+    after.write_text(
+        "import os\n\n\n"
+        "def test_environment_is_clean():\n"
+        f"    assert {{k: os.environ.get(k) for k in {list(_BRAIN_KEYS)!r}}} == {expected!r}\n"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    dropped = {*_BRAIN_KEYS, "AGENTIHOOKS_HOME", "AGENTIBRAIN_HOME"}
+    env = {k: v for k, v in os.environ.items() if k not in dropped} | {"HOME": str(home)} | preset
+    leaker = f"{Path(__file__).resolve()}::test_brain_owned_client_policy_is_loaded_from_agentibrain"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "-p", "no:cacheprovider"]
+        + ["-c", str(root / "pyproject.toml"), "--rootdir", str(root), leaker, str(after)],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
 
 
 def test_both_off_without_a_brain_url(brain_env):
