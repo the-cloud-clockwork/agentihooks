@@ -127,12 +127,17 @@ def test_buttons_and_the_floating_bin_entry_are_flat_at_rest():
         assert "border:0" in rule(selector)
 
 
-def test_the_header_names_each_column_and_counts_the_ledgers(updated_at):
+def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(updated_at):
     make("header-a")
     make("header-b")
     page = server.index_page()
     count = len(server.ledger_summaries())
-    assert f'<header><h1>HOME</h1><span class="total">{count} ledgers</span></header>' in page
+    assert count > 1
+    assert (
+        '<header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>HOME</h1></header>'
+        in page
+    )
+    assert 'class="total"' not in page
     head = re.search(r'<div class="row head" aria-hidden="true">(.*?)</div>', page).group(1)
     assert head == (
         '<span>Ledger</span><span>Kind</span><span>Overview</span><span class="r">Open</span>'
@@ -151,7 +156,11 @@ def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
     assert f'<span class="deleted">{date}</span><span class="left">1 day left</span>' in found
     assert f'<button class="act restore" type="button" data-act="restore" data-slug="{SLUG}"' in found
     assert "Restore</button>" in found
-    assert '<main class="bin"><header><h1>BIN</h1><span class="total">1 ledger</span></header>' in page
+    assert (
+        '<main class="bin"><header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>BIN</h1><span class="total">1 ledger</span></header>'
+        in page
+    )
+    assert 'class="watermark"' not in page
     assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in page
     assert 'id="home-fab" href="/"' in page
     assert server.bin_cells({"deleted_at": updated_at, "days_left": 30}).endswith(">30 days left</span>")
