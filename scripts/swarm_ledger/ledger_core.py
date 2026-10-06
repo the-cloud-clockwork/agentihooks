@@ -30,6 +30,8 @@ import ledger_sources
 import ledger_tasks
 import ledger_title
 
+from scripts.swarm_ledger import ledger_phases
+
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
 SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(</script>)', re.S)
@@ -39,7 +41,7 @@ PALETTE = TEMPLATE.with_name("palette.css")
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = {
-    "phases": ("title", "description", "done", "out_of_scope"),
+    "phases": ("title", "description", "done", "out_of_scope", "depends_on", "planning", "release"),
     "questions": ("text", "out_of_scope"),
     "followups": ("text", "done", "out_of_scope"),
     "tasks": (
@@ -95,6 +97,7 @@ EXTENSION_OPS = {
         ledger_close,
         ledger_size,
         ledger_sources,
+        ledger_phases,
     )
     for name in module.OPS
 }
@@ -217,13 +220,15 @@ def validate(doc):
             raise ValueError(f"every {name} item needs a unique string id without '/'")
         for item in items:
             for field in fields:
-                expected = bool if field in BOOL_FIELDS else str
+                expected = list if field == "depends_on" else bool if field in (*BOOL_FIELDS, "release") else str
                 if field in item and not isinstance(item[field], expected):
                     raise ValueError(f"{name}/{item['id']}/{field} must be {expected.__name__}")
             for thread in THREADS[name]:
                 validate_thread(f"{name}/{item['id']}/{thread}", item.get(thread, []))
             if name == "tasks":
                 ledger_tasks.check_task(item)
+
+    ledger_phases.validate(doc.get("phases", []))
 
 
 def flatten(doc):
@@ -234,6 +239,8 @@ def flatten(doc):
         flat[name] = [item["id"] for item in items]
         for item in items:
             for field in fields:
+                if field in ("depends_on", "planning", "release") and field not in item:
+                    continue
                 flat[f"{name}/{item['id']}/{field}"] = item.get(field, False if field in BOOL_FIELDS else "")
     return flat
 
@@ -362,7 +369,7 @@ def agent_entry(entry, ctx):
 
 
 def new_item(name, seed_item, ctx):
-    item = {k: v for k, v in seed_item.items() if k not in THREADS[name]}
+    item = {k: v for k, v in seed_item.items() if k not in THREADS[name] and not (name == "phases" and k == "review")}
     for thread in THREADS[name]:
         operator_only = thread == "answers"
         item[thread] = [] if operator_only else [agent_entry(e, ctx) for e in seed_item.get(thread, [])]
@@ -370,6 +377,8 @@ def new_item(name, seed_item, ctx):
 
 
 def reconcile_fields(doc, base_doc, seed, ctx):
+    if not ledger_phases.seed_graph_valid(doc["phases"], base_doc["phases"], seed["phases"], ctx):
+        seed = {**seed, "phases": base_doc["phases"]}
     base, new, flat = flatten(base_doc), flatten(seed), flatten(doc)
     items = {name: {i["id"]: i for i in doc[name]} for name in LISTS}
     for name in LISTS:
@@ -655,6 +664,7 @@ def load_state(json_path, seed):
     if seed is None:
         raise ValueError(f"{json_path} is missing and the HTML seed is unreadable")
     doc = {k: v for k, v in seed.items() if k not in ("_rev", "notifications")}
+    doc["phases"] = [{k: v for k, v in phase.items() if k != "review"} for phase in doc["phases"]]
     meta = {"rev": 0, "stamps": {}, "events": [], "seeds": {"0": doc}, "seed_error": None, "updated_at": now_ms()}
     return doc, meta, True
 

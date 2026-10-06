@@ -202,3 +202,27 @@ def test_init_reports_invalid_inheritance_before_writing(tmp_path, monkeypatch, 
     assert error.value.code == 1
     assert capsys.readouterr().err == f"ERROR: {message}\n"
     assert not (Path.home() / ".claude" / "settings.json").exists()
+
+
+@pytest.mark.parametrize(
+    "parents, identity, layers",
+    [
+        ({"child": ["base", "kit"]}, "child", "Layered on top: **brain** (a capability layer"),
+        ({}, "base", "Layered on top: **kit**, **child**, **brain** (capability layers"),
+    ],
+)
+def test_persona_identity_skips_profiles_reached_through_extends(tmp_path, monkeypatch, parents, identity, layers):
+    from scripts.targets import _common
+
+    dirs = []
+    for name in ("base", "kit", "child", "brain"):
+        directory = tmp_path / name
+        directory.mkdir()
+        if name in parents:
+            (directory / "profile.yml").write_text(yaml.safe_dump({"extends": parents[name]}))
+        dirs.append((name, directory))
+    monkeypatch.setattr(_common, "linked_profile_names", lambda: {"brain"})
+    text = _common.build_persona(dirs, [name for name, _ in dirs], None, [], "HEAD", "FOOT")
+    assert f"You are **{identity}**" in text
+    assert f"answer as **{identity}**" in text
+    assert layers in text

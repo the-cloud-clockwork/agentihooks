@@ -55,6 +55,16 @@ def linked_profiles(state: dict) -> dict[str, Path]:
     return linked
 
 
+def parents(path: Path) -> list[str]:
+    manifest = path / "profile.yml"
+    data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+    return data.get("extends", [])
+
+
+def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
+    return {parent for _, path in profile_dirs for parent in parents(path)}
+
+
 def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> list[str]:
     out = []
     seen = set()
@@ -68,10 +78,8 @@ def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> 
         path = resolve(name)
         if path is None:
             raise ValueError(f"Profile '{name}' not found in inheritance chain: {' -> '.join(visiting + [name])}")
-        manifest = path / "profile.yml"
-        data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
         visiting.append(name)
-        for parent in data.get("extends", []):
+        for parent in parents(path):
             visit(parent)
         visiting.pop()
         seen.add(name)

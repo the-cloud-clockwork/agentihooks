@@ -69,6 +69,18 @@ def check_types(content):
             for f in fields
             if not isinstance(i.get(f, ""), str)
         ]
+    if not errors:
+        from scripts.swarm_ledger import ledger_phases
+
+        try:
+            ledger_phases.validate(
+                [
+                    {"id": f"p{n}", **phase_fields("phases", phase)}
+                    for n, phase in enumerate(content.get("phases", []), 1)
+                ]
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
     for n, task in enumerate(content.get("tasks", []) if isinstance(content.get("tasks", []), list) else [], 1):
         if isinstance(task, dict) and task.get("lane", "eng") not in ("eng", "ci"):
             errors.append(f"tasks[{n}].lane must be eng or ci")
@@ -93,10 +105,14 @@ def check(content):
     return errors
 
 
+def phase_fields(key: str, item: dict) -> dict:
+    return {name: item[name] for name in ("depends_on", "planning", "release") if key == "phases" and name in item}
+
+
 def build_doc(content, size="small"):
     def items(key, prefix, fields):
         return [
-            {"id": f"{prefix}{n}", **{f: item.get(f, "") for f in fields}, **extra(key)}
+            {"id": f"{prefix}{n}", **{f: item.get(f, "") for f in fields}, **extra(key), **phase_fields(key, item)}
             for n, item in enumerate(content.get(key, []), 1)
         ]
 
