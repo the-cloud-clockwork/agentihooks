@@ -58,7 +58,7 @@ class Outline(unittest.TestCase):
                 {
                     "id": "sec-tasks",
                     "title": "Swarm tasks · 1 open",
-                    "items": [],
+                    "items": [{"id": "item-tasks-t1", "title": "t1 Write the test", "state": "open"}],
                 },
                 {
                     "id": "sec-questions",
