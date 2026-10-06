@@ -7,7 +7,8 @@ html{color-scheme:dark}
 body{margin:0;min-height:100vh;color:var(--text);font:13px/1.6 ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);background-image:var(--backdrop);background-attachment:fixed}
 ::selection{background:var(--selection);color:var(--text)}
 main{position:relative;z-index:1;padding:32px clamp(16px,3vw,48px) 96px}
-main.home{padding-inline:clamp(16px,10vw,192px)}
+main.home{padding-inline:192px}
+@media (max-width:1439px){main.home{padding-inline:clamp(16px,3vw,48px)}}
 .home .panel{margin-top:16px;padding:4px 8px 8px;border:1px solid var(--rule);border-radius:12px;background:var(--veil)}
 header{display:flex;align-items:center;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}
 .logo{flex:none;width:22px;height:22px;background:var(--logo);mask:url(/logo.png) center/contain no-repeat}

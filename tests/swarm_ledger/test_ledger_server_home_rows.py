@@ -137,6 +137,13 @@ def opened(tab):
     return tab.evaluate("() => [...document.querySelectorAll('li.row.open')].map((r) => r.dataset.slug).join('')")
 
 
+def test_home_side_margins_are_192_pixels_each_on_a_wide_screen(tab):
+    pads = tab.evaluate(
+        "() => { const s = getComputedStyle(document.querySelector('main')); return [s.paddingLeft, s.paddingRight]; }"
+    )
+    assert pads == ["192px", "192px"]
+
+
 def test_rows_start_folded_on_one_line_of_equal_height(tab):
     assert opened(tab) == ""
     assert len(set(heights(tab))) == 1
