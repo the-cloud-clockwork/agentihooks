@@ -61,12 +61,13 @@ from scripts.swarm import (
     templates,
     timer,
 )
-from scripts.swarm.health import activity, checks, verdicts
+from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
+from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
-from scripts.swarm.tick import agent_status, primed, tick
+from scripts.swarm.tick import primed, tick
 from scripts.swarm_ledger import ledger_kinds, ledger_link, plan_shape
 
 SETTABLE = {
@@ -112,7 +113,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += phases.phase_pass(inbox, store, slug, doc, ledger)
-        found = _findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
+        found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
         actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window)
@@ -384,14 +385,6 @@ def _share(store, config):
     )
 
 
-def _auto_snapshot(config):
-    return {
-        "last": snapshot.last_auto(config.slug),
-        "kept": len(snapshot.automatic(config.slug)),
-        "every_minutes": snapshot.interval_minutes(config, os.environ),
-    }
-
-
 def _snapshot_line(auto):
     every = f"every {auto['every_minutes']} min" if auto["every_minutes"] > 0 else "automatic snapshots off"
     if auto["last"] is None:
@@ -401,49 +394,22 @@ def _snapshot_line(auto):
 
 
 def cmd_status(store, args):
+    if args.json:
+        store.config(args.slug)
+        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug))))
+        return
     config = store.config(args.slug)
     agents = store.agents(args.slug)
     ledger = LedgerClient()
     tasks = ledger.tasks(args.slug)
-    counts = {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
-    found = _findings(store, args.slug, config, tasks, ledger.events(args.slug))
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "config": {**config.__dict__, "codex_share": codex_split(config, os.environ)[0]},
-                    "agents": [
-                        {
-                            **a.__dict__,
-                            "status": agent_status(a),
-                            "state_since": int(store.redis.hget(store.key(args.slug, "state-since"), a.name) or 0),
-                            "inbox": [
-                                {"text": item.text, "sender": item.sender, "state": item.state}
-                                for item in InboxStore(store.redis).pending_mail(a.name)
-                            ],
-                        }
-                        for a in agents
-                    ],
-                    "last_tick": int(store.redis.get(store.key(args.slug, "last-tick")) or 0),
-                    "history": [json.loads(row) for row in store.redis.lrange(store.key(args.slug, "history"), 0, -1)],
-                    "tasks": counts,
-                    "spawns": store.spawns(args.slug),
-                    "findings": found,
-                    "auto_snapshot": _auto_snapshot(config),
-                    "restored": store.restored(args.slug),
-                    "transfers": transfers.list_transfers(store, args.slug),
-                    "peer": store.peer(args.slug),
-                    "plan_shape": plan_shape.report(tasks, config.max_eng),
-                }
-            )
-        )
-        return
+    counts = task_counts(tasks)
+    found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
         f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}  {_share(store, config)}"
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print(plan_shape.report(tasks, config.max_eng)["summary"])
-    print(_snapshot_line(_auto_snapshot(config)))
+    print(_snapshot_line(auto_snapshot(config)))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(
@@ -491,38 +457,13 @@ def cmd_rename(store, args):
         raise SwarmError("; ".join(failed))
 
 
-def _findings(store, slug, config, tasks, events):
-    rows, limits = [a.__dict__ for a in store.agents(slug)], health.limits()
-    return _verdicts(store, slug).visible(
-        health.findings(
-            {"tasks": tasks, "_meta": {"events": events}},
-            rows,
-            activity.counts(slug),
-            now_ms(),
-            limits,
-            checks.waiting(
-                rows,
-                tasks,
-                limits,
-                checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
-            ),
-        ),
-        now_ms(),
-        limits.cooldown_minutes * 60_000,
-    )
-
-
-def _verdicts(store, slug):
-    return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
-
-
 def cmd_verdict(store, args):
     store.config(args.slug)
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is not None and agent.lane != MASTER:
         raise SwarmError("only the master or the operator gives a finding a verdict")
-    verdict = _verdicts(store, args.slug).judge(args.finding, args.verdict, args.note, name or "operator", now_ms())
+    verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, name or "operator", now_ms())
     minutes = health.limits().cooldown_minutes
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 

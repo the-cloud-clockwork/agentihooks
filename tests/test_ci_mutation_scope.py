@@ -1,0 +1,53 @@
+from pathlib import Path
+
+from scripts.ci_mutation.scope import changed_lines, select_tests
+
+
+def test_hunks_include_only_added_and_changed_head_lines():
+    diff = "@@ -3,2 +3,3 @@\n-old\n+new\n+extra\n@@ -12 +13 @@\n-old\n+new\n@@ -20,2 +21,0 @@\n-deleted\n"
+    assert changed_lines(diff) == {3, 4, 5, 13}
+
+
+def test_tests_are_discovered_by_module_name_and_import(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    nested = tests / "nested"
+    nested.mkdir()
+    (nested / "test_sample.py").write_text("pass\n")
+    (tests / "test_import.py").write_text("from hooks.context import sample\n")
+    (tests / "test_direct.py").write_text("import hooks.context.sample as sample\n")
+    (tests / "test_other.py").write_text("from hooks.context import other\n")
+    assert select_tests(tmp_path, Path("hooks/context/sample.py")) == [
+        "tests/nested/test_sample.py",
+        "tests/test_direct.py",
+        "tests/test_import.py",
+    ]
+
+
+def test_diff_discovers_only_changed_source_python_files(tmp_path):
+    import subprocess
+
+    from scripts.ci_mutation.scope import discover_changes
+
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path).decode().strip()
+
+    git("init")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "hooks" / "gone.py").write_text("removed = 1\n")
+    (tmp_path / "hooks" / "same.py").write_text("untouched = 1\n")
+    git("add", "hooks/gone.py", "hooks/same.py")
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    (tmp_path / "hooks" / "gone.py").unlink()
+    (tmp_path / "hooks" / "new.py").write_text("def f():\n    return 3\n")
+    (tmp_path / "scripts" / "space name.py").write_text("def f():\n    return 2\n")
+    (tmp_path / "tests" / "test_other.py").write_text("pass\n")
+    (tmp_path / "scripts" / "note.txt").write_text("prose\n")
+    git("add", "hooks/gone.py", "hooks/new.py", "scripts/space name.py", "tests/test_other.py", "scripts/note.txt")
+    git("commit", "-m", "head")
+    assert discover_changes(tmp_path, base, "HEAD") == {"hooks/new.py": {1, 2}, "scripts/space name.py": {1, 2}}
