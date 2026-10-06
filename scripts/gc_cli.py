@@ -98,7 +98,10 @@ def _name(kind: str, repo: str, check: str) -> int:
     try:
         built = naming.tmp_worktree(os.environ, taken) if kind == "tmp" else naming.worktree(os.environ, taken)
         if check and not naming.is_worktree(check, os.environ, tmp=kind == "tmp"):
-            print(f"name: names come from code; use {built} (run wt.sh {kind} without a name)", file=sys.stderr)
+            print(
+                f"name: names come from code; use {built} (run wt.sh {'tmp' if kind == 'tmp' else 'new'} without a name)",
+                file=sys.stderr,
+            )
             return 1
     except naming.NamingError as error:
         print(f"name: {error}", file=sys.stderr)
