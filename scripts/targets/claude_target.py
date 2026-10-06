@@ -109,6 +109,12 @@ def settings_document(rendered: dict) -> dict:
     return rendered
 
 
+def enabled_plugins(operator: dict, layered: dict, bundle: Path | None) -> dict:
+    from scripts.deps_preflight import fleet_plugins
+
+    return {**operator, **dict.fromkeys(fleet_plugins(bundle), True), **layered}
+
+
 def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
     from scripts.targets._common import _atomic_write
 
@@ -180,6 +186,10 @@ class ClaudeAdapter:
         personal = _i._preserve_personal_keys(existing_settings_path)
         merged: dict = deepcopy(personal)
         merged.update(rendered)
+        existing = _i.load_json(existing_settings_path) if existing_settings_path.exists() else {}
+        merged["enabledPlugins"] = enabled_plugins(
+            existing.get("enabledPlugins") or {}, rendered.get("enabledPlugins") or {}, _i._get_bundle_path()
+        )
         merged["hooks"] = _keep_foreign_hooks(existing_settings_path, rendered.get("hooks") or {})
         if not merged["hooks"]:
             del merged["hooks"]

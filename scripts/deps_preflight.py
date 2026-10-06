@@ -73,6 +73,13 @@ def manifest_path() -> Path | None:
     return path if path and path.is_file() else None
 
 
+def fleet_plugins(bundle: Path | None) -> list[str]:
+    path = bundle / "deps.json" if bundle else None
+    if path is None or not path.is_file():
+        return []
+    return [dep.id for dep in parse(json.loads(path.read_text())) if dep.kind == "claude-plugin" and dep.present]
+
+
 def _stamp() -> Path:
     return mcp_daemon.state_dir() / "deps.stamp"
 
