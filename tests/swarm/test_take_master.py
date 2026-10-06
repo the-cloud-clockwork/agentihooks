@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import pytest
 
 from scripts.swarm import cli, take_master
@@ -35,6 +38,23 @@ def test_take_master_seats_this_session_and_names_it(taker, capsys):
     assert store.seats.occupant("master@sw").occupant == "master@a1b2c3-0001"
     assert named == [(4242, "master@a1b2c3-0001")]
     assert rt.masters == []
+
+
+def test_take_master_records_the_model_and_effort_the_session_launched_with(taker, monkeypatch):
+    store, _, _, _ = taker
+    argv = ("codex", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"')
+    monkeypatch.setattr(take_master, "harness_of", lambda pid: "codex" if pid == 4242 else "claude")
+    monkeypatch.setattr(take_master, "argv_of", lambda pid: argv if pid == 4242 else ())
+    assert run("sw", "take-master") == 0
+    [master] = [a for a in store.agents("sw") if a.lane == "master"]
+    assert (master.harness, master.model, master.effort) == ("codex", "gpt-6.1-sol", "high")
+    assert master.started_at > 0
+
+
+def test_argv_of_reads_a_process_command_line():
+    own = Path("/proc/self/cmdline").read_bytes().split(b"\0")
+    assert take_master.argv_of(os.getpid()) == tuple(arg.decode() for arg in own if arg)
+    assert take_master.argv_of(2**22 + 1) == ()
 
 
 def test_a_named_session_keeps_its_name(taker, monkeypatch):

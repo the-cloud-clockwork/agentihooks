@@ -27,7 +27,7 @@ def caps_boxes(browser, width):
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;
-              for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20%"], ["cap-compact", "600k"]]) document.getElementById(id).textContent = v;
+              for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20"], ["cap-compact", "600"]]) document.getElementById(id).value = v;
               const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
                 caps: [...document.querySelectorAll("#capacity-box .sw-cap")].map((cap) => [...cap.children].map(box)),

@@ -4280,11 +4280,11 @@ def _symlink_dir_contents(
     Stale symlinks (broken or pointing to items that no longer pass the filter)
     are removed automatically before new links are created.
     """
+    _cleanup_stale_links(dst_dir, src_dir, filter_fn)
+
     if not src_dir.exists():
         print(f"  (no {label}s directory at {src_dir}, skipping)")
         return
-
-    _cleanup_stale_links(dst_dir, src_dir, filter_fn)
 
     children = [c for c in src_dir.iterdir() if not filter_fn or filter_fn(c)]
     if not children:
