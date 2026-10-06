@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.doctor import priming
+from scripts.gates import Who
+from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
@@ -789,6 +791,9 @@ def main(argv):
             argv = [argv[0], "set", *argv[1:]]
         args = build_parser().parse_args(argv)
         handler = globals()[f"cmd_{args.command.replace('-', '_')}"]
+    if text := refusal(getattr(args, "name", ""), Who.from_env()):
+        print(f"swarm: {text}", file=sys.stderr)
+        return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         store = connect()
