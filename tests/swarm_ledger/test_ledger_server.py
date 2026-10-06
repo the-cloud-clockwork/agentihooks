@@ -130,7 +130,8 @@ def test_buttons_and_the_floating_bin_entry_are_flat_at_rest():
 def test_the_header_names_each_column_and_counts_the_ledgers(updated_at):
     page = server.index_page()
     count = len(server.ledger_summaries())
-    assert f'<header><h1>HOME</h1><span class="total">{count} ledgers</span></header>' in page
+    total = f"{count} ledger{'' if count == 1 else 's'}"
+    assert f'<header><h1>HOME</h1><span class="total">{total}</span></header>' in page
     head = re.search(r'<div class="row head" aria-hidden="true">(.*?)</div>', page).group(1)
     assert head == (
         '<span>Ledger</span><span>Kind</span><span>Overview</span><span class="r">Open</span>'
