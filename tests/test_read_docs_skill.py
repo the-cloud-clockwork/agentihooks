@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import re
 from pathlib import Path
@@ -15,10 +14,9 @@ SITE = "https://the-cloud-clockwork.github.io/agentihooks/"
 
 @pytest.fixture
 def lookup():
-    spec = importlib.util.spec_from_file_location("docs_lookup", SKILL / "scripts/lookup.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from scripts import read_docs
+
+    return read_docs
 
 
 @pytest.fixture
@@ -202,3 +200,14 @@ def test_cli_uses_process_arguments(lookup, monkeypatch, index, capsys):
     monkeypatch.setattr(sys, "argv", ["lookup.py", "--question", "Priorities"])
     assert lookup.main() == 0
     assert json.loads(capsys.readouterr().out)["candidates"][0]["heading"] == "Priorities"
+
+
+@pytest.mark.parametrize("question", ["How does the swarm work?", "How does the swarm behave?", "What is the ledger?"])
+def test_generic_subject_is_still_searchable(lookup, index, question):
+    index["5"] = {
+        "doc": "Swarm",
+        "title": "Ledger",
+        "content": "Swarm behavior.",
+        "url": "/agentihooks/docs/swarm/#ledger",
+    }
+    assert lookup.candidates(index, question)[0]["page"] == "Swarm"
