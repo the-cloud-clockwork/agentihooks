@@ -152,3 +152,27 @@ def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeyp
     render.render_codex("rb-role")
     codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
     assert f"ROLE RULE MARKER\n\n{notice}" in codex and f"ROLE PERSONA MARKER\n\n{notice}" in codex
+
+
+def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypatch):
+    import tomllib
+
+    from scripts.profiles import render
+    from scripts.targets.codex_target import codex_home
+
+    monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
+    rel = "profiles/rb-kit/.claude/rules/role-rule.md"
+    _correct_passage(bundle, rel, "ROLE RULE MARKER")
+    _correct_passage(bundle, rel, "ROLE RULE MARKER")
+
+    out = render.render_claude("rb-role")
+    render.render_codex("rb-role")
+
+    held = (
+        f"> CORRECTION: bundle/{rel} was marked wrong more than once and is held whole until the operator releases it."
+    )
+    assert (out / "rules" / "role-rule.md").read_text() == f"{held}\n"
+    assert (out / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
+    codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
+    assert f"<!-- rule: role-rule.md (rule) -->\n{held}" in codex
+    assert "ROLE RULE MARKER" not in codex
