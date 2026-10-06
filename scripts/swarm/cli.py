@@ -951,7 +951,7 @@ def main(argv):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         store = connect()
-        if getattr(args, "slug", ""):
+        if "slug" in args:
             args.slug = store.resolve(args.slug)
         action = getattr(args, "command", "")
         before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None

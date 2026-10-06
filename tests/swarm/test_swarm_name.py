@@ -123,3 +123,40 @@ def test_a_command_given_the_name_acts_on_the_swarm(env, capsys):  # noqa: F811
 def test_a_name_cannot_create_a_swarm(env, capsys):  # noqa: F811
     assert run("swarm@a1b2c3", "create", "--repo", "/repo") == 1
     assert cli.SLUG_RE.match("swarm@a1b2c3") is None
+
+
+def test_a_swarm_registry_emptied_by_a_restore_is_adopted_with_its_name(store):
+    config = store.config("sw")
+    store.redis.delete(naming.NameRegistry.key("codes"), naming.NameRegistry.key("code-of"))
+    assert store.resolve(config.name) == config.name
+    store.ensure_code("sw")
+    assert store.names.swarm(config.code) == {
+        "swarm": "sw",
+        "name": config.name,
+        "ledger": "sw",
+        "repo": "/home/x/dev/agentihooks",
+    }
+    assert store.resolve(config.name) == "sw"
+
+
+def test_status_of_a_swarm_not_yet_named_marks_the_name_missing(env, capsys):  # noqa: F811
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.redis.hdel(store.key("sw", "config"), "name")
+    capsys.readouterr()
+    run("sw", "status")
+    assert capsys.readouterr().out.splitlines()[0].startswith("-  sw  paused  eng 2")
+
+
+def test_names_json_carries_the_swarm_name(env, capsys):  # noqa: F811
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    capsys.readouterr()
+    run("sw", "names", "--json")
+    config = store.config("sw")
+    assert json.loads(capsys.readouterr().out) == {
+        "name": config.name,
+        "code": config.code,
+        "space": f"repo-{config.code}",
+        "names": [],
+    }

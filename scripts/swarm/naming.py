@@ -73,7 +73,7 @@ def swarm_name(code):
 
 
 def swarm_code(name):
-    found = SWARM_RE.fullmatch(name or "")
+    found = SWARM_RE.fullmatch(name)
     return found.group(1) if found else ""
 
 
@@ -280,7 +280,7 @@ class NameRegistry:
     def swarm_slug(self, ref):
         """The ledger slug a swarm name `swarm@<code>` stands for while that swarm holds the code; ref otherwise."""
         code = swarm_code(ref)
-        slug = self.swarm(code).get("swarm", "") if code else ""
+        slug = self.swarm(code).get("swarm")
         return slug if slug and self.code_of(slug) == code else ref
 
     def release(self, slug):
