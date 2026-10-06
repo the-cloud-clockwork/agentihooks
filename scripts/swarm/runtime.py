@@ -10,7 +10,8 @@ from pathlib import Path
 
 from scripts import agent_choice
 from scripts.swarm import model_pick, naming, prompt
-from scripts.swarm.store import SwarmConfig, codex_split
+from scripts.swarm.pane import PaneObservation, selection_prompt
+from scripts.swarm.store import AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -41,8 +42,11 @@ def _model_args(agent, chosen):
 
 
 def herdr_call(args):
-    from scripts.herdr_host import _cli
+    from scripts.herdr_host import _cli, binary
 
+    if args[:2] == ["pane", "read"]:
+        done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
+        return {"text": done.stdout}
     return _cli(args, dict(os.environ))
 
 
@@ -231,12 +235,21 @@ class HerdrRuntime:
             return False
 
     def status(self, agent):
+        return self.observe(agent).state
+
+    def observe(self, agent: AgentRecord) -> PaneObservation:
         found = self._get(pane_target(agent))
         if found is None or not _owns(found, agent):
-            return "unknown"
+            return PaneObservation("unknown")
         if agent.pane_id and found.get("name") not in (agent.name, herdr_target(agent.name)):
             self.name_pane(agent)
-        return found.get("agent_status") or found.get("status") or "unknown"
+        state = found.get("agent_status") or found.get("status") or "unknown"
+        try:
+            capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "text"])
+        except Exception:
+            return PaneObservation(state)
+        title = selection_prompt(capture.get("text", ""))
+        return PaneObservation("waiting", title) if title else PaneObservation(state)
 
     def _get(self, target):
         try:

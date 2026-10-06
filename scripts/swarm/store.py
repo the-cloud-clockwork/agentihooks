@@ -59,6 +59,8 @@ class AgentRecord:
     profile: str = ""
     model_source: str = ""
     model_confidence: float | None = None
+    input_prompt: str = ""
+    input_ticks: int = 0
 
 
 class RedisStore:

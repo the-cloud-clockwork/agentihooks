@@ -312,6 +312,7 @@ details.sw-agents { margin: 0; }
 .sw-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
 .sw-status.working { color: var(--accent); }
 .sw-status.idle { color: var(--warn); }
+.sw-status.waiting { color: var(--warn); }
 .sw-status.stalled { color: var(--destructive); }
 .sw-status.finished { color: var(--muted); text-shadow: none; }
 .sw-status.finished::before { box-shadow: none; }
@@ -1488,7 +1489,7 @@ input, textarea { caret-color: var(--accent-2); }
         ...(a.model_source ? { modelSource: a.model_source } : {}), modelConfidence: a.model_confidence,
         account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
         ago: last ? span(now - last) : "", taskState: t.state || "open", inbox: a.inbox,
-        held: a.state_since ? span(now - a.state_since) : "", taskId: a.task };
+        held: a.state_since ? span(now - a.state_since) : "", taskId: a.task, ...(a.input_prompt ? { inputPrompt: a.input_prompt } : {}) };
     });
   }
 
@@ -1737,7 +1738,7 @@ input, textarea { caret-color: var(--accent-2); }
     const box = h("details", { class: "fold", id: "agent-" + a.name },
       h("summary", {},
         h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
-          h("span", { class: `sw-status ${a.status}`, text: a.status }),
+          h("span", { class: `sw-status ${a.status}`, text: a.status === "waiting" ? "Waiting on input" : a.status }),
           h("span", { class: "hint", text: a.held || "duration not recorded" })),
         h("span", { class: "sw-task", text: a.task }),
         h("div", { class: "sw-meta" }, h("span", { text: { eng: "engineer", ci: "CI agent", master: "master" }[a.lane] || a.lane }),
@@ -1745,6 +1746,7 @@ input, textarea { caret-color: var(--accent-2); }
           a.modelSource ? h("span", { text: `source ${a.modelSource}` }) : null,
           a.modelConfidence != null ? h("span", { text: `confidence ${Math.round(a.modelConfidence * 100)}%` }) : null, a.account ? h("span", { text: a.account }) : null,
           h("span", { class: "sw-ago", text: a.ago ? `last activity ${a.ago} ago` : "last activity not recorded" }))),
+      a.inputPrompt ? h("p", { class: "sw-meta", text: `Prompt: ${a.inputPrompt}` }) : null,
       h("p", { class: "hint", text: ((task.workspace_tail || {}).latest_progress || "").split("\n").filter((line) => line.trim()).at(-1) || "Progress not recorded." }),
       a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: `Pull request · ${task.checks_state || "checks not reported"}` }) : null,
       h("ul", { class: "pending-inbox" }, ...(a.inbox || []).map((i) => h("li", { class: "hint", text: i.text }))),
