@@ -332,16 +332,17 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 
-def _launched(tmp_path, monkeypatch, lane, task, lanes=None):
-    for key in ("AGENTIHOOKS_CLAUDE_MODEL", "AGENTIHOOKS_CLAUDE_EFFORT"):
-        monkeypatch.delenv(key, raising=False)
+def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude"):
+    for key in ("MODEL", "EFFORT"):
+        for agent in ("CLAUDE", "CODEX"):
+            monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
     seen = {}
 
     def run(argv, **kwargs):
         seen["argv"] = argv
         return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
 
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     auto = {"agent": "auto", "model": "auto", "effort": "auto"}
     config = SimpleNamespace(
         slug="sw",
@@ -386,6 +387,48 @@ def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
         "sonnet",
         "--effort",
         "max",
+    ]
+
+
+def _lowest_pick(*args, **kwargs):
+    from hooks.classifier import Answer, DecisionResult
+
+    return DecisionResult(
+        {
+            "tier": Answer("choice", choice="small", confidence=0.95),
+            "effort": Answer("score", score=0, confidence=0.95),
+        },
+        "luna",
+    )
+
+
+@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
+@pytest.mark.parametrize(
+    "harness,launch",
+    [
+        ("claude", ["--model", "opus", "--effort", "high"]),
+        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
+    ],
+)
+def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_high_effort(
+    tmp_path, monkeypatch, lane, harness, launch
+):
+    from scripts.swarm import model_pick
+
+    monkeypatch.setattr(model_pick, "decide", _lowest_pick)
+    assert _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness) == launch
+
+
+def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_path, monkeypatch):
+    from scripts.swarm import model_pick
+
+    monkeypatch.setattr(model_pick, "decide", _lowest_pick)
+    lanes = {"eng": {"agent": "claude", "model": "sonnet", "effort": "auto"}}
+    assert _launched(tmp_path, monkeypatch, "eng", SEAT_TASKS["eng"], lanes) == [
+        "--model",
+        "sonnet",
+        "--effort",
+        "high",
     ]
 
 
