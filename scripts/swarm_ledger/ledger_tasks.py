@@ -69,8 +69,7 @@ def check(op):
     strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS}
     if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in strings.values()):
         raise ValueError(
-            f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists, {OBJECT_FIELDS} as objects "
-            f"or {BOOL_FIELDS} as true or false"
+            f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists or {OBJECT_FIELDS} as objects"
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")

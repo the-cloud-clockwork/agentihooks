@@ -1,21 +1,29 @@
 import json
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import ledger
-import ledger_artifacts as artifacts
-import ledger_core as core
-import ledger_gate
 import ledger_media as media
 import pytest
 
 from scripts.swarm import prompt
+from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
+from scripts.swarm_ledger import ledger_artifacts as artifacts
+from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png
 
 AGENT = "life-engineer"
 RULE = "proofs go on the task proof and the pull request"
+
+
+@pytest.fixture(autouse=True)
+def package_modules(ledger_dir, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", ledger_dir)
+    monkeypatch.setitem(sys.modules, "ledger_artifacts", artifacts)
+    monkeypatch.setitem(core.EXTENSION_OPS, "task_add", ledger_tasks)
+    monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
 
 
 @pytest.fixture
@@ -83,16 +91,18 @@ class TestRequestGate:
             "file": {"id": "a" * 64 + ".md"},
         }
         core.check_op({**good, "request": "m-1"})
-        with pytest.raises(ValueError):
-            core.check_op({**good, "request": 7})
+        for bad in (7, ""):
+            with pytest.raises(ValueError, match="^request must be the id of the operator message that asked"):
+                core.check_op({**good, "request": bad})
+        with pytest.raises(ValueError, match="^artifact_add takes id, by, task, title, file and an optional request$"):
+            core.check_op({**good, "extra": 1})
         task = {"op": "task_add", "id": "t", "by": "eng", "task": "w", "title": "Work", "lane": "eng"}
         core.check_op({**task, "artifact": True})
-        with pytest.raises(ValueError):
-            core.check_op({**task, "artifact": "yes"})
-        with pytest.raises(ValueError):
-            core.check_op(
-                {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/w", "fields": {"artifact": "yes"}}
-            )
+        update = {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/w", "fields": {"artifact": False}}
+        core.check_op(update)
+        for bad in ({**task, "artifact": "yes"}, {**update, "fields": {"artifact": "yes"}}):
+            with pytest.raises(ValueError, match="^artifact must be true or false$"):
+                core.check_op(bad)
 
 
 class TestCommands:
@@ -107,18 +117,21 @@ class TestCommands:
         return call.call_args.args[1][0]
 
     def test_task_add_artifact_marks_the_task(self):
-        op = self.run(["task", "add", "w9", "Logo", "--artifact"])
-        assert op["artifact"] is True
+        assert self.run(["task", "add", "w9", "Logo", "--artifact"])["artifact"] is True
+        assert "artifact" not in self.run(["task", "add", "w9", "Logo"])
 
     def test_task_set_artifact_yes_and_no(self):
         assert self.run(["task", "set", "w9", "artifact=yes"])["fields"] == {"artifact": True}
         assert self.run(["task", "set", "w9", "artifact=no"])["fields"] == {"artifact": False}
+        with pytest.raises(SystemExit) as exc:
+            self.run(["task", "set", "w9", "artifact=maybe"])
+        assert exc.value.code == "task set takes artifact=yes or artifact=no"
 
     def test_artifact_request_names_the_operator_message(self, tmp_path):
         doc = tmp_path / "logo.md"
         doc.write_bytes(MARKDOWN)
-        op = self.run(["artifact", str(doc), "Logo", "--task", "", "--request", "m-asks"])
-        assert op["request"] == "m-asks"
+        assert self.run(["artifact", str(doc), "Logo", "--task", "", "--request", "m-asks"])["request"] == "m-asks"
+        assert "request" not in self.run(["artifact", str(doc), "Logo", "--task", ""])
 
     def test_a_refused_publish_exits_with_the_rule(self, tmp_path):
         doc = tmp_path / "proof.md"
@@ -126,28 +139,46 @@ class TestCommands:
         refused = {"rejected": ["x"], "_meta": {"warnings": ["overview has 300 words", artifacts.REFUSED]}}
         with pytest.raises(SystemExit) as exc:
             self.run(["artifact", str(doc), "Proof", "--task", ""], refused)
-        assert RULE in str(exc.value.code) and "overview" not in str(exc.value.code)
+        assert exc.value.code == f"rejected: {artifacts.REFUSED}"
+        with pytest.raises(SystemExit) as exc:
+            self.run(["artifact", str(doc), "Proof", "--task", ""], {"rejected": ["x"]})
+        assert exc.value.code == "rejected: join the ledger first and name a task it holds"
 
     def test_artifact_purge_sends_the_purge(self):
         purged = {"artifacts": [], "_meta": {"events": [{"kind": "artifacts purged", "count": 0}]}}
         op = self.run(["artifact-purge"], purged)
         assert op["op"] == "artifact_purge" and op["by"] == AGENT
 
+    def test_the_new_options_explain_themselves(self):
+        sub = next(a for a in ledger.build_parser()._actions if a.dest == "command").choices
+        helps = {a.dest: a.help for name in ("artifact", "task") for a in sub[name]._actions}
+        assert helps["request"] == "id of the operator chat line or comment that asked for the file"
+        assert helps["artifact"] == "the operator asked this task for a file to review"
+        assert "artifact-purge" in sub
+
 
 class TestInstructions:
     OLD = "Publish plans, screenshots, reports and proof files as they are produced"
+    LINE = (
+        "Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown "
+        'or JSON he wants to review. Publish it with agentihooks ledger --slug demo --as agent artifact <file> "<title '
+        'in plain words>" from a task marked artifact requested, or add --request <id of his message that asked>. '
+        "Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request, raw "
+        "output stays in the task work folder."
+    )
 
     @pytest.mark.parametrize("lane", ["eng", "ci", "master"])
     def test_prompts_publish_only_requested_files(self, lane):
         text = prompt.build("demo", "/repo", lane, "agent", {"id": "one", "title": "One"})
         assert self.OLD not in text
-        assert "Publish an artifact only when the operator asked for that file" in text
-        assert RULE in text
-        assert "--request" in text
+        assert self.LINE in text
 
     def test_master_marks_tasks_that_carry_a_requested_file(self):
         text = prompt.build("demo", "/repo", "master", "agent", {"id": "one", "title": "One"})
-        assert "--artifact" in text
+        assert (
+            f"- {self.LINE} When the operator asks for a file to review, add or set its task with --artifact "
+            "or artifact=yes so its agent may publish it."
+        ) in text
 
     def test_packaged_toolbelt_carries_the_rule(self):
         rule = Path(__file__).resolve().parents[2] / "profiles/package/rules/agentihooks-toolbelt.md"
