@@ -157,6 +157,7 @@ def test_report_maps_a_method_mutant_back_to_its_class(tmp_path, monkeypatch):
 @pytest.mark.parametrize("method", [False, True])
 def test_report_maps_overloaded_implementations_instead_of_stubs(tmp_path, monkeypatch, method):
     import json
+
     from scripts.ci_mutation.report import collect_results
 
     for name in ("hooks", "scripts", "mutants/hooks"):
