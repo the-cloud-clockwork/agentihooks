@@ -134,7 +134,7 @@ def test_the_picker_opens_on_click_above_the_message_box_and_closes_on_a_pick(op
     row = menu.get_by_role("option", name="swarm")
     style = "el => [getComputedStyle(el).textShadow, getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopWidth]"
     glow, rest, edge = row.evaluate(style)
-    assert glow != "none" and rest == "rgba(0, 0, 0, 0)" and edge == "0px"
+    assert glow == "none" and rest == "rgba(0, 0, 0, 0)" and edge == "0px"
     row.hover()
     assert row.evaluate(style)[1] != rest
     above = menu.bounding_box()["y"] + menu.bounding_box()["height"]

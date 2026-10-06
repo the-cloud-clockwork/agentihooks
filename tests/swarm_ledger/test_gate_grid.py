@@ -77,7 +77,7 @@ def test_every_gate_name_has_a_short_shared_tooltip(open_page):
     assert page.tab.locator(".ledger-tip").inner_text() == tips[0][1]
 
 
-def test_labels_are_bright_and_flat_while_only_the_selected_mode_glows(open_page):
+def test_labels_are_bright_and_flat_while_only_the_selected_mode_takes_its_colour(open_page):
     page = open_page(status(gate_modes=defaults()))
     styles = page.tab.eval_on_selector_all(
         ".sw-cap-name",
@@ -90,5 +90,5 @@ def test_labels_are_bright_and_flat_while_only_the_selected_mode_glows(open_page
         "buttons => buttons.map(button => [button.getAttribute('aria-pressed'), getComputedStyle(button).color, getComputedStyle(button).textShadow])",
     )
     selected = next(color for pressed, color, _ in modes if pressed == "true")
-    assert all(color == selected and shadow != "none" for pressed, color, shadow in modes if pressed == "true")
+    assert all(color == selected and shadow == "none" for pressed, color, shadow in modes if pressed == "true")
     assert all(color != selected and shadow == "none" for pressed, color, shadow in modes if pressed == "false")

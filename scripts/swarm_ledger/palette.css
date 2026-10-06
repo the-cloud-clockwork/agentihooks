@@ -1,6 +1,6 @@
 /* The only file in the ledger front end that holds colour values. */
 :root {
-  --ink-950: #03050b;
+  --ink-950: #010104;
   --navy-900: #0d1424;
   --blue-700: #1d4ed8;
   --blue-500: #3b82f6;
@@ -20,10 +20,7 @@
   --lift-140: rgba(255, 255, 255, .14);
 
   --canvas: var(--ink-950);
-  --backdrop:
-    radial-gradient(1100px 620px at 8% -12%, rgba(29, 78, 216, .42), transparent 62%),
-    radial-gradient(900px 560px at 108% 18%, rgba(59, 130, 246, .20), transparent 60%),
-    radial-gradient(700px 480px at 50% 120%, rgba(29, 78, 216, .18), transparent 60%);
+  --backdrop: none;
   --surface-1: var(--lift-045);
   --surface-2: var(--lift-060);
   --hover: var(--lift-080);
