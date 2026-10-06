@@ -155,7 +155,7 @@ def test_invalid_index_reports_schema(lookup, monkeypatch, bad):
     from io import BytesIO
 
     monkeypatch.setattr(lookup, "urlopen", lambda *a, **kw: BytesIO(json.dumps(bad).encode()))
-    with pytest.raises(ValueError, match="Published docs index"):
+    with pytest.raises(ValueError, match="^Published docs index must contain page, heading, content and URL strings$"):
         lookup.load_index()
 
 
@@ -176,7 +176,10 @@ def test_cli_returns_section_or_explicit_gap(lookup, index, monkeypatch, capsys,
     assert result["source"] == SITE + "assets/js/search-data.json"
     assert key in result
     if status == "missing":
-        assert "follow up" in result[key] and "never invent" in result[key]
+        assert (
+            result[key]
+            == "Say the published docs lack this answer and propose a docs follow up; never invent an explanation."
+        )
 
 
 def test_cli_unavailable_is_not_a_content_gap(lookup, monkeypatch, capsys):
@@ -190,7 +193,10 @@ def test_cli_unavailable_is_not_a_content_gap(lookup, monkeypatch, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "unavailable"
     assert "site unavailable" in result["error"]
-    assert "reachable" in result["next_step"]
+    assert result["source"] == SITE + "assets/js/search-data.json"
+    assert (
+        result["next_step"] == "Check the published docs site and retry when it is reachable; do not infer an answer."
+    )
 
 
 def test_cli_uses_process_arguments(lookup, monkeypatch, index, capsys):
@@ -211,3 +217,48 @@ def test_generic_subject_is_still_searchable(lookup, index, question):
         "url": "/agentihooks/docs/swarm/#ledger",
     }
     assert lookup.candidates(index, question)[0]["page"] == "Swarm"
+
+
+def test_missing_subject_never_assumes_swarm(lookup, index):
+    assert lookup.candidates(index, "What does this mean?") == []
+
+
+def test_matching_more_question_terms_beats_one_heading_match(lookup):
+    index = {
+        "a": {"doc": "Guide", "title": "Priorities", "content": "Priorities", "url": "/agentihooks/docs/a/"},
+        "b": {"doc": "Guide", "title": "Overview", "content": "Priorities autonomy", "url": "/agentihooks/docs/b/"},
+    }
+    assert lookup.candidates(index, "Priorities autonomy")[0]["url"] == SITE + "docs/b/"
+
+
+def test_page_match_beats_unrelated_long_page_name(lookup):
+    index = {
+        "a": {
+            "doc": "Many unrelated words in this title",
+            "title": "Overview",
+            "content": "autonomy",
+            "url": "/agentihooks/docs/a/",
+        },
+        "b": {"doc": "Autonomy", "title": "Overview", "content": "autonomy", "url": "/agentihooks/docs/b/"},
+    }
+    assert lookup.candidates(index, "autonomy")[0]["url"] == SITE + "docs/b/"
+
+
+@pytest.mark.parametrize("argv", [[], ["--question", "watch", "--section", SITE]])
+def test_cli_requires_one_lookup_mode_before_network(lookup, monkeypatch, argv):
+    def unexpected_fetch():
+        pytest.fail("Invalid arguments must not fetch docs")
+
+    monkeypatch.setattr(lookup, "load_index", unexpected_fetch)
+    with pytest.raises(SystemExit) as error:
+        lookup.main(argv)
+    assert error.value.code == 2
+
+
+def test_cli_help_names_the_source_and_modes(lookup, capsys):
+    with pytest.raises(SystemExit) as error:
+        lookup.main(["--help"])
+    assert error.value.code == 0
+    output = capsys.readouterr().out
+    assert "\nFind or read sections of the published AgentiHooks docs\n" in output
+    assert "--question" in output and "--section" in output

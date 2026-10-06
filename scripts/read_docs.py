@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         key = "candidates" if args.question is not None else "section"
-        print(json.dumps({"status": key, "source": INDEX, key: result}, ensure_ascii=False))
+        print(json.dumps({"status": key, "source": INDEX, key: result}))
     return 0
 
 
