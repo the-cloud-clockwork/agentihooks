@@ -1,9 +1,11 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
 
 from tests.swarm_ledger.test_artifacts import JSON_DOC, MARKDOWN, SVG
+from tests.swarm_ledger.test_bin import DAY_MS
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html"
@@ -63,7 +65,7 @@ def page(browser, request):
 
 def open_artifact(tab, title):
     tab.get_by_role("button", name="Artifacts").click()
-    tab.locator("#art-list").get_by_role("button", name=title).click()
+    tab.locator("#art-list").get_by_role("button", name=title, exact=True).click()
     viewer = tab.get_by_role("dialog", name="Artifact viewer")
     assert viewer.is_visible()
     assert len(tab.context.pages) == 1
@@ -124,3 +126,49 @@ def test_svg_renders_as_an_image_and_its_script_never_runs(page):
     page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=image.element_handle())
     assert image.bounding_box()["width"] <= viewer.locator(".art-body").bounding_box()["width"]
     assert image.get_attribute("src").endswith(".svg")
+
+
+@pytest.fixture
+def trash_page(browser):
+    tab = browser.new_page(viewport={"width": 1440, "height": 900})
+    tab.set_default_timeout(1500)
+    tab.route("**/artifacts/**", serve)
+    sent = []
+
+    def api(route):
+        if route.request.method == "PUT":
+            sent.extend(json.loads(route.request.post_data)["ops"])
+        route.fulfill(status=503, body="offline")
+
+    tab.route("**/api/**", api)
+    old = {**ROWS[0], "id": "art-old", "title": "Old logo draft", "deleted_at": int(time.time() * 1000) - 2 * DAY_MS}
+    doc = {"title": "Trash proof", "tasks": [], "artifacts": ROWS[1:], "artifact_trash": [old]}
+    html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
+    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
+    tab.set_content(html)
+    tab.get_by_role("button", name="Artifacts").click()
+    yield tab, sent
+    tab.close()
+
+
+def test_delete_moves_an_artifact_to_the_trash_and_drops_the_badge(trash_page):
+    tab, sent = trash_page
+    assert tab.locator("#art-badge").inner_text() == "2"
+    tab.get_by_role("button", name="Delete Proposal shape").click()
+    assert tab.locator("#art-list .art-row").count() == 1
+    assert tab.locator("#art-badge").inner_text() == "1"
+    assert "Proposal shape" in tab.locator("#art-trash").inner_text()
+    tab.wait_for_function("() => document.getElementById('status').textContent !== ''")
+    tab.wait_for_timeout(200)
+    assert {"op": "artifact_delete", "target": "art-json"}.items() <= sent[0].items()
+
+
+def test_the_trash_lists_days_left_and_restore_brings_an_artifact_back(trash_page):
+    tab, _ = trash_page
+    row = tab.locator("#art-trash .art-row", has_text="Old logo draft")
+    assert "28 days left" in row.inner_text()
+    row.get_by_role("button", name="Restore Old logo draft").click()
+    assert tab.locator("#art-badge").inner_text() == "3"
+    assert tab.locator("#art-list").get_by_role("button", name="Old logo draft", exact=True).is_visible()
+    assert tab.locator("#art-trash .art-row").count() == 0

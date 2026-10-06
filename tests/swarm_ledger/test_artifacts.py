@@ -6,7 +6,6 @@ from unittest.mock import patch
 import ledger_artifacts as artifacts  # noqa: E402
 import pytest
 
-from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger
 from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
 
@@ -83,6 +82,7 @@ class ArtifactEndpoint(Endpoint):
             "task": "av1",
             "title": "Artifacts",
             "lane": "eng",
+            "artifact": True,
         }
         core.sync("via-media", ops=[task])
         published = []
@@ -137,7 +137,8 @@ class ArtifactEndpoint(Endpoint):
         assert "a-anon" in state["rejected"]
         state = json.loads(self.put([{**base, "id": "a-notask", "task": "nope", "file": file}])[2])
         assert "a-notask" in state["rejected"]
-        state = json.loads(self.put([{**base, "id": "a-free", "file": file}])[2])
+        self.put([{"op": "add", "thread": "chat", "id": "m-wants", "text": "Send me the plan"}])
+        state = json.loads(self.put([{**base, "id": "a-free", "file": file, "request": "m-wants"}])[2])
         assert state["artifacts"][-1]["id"] == "a-free"
 
 
@@ -203,10 +204,3 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     assert req.get_header("X-artifact-name") == "proposal.md"
     assert req.get_header("X-ledger-agent") == "art-engineer"
     assert req.get_header("X-ledger-token") == "test-token"
-
-
-def test_swarm_prompt_tells_agents_to_publish_what_needs_operator_review():
-    task = {"id": "av1", "title": "Artifacts", "phase": "p7", "lane": "eng"}
-    text = prompt.build("rig", "/repo", "eng", "engineer@1", task)
-    assert "ledger --slug rig --as engineer@1 artifact <file>" in text
-    assert "operator review" in text

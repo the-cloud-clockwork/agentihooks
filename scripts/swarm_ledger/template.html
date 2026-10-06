@@ -581,6 +581,8 @@ input, textarea { caret-color: var(--accent-2); }
 <section class="notif" id="art-panel" role="dialog" aria-modal="false" aria-label="Artifacts" hidden><details class="sources-box fold panel-fold" id="art-fold" open>
   <summary class="notif-head">Artifacts<span class="end"><button class="link" id="art-close" type="button">Close</button></span></summary>
   <ul class="notif-list" id="art-list"></ul>
+  <p class="notif-meta art-trash-head" id="art-trash-head" hidden>Trash, each kept 30 days</p>
+  <ul class="notif-list" id="art-trash" aria-label="Artifact trash"></ul>
 </details></section>
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
   <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
@@ -609,6 +611,8 @@ input, textarea { caret-color: var(--accent-2); }
   const POLL_MS = 2000;
   const ACTIVE_MS = 2 * 3600 * 1000;
   const SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+  const DAY = 24 * 3600 * 1000;
+  const ARTIFACT_KEEP_DAYS = 30;
   const sentAt = { sync: 0, stats_sync: 0 };
   const OFFLINE = "saved in this browser only — ledger server offline";
   const NOUN = { comments: "comment", answers: "answer", notes: "note" };
@@ -667,6 +671,7 @@ input, textarea { caret-color: var(--accent-2); }
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
       notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
       artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
+      artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
       phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
@@ -696,6 +701,15 @@ input, textarea { caret-color: var(--accent-2); }
     }
     if (op.op === "title_set") {
       d.title = op.text.trim();
+      return;
+    }
+    if (op.op === "artifact_delete" || op.op === "artifact_restore") {
+      const [from, to] = op.op === "artifact_delete" ? ["artifacts", "artifact_trash"] : ["artifact_trash", "artifacts"];
+      const row = d[from].find((a) => a.id === op.target);
+      if (!row) return;
+      const { deleted_at, ...rest } = row;
+      d[from] = d[from].filter((a) => a !== row);
+      d[to].push(to === "artifact_trash" ? { ...rest, deleted_at: Date.now() } : rest);
       return;
     }
     if (op.op === "notification_clear") {
@@ -940,14 +954,26 @@ input, textarea { caret-color: var(--accent-2); }
       (err) => body.replaceChildren(h("p", { class: "attach-note", text: `This artifact could not be opened: ${err.message}` })));
   }
 
+  function daysLeft(deletedAt) {
+    return Math.max(0, Math.ceil((ARTIFACT_KEEP_DAYS * DAY - (Date.now() - deletedAt)) / DAY));
+  }
+
   function renderArtifacts() {
     const list = [...doc.artifacts].sort((a, b) => (b.at || 0) - (a.at || 0));
     $("art-badge").hidden = !list.length;
     $("art-badge").textContent = String(list.length);
     $("art-list").replaceChildren(...list.map((a) => h("li", { class: "notif-row art-row" },
       h("div", { class: "notif-meta", text: artifactMeta(a) }),
-      h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }))));
+      h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }),
+      h("button", { class: "link danger", type: "button", text: "Delete", "aria-label": `Delete ${a.title}`,
+        on: { click: () => queue({ op: "artifact_delete", id: newId("artdel"), target: a.id }) } }))));
     if (!list.length) $("art-list").append(h("li", { class: "empty", text: "No artifacts yet." }));
+    const trash = [...doc.artifact_trash].sort((a, b) => (b.deleted_at || 0) - (a.deleted_at || 0));
+    $("art-trash-head").hidden = !trash.length;
+    $("art-trash").replaceChildren(...trash.map((a) => h("li", { class: "notif-row art-row" },
+      h("div", { class: "notif-meta", text: `${a.title} · ${daysLeft(a.deleted_at)} days left` }),
+      h("button", { class: "link", type: "button", text: "Restore", "aria-label": `Restore ${a.title}`,
+        on: { click: () => queue({ op: "artifact_restore", id: newId("artback"), target: a.id }) } }))));
   }
 
   function anchorPanel(panel, icon) {

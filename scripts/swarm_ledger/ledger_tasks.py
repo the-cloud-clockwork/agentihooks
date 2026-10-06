@@ -23,7 +23,9 @@ UPDATABLE = (
     "proof",
     "workspace",
     "awaiting",
+    "artifact",
 )
+BOOL_FIELDS = ("artifact",)
 LIST_FIELDS = ("depends_on", "territory")
 OBJECT_FIELDS = ("contract", "proof")
 URL_FIELDS = ("issue_url", "pr_url")
@@ -53,6 +55,7 @@ def check(op):
         if not all(isinstance(op.get(key, ""), str) for key in ("phase", "description", "workspace")):
             raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
+        check_bools(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -63,14 +66,16 @@ def check(op):
     fields = op.get("fields")
     if not ITEM_RE.match(str(op.get("item"))) or not isinstance(fields, dict) or not fields:
         raise ValueError("task_update needs item tasks/<id> and fields")
-    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS}
+    strings = {k: v for k, v in fields.items() if k not in LIST_FIELDS + OBJECT_FIELDS + BOOL_FIELDS}
     if set(fields) - set(UPDATABLE) or not all(isinstance(v, str) for v in strings.values()):
         raise ValueError(
-            f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists or {OBJECT_FIELDS} as objects"
+            f"task_update may set only {UPDATABLE}, as strings, {LIST_FIELDS} as lists, {OBJECT_FIELDS} as objects "
+            f"or {BOOL_FIELDS} as true or false"
         )
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
     check_lists(fields)
+    check_bools(fields)
     check_urls(fields)
     ledger_kinds.check(fields)
 
@@ -80,6 +85,12 @@ def check_lists(fields):
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
+
+
+def check_bools(fields):
+    for key in BOOL_FIELDS:
+        if key in fields and not isinstance(fields[key], bool):
+            raise ValueError(f"{key} must be true or false")
 
 
 def check_urls(fields):
@@ -124,7 +135,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace"):
+    for key in ("gain", "contract", "workspace", "artifact"):
         if key in op:
             task[key] = op[key]
     tasks.append(task)

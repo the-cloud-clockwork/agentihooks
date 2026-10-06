@@ -10,8 +10,11 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
   say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
   comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
-  artifact PATH TITLE [--task ID]     publish a markdown, JSON, SVG or image file for operator review; it opens
-                                      rendered from the page's artifacts list (task defaults to your swarm task)
+  artifact PATH TITLE [--task ID] [--request ENTRY]
+                                      publish a markdown, JSON, SVG or image file the operator asked for; its task
+                                      must be marked artifact requested, or ENTRY names his message that asked
+                                      (task defaults to your swarm task). Proofs go on the task proof and the PR
+  artifact-purge                      delete every artifact and trash row of the ledger with their files
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -31,11 +34,13 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
-           [--kind K] [--must M --check C --judge J] [--scaffold]
+           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
-                                      --scaffold creates its work folder (steering, progress, proof) in the same call
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task;
+                                      --scaffold creates its work folder (steering, progress, proof) in the same call;
+                                      --artifact marks a file the operator asked for, so the task may publish it
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind or
+                                      artifact (yes or no) of a task;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O
   prompt                              print the join paragraph for a launch prompt
@@ -60,6 +65,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import ledger_artifacts  # noqa: E402
 import ledger_comments  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
@@ -198,10 +204,19 @@ def cmd_comment(args):
 def cmd_artifact(args):
     file = upload_artifact(args.slug, args.name, args.path)
     task = args.task if args.task is not None else os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-    state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file)])
+    request = {"request": args.request} if args.request else {}
+    state = call(args.slug, [op("artifact_add", args, task=task, title=args.title, file=file, **request)])
     print(json.dumps({"published": not state.get("rejected")}))
     if state.get("rejected"):
+        if ledger_artifacts.REFUSED in state.get("_meta", {}).get("warnings", []):
+            sys.exit(f"rejected: {ledger_artifacts.REFUSED}")
         sys.exit("rejected: join the ledger first and name a task it holds")
+
+
+def cmd_artifact_purge(args):
+    state = send(args, "artifact_purge")
+    event = next(e for e in reversed(state["_meta"]["events"]) if e["kind"] == "artifacts purged")
+    print(json.dumps({"purged": event["count"], "artifacts": len(state["artifacts"])}))
 
 
 def cmd_phase(args):
@@ -338,6 +353,8 @@ def cmd_task(args):
             lists["contract"] = contract
         if args.kind:
             lists["kind"] = args.kind
+        if args.artifact:
+            lists["artifact"] = True
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -360,6 +377,10 @@ def cmd_task(args):
     for key in ("depends_on", "territory"):
         if key in fields:
             fields[key] = comma_list(fields[key])
+    if "artifact" in fields:
+        if fields["artifact"] not in ("yes", "no"):
+            sys.exit("task set takes artifact=yes or artifact=no")
+        fields["artifact"] = fields["artifact"] == "yes"
     for dotted in [key for key in fields if "." in key]:
         name, _, sub = dotted.partition(".")
         if not isinstance(fields.get(name, {}), dict):
@@ -414,6 +435,8 @@ def build_parser():
     artifact.add_argument("path")
     artifact.add_argument("title")
     artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
+    artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
+    sub.add_parser("artifact-purge")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
     phase.add_argument("state")
@@ -470,6 +493,7 @@ def build_parser():
     task.add_argument(
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
+    task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     return parser
 
 
