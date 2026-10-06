@@ -1,6 +1,6 @@
 (() => {
   const DELAY = 2000;
-  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab';
+  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name]';
   const TIPS = [
     ["#title-edit", "Rename this ledger. The new title shows here and on HOME."],
     ['#title-form [type="submit"]', "Save the new ledger title."],
@@ -27,6 +27,18 @@
     ['[data-autonomy="delegate"]', "Delegate autonomy. The master approves or sends back phase plans; you decide after three send backs."],
     ['[data-autonomy="full"]', "Full autonomy. The master approves phase plans and turns agents' follow ups into tasks without asking you."],
     ["#layout-reset", "Restore the default panel sizes on every ledger."],
+    ['[data-gate-name="identity"]', "Checks the session identity on commands. Refuses acting as another agent or rewriting the pinned identity."],
+    ['[data-gate-name="subagents"]', "Counts subagent launches and continuations per task. Refuses another when its budget is spent."],
+    ['[data-gate-name="intent"]', "Checks changes against task, phase and project intent. Holds merge and completion on a failed verdict or while the tick verdict is pending."],
+    ['[data-gate-name="claim-stop"]', "Checks unfinished work when an agent stops. Refuses stopping without a checked wait, or while checks need fixing or a merge is due."],
+    ['[data-gate-name="claims"]', "Counts agent lives claiming each task. The tick refuses a fourth claim."],
+    ['[data-gate-name="talk"]', "Counts engineer and CI ledger talk writes since their last outcome. Refuses more talk when the budget is spent."],
+    ['[data-gate-name="watch"]', "Counts watch calls since the last action. Refuses another when both the count and watch to action ratio exceed their limits."],
+    ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head. Refuses a third; jobs cancelled before reaching a runner are exempt."],
+    ['[data-gate-name="build"]', "Checks edits and commits against the traced plan and task territory. Refuses failed or stale plans and changes outside approved areas."],
+    ['[data-gate-name="quiet"]', "Checks claimed tasks for thirty minutes without progress. Holds tool calls until the agent reports progress; ledger commands remain available."],
+    ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent during tracing. Fails plans mostly outside that intent or larger than one pull request."],
+    ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-gate-mode="enforce"]', "Enforce this gate. A call it catches is refused, and the refusal is logged."],
     ['[data-gate-mode="observe"]', "Observe this gate. A call it catches goes through, and the refusal it would have made is only logged."],
     ['[data-gate-mode="off"]', "Turn this gate off. It checks nothing and logs nothing."],
