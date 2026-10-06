@@ -88,20 +88,18 @@ MEASURE = """
 def expected_blocks(text: str) -> Counter:
     lines = re.split(r"\r\n?|\n", text)
     counts = Counter()
-    i = 0
-    while i < len(lines):
-        i = _block(lines, i, counts)
+    end = 0
+    for i in range(len(lines)):
+        if i >= end:
+            end = _block(lines, i, counts)
     return counts
 
 
 def _block(lines, i, counts):
     line = lines[i]
     if fence := FENCE.match(line):
-        i += 1
-        while i < len(lines) and not lines[i].strip().startswith(fence[1]):
-            i += 1
         counts["pre"] += 1
-        return i + 1
+        return _run(lines, i + 1, lambda row: not row.strip().startswith(fence[1])) + 1
     if HEADING.match(line):
         counts["h"] += 1
         return i + 1
@@ -122,9 +120,7 @@ def _block(lines, i, counts):
 
 
 def _run(lines, i, keep):
-    while i < len(lines) and keep(lines[i]):
-        i += 1
-    return i
+    return next((j for j in range(i, len(lines)) if not keep(lines[j])), len(lines))
 
 
 def check(measure: dict, expected: Counter | None = None) -> list[str]:
