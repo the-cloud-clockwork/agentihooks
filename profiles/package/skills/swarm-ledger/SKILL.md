@@ -215,9 +215,8 @@ For a bound session the hooks do the following; each is tunable in the ledger's 
 
 - every tool result and prompt: unhandled operator events you owe are injected, up to 5;
 - after `nudge_after_calls` tool calls without a ledger command: a reminder to record progress;
-- Stop is blocked while events are unhandled, `stop_after_calls` calls passed without a ledger
-  command, or (orchestrator) the watcher is not running; after `stop_blocks` blocks it lets the
-  stop through and logs `gate bypassed` in the ledger for the operator;
+- Stop is blocked while events are unhandled or `stop_after_calls` calls passed without a ledger
+  command; after `stop_blocks` blocks it lets the stop through and logs `gate bypassed` in the ledger for the operator;
 - any error, an unreadable ledger or a stopped server lets everything through; a ledger with every
   phase and follow-up done is not gated.
 
@@ -309,7 +308,7 @@ Every change to `template.html` keeps these:
   completion never recalculate it. Other Stats are computed in the page; started uses
   `_meta.created_at`, the ledger's earliest recorded timestamp.
 - Chat is the `chat` thread (last 500 messages); each send is one event, so
-  the orchestrator's watcher sees it within seconds.
+  it reaches the orchestrator through the inbox (or a watch, outside a swarm) within seconds.
 - The page polls the server every 2 s and redraws agent changes, keeping the
   cursor and any message not yet sent. Original sources are collapsed by
   default.

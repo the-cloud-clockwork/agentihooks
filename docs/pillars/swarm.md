@@ -53,7 +53,8 @@ Every swarm that is not stopped keeps exactly one master, named `master@<code>-<
 swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
-Its opening prompt makes it join the ledger as orchestrator under a watch Monitor, answer every operator chat
+Its opening prompt makes it join the ledger as orchestrator, with operator writes reaching it as inbox messages
+and the tick waking its idle pane, answer every operator chat
 message on the page and in its herdr pane, keep phases, follow ups, time left and status comments current, turn
 operator requests into tasks with full specs, rewrite task descriptions, set caps, pause or stop the swarm,
 talk to agents, and check merged UI work in a real browser, closing the shared browser after.
