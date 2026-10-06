@@ -240,7 +240,7 @@ def test_unknown_agent_or_layer_is_refused(argv, monkeypatch):
 def test_help_lists_measure(capsys):
     with pytest.raises(SystemExit):
         render.main(["--help"])
-    assert "Print a profile's first turn input tokens" in capsys.readouterr().out
+    assert "  Print a profile's first turn input tokens\n" in capsys.readouterr().out
 
 
 def test_installer_dispatches_profiles(monkeypatch):
