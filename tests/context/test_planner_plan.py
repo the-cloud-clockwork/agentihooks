@@ -64,7 +64,10 @@ def test_a_swarm_planner_leaves_plan_mode_with_its_plan_as_the_updated_input(
 ):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "plan")
+    monkeypatch.setattr(hm, "_refocus_blocks", lambda *_: ["first block", "second block"])
     out = _pre_tool_use(tmp_path, capsys)
+    assert out["hookEventName"] == "PreToolUse"
+    assert "first block\n\nsecond block" in out["additionalContext"]
     assert out["permissionDecision"] == "allow"
     assert out["updatedInput"] == PLAN
     assert out["permissionDecisionReason"] == planner_plan.REASON
