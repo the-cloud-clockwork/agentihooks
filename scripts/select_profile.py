@@ -107,6 +107,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def dispatch(argv: list[str]) -> int:
-    if argv[0] == "profile":
+    if argv[0] in ("profile", "profiles"):
         return profiles.main(argv[1:])
     return main(argv[1:])

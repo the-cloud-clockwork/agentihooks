@@ -150,17 +150,23 @@ def _note(text, maturity):
 
 
 def test_learned_notes_list_canon_first_then_insights_and_notes_and_count_data():
-    ranked = [_note("n1", "note"), _note("d1", "data"), _note("c1", "canon"), _note("i1", "insight")]
-    text = _eng(seat="eng-1@sw", learned=[*ranked, _note("d2", "data"), _note("n2", "note")])
-    order = [text.index(f"- {m}: {t}") for m, t in (("canon", "c1"), ("insight", "i1"), ("note", "n1"), ("note", "n2"))]
+    first, second = "first plain note entry", "second plain note entry"
+    canon, insight = "canon note entry", "insight note entry"
+    hidden = ("first hidden data entry", "second hidden data entry")
+    ranked = [_note(first, "note"), _note(hidden[0], "data"), _note(canon, "canon"), _note(insight, "insight")]
+    text = _eng(seat="eng-1@sw", learned=[*ranked, _note(hidden[1], "data"), _note(second, "note")])
+    order = [
+        text.index(f"- {m}: {t}")
+        for m, t in (("canon", canon), ("insight", insight), ("note", first), ("note", second))
+    ]
     assert order == sorted(order)
-    assert "d1" not in text and "d2" not in text
+    assert hidden[0] not in text and hidden[1] not in text
     assert "2 data entries are kept on the seat and not shown." in text
 
 
 def test_a_seat_with_only_data_says_so_and_counts_it():
-    text = _eng(seat="eng-1@sw", learned=[_note("d1", "data")])
-    assert "d1" not in text and "1 data entries are kept on the seat" in text
+    text = _eng(seat="eng-1@sw", learned=[_note("only hidden data entry", "data")])
+    assert "only hidden data entry" not in text and "1 data entries are kept on the seat" in text
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])

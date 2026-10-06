@@ -24,6 +24,7 @@ agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
+agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
 --evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
 """
@@ -42,7 +43,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace
 from scripts.doctor import priming
-from scripts.gates import Who, intent, progress
+from scripts.gates import Who, intent, modes, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -71,6 +72,7 @@ from scripts.swarm import (
     take_master,
     templates,
     timer,
+    trace_plan,
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
@@ -79,7 +81,7 @@ from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, plan_shape
+from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -590,11 +592,30 @@ def cmd_done(store, args):
 
 def cmd_block(store, args):
     agent = _worker(store, args)
-    ledger = LedgerClient()
-    ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
-    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
-    _retire(store, args.slug, agent, "blocked its task and exited")
+    _block(store, args.slug, agent, args.note, LedgerClient())
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+
+
+def _block(store, slug, agent, note, ledger):
+    ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
+    ledger.comment(slug, agent.task, note, by=agent.name)
+    _retire(store, slug, agent, "blocked its task and exited")
+
+
+def cmd_trace_plan(store, args):
+    agent = _worker(store, args)
+    ledger = LedgerClient()
+    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    who = Who(name=agent.name, swarm=args.slug, task=agent.task)
+    folder = ledger_workspace.folder(args.slug, agent.task)
+    mode = modes.mode(trace_plan.GATE, os.environ)
+    try:
+        record, block = trace_plan.run(folder, state, ledger, who, mode)
+    except ValueError as exc:
+        raise SwarmError(str(exc)) from exc
+    if block:
+        _block(store, args.slug, agent, trace_plan.block_note(record), ledger)
+    print(json.dumps(trace_plan.report(agent.task, record, block)))
 
 
 def cmd_wait(store, args):
@@ -784,6 +805,7 @@ def build_parser():
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
+    sub.add_parser("trace-plan")
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)

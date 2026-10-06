@@ -6380,7 +6380,7 @@ def main() -> None:
         from hooks.classifier import cli as classifier_cli
 
         raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
-    if _argv and _argv[0] in ("profile", "select-profile"):
+    if _argv and _argv[0] in ("profile", "profiles", "select-profile"):
         from scripts.select_profile import dispatch
 
         raise SystemExit(dispatch(_argv))

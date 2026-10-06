@@ -531,7 +531,7 @@ def test_cli_usage(world, capsys):
     )
     with pytest.raises(SystemExit):
         render.main([])
-    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render}")
+    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render,measure}")
     with pytest.raises(SystemExit):
         render.main(["--help"])
     assert re.search(
