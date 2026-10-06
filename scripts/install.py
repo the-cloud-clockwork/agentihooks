@@ -2221,11 +2221,24 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         install_target=install_target,
     )
     install_global(global_args)
+    _rerender_profile_homes(install_target)
 
     # --- Update bashrc block (agentienv + agenti alias + PATH) ---
     # Always write — the block is self-guarding (agentienv checks for the
     # env file at runtime) and the alias/PATH lines must land regardless.
     _update_bashrc_block()
+
+
+def _rerender_profile_homes(target: str) -> None:
+    from scripts.profiles import render
+
+    for name in render.rendered_profiles(target):
+        try:
+            render.render(target, name, force=True)
+        except ValueError as exc:
+            print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
+            continue
+        print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
 
 
 def _remove_bashrc_block() -> bool:

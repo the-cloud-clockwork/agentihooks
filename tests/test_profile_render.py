@@ -417,6 +417,41 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
     assert render.render(target, "rb-role") is not None
 
 
+def test_rendered_profiles_lists_the_homes_each_target_has(world):
+    from scripts.profiles import render
+
+    assert render.rendered_profiles("claude") == []
+    render.render_claude("rb-role")
+    render.render_claude("rb-other")
+    render.render_codex("rb-other")
+    _write(world["home"] / ".codex" / "hand.config.toml", 'model = "x"\n')
+
+    assert render.rendered_profiles("claude") == ["rb-other", "rb-role"]
+    assert render.rendered_profiles("codex") == ["rb-other"]
+    assert render.rendered_profiles("copilot") == []
+
+
+def test_init_rerenders_every_existing_profile_home(world, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from scripts.profiles import render
+
+    install = world["install"]
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setattr(install, "install_global", lambda args: None)
+    monkeypatch.setattr(install, "_update_bashrc_block", lambda: None)
+    home = render.render_claude("rb-role")
+    _write(world["bundle"] / ".claude" / "skills" / "new-skill" / "SKILL.md", "---\nname: new-skill\n---\n")
+    (render.rendered_root() / "gone" / "claude").mkdir(parents=True)
+
+    install.cmd_init_unified(Namespace(profile="rb-role"))
+
+    assert (home / "skills" / "new-skill").is_symlink()
+    lines = capsys.readouterr().out.splitlines()
+    assert f"{install._DIM}[--] Profile home gone kept as it was: Profile 'gone' not found{install._RESET}" in lines
+    assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home" in lines
+
+
 def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 
