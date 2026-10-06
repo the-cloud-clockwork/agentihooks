@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -29,7 +30,7 @@ def _is_doc(path: Path) -> bool:
     return path.suffix == ".md" and path.name != "README.md"
 
 
-FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc), ("rules", _is_doc))
+FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc))
 
 
 def rendered_root() -> Path:
@@ -173,13 +174,11 @@ def _relink(dst: Path, items: dict[str, Path]) -> None:
         (dst / name).symlink_to(src)
 
 
-def _render_rules(dst: Path, items: dict[str, Path]) -> None:
-    dst.mkdir(exist_ok=True)
-    for old in dst.iterdir():
-        if old.is_file() or old.is_symlink():
-            old.unlink()
-    for name, src in items.items():
-        _atomic_write(dst / name, quarantine.annotate(src.read_text(), sources.source(src)))
+def _persona(name: str, target: str, bundle: Path | None, dirs: list[tuple[str, Path]], chain: list[str]) -> str:
+    items = _features("rules", _is_doc, bundle, dirs)
+    sources.write(sources.path(name, target, rendered_root()), sources.rows(bundle, dirs, items))
+    rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
+    return quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
 
 
 def _read_json(path: Path) -> dict | None:
@@ -197,21 +196,17 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     if (
         not force
         and _read_json(out / STAMP) == current
-        and not any(rule.is_symlink() for rule in (out / "rules").iterdir())
+        and not (out / "rules").exists()
         and sources.path(name, "claude", rendered_root()).is_file()
     ):
         return None
     out.mkdir(parents=True, exist_ok=True)
     _i.save_json(out / "settings.json", _claude_settings(bundle, dirs))
     for subdir, keep in FEATURES:
-        items = _features(subdir, keep, bundle, dirs)
-        if subdir == "rules":
-            _render_rules(out / subdir, items)
-            sources.write(sources.path(name, "claude", rendered_root()), sources.rows(bundle, dirs, items))
-        else:
-            _relink(out / subdir, items)
-    persona = build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER)
-    _atomic_write(out / "CLAUDE.md", quarantine.passages(persona))
+        _relink(out / subdir, _features(subdir, keep, bundle, dirs))
+    if (out / "rules").is_dir():
+        shutil.rmtree(out / "rules")
+    _atomic_write(out / "CLAUDE.md", _persona(name, "claude", bundle, dirs, current["chain"]))
     _claude_json(out, bundle, dirs)
     shared = claude_home(_global_env())
     for item in SHARED:
@@ -248,11 +243,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
         return None
     settings = _settings("codex", bundle, dirs)
     doc: dict = {key: settings[key] for key in CODEX_KEYS if key in settings}
-    items = _features("rules", _is_doc, bundle, dirs)
-    sources.write(manifest, sources.rows(bundle, dirs, items))
-    rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
-    persona = build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
-    doc["developer_instructions"] = quarantine.passages(persona)
+    doc["developer_instructions"] = _persona(name, "codex", bundle, dirs, current["chain"])
     global_config = codex_home() / "config.toml"
     installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}
     hidden_servers = sorted(set(installed) - set(_mcp_servers("codex", bundle, dirs)))
