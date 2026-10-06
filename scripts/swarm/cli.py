@@ -54,6 +54,7 @@ from scripts.swarm import (
     idle,
     ledger_events,
     naming,
+    phase_state,
     phases,
     prompt,
     snapshot,
@@ -401,7 +402,8 @@ def cmd_status(store, args):
     config = store.config(args.slug)
     agents = store.agents(args.slug)
     ledger = LedgerClient()
-    tasks = ledger.tasks(args.slug)
+    doc = ledger.state(args.slug)
+    tasks = doc.get("tasks", [])
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
@@ -409,6 +411,8 @@ def cmd_status(store, args):
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print(plan_shape.report(tasks, config.max_eng)["summary"])
+    for phase_id, state, held in phase_state.report(doc):
+        print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
