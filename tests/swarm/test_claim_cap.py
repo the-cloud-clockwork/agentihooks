@@ -80,8 +80,10 @@ def test_blocking_restarts_the_count_so_a_reopen_buys_three_more_lives(store):  
 def test_without_a_pending_handoff_the_summary_says_none(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 4)
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.comments == [("sw", "t1", refusal(4, "none", "sw", "t1"), "swarm")]
+    assert "drained" in actions
+    assert ledger.notes == ["The swarm has no task left to start, one blocked task waits for you"]
 
 
 def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store, monkeypatch):  # noqa: F811
