@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -922,3 +923,79 @@ def test_scratch_render_options_are_documented(capsys):
     with pytest.raises(SystemExit):
         render.main(["render", "rb-role", "--bundle", "b"])
     assert capsys.readouterr().err.endswith("render: error: --bundle needs --out\n")
+
+
+@pytest.fixture
+def worktree_run(world, tmp_path, monkeypatch):
+    install = world["install"]
+    installed = tmp_path / "installed-agentihooks"
+    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", tmp_path / "worktrees" / "agentihooks" / "eng-1")
+    monkeypatch.setattr(install, "install_root", lambda: installed)
+    return installed
+
+
+def test_render_from_a_worktree_leaves_the_live_home_untouched(world, worktree_run, monkeypatch, capsys):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render.pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(Path.home())))
+    settings = _write(render.rendered_root() / "rb-role" / "claude" / "settings.json", '{"live": true}\n')
+    before = _tree_hashes(render.rendered_root(), Path("/none"))
+
+    for target in ("claude", "codex"):
+        with pytest.raises(ValueError, match="scratch home"):
+            render.render(target, "rb-role", force=True)
+    assert render.main(["render", "rb-role", "--force"]) == 1
+
+    assert "agentihooks profile render rb-role --out" in capsys.readouterr().err
+    assert settings.read_bytes() == b'{"live": true}\n'
+    assert _tree_hashes(render.rendered_root(), Path("/none")) == before
+
+
+def test_render_takes_the_hook_root_from_the_installed_agentihooks(world, worktree_run):
+    from scripts.profiles import render
+
+    text = (render.render_claude("rb-role") / "settings.json").read_text()
+
+    assert f"cd {worktree_run} && " in text
+    assert str(world["install"].AGENTIHOOKS_ROOT) not in text
+
+
+def test_install_root_is_the_editable_source(world, tmp_path, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    install = world["install"]
+    source = tmp_path / "agentihooks src"
+    records = [
+        ({"url": source.as_uri(), "dir_info": {"editable": True}}, source),
+        ({"url": "https://x", "archive_info": {}}, install.AGENTIHOOKS_ROOT),
+        ({"url": source.as_uri(), "dir_info": {}}, install.AGENTIHOOKS_ROOT),
+        ("{not json", install.AGENTIHOOKS_ROOT),
+        (None, install.AGENTIHOOKS_ROOT),
+    ]
+
+    class Dist:
+        def __init__(self, record):
+            self.record = record
+
+        def read_text(self, name):
+            if name != "direct_url.json" or self.record is None:
+                return None
+            return self.record if isinstance(self.record, str) else json.dumps(self.record)
+
+    def distribution(record):
+        def find(name):
+            if name != "agentihooks":
+                raise PackageNotFoundError(name)
+            return Dist(record)
+
+        return find
+
+    for record, root in records:
+        monkeypatch.setattr(install.metadata, "distribution", distribution(record))
+        assert install.install_root() == root
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(install.metadata, "distribution", missing)
+    assert install.install_root() == install.AGENTIHOOKS_ROOT
