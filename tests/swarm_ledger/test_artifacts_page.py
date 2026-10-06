@@ -91,6 +91,7 @@ def test_markdown_renders_headings_tables_and_code(page):
     assert body.locator("table th").all_inner_texts() == ["Field", "Use"]
     assert body.locator("table td").all_inner_texts() == ["Done", "what landed"]
     assert body.locator("pre code").inner_text().strip() == "agentihooks swarm done"
+    assert body.locator("ul li").evaluate("el => getComputedStyle(el).listStyleType") == "disc"
     box = viewer.bounding_box()
     width = page.viewport_size["width"]
     assert box["width"] >= width - 40
@@ -105,6 +106,7 @@ def test_json_is_pretty_printed_and_foldable(page):
     folds.nth(2).wait_for()
     assert folds.count() == 3
     assert "Stopped at" in body.inner_text()
+    assert body.locator("summary").nth(1).inner_text() == '"proposal": {'
     folds.nth(1).locator("summary").first.click()
     assert not folds.nth(1).evaluate("el => el.open")
     assert not body.get_by_text('"Stopped at"').is_visible()
@@ -119,4 +121,5 @@ def test_svg_renders_as_an_image_and_its_script_never_runs(page):
     assert page.evaluate("window.pwned") is None
     image = viewer.locator(".art-body img")
     page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=image.element_handle())
+    assert image.bounding_box()["width"] <= viewer.locator(".art-body").bounding_box()["width"]
     assert image.get_attribute("src").endswith(".svg")

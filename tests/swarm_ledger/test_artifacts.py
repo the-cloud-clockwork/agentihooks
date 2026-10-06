@@ -10,10 +10,10 @@ from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger
 from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
 
-MARKDOWN = b"# Handoff template\n\n| Field | Use |\n| --- | --- |\n| Done | what landed |\n\n```\nagentihooks swarm done\n```\n"
+MARKDOWN = b"# Handoff template\n\n| Field | Use |\n| --- | --- |\n| Done | what landed |\n\n```\nagentihooks swarm done\n```\n\n- Keep it short\n"
 JSON_DOC = b'{"proposal": {"sections": ["Done", "Stopped at"], "version": 2}}'
 SVG = (
-    b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="20" '
+    b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="20" '
     b'onload="parent.pwned=1"><script>parent.pwned=1</script><rect width="40" height="20" fill="red" '
     b'onclick="parent.pwned=1"/><a xlink:href="javascript:parent.pwned=1"><text>x</text></a>'
     b'<image href="missing.png" onerror="parent.pwned=1"/>'
