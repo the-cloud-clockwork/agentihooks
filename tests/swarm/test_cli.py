@@ -538,7 +538,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
-    assert ran == ["event_pass", "phase_pass", "wake_pass"]
+    assert ran == ["phase_pass", "event_pass", "wake_pass"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 

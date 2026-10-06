@@ -2,6 +2,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
+from scripts.swarm import phase_state
 from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_delivery import FakeHerdr
@@ -110,3 +111,27 @@ def test_phase_notices_to_the_master_are_informational(env):
     ledger.update_task(SLUG, "t2", {"state": "claimed"})
     run(store, ledger)
     assert [i.fyi for i in InboxStore(store.redis).inbox(MASTER_SEAT) if "phase p1" in i.text] == [True, True]
+
+
+def test_a_finished_phase_opens_its_waiting_phase_before_the_drained_decision(env):
+    store, ledger = env
+    op = {
+        "op": "phase_update",
+        "id": "wait-on-build",
+        "by": "engineer",
+        "item": "phases/p2",
+        "fields": {"depends_on": ["p1"]},
+    }
+    assert core.sync(SLUG, ops=[op])[1] == []
+    ledger.add_task(SLUG, {"task": "t3", "title": "Task three", "lane": "eng", "phase": "p2"}, "init-swarm")
+    store.update(SLUG, state="running")
+    finish(ledger, "t1", "t2")
+    rt = FakeRuntime()
+    actions = swarm_cli.run_tick(store, SLUG, ledger, rt, FakeHerdr({}))
+    doc = state(SLUG)
+    assert phase("p1")["done"] is True
+    assert phase_state.lifecycle(phase("p2"), doc) == "building"
+    assert "drained" not in actions and store.config(SLUG).state == "running"
+    assert not any("no task left" in c["text"] for c in doc["chat"])
+    assert rt.killed == [] and rt.closed_spaces == []
+    assert [a.lane for a in store.agents(SLUG)] == ["master"]
