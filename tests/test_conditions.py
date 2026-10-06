@@ -505,6 +505,18 @@ class TestStopStep:
         _write(layers[2], "stop-idle.sh", 'echo \'{"decision": "deny", "reason": "run swarm done"}\'')
         assert conditions.stop_block(_stop()) == "[condition stop-idle.sh] run swarm done"
 
+    def test_every_denying_condition_is_named_one_per_line(self, layers):
+        _write(layers[1], "stop-claim.sh", "echo 'task still claimed' >&2; exit 2")
+        _write(layers[1], "stop-wait.sh", "echo 'no checked wait' >&2; exit 2")
+        assert conditions.stop_block(_stop()) == (
+            "[condition stop-claim.sh] task still claimed\n[condition stop-wait.sh] no checked wait"
+        )
+
+    def test_a_stop_file_with_a_matcher_names_the_stop_grammar(self):
+        with pytest.raises(ValueError) as refused:
+            conditions.parse_filename("stop-bash-idle.sh")
+        assert str(refused.value) == "expected stop-<name>.<ext>: Stop has no tool to match"
+
     def test_a_deny_without_a_reason_still_blocks(self, layers):
         _write(layers[1], "stop-idle.sh", 'echo \'{"decision": "deny"}\'')
         assert conditions.stop_block(_stop()) == "blocked by a condition"
@@ -559,11 +571,13 @@ class TestStopStep:
             raise RuntimeError("index unreadable")
 
         monkeypatch.setattr(conditions, "stop_block", broken)
-        beats = []
+        beats, logged = [], []
         monkeypatch.setattr(hm, "_swarm_heartbeat", lambda *a, **k: beats.append(a))
+        monkeypatch.setattr(hm, "log", lambda *a, **k: logged.append(a))
         monkeypatch.setattr("hooks._async.fork_and_call", lambda *a, **k: None)
         hm.on_stop(_stop())
         assert beats == [("idle",)]
+        assert ("conditions stop failed", {"error": "index unreadable"}) in logged
 
 
 class TestHookProcess:

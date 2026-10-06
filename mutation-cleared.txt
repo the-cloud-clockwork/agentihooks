@@ -446,5 +446,9 @@
   "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
     "reader": "Standards",
     "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x_parse_filename__mutmut_18:a6288aca9993c9d6efea2ba799f9170d9579e894edd31f3ebe21f43c79c132cc": {
+    "reader": "Standards",
+    "reason": "tool_matcher.parse lowercases its input, so inserting any or ANY yields the same matcher, key and index bucket."
   }
 }

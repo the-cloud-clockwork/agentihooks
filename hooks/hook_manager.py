@@ -1961,7 +1961,7 @@ def on_stop(payload: dict) -> None:
         _stop_block = conditions.stop_block(payload)
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
-    if _stop_block:
+    if _stop_block is not None:
         raise BlockAction(_stop_block)
 
     session_id = payload.get("session_id", "")
