@@ -1,6 +1,7 @@
+import io
 import json
 
-from scripts.gates import Call, Gate, Who
+from scripts.gates import Call, Gate, Who, entry, modes
 from scripts.gates.budget import Budget
 from scripts.gates.subagents import SubagentBudget, refusal
 from scripts.gates.verdicts import Verdicts
@@ -21,10 +22,20 @@ def launch(kind="general-purpose", tool="Agent"):
     return Call(tool, {"subagent_type": kind, "description": "read", "prompt": "go"})
 
 
-def test_it_is_a_gate_that_ships_in_observe():
+def test_it_is_a_gate_that_enforces_by_default():
     gate = SubagentBudget()
     assert isinstance(gate, Gate)
-    assert (gate.name, gate.default_mode, gate.launches, gate.continuations) == ("subagents", "observe", 8, 8)
+    assert (gate.name, gate.default_mode, gate.launches, gate.continuations) == ("subagents", "enforce", 8, 8)
+
+
+def test_a_swarm_config_naming_no_mode_denies_the_launch_past_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setitem(entry.GATES, "subagents", SubagentBudget(launches=1, continuations=1))
+    monkeypatch.setattr(modes, "swarm_gates", lambda swarm, environ: {})
+    environ = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
+    payload = json.dumps({"tool_name": "Agent", "tool_input": {"prompt": "go"}, "session_id": "sid-1"})
+    codes = [entry.main(["subagents"], io.StringIO(payload), environ, tmp_path) for _ in range(2)]
+    assert codes == [0, 2]
+    assert [r["kind"] for r in rows(tmp_path)] == ["count", "deny"]
 
 
 def test_it_matches_launch_and_continuation_tools_only():

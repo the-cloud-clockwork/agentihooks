@@ -17,7 +17,7 @@ def refusal(slug, task, counter, cap):
 
 class SubagentBudget:
     name = "subagents"
-    default_mode = "observe"
+    default_mode = "enforce"
 
     def __init__(self, launches=8, continuations=8):
         self.launches, self.continuations = launches, continuations
