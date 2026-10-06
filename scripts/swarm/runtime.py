@@ -20,6 +20,7 @@ SPAWN_TIMEOUT_S = 300
 RESUME_CHECKS, RESUME_CHECK_S = 30, 2
 STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
+PICKED_LANES = ("eng", "ci")
 
 
 def _bin():
@@ -34,11 +35,11 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
-def _model_args(agent, chosen):
-    from scripts.init_agent import model_flags
+def _model_args(agent, chosen, environ):
+    from scripts.init_agent import model_effort, model_flags
 
-    flags = model_flags(agent, _set(chosen.get("model")), _set(chosen.get("effort")))
-    return ["--", *flags] if flags else []
+    model, effort = model_effort(agent, [], environ)
+    return ["--", *model_flags(agent, _set(chosen.get("model")) or model, _set(chosen.get("effort")) or effort)]
 
 
 def herdr_call(args):
@@ -100,8 +101,11 @@ class HerdrRuntime:
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         argv = self._argv(config, name, agent, text, f"{name}.md", chosen.get("profile", DEFAULT_PROFILES[lane]))
-        picked = model_pick.pick(agent, chosen, task, environ)
-        placed = self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, picked.__dict__)])
+        if lane in PICKED_LANES:
+            picked = model_pick.pick(agent, chosen, task, environ)
+        else:
+            picked = model_pick.ModelPick(chosen.get("model", ""), chosen.get("effort", ""))
+        placed = self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, picked.__dict__, environ)])
         return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 
     def resume(self, config, agent, text):

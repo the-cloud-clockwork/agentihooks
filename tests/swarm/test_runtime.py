@@ -181,17 +181,17 @@ def test_spawn_passes_a_claude_lane_model_and_effort_to_init_agent(tmp_path):
 
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
-    assert seen["requested"] == "" and "--" not in seen["argv"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
 
 
 def test_a_lane_without_an_entry_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex"}}, lane="ci")
-    assert seen["requested"] == "" and "--" not in seen["argv"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
 
 
 def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "sonnet", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "high"]
 
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
@@ -330,3 +330,60 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
         runtime.resume(config, agent, "you were restored")
     assert any("terminate-agent" in argv for argv in seen["runs"])
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
+
+
+def _launched(tmp_path, monkeypatch, lane, task, lanes=None):
+    for key in ("AGENTIHOOKS_CLAUDE_MODEL", "AGENTIHOOKS_CLAUDE_EFFORT"):
+        monkeypatch.delenv(key, raising=False)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    auto = {"agent": "auto", "model": "auto", "effort": "auto"}
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes=lanes if lanes is not None else {name: auto for name in ("eng", "ci", "plan", "master")},
+        autonomy="delegate",
+    )
+    runtime.spawn(config, lane, "agent@a1b2c3-0001", task)
+    return _passed(seen["argv"])
+
+
+SEAT_TASKS = {
+    "eng": {"id": "t1", "title": "x"},
+    "ci": {"id": "t1", "title": "x"},
+    "plan": {"id": "t1", "title": "x"},
+    "master": {"id": "master", "peer": ""},
+}
+
+
+@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
+@pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
+def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
+    task = {**SEAT_TASKS[lane], **({"handoff": handoff} if handoff else {})}
+    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+
+
+@pytest.mark.parametrize("lane", ["master", "plan"])
+def test_master_and_plan_seats_never_take_the_task_classifier_pick(tmp_path, monkeypatch, lane):
+    from scripts.swarm import model_pick
+
+    monkeypatch.setattr(model_pick, "pick", lambda *a, **kw: pytest.fail(f"{lane} seat consulted the classifier"))
+    task = {**SEAT_TASKS[lane], "handoff": "# Handoff\n<!-- handoff complete -->"}
+    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+
+
+def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
+    lanes = {"master": {"agent": "claude", "model": "sonnet", "effort": "auto"}}
+    assert _launched(tmp_path, monkeypatch, "master", SEAT_TASKS["master"], lanes) == [
+        "--model",
+        "sonnet",
+        "--effort",
+        "high",
+    ]
