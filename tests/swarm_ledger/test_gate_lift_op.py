@@ -52,6 +52,19 @@ class GateLiftOp(unittest.TestCase):
         core.check_op(lift(gate="watch-budget"))
         core.check_op(lift(gate="x" * 40))
 
+    def test_the_lift_handler_records_one_event_and_reports_a_change(self):
+        recorded = []
+
+        class Ctx:
+            def record(self, *args, **extra):
+                recorded.append((args, extra))
+
+        self.assertIs(ledger_agent_ops.HANDLERS["gate_lift"]({}, lift(), Ctx()), True)
+        self.assertEqual(
+            recorded,
+            [(("engineer@1-1", "gate lifted", ""), {"text": "the operator lifted the talk gate for one hour"})],
+        )
+
     def test_the_agent_op_check_names_the_missing_gate(self):
         with self.assertRaisesRegex(ValueError, "^gate_lift needs the gate's name$"):
             ledger_agent_ops.check(lift(gate=""))
