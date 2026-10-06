@@ -229,3 +229,50 @@ def test_names_lists_the_code_space_and_every_name(store, capsys):
     out = capsys.readouterr().out
     assert out.splitlines()[0] == "code a1b2c3\tspace agentihooks-a1b2c3"
     assert out.splitlines()[1].startswith(f"{name}\tengineer\t1\t-\t7\t-")
+
+
+PROOF = "proof-a1b2c3-dn1-1"
+
+
+@pytest.fixture
+def proof_store(redis):
+    s = RedisStore(redis)
+    s.create(SwarmConfig(PROOF, "/home/x/dev/agentihooks", max_eng=1, max_ci=0))
+    return s
+
+
+def test_names_json_and_a_proof_swarm_space(store, proof_store, capsys):
+    import json
+    from argparse import Namespace
+
+    from scripts.swarm import cli
+
+    cli.cmd_names(store, Namespace(slug="sw", json=True))
+    listed = json.loads(capsys.readouterr().out)
+    assert (listed["code"], listed["space"], listed["names"]) == ("a1b2c3", "agentihooks-a1b2c3", [])
+    cli.cmd_names(proof_store, Namespace(slug=PROOF, json=False))
+    assert capsys.readouterr().out.splitlines()[0].endswith(f"\tspace {PROOF}")
+
+
+def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):
+    from types import SimpleNamespace
+
+    from scripts.swarm.rename import rename_swarm
+    from scripts.swarm.runtime import HerdrRuntime
+
+    calls, spaces = [], [{"workspace_id": "w5", "label": f"swarm-{PROOF}"}]
+
+    def herdr(argv):
+        calls.append(argv)
+        if argv == ["workspace", "list"]:
+            return {"workspaces": spaces}
+        return {"agents": []} if argv == ["agent", "list"] else {}
+
+    runtime = HerdrRuntime(herdr=herdr)
+    rename_swarm(proof_store, PROOF, SimpleNamespace(tasks=lambda slug: []), runtime, 10)
+    assert ["workspace", "rename", "w5", PROOF] in calls
+    spaces[0]["label"] = PROOF
+    assert runtime.close_space(proof_store.config(PROOF)) is True
+    assert ["workspace", "close", "w5"] in calls
+    spaces[0]["label"] = "agentihooks-ffffff"
+    assert runtime.close_space(proof_store.config(PROOF)) is False

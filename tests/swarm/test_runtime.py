@@ -314,6 +314,14 @@ def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conve
     assert (placed.pane_id, placed.harness, placed.account) == ("w2:p9", "codex", "a1")
 
 
+def test_a_proof_swarm_agent_launches_into_the_space_named_by_its_slug(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    config.slug = "proof-a1b2c3-dn1-1"
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--workspace") + 1] == "proof-a1b2c3-dn1-1"
+
+
 def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
     from dataclasses import replace
 

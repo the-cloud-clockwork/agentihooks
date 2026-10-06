@@ -5,7 +5,6 @@ counts each type on its own within the swarm and is never reused. Names the swar
 `<slug>-<lane>-<n>`, are still recognised so live agents keep working until they retire.
 """
 
-import itertools
 import json
 import re
 import secrets
@@ -103,16 +102,16 @@ def repo_name(path):
             capture_output=True,
             text=True,
             timeout=10,
-        )
+        ).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
-        found = None
-    common = Path(found.stdout.strip()) if found and found.returncode == 0 and found.stdout.strip() else None
-    return _clean(common.parent.name if common and common.name == ".git" else Path(path).name) or "repo"
+        found = ""
+    common = Path(found)
+    return _clean(common.parent.name if common.name == ".git" else Path(path).name) or "repo"
 
 
 def session_base(environ):
     """The plain name of the swarm agent this session is, else session- and the first eight of its session id."""
-    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME"))
     if agent:
         return plain(str(agent))
     session = re.sub(r"[^0-9a-f]", "", environ.get("CLAUDE_CODE_SESSION_ID", "").lower())
@@ -122,27 +121,28 @@ def session_base(environ):
 
 
 def _first_free(names, taken):
+    """The first of names not taken; names must hold one more candidate than taken, so one is always free."""
     return next(name for name in names if name not in taken)
 
 
 def worktree(environ, taken=()):
-    base = session_base(environ)
-    return _first_free(itertools.chain([base], (f"{base}-{n}" for n in itertools.count(2))), set(taken))
+    base, taken = session_base(environ), set(taken)
+    return _first_free([base, *(f"{base}-{n}" for n in range(2, len(taken) + 2))], taken)
 
 
 def tmp_worktree(environ, taken=()):
-    base = session_base(environ)
-    return _first_free((f"{base}-tmp-{n}" for n in itertools.count(1)), set(taken))
+    base, taken = session_base(environ), set(taken)
+    return _first_free([f"{base}-tmp-{n}" for n in range(1, len(taken) + 2)], taken)
 
 
 def is_worktree(name, environ, tmp=False):
     base = re.escape(session_base(environ))
-    return re.fullmatch(rf"{base}-tmp-\d+" if tmp else rf"{base}(?:-\d+)?", name or "") is not None
+    return re.fullmatch(rf"{base}-tmp-\d+" if tmp else rf"{base}(?:-\d+)?", name) is not None
 
 
 def scratch(environ, cwd):
     """`<repo>/<swarm>-<task>` for a swarm task, else `<repo>/<session base>`."""
-    swarm, task = environ.get("AGENTIHOOKS_SWARM", ""), _clean(environ.get("AGENTIHOOKS_SWARM_TASK", ""))
+    swarm, task = environ.get("AGENTIHOOKS_SWARM"), _clean(environ.get("AGENTIHOOKS_SWARM_TASK") or "")
     folder = f"{swarm}-{task}" if swarm and task else session_base(environ)
     return f"{repo_name(cwd)}/{folder}"
 
@@ -158,11 +158,12 @@ def small_slug(environ):
 
 def proof_slug(environ, taken=()):
     """`proof-<swarm code>-<task>-<n>`, from the swarm agent asking and its task."""
-    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME", ""))
+    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME"))
     task = re.sub(r"[^a-z0-9]", "", environ.get("AGENTIHOOKS_SWARM_TASK", "").lower())
     if not agent or not task:
         raise NamingError("a proof swarm is named from its swarm agent and task: create it from a swarm task session")
-    return _first_free((f"proof-{agent.code}-{task}-{n}" for n in itertools.count(1)), set(taken))
+    taken = set(taken)
+    return _first_free([f"proof-{agent.code}-{task}-{n}" for n in range(1, len(taken) + 2)], taken)
 
 
 def is_built_slug(slug):
