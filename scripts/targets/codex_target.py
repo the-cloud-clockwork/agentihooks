@@ -294,7 +294,7 @@ class CodexAdapter:
                     (prompts_dir / name).unlink(missing_ok=True)
             except (json.JSONDecodeError, OSError):
                 pass
-            manifest_path.unlink(missing_ok=True)
+            manifest_path.unlink()
             _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
 
     # ------------------------------------------------------------------

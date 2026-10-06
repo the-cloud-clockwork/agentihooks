@@ -342,7 +342,7 @@ class TestPrompts:
         dst_dir.mkdir(parents=True)
         (dst_dir / "deploy.md").write_text("translated by an earlier install\n")
         (dst_dir / "mine.md").write_text("# operator's own prompt\n")
-        (dst_dir / ".agentihooks-manifest.json").write_text('["deploy.md"]')
+        (dst_dir / ".agentihooks-manifest.json").write_text('["gone.md", "deploy.md"]')
         adapter.install_features("commands", self._commands(tmp_path), lambda p: p.suffix == ".md")
         assert sorted(p.name for p in dst_dir.iterdir()) == ["mine.md"]
 
