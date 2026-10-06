@@ -23,10 +23,9 @@ def test_page_and_home_reopen_route_to_the_same_swarm_command():
     make_ledger()
     apply({"op": "close", "id": "c", "by": "swarm"})
     page = server.index_page()
-    active, closed = page.split("<h1>CLOSED</h1>", 1)
-    assert 'data-act="reopen"' not in active
-    assert f'data-act="reopen" data-slug="{SLUG}"' in closed
-    assert ">Reopen</button>" in closed
+    assert "<h1>CLOSED</h1>" not in page
+    assert f'data-act="reopen" data-slug="{SLUG}"' in page
+    assert ">Reopen</button>" in page
 
 
 def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
