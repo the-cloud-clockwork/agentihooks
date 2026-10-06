@@ -628,3 +628,13 @@ def test_phase_cli_reports_all_refusal_details():
         with pytest.raises(SystemExit) as error:
             ledger.cmd_phase(args)
     assert str(error.value) == "First refusal; Second refusal"
+
+
+def test_content_without_phases_reports_the_missing_phase():
+    assert new_ledger.check({"title": "Demo"}) == ["no phases"]
+
+
+def test_phase_content_missing_description_defaults_to_empty():
+    assert new_ledger.build_doc({"title": "Demo", "phases": [{"title": "First"}]})["phases"] == [
+        {"id": "p1", "title": "First", "description": "", "done": False, "comments": []}
+    ]
