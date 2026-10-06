@@ -30,7 +30,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory or kind of a task;
+                                      proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
+                                      proof.command=C proof.output=O
   prompt                              print the join paragraph for a launch prompt
   url                                 print the ledger page link for the operator (no --as needed)
 
@@ -307,6 +309,9 @@ def cmd_task(args):
     for key in ("depends_on", "territory"):
         if key in fields:
             fields[key] = comma_list(fields[key])
+    for dotted in [key for key in fields if "." in key]:
+        name, _, sub = dotted.partition(".")
+        fields.setdefault(name, {})[sub] = fields.pop(dotted)
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))
 
