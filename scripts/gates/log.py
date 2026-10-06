@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 TAIL_BYTES = 65536
+DECISIONS = ("deny", "observe", "lift", "fail-open")
 UNSAFE = re.compile(r"[^A-Za-z0-9@_-]")
 
 
@@ -66,3 +67,7 @@ def recent(slug, limit=20, home=None):
         if isinstance(row, dict):
             rows.append(row)
     return rows if limit is None else rows[-limit:]
+
+
+def decisions(slug, limit=20, home=None):
+    return [row for row in recent(slug, None, home) if row.get("kind") in DECISIONS][-limit:]
