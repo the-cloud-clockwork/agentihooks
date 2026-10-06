@@ -534,7 +534,6 @@ input, textarea { caret-color: var(--accent-2); }
 <section id="swarm-status-box"><details class="sources-box fold" id="swarm-fold" open><summary>Swarm <span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy"></span><span class="hint" id="swarm-tick"></span></summary>
 <div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><div class="destructive-group"><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button><button class="sw-btn danger" type="button" data-swarm="close">Close ledger</button></div></div><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></details></section>
 <div class="swarm-grid">
-<section id="needs-you-box"><details class="sources-box fold" id="needs-you-fold" open><summary>Needs you</summary><ul id="needs-you"></ul></details></section>
 <div class="counts-row"><dl class="sw-figs" id="swarm-figs"></dl><div class="sw-figs" id="swarm-plan-shape" hidden></div><button class="link" type="button" id="filter-clear" hidden>Show all work</button></div>
 <section id="agents-box"><details class="sources-box fold" id="swarm-agents-box" open><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><p class="hint" id="active-agents"></p><ul class="sw-list" id="swarm-master"></ul><ul class="sw-list" id="swarm-agents"></ul><details class="fold" id="swarm-work-box" open><summary>Work <span class="count" id="swarm-work-count"></span></summary><ul id="swarm-work"></ul></details></details></section>
 <section id="capacity-box"><details class="sources-box fold" id="capacity-fold" open><summary>Capacity</summary>
@@ -1692,7 +1691,6 @@ input, textarea { caret-color: var(--accent-2); }
     $("codex-split").textContent = `Codex share: percent of new engineers started on Codex. So far ${codex} of ${total} started on Codex (${total ? Math.floor(codex * 100 / total) : 0}%).`;
     renderControls();
     renderWork(sw);
-    renderNeedsYou(sw);
     if (!$("health").contains(document.activeElement)) renderHealth(sw.findings);
     renderCrew();
     renderStats();
@@ -1734,17 +1732,6 @@ input, textarea { caret-color: var(--accent-2); }
       h("a", { href: `#item-tasks-${t.id}`, class: "sw-task", text: t.title }),
       h("span", { class: "hint", text: t.state || "open" }))));
     $("filter-clear").hidden = !workFilter;
-  }
-
-  function renderNeedsYou(sw) {
-    const waiting = (sw.findings || []).filter((f) => !f.verdict).map(healthCard);
-    for (const t of doc.tasks.filter((t) => t.state === "blocked" || (t.state === "pr" && t.approval_required))) {
-      waiting.push(h("li", { class: "sw-card" },
-        h("a", { class: "sw-task", href: `#item-tasks-${t.id}`, text: t.title }),
-        h("p", { class: "hint", text: t.blocked_reason || t.blocker || ((t.comments || []).filter((c) => !c.deleted).at(-1) || {}).text || (t.approval_required ? "Pull request awaits merge approval." : "Blocked: ask the master for the reason.") })));
-    }
-    if (!$("needs-you").contains(document.activeElement)) $("needs-you").replaceChildren(...(waiting.length ? waiting : [h("li", { class: "sw-empty", text: "Nothing waits on you." })]));
-
   }
 
   function restoreCards(restored, tasks) {
@@ -2312,15 +2299,15 @@ input, textarea { caret-color: var(--accent-2); }
     const grid = document.querySelector(".swarm-grid");
     const workColumn = h("div", { class: "swarm-work-column" });
     const sideColumn = h("div", { class: "swarm-side-column" });
-    const parts = ["needs-you-box", "agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "handoff-box", "restore-box"].map($);
+    const parts = ["agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "handoff-box", "restore-box"].map($);
     const counts = document.querySelector(".counts-row");
     const placePanels = () => {
       placeRail();
       if (innerWidth < 1024) grid.replaceChildren(parts[0], counts, ...parts.slice(1));
       else {
         $("swarm-status-box").after(counts);
-        workColumn.replaceChildren(parts[1], parts[5]);
-        sideColumn.replaceChildren(parts[0], parts[2], parts[3], parts[4], parts[6], parts[7]);
+        workColumn.replaceChildren(parts[0], parts[4]);
+        sideColumn.replaceChildren(parts[1], parts[2], parts[3], parts[5], parts[6]);
         grid.replaceChildren(workColumn, sideColumn);
       }
     };

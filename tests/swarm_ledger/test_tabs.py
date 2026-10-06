@@ -89,13 +89,17 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
 def test_swarm_contains_the_operational_panels_and_controls_do_not_cover_text(tab, width):
     tab.set_viewport_size({"width": width, "height": 844})
     tab.get_by_role("tab", name="Swarm").click()
-    for name in ["Agents", "Needs you", "Capacity", "Swarm health", "Doctor", "Crew history"]:
+    for name in ["Agents", "Capacity", "Swarm health", "Doctor", "Crew history"]:
         assert tab.locator("#swarm").get_by_text(name, exact=True).count() == 1
+    assert tab.get_by_text("Needs you", exact=True).count() == 0
+    assert tab.locator("#needs-you-box, #needs-you").count() == 0
+    tab.get_by_role("tab", name="Ledger").click()
+    assert "Choose the first phase" in tab.locator("#priorities").inner_text()
+    tab.get_by_role("tab", name="Swarm").click()
     assert tab.locator("#swarm #cap-eng").count() == 1
     assert tab.locator("#swarm #health").count() == 1
     assert tab.locator("#swarm #crew").count() == 1
     assert tab.locator("#swarm-restore-box").is_hidden()
-    assert "Nothing waits on you." in tab.locator("#needs-you").inner_text()
     assert tab.locator("#swarm-agents-box").get_attribute("open") is not None
     assert tab.locator("#codex-split").inner_text() == (
         "Codex share: percent of new engineers started on Codex. So far 6 of 19 started on Codex (31%)."

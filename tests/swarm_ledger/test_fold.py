@@ -15,7 +15,6 @@ SECTIONS = {
     "Operator notes": True,
     "Follow-ups or blockers": True,
     "Swarm": True,
-    "Needs you": True,
     "Agents": True,
     "Capacity": True,
     "Swarm health": True,
