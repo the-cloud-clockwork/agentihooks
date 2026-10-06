@@ -26,7 +26,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -58,11 +57,40 @@ jobs:
       - name: Name each leaking pair
         id: pairs
         if: failure() && steps.suite.outcome == 'failure'
-        run: python -m tests.leaks pairs run.jsonl leaks.json | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python -m tests.leaks pairs run.jsonl leaks-${{ matrix.order }}.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the findings for the follow up job
+        id: keep
+        if: failure() && steps.suite.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: leaks-${{ matrix.order }}
+          path: leaks-${{ matrix.order }}.json
+          retention-days: 14
+
+  # One job opens every follow up, so a pair both orders find gets one issue.
+  followup:
+    needs: one-process
+    if: ${{ failure() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: leaks-*
+          merge-multiple: true
 
       - name: Open a follow up per finding
-        id: followup
-        if: failure() && steps.suite.outcome == 'failure' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m tests.leaks followup leaks.json "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        run: python -m tests.leaks followup "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" leaks-*.json

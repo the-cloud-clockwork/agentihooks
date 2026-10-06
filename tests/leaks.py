@@ -38,15 +38,15 @@ def find_polluter(victim: str, before: list[str], cwd: Path) -> dict:
     return {"victim": victim, "polluter": None, "note": NOTES.get(verdict, "no single earlier test makes it fail")}
 
 
-def leaking_pairs(report_log: Path, cwd: Path) -> tuple[list[dict], int]:
+def leaking_pairs(report_log: Path, cwd: Path) -> tuple[list[dict], list[str]]:
     order, failed = run_order(report_log)
-    traced = failed[:MAX_TRACED]
+    traced, untraced = failed[:MAX_TRACED], failed[MAX_TRACED:]
     with ThreadPoolExecutor(MAX_TRACED) as pool:
         findings = list(pool.map(lambda victim: find_polluter(victim, order[: order.index(victim)], cwd), traced))
-    return findings, len(failed) - len(traced)
+    return findings, untraced
 
 
-def summary(findings: list[dict], untraced: int) -> str:
+def summary(findings: list[dict], untraced: list[str]) -> str:
     rows = [
         f"| `{finding['polluter']}` | `{finding['victim']}` |"
         if finding["polluter"]
@@ -55,7 +55,7 @@ def summary(findings: list[dict], untraced: int) -> str:
     ]
     lines = ["### Leaks between tests", "", "| Earlier test that leaks | Test it breaks |", "| --- | --- |", *rows]
     if untraced:
-        lines += ["", f"{untraced} more failing tests were not traced."]
+        lines += ["", "Failing tests not traced in this run:", *(f"- `{nodeid}`" for nodeid in untraced)]
     return "\n".join(lines)
 
 
@@ -80,8 +80,7 @@ def followup(finding: dict, run_url: str) -> tuple[str, str]:
 def open_followups(findings: list[dict], run_url: str, gh=_gh) -> None:
     listing = gh(["issue", "list", "--state", "open", "--limit", "1000", "--json", "number,title"])
     open_issues = {issue["title"]: issue["number"] for issue in json.loads(listing)}
-    for finding in findings:
-        title, body = followup(finding, run_url)
+    for title, body in dict(followup(finding, run_url) for finding in findings).items():
         if title in open_issues:
             gh(["issue", "comment", str(open_issues[title]), "--body", body])
         else:
@@ -95,15 +94,15 @@ def main(argv: list[str] | None = None) -> None:
     pairs.add_argument("report_log", type=Path)
     pairs.add_argument("findings", type=Path)
     followups = commands.add_parser("followup", help="open or update one issue per finding")
-    followups.add_argument("findings", type=Path)
     followups.add_argument("run_url")
+    followups.add_argument("findings", type=Path, nargs="+")
     args = parser.parse_args(argv)
     if args.command == "pairs":
         findings, untraced = leaking_pairs(args.report_log, Path.cwd())
         args.findings.write_text(json.dumps(findings, indent=2) + "\n")
         print(summary(findings, untraced))
     else:
-        open_followups(json.loads(args.findings.read_text()), args.run_url)
+        open_followups([finding for path in args.findings for finding in json.loads(path.read_text())], args.run_url)
 
 
 if __name__ == "__main__":
