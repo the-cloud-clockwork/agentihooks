@@ -1,9 +1,12 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from scripts import herdr_host, init_agent
+from scripts.claude_config import claude_json
 
 
 @pytest.fixture(autouse=True)
@@ -573,6 +576,59 @@ def test_when_trust_cannot_be_set_the_caller_is_told(monkeypatch, tmp_path, caps
     assert "trust=untrusted" in captured.out
     assert "folder trust question" in captured.err
     assert config.read_text() == config_text
+
+
+@pytest.mark.parametrize(
+    ("caller_home", "pane_home"),
+    [("profile", None), (None, "herdr")],
+    ids=["caller-profile-home", "pane-foreign-home"],
+)
+def test_the_launched_claude_reads_the_config_holding_the_recorded_trust(monkeypatch, tmp_path, caller_home, pane_home):
+    project = tmp_path / "fresh"
+    project.mkdir()
+    seen = tmp_path / "seen"
+    stub = tmp_path / "agentihooks"
+    stub.write_text(f'#!/bin/sh\nprintf %s "${{CLAUDE_CONFIG_DIR:-}}" > {seen}\n')
+    stub.chmod(0o755)
+    real_popen = subprocess.Popen
+
+    def popen(command, **kwargs):
+        if command[0] != "/usr/bin/terminal":
+            return real_popen(command, **kwargs)
+        pane = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
+        if pane_home:
+            pane["CLAUDE_CONFIG_DIR"] = str(tmp_path / pane_home)
+        real_popen(["bash", command[-1]], env=pane).wait()
+
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: str(stub) if name == "agentihooks" else None)
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    caller = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "SHELL": "/bin/true"}
+    if caller_home:
+        (tmp_path / caller_home).mkdir()
+        caller["CLAUDE_CONFIG_DIR"] = str(tmp_path / caller_home)
+
+    rc = init_agent.main(
+        ["--dir", str(project), "--name", "trust", "--agent", "claude", "--start-timeout", "5", "--route-timeout", "0"],
+        caller,
+    )
+
+    assert rc == 0
+    launched = {"HOME": str(tmp_path), **({"CLAUDE_CONFIG_DIR": seen.read_text()} if seen.read_text() else {})}
+    config = json.loads(claude_json(launched).read_text())
+    assert config["projects"][str(project)]["hasTrustDialogAccepted"] is True
+
+
+def test_a_codex_launcher_leaves_the_claude_config_home_alone(tmp_path):
+    text = _launcher_text(tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "profile")}, "codex")
+    assert "CLAUDE_CONFIG_DIR" not in text
+    lines = text.splitlines()
+    after_name = lines[lines.index("export AGENTIHOOKS_AGENT_NAME=swarm-buildout-eng-4") + 1]
+    assert after_name.startswith("/") and " codex " in after_name
 
 
 def test_codex_trusts_exactly_its_launch_folder_for_that_session(tmp_path):
