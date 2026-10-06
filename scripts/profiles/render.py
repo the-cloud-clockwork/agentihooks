@@ -89,9 +89,16 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     doc = _settings("claude", bundle, dirs)
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
-    global_settings = claude_home(_global_env()) / "settings.json"
+    default_home = claude_home(_global_env())
+    global_settings = default_home / "settings.json"
     personal = _i.load_json(global_settings) if global_settings.exists() else {}
-    return {**{k: personal[k] for k in _i.PERSONAL_KEYS if k in personal}, **settings_document(doc)}
+    # Claude reads the default home as an ancestor project folder when the working folder sits under it.
+    excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
+    return {
+        **{k: personal[k] for k in _i.PERSONAL_KEYS if k in personal},
+        **settings_document(doc),
+        "claudeMdExcludes": excludes,
+    }
 
 
 def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
