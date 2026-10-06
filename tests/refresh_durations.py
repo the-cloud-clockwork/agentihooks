@@ -54,10 +54,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
     )
+    parser.add_argument("--ci-run", help="take the durations from one complete CI run")
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as tmp:
-        if args.ci:
-            ci_download(ci_run_ids(args.ci), Path(tmp))
+        if args.ci or args.ci_run:
+            ci_download([args.ci_run] if args.ci_run else ci_run_ids(args.ci), Path(tmp))
             runs = ci_samples(Path(tmp))
         else:
             runs = local_samples(Path(tmp))
