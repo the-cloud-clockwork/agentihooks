@@ -5521,6 +5521,13 @@ def _write_route_report(path: str, **fields: str) -> None:
     os.replace(temporary, target)
 
 
+def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
+    # --dangerously-skip-permissions overrides a named --permission-mode; the allow form keeps bypass reachable.
+    named = any(arg == "--permission-mode" or arg.startswith("--permission-mode=") for arg in extra_args)
+    skip = "--allow-dangerously-skip-permissions" if named else "--dangerously-skip-permissions"
+    return [claude_bin, skip, *extra_args]
+
+
 def cmd_claude(extra_args: list[str]) -> None:
     """Route to the healthiest Claude account, then replace this process with Claude.
 
@@ -5587,7 +5594,7 @@ def cmd_claude(extra_args: list[str]) -> None:
             print(f"[agenti] router unavailable ({exc}); launching bare Claude", file=sys.stderr, flush=True)
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
-            cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
+            cmd = _claude_command(claude_bin, extra_args)
             os.execvpe(claude_bin, cmd, os.environ)
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
@@ -5613,7 +5620,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         else format_selection(decision, include_fable),
         flush=True,
     )
-    cmd = [claude_bin, "--dangerously-skip-permissions", *extra_args]
+    cmd = _claude_command(claude_bin, extra_args)
     os.execvpe(claude_bin, cmd, os.environ)
 
 

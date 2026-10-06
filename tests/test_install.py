@@ -112,6 +112,41 @@ class TestClaudeRouting:
         assert "AH_CC_TOKEN_3" not in observed["environ"]
         assert capsys.readouterr().out == "[agenti] account=0 route=forced\n"
 
+    @pytest.mark.parametrize(
+        ("extra", "command"),
+        [
+            (["--model", "opus"], ["/c", "--dangerously-skip-permissions", "--model", "opus"]),
+            (
+                ["--model", "opus", "--permission-mode", "plan"],
+                ["/c", "--allow-dangerously-skip-permissions", "--model", "opus", "--permission-mode", "plan"],
+            ),
+            (["--permission-mode=plan"], ["/c", "--allow-dangerously-skip-permissions", "--permission-mode=plan"]),
+            (["--permission-modes"], ["/c", "--dangerously-skip-permissions", "--permission-modes"]),
+        ],
+    )
+    def test_a_named_permission_mode_starts_the_session_in_it_with_bypass_still_allowed(self, extra, command):
+        assert install._claude_command("/c", extra) == command
+
+    def test_a_routed_planner_launch_keeps_its_plan_mode(self, monkeypatch):
+        observed = {}
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setenv("AH_CC_TOKEN_0", "selected-secret")
+
+        def execvpe(executable, command, environ):
+            observed.update(command=command)
+            raise RuntimeError("exec intercepted")
+
+        monkeypatch.setattr(install.os, "execvpe", execvpe)
+        with pytest.raises(RuntimeError, match="exec intercepted"):
+            install.cmd_claude(["--route", "0", "--permission-mode", "plan"])
+        assert observed["command"] == [
+            "/usr/bin/claude",
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "plan",
+        ]
+
     @pytest.mark.parametrize("arguments", [["--route"], ["--route="], ["--route", "0", "--route=3"]])
     def test_cmd_claude_rejects_invalid_route_syntax(self, arguments, capsys):
         with pytest.raises(SystemExit) as exc:
