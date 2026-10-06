@@ -79,6 +79,7 @@ import os
 import re
 import shutil
 import sys
+import sysconfig
 import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
@@ -4109,35 +4110,54 @@ def _install_cli_tool() -> None:
     """Install the agentihooks CLI globally via ``uv tool install --editable .``."""
     import subprocess
 
+    if not _is_source_checkout():
+        _link_cli_tool()
+        return
+
     uv = shutil.which("uv")
     if not uv:
         _cprint("  [!!] uv not found — install uv first: https://docs.astral.sh/uv/getting-started/installation/")
         print("       Then re-run: uv run agentihooks init")
         return
 
-    if _is_source_checkout():
-        cmd = [uv, "tool", "install", "--editable", "--force", "."]
-        cwd = str(AGENTIHOOKS_ROOT)
-        label = "uv tool install --editable ."
-    else:
-        cmd = [uv, "tool", "install", "--force", "agentihooks"]
-        cwd = None
-        label = "uv tool install agentihooks"
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    cmd = [uv, "tool", "install", "--editable", "--force", "."]
+    label = "uv tool install --editable ."
+    result = subprocess.run(cmd, cwd=str(AGENTIHOOKS_ROOT), capture_output=True, text=True)
     if result.returncode == 0:
         _cprint(f"  [OK] CLI installed via: {label}")
     else:
         _cprint(f"  [!!] uv tool install failed: {result.stderr.strip()}")
 
 
+def _cli_link() -> Path:
+    return Path.home() / ".local" / "bin" / _CLI_NAME
+
+
+def _link_cli_tool() -> None:
+    target = Path(sysconfig.get_path("scripts")) / _CLI_NAME
+    link = _cli_link()
+    if not target.exists():
+        _cprint(f"  [!!] {target} not found — the agentihooks CLI was not linked")
+        return
+    if link.exists() and link.samefile(target):
+        _cprint(f"  [OK] CLI on PATH: {link} is {target}")
+        return
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.unlink(missing_ok=True)
+    link.symlink_to(target)
+    _cprint(f"  [OK] CLI linked: {link} -> {target}")
+
+
 def _cli_tool_is_installed() -> bool:
-    """True when the agentihooks CLI is present as a uv tool.
+    """True when the agentihooks CLI is present as a uv tool or as init's link.
 
     Used by uninstall's early exit, which must not report "nothing to
     uninstall" while the CLI itself is still on PATH.
     """
     import subprocess
 
+    if _cli_link().is_symlink():
+        return True
     uv = shutil.which("uv")
     if not uv:
         return False
@@ -4151,28 +4171,32 @@ def _cli_tool_is_installed() -> bool:
 
 
 def _uninstall_cli_tool() -> None:
-    """Uninstall the agentihooks CLI via ``uv tool uninstall``."""
+    """Uninstall the agentihooks CLI via ``uv tool uninstall`` and remove init's link."""
     import subprocess
 
     uv = shutil.which("uv")
-    if not uv:
+    if uv:
+        result = subprocess.run(
+            [uv, "tool", "uninstall", _CLI_NAME],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            _cprint(f"  [OK] Uninstalled CLI via: uv tool uninstall {_CLI_NAME}")
+        else:
+            stderr = result.stderr.strip()
+            if "not installed" in stderr.lower():
+                _cprint(f"  [--] {_CLI_NAME} was not installed via uv tool (skipping)")
+            else:
+                _cprint(f"  [!!] uv tool uninstall failed: {stderr}")
+
+    link = _cli_link()
+    if link.is_symlink():
+        link.unlink()
+        _cprint(f"  [OK] Removed CLI link: {link}")
+    elif not uv:
         _cprint("  [!!] uv not found — cannot uninstall CLI automatically.")
         print(f"       Remove manually: uv tool uninstall {_CLI_NAME}")
-        return
-
-    result = subprocess.run(
-        [uv, "tool", "uninstall", _CLI_NAME],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        _cprint(f"  [OK] Uninstalled CLI via: uv tool uninstall {_CLI_NAME}")
-    else:
-        stderr = result.stderr.strip()
-        if "not installed" in stderr.lower():
-            _cprint(f"  [--] {_CLI_NAME} was not installed via uv tool (skipping)")
-        else:
-            _cprint(f"  [!!] uv tool uninstall failed: {stderr}")
 
 
 # ---------------------------------------------------------------------------
