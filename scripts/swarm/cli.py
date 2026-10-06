@@ -40,6 +40,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.doctor import priming
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
@@ -72,7 +73,7 @@ from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
-from scripts.swarm_ledger import ledger_kinds, ledger_link, plan_shape
+from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, plan_shape
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -161,7 +162,12 @@ def cmd_create(store, args):
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
-    ledger.tasks(args.slug)
+    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
+    refused = ledger_creator.swarm_refusal(os.environ) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
+    )
+    if refused:
+        raise SwarmError(refused)
     ledger.mark_swarm(args.slug)
     caps = {key: value.cap for key, value in template.lanes.items()}
     config = SwarmConfig(
@@ -714,6 +720,7 @@ def build_parser():
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
+    create.add_argument("--operator-asked")
     for plain in ("start", "pause", "remove", "snapshot", "url", "reopen", "rename"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
