@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import tomllib
 from datetime import datetime, timedelta, timezone
@@ -999,6 +1000,30 @@ def test_scratch_render_runs_this_checkout_in_a_child(world, tmp_path, monkeypat
     assert Path(kw["cwd"]) / "scripts" / "profiles" / "render.py" == Path(render.__file__).resolve()
     assert kw["env"]["AGENTIHOOKS_HOME"] == str(tmp_path / "rel-home")
     assert kw["env"]["AGENTIHOOKS_BUNDLE_PATH"] == str(world["bundle"])
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        ["-m", "scripts.profiles.render"],
+        ["-c", "import sys; from scripts.install import main; sys.exit(main())", "profile"],
+    ],
+    ids=["module", "command"],
+)
+def test_scratch_render_works_from_both_entry_paths(world, tmp_path, entry):
+    from scripts.profiles import render
+
+    bundle, out = _scratch_bundle(world, tmp_path), tmp_path / "scratch-home"
+    argv = [sys.executable, *entry, "render", "rb-role", "--out", str(out), "--bundle", str(bundle)]
+    repo = Path(render.__file__).resolve().parents[2]
+
+    done = subprocess.run(argv, cwd=repo, capture_output=True, text=True)
+
+    home = out / "profiles" / "rb-role" / "claude"
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout.endswith(f"Rendered rb-role (claude) → {home}\n")
+    assert "SCRATCH PERSONA MARKER" in (home / "CLAUDE.md").read_text()
+    assert not (render.rendered_root() / "rb-role").exists()
 
 
 def test_scratch_render_options_are_documented(capsys):
