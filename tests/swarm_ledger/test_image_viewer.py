@@ -37,13 +37,12 @@ def image_page(browser):
 
 
 @pytest.mark.parametrize("width", [1440, 390])
-def test_images_fill_comment_column_keep_ratio_and_never_grow(image_page, width):
+def test_comment_images_are_small_thumbnails_that_keep_ratio_and_never_grow(image_page, width):
     tab = image_page
     tab.set_viewport_size({"width": width, "height": 900})
-    box = tab.locator("#item-phases-p1 .attach-row").bounding_box()
     large = tab.locator("#item-phases-p1 .attach-row img").nth(0).bounding_box()
     small = tab.locator("#item-phases-p1 .attach-row img").nth(1).bounding_box()
-    assert abs(large["width"] - min(box["width"], 1280)) <= 2
+    assert large["width"] == 160
     assert abs(large["width"] / large["height"] - 1280 / 720) < 0.01
     assert small["width"] == 120
     assert small["height"] == 80

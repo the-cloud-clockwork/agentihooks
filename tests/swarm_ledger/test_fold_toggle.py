@@ -80,7 +80,7 @@ def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab)
     note = tab.locator("#item-notes-n1")
     assert note.locator(".entry-body").all_text_contents() == ["Keep replies here", COMMENT["text"]]
     assert tab.locator("#item-notes-n2 details[data-key]").count() == 1
-    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [True, False]}
+    assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
     tab.click("#sec-notes button[data-comments]")
     settle(tab)
     assert comments(tab, "sec-notes") == {"labels": ["Hide all comments"], "open": [True, True]}
@@ -112,37 +112,78 @@ def test_newly_added_note_immediately_has_a_comments_dropdown(tab):
     assert errors == []
 
 
+def test_every_comments_dropdown_starts_collapsed_on_a_fresh_load_and_after_a_reload(tab):
+    for section in (*SECTIONS, "sec-notes"):
+        assert not any(comments(tab, section)["open"]), section
+    tab.reload()
+    settle(tab)
+    for section in (*SECTIONS, "sec-notes"):
+        assert not any(comments(tab, section)["open"]), section
+
+
+def test_comments_stored_by_the_old_open_by_default_rule_start_collapsed(browser):
+    context = browser.new_context()
+    context.add_init_script(
+        """if (!sessionStorage.getItem("seeded")) {
+          sessionStorage.setItem("seeded", "1");
+          localStorage.setItem("plan-ledger:swarm-buildout:comments", JSON.stringify({ open: ["phases/p0", "phases/p1", "phases/p2", "followups/f1", "notes/n1"], closed: [] }));
+          localStorage.setItem("plan-ledger:swarm-buildout:toggles", JSON.stringify({ "sec-phases": true, "sec-followups": true, "all-comments": true }));
+        }"""
+    )
+    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(DOC))
+    context.route(
+        "**/*",
+        lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
+    )
+    page = context.new_page()
+    try:
+        page.goto(URL)
+        settle(page)
+        for section in ("sec-phases", "sec-followups", "sec-notes"):
+            assert comments(page, section) == {
+                "labels": ["Show all comments"],
+                "open": [False] * len(comments(page, section)["open"]),
+            }
+        page.click("#sec-phases button[data-comments]")
+        settle(page)
+        page.reload()
+        settle(page)
+        assert comments(page, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
+    finally:
+        context.close()
+
+
 def test_comment_control_label_flips_with_state_and_survives_a_reload(tab):
+    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
+    assert comments(tab, "sec-followups") == {"labels": ["Show all comments"], "open": [False]}
+    tab.click("#sec-phases button[data-comments]")
+    settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
-    tab.click("#sec-phases button[data-comments]")
-    settle(tab)
-    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
-    assert comments(tab, "sec-followups") == {"labels": ["Hide all comments"], "open": [True]}
-    tab.reload()
-    settle(tab)
-    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
-    tab.click("#sec-phases button[data-comments]")
-    settle(tab)
     tab.reload()
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
+    tab.click("#sec-phases button[data-comments]")
+    settle(tab)
+    tab.reload()
+    settle(tab)
+    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
 
 
 def test_one_dropdown_by_hand_is_remembered_and_flips_the_control_only_when_all_agree(tab):
     summaries = "#sec-phases details[data-key] > summary"
     tab.locator(summaries).nth(0).evaluate("(el) => el.click()")
     settle(tab)
-    assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [False, True, True]}
+    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
     tab.reload()
     settle(tab)
-    assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [False, True, True]}
+    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
     tab.locator(summaries).nth(1).evaluate("(el) => el.click()")
     tab.locator(summaries).nth(2).evaluate("(el) => el.click()")
     settle(tab)
-    assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
+    assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
     tab.reload()
     settle(tab)
-    assert comments(tab, "sec-phases")["labels"] == ["Show all comments"]
+    assert comments(tab, "sec-phases")["labels"] == ["Hide all comments"]
 
 
 def test_outline_control_label_flips_with_state_and_survives_a_reload(tab):
@@ -178,10 +219,10 @@ def test_page_renders_both_controls_when_storage_is_unavailable(browser):
     try:
         page.goto(URL)
         settle(page)
-        assert comments(page, "sec-phases")["labels"] == ["Hide all comments"]
+        assert comments(page, "sec-phases")["labels"] == ["Show all comments"]
         page.click("#sec-phases button[data-comments]")
         settle(page)
-        assert comments(page, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
+        assert comments(page, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
         assert outline(page)["labels"] == ["Collapse all"]
         assert errors == []
     finally:
