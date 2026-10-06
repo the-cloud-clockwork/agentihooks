@@ -13,7 +13,10 @@ NESTED_DEPTH = 8
 
 
 def _is_worktree(path: Path) -> bool:
-    return (path / ".git").is_file()
+    try:
+        return (path / ".git").read_bytes().startswith(b"gitdir:")
+    except OSError:
+        return False
 
 
 def nested_worktrees(top: Path, depth: int = NESTED_DEPTH) -> list[Path]:
