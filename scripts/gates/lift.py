@@ -9,6 +9,7 @@ from scripts.gates import log
 from scripts.gates.log import safe_name
 
 LIFT_SECONDS = 3600
+SERVER_GATES = frozenset({"talk"})
 LIFT_REASON = "the operator lifted it for one hour"
 SIGNAL = re.compile(r"\blift\s+(?:the\s+)?([a-z][a-z0-9-]*)\s+gate\b", re.IGNORECASE)
 
@@ -49,7 +50,7 @@ def post(slug):
 def arm_from_prompt(prompt, session_id, who, known, home=None, send=None):
     if not (who.pinned and session_id):
         return []
-    armed = sorted(requested(prompt) & set(known))
+    armed = sorted(requested(prompt) & (set(known) | SERVER_GATES))
     if not armed:
         return []
     for gate in armed:

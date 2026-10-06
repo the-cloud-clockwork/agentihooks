@@ -214,6 +214,17 @@ def test_the_cli_and_the_gate_share_the_refusal_prefix():
     assert ledger.TALK_REFUSED == talk.REFUSED
 
 
+def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_path):
+    from scripts.gates import lift
+    from scripts.gates.base import Who
+
+    posted = []
+    who = Who(name=ENG, swarm=SLUG, task="t1")
+    assert lift.arm_from_prompt("lift the talk gate", "sid", who, {"identity"}, tmp_path, posted.append) == ["talk"]
+    assert [op["gate"] for op in posted] == ["talk"]
+    assert lift.SERVER_GATES == {talk.NAME}
+
+
 @pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack"}], True), (None, False), ([], False)])
 def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     from scripts.swarm_ledger import ledger_server
