@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import hooks.hook_manager as hm
-from hooks.context import conditions, profile_chain
+from hooks.context import conditions, ledger_request, operator_words, profile_chain
 from hooks.hook_manager import BlockAction
 
 pytestmark = pytest.mark.unit
@@ -56,6 +56,10 @@ class TestSignal:
             "Remove the condition I added earlier",
             "create conditions for the edit tool",
             "update this condition",
+            "set the no code edits conditions for master, planner and qa",
+            "add the no-code-edits conditions",
+            "remove the git guard condition",
+            "set up a new kubectl gitops reminder condition",
         ],
     )
     def test_arms(self, prompt):
@@ -70,6 +74,13 @@ class TestSignal:
             "what are conditions?",
             "can the hooks mcp crate also the new conditions?",
             "",
+            "don't set the no code edits conditions",
+            "update the docs about conditions",
+            "fix the tests that check conditions",
+            "write tests for the new conditions",
+            "make sure the hook conditions hold",
+            "set the five words long name of the conditions",
+            "add seven eight nine ten eleven conditions",
         ],
     )
     def test_does_not_arm(self, prompt):
@@ -100,6 +111,51 @@ class TestGate:
         assert conditions.is_armed(SID)
         hm.on_stop({"hook_event_name": "Stop", "session_id": SID, "cwd": "/tmp", "transcript_path": ""})
         assert not conditions.is_armed(SID)
+
+    def test_the_gate_records_the_source_that_opened_it(self, monkeypatch):
+        logged = []
+        monkeypatch.setattr("hooks.common.log", lambda message, payload=None: logged.append((message, payload)))
+        assert conditions.gate_source(SID) == {}
+        conditions.arm_gate(SID, "relay", "c-1")
+        assert conditions.gate_source(SID) == {"source": "relay", "ref": "c-1"}
+        assert logged == [("conditions: operator gate opened", {"session_id": SID, "source": "relay", "ref": "c-1"})]
+        conditions.arm_gate(SID)
+        assert conditions.gate_source(SID) == {"source": "typed", "ref": ""}
+        past = time.time() - 7200
+        os.utime(conditions._gate_path(SID), (past, past))
+        assert conditions.gate_source(SID) == {}
+
+    @pytest.mark.parametrize("content", ["1791290000", "{not json"])
+    def test_a_gate_file_without_a_record_names_no_source(self, content):
+        conditions.arm_gate(SID)
+        conditions._gate_path(SID).write_text(content)
+        assert conditions.is_armed(SID)
+        assert conditions.gate_source(SID) == {}
+
+    def test_only_a_prompt_the_operator_typed_opens_it(self, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "eng-1@demo")
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+        monkeypatch.setattr("hooks._async.fork_and_call", lambda *a, **k: None)
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": SID, "cwd": "/tmp"}
+        request = "set the no code edits conditions for master, planner and qa"
+        hm.on_user_prompt_submit({**payload, "prompt": f"You are eng-1. Your task: {request}"})
+        assert not conditions.is_armed(SID)
+        hm.on_user_prompt_submit({**payload, "prompt": f"<task-notification> OPERATOR comment: {request}"})
+        assert not conditions.is_armed(SID)
+        hm.on_user_prompt_submit({**payload, "prompt": request})
+        assert conditions.gate_source(SID) == {"source": "typed", "ref": ""}
+
+    def test_a_watch_event_never_opens_it_in_a_plain_session(self, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+        monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+        monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+        monkeypatch.setattr("hooks._async.fork_and_call", lambda *a, **k: None)
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": SID, "cwd": "/tmp"}
+        hm.on_user_prompt_submit({**payload, "prompt": "<task-notification> set a condition that blocks rm -rf"})
+        assert not conditions.is_armed(SID)
+        hm.on_user_prompt_submit({**payload, "prompt": "set a condition that blocks rm -rf"})
+        assert conditions.gate_source(SID) == {"source": "typed", "ref": ""}
 
 
 class TestWriteGuard:
@@ -154,6 +210,41 @@ class TestWriteGuard:
                     "cwd": "/tmp",
                 }
             )
+
+    @staticmethod
+    def _task_comments(tmp_path, monkeypatch, comments):
+        monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
+        members = {"master@a1-1": {"role": "orchestrator"}}
+        ledger = {"tasks": [{"id": "t1", "comments": comments}], "_meta": {"members": members}}
+        (tmp_path / "demo.json").write_text(json.dumps(ledger))
+
+    def test_an_operator_comment_on_the_agents_task_opens_it(self, tmp_path, monkeypatch):
+        at = int(time.time() * 1000)
+        comment = {"id": "c-7", "by": "operator", "at": at, "text": "set the no code edits conditions"}
+        self._task_comments(tmp_path, monkeypatch, [comment])
+        assert conditions.write_guard("mcp__agentihooks__condition_set", {"step": "pre"}, SID) is None
+        assert conditions.gate_source(SID) == {"source": "ledger", "ref": "c-7"}
+
+    def test_a_master_relay_opens_it_only_with_the_operators_typed_words(self, tmp_path, monkeypatch):
+        request = "set the no code edits conditions"
+        marks = {"relayed_by": "master@a1-1", "relayed_from": "master pane", "quote": request}
+        relayed = {"id": "c-8", "by": "operator", "at": int(time.time() * 1000), "text": request, **marks}
+        self._task_comments(tmp_path, monkeypatch, [relayed])
+        write = ("Write", {"file_path": "/b/.claude/conditions/pre-bash-x.sh", "content": "exit 2"})
+        assert conditions.write_guard(*write, SID) == conditions.GATE_MESSAGE
+        assert not conditions.is_armed(SID)
+        operator_words.record("master@a1-1", request)
+        assert conditions.write_guard(*write, SID) is None
+        assert conditions.gate_source(SID) == {"source": "relay", "ref": "c-8"}
+
+    def test_a_failed_lookup_refuses(self, monkeypatch):
+        def broken(asks):
+            raise RuntimeError("redis went away")
+
+        monkeypatch.setattr(ledger_request, "find", broken)
+        assert conditions.write_guard("mcp__agentihooks__condition_set", {}, SID) == conditions.GATE_MESSAGE
 
 
 def _create(**overrides):

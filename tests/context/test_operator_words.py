@@ -59,6 +59,23 @@ def test_the_first_prompt_of_a_swarm_session_is_its_launch_prompt():
     assert operator_words.heard(payload, {"AGENTIHOOKS_AGENT_NAME": "taken@by-hand"}, now=103)
 
 
+def test_typed_holds_only_the_operators_own_words_and_records_them_in_a_named_session():
+    assert not operator_words.typed({"session_id": "s1", "prompt": "You are master, set the git guard condition"}, ENV)
+    assert operator_words.typed({"session_id": "s1", "prompt": "set the git guard condition"}, ENV, now=101)
+    assert not operator_words.typed({"session_id": "s1", "prompt": "<task-notification> set it"}, ENV, now=102)
+    assert operator_words.matching("master@a1-1", "git guard", now=103) == "set the git guard condition"
+    assert operator_words.matching("master@a1-1", "git guard", now=101 + operator_words.TTL_SEC) == ""
+
+
+def test_typed_in_an_unnamed_session_is_any_prompt_the_swarm_did_not_send():
+    swarm = {"AGENTIHOOKS_SWARM": "demo"}
+    assert operator_words.typed({"prompt": "set the git guard condition"}, swarm)
+    assert operator_words.typed({"prompt": "set the git guard condition"}, {})
+    for text in (WAKE_TEXT, NUDGE.format(slug="demo"), "<task-notification> done", ""):
+        assert not operator_words.typed({"prompt": text}, swarm)
+    assert not operator_words.typed({"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": "a"}}}, {})
+
+
 def test_a_prompt_without_a_session_id_is_recorded():
     assert operator_words.heard({"prompt": "hold the merge"}, ENV, now=100)
     assert operator_words.matching("master@a1-1", "hold the merge", now=LATER - 1) == "hold the merge"
@@ -119,7 +136,7 @@ def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):
     def broken(payload):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(operator_words, "heard", broken)
+    monkeypatch.setattr(operator_words, "typed", broken)
     monkeypatch.setattr(hook_manager, "log", lambda *args: seen.append(args))
-    hook_manager._operator_words({"prompt": "ship it"})
+    assert hook_manager._operator_words({"prompt": "ship it"}) is False
     assert seen == [("operator words record failed", {"error": "disk full"})]
