@@ -280,6 +280,27 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 502)
         run.assert_not_called()
 
+    def test_quota_refresh_probes_every_account_and_answers_fresh_status(self):
+        from scripts import agents_quota
+
+        agents_quota._last_refresh.clear()
+        agents_quota._page_cache.update(at=0.0, quota={"rows": []})
+        code, text, run = self.control({"action": "quota_refresh"})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(text), STATUS)
+        self.assertEqual(run.call_args_list[0].args[0][1:], ["quota", "--refresh", "--json"])
+        self.assertEqual(agents_quota._page_cache, {})
+        code, _, again = self.control({"action": "quota_refresh"})
+        self.assertEqual(code, 200)
+        again.assert_not_called()
+
+    def test_a_failed_quota_probe_is_502_with_its_message(self):
+        from scripts import agents_quota
+
+        agents_quota._last_refresh.clear()
+        code, text, _ = self.control({"action": "quota_refresh"}, completed(1, err="no Claude account"))
+        self.assertEqual((code, text), (502, "no Claude account"))
+
     def test_control_needs_the_ledger_token(self):
         with patch.object(server.subprocess, "run") as run:
             code, _ = self.put({"action": "start"}, token=False)

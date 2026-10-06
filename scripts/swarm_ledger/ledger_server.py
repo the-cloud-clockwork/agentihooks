@@ -361,6 +361,7 @@ DOCTOR = {"doctor_start": ["start"], "doctor_stop": ["stop"]}
 DOCTOR_PHRASE = "rig doctor stop"
 MAX_CAP = 50
 MIN_COMPACT, MAX_COMPACT = 100, 1000
+QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
@@ -485,6 +486,29 @@ def swarm_control(slug, argv, command="swarm"):
         return None, (done.stderr or done.stdout).strip() or "swarm command failed"
     status = swarm_status(slug)
     return status, "" if status else "swarm status unreadable after the command"
+
+
+def probe_quota():
+    exe = shutil.which("agentihooks")
+    if not exe:
+        return "agentihooks is not on PATH"
+    try:
+        done = subprocess.run(
+            [exe, "quota", "--refresh", "--json"], capture_output=True, text=True, timeout=QUOTA_PROBE_TIMEOUT_S
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)
+    return "" if done.returncode == 0 else (done.stderr or done.stdout).strip() or "quota probe failed"
+
+
+def refresh_quota(slug):
+    from scripts import agents_quota
+
+    error = agents_quota.refresh_page_quota(probe_quota)
+    if error:
+        return None, error
+    status = swarm_status(slug)
+    return status, "" if status else "swarm status unreadable after the quota probe"
 
 
 def relay_to_inbox(slug, state):
@@ -632,10 +656,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("body size out of range")
             body = core.loads(self.rfile.read(length) or b"{}")
             action = body.get("action") if isinstance(body, dict) else None
-            command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
+            if action == "quota_refresh":
+                control = functools.partial(refresh_quota, slug)
+            else:
+                command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
+                control = functools.partial(swarm_control, slug, argv, command)
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
-        status, error = swarm_control(slug, argv, command)
+        status, error = control()
         if error:
             return self.send(502, error, "text/plain")
         return self.send(200, json.dumps(status), "application/json")

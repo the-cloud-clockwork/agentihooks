@@ -362,7 +362,7 @@ live probe with `--refresh`) and one for Codex, read from the newest rate-limit
 event in Codex's session logs.
 
 ```bash
-agentihooks quota            # AGENT ACCOUNT STATE SESSIONS 5H LEFT 7D LEFT 7D RESET SOURCE
+agentihooks quota            # AGENT ACCOUNT STATE SESSIONS 5H LEFT 5H RESET 7D LEFT 7D RESET SOURCE
 agentihooks quota --json
 ```
 

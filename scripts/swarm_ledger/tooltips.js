@@ -24,6 +24,7 @@
     ['[data-autonomy="delegate"]', "Delegate autonomy. The master approves or sends back phase plans; you decide after three send backs."],
     ['[data-autonomy="full"]', "Full autonomy. The master approves phase plans and turns agents' follow ups into tasks without asking you."],
     ["#layout-reset", "Restore the default panel sizes on every ledger."],
+    ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-gate-mode="enforce"]', "Enforce this gate. A call it catches is refused, and the refusal is logged."],
     ['[data-gate-mode="observe"]', "Observe this gate. A call it catches goes through, and the refusal it would have made is only logged."],
     ['[data-gate-mode="off"]', "Turn this gate off. It checks nothing and logs nothing."],
