@@ -320,9 +320,21 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
     assert ledger.rows["t1"]["claimed_by"] == ""
+    assert "task t1 had no agent, reopened" in actions
+
+
+def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused")
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", started_at=1_000))
+    runtime.live.add("engineer@a1b2c3-0009")
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
+    assert "task t1 had no agent, reopened" not in actions
 
 
 def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
