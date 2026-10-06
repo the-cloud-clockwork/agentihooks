@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from hooks.classifier.child import skip_classifier_child
 from hooks.observability import otel
 
 # Add parent directory to path for direct execution
@@ -2412,6 +2413,7 @@ EVENT_HANDLERS = {
 }
 
 
+@skip_classifier_child
 def main() -> None:
     """Main entry point - routes events to handlers.
 

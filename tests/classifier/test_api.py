@@ -151,7 +151,7 @@ def test_estimated_tokens_is_four_characters_per_token():
         (http_error(401), "pplx-decider-v1-27b: HTTP 401, key refused"),
         (http_error(503), "pplx-decider-v1-27b: HTTP 503"),
         (http_error(400, "context window exceeded"), "pplx-decider-v1-27b: HTTP 400, input too long"),
-        (urllib.error.URLError("refused"), "pplx-decider-v1-27b: unreachable (URLError)"),
+        (urllib.error.URLError("refused"), "pplx-decider-v1-27b: connection error"),
     ],
 )
 def test_failure_messages_name_the_model_and_the_cause(monkeypatch, outcome, message):
@@ -167,7 +167,7 @@ def test_non_json_message_names_the_model(monkeypatch):
     backend, _ = _backend(monkeypatch, Response(b"<html>"))
     with pytest.raises(BackendFailure) as err:
         backend.decide(DecisionRequest("s", QUESTIONS))
-    assert str(err.value) == "pplx-decider-v1-27b: response is not JSON"
+    assert str(err.value) == "pplx-decider-v1-27b: parse error, response is not JSON"
 
 
 def test_missing_answer_message_names_the_model(monkeypatch):
@@ -176,7 +176,7 @@ def test_missing_answer_message_names_the_model(monkeypatch):
     backend, _ = _backend(monkeypatch, ok(body))
     with pytest.raises(BackendFailure) as err:
         backend.decide(DecisionRequest("s", QUESTIONS))
-    assert str(err.value) == "pplx-decider-v1-27b: no answer for trivial"
+    assert str(err.value) == "pplx-decider-v1-27b: parse error, no answer for trivial"
 
 
 def test_caller_bug_carries_only_the_error_message(monkeypatch):

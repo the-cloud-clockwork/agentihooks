@@ -67,5 +67,5 @@ def parse_answers(payload: dict, questions: dict, source: str) -> dict:
     raw = payload.get("answers") or {}
     missing = [name for name in questions if name not in raw]
     if missing:
-        raise BackendFailure(f"{source}: no answer for {', '.join(missing)}")
+        raise BackendFailure(f"{source}: parse error, no answer for {', '.join(missing)}")
     return {name: Answer.from_wire(raw[name]) for name in questions}
