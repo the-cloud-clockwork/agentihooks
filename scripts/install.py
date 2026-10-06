@@ -130,10 +130,10 @@ def _is_source_checkout() -> bool:
 def install_root() -> Path:
     try:
         raw = metadata.distribution("agentihooks").read_text("direct_url.json")
-    except metadata.PackageNotFoundError:
+        url = json.loads(raw) if raw else {}
+    except (metadata.PackageNotFoundError, ValueError):
         return AGENTIHOOKS_ROOT
-    url = json.loads(raw) if raw else {}
-    if url.get("dir_info", {}).get("editable") and url.get("url", "").startswith("file:"):
+    if url.get("dir_info", {}).get("editable") and url["url"].startswith("file:"):
         return Path(url2pathname(urlparse(url["url"]).path))
     return AGENTIHOOKS_ROOT
 

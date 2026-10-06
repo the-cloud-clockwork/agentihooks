@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -936,7 +937,7 @@ def worktree_run(world, tmp_path, monkeypatch):
 def test_render_from_a_worktree_leaves_the_live_home_untouched(world, worktree_run, monkeypatch, capsys):
     from scripts.profiles import render
 
-    monkeypatch.setattr(render, "live_root", lambda: Path.home() / ".agentihooks" / "profiles")
+    monkeypatch.setattr(render.pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(Path.home())))
     settings = _write(render.rendered_root() / "rb-role" / "claude" / "settings.json", '{"live": true}\n')
     before = _tree_hashes(render.rendered_root(), Path("/none"))
 
@@ -960,21 +961,41 @@ def test_render_takes_the_hook_root_from_the_installed_agentihooks(world, worktr
 
 
 def test_install_root_is_the_editable_source(world, tmp_path, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
     install = world["install"]
     source = tmp_path / "agentihooks src"
-    editable = {"url": source.as_uri(), "dir_info": {"editable": True}}
+    records = [
+        ({"url": source.as_uri(), "dir_info": {"editable": True}}, source),
+        ({"url": "https://x", "archive_info": {}}, install.AGENTIHOOKS_ROOT),
+        ({"url": source.as_uri(), "dir_info": {}}, install.AGENTIHOOKS_ROOT),
+        ("{not json", install.AGENTIHOOKS_ROOT),
+        (None, install.AGENTIHOOKS_ROOT),
+    ]
 
     class Dist:
-        def __init__(self, url):
-            self.url = url
+        def __init__(self, record):
+            self.record = record
 
         def read_text(self, name):
-            return json.dumps(self.url) if name == "direct_url.json" and self.url else None
+            if name != "direct_url.json" or self.record is None:
+                return None
+            return self.record if isinstance(self.record, str) else json.dumps(self.record)
 
-    for url, root in (
-        (editable, source),
-        ({"url": "https://x"}, install.AGENTIHOOKS_ROOT),
-        (None, install.AGENTIHOOKS_ROOT),
-    ):
-        monkeypatch.setattr(install.metadata, "distribution", lambda _name, url=url: Dist(url))
+    def distribution(record):
+        def find(name):
+            if name != "agentihooks":
+                raise PackageNotFoundError(name)
+            return Dist(record)
+
+        return find
+
+    for record, root in records:
+        monkeypatch.setattr(install.metadata, "distribution", distribution(record))
         assert install.install_root() == root
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(install.metadata, "distribution", missing)
+    assert install.install_root() == install.AGENTIHOOKS_ROOT
