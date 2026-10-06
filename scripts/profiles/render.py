@@ -14,7 +14,7 @@ from scripts.targets._common import _atomic_write, _install_module, agents_skill
 from scripts.targets.claude_target import enabled_plugins, settings_document
 from scripts.targets.codex_target import codex_home
 
-SHARED = ("projects", "sessions", "todos", "plans", "plugins", ".credentials.json")
+SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
 CODEX_KEYS = ("model", "model_reasoning_effort", "sandbox_mode", "approval_policy")
 STAMP = ".agentihooks-render.json"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
@@ -204,6 +204,11 @@ def render_claude(name: str, force: bool = False) -> Path | None:
             link.unlink()
         if not link.exists():
             link.symlink_to(shared / item)
+    # Claude Code refuses plan file writes that resolve through a symlink.
+    plans = out / "plans"
+    if plans.is_symlink():
+        plans.unlink()
+    plans.mkdir(exist_ok=True)
     _i.save_json(out / STAMP, current)
     return out
 

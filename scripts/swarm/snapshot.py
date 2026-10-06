@@ -22,7 +22,10 @@ MINUTES = 30
 
 
 def path(slug):
-    return Path.home() / ".agentihooks" / "swarm" / slug / "snapshot.json"
+    root = Path.home() / ".agentihooks" / "swarm"
+    if (root / slug).resolve().parent != root.resolve():
+        raise SwarmError(f"refusing snapshot path for swarm {slug!r}: not one folder under {root}")
+    return root / slug / "snapshot.json"
 
 
 def auto_dir(slug):

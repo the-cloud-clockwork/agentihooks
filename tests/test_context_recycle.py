@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(recycle, "AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr(recycle, "COMPACT_LIMIT", 600)
+    monkeypatch.setattr(recycle, "HANDOFF_MARGIN", 50)
     monkeypatch.setattr(recycle, "used_tokens", lambda session_id: None)
     monkeypatch.setattr(recycle, "codex_context", lambda session_id: None)
 
@@ -24,8 +25,8 @@ def test_default_limit_is_600_thousand():
     assert config.COMPACT_LIMIT == 600
 
 
-def test_claude_agent_at_the_limit_gets_the_handoff_directive(monkeypatch):
-    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 600_000)
+def test_claude_agent_at_the_hard_gate_gets_the_handoff_directive(monkeypatch):
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 650_000)
     text = recycle.directive("s1", _swarm_env("my-swarm-ci-2"))
     assert "agentihooks swarm my-swarm handoff" in text and "handoff document" in text
     assert "--recap" in text and "agentihooks swarm my-swarm learned" in text
@@ -37,7 +38,7 @@ def test_codex_agent_over_the_limit_gets_the_directive(monkeypatch):
 
 
 def test_below_the_preparation_window_nothing(monkeypatch):
-    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 479_999)
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 599_999)
     assert recycle.directive("s1", _swarm_env()) is None
 
 
@@ -59,7 +60,7 @@ def test_directive_is_given_once_per_session(monkeypatch):
 
 
 def test_the_swarm_master_gets_the_directive_too(monkeypatch):
-    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 600_000)
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 650_000)
     assert "agentihooks swarm my-swarm handoff" in recycle.directive("s1", _swarm_env("my-swarm-master-3"))
 
 
@@ -71,10 +72,10 @@ def _gate(tool_name, tool_input, env=None):
     return recycle.gate(tool_name, tool_input, "s1", _swarm_env("my-swarm-eng-4") if env is None else env)
 
 
-def test_recycle_check_returns_the_slug_only_at_or_over_the_limit(monkeypatch):
-    _over(monkeypatch, 600_000)
+def test_recycle_check_returns_the_slug_only_at_or_over_the_hard_gate(monkeypatch):
+    _over(monkeypatch, 650_000)
     assert recycle.over_limit("s1", _swarm_env("my-swarm-master-1")) == "my-swarm"
-    _over(monkeypatch, 599_999)
+    _over(monkeypatch, 649_999)
     assert recycle.over_limit("s1", _swarm_env("my-swarm-master-1")) is None
 
 
@@ -130,8 +131,8 @@ def test_a_write_that_escapes_the_scratchpad_is_denied(monkeypatch):
     assert _gate("Write", {"file_path": "~/scratchpad/../dev/repo/a.py", "content": "x"})
 
 
-def test_under_the_limit_everything_is_allowed(monkeypatch):
-    _over(monkeypatch, 599_999)
+def test_under_the_hard_gate_everything_is_allowed(monkeypatch):
+    _over(monkeypatch, 649_999)
     assert _gate("Bash", {"command": "git commit -m x"}) is None
     assert _gate("Edit", {"file_path": "/repo/a.py"}) is None
 

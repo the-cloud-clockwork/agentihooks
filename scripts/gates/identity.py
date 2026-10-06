@@ -67,7 +67,7 @@ def simple_commands(text):
     return [words for words in commands if words]
 
 
-def _program_index(words):
+def program_index(words):
     for index, word in enumerate(words):
         if (
             ANY_ASSIGNMENT.match(word)
@@ -82,7 +82,7 @@ def _program_index(words):
 
 
 def _pinned_args(words):
-    index = _program_index(words)
+    index = program_index(words)
     if index is None or PurePosixPath(words[index]).name != "agentihooks":
         return None
     rest = words[index + 1 :]
