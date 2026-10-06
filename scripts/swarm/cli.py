@@ -43,7 +43,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, intent, modes, progress
+from scripts.gates import Who, catalog, intent, modes, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -93,8 +93,8 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
-GATE_KEYS = {"talk-gate": "talk", "intent-gate": intent.NAME}
-GATE_MODES = ("enforce", "observe", "off")
+GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
+GATE_MODES = modes.MODES
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -608,7 +608,7 @@ def cmd_trace_plan(store, args):
     state = trace_plan.intent(ledger.state(args.slug), agent.task)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
-    mode = modes.mode(trace_plan.GATE, os.environ)
+    mode = modes.mode(trace_plan.GATE, os.environ, store.config(args.slug).gates)
     try:
         record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:

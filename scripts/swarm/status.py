@@ -6,8 +6,8 @@ import time
 from datetime import date, datetime
 
 from scripts.agents_quota import page_quota
+from scripts.gates import catalog, progress
 from scripts.gates import log as gate_log
-from scripts.gates import progress
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
@@ -158,4 +158,5 @@ def status_report(store, slug, state):
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
         "gates": gate_log.recent(slug),
+        "gate_modes": catalog.current(config.gates),
     }

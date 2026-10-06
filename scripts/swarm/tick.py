@@ -345,7 +345,7 @@ def _lives_spent(slug, store, ledger, rows, task):
 
 
 def _claim_cap(slug, store, ledger, rows, task):
-    lives, mode = store.claims(slug, task["id"]), modes.mode(claim_cap.GATE, os.environ)
+    lives, mode = store.claims(slug, task["id"]), modes.mode(claim_cap.GATE, os.environ, store.config(slug).gates)
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
