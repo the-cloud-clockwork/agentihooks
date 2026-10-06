@@ -2,8 +2,10 @@ import copy
 import json
 import re
 
-import install
+import pytest
 
+import install as fixture_install
+from scripts import install
 from scripts.targets.claude_target import settings_document
 
 TOKEN = "ghp_" + "d" * 36
@@ -15,6 +17,14 @@ def test_profile_env_folds_under_explicit_env():
 
     assert settings_document(rendered) == {"env": {"A": "profile", "B": "explicit"}, "model": "opus"}
     assert rendered == original
+
+
+@pytest.fixture(autouse=True)
+def isolate_canonical_installer(_isolate_real_user_paths, monkeypatch):
+    for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC", "AGENTIHOOKS_ROOT"):
+        monkeypatch.setattr(install, name, getattr(fixture_install, name))
+    assert install.CLAUDE_HOME == fixture_install.CLAUDE_HOME
+    assert install.STATE_JSON == fixture_install.STATE_JSON
 
 
 def test_profile_env_without_explicit_env():
