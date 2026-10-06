@@ -121,6 +121,51 @@ def test_claude_render_tree(world, capsys):
     assert persona.endswith(f"\n\n{render.FOOTER}\n")
 
 
+def test_claude_render_rules_stay_inside_profile_home(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+
+    rules = list((out / "rules").iterdir())
+    assert rules
+    assert all(path.resolve().is_relative_to(out) for path in rules)
+    assert (out / "rules" / "bundle-rule.md").read_text() == "BUNDLE RULE MARKER\n"
+    assert (out / "rules" / "role-rule.md").read_text() == "ROLE RULE MARKER\n"
+
+
+def test_claude_render_upgrades_cached_external_rules(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    rule = out / "rules" / "role-rule.md"
+    rule.unlink()
+    rule.symlink_to(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "rules" / "role-rule.md")
+    (out / render.STAMP).write_text(json.dumps(render.stamp("rb-role")))
+
+    assert render.render_claude("rb-role") == out
+    assert rule.resolve().is_relative_to(out)
+    assert rule.read_text() == "ROLE RULE MARKER\n"
+    assert render.render_claude("rb-role") is None
+
+
+def test_claude_render_refreshes_copied_rules(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    rules = out / "rules"
+    _write(rules / "stale.md", "STALE RULE\n")
+    (rules / "broken.md").symlink_to(out / "missing.md")
+    (rules / "local-folder").mkdir()
+    source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
+    _write(source, "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n")
+
+    assert render.render_claude("rb-role", force=True) == out
+    assert not (rules / "stale.md").exists()
+    assert not (rules / "broken.md").is_symlink()
+    assert (rules / "local-folder").is_dir()
+    assert (rules / "bundle-rule.md").read_text() == "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n"
+
+
 def test_claude_render_settings(world):
     from scripts.profiles import render
 
