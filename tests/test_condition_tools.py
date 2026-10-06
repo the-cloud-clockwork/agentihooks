@@ -307,7 +307,10 @@ class TestLiveFolders:
         [
             ("Write", lambda c: {"file_path": f"{c['worktree']}/.claude/conditions/pre-bash-x.sh"}, None),
             ("Edit", lambda c: {"file_path": f"{c['worktree']}/profiles/a/.claude/conditions/pre-any-x.py"}, None),
-            ("Bash", lambda c: {"command": f"cp /tmp/x {c['worktree']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Bash", lambda c: {"command": f"cp /tmp/x {c['worktree']}/.claude/conditions/pre-bash-x.sh"}, "primary"),
+            ("Bash", lambda c: {"command": f"{c['worktree']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Edit", lambda c: {"file_path": ".claude/conditions/pre-any-x.py"}, "worktree"),
+            ("Bash", lambda c: {"command": "cd profiles && touch a/.claude/conditions/pre-a-b.sh"}, "worktree"),
             ("Bash", lambda c: {"command": "cat > .claude/conditions/pre-bash-x.sh <<'EOF'\nexit 0\nEOF"}, "worktree"),
             ("Bash", lambda c: {"command": "python3 -c \"open('.claude/conditions/pre-a-b.sh','w')\""}, "worktree"),
             (
@@ -334,6 +337,12 @@ class TestLiveFolders:
             ("Edit", lambda c: {"file_path": ".claude/conditions/pre-bash-x.sh"}, "primary"),
             ("Bash", lambda c: {"command": "touch .claude/conditions/pre-bash-x.sh"}, "primary"),
             ("Bash", lambda c: {"command": "touch .claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"content": "x", "target": f"{c['worktree']}/.claude/conditions/a.sh"}, "worktree"),
+            (
+                "Bash",
+                lambda c: {"command": f"cp {c['bundle']}/.claude/conditions/x {c['worktree']}/.claude/conditions/"},
+                "worktree",
+            ),
             ("Bash", lambda c: {"command": f"cp {c['worktree']}/.claude/conditions/x $D/.claude/conditions/"}, None),
             (
                 "Bash",
@@ -368,6 +377,7 @@ class TestLiveFolders:
             lambda c: f"grep -n exit {conditions.runtime_dir()}/pre-any-x.sh >> {c['tmp']}/proof.md",
             lambda c: f"cat {c['bundle']}/.claude/conditions/pre-bash-x.sh > {c['tmp']}/notes.txt 2>&1",
             lambda c: f"ls {c['bundle']}/.claude/conditions | head >> ~/scratchpad/proof.md",
+            lambda c: f"cat {c['bundle']}/.claude/conditions/pre-bash-x.sh > notes.txt",
             lambda c: f"echo checked .claude/conditions >> {c['worktree']}/.claude/conditions/notes.md",
         ],
     )
@@ -409,9 +419,31 @@ class TestLiveFolders:
         assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
 
     def test_a_detached_head_is_live(self, checkouts):
+        primary = checkouts["primary"]
+        _git(primary, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         _git(checkouts["worktree"], "checkout", "-q", "--detach")
         write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
         assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_a_branch_lookup_that_times_out_is_live(self, checkouts, monkeypatch):
+        real_run = subprocess.run
+
+        def slow_head(argv, **kwargs):
+            if argv[-1] == "HEAD":
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            return real_run(argv, **kwargs)
+
+        monkeypatch.setattr(conditions.subprocess, "run", slow_head)
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_a_chained_profile_folder_not_created_yet_is_live(self, checkouts):
+        _state(checkouts["bundle"], "alpha,gamma")
+        write = {"file_path": f"{checkouts['bundle']}/profiles/gamma/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+        write = {"file_path": f"{checkouts['bundle']}/profiles/delta/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) is None
 
     def test_without_git_every_conditions_path_is_live(self, checkouts, monkeypatch):
         def missing(*args, **kwargs):
