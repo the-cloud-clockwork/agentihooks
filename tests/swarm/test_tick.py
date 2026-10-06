@@ -306,6 +306,59 @@ def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ]
 
 
+@pytest.mark.parametrize("closed_mid_tick", [True, False])
+def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    from scripts.inbox.store import InboxStore
+
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
+    runtime.live.discard("engineer@a1b2c3-0001")
+    if closed_mid_tick:
+        ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    moved = inbox.get(item.id)
+    if closed_mid_tick:
+        assert ledger.rows["t1"]["state"] == "done"
+        assert (moved.address, moved.state) == ("engineer@a1b2c3-0001", "cancelled")
+        assert inbox.history(item.id)[-1]["reason"] == "cancelled: engineer@a1b2c3-0001 stopped before closing it"
+        assert inbox.inbox("eng-1@sw") == []
+        assert actions == ["lost engineer@a1b2c3-0001"]
+    else:
+        assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+        assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+        assert actions == ["lost engineer@a1b2c3-0001, task t1 reopened"]
+
+
+@pytest.mark.parametrize("closed_mid_tick", [True, False])
+def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("master@a1b2c3-0001", "engineer@a1b2c3-0001", "your pull request has a red check")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS - 1, start=2_000)
+    if closed_mid_tick:
+        ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
+    moved = inbox.get(item.id)
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    if closed_mid_tick:
+        assert ledger.rows["t1"]["state"] == "done"
+        assert (moved.address, moved.state) == ("engineer@a1b2c3-0001", "cancelled")
+        assert actions == ["stalled engineer@a1b2c3-0001"]
+    else:
+        assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+        assert (moved.address, moved.state) == ("eng-1@sw", "pending")
+        assert actions == ["stalled engineer@a1b2c3-0001, task t1 reopened"]
+
+
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
     for _ in range(3):

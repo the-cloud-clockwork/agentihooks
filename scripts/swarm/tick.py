@@ -136,9 +136,8 @@ def _woken(slug, config, store, ledger):
 def _drop(slug, store, ledger, rows, agent):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    reopen = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    if reopen:
-        _reopen(slug, ledger, rows, agent.task)
+    held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    reopen = held and _reopen(slug, ledger, rows, agent.task)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
 
