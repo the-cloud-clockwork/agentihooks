@@ -54,7 +54,7 @@ class FakeRuntime:
         self.live, self.spawned, self.killed, self.closed, self.nudged = set(), [], [], [], []
         self.tasks, self.masters, self.spawns_seen, self.harness = [], [], [], "claude"
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
-        self.conversation_ids, self.named, self.closed_spaces = {}, [], []
+        self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
 
     def has_capacity(self):
         return not self.full
@@ -96,7 +96,7 @@ class FakeRuntime:
     def observe(self, agent):
         from scripts.swarm.pane import PaneObservation
 
-        return PaneObservation(self.status(agent))
+        return PaneObservation(self.status(agent), typed=self.typed.get(agent.name, ""))
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
@@ -349,6 +349,48 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
         if n + 1 == IDLE_NUDGE_TICKS:
             assert runtime.nudged == ["engineer@a1b2c3-0001"]
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
+
+
+def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    runtime.typed["engineer@a1b2c3-0001"] = "wait, before you"
+    for n in range(IDLE_NUDGE_TICKS + 2):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
+    assert runtime.nudged == [] and workers(store)[0].idle_ticks == 0
+    runtime.typed.clear()
+    for n in range(IDLE_NUDGE_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=3_000 + n)
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+
+
+def test_the_nudge_is_skipped_inside_the_quiet_window_after_an_operator_prompt(store):
+    from scripts.inbox import wake
+    from scripts.swarm import idle
+    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle.prompted(store.redis, "sw", "engineer@a1b2c3-0001", 2_000)
+    quiet = wake.DEFAULT_QUIET_S * 1000
+    for n in range(IDLE_NUDGE_TICKS + 2):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet - 10 + n)
+    assert runtime.nudged == []
+    for n in range(IDLE_NUDGE_TICKS):
+        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet + n)
+    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+
+
+def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal():
+    from scripts.swarm.tick import NUDGE
+
+    assert "agentihooks msg reply" in NUDGE and "never as text in this terminal" in NUDGE
 
 
 def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store):

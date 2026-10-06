@@ -20,7 +20,11 @@ QUIET_ENV = "AGENTIHOOKS_INBOX_QUIET_S"
 DEFAULT_QUIET_S = 180
 IN_USE = "in use"
 BY = "swarm"
-WAKE_TEXT = "You have unread inbox messages: run agentihooks msg inbox, then read and close each one."
+WAKE_TEXT = (
+    "You have unread inbox messages: run agentihooks msg inbox, then read each one and answer it with agentihooks "
+    "msg reply or the swarm commands, never as text in this terminal, and close the rest."
+)
+WATCHED = ("claude",)
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
 
 
@@ -30,6 +34,11 @@ def window_ms(environ):
 
 def quiet_ms(environ):
     return int(environ.get(QUIET_ENV) or DEFAULT_QUIET_S) * 1000
+
+
+def typed_wake(agent):
+    """Only a worker pane whose harness has no inbox channel is typed into; the master pane is the operator's."""
+    return bool(agent.pane_id) and agent.lane != MASTER and agent.harness not in WATCHED
 
 
 def decide(item, pane, history, now_ms, window):
@@ -51,7 +60,7 @@ def decide(item, pane, history, now_ms, window):
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     names = {a.name for a in agents}
-    panes = {a.name: a for a in agents if a.pane_id}
+    panes = {a.name: a for a in agents if typed_wake(a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
@@ -96,7 +105,7 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     channel, and escalation stays with the tick's wake pass."""
     actions = []
     for agent in agents:
-        if agent.harness != "codex" or not agent.pane_id:
+        if agent.harness != "codex" or not typed_wake(agent):
             continue
         mail = inbox.pending_mail(agent.name)
         if not mail:
