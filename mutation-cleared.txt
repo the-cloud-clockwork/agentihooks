@@ -590,5 +590,25 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_42:56ac4f73cbc1ec13a84f7ccf890447b82ed22904850f8505327ba7519015b6a8": {
     "reader": "Standards",
     "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__git_out__mutmut_17:7e83af62eb5a9556bbfc625512b67cce33a0a983daf72c5be3a31b0cf2f14941": {
+    "reader": "Standards",
+    "reason": "The timeout bounds only a hung git; a timeout of four seconds takes the same path as three, and the TimeoutExpired path is tested."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__read_only_shell__mutmut_6:34f007662439ddc94e96969768aeb55d806d4123526217d22f8a7d36ba4a2f3d": {
+    "reader": "Standards",
+    "reason": "The stripped text is used only for the redirect count and targets; the replacement holds no redirect sign and is never a target, and heads come from the raw command."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_11:8ae8489f0af9364207071bfabe5a22a308624d7d8ea659719e87617ed7c0402d": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_13:9c8cd87ccec233a4d42979c4a21eca3f276bb47d2648d9aa1c952bced3d41132": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_16:f4539d9897457d7a59f3b0adf7bfbf1155ad5f54a96da0c00fbb27a5d8ddb3e9": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
   }
 }
