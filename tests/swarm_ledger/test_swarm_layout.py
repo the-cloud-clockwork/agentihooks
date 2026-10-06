@@ -245,14 +245,53 @@ def test_agents_table_lists_the_master_first_and_tasks_block_counts(open_page):
 
 
 @pytest.mark.parametrize("width", [1440, 390])
-def test_agents_table_fits_its_column_with_full_length_agent_names(open_page, width):
+def test_full_length_agent_names_stay_on_one_line_and_fit_the_desktop_column(open_page, width):
     payload = status()
     for agent, name in zip(payload["agents"], ["master@323133-0004", "engineer@323133-0072"]):
         agent["name"] = name
+        agent["profile"] = "engineer"
     page = open_page(payload, width)
-    fit = page.tab.eval_on_selector("#agents-box .sw-scroll", "el => [el.scrollWidth, el.clientWidth]")
-    assert fit[0] <= fit[1], fit
+    if width == 1440:
+        fit = page.tab.eval_on_selector("#agents-box .sw-scroll", "el => [el.scrollWidth, el.clientWidth]")
+        assert fit[0] <= fit[1], fit
+    lines = page.tab.eval_on_selector_all(
+        "#swarm-agents td",
+        """tds => tds.filter(td => td.innerText.trim()).map(td => {
+          const tops = new Set(), walk = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            const r = document.createRange();
+            r.selectNodeContents(n);
+            for (const box of r.getClientRects()) tops.add(Math.round(box.top));
+          }
+          return [td.innerText, tops.size];
+        })""",
+    )
+    assert lines and all(count == 1 for _text, count in lines if "\n" not in _text), lines
     assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+    titles = page.tab.eval_on_selector_all("#swarm-agents td:first-child .sw-id", "ids => ids.map(e => e.title)")
+    assert titles == ["master@323133-0004", "engineer@323133-0072"]
+
+
+def test_every_button_is_flat_at_rest(open_page):
+    page = open_page()
+    page.tab.mouse.move(1439, 2399)
+    rest = page.tab.evaluate(
+        """() => [...document.querySelectorAll("button:not([aria-selected=true])")].filter(b => b.getClientRects().length).map(b => {
+          const s = getComputedStyle(b);
+          return [b.className || b.id, s.backgroundColor, s.backgroundImage, s.boxShadow, s.backdropFilter,
+            ["Top", "Right", "Bottom", "Left"].every(side => s[`border${side}Width`] === "0px" || s[`border${side}Color`] === "rgba(0, 0, 0, 0)")];
+        })"""
+    )
+    assert len(rest) > 20
+    for name, color, image, shadow, glass, frameless in rest:
+        assert (color, image, shadow, glass, frameless) == ("rgba(0, 0, 0, 0)", "none", "none", "none", True), (
+            name,
+            color,
+            image,
+            shadow,
+            glass,
+            frameless,
+        )
 
 
 def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(open_page):
