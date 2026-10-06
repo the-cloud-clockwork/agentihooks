@@ -25,7 +25,7 @@ def heard(prompt, environ=None, redis=None, now_ms=None):
     from scripts.swarm.tick import NUDGE
 
     env = os.environ if environ is None else environ
-    slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
+    slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
     if not (slug and name) or prompt.strip() in (WAKE_TEXT, NUDGE.format(slug=slug)):
         return False
     if redis is None:

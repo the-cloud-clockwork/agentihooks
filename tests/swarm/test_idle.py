@@ -68,4 +68,17 @@ def test_the_hook_records_operator_prompts_but_not_the_ones_the_swarm_types(redi
     assert idle.last_prompt(redis, "sw", "sw-master-1") is None
     assert swarm_heartbeat.heard("hold on", environ=swarm, redis=redis, now_ms=NOW) is True
     assert idle.last_prompt(redis, "sw", "sw-master-1") == NOW
+    assert redis.ttl(idle.key("sw", "prompt", "sw-master-1")) == idle.BEAT_TTL_S
     assert swarm_heartbeat.heard("hold on", environ={"AGENTIHOOKS_AGENT_NAME": "x"}, redis=redis) is False
+    assert swarm_heartbeat.heard("hold on", environ={"AGENTIHOOKS_SWARM": "sw"}, redis=redis) is False
+
+
+def test_the_hook_connects_with_the_session_environment_and_stamps_the_clock(redis, monkeypatch):
+    from scripts.swarm import store
+
+    seen = []
+    monkeypatch.setattr(store, "redis_client", lambda env: seen.append(env) or redis)
+    monkeypatch.setattr(swarm_heartbeat.time, "time_ns", lambda: 5_000_123_456)
+    swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-master-1"}
+    assert swarm_heartbeat.heard("hold on", environ=swarm) is True
+    assert seen == [swarm] and idle.last_prompt(redis, "sw", "sw-master-1") == 5_000

@@ -47,13 +47,11 @@ def typed_input(text: str) -> str:
 
 def _undimmed(text):
     """Placeholder hints render faint, so faint text is dropped and only its line breaks kept."""
-    out, faint, at = [], False, 0
-    for found in SGR.finditer(text):
-        segment = text[at : found.start()]
+    parts = SGR.split(text)
+    out, faint = [parts[0]], False
+    for params, segment in zip(parts[1::2], parts[2::2]):
+        faint = _faint_after(faint, params)
         out.append("\n" * segment.count("\n") if faint else segment)
-        faint = _faint_after(faint, found.group(1))
-        at = found.end()
-    out.append("\n" * text[at:].count("\n") if faint else text[at:])
     return ESCAPE.sub("", "".join(out))
 
 
@@ -64,9 +62,6 @@ def _faint_after(faint, params):
         if codes[i] in (38, 48, 58):
             i += 3 if codes[i + 1 : i + 2] == [5] else 5
             continue
-        if codes[i] == 2:
-            faint = True
-        elif codes[i] in (0, 22):
-            faint = False
+        faint = (faint or codes[i] == 2) and codes[i] not in (0, 22)
         i += 1
     return faint

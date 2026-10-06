@@ -39,7 +39,7 @@ class HerdrMessenger:
         from scripts.swarm.pane import typed_input
 
         capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
-        return typed_input(capture.get("text", ""))
+        return typed_input(capture["text"])
 
 
 def recipients(store, slug, to, sender):
