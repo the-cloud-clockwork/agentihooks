@@ -168,6 +168,7 @@ def normalize(doc):
     doc.setdefault("priorities", [])
     doc.setdefault("notifications", [])
     doc.setdefault("artifacts", [])
+    doc.setdefault("artifact_trash", [])
     doc.setdefault("tasks", [])
     for name in THREADS:
         for item in doc.get(name, []) if isinstance(doc.get(name), list) else []:

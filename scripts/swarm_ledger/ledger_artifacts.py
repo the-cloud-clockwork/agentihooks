@@ -164,8 +164,8 @@ def _add(doc, op, ctx):
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True
-    task = next((t for t in doc.get("tasks", []) if t["id"] == op["task"]), None)
-    if op["by"] not in ctx.meta.get("members", {}) or (op["task"] and task is None):
+    task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
+    if op["by"] not in ctx.meta["members"] or (op["task"] and task is None):
         return False
     if not (task and task.get("artifact") is True) and not operator_asked(doc, op.get("request")):
         ctx.refused.append(REFUSED)
@@ -183,27 +183,26 @@ def _add(doc, op, ctx):
 
 
 def _move(doc, op, ctx, source, dest):
-    rows = doc.setdefault(source, [])
-    row = next((r for r in rows if r["id"] == op["target"]), None)
+    row = next((r for r in doc[source] if r["id"] == op["target"]), None)
     if row is None:
-        return any(r["id"] == op["target"] for r in doc.setdefault(dest, []))
-    rows.remove(row)
+        return any(r["id"] == op["target"] for r in doc[dest])
+    doc[source].remove(row)
     if dest == TRASH:
         row["deleted_at"] = ctx.at
     else:
-        row.pop("deleted_at", None)
-    doc.setdefault(dest, []).append(row)
+        del row["deleted_at"]
+    doc[dest].append(row)
     kind = "artifact deleted" if dest == TRASH else "artifact restored"
     ctx.record("operator", kind, "artifacts", id=row["id"], text=row["title"])
     return True
 
 
 def _purge(doc, op, ctx):
-    if op["by"] not in ctx.meta.get("members", {}):
+    if op["by"] not in ctx.meta["members"]:
         return False
-    rows = doc.get("artifacts", []) + doc.get(TRASH, [])
+    rows = doc["artifacts"] + doc[TRASH]
     doc["artifacts"], doc[TRASH] = [], []
-    ctx.dropped += [row["file"]["id"] for row in rows]
+    ctx.dropped.extend(row["file"]["id"] for row in rows)
     ctx.record(op["by"], "artifacts purged", "artifacts", id=op["id"], count=len(rows))
     return True
 
@@ -219,7 +218,7 @@ def apply(doc, op, ctx):
 
 
 def in_use(doc):
-    used = {row["file"]["id"] for key in ("artifacts", TRASH) for row in doc.get(key, [])}
+    used = {row["file"]["id"] for key in ("artifacts", TRASH) for row in doc[key]}
     for _, thread in core.thread_paths(doc):
         for entry in thread:
             used.update(att["id"] for att in entry.get("attachments", []))
@@ -227,7 +226,7 @@ def in_use(doc):
 
 
 def sweep(slug, doc, ctx):
-    trash = doc.setdefault(TRASH, [])
+    trash = doc[TRASH]
     expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
     if expired:
         doc[TRASH] = [row for row in trash if row not in expired]

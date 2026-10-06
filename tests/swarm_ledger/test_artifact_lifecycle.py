@@ -288,3 +288,133 @@ def test_a_purge_summary_prints_the_count(capsys):
     ):
         ledger.cmd_artifact_purge(args)
     assert json.loads(capsys.readouterr().out) == {"purged": 4, "artifacts": 0}
+
+
+class TestDetails:
+    def test_a_published_row_and_its_event_carry_every_field(self, slug):
+        add_task(slug, "d1", artifact=True)
+        state, _ = publish(slug, "a-full", task="d1")
+        row = state["artifacts"][0]
+        assert set(row) == {"id", "title", "by", "task", "at", "file"}
+        assert (row["id"], row["title"], row["by"], row["task"]) == ("a-full", "Plan", AGENT, "d1")
+        assert row["at"] == state["_meta"]["updated_at"]
+        event = state["_meta"]["events"][-1]
+        assert {k: event[k] for k in ("by", "kind", "target", "id", "text")} == {
+            "by": AGENT,
+            "kind": "artifact added",
+            "target": "tasks/d1",
+            "id": "a-full",
+            "text": "Plan",
+        }
+        assert publish(slug, "a-full", task="d1")[1] == []
+        assert [a["id"] for a in core.sync(slug)[0]["artifacts"]] == ["a-full"]
+
+    def test_a_stranger_or_an_unknown_task_is_refused_even_with_a_request(self, slug):
+        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-want", "text": "Draw me a logo"}])
+        file = artifacts.store(slug, "x.md", MARKDOWN)
+        base = {"op": "artifact_add", "title": "Logo", "file": file, "request": "m-want"}
+        stranger = {**base, "id": "a-who", "by": "stranger", "task": ""}
+        ghost = {**base, "id": "a-ghost", "by": AGENT, "task": "nope"}
+        state, rejected = core.sync(slug, ops=[stranger, ghost])
+        assert rejected == ["a-who", "a-ghost"] and state["artifacts"] == []
+        assert artifacts.REFUSED not in state["_meta"]["warnings"]
+
+    def test_a_deleted_operator_message_is_no_request(self, slug):
+        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-gone", "text": "Draw me a logo"}])
+        core.sync(slug, ops=[{"op": "delete", "thread": "chat", "id": "m-gone"}])
+        assert publish(slug, "a-late", request="m-gone")[1] == ["a-late"]
+
+    def test_delete_and_restore_are_recorded_and_repeat_safely(self, slug):
+        add_task(slug, "d2", artifact=True)
+        publish(slug, "a-one", task="d2", data=b"# One\n")
+        publish(slug, "a-two", task="d2", data=b"# Two\n")
+        state, _ = delete(slug, "a-one")
+        event = state["_meta"]["events"][-1]
+        assert (event["by"], event["kind"], event["target"], event["id"], event["text"]) == (
+            "operator",
+            "artifact deleted",
+            "artifacts",
+            "a-one",
+            "Plan",
+        )
+        assert delete(slug, "a-one")[1] == []
+        assert delete(slug, "a-none")[1] == ["artifact_delete-a-none"]
+        state, _ = delete(slug, "a-one", op="artifact_restore")
+        assert state["_meta"]["events"][-1]["kind"] == "artifact restored"
+        assert delete(slug, "a-one", op="artifact_restore")[1] == []
+        assert delete(slug, "a-none", op="artifact_restore")[1] == ["artifact_restore-a-none"]
+
+    def test_the_trash_keeps_a_row_on_its_thirtieth_day_and_bumps_the_revision_when_it_expires(self, slug):
+        add_task(slug, "d3", artifact=True)
+        publish(slug, "a-day", task="d3", data=b"# Day\n")
+        with patch.object(core, "now_ms", return_value=1_000):
+            delete(slug, "a-day")
+        with patch.object(core, "now_ms", return_value=1_000 + 30 * DAY_MS):
+            state, _ = core.sync(slug)
+        assert [r["id"] for r in state["artifact_trash"]] == ["a-day"]
+        rev = state["_meta"]["rev"]
+        with patch.object(core, "now_ms", return_value=1_001 + 30 * DAY_MS):
+            state, _ = core.sync(slug)
+        assert state["artifact_trash"] == [] and state["_meta"]["rev"] == rev + 1
+
+    def test_purge_records_itself_and_survives_a_file_already_gone(self, slug):
+        add_task(slug, "d4", artifact=True)
+        state, _ = publish(slug, "a-lost", task="d4", data=b"# Lost\n")
+        artifacts.path_of(slug, state["artifacts"][0]["file"]["id"]).unlink()
+        core.sync(slug, ops=[{"op": "add", "thread": "chat", "id": "m-plain", "text": "No picture here"}])
+        state, rejected = core.sync(slug, ops=[{"op": "artifact_purge", "id": "p-lost", "by": AGENT}])
+        event = state["_meta"]["events"][-1]
+        assert rejected == [] and (event["target"], event["id"], event["count"]) == ("artifacts", "p-lost", 1)
+
+    def test_a_ledger_without_a_trash_gets_an_empty_one(self, slug):
+        _, json_path = core.paths(slug)
+        state = json.loads(json_path.read_text())
+        del state["artifact_trash"]
+        json_path.write_text(json.dumps(state))
+        assert core.sync(slug)[0]["artifact_trash"] == []
+
+    def test_operation_shapes_name_what_they_take(self):
+        good = {
+            "op": "artifact_add",
+            "id": "a",
+            "by": "eng",
+            "task": "",
+            "title": "Plan",
+            "file": {"id": "a" * 64 + ".md"},
+        }
+        assert core.check_op(good) is None
+        purge = {"op": "artifact_purge", "id": "p", "by": "eng"}
+        assert core.check_op(purge) is None
+        for bad in (
+            {**purge, "extra": 1},
+            {**purge, "by": "operator"},
+            {**purge, "by": "1 bad"},
+            {"op": "artifact_purge", "id": "p"},
+        ):
+            with pytest.raises(ValueError, match="^artifact_purge takes id and by, an agent name other than operator$"):
+                core.check_op(bad)
+        for kind in ("artifact_delete", "artifact_restore"):
+            move = {"op": kind, "id": "d", "target": "a-1"}
+            assert core.check_op(move) is None
+            for bad in ({**move, "by": "eng"}, {**move, "target": 7}, {**move, "target": ""}, {"op": kind, "id": "d"}):
+                with pytest.raises(
+                    ValueError, match=f"^{kind} is the operator's and takes only id and target, an artifact id$"
+                ):
+                    core.check_op(bad)
+
+    def test_task_add_keeps_gain_contract_workspace_and_artifact(self, slug):
+        contract = {"must": "logo drawn", "check": "look", "judge": "operator"}
+        add_task(slug, "d5", gain=2, contract=contract, workspace="/work", artifact=True)
+        task = next(t for t in core.sync(slug)[0]["tasks"] if t["id"] == "d5")
+        assert (task["gain"], task["contract"], task["workspace"], task["artifact"]) == (2, contract, "/work", True)
+
+    def test_the_publish_goes_to_the_named_ledger(self, tmp_path):
+        doc = tmp_path / "logo.md"
+        doc.write_bytes(MARKDOWN)
+        args = ledger.build_parser().parse_args(["--slug", "cli", "--as", AGENT, "artifact", str(doc), "Logo"])
+        with (
+            patch.object(ledger, "upload_artifact", return_value={"id": "a" * 64 + ".md"}),
+            patch.object(ledger, "call", return_value={}) as call,
+        ):
+            ledger.cmd_artifact(args)
+        assert call.call_args.args[0] == "cli"
