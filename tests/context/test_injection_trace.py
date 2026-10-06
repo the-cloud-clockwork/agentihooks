@@ -163,6 +163,13 @@ def test_session_start_outside_a_profile_and_swarm_records_nothing(tmp_path, cap
     assert capsys.readouterr().out == ""
 
 
+def test_a_swarm_session_without_an_agent_name_has_no_priming_manifest():
+    from hooks.context import injection_trace
+
+    assert injection_trace.manifests({"AGENTIHOOKS_SWARM": "sw"}, "claude") == []
+    assert injection_trace.manifests({"AGENTIHOOKS_AGENT_NAME": "eng@x-1"}, "claude") == []
+
+
 def test_an_unreadable_manifest_records_nothing(capsys):
     from hooks import config
     from hooks.context import injection_trace

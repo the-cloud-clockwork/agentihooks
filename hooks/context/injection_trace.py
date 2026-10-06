@@ -92,12 +92,12 @@ def record_rows(session_id: str, rows: list[dict]) -> None:
     held = {(row.get("layer"), row.get("source")) for row in trace(session_id)}
     for row in rows:
         if (row.get("layer"), row.get("source")) not in held:
-            record(session_id, row["layer"], row["source"], row.get("text", ""), row.get("locator"))
+            record(session_id, row["layer"], row["source"], row["text"], row["locator"])
 
 
 def _manifest(path: Path) -> list[dict]:
     try:
-        rows = json.loads(path.read_text(encoding="utf-8"))
+        rows = json.loads(path.read_text())
     except (OSError, ValueError):
         return []
     return rows if isinstance(rows, list) else []
@@ -152,9 +152,9 @@ def _check_quote(row: dict, quote: str) -> None:
         raise ValueError(
             f"--quote names a passage of a rule or doctrine file; {row['source']} is a {row['layer']} directive"
         )
-    file = Path(row["locator"].get("repo", "")) / row["locator"].get("path", "")
+    file = Path(row["locator"]["repo"]) / row["locator"]["path"]
     try:
-        text = file.read_text(encoding="utf-8")
+        text = file.read_text()
     except OSError as e:
         raise ValueError(f"cannot read {file} to find the quoted passage: {e}") from e
     if " ".join(quote.split()) not in " ".join(text.split()):

@@ -57,4 +57,4 @@ def rows(bundle: Path | None, dirs: list[tuple[str, Path]], rules: dict[str, Pat
 
 def write(dst: Path, found: list[dict]) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(json.dumps(found, indent=1) + "\n")
+    dst.write_text(json.dumps(found) + "\n")

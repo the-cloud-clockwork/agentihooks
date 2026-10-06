@@ -47,7 +47,7 @@ def build_parser():
     parser.add_argument("--wrong", metavar="SOURCE")
     parser.add_argument("--repo", default=os.getcwd())
     parser.add_argument("--reason", default="")
-    parser.add_argument("--quote", default="")
+    parser.add_argument("--quote")
     parser.add_argument("--corrections", action="store_true")
     return parser
 

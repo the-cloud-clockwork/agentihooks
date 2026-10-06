@@ -49,6 +49,11 @@ def test_an_empty_seat_carries_no_rows():
     assert priming_trace.rows("sw", {"id": "t4", "seat": SEAT}) == []
 
 
+def test_a_task_spawned_without_a_seat_names_no_seat():
+    [row] = priming_trace.rows("sw", {"id": "t4", "learned": [{"maturity": "note", "text": "n"}]})
+    assert (row["source"], row["locator"]) == ("learned:#1", {"seat": "", "note": 1})
+
+
 def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
 
@@ -63,3 +68,10 @@ def test_spawn_writes_the_priming_rows_beside_the_prompt(tmp_path, monkeypatch):
     written = priming_trace.path(tmp_path, "sw", "engineer@a1b2c3-0001")
     assert written.parent == tmp_path / "sw" / "prompts"
     assert json.loads(written.read_text()) == priming_trace.rows("sw", _task())
+
+
+def test_a_second_spawn_of_the_same_agent_rewrites_its_rows(tmp_path):
+    priming_trace.write(tmp_path, "sw", "engineer@a1b2c3-0001", _task())
+    priming_trace.write(tmp_path, "sw", "engineer@a1b2c3-0001", _task(culture="- only line"))
+    written = json.loads(priming_trace.path(tmp_path, "sw", "engineer@a1b2c3-0001").read_text())
+    assert [row["source"] for row in written if row["layer"] == "culture"] == ["culture:sw#1"]

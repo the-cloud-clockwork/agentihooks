@@ -311,12 +311,8 @@ def cmd_take_master(store, args):
         store.update(args.slug, state="running")
         timer.ensure(_bin())
     config = store.config(args.slug)
-    task = primed(
-        store,
-        args.slug,
-        record.seat,
-        {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)},
-    )
+    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)}
+    task = primed(store, args.slug, record.seat, task)
     print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
     injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
     store.clear_handoff(args.slug, MASTER)

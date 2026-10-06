@@ -106,3 +106,18 @@ def test_empty_doctrine_files_are_left_out(bundle):
     render.render_claude("rb-role", force=True)
     rows = json.loads(sources.path("rb-role", "claude", render.rendered_root()).read_text())
     assert "bundle/profiles/rb-base/CLAUDE.md" not in _by_source(rows)
+
+
+def test_an_empty_rule_file_has_empty_text_and_bad_bytes_are_replaced(tmp_path):
+    empty = _write(tmp_path / "empty.md", "\n  \n")
+    assert sources.row("rule", empty)["text"] == ""
+    broken = tmp_path / "broken.md"
+    broken.write_bytes(b"\n# Rule \xff marker\n")
+    assert sources.row("rule", broken)["text"] == "# Rule � marker"
+
+
+def test_a_bundle_without_a_shared_claude_dir_reads_its_root_claude_md(tmp_path):
+    bundle = tmp_path / "b"
+    _write(bundle / "CLAUDE.md", "ROOT DIRECTIVE\n")
+    _write(bundle / ".claude" / "claude.md", "WRONG CASE\n")
+    assert sources.doctrine_files(bundle, []) == [bundle / "CLAUDE.md"]
