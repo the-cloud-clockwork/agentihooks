@@ -9,6 +9,7 @@ import yaml
 from scripts.inbox.cli import build_parser as msg_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from scripts.swarm_ledger.ledger import build_parser as ledger_parser
+from tests.test_package_internal_names import LEAKS
 from tests.test_profile_render import world as render_world
 
 world = render_world
@@ -36,11 +37,6 @@ LOOP = {
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
     "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
 }
-LEAKS = re.compile(
-    r"\b(anton|smith|tcc|homeofanton|litellm|openbao|plane|manifesto|nestor|colt)\b|gateway[ _-]tools|§"
-    r"|\b10\.\d+\.\d+\.\d+|\b192\.168\.\d+\.\d+|\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[\w.+-]+@gmail\.com",
-    re.IGNORECASE,
-)
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
 

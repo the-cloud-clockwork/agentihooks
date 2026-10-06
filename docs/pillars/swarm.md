@@ -53,7 +53,8 @@ Every swarm that is not stopped keeps exactly one master, named `master@<code>-<
 swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
-Its opening prompt makes it join the ledger as orchestrator under a watch Monitor, answer every operator chat
+Its opening prompt makes it join the ledger as orchestrator, with operator writes reaching it as inbox messages
+and the tick waking its idle pane, answer every operator chat
 message on the page and in its herdr pane, keep phases, follow ups, time left and status comments current, turn
 operator requests into tasks with full specs, rewrite task descriptions, set caps, pause or stop the swarm,
 talk to agents, and check merged UI work in a real browser, closing the shared browser after.
@@ -113,7 +114,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 ### Templates
 
 A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`
-(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lanes are `eng`, `ci` and `plan`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`) and leaves it with no pane prompt: PreToolUse allows its `ExitPlanMode` with the plan as the updated input, because Claude Code keeps the proceed prompt for a bare allow. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner starts in its default mode. Per lane:
+(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lanes are `eng`, `ci` and `plan`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. A Claude planner starts in plan mode (`--permission-mode plan`; `agentihooks claude` then passes `--allow-dangerously-skip-permissions`, since `--dangerously-skip-permissions` would override the named mode) and leaves it with no pane prompt: the PermissionRequest hook allows its `ExitPlanMode` with the plan as the updated input and sets the session back to bypass, because Claude Code keeps the proceed prompt for a bare allow and would otherwise fall back to manual mode. The plan is approved by the plan review below. Codex has no launch flag for plan mode, so a Codex planner starts in its default mode. Per lane:
 
 | Field | Meaning |
 |---|---|

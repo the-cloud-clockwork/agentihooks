@@ -44,13 +44,14 @@ def forced_claude(monkeypatch):
     monkeypatch.setattr(emitter, "_buffer", [])
 
 
-def _pre_tool_use(tmp_path, capsys, tool="ExitPlanMode", tool_input=PLAN):
-    hm.on_pre_tool_use(
+def _hook(event, tmp_path, capsys, tool="ExitPlanMode"):
+    handler = hm.on_permission_request if event == "PermissionRequest" else hm.on_pre_tool_use
+    handler(
         {
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": event,
             "session_id": "sid-planner-plan",
             "tool_name": tool,
-            "tool_input": dict(tool_input),
+            "tool_input": dict(PLAN),
             "permission_mode": "plan",
             "cwd": str(tmp_path),
         }
@@ -59,21 +60,33 @@ def _pre_tool_use(tmp_path, capsys, tool="ExitPlanMode", tool_input=PLAN):
     return json.loads(out)["hookSpecificOutput"] if out else {}
 
 
-def test_a_swarm_planner_leaves_plan_mode_with_its_plan_as_the_updated_input(
+def _planner(monkeypatch, lane="plan"):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", lane)
+
+
+def test_a_swarm_planner_leaves_plan_mode_into_bypass_with_its_plan_as_the_updated_input(
     forced_claude, monkeypatch, capsys, tmp_path
 ):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "plan")
-    monkeypatch.setattr(hm, "_refocus_blocks", lambda *_: ["first block", "second block"])
-    out = _pre_tool_use(tmp_path, capsys)
-    assert out["hookEventName"] == "PreToolUse"
-    assert "first block\n\nsecond block" in out["additionalContext"]
-    assert out["permissionDecision"] == "allow"
-    assert out["updatedInput"] == PLAN
-    assert out["permissionDecisionReason"] == planner_plan.REASON
+    _planner(monkeypatch)
+    assert _hook("PermissionRequest", tmp_path, capsys) == {
+        "hookEventName": "PermissionRequest",
+        "decision": {
+            "behavior": "allow",
+            "updatedInput": PLAN,
+            "updatedPermissions": [{"type": "setMode", "mode": "bypassPermissions", "destination": "session"}],
+        },
+    }
 
 
-def test_an_engineer_leaving_plan_mode_still_gets_the_pane_prompt(forced_claude, monkeypatch, capsys, tmp_path):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "eng")
-    assert "permissionDecision" not in _pre_tool_use(tmp_path, capsys)
+def test_pre_tool_use_leaves_the_planner_plan_exit_to_the_permission_request(
+    forced_claude, monkeypatch, capsys, tmp_path
+):
+    _planner(monkeypatch)
+    assert "permissionDecision" not in _hook("PreToolUse", tmp_path, capsys)
+
+
+@pytest.mark.parametrize(("lane", "tool"), [("eng", "ExitPlanMode"), ("plan", "Bash")])
+def test_anything_else_still_gets_the_pane_prompt(forced_claude, monkeypatch, capsys, tmp_path, lane, tool):
+    _planner(monkeypatch, lane)
+    assert _hook("PermissionRequest", tmp_path, capsys, tool) == {}

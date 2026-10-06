@@ -20,6 +20,10 @@ THROUGH_CODE = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+INBOX_LINE = (
+    "Operator writes on the ledger reach you as inbox messages at your next tool call, and the swarm wakes you with a "
+    "prompt when you sit idle."
+)
 
 LANE_ROLE = {
     "plan": "a planner whose task is to slice its phase into tasks for review",
@@ -51,8 +55,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "",
         f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
         "the operator's notes, answers, comments and chat.",
-        f"Run once: {led} join --role orchestrator. Then keep a Monitor on: agentihooks ledger watch {slug} --as "
-        f"{name}, and re-arm it whenever it expires. Act on every OPERATOR line, then run {led} ack.",
+        f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
         (
             "After posting your summary acknowledgement in ledger chat, send the ledger page link as your second chat line: "
@@ -171,8 +174,8 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
         "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "",
-        f"You are a member of the ledger crew. Run once: {led} join. Then keep a Monitor on: "
-        f"agentihooks ledger watch {slug} --as {name}. Act on every OPERATOR line about your work, then run {led} ack.",
+        f"You are a member of the ledger crew. Run once: {led} join. {INBOX_LINE} Act on every OPERATOR line about "
+        f"your work, then run {led} ack.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
@@ -182,7 +185,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
-        *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy),
+        *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy, task["id"]),
         "",
         "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
         f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
@@ -332,7 +335,8 @@ def code_steps(me, led, name, phase):
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
-        "6. Merge on green checks, then wt.sh done.",
+        f"6. Wait on the checks with {me} wait --on checks <pr url>: the tick ends the wait and tells you when they "
+        "resolve, so no Monitor is needed. Merge on green checks, then wt.sh done.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
     ]
 
@@ -427,7 +431,7 @@ STEPS = {
 }
 
 
-def manual_ship(me, led, phase):
+def manual_ship(me, led, task_id):
     return [
         "5. Push, open a draft pull request into dev (gh pr create --draft --base dev, with Closes #<n> when there "
         f"is an issue), record it: {me} pr <pr url>",
@@ -437,13 +441,14 @@ def manual_ship(me, led, phase):
     ]
 
 
-def assist_ship(me, led, phase):
+def assist_ship(me, led, task_id):
     return [
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
-        f'{led} comment phases/{phase} "<plain words: what the pull request does, checks green, waiting for your '
-        'approval to merge>", then wait on your ledger watch. Merge only after an OPERATOR line on the ledger '
-        "approves it, then wt.sh done. An OPERATOR line asking for changes: make them and ask again.",
+        f'{led} comment tasks/{task_id} "<plain words: what the pull request does, checks green, waiting for your '
+        f'approval to merge>", then {me} wait 60 --reason "operator merge approval"; his answer reaches you as an '
+        "inbox message. Merge only after an OPERATOR line on the ledger approves it, then wt.sh done. An OPERATOR "
+        "line asking for changes: make them and ask again.",
         f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
     ]
 
@@ -451,8 +456,8 @@ def assist_ship(me, led, phase):
 GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 
 
-def kind_steps(kind, me, led, name, phase, autonomy):
+def kind_steps(kind, me, led, name, phase, autonomy, task_id):
     steps = STEPS[kind](me, led, naming.plain(name), phase)
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
-    return steps[:5] + GATED_SHIP[autonomy](me, led, phase)
+    return steps[:5] + GATED_SHIP[autonomy](me, led, task_id)
