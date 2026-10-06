@@ -1484,6 +1484,7 @@ input, textarea { caret-color: var(--accent-2); }
       const t = a.lane === "master" ? { title: "Answers your chat" } : byId[a.task] || {};
       const last = Math.max(seen[a.name] || 0, a.started_at || 0);
       return { name: a.name, lane: a.lane, profile: a.profile || "unknown", model: a.model ? [a.model, a.effort].filter(Boolean).join(" ") : "unknown",
+        ...(a.model_source ? { modelSource: a.model_source } : {}), modelConfidence: a.model_confidence,
         account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
         ago: last ? span(now - last) : "", taskState: t.state || "open", inbox: a.inbox,
         held: a.state_since ? span(now - a.state_since) : "", taskId: a.task };
@@ -1739,7 +1740,9 @@ input, textarea { caret-color: var(--accent-2); }
           h("span", { class: "hint", text: a.held || "duration not recorded" })),
         h("span", { class: "sw-task", text: a.task }),
         h("div", { class: "sw-meta" }, h("span", { text: { eng: "engineer", ci: "CI agent", master: "master" }[a.lane] || a.lane }),
-          h("span", { text: `profile ${a.profile}` }), h("span", { text: `model ${a.model}` }), a.account ? h("span", { text: a.account }) : null,
+          h("span", { text: `profile ${a.profile}` }), h("span", { text: `model ${a.model}` }),
+          a.modelSource ? h("span", { text: `source ${a.modelSource}` }) : null,
+          a.modelConfidence != null ? h("span", { text: `confidence ${Math.round(a.modelConfidence * 100)}%` }) : null, a.account ? h("span", { text: a.account }) : null,
           h("span", { class: "sw-ago", text: a.ago ? `last activity ${a.ago} ago` : "last activity not recorded" }))),
       h("p", { class: "hint", text: ((task.workspace_tail || {}).latest_progress || "").split("\n").filter((line) => line.trim()).at(-1) || "Progress not recorded." }),
       a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: `Pull request · ${task.checks_state || "checks not reported"}` }) : null,

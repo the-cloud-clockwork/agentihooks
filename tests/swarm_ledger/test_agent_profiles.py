@@ -17,7 +17,7 @@ const doc = {tasks: []};
 function h(tag, attrs, ...children) { return {tag, attrs, children: children.filter(Boolean)}; }
 function collapsible() {}
 const raw = {agents: [
-  {name: 'm', lane: 'master', profile: 'master', model: 'sonnet', effort: 'low'},
+  {name: 'm', lane: 'master', profile: 'master', model: 'sonnet', effort: 'low', model_source: '<jev>', model_confidence: 0.72},
   {name: 'e', lane: 'eng', profile: '<qa>', model: 'gpt-6-luna'},
   {name: 'old', lane: 'ci'}
 ]};
@@ -33,6 +33,8 @@ console.log(JSON.stringify({cards, trees: cards.map(swarmCard)}));
 
     assert "profile master" in texts(output["trees"][0])
     assert "model sonnet low" in texts(output["trees"][0])
+    assert "source <jev>" in texts(output["trees"][0])
+    assert "confidence 72%" in texts(output["trees"][0])
     assert "profile <qa>" in texts(output["trees"][1])
     assert "model gpt-6-luna" in texts(output["trees"][1])
     assert "profile unknown" in texts(output["trees"][2])

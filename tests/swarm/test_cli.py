@@ -227,7 +227,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     config = cli.SwarmConfig("sw", "/repo", 1, 1)
     placed = rt.spawn(config, "ci", "ci@a1b2c3-0001", {"id": "t2", "title": "speed up the tests"})
     prompt_path = tmp_path / "sw" / "prompts" / "ci@a1b2c3-0001.md"
-    assert placed == runtime.Placed("w3:p1", "codex", "acct")
+    assert placed == runtime.Placed("w3:p1", "codex", "acct", model_source="lane-default")
     assert seen[0][1:4] == ["init-agent", "--host", "herdr"]
     assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
@@ -1017,7 +1017,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w1:p2"))
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-1] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-1] == "-"
+    assert lines["engineer@a1b2c3-0001"][-3] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-3] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (
