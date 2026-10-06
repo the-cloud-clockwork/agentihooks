@@ -60,11 +60,11 @@ def test_approved_columns_overview_tabs_and_stats(page):
     assert page.locator("#stats-column #stats-sync").count() == 1
     assert page.locator("#ledger .col > section").evaluate_all("els => els.map(el => el.id)") == [
         "sec-priorities",
+        "sec-notes",
         "sec-questions",
         "sec-phases",
         "sec-tasks",
         "sec-followups",
-        "sec-notes",
         "sec-sources",
     ]
     overview = page.locator("#overview-box").bounding_box()
