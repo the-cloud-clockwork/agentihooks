@@ -195,6 +195,13 @@ def test_real_artifacts_render_wide_and_readable_in_the_viewer(browser, fixture_
     assert report == {path.name: [] for path in fixture_files}
 
 
+def test_an_artifact_named_inside_another_name_opens_its_own_viewer(browser, tmp_path):
+    files = [tmp_path / "notes.md", tmp_path / "old-notes.md"]
+    files[0].write_text("# Notes\n")
+    files[1].write_text("- old\n")
+    assert sanity.run(browser, files) == {"notes.md": [], "old-notes.md": []}
+
+
 def test_the_old_narrow_column_fails_width_and_compacts_the_delivery_table(browser, fixture_files, narrow):
     report = sanity.run(browser, fixture_files)
     for name in (AUDIT.name, DELIVERY.name):

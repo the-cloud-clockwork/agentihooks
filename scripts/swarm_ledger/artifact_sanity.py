@@ -215,8 +215,8 @@ def _view(tab, path):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("files", nargs="+", type=Path, help="artifact files to open in the viewer")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("files", nargs="+", type=Path)
     args = parser.parse_args(argv)
     from playwright.sync_api import sync_playwright
 
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             report = run(browser, args.files)
         finally:
             browser.close()
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report))
     return 1 if any(report.values()) else 0
 
 
