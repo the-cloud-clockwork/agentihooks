@@ -230,5 +230,9 @@
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_ensure__mutmut_3:83b5c3341eba581ced3779613419d723ad3759b23941b92a53d6879c071fd292": {
     "reader": "Standards",
     "reason": "False and None are only tested through not started before both branches assign True. The independent reader verified identical truth values at both reads; the value is never returned or printed."
+  },
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
+    "reader": "Standards",
+    "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
   }
 }

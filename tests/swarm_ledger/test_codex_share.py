@@ -27,7 +27,7 @@ def test_codex_steps_are_five_and_apply_sends_the_draft(tab):
     assert tab.locator("#cap-eng").input_value() == "4"
     tab.locator('[data-swarm="set"]').click()
     tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
-    assert sent[-1] == {"action": "set", "max_eng": 4, "max_ci": 1, "codex_share": 35}
+    assert sent[-1] == {"action": "set", "max_eng": 4, "max_ci": 1, "max_plan": 0, "codex_share": 35}
 
 
 @pytest.mark.parametrize(

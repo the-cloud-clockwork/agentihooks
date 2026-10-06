@@ -52,7 +52,7 @@ def same(values):
 @pytest.mark.parametrize("width", [1300, 390])
 def test_caps_rows_put_minus_number_and_plus_in_straight_columns(browser, width):
     boxes = caps_boxes(browser, width)
-    assert len(boxes["down"]) == len(boxes["num"]) == len(boxes["up"]) == 3
+    assert len(boxes["down"]) == len(boxes["num"]) == len(boxes["up"]) == 4
     assert same([b["left"] for b in boxes["down"]]), boxes["down"]
     assert same([b["left"] for b in boxes["num"]]), boxes["num"]
     assert same([b["width"] for b in boxes["num"]]), boxes["num"]

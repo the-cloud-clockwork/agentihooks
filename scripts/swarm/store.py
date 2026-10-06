@@ -37,6 +37,7 @@ class SwarmConfig:
     codex_min_week_left: int | None = None
     snapshot_minutes: int | None = None
     code: str = ""
+    max_plan: int = 1
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,7 @@ class RedisStore:
             _whole(raw.get("codex_min_week_left")),
             _whole(raw.get("snapshot_minutes")),
             raw.get("code", ""),
+            int(raw.get("max_plan", 1)),
         )
 
     def update(self, slug, **changes):

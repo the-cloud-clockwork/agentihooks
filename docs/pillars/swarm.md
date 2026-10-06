@@ -76,7 +76,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
 | `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
-| `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
+| `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | Register a swarm, paused. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> url` | Print the `Ledger page: <link>` line, built from `LEDGER_HOST` and `LEDGER_PORT`; when the ledger server is not answering, the line names `agentihooks ledger serve --ensure`. |
 | `agentihooks swarm <id> pause` | Stop new spawns; running agents continue. |
@@ -92,7 +92,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
 | `agentihooks swarm <id> status [--json]` | Config with the Codex share of work-lane spawns against its target (`codex 2/7 spawns 28%  target 30%  min week left 5%`), task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
-| `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
+| `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT` | Share of `auto` lane spawns sent to Codex. While Codex spawns are below `codex-share` percent of the swarm's eng and ci spawns, the best signed-in Codex account (the default login is `default`) has at least `codex-min-week-left` percent of its weekly quota left, and Codex has a free session slot, an `auto` lane spawns Codex; otherwise the priority choice applies. Defaults 30 and 5; a swarm without the setting takes `AGENTIHOOKS_SWARM_CODEX_SHARE` and `AGENTIHOOKS_SWARM_CODEX_MIN_WEEK_LEFT`. The master is never part of the share. |
@@ -109,7 +109,7 @@ The swarm id is a lowercase slug of letters, digits and dashes, starting with a 
 ### Templates
 
 A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`
-(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Only `eng` and `ci` exist. Per lane:
+(`manual`, `assist`, `delegate` or `full`; empty means `delegate`) the swarm is created with, and `lanes` with one entry per lane. Worker lanes are `eng`, `ci` and `plan`; `master` configures the master. The `plan` lane defaults to the `planner` profile and has its own cap, names `planner@<code>-<n>` and seats `plan-<k>@<slug>`. A swarm without planner tasks starts no planners. Per lane:
 
 | Field | Meaning |
 |---|---|

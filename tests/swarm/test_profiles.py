@@ -13,11 +13,17 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
     environ = {"AGENTIHOOKS_HOME": str(tmp_path)}
     default = templates.parse({"name": "x"})
-    assert {k: v.profile for k, v in default.lanes.items()} == {"eng": "engineer", "ci": "cicd", "master": "master"}
+    assert {k: v.profile for k, v in default.lanes.items()} == {
+        "eng": "engineer",
+        "ci": "cicd",
+        "plan": "planner",
+        "master": "master",
+    }
     for built_in, _ in templates.available(environ):
         assert {k: v.profile for k, v in built_in.lanes.items()} == {
             "eng": "engineer",
             "ci": "cicd",
+            "plan": "planner",
             "master": "master",
         }
     config = store.SwarmConfig(
@@ -58,7 +64,9 @@ def test_template_accepts_custom_profile_name():
     )
 
 
-@pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("master", "master"), ("eng", "qa")])
+@pytest.mark.parametrize(
+    "lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("plan", "planner"), ("master", "master"), ("eng", "qa")]
+)
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     import fakeredis
@@ -167,5 +175,5 @@ def test_create_set_and_save_preserve_master_profile(monkeypatch, tmp_path, caps
 
 
 def test_unknown_template_lane_names_the_valid_lanes():
-    with pytest.raises(store.SwarmError, match="template x names lanes.*qa.*eng, ci and master"):
+    with pytest.raises(store.SwarmError, match="template x names lanes.*qa.*eng, ci, plan and master"):
         templates.parse({"name": "x", "lanes": {"qa": {}}})

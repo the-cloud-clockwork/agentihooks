@@ -14,9 +14,9 @@ from scripts.inbox import links
 from scripts.swarm.store import AUTONOMY, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
-LANES = ("eng", "ci", "master")
-DEFAULT_CAPS = {"eng": 2, "ci": 1, "master": 1}
-DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "master": "master"}
+LANES = ("eng", "ci", "plan", "master")
+DEFAULT_CAPS = {"eng": 2, "ci": 1, "plan": 1, "master": 1}
+DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "plan": "planner", "master": "master"}
 AUTO = "auto"
 LANE_FIELDS = ("role", "agent", "model", "effort", "kind", "profile")
 LINK_FIELDS = {"from", "to", "kind"}
@@ -87,7 +87,9 @@ def parse(data):
     lanes = data.get("lanes") or {}
     custom = set(lanes) - set(LANES)
     if custom:
-        raise SwarmError(f"template {name} names lanes {sorted(custom)}; a swarm has only the eng, ci and master lanes")
+        raise SwarmError(
+            f"template {name} names lanes {sorted(custom)}; a swarm has only the eng, ci, plan and master lanes"
+        )
     if data.get("autonomy", "") not in ("", *AUTONOMY):
         raise SwarmError(f"template {name} autonomy must be one of {AUTONOMY}")
     return Template(
@@ -133,7 +135,7 @@ def lane_map(template):
 
 
 def from_config(name, config):
-    caps = {"eng": config.max_eng, "ci": config.max_ci, "master": 1}
+    caps = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan, "master": 1}
     return parse(
         {
             "name": name,

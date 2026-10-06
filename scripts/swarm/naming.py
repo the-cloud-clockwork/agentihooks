@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PREFIX = "agentihooks:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci"}
+TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
-NAME_RE = re.compile(r"(master|engineer|ci)@([0-9a-f]{6})-(\d{4})")
+NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 MINT_ATTEMPTS = 20

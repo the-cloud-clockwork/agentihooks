@@ -23,7 +23,7 @@ LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
 IDLE_NUDGE_TICKS = 3
 IDLE_KILL_TICKS = 10
-LANES = ("eng", "ci")
+LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
 NUDGE = (
     "Swarm check: you are idle and your task is still open. If you are waiting on checks or a deploy, declare it "
@@ -248,7 +248,7 @@ def _nested(outer, inner):
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
-    for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci)):
+    for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane)
         for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
             if not runtime.has_capacity():

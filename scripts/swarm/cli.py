@@ -74,6 +74,7 @@ from scripts.swarm_ledger import ledger_kinds, ledger_link, plan_shape
 SETTABLE = {
     "max-eng-agents": "max_eng",
     "max-ci-agents": "max_ci",
+    "max-plan-agents": "max_plan",
     "compact-limit": "compact_limit",
     "codex-share": "codex_share",
     "codex-min-week-left": "codex_min_week_left",
@@ -129,7 +130,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
 def cmd_list(store, args):
     for slug in store.slugs():
         c = store.config(slug)
-        print(f"{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tagents {len(store.agents(slug))}\t{c.repo}")
+        print(
+            f"{slug}\t{c.state}\teng {c.max_eng}\tci {c.max_ci}\tplan {c.max_plan}\tagents {len(store.agents(slug))}\t{c.repo}"
+        )
 
 
 def cmd_tick(store, args):
@@ -155,6 +158,7 @@ def cmd_create(store, args):
         repo,
         caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
         caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
+        max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
         state="paused",
         compact_limit=template.compact_limit,
         template=args.template,
@@ -325,6 +329,7 @@ def cmd_set(store, args):
                 "swarm": args.slug,
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
+                "max_plan": config.max_plan,
                 "compact_limit": config.compact_limit,
                 "autonomy": config.autonomy,
                 "codex_share": config.codex_share,
@@ -407,7 +412,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  repo {config.repo}  {_share(store, config)}"
+        f"{config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  repo {config.repo}  {_share(store, config)}"
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print(plan_shape.report(tasks, config.max_eng)["summary"])
@@ -687,6 +692,7 @@ def build_parser():
     create.add_argument("--template", default="")
     create.add_argument("--max-eng-agents", type=int, default=None)
     create.add_argument("--max-ci-agents", type=int, default=None)
+    create.add_argument("--max-plan-agents", type=int, default=None)
     for plain in ("start", "pause", "remove", "snapshot", "url", "reopen", "rename"):
         sub.add_parser(plain)
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
