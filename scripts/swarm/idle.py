@@ -52,6 +52,8 @@ def wait(redis, slug, name):
 
 
 def verdict(pane, heartbeat, wait, now_ms):
+    if pane == WAITING:
+        return WAITING
     if pane not in READY:
         return WORKING
     if heartbeat and heartbeat.get("state") == WORKING and now_ms - heartbeat.get("at", 0) < STALE_MS:

@@ -166,6 +166,24 @@ def test_claude_render_refreshes_copied_rules(world):
     assert (rules / "bundle-rule.md").read_text() == "---\npaths: ['**/*.py']\n---\nUPDATED BUNDLE RULE\n"
 
 
+def test_refresh_rules_updates_rendered_profile_copies(world, monkeypatch):
+    from scripts.profiles import render
+    from scripts.targets.claude_target import refresh_rules
+
+    out = render.render_claude("rb-role")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(out))
+    source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
+    _write(source, "UPDATED RENDERED RULE\n")
+    _write(out / "CLAUDE.local.md", "ROLE LOCAL OVERRIDE\n")
+
+    payload = refresh_rules(out / "rules", out / "CLAUDE.md", out / "CLAUDE.local.md", False)
+
+    assert (out / "rules" / "bundle-rule.md").read_text() == "UPDATED RENDERED RULE\n"
+    assert "UPDATED RENDERED RULE" in payload
+    assert "ROLE PERSONA MARKER" in payload
+    assert "ROLE LOCAL OVERRIDE" in payload
+
+
 def test_claude_render_settings(world):
     from scripts.profiles import render
 

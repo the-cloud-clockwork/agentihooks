@@ -16,6 +16,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications, lifetime, phase_state
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
+from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
 
@@ -63,6 +64,7 @@ class Runtime(Protocol):
     def recover(self, name: str) -> Placed: ...
     def retire(self, agent: AgentRecord, live: bool) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
+    def observe(self, agent: AgentRecord) -> PaneObservation: ...
     def nudge(self, agent: AgentRecord, text: str) -> None: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
@@ -145,6 +147,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 actions.append(f"could not retire {agent.name}, retrying next tick")
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
+            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -157,18 +160,32 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 def agent_status(agent):
     if agent.state in {"finished", "awaiting-decision"}:
         return agent.state
+    if agent.input_prompt:
+        return "waiting"
     if agent.idle_ticks >= IDLE_NUDGE_TICKS:
         return "stalled"
     return "idle" if agent.idle_ticks else "working"
 
 
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
-    state = idle_state.of(store, runtime, slug, agent, now_ms)
-    if state == idle_state.WAITING:
+    observed = runtime.observe(agent)
+    if observed.state == idle_state.WAITING:
+        title = observed.prompt_title or "Waiting on input"
+        ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
+        store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
-    if state == idle_state.WORKING:
-        if agent.idle_ticks:
-            store.put_agent(slug, replace(agent, idle_ticks=0))
+    agent = replace(agent, input_prompt="", input_ticks=0)
+    if agent.lane == MASTER:
+        store.put_agent(slug, agent)
+        return []
+    state = idle_state.verdict(
+        observed.state,
+        idle_state.heartbeat(store.redis, slug, agent.name),
+        idle_state.wait(store.redis, slug, agent.name),
+        now_ms,
+    )
+    if state in {idle_state.WAITING, idle_state.WORKING}:
+        store.put_agent(slug, replace(agent, idle_ticks=0))
         return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)

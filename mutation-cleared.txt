@@ -234,5 +234,37 @@
   "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
     "reader": "Standards",
     "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁobserve__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
+    "reader": "Standards /root/standards",
+    "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_9:621e1e54433d2b39917cb539813e8bf1440aa9e6142ff41ec747585be6765b94": {
+    "reader": "Standards /root/standards",
+    "reason": "Hex escape digit case denotes the same escape byte."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_21:6579613443d4e3d56e7997967a445eb4a9eb66234972d92237cc5913a1136686": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_33:472bb940820328ca7dce0df9d3140d760f71ec3973dcd2a0cb0024eb50627267": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_waiting_on_input__mutmut_17:df825097be97b85aa5ab7ad35adccc47e7215e4eca4ce205b5aa0f8d0da9038a": {
+    "reader": "Standards /root/standards",
+    "reason": "Missing tick counts zero and one both remain below the four tick finding threshold."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_5:16538ba358287064156593d27f28e92076b6df14247465396575de341381c291": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before ledger is used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_7:b352cc411cb90bb7cef57ba21a5944c592da8836b567de21e9c76ca6589d685c": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before task rows are used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_9:3a19000dfa0194f0917d772f84ef1ae2082dd6416e19320087b022e52e6045d5": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before time is used."
   }
 }

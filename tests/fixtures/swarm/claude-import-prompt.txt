@@ -1,0 +1,20 @@
+Allow external CLAUDE.md file imports?
+
+  This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories.
+
+  External imports:
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/.claude/rules/credential-files.md
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/profiles/kit-engineer/.claude/rules/code-intelligence.md
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/.claude/rules/durability.md
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/profiles/swarm-base/.claude/rules/anton-ops.md
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/.claude/rules/handoffs.md
+    /home/iamroot/dev/tcc-ecosystem/agentihooks-bundle/profiles/kit-engineer/.claude/rules/worktrees.md
+    … +5 imports not shown.
+    Yes covers those too, plus any this project adds later.
+
+  Important: Only use Claude Code with files you trust. Accessing untrusted files may pose security risks https://code.claude.com/docs/en/security
+
+  ❯ No, disable external imports
+    Yes, allow external imports
+
+  Enter to confirm

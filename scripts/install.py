@@ -4120,7 +4120,7 @@ def _uninstall_cli_tool() -> None:
 
 
 def _remove_agentihooks_symlinks(dst_dir: Path, label: str, *, ledger_only: bool = False) -> int:
-    """Remove the symlinks in *dst_dir* that agentihooks recorded installing.
+    """Remove the links and copied rules in *dst_dir* that agentihooks installed.
 
     Ownership comes from ``state.json['managed_links']``. Links the operator or
     another tool put there are never touched, whatever they point at.
@@ -4137,7 +4137,7 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str, *, ledger_only: bool
     ledger = _state_links()
     removed: list[Path] = []
     for link in sorted(dst_dir.iterdir()):
-        if not link.is_symlink():
+        if not link.is_symlink() and not (dst_dir.name == "rules" and link.is_file() and str(link) in ledger):
             continue
         if ledger_only:
             entry = ledger.get(str(link))
@@ -4150,7 +4150,7 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str, *, ledger_only: bool
         elif not _link_is_managed(link, ledger):
             continue
         link.unlink()
-        _cprint(f"  [RM] Removed {label} symlink: {link.name}")
+        _cprint(f"  [RM] Removed managed {label}: {link.name}")
         removed.append(link)
     _state_forget_links(removed)
     return len(removed)
@@ -4801,7 +4801,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     n_skills = _count_managed_symlinks(skills_dir)
     n_agents = _count_managed_symlinks(agents_dir)
     n_commands = _count_managed_symlinks(commands_dir)
-    n_rules = _count_managed_symlinks(rules_dir)
+    n_rules = sum(1 for path in rules_dir.glob("*.md") if _link_is_managed(path))
 
     # Remove CLAUDE.md whether it's a legacy profiles/ symlink or a real file
     # written by install (tracked in state.json / manifesto marker).
@@ -4871,7 +4871,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     print(f"  {skills_dir}/  → {n_skills} symlink(s)")
     print(f"  {agents_dir}/  → {n_agents} symlink(s)")
     print(f"  {commands_dir}/  → {n_commands} symlink(s)")
-    print(f"  {rules_dir}/  → {n_rules} symlink(s)")
+    print(f"  {rules_dir}/  → {n_rules} rule(s)")
     if remove_claude_md:
         _orig = _load_state().get("claude_md_original_backup")
         if _orig and Path(_orig).exists():
@@ -5856,9 +5856,9 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     from hooks.context.rules_refresh import (
         _delete_marker,
         _load_marker,
-        collect_profile_rules,
         write_refresh_marker,
     )
+    from scripts.targets.claude_target import refresh_rules
 
     profile = args.profile or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5881,7 +5881,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print(f"[ERROR] No rules found at {rules_dir} / {claude_md} / {claude_local_md}. Is agentihooks installed?")
         sys.exit(1)
 
-    payload = collect_profile_rules(rules_dir, claude_md, claude_local_md)
+    payload = refresh_rules(rules_dir, claude_md, claude_local_md, args.dry_run)
 
     if args.dry_run:
         import hashlib as _hash

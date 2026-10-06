@@ -89,6 +89,11 @@ class FakeRuntime:
     def status(self, agent):
         return self.statuses.get(agent.name, "working")
 
+    def observe(self, agent):
+        from scripts.swarm.pane import PaneObservation
+
+        return PaneObservation(self.status(agent))
+
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
 

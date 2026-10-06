@@ -82,6 +82,7 @@ def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset()):
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
         *idle_with_claim(agents, tasks, limits, waiting),
+        *waiting_on_input(agents, tasks),
         *stale_claims(events, tasks, now_ms, limits),
         *over_monitoring(activity, limits),
     ]
@@ -211,6 +212,26 @@ def idle_with_claim(agents, tasks, limits, waiting=frozenset()):
                 (f"task {_title(tasks, held['id'])} ({held['state']})",),
                 f"{limits.idle_ticks} idle ticks",
                 a["idle_ticks"],
+            )
+        )
+    return found
+
+
+def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        held = tasks.get(agent.get("task"), {})
+        ticks = agent.get("input_ticks", 0)
+        if held.get("state") not in HELD or ticks <= 3 or not agent.get("input_prompt"):
+            continue
+        found.append(
+            Finding(
+                "waiting on input",
+                agent["name"],
+                f"waiting on input for {ticks} ticks while holding a task",
+                (f"prompt: {agent['input_prompt']}", f"task {_title(tasks, held['id'])} ({held['state']})"),
+                "more than 3 consecutive ticks waiting on input",
+                ticks,
             )
         )
     return found
