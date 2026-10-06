@@ -13,7 +13,7 @@ from scripts.handoff import transfers
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, lifetime, phase_state
+from scripts.swarm import control_notifications, lifetime, phase_state, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -98,6 +98,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         if config.state == "running":
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
+    _session_models(slug, store)
     transfers.observe(store, slug, runtime.live_names(), now_ms)
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
 
@@ -218,6 +219,13 @@ def _conversations(slug, store, runtime):
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
+
+
+def _session_models(slug, store):
+    for agent in store.agents(slug):
+        reported = session_model.apply(agent, session_model.get(store.redis, slug, agent.name))
+        if reported != agent:
+            store.put_agent(slug, reported)
 
 
 def _reopen(slug, ledger, rows, task_id):

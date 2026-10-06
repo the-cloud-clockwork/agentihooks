@@ -150,7 +150,9 @@ classifier never picks a model: a lane model of `auto` launches the harness
 default, opus for Claude and gpt-6.1-sol for Codex unless
 `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit
 model and effort values remain unchanged, and master and plan seats never consult
-the classifier. Decisions use purpose `model-pick` in the classifier log.
+the classifier. A master always launches on the frontier model at high effort for
+its harness, whatever its lane or the environment names, and records `frontier`.
+Decisions use purpose `model-pick` in the classifier log.
 
 `AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The effort answer's
 confidence must meet it; otherwise the lane keeps its launch defaults. An
@@ -158,3 +160,5 @@ unavailable classifier also preserves those defaults.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,
 and an explicit or unavailable pick records `lane-default` without confidence.
+A running session that reports another model or effort replaces both on the
+record with source `session` and no confidence.
