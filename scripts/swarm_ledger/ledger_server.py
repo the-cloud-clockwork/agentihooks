@@ -372,6 +372,7 @@ MAX_CAP = 50
 MIN_COMPACT, MAX_COMPACT = 100, 1000
 QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
+EFFORTS = ("low", "medium", "high", "max")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
@@ -408,6 +409,11 @@ def control_argv(body):
         if type(value) is not int or not low <= value <= limit:
             raise ValueError(f"{key} must be a whole number from {low} to {limit}")
         pairs.append(f"{flag}={value}")
+    for key, flag in (("effort_min", "effort-min"), ("effort_max", "effort-max")):
+        if key in body:
+            if body[key] not in EFFORTS:
+                raise ValueError(f"{key} must be one of {', '.join(EFFORTS)}")
+            pairs.append(f"{flag}={body[key]}")
     if "autonomy" in body:
         if body["autonomy"] not in AUTONOMY:
             raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
@@ -415,7 +421,9 @@ def control_argv(body):
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
     if not pairs:
-        raise ValueError("set needs max_eng, max_ci, max_plan, codex_share, compact_limit, autonomy or gates")
+        raise ValueError(
+            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy or gates"
+        )
     return ["set", *pairs]
 
 

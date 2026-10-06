@@ -206,16 +206,16 @@ def _passed(argv):
 
 
 def test_spawn_passes_a_codex_lane_agent_model_and_effort_to_init_agent(tmp_path):
-    seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex", "model": "gpt-6.1-sol", "effort": "xhigh"}})
+    seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex", "model": "gpt-6.1-sol", "effort": "medium"}})
     assert seen["requested"] == "codex"
     assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
-    assert _passed(seen["argv"]) == ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"']
+    assert _passed(seen["argv"]) == ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']
 
 
 def test_spawn_passes_a_claude_lane_model_and_effort_to_init_agent(tmp_path):
-    seen = _spawn_seen(tmp_path, {"eng": {"agent": "claude", "model": "sonnet", "effort": "max"}})
+    seen = _spawn_seen(tmp_path, {"eng": {"agent": "claude", "model": "sonnet", "effort": "medium"}})
     assert seen["requested"] == "claude"
-    assert _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "max"]
+    assert _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "medium"]
 
 
 def test_a_claude_planner_starts_in_plan_mode(tmp_path):
@@ -489,9 +489,9 @@ def test_resume_relaunches_on_the_model_and_effort_its_lane_names(tmp_path):
     from dataclasses import replace
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
-    config.lanes = {"eng": {"model": "fable", "effort": "max"}}
+    config.lanes = {"eng": {"model": "fable", "effort": "medium"}}
     runtime.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
-    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "max"]
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "medium"]
 
 
 def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):

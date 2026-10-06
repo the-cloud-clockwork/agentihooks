@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts import agent_choice, claude_trust, herdr_host
+from scripts.swarm import effort_range
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -432,6 +433,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
 
             profile_env, claude_args = prepare(args.profile, agent, "", "", claude_args, active_env)
             active_env.update(profile_env)
+        claude_args = effort_range.launch_args(agent, claude_args, active_env)
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
