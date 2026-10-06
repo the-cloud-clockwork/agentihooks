@@ -1,0 +1,18 @@
+[
+  {
+    "query": "You are a CI engineer in swarm build-speed, fix the slow image build",
+    "expected_behavior": "Measures the build time first, fixes it with one pull request in its own worktree, measures again, and closes with swarm done --pr."
+  },
+  {
+    "query": "the tune task asks to cut the test job time",
+    "expected_behavior": "Closes with swarm done --command naming the measuring command and --output carrying the before and after numbers."
+  },
+  {
+    "query": "the rollout is still in progress after the merge",
+    "expected_behavior": "Declares a bare wait of at most an hour with swarm wait and a reason, or waits on checks with --on checks and the pull request url."
+  },
+  {
+    "query": "after the fix the next slowest step is the dependency install",
+    "expected_behavior": "Proposes it as a follow up with its measured number through ledger followup add, never as its own next task."
+  }
+]
