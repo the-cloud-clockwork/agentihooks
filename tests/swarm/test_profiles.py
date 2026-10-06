@@ -2,7 +2,6 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, runtime, status, store, templates, tick
@@ -62,6 +61,8 @@ def test_template_accepts_custom_profile_name():
 @pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("master", "master"), ("eng", "qa")])
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
+    import fakeredis
+
     calls = []
 
     def launch(argv, **kwargs):
@@ -102,6 +103,8 @@ def test_resume_preserves_profile_or_defaults_for_old_record(tmp_path, profile, 
 
 
 def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
+    import fakeredis
+
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(store.SwarmConfig("sw", "/r", 1, 0))
     for name, lane, profile, model in [
@@ -132,6 +135,10 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
     assert agents["m"][3:5] == ["master", "sonnet low"]
     assert agents["e"][3:5] == ["engineer", "gpt-6-luna low"]
     assert agents["old"][3:5] == ["unknown", "unknown"]
+    assert agents["old"][5] == "-"
+    saved.put_agent("sw", replace(saved.agents("sw")[0], account="primary"))
+    cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
+    assert "\tprimary\t" in capsys.readouterr().out
     report = status.status_report(saved, "sw", ledger.state("sw"))
     assert {a["name"]: (a["profile"], a["model"]) for a in report["agents"]} == {
         "m": ("master", "sonnet"),
@@ -141,6 +148,8 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
 
 
 def test_create_set_and_save_preserve_master_profile(monkeypatch, tmp_path, capsys):
+    import fakeredis
+
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(cli, "connect", lambda: saved)
     ledger = FakeLedger([])
@@ -153,3 +162,8 @@ def test_create_set_and_save_preserve_master_profile(monkeypatch, tmp_path, caps
     found = templates.load("custom", dict(AGENTIHOOKS_HOME=str(tmp_path)))
     assert found.lanes["master"].profile == "planner"
     assert found.lanes["eng"].profile == "qa"
+
+
+def test_unknown_template_lane_names_the_valid_lanes():
+    with pytest.raises(store.SwarmError, match="template x names lanes.*qa.*eng, ci and master"):
+        templates.parse({"name": "x", "lanes": {"qa": {}}})
