@@ -14,8 +14,15 @@ class CommentingLedger(FakeLedger):
         super().__init__(tasks)
         self.comments = []
 
+    def state(self, slug):
+        return {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
+
+    def update_task(self, slug, task_id, fields, by="swarm"):
+        assert (slug, by) == ("sw", "swarm")
+        super().update_task(slug, task_id, fields, by)
+
     def comment(self, slug, task_id, text, by):
-        self.comments.append((task_id, text, by))
+        self.comments.append((slug, task_id, text, by))
 
 
 def gate_rows():
@@ -53,7 +60,7 @@ def test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master(store):  
     assert [task for _, _, task in runtime.spawned] == ["t2"]
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.claimant("sw", "t1") is None
-    assert ledger.comments == [("t1", refusal(3, "recycle"), "swarm")]
+    assert ledger.comments == [("sw", "t1", refusal(3, "recycle"), "swarm")]
     assert f"blocked t1: {refusal(3, 'recycle')}" in actions
     assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in gate_rows()] == [
         ("claims", "deny", "swarm", "t1", refusal(3, "recycle"))
@@ -74,7 +81,7 @@ def test_without_a_pending_handoff_the_summary_says_none(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 4)
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert ledger.comments == [("t1", refusal(4, "none"), "swarm")]
+    assert ledger.comments == [("sw", "t1", refusal(4, "none"), "swarm")]
 
 
 def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store, monkeypatch):  # noqa: F811

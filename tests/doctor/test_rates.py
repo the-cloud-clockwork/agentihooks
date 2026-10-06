@@ -270,9 +270,10 @@ def test_proof_loops_count_ci_reruns_and_sub_agent_calls_per_task_from_count_row
         {"gate": "subagents", "kind": "observe", "task": "t1", "at": 117 * MIN},
         {"gate": "talk", "kind": "count", "task": "t1", "at": 118 * MIN},
         {"gate": "reruns", "kind": "count"},
+        {"gate": "reruns", "kind": "count", "at": 119 * MIN},
     ]
     found = rates.proof_loops(recs(events=events, gate_log=log), WIN)
-    assert (found["CI reruns per task"], found["sub-agent calls per task"]) == (1.5, 1.0)
+    assert (found["CI reruns per task"], found["sub-agent calls per task"]) == (2.0, 1.0)
 
 
 def test_count_rows_are_a_gate_kind():

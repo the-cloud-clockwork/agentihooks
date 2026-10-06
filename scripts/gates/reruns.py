@@ -24,17 +24,13 @@ class Target:
 
 
 def _target(args):
-    found, index = {"run": "", "job": "", "repo": ""}, 0
-    while index < len(args):
-        flag, eq, value = args[index].partition("=")
+    found, words = {"run": "", "job": "", "repo": ""}, iter(args)
+    for word in words:
+        flag, eq, value = word.partition("=")
         if flag in VALUE_FLAGS:
-            if not eq:
-                index += 1
-                value = args[index] if index < len(args) else ""
-            found[VALUE_FLAGS[flag]] = value
+            found[VALUE_FLAGS[flag]] = value if eq else next(words, "")
         elif not (found["run"] or flag.startswith("-")):
             found["run"] = flag
-        index += 1
     return Target(**found)
 
 

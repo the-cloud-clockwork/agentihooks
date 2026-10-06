@@ -215,7 +215,7 @@ class RedisStore:
         return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
 
     def count_claim(self, slug, task):
-        return self.redis.hincrby(self.key(slug, "claims"), task, 1)
+        return self.redis.hincrby(self.key(slug, "claims"), task)
 
     def claims(self, slug, task):
         return int(self.redis.hget(self.key(slug, "claims"), task) or 0)

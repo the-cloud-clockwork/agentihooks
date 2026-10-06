@@ -137,7 +137,7 @@ def _spends(records, window, gate):
     return sum(
         1
         for row in records.gate_log
-        if row.get("gate") == gate and row.get("kind") == "count" and window.holds(row.get("at", -1))
+        if GATE_FIELDS <= row.keys() and window.holds(row["at"]) and (row["gate"], row["kind"]) == (gate, "count")
     )
 
 
