@@ -126,4 +126,8 @@ def first_events(slug, root=None):
 
 
 def clear(slug, root=None):
-    shutil.rmtree(Path(root or default_root()) / slug, ignore_errors=True)
+    base = Path(root or default_root()).resolve()
+    folder = (base / slug).resolve()
+    if folder.parent != base:
+        raise ValueError(f"refusing to clear swarm activity for {slug!r}: not one folder under {base}")
+    shutil.rmtree(folder, ignore_errors=True)
