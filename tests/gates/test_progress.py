@@ -144,3 +144,31 @@ def test_a_pull_request_reads_resolved_when_every_check_finished(rollup, resolve
 
     found = pull_request({"state": "OPEN", "statusCheckRollup": rollup})
     assert (found.resolved, found.red) == (resolved, red)
+
+
+def test_no_command_is_no_outcome():
+    assert progress.outcome_of(None) == ""
+
+
+def test_an_outcome_without_a_time_is_stamped_now(store):
+    import time
+
+    before = int(time.time() * 1000)
+    store.outcome(ME, "pushed")
+    assert before <= store.read(ME).outcome_at <= int(time.time() * 1000)
+
+
+def test_every_held_pull_request_is_read_past_a_skipped_one(store):
+    other = "engineer@abcdef-0002"
+    tasks = [
+        pr_task(id="t0", state="claimed"),
+        pr_task(id="t1", pr_url=URL + "1", claimed_by=other),
+        pr_task(id="t2", pr_url=URL + "2"),
+        pr_task(id="t3", pr_url=URL + "3", claimed_by="engineer@abcdef-0003"),
+    ]
+    found = {URL + "1": None, URL + "2": pull(), URL + "3": pull()}
+    assert progress.checks_pass(store.redis, SLUG, tasks, found.get, now_ms=5) == [
+        f"checks resolved green on {URL}2, an outcome for {ME}",
+        f"checks resolved green on {URL}3, an outcome for engineer@abcdef-0003",
+    ]
+    assert store.read(other).outcome_at == 0

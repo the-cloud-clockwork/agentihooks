@@ -229,10 +229,11 @@ def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_pat
 def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     from scripts.swarm_ledger import ledger_server
 
-    seen = []
+    seen, seen_changes, changes = [], [], [{"path": "phases/p1/done", "value": True}]
 
     def sync(slug, changes=None, ops=None, gate=None):
         seen.append(gate)
+        seen_changes.append(changes)
         return {"_meta": {"members": {}}, "tasks": []}, []
 
     monkeypatch.setattr(ledger_server.core, "sync", sync)
@@ -241,6 +242,163 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     handler = ledger_server.Handler.__new__(ledger_server.Handler)
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: code
-    assert handler.reply_state(SLUG, ops=ops) == 200
+    assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200
     assert [type(gate).__name__ for gate in seen] == (["Budget"] if gated else ["NoneType"])
+    assert seen_changes == [changes]
     assert not gated or seen[0].slug == SLUG
+
+
+@pytest.mark.parametrize(
+    ("op", "counted"),
+    [
+        ({"op": "add", "thread": "chat"}, False),
+        ({"op": "delete", "thread": "chat", "by": ENG}, False),
+        ({"op": "edit", "thread": "chat", "by": ENG}, True),
+        ({"op": "edit", "thread": "tasks/t1/comments", "by": ENG}, True),
+        ({"op": "add", "by": ENG}, False),
+    ],
+)
+def test_talk_is_an_agent_add_or_edit_on_chat_or_comments(op, counted):
+    assert talk.talk_op(op) is counted
+
+
+@pytest.mark.parametrize(
+    "op",
+    [{"op": "add", "fields": {"state": "pr"}}, {"op": "task_update", "fields": {}}, {"op": "task_update"}],
+)
+def test_only_a_task_update_with_an_outcome_field_is_an_outcome(op):
+    assert talk.outcome_op(op) == ""
+
+
+def test_the_refusal_reads_in_full():
+    assert talk.refusal(ENG, 12, SLUG) == (
+        f"talk refused: {ENG} made 12 talk writes since its last outcome, the budget is 10. "
+        f"Record an outcome first: push the commit, or run agentihooks swarm {SLUG} pr <url>. "
+        "Only the operator lifts it, by typing lift the talk gate in this pane."
+    )
+
+
+def direct(redis, home, doc, op, meta=None, at=1000):
+    from types import SimpleNamespace
+
+    ctx = SimpleNamespace(meta=meta or {"events": [], "members": {}}, at=at, refused=[])
+    return budget(redis, home).apply(doc, op, ctx, lambda d, o, c: True), ctx
+
+
+def at_budget(redis, by=ENG):
+    marks = progress.Progress(redis, SLUG)
+    for _ in range(talk.BUDGET):
+        marks.talk(by)
+
+
+CHAT = {"op": "add", "thread": "chat", "id": "m1", "text": "hi", "by": ENG}
+
+
+def test_an_operator_event_on_a_task_the_agent_claimed_is_owed(redis, tmp_path):
+    mode(redis, "enforce")
+    at_budget(redis)
+    members = {ENG: {}, MASTER: {"role": "orchestrator"}}
+    meta = {"members": members, "events": [{"rev": 1, "by": "operator", "kind": "comment", "target": "tasks/t1"}]}
+    claimed = {"tasks": [{"id": "t1", "claimed_by": ENG, "state": "claimed"}]}
+    assert direct(redis, tmp_path, claimed, CHAT, meta)[0] is True
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT, meta)[0] is False
+
+
+@pytest.mark.parametrize(
+    ("tasks", "held"),
+    [
+        (
+            [
+                {"id": "t0", "claimed_by": CI, "state": "claimed"},
+                {"id": "t1", "claimed_by": ENG, "state": "done"},
+                {"id": "t2", "claimed_by": ENG, "state": "claimed"},
+            ],
+            "t2",
+        ),
+        ([{"id": "t1", "claimed_by": ENG, "state": "done"}], ""),
+    ],
+)
+def test_a_deny_row_names_the_open_task_the_agent_holds(redis, tmp_path, tasks, held):
+    mode(redis, "enforce")
+    at_budget(redis)
+    done, ctx = direct(redis, tmp_path, {"tasks": tasks}, CHAT)
+    assert done is False
+    assert ctx.refused == [talk.refusal(ENG, talk.BUDGET, SLUG)]
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["tool"], r["reason"]) for r in gate_rows(tmp_path)] == [
+        ("talk", "deny", ENG, held, "ledger", talk.refusal(ENG, talk.BUDGET, SLUG))
+    ]
+
+
+def test_an_observe_row_carries_the_refusal(redis, tmp_path):
+    at_budget(redis)
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT)[0] is True
+    assert [(r["gate"], r["kind"], r["tool"], r["reason"]) for r in gate_rows(tmp_path)] == [
+        ("talk", "observe", "ledger", talk.refusal(ENG, talk.BUDGET, SLUG))
+    ]
+
+
+def test_a_fail_open_row_names_the_gate_and_the_ledger(redis, tmp_path):
+    def down():
+        raise ConnectionError("refused")
+
+    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG}
+    core.sync(SLUG, ops=[op], gate=talk.Budget(SLUG, connect=down, home=tmp_path))
+    assert [(r["gate"], r["tool"], r["agent"]) for r in gate_rows(tmp_path)] == [("talk", "ledger", ENG)]
+
+
+def test_an_outcome_is_stamped_at_the_write_time(redis, tmp_path):
+    op = {"op": "task_update", "id": "u1", "by": ENG, "item": "tasks/t1", "fields": {"state": "pr"}}
+    assert direct(redis, tmp_path, {"tasks": []}, op, at=4242)[0] is True
+    assert progress.Progress(redis, SLUG).read(ENG) == progress.Mark(4242, "task pr", 0)
+
+
+def test_a_sync_reports_both_a_refused_change_and_a_refused_op(redis, tmp_path):
+    mode(redis, "enforce")
+    fill(redis, tmp_path)
+    op = {"op": "add", "thread": "chat", "id": "m-late", "text": "late", "by": ENG}
+    _, rejected = core.sync(
+        SLUG, changes=[{"path": "nowhere/x/done", "value": True}], ops=[op], gate=budget(redis, tmp_path)
+    )
+    assert rejected == ["nowhere/x/done", "m-late"]
+
+
+def refused_state(*warnings, rejected=("m1",)):
+    return {"rejected": list(rejected), "_meta": {"warnings": list(warnings)}}
+
+
+def test_the_cli_exits_with_every_talk_refusal():
+    from scripts.swarm_ledger import ledger
+
+    with pytest.raises(SystemExit) as stop:
+        ledger.talk_refused(refused_state("talk refused: one", "stale page", "talk refused: two"))
+    assert stop.value.code == "talk refused: one; talk refused: two"
+
+
+@pytest.mark.parametrize(
+    "state",
+    [refused_state("stale page"), refused_state("talk refused: old", rejected=()), {"rejected": ["m1"]}],
+)
+def test_the_cli_passes_other_rejections_and_accepted_writes(state):
+    from scripts.swarm_ledger import ledger
+
+    assert ledger.talk_refused(state) is None
+
+
+@pytest.mark.parametrize(("state", "printed"), [({"rejected": []}, True), (refused_state("stale page"), False)])
+def test_posted_prints_whether_the_write_landed(capsys, state, printed):
+    from scripts.swarm_ledger import ledger
+
+    ledger.posted(state)
+    assert json.loads(capsys.readouterr().out) == {"posted": printed}
+
+
+def test_say_stops_on_a_talk_refusal(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger import ledger
+
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: refused_state("talk refused: busy"))
+    args = SimpleNamespace(text="hi", name=ENG, long=False, slug=SLUG)
+    with pytest.raises(SystemExit) as stop:
+        ledger.cmd_say(args)
+    assert stop.value.code == "talk refused: busy"

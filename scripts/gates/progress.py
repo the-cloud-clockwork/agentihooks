@@ -19,7 +19,7 @@ class Mark:
 
 
 def outcome_of(command):
-    return next((kind for kind, pattern in OUTCOME_COMMANDS if pattern.search(command or "")), "")
+    return next((kind for kind, pattern in OUTCOME_COMMANDS if command and pattern.search(command)), "")
 
 
 class Progress:
@@ -34,7 +34,7 @@ class Progress:
         return Mark(int(raw.get("outcome_at") or 0), raw.get("outcome", ""), int(raw.get("talk") or 0))
 
     def talk(self, agent):
-        return int(self.redis.hincrby(self.key(agent), "talk", 1))
+        return int(self.redis.hincrby(self.key(agent), "talk"))
 
     def outcome(self, agent, kind, now_ms=None):
         at = int(time.time() * 1000) if now_ms is None else now_ms
@@ -51,7 +51,7 @@ class Progress:
 def checks_pass(redis, slug, tasks, github, now_ms=None):
     marks, stamped = Progress(redis, slug), []
     for task in tasks:
-        url, owner = task.get("pr_url", ""), task.get("claimed_by", "")
+        url, owner = task.get("pr_url"), task.get("claimed_by")
         if task.get("state") != "pr" or not (url and owner):
             continue
         found = github(url)

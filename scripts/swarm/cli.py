@@ -29,7 +29,6 @@ done carries the proof its task's kind needs: ops and tune --command C --output 
 """
 
 import argparse
-import functools
 import json
 import os
 import re
@@ -139,10 +138,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
-        github = functools.cache(ledger_events.view)
-        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms(), github)
-        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), github)
-        actions += progress.checks_pass(store.redis, slug, doc.get("tasks", []), github, now_ms())
+        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
+        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -359,7 +357,7 @@ def cmd_set(store, args):
             changes["autonomy"] = value
             continue
         if key in GATE_KEYS:
-            changes["gates"] = {**changes.get("gates", store.config(args.slug).gates), **gate_mode(key, value)}
+            changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(

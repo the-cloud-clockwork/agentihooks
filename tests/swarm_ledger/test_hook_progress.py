@@ -16,11 +16,11 @@ def hook(tmp_path, monkeypatch):
     from scripts.swarm_ledger import ledger_hook
 
     marks = progress.Progress(fakeredis.FakeRedis(decode_responses=True), SLUG)
-    monkeypatch.setattr(ledger_hook, "SESSIONS", tmp_path)
-    monkeypatch.setattr(ledger_hook, "progress_of", lambda session: marks)
-    monkeypatch.setattr(ledger_hook, "first_shown", lambda session, owed: owed)
     state = {"_meta": {"members": {ME: {"role": "member", "handled_rev": 0}}, "events": []}, "tasks": []}
     session = ledger_hook.new_session(SLUG, ME, "member")
+    monkeypatch.setattr(ledger_hook, "SESSIONS", tmp_path)
+    monkeypatch.setattr(ledger_hook, "progress_of", lambda bound: marks if bound is session else None)
+    monkeypatch.setattr(ledger_hook, "first_shown", lambda session, owed: owed)
     sfile = tmp_path / "s.json"
 
     def call(command="ls", **extra):
@@ -97,3 +97,60 @@ def test_an_unreadable_progress_signal_reads_as_no_outcome(hook, monkeypatch, ca
     for _ in range(25):
         hook()
     assert "25 tool calls" in capsys.readouterr().out
+
+
+def test_an_outcome_restarts_every_counter(hook):
+    hook.session.update(calls=9, nudge_calls=7, blocks=2, bypass_posted=True)
+    hook("git push")
+    assert [hook.session[k] for k in ("calls", "nudge_calls", "blocks", "bypass_posted")] == [0, 0, 0, False]
+
+
+def test_a_ledger_write_restarts_the_count(hook):
+    for _ in range(3):
+        hook()
+    hook(f"agentihooks ledger --slug {SLUG} --as {ME} comment phases/p1 done")
+    assert hook.session["calls"] == 0
+    assert hook.marks.read(ME).outcome_at == 0
+
+
+def test_the_nudge_fires_once_per_window(hook, capsys):
+    for _ in range(25):
+        hook()
+    assert "25 tool calls" in capsys.readouterr().out
+    hook()
+    assert capsys.readouterr().out == ""
+
+
+def test_stop_blocks_at_exactly_the_call_limit(hook, capsys):
+    hook.session["calls"] = 10
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
+def test_a_first_outcome_at_any_time_is_seen_on_a_fresh_session(hook):
+    hook.marks.outcome(ME, "pushed", now_ms=1)
+    assert hook.module.outcome_seen(hook.session) is True
+    assert hook.session["outcome_at"] == 1
+
+
+def test_a_failed_progress_signal_is_logged(hook, monkeypatch):
+    lines = []
+
+    def down(session):
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(hook.module, "progress_of", down)
+    monkeypatch.setattr(hook.module, "log", lines.append)
+    hook.module.note_outcome(hook.session, "pushed")
+    assert hook.module.outcome_seen(hook.session) is False
+    assert lines == ["outcome not recorded: refused", "progress unreadable: refused"]
+
+
+def test_the_progress_signal_reads_the_sessions_swarm(monkeypatch):
+    from scripts.swarm import store
+    from scripts.swarm_ledger import ledger_hook
+
+    client = object()
+    monkeypatch.setattr(store, "redis_client", lambda: client)
+    marks = ledger_hook.progress_of(ledger_hook.new_session(SLUG, ME, "member"))
+    assert (marks.redis, marks.slug) == (client, SLUG)

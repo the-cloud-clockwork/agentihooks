@@ -21,8 +21,9 @@ def test_the_page_sets_it_as_the_operator(env, monkeypatch):  # noqa: F811
     store, _, _ = env
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "operator")
     run("sw", "create", "--repo", "/repo")
-    assert run("sw", "set", "talk-gate=enforce", "max-eng-agents=2") == 0
-    assert (store.config("sw").gates, store.config("sw").max_eng) == ({"talk": "enforce"}, 2)
+    store.update("sw", gates={"identity": "enforce"})
+    assert run("sw", "set", "talk-gate=enforce", "max-eng-agents=3") == 0
+    assert (store.config("sw").gates, store.config("sw").max_eng) == ({"identity": "enforce", "talk": "enforce"}, 3)
 
 
 def test_an_agent_cannot_set_a_gate_mode(env, monkeypatch, capsys):  # noqa: F811
@@ -53,11 +54,29 @@ def test_block_records_the_state_change_before_its_note(env):  # noqa: F811
     order = []
     update, comment = ledger.update_task, ledger.comment
     ledger.update_task = lambda *a, **k: order.append("state") or update(*a, **k)
-    ledger.comment = lambda *a, **k: order.append("note") or comment(*a, **k)
+    ledger.comment = lambda *a, **k: order.append(("note", a[0])) or comment(*a, **k)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "waiting on a token only the operator can create") == 0
-    assert order[-2:] == ["state", "note"]
+    assert order[-2:] == ["state", ("note", "sw")]
+
+
+def test_the_tick_stamps_resolved_checks_as_the_owners_outcome(env, monkeypatch):  # noqa: F811
+    from scripts.gates.progress import Mark, Progress
+    from scripts.swarm.ledger_events import PullRequest
+    from scripts.swarm.store import AgentRecord
+
+    store, ledger, rt = env
+    me, url = "engineer@a1b2c3-0001", "https://github.com/o/r/pull/9"
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord(me, "eng", "t1", pane_id="p1"))
+    rt.live.add(me)
+    ledger.rows["t1"].update(state="pr", pr_url=url, claimed_by=me)
+    ledger.pulls[url] = PullRequest("OPEN", None, 5, False, True)
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    actions = cli.run_tick(store, "sw", ledger, rt, cli.delivery.HerdrMessenger())
+    assert f"checks resolved green on {url}, an outcome for {me}" in actions
+    assert Progress(store.redis, "sw").read(me) == Mark(9_000_000, "checks resolved", 0)
 
 
 def test_worker_ceremony_reads_the_talk_measure_and_the_master_keeps_the_ratio():

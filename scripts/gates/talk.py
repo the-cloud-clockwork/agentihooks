@@ -21,7 +21,7 @@ OUTCOME_FIELDS = (("state", "task {}"), ("pr_url", "pull request recorded"), ("p
 def talk_op(op):
     if op.get("op") == "add_item":
         return op.get("list") == "followups"
-    thread = str(op.get("thread") or "")
+    thread = str(op.get("thread"))
     return op.get("op") in ("add", "edit") and "by" in op and (thread in TALK_THREADS or thread.endswith("/comments"))
 
 
@@ -43,8 +43,8 @@ def refusal(by, count, slug):
 def lifted(meta, by, now_ms):
     since = now_ms - LIFT_SECONDS * 1000
     return any(
-        e.get("kind") == LIFTED and e.get("by") == by and e.get("gate") == NAME and e.get("at", 0) >= since
-        for e in meta.get("events", [])
+        e.get("kind") == LIFTED and e.get("by") == by and e.get("gate") == NAME and e["at"] >= since
+        for e in meta["events"]
     )
 
 
@@ -55,8 +55,8 @@ def owes(meta, by, tasks):
 
 
 def mode_of(config):
-    chosen = (config.gates or {}).get(NAME, DEFAULT_MODE)
-    return chosen if chosen in ("enforce", "observe", "off") else DEFAULT_MODE
+    chosen = config.gates.get(NAME)
+    return chosen if chosen in ("enforce", "off") else DEFAULT_MODE
 
 
 def _connect():
@@ -73,11 +73,11 @@ class Budget:
     def apply(self, doc, op, ctx, apply):
         from scripts.swarm.naming import lane_of, resolve_name
 
-        by = resolve_name(str(op.get("by") or ""))
+        by = resolve_name(str(op.get("by")))
         outcome, talk = outcome_op(op), talk_op(op)
         if lane_of(by) not in WORKER_LANES or not (outcome or talk):
             return apply(doc, op, ctx)
-        who = Who(name=by, swarm=self.slug, task=_held(doc, by))
+        who = Who(name=by, task=_held(doc, by))
         try:
             marks = self._marks()
         except Exception as exc:  # a crashed gate lets the write through, counted in the gate log
@@ -99,7 +99,7 @@ class Budget:
         if count >= BUDGET:
             reason = refusal(by, count, self.slug)
             kind = "deny" if mode == "enforce" else "observe"
-            log.append(self.slug, log.Row.of(NAME, kind, who, "ledger", reason, ctx.at), self.home)
+            log.append(self.slug, log.Row.of(NAME, kind, who, "ledger", reason), self.home)
             if mode == "enforce":
                 ctx.refused.append(reason)
                 return False
@@ -109,7 +109,7 @@ class Budget:
         return done
 
     def _exempt(self, doc, by, ctx):
-        return owes(ctx.meta, by, doc.get("tasks", [])) or lifted(ctx.meta, by, ctx.at)
+        return owes(ctx.meta, by, doc["tasks"]) or lifted(ctx.meta, by, ctx.at)
 
     def _marks(self):
         from scripts.gates.progress import Progress
@@ -125,4 +125,4 @@ class Budget:
 
 
 def _held(doc, by):
-    return next((t["id"] for t in doc.get("tasks", []) if t.get("claimed_by") == by and t.get("state") != "done"), "")
+    return next((t["id"] for t in doc["tasks"] if t.get("claimed_by") == by and t.get("state") != "done"), "")
