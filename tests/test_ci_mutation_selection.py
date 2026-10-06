@@ -100,6 +100,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
 
 def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_excluded(tmp_path, monkeypatch):
     from mutmut.configuration import Config
+    from mutmut.mutation.pragma_handling import PragmaParseError
 
     from scripts.ci_mutation.selection import selected_mutants
 
@@ -117,5 +118,5 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
     generated, names = selected_mutants("scripts/sample.py", source, {5})
     assert len(names) == 1
     assert all(name.startswith("x_g__") for name in names)
-    with pytest.raises(ValueError, match="scripts/sample.py"):
+    with pytest.raises(PragmaParseError, match="scripts/sample.py"):
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
