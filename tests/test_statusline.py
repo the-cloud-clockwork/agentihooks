@@ -87,3 +87,37 @@ def test_statusline_names_the_brain_overlay(monkeypatch, capsys, channels, enabl
     plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
     assert f"  {shown}  channels:{','.join(channels)}" in plain
+
+
+MODEL_PAYLOAD = {
+    "session_id": "statusline-model",
+    "model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5"},
+    "effort": {"level": "high"},
+}
+
+
+@pytest.mark.parametrize("effort, shown", [({"level": "high"}, "| Opus 5.5 high\n"), (None, "| Opus 5.5\n")])
+def test_statusline_shows_the_effort_beside_the_model(monkeypatch, capsys, effort, shown):
+    from hooks import statusline
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({**MODEL_PAYLOAD, "effort": effort})))
+    statusline.main()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+
+    assert shown in plain
+
+
+@pytest.mark.parametrize(
+    "model, reported",
+    [({"id": "claude-opus-5-5", "display_name": "Opus 5.5"}, ("claude-opus-5-5", "high")), ({}, ("", "high"))],
+)
+def test_the_statusline_reports_the_live_model_and_effort_to_the_swarm(monkeypatch, capsys, model, reported):
+    from hooks import statusline
+    from hooks.context import swarm_heartbeat
+
+    seen = []
+    monkeypatch.setattr(swarm_heartbeat, "report", lambda *args: seen.append(args))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({**MODEL_PAYLOAD, "model": model})))
+    statusline.main()
+
+    assert seen == [reported]

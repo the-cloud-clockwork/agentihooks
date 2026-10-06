@@ -29,3 +29,15 @@ def test_user_prompt_submit_hands_its_prompt_to_the_heartbeat(monkeypatch, paylo
     monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args: seen.append(args))
     hook_manager.on_user_prompt_submit({"session_id": "s1", "cwd": "/", **payload})
     assert seen[0] == ("working", prompt)
+
+
+@pytest.mark.parametrize("model", [{"model": "gpt-6.1-sol"}, {}])
+@pytest.mark.parametrize("handler, event", [("on_pre_tool_use", "PreToolUse"), ("on_stop", "Stop")])
+def test_a_hook_reports_the_model_its_payload_names_and_none_without_one(monkeypatch, handler, event, model):
+    seen = []
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.setattr(swarm_heartbeat, "beat", lambda state: None)
+    monkeypatch.setattr(swarm_heartbeat, "report", lambda reported: seen.append(reported))
+    payload = {"hook_event_name": event, "session_id": "s1", "cwd": "/", "transcript_path": "", **model}
+    getattr(hook_manager, handler)({**payload, "tool_name": "Bash", "tool_input": {"command": "true"}})
+    assert seen == [model.get("model", "")]

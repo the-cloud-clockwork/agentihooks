@@ -58,6 +58,19 @@ def test_the_hook_heartbeat_is_written_only_for_a_swarm_agent(redis):
     assert swarm_heartbeat.beat(idle.WORKING, environ={"AGENTIHOOKS_AGENT_NAME": "x"}, redis=redis) is False
 
 
+def test_a_session_model_is_reported_only_by_a_swarm_agent_that_names_one(redis):
+    from scripts.swarm import session_model
+
+    swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-eng-1"}
+    assert swarm_heartbeat.report("", "high", environ=swarm, redis=redis) is False
+    assert swarm_heartbeat.report("opus", "high", environ={"AGENTIHOOKS_AGENT_NAME": "sw-eng-1"}, redis=redis) is False
+    assert swarm_heartbeat.report("opus", "high", environ={"AGENTIHOOKS_SWARM": "sw"}, redis=redis) is False
+    assert session_model.get(redis, "sw", "sw-eng-1") is None
+    assert swarm_heartbeat.report("opus", "high", environ=swarm, redis=redis, now_ms=NOW) is True
+    assert session_model.get(redis, "sw", "sw-eng-1") == {"model": "opus", "effort": "high", "at": NOW}
+    assert 0 < redis.ttl(session_model.key("sw", "sw-eng-1")) <= session_model.TTL_S
+
+
 def test_the_hook_records_operator_prompts_but_not_the_ones_the_swarm_types(redis):
     from scripts.inbox.wake import WAKE_TEXT
     from scripts.swarm.tick import NUDGE

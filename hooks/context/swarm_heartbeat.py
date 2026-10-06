@@ -3,7 +3,7 @@
 import os
 import time
 
-from scripts.swarm import idle
+from scripts.swarm import idle, session_model
 
 NOTIFICATION = "<task-notification>"
 
@@ -36,4 +36,17 @@ def heard(prompt, environ=None, redis=None, now_ms=None):
 
         redis = redis_client(env)
     idle.prompted(redis, slug, name, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
+    return True
+
+
+def report(model, effort="", environ=None, redis=None, now_ms=None):
+    env = os.environ if environ is None else environ
+    slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
+    if not (slug and name and model):
+        return False
+    if redis is None:
+        from scripts.swarm.store import redis_client
+
+        redis = redis_client(env)
+    session_model.put(redis, slug, name, model, effort, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
     return True

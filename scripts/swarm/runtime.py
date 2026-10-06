@@ -11,7 +11,7 @@ from pathlib import Path
 from scripts import agent_choice
 from scripts.swarm import model_pick, naming, prompt
 from scripts.swarm.pane import PaneObservation, selection_prompt
-from scripts.swarm.store import AgentRecord, SwarmConfig, codex_split
+from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -39,7 +39,13 @@ def _model_args(agent, chosen, environ):
     from scripts.init_agent import model_effort, model_flags
 
     model, effort = model_effort(agent, [], environ)
-    return ["--", *model_flags(agent, _set(chosen.get("model")) or model, _set(chosen.get("effort")) or effort)]
+    return model_flags(agent, _set(chosen.get("model")) or model, _set(chosen.get("effort")) or effort)
+
+
+def _lane_default(lane, agent, chosen):
+    if lane == MASTER:
+        return model_pick.frontier(agent)
+    return model_pick.ModelPick(chosen.get("model"), chosen.get("effort"))
 
 
 def herdr_call(args):
@@ -104,14 +110,14 @@ class HerdrRuntime:
         if lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)
         else:
-            picked = model_pick.ModelPick(chosen.get("model"), chosen.get("effort"))
-        placed = self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, picked.__dict__, environ)])
+            picked = _lane_default(lane, agent, chosen)
+        placed = self._launch(
+            config, lane, task["id"], name, [*argv, "--", *_model_args(agent, picked.__dict__, environ)]
+        )
         return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
-        from scripts.init_agent import model_flags
-
         argv = self._argv(
             config,
             agent.name,
@@ -120,15 +126,15 @@ class HerdrRuntime:
             f"{agent.name}-restored.md",
             agent.profile or DEFAULT_PROFILES[agent.lane],
         )
-        flags = (["--route", agent.account] if agent.account else []) + model_flags(
-            agent.harness, agent.model, agent.effort
-        )
-        argv += ["--resume", agent.conversation_id, *(["--", *flags] if flags else [])]
+        picked = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
+        route = ["--route", agent.account] if agent.account else []
+        model = _model_args(agent.harness, picked.__dict__, dict(os.environ))
+        argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(replace(agent, pane_id=placed.pane_id), True)
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
-        return placed
+        return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 
     def _holds(self, pane_id, conversation_id):
         for _ in range(RESUME_CHECKS):

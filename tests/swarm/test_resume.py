@@ -60,12 +60,19 @@ class ResumingRuntime(FakeRuntime):
             raise SpawnError(self.resume_fail)
         self.resumed.append((agent.name, agent.conversation_id, text))
         self.live.add(agent.name)
-        return Placed(pane_id="w2:p9", harness=agent.harness, account=agent.account, model=agent.model)
+        return Placed(
+            pane_id="w2:p9",
+            harness=agent.harness,
+            account=agent.account,
+            model="opus",
+            effort="high",
+            model_source="lane-default",
+        )
 
 
-def saved(store, tmp_path, conversation=ID, worktree=True):
+def saved(store, tmp_path, conversation=ID, worktree=True, **fields):
     store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
-    store.put_agent("sw", agent(pane_id="w1:p1", conversation_id=conversation, seat="eng-1@sw", started_at=5))
+    store.put_agent("sw", agent(pane_id="w1:p1", conversation_id=conversation, seat="eng-1@sw", started_at=5, **fields))
     master = AgentRecord("sw-master-1", MASTER, MASTER, pane_id="w1:m1", harness="claude", seat="master@sw")
     store.put_agent("sw", master)
     store.claim("sw", "t1", "sw-eng-1", 600_000)
@@ -105,6 +112,13 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     assert "/.agentihooks/swarm/sw/tasks/t1" in text
     assert str(snapshot.ledger_path("sw")) in text
     assert "Before acting, re-read" in text
+
+
+def test_a_resumed_agent_record_takes_the_model_and_effort_it_relaunched_with(store, tmp_path):
+    saved(store, tmp_path, model="sonnet", effort="low", model_source="luna", model_confidence=0.99)
+    restore(store, ResumingRuntime())
+    eng = next(a for a in store.agents("sw") if a.name == "sw-eng-1")
+    assert (eng.model, eng.effort, eng.model_source, eng.model_confidence) == ("opus", "high", "lane-default", None)
 
 
 def test_a_resume_that_fails_to_start_leaves_the_agent_to_start_fresh_with_the_reason(store, tmp_path):

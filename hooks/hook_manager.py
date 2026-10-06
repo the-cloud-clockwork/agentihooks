@@ -989,13 +989,15 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
         inject_context(context, also_log=False, skip_compression=True)
 
 
-def _swarm_heartbeat(state: str, prompt: str | None = None) -> None:
+def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
     try:
-        from hooks.context.swarm_heartbeat import beat, heard
+        from hooks.context.swarm_heartbeat import beat, heard, report
 
         beat(state)
         if prompt is not None:
             heard(prompt)
+        if payload is not None:
+            report(payload.get("model", ""))
     except Exception as e:
         log("swarm heartbeat failed", {"error": str(e)})
 
@@ -1076,7 +1078,7 @@ def on_pre_tool_use(payload: dict) -> None:
         _record_swarm_activity(tool_name, tool_input)
     except Exception as e:
         log("swarm activity record failed", {"error": str(e)})
-    _swarm_heartbeat("working")
+    _swarm_heartbeat("working", payload=payload)
 
     _recycle_block = None
     try:
@@ -1946,7 +1948,7 @@ def on_stop(payload: dict) -> None:
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
-    _swarm_heartbeat("idle")
+    _swarm_heartbeat("idle", payload=payload)
     log(
         "Claude stopped",
         {

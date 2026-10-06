@@ -340,10 +340,44 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 
-def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude"):
+@pytest.mark.parametrize(
+    "lane,harness,launch,source",
+    [
+        ("master", "claude", ["--model", "opus", "--effort", "high"], "frontier"),
+        ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "frontier"),
+        ("eng", "claude", ["--model", "opus", "--effort", "high"], "lane-default"),
+        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "lane-default"),
+    ],
+)
+def test_resume_relaunches_on_the_lane_defaults_never_the_recorded_model(
+    tmp_path, monkeypatch, lane, harness, launch, source
+):
+    from dataclasses import replace
+
+    for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
+        monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    config.lanes = {"master": {"model": "sonnet", "effort": "low"}}
+    placed = runtime.resume(config, replace(agent, lane=lane, model="sonnet", effort="low"), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
+    assert placed.model_source == source
+
+
+def test_resume_relaunches_on_the_model_and_effort_its_lane_names(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.lanes = {"eng": {"model": "fable", "effort": "max"}}
+    runtime.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "max"]
+
+
+def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
+    for key, value in (env or {}).items():
+        monkeypatch.setenv(key, value)
     seen = {}
 
     def run(argv, **kwargs):
@@ -388,14 +422,21 @@ def test_master_and_plan_seats_never_take_the_task_classifier_pick(tmp_path, mon
     assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
 
 
-def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
-    lanes = {"master": {"agent": "claude", "model": "sonnet", "effort": "max"}}
-    assert _launched(tmp_path, monkeypatch, "master", SEAT_TASKS["master"], lanes) == [
-        "--model",
-        "sonnet",
-        "--effort",
-        "max",
-    ]
+@pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
+@pytest.mark.parametrize(
+    "harness,launch",
+    [
+        ("claude", ["--model", "opus", "--effort", "high"]),
+        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
+    ],
+)
+def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lane_or_environment_names(
+    tmp_path, monkeypatch, harness, launch, handoff
+):
+    lanes = {"master": {"agent": harness, "model": "sonnet", "effort": "low"}}
+    env = {f"AGENTIHOOKS_{harness.upper()}_MODEL": "haiku", f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
+    task = {**SEAT_TASKS["master"], **({"handoff": handoff} if handoff else {})}
+    assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
 
 
 def _lowest_pick(*args, **kwargs):
