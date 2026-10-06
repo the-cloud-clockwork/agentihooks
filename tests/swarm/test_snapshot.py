@@ -283,9 +283,13 @@ def test_automatic_pruning_refuses_a_name_that_is_not_one_swarm_folder(store, sl
     planted = [shared / f"auto-{n}.json" for n in range(1, 12)]
     for file in planted:
         file.write_text(json.dumps({"taken_at": 0}))
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError, match="refusing snapshot path for swarm .*: not one folder under"):
         snapshot.auto(store, slug, 20 * MINUTE, {}, run=_no_git)
     assert all(file.exists() for file in planted)
+
+
+def test_a_swarm_snapshot_lives_in_its_own_folder_under_the_swarm_root():
+    assert snapshot.path("sw") == snapshot.Path.home() / ".agentihooks" / "swarm" / "sw" / "snapshot.json"
 
 
 def test_restore_uses_the_newest_snapshot_unless_pointed_at_another(store):
