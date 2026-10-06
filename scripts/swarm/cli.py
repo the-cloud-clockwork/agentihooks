@@ -70,7 +70,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
-from scripts.swarm.tick import primed, tick
+from scripts.swarm.tick import agent_status, primed, tick
 from scripts.swarm_ledger import ledger_kinds, ledger_link, plan_shape
 
 SETTABLE = {
@@ -432,7 +432,7 @@ def cmd_status(store, args):
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{a.state}\t{a.conversation_id or '-'}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
