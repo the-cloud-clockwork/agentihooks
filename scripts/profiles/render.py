@@ -327,6 +327,17 @@ def rendered_profiles(target: str) -> list[str]:
     return []
 
 
+def _render_scratch(args: argparse.Namespace) -> int:
+    bundle = args.bundle or _install_module()._get_bundle_path()
+    env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
+    if bundle is not None:
+        env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
+    argv = [sys.executable, "-m", __name__, "render", args.name, "--target", args.target]
+    # The child resolves the agentihooks home, bundle and corrections store at import, so only a fresh process sees them.
+    cwd = Path(__file__).resolve().parents[2]
+    return subprocess.run([*argv, *(["--force"] if args.force else [])], env=env, cwd=cwd).returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks profile")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -334,15 +345,21 @@ def main(argv: list[str] | None = None) -> int:
     render_cmd.add_argument("name")
     render_cmd.add_argument("--target", choices=("claude", "codex", "copilot"), default="claude")
     render_cmd.add_argument("--force", action="store_true")
+    render_cmd.add_argument("--out", type=Path, help="Render into this scratch agentihooks home, not the live one")
+    render_cmd.add_argument("--bundle", type=Path, help="Bundle for --out (default: the linked bundle)")
     from scripts.profiles import measure
 
     measure.add_arguments(commands.add_parser("measure", help="Print a profile's first turn input tokens"))
     args = parser.parse_args(argv)
     if args.command == "measure":
         return measure.main(args)
+    if args.bundle is not None and args.out is None:
+        render_cmd.error("--bundle needs --out")
     if args.target == "copilot":
         print("copilot per-run profiles are not supported", file=sys.stderr)
         return 2
+    if args.out is not None:
+        return _render_scratch(args)
     try:
         out = render(args.target, args.name, force=args.force)
     except ValueError as exc:
@@ -353,3 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Rendered {args.name} ({args.target}) → {out}")
     return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
