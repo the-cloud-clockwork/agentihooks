@@ -31,6 +31,11 @@ URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 
 
+def check_lane(task: dict) -> None:
+    if (ledger_kinds.kind(task) == "plan") != (task.get("lane", "eng") == "plan"):
+        raise ValueError("plan tasks must use the plan lane, and the plan lane accepts only plan tasks")
+
+
 def check(op):
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
@@ -49,6 +54,7 @@ def check(op):
             raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
         ledger_kinds.check(op)
+        check_lane(op)
         gain = op.get("gain", 0)
         if isinstance(gain, bool) or not isinstance(gain, (int, float)) or gain < 0:
             raise ValueError("gain must be a nonnegative number")
@@ -91,6 +97,7 @@ def check_task(task):
     check_lists(task)
     check_urls(task)
     ledger_kinds.check(task)
+    check_lane(task)
     if task.get("state") == "done" and ledger_kinds.unmet(task):
         raise ValueError(f"tasks/{task.get('id')} is done without its proof: {', '.join(ledger_kinds.unmet(task))}")
 
@@ -129,6 +136,18 @@ def _known(tasks, ids):
     return set(ids) <= {t["id"] for t in tasks}
 
 
+def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
+    ids = [item.strip() for item in task["proof"]["slice"].split(",")]
+    known = {item["id"]: item for item in tasks}
+    return [
+        item or "<empty>"
+        for item in ids
+        if item not in known
+        or known[item].get("phase") != task.get("phase")
+        or ledger_kinds.kind(known[item]) == "plan"
+    ]
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
@@ -136,9 +155,15 @@ def _update(doc, op, ctx):
     if task is None or not _known(others, op["fields"].get("depends_on", [])):
         return False
     after = {**task, **op["fields"]}
+    check_lane(after)
     if after.get("state") == "done" and ledger_kinds.unmet(after):
         ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
         return False
+    if after.get("state") == "done" and ledger_kinds.kind(after) == "plan":
+        bad = invalid_slice(after, doc["tasks"])
+        if bad:
+            ctx.refused.append(f"{op['item']} has invalid slice task ids: {', '.join(bad)}")
+            return False
     changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
     task.update(changed)
     if "state" in changed:

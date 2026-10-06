@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 GUIDE = ROOT / "profiles/package/skills/init-swarm/work-beyond-code.md"
 SLUG = "init-swarm-sample-2026-01-01"
 PREFIX = "agentihooks ledger --slug <slug> task add "
-BEYOND_CODE = set(ledger_kinds.KINDS) - {"code", "ci"}
+BEYOND_CODE = set(ledger_kinds.KINDS) - {"code", "ci", "plan"}
 FIELDS_BEFORE_KINDS = {"op", "id", "by", "task", "title", "lane", "phase", "description", "depends_on", "territory"}
 
 

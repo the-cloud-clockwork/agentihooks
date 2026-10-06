@@ -25,6 +25,7 @@ class FakeLedger:
     def state(self, slug):
         log = getattr(self, "log", [])
         return {
+            "overview": "Project intent",
             "tasks": self.tasks(slug),
             "phases": getattr(self, "phases", []),
             "_meta": {"rev": len(log), "events": log},

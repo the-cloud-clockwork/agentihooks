@@ -96,14 +96,22 @@ def test_an_auto_phase_holds_its_tasks_until_the_plan_is_approved(store):
 
 
 def test_the_plan_task_is_claimed_only_while_its_phase_is_planning(store):
-    ledger = FakeLedger([{**plan("p1"), "lane": "eng"}, {"id": "b", "phase": "p1"}])
-    ledger.phases = [{"id": "p1", "planning": "auto", "depends_on": ["p0"]}, {"id": "p0"}]
+    from pathlib import Path
+
+    ledger = FakeLedger([{**plan("p1"), "lane": "plan"}, {"id": "b", "phase": "p1"}])
+    ledger.phases = [
+        {"id": "p1", "title": "Build", "planning": "auto", "depends_on": ["p0"]},
+        {"id": "p0", "title": "Base"},
+    ]
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == []
     ledger.phases[1]["done"] = True
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned(runtime) == ["plan-p1"]
+    steering = (Path(ledger.rows["plan-p1"]["workspace"]) / "steering.md").read_text()
+    assert "Project intent\nProject intent" in steering
+    assert "Dependency tasks for Base" in steering
 
 
 class OwnLedger(FakeLedger):

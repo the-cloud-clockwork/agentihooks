@@ -325,8 +325,9 @@ def cmd_task(args):
         if args.kind:
             lists["kind"] = args.kind
         if args.scaffold:
-            task = {"id": args.id, "title": title, "description": args.description, **lists}
-            lists["workspace"] = str(ledger_workspace.scaffold(args.slug, task))
+            task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
+            doc = call(args.slug) if args.kind == "plan" else None
+            lists["workspace"] = str(ledger_workspace.scaffold(args.slug, task, doc))
         send(
             args,
             "task_add",
@@ -434,7 +435,7 @@ def build_parser():
     task.add_argument("action", choices=["add", "set"])
     task.add_argument("id")
     task.add_argument("values", nargs="+")
-    task.add_argument("--lane", choices=["eng", "ci"], default="eng")
+    task.add_argument("--lane", choices=["eng", "ci", "plan"], default="eng")
     task.add_argument("--phase", default="")
     task.add_argument("--description", default="")
     task.add_argument("--depends-on", default="", help="comma separated task ids that must be done first")

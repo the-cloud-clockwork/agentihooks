@@ -16,10 +16,13 @@ def folder(slug, task_id):
     return Path.home() / ".agentihooks" / "swarm" / slug / "tasks" / task_id
 
 
-def scaffold(slug, task):
+def scaffold(slug: str, task: dict, doc: dict | None = None) -> Path:
     path = folder(slug, task["id"])
     path.mkdir(parents=True, exist_ok=True)
-    for name, text in (("steering.md", steering(task)), ("progress.md", ""), ("proof.md", "")):
+    for name, text in (("steering.md", steering(task, doc)), ("progress.md", ""), ("proof.md", "")):
+        if name == "steering.md" and task.get("kind") == "plan" and doc is not None:
+            (path / name).write_text(text, encoding="utf-8")
+            continue
         try:
             with (path / name).open("x", encoding="utf-8") as fh:
                 fh.write(text)
@@ -28,7 +31,7 @@ def scaffold(slug, task):
     return path
 
 
-def steering(task):
+def steering(task: dict, doc: dict | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]
@@ -36,6 +39,10 @@ def steering(task):
     rows = [f"- {label}: {contract[key]}" for key, label in CONTRACT_LABELS if contract.get(key)]
     if rows:
         lines += ["Proof contract", *rows, ""]
+    if task.get("kind") == "plan" and doc is not None:
+        from scripts.swarm_ledger.plan_evidence import evidence
+
+        lines.append(evidence(task, doc))
     return "\n".join(lines)
 
 

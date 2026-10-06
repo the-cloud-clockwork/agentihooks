@@ -2,11 +2,12 @@
 
 import re
 
-KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
+KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan")
 CONTRACT_KEYS = ("must", "check", "judge")
-PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding")
+PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice")
 LINK_RE = re.compile(r"^https?://[^\s]+$")
 NEEDS = {
+    "plan": ("slice",),
     "ops": ("command", "output"),
     "tune": ("command", "output"),
     "troubleshoot": ("root_cause", "evidence"),
