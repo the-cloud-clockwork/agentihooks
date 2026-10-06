@@ -17,6 +17,7 @@ agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E 
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
+agentihooks swarm <id> lift AGENT GATE                            operator lets one agent past a gate for one hour
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
@@ -534,6 +535,21 @@ def cmd_verdict(store, args):
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
 
 
+def cmd_lift(store, args):
+    from scripts.gates import entry, lift
+
+    store.config(args.slug)
+    if os.environ.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
+        raise SwarmError("only the operator lifts a gate, from the ledger page or by typing it in the agent's pane")
+    agent = next((a for a in store.agents(args.slug) if a.name == args.agent), None)
+    if agent is None:
+        raise SwarmError(f"{args.agent} is not in this swarm")
+    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
+        raise SwarmError(f"no gate named {args.gate}")
+    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate)
+    print(json.dumps({"agent": agent.name, "gate": args.gate, "minutes": lift.LIFT_SECONDS // 60}))
+
+
 def cmd_send_message(store, args):
     store.config(args.slug)
     LedgerClient().say(args.slug, args.text)
@@ -803,6 +819,9 @@ def build_parser():
     verdict.add_argument("verdict")
     verdict.add_argument("--note", default="")
     sub.add_parser("send-message").add_argument("text")
+    lift = sub.add_parser("lift")
+    lift.add_argument("agent")
+    lift.add_argument("gate")
     for name in ("issue", "pr"):
         sub.add_parser(name).add_argument("url")
     done = sub.add_parser("done")

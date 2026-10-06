@@ -1629,7 +1629,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
-      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict" }[action] || action;
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict", lift: "Lift the gate" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1699,6 +1699,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
       return;
     }
+    const lift = event.target.closest("button[data-lift]");
+    if (lift && !lift.disabled) return swarmControl({ action: "lift", agent: lift.dataset.agent, gate: lift.dataset.lift });
     const restore = event.target.closest("button[data-restore-choice]");
     if (restore && !restore.disabled) return swarmControl({ action: "restore-decision", agent: restore.dataset.agent, choice: restore.dataset.restoreChoice });
     const btn = event.target.closest("button[data-swarm]");
@@ -1760,13 +1762,15 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
     return agents.map((a) => {
       const master = a.lane === "master";
-      return { name: a.name, master, lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
+      return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
         state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
     });
   }
 
   function agentActions(a) {
     return h("div", { class: "sw-acts" },
+      ...a.gates.map((g) => g.lifted ? label(`${g.gate} lifted`, "on")
+        : h("button", { class: "sw-btn", type: "button", "data-lift": g.gate, "data-agent": a.name, "aria-label": `Lift the ${g.gate} gate for ${a.name}`, disabled: !!pending, text: `lift ${g.gate}` })),
       h("button", { class: "sw-btn", type: "button", "data-message": a.master ? "" : a.name, "aria-label": `Message ${a.name}`, text: "message" }),
       h("button", { class: "sw-btn danger", type: "button", "data-terminate": a.name, "aria-label": `Terminate ${a.name}`, disabled: !!pending, text: "terminate" }));
   }

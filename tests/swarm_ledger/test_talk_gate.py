@@ -174,6 +174,18 @@ def test_an_operator_lift_lets_the_write_through_for_an_hour(redis, tmp_path):
     assert rejected == []
 
 
+def test_a_page_lift_for_the_agent_lets_the_write_through(redis, tmp_path):
+    from scripts.gates import lift
+    from scripts.gates.base import Who
+
+    mode(redis, "enforce")
+    fill(redis, tmp_path)
+    lift.lift_agent(Who(name=CI, swarm=SLUG), "talk", tmp_path)
+    assert say(redis, tmp_path, n=98)[1] != []
+    lift.lift_agent(Who(name=ENG, swarm=SLUG), "talk", tmp_path)
+    assert say(redis, tmp_path, n=99)[1] == []
+
+
 def test_a_lift_of_another_gate_or_agent_or_an_old_lift_does_not_count():
     events = [
         {"kind": "gate lifted", "by": ENG, "gate": "identity", "at": 10_000_000},
