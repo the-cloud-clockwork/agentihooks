@@ -266,6 +266,8 @@ CONTROLS = {
 DOCTOR = {"doctor_start": ["start"], "doctor_stop": ["stop"]}
 DOCTOR_PHRASE = "rig doctor stop"
 MAX_CAP = 50
+MIN_COMPACT, MAX_COMPACT = 100, 1000
+AUTONOMY = ("manual", "assist", "delegate", "full")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
@@ -291,15 +293,21 @@ def control_argv(body):
         ("max_ci", "max-ci-agents", MAX_CAP),
         ("max_plan", "max-plan-agents", MAX_CAP),
         ("codex_share", "codex-share", 100),
+        ("compact_limit", "compact-limit", MAX_COMPACT),
     ):
         value = body.get(key)
         if value is None:
             continue
-        if type(value) is not int or not 0 <= value <= limit:
-            raise ValueError(f"{key} must be a whole number from 0 to {limit}")
+        low = MIN_COMPACT if key == "compact_limit" else 0
+        if type(value) is not int or not low <= value <= limit:
+            raise ValueError(f"{key} must be a whole number from {low} to {limit}")
         pairs.append(f"{flag}={value}")
+    if "autonomy" in body:
+        if body["autonomy"] not in AUTONOMY:
+            raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
+        pairs.append(f"autonomy={body['autonomy']}")
     if not pairs:
-        raise ValueError("set needs max_eng, max_ci, max_plan or codex_share")
+        raise ValueError("set needs max_eng, max_ci, max_plan, codex_share, compact_limit or autonomy")
     return ["set", *pairs]
 
 

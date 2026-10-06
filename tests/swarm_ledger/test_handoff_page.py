@@ -8,13 +8,15 @@ def test_handoff_outcomes_survive_initial_layout_and_resizes(tab):
     tab.on("pageerror", lambda error: errors.append(str(error)))
     status = {
         **SWARM,
-        "transfers": [
+        "handoffs": [
             {
                 "seat": "eng-1@proof",
+                "at": 0,
                 "reason": "recycle",
-                "task": "t1",
-                "continuity": {"state": "confirmed", "next": "Read the proof."},
-                "binding": {"state": "live"},
+                "continuity": "confirmed",
+                "binding": "live",
+                "successor": "engineer",
+                "awaiting": "",
             }
         ],
     }
@@ -23,9 +25,9 @@ def test_handoff_outcomes_survive_initial_layout_and_resizes(tab):
     tab.get_by_role("tab", name="Swarm", exact=False).click()
     for width in (1440, 390, 1440):
         tab.set_viewport_size({"width": width, "height": 900})
-        tab.locator("#swarm-transfers-box").wait_for(state="visible", timeout=1500)
-        tab.locator("#swarm-transfers-box").evaluate("element => element.open = true")
-        text = tab.locator("#swarm-transfers").inner_text()
-        assert "Continuity: confirmed" in text
-        assert "Binding: live" in text
+        tab.locator("#handoff-box").wait_for(state="visible", timeout=1500)
+        text = tab.locator("#swarm-handoffs").inner_text()
+        assert "CONFIRMED" in text
+        assert "LIVE" in text
+        assert "eng 1" in text
     assert errors == []

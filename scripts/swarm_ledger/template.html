@@ -254,27 +254,11 @@ textarea.line:focus { box-shadow: inset 0 -1px 0 var(--accent); }
 .bar > i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .chat-log .entry-body { margin-top: 2px; }
-details.crew { margin: 10px 0 0; }
-.crew-row { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); padding: 3px 0; }
-.crew-row .who { color: var(--text-2); }
-.crew-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 6px var(--signal); flex: none; align-self: center; }
 .sw-state { margin-left: auto; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--muted); }
 .sw-state.running { color: var(--positive); text-shadow: var(--glow); }
 .sw-state.paused { color: var(--warn); text-shadow: var(--glow); }
 .sw-state.stopping { color: var(--destructive); text-shadow: var(--glow); }
 .sw-state.drained { color: var(--accent); text-shadow: var(--glow); }
-.sw-auto { margin-left: 10px; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; color: var(--accent); text-shadow: var(--glow); }
-.sw-figs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin: 0 0 12px; }
-.sw-figs div { min-width: 0; text-align: center; }
-.sw-figs dd { margin: 0; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
-.sw-figs dt { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
-.sw-figs .lit dd { color: var(--accent); text-shadow: var(--glow); }
-.sw-figs .warn dd { color: var(--destructive); text-shadow: var(--glow); }
-.sw-ctl, .sw-caps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: var(--fs-meta); color: var(--muted); }
-.sw-caps { display: grid; grid-template-columns: repeat(5, max-content) minmax(0, 1fr); margin: 8px 0 10px; }
-.sw-caps label { grid-column: 1 / 6; display: grid; grid-template-columns: subgrid; align-items: center; letter-spacing: .1em; text-transform: uppercase; }
-#codex-split { min-width: 0; overflow-wrap: anywhere; }
-.sw-caps [data-swarm="set"] { grid-column: 1 / 5; justify-self: start; }
 .sw-btn { background: var(--surface-2); border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; color: var(--accent);
   font: inherit; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer;
   transition: background .15s, border-color .15s, text-shadow .15s, box-shadow .15s; }
@@ -286,56 +270,16 @@ details.crew { margin: 10px 0 0; }
 .sw-btn.armed { background: var(--hover); border-color: var(--destructive); text-shadow: var(--glow); }
 .sw-btn.sending { animation: sw-pulse 1s ease-in-out infinite; }
 @keyframes sw-pulse { 50% { opacity: .45; } }
-.sw-cap { width: 3em; padding: 2px 0; text-align: center; color: var(--text); font: inherit; font-size: var(--fs-item); font-weight: 700;
-  background: transparent; border: 0; border-bottom: 1px solid var(--edge); border-radius: 0; -moz-appearance: textfield; appearance: textfield; }
-.sw-cap::-webkit-inner-spin-button, .sw-cap::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.sw-cap:hover { border-bottom-color: var(--accent); }
-.sw-cap:focus { outline: none; border-bottom-color: var(--accent); }
-.sw-cap:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.sw-note { grid-column: 5 / -1; min-width: 0; margin: 0; text-align: right; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#swarm-plan-shape { text-align: left; white-space: pre-line; overflow-wrap: anywhere; }
 .sw-note.pending { color: var(--accent); }
 .sw-note.ok { color: var(--positive); text-shadow: var(--glow); }
 .sw-note.bad { color: var(--destructive); text-shadow: var(--glow); }
-.sw-note.bad { grid-column: 1 / -1; text-align: left; white-space: normal; overflow-wrap: anywhere; }
-details.sw-agents { margin: 0; }
-.sw-agents > summary { padding: 10px 0 8px; font-weight: 700; letter-spacing: .12em; color: var(--text-2); }
-.sw-agents[open] > summary { border-bottom: 1px solid var(--rule); }
-.sw-list { margin: 0; }
-.sw-card { padding: 8px 0; border-top: 1px solid var(--rule); }
-.sw-card:first-child { border-top: 0; }
-.sw-card.master .sw-name { color: var(--accent); text-shadow: 0 0 10px currentColor; }
-.sw-top { display: flex; gap: 8px; align-items: baseline; }
-.sw-name { font-weight: 700; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sw-status { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-meta); font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; text-shadow: var(--glow); }
-.sw-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
-.sw-status.working { color: var(--accent); }
-.sw-status.idle { color: var(--warn); }
-.sw-status.waiting { color: var(--warn); }
-.sw-status.stalled { color: var(--destructive); }
-.sw-status.finished { color: var(--muted); text-shadow: none; }
-.sw-status.finished::before { box-shadow: none; }
-.sw-status.resumed { color: var(--accent); }
-.sw-status.fresh { color: var(--warn); }
-.sw-task { display: block; margin-top: 1px; font-size: var(--fs-body); color: var(--text-2); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 a.sw-task:hover, a.sw-task:focus-visible { color: var(--accent); text-decoration: underline; }
 a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.sw-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: var(--fs-meta); color: var(--muted); }
-.sw-meta .sw-ago { margin-left: auto; color: var(--dim); }
-.sw-empty { padding: 10px 0; font-size: var(--fs-meta); color: var(--dim); }
-.hl-kind { margin-left: auto; flex: none; font-size: var(--fs-meta); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--warn); text-shadow: var(--glow); }
-.hl-summary { margin: 2px 0 0; font-size: var(--fs-body); color: var(--text); overflow-wrap: anywhere; }
-.hl-evidence { margin: 2px 0 0; padding-left: 16px; list-style: disc; font-size: var(--fs-body); color: var(--text-2); overflow-wrap: anywhere; }
-.hl-evidence li::marker { color: var(--muted); }
-.hl-threshold { margin: 2px 0 0; font-size: var(--fs-meta); color: var(--muted); }
-.hl-earlier { margin: 2px 0 0; font-size: var(--fs-meta); color: var(--accent); overflow-wrap: anywhere; }
 .hl-verdict { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 0; font-size: var(--fs-meta); }
 .hl-pick, .hl-note { min-width: 0; padding: 2px 0; background: transparent; border: 0; border-bottom: 1px solid var(--rule); color: var(--text); font: inherit; }
 .hl-note { flex: 1; }
 .hl-pick option { background: var(--panel); color: var(--text); }
 .hl-pick:hover, .hl-note:hover, .hl-pick:focus, .hl-note:focus { outline: none; border-bottom-color: var(--accent); }
-.crew-row .unhandled { margin-left: auto; color: var(--destructive); text-shadow: var(--glow); }
 #chat-input { max-height: 140px; overflow-y: auto; }
 .attach-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 6px; }
 .attach-tray { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
@@ -417,37 +361,10 @@ section { margin-bottom: var(--space-group); padding: var(--space-row); }
 .jump-menu select { display: block; max-width: 180px; background: var(--surface-2); color: var(--text); border: 0; font: inherit; }
 .overview { margin: 0; color: var(--muted); }
 .overview:not([open]) > summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-#swarm-box { max-width: 1400px; margin: 0 auto; padding: 0; }
-#swarm-fold > summary, #swarm-fold[open] > summary { position: static; margin: 0; padding: 0 0 var(--space-tight); background: transparent; border-radius: 0; }
-.swarm-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-group); }
-.swarm-work-column, .swarm-side-column { min-width: 0; }
-.counts-row { margin-bottom: var(--space-group); }
-.sw-figs { display: flex; gap: var(--space-row); flex-wrap: wrap; margin: var(--space-row) 0; }
-.count-filter { display: flex; flex-direction: column; align-items: center; min-width: 64px; min-height: 44px; padding: var(--space-tight); border: 0; background: var(--surface-2); color: var(--muted); font: inherit; cursor: pointer; }
-.count-filter:hover, .count-filter[aria-pressed="true"] { color: var(--accent-2); background: var(--hover); }
-.figure-value { display: block; color: var(--text); font-size: var(--fs-item); font-weight: 700; font-variant-numeric: tabular-nums; }
-.count-filter:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .sw-ctl { gap: var(--space-tight); margin-top: var(--space-tight); }
-.destructive-group { display: flex; gap: var(--space-tight); border-left: 1px solid var(--rule); padding-left: var(--space-row); margin-left: auto; }
 .sw-btn { min-height: 40px; text-transform: none; letter-spacing: 0; }
 .sw-btn[hidden] { display: none; }
 .sw-note { text-align: left; white-space: normal; margin-top: var(--space-tight); }
-.sw-caps { grid-template-columns: minmax(80px, 1fr) 40px 48px 40px 20px; gap: var(--space-tight); }
-.sw-caps label { grid-column: 1 / -1; text-transform: none; letter-spacing: 0; }
-.sw-caps #codex-split, .sw-caps [data-swarm="set"] { grid-column: 1 / -1; }
-.sw-cap { width: 48px; }
-.sw-card { padding: var(--space-row) 0; }
-.sw-card > details { margin: 0; }
-.sw-card > details > summary { display: block; }
-.sw-card > details > summary .sw-task, .sw-card > details > summary .sw-meta, .sw-card > details > summary .hint { text-transform: none; letter-spacing: normal; }
-#swarm-fold .sw-state { margin-left: var(--space-tight); }
-.sw-card > details > summary::before { float: left; margin-top: 6px; }
-.sw-task { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.sw-top { flex-wrap: wrap; }
-.sw-name { overflow-wrap: anywhere; white-space: normal; flex: 1; }
-.sw-meta { gap: var(--space-tight) var(--space-row); }
-#swarm-work-box { margin-top: var(--space-row); }
-.crew-row { flex-wrap: wrap; }
 .sync { left: 16px; right: auto; width: 40px; height: 40px; }
 #chat-fab { left: 16px; right: auto; bottom: 24px; }
 #sync { bottom: 80px; }
@@ -477,12 +394,83 @@ input, textarea { caret-color: var(--accent-2); }
   .tab-body { padding: var(--space-row); }
   .tabs { padding: 0 var(--space-row); }
   .tab { padding: var(--space-tight); }
-  .swarm-grid { display: block; }
-  .destructive-group { flex-basis: 100%; margin-left: 0; border-left: 0; padding: var(--space-tight) 0 0; border-top: 1px solid var(--rule); }
-  .sw-figs { gap: var(--space-tight); }
-  .count-filter { min-width: 56px; }
   .sec-tools { flex-wrap: wrap; }
   .summary-strip { gap: var(--space-tight); }
+}
+#swarm-box { max-width: 1400px; margin: 0 auto; background: var(--surface-1); border-radius: 6px; font-variant-numeric: tabular-nums; }
+.sw-row { padding: var(--space-row); border-top: 1px solid var(--rule); }
+.sw-row:first-child { border-top: 0; }
+.sw-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-group); }
+.sw-title { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; margin: 0; font-size: var(--fs-item); font-weight: 700; letter-spacing: .04em; color: var(--text); }
+.sw-word { letter-spacing: .16em; text-transform: uppercase; color: var(--accent-2); text-shadow: var(--glow); }
+.sw-sep { color: var(--muted); font-weight: 400; }
+.sw-title .sw-state { margin: 0; font-size: var(--fs-item); letter-spacing: .04em; }
+.sw-tick { font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.sw-ctl { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0; }
+.sw-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-tight) var(--space-row); margin-left: auto; }
+.sw-head .sw-btn { min-height: 32px; padding: 4px 8px; }
+.sw-modes { padding-left: var(--space-row); border-left: 1px solid var(--rule); }
+.sw-btn.sw-mode { color: var(--muted); }
+.sw-btn.sw-mode[aria-pressed="true"] { color: var(--accent-2); text-shadow: var(--glow); }
+.sw-note { margin: 0; padding: 0 var(--space-row) var(--space-tight); font-size: var(--fs-meta); color: var(--muted); }
+.sw-note:empty { display: none; }
+.sw-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-tight) var(--space-row); font-size: var(--fs-meta); }
+.sw-alert[hidden] { display: none; }
+.sw-alert-count { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--destructive); text-shadow: var(--glow); }
+.sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
+.sw-alert-kinds { letter-spacing: .06em; color: var(--warn); text-shadow: var(--glow); }
+.sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
+.sw-capacity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-group); }
+.sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
+.sw-cap { display: inline-flex; align-items: center; gap: 6px; }
+.sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.sw-num { min-width: 4ch; text-align: right; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
+.sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
+.sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 0; }
+.sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
+.sw-pair > .sw-block + .sw-block { border-left: 1px solid var(--rule); }
+.sw-blockhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-row); margin-bottom: var(--space-tight); }
+.sw-count { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); text-shadow: var(--glow); }
+.sw-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+.sw-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.sw-table th { padding: 0 10px 6px 0; text-align: left; font-size: var(--fs-meta); font-weight: 400; letter-spacing: .08em; color: var(--muted); white-space: nowrap; }
+.sw-table td { padding: 6px 10px 6px 0; border-top: 1px solid var(--rule); color: var(--text); white-space: nowrap; }
+.sw-table th:last-child, .sw-table td:last-child { padding-right: 0; }
+.sw-table tbody tr:hover td { background: var(--surface-2); }
+.sw-table .r, #agents-table td:last-child, #quota-table td:nth-child(n+3):nth-child(-n+5) { text-align: right; }
+.sw-table a { color: inherit; text-decoration: none; }
+.sw-table a:hover, .sw-table a:focus-visible { color: var(--accent); text-shadow: var(--glow); }
+#agents-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.sw-table .sw-empty td { white-space: normal; font-size: var(--fs-meta); color: var(--dim); }
+#health-table td:nth-child(3) { min-width: 20ch; white-space: normal; color: var(--text-2); }
+#health-table .hl-pick, #health-table .hl-note { border-bottom-color: transparent; font-size: var(--fs-body); }
+#health-table .hl-pick:hover, #health-table .hl-note:hover, #health-table .hl-pick:focus, #health-table .hl-note:focus { border-bottom-color: var(--accent); }
+#health-table .hl-pick { field-sizing: content; }
+#health-table .hl-note { field-sizing: content; min-width: 8ch; max-width: 32ch; }
+#health-table .hl-note::placeholder { color: var(--muted); }
+.sw-kv { margin: 0; }
+.sw-kv .kv { display: grid; grid-template-columns: 14ch minmax(0, 1fr); gap: var(--space-row); align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); }
+.sw-kv dt { color: var(--muted); }
+.sw-kv dd { margin: 0; text-align: right; font-weight: 700; color: var(--text); }
+.sw-kv dd a { color: var(--accent); text-shadow: var(--glow); text-decoration: none; }
+.sw-end { justify-content: flex-end; margin-top: var(--space-tight); }
+.lbl { font-size: var(--fs-meta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.lbl.working, .lbl.here, .lbl.on { color: var(--accent); text-shadow: var(--glow); }
+.lbl.live, .lbl.confirmed { color: var(--positive); text-shadow: var(--glow); }
+.lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); text-shadow: var(--glow); }
+.lbl.stalled, .lbl.absent { color: var(--destructive); text-shadow: var(--glow); }
+.lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.lbl.here { letter-spacing: .06em; }
+.lbl.here::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 1023px) {
+  .sw-pair { grid-template-columns: minmax(0, 1fr); }
+  .sw-pair > .sw-block + .sw-block { border-left: 0; border-top: 1px solid var(--rule); }
+  .sw-modes { padding-left: 0; border-left: 0; }
+  .sw-live { margin-left: 0; }
+  .sw-capacity { gap: var(--space-tight) var(--space-row); }
+  .sw-capacity .sw-label { flex-basis: 100%; }
+  .sw-actions { margin-left: 0; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 .workspace { display: flex; flex: 1; min-height: 0; gap: 16px; padding: 16px; margin-left: calc(-1 * var(--gutter)); }
@@ -529,24 +517,24 @@ input, textarea { caret-color: var(--accent-2); }
 </div></div></div>
 
 <div class="tab-body" id="swarm" role="tabpanel" aria-labelledby="tab-swarm" hidden><div id="swarm-box">
-<section id="swarm-status-box"><details class="sources-box fold" id="swarm-fold" open><summary>Swarm <span class="sw-state" id="swarm-state"></span><span class="sw-auto" id="swarm-autonomy"></span><span class="hint" id="swarm-tick"></span></summary>
-<div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">Start</button><button class="sw-btn" type="button" data-swarm="pause">Pause</button><button class="sw-btn" type="button" data-swarm="stop">Stop</button><div class="destructive-group"><button class="sw-btn danger" type="button" data-swarm="stop_now">Stop now</button><button class="sw-btn danger" type="button" data-swarm="close">Close ledger</button></div></div><p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p></details></section>
-<div class="swarm-grid">
-<div class="counts-row"><dl class="sw-figs" id="swarm-figs"></dl><div class="sw-figs" id="swarm-plan-shape" hidden></div><button class="link" type="button" id="filter-clear" hidden>Show all work</button></div>
-<section id="agents-box"><details class="sources-box fold" id="swarm-agents-box" open><summary>Agents <span class="count" id="swarm-agents-count"></span></summary><p class="hint" id="active-agents"></p><ul class="sw-list" id="swarm-master"></ul><ul class="sw-list" id="swarm-agents"></ul><details class="fold" id="swarm-work-box" open><summary>Work <span class="count" id="swarm-work-count"></span></summary><ul id="swarm-work"></ul></details></details></section>
-<section id="capacity-box"><details class="sources-box fold" id="capacity-fold" open><summary>Capacity</summary>
-<div class="sw-caps">
-<label for="cap-eng">Engineers <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Engineer agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></label>
-<label for="cap-ci">CI agents <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></label>
-<label for="cap-plan">Planner agents <button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_plan" id="cap-plan" aria-label="Planner agent cap"><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></label>
-<label for="cap-codex">Codex share <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label>
-<p class="hint" id="codex-split" aria-live="polite"></p><button class="sw-btn" type="button" data-swarm="set">Apply caps</button></div></details></section>
-<section id="health-box"><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
-<section id="doctor-box"><details class="sources-box fold" id="doctor-fold" open><summary>Doctor</summary><p class="hint">A Doctor crew watches this swarm on its own linked ledger and proposes fixes.</p><div class="sw-ctl"><button class="sw-btn" type="button" data-swarm="doctor_start">Start Doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">Stop Doctor</button></div><a id="doctor-link" class="sw-task" hidden></a></details></section>
-<section id="history-box"><details class="sources-box fold" id="crew-box"><summary>Crew history <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></section>
-<section id="handoff-box" hidden><details class="sources-box fold" id="swarm-transfers-box" hidden><summary>Handoff outcomes <span class="count" id="swarm-transfers-count"></span></summary><ul class="sw-list" id="swarm-transfers"></ul></details></section>
-<section id="restore-box" hidden><details class="sources-box fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><p class="hint" id="restore-summary"></p><ul class="sw-list" id="swarm-restore"></ul></details></section>
-</div></div></div>
+<div class="sw-row sw-head" id="swarm-head"><h2 class="sw-title"><span class="sw-word">Swarm</span><span class="sw-sep" aria-hidden="true">·</span><span id="swarm-name"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-state" id="swarm-state"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-tick" id="swarm-tick"></span></h2>
+<div class="sw-actions"><div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">start</button><button class="sw-btn" type="button" data-swarm="pause">pause</button><button class="sw-btn" type="button" data-swarm="stop">stop</button></div>
+<div class="sw-ctl sw-modes" id="swarm-modes" role="group" aria-label="Autonomy"><button class="sw-btn sw-mode" type="button" data-autonomy="manual" aria-pressed="false">manual</button><button class="sw-btn sw-mode" type="button" data-autonomy="assist" aria-pressed="false">assist</button><button class="sw-btn sw-mode" type="button" data-autonomy="delegate" aria-pressed="false">delegate</button><button class="sw-btn sw-mode" type="button" data-autonomy="full" aria-pressed="false">full</button></div></div></div>
+<p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
+<div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
+<div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
+<div class="sw-cap"><span class="sw-cap-name">eng</span><span class="sw-num" id="cap-eng"></span><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">ci</span><span class="sw-num" id="cap-ci"></span><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div></div>
+<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>model</th><th>task</th><th>state</th><th class="r">age</th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
+<div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
+<div class="sw-row sw-pair" id="swarm-row-accounts"><div class="sw-block" id="quota-box"><div class="sw-blockhead"><h3>Quota</h3><span class="sw-count" id="quota-count"></span></div><div class="sw-scroll"><table class="sw-table" id="quota-table"><thead><tr><th>account</th><th>harness</th><th class="r">5h left</th><th class="r">7d left</th><th class="r">sessions</th><th><span class="sr-only">routing</span></th></tr></thead><tbody id="swarm-quota"></tbody></table></div></div>
+<div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
+<div class="sw-row sw-block" id="health-box"><div class="sw-blockhead"><h3>Health</h3><span class="sw-count" id="health-count"></span></div><div class="sw-scroll"><table class="sw-table" id="health-table"><thead><tr><th>finding</th><th>subject</th><th>evidence</th><th>threshold</th><th>seen</th><th>verdict</th><th>note</th></tr></thead><tbody id="health"></tbody></table></div></div>
+<div class="sw-row sw-block" id="handoff-box"><div class="sw-blockhead"><h3>Handoff outcomes</h3><span class="sw-count" id="handoff-count"></span></div><div class="sw-scroll"><table class="sw-table" id="handoff-table"><thead><tr><th>seat</th><th>last handoff</th><th>reason</th><th>continuity</th><th>binding</th><th>successor</th></tr></thead><tbody id="swarm-handoffs"></tbody></table></div></div>
+</div></div>
 
 </div><aside id="stats-column" class="side"><section><details class="sources-box fold" id="stats-box" open><summary>Stats<button class="mini-sync end" id="stats-sync" type="button" aria-label="Ask master to recheck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button></summary><dl id="stats"></dl></details></section></aside></div>
 </main>
@@ -1277,7 +1265,6 @@ input, textarea { caret-color: var(--accent-2); }
     renderChat();
     renderChatBadge();
     renderStats();
-    renderCrew();
     renderSwarm(swarm);
     renderOutline();
     markToggles();
@@ -1353,7 +1340,6 @@ input, textarea { caret-color: var(--accent-2); }
       ...(out ? [row("Out of scope", String(out))] : []),
       row("Agents · 2 h", String(activeAgents())),
       row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
-    $("active-agents").textContent = `Agents active in the last 2 hours: ${activeAgents()}`;
   }
 
   function jumpTo(ev, item) {
@@ -1484,28 +1470,12 @@ input, textarea { caret-color: var(--accent-2); }
 
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
-  function crewShown(crew, sw) {
-    return crew.length > 0 && !sw;
-  }
-
-  function renderCrew() {
-    const crew = (swarm && swarm.history) || meta.crew || [];
-    $("crew-count").textContent = crew.length ? `· ${crew.length}` : "";
-    $("crew").replaceChildren(...crew.map((m) => h("div", { class: "crew-row" },
-      h("span", { class: "who", text: m.name }),
-      h("span", { text: m.lane === "master" || m.role === "orchestrator" ? "master" : m.lane || "" }),
-      h("span", { text: m.ended_at || m.last_seen ? `${span(Date.now() - (m.ended_at || m.last_seen))} ago` : "" }),
-      h("span", { text: m.reason || m.state || "" }))));
-  }
-
-  const FIGURES = [["agents", "Agents"], ["open", "Open"], ["claimed", "Claimed"], ["pr", "In PR"], ["blocked", "Blocked"], ["done", "Done"]];
+  const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100], compact: ["compact_limit", 50, 100, 1000] };
+  const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
+  const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
+  const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
   let swarm = null;
   let swarmReadError = false;
-  let codexDraft = null;
-  let capDraft = {};
-  let workFilter = "";
-  let armed = "";
-  let armTimer = 0;
   let pending = "";
   let noteTimer = 0;
 
@@ -1521,53 +1491,42 @@ input, textarea { caret-color: var(--accent-2); }
     } catch (error) {
       swarmReadError = true;
       renderSwarm(swarm);
-      $("swarm-status-box").hidden = false;
       $("swarm-note").className = "sw-note bad";
       $("swarm-note").textContent = `Could not read swarm status: ${error.message}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
       renderControls();
     }
   }
 
-  function swarmCards(sw, tasks, seen, now) {
-    const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
-    const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
-    return agents.map((a) => {
-      const t = a.lane === "master" ? { title: "Answers your chat" } : byId[a.task] || {};
-      const last = Math.max(seen[a.name] || 0, a.started_at || 0);
-      return { name: a.name, lane: a.lane, profile: a.profile || "unknown", model: a.model ? [a.model, a.effort].filter(Boolean).join(" ") : "unknown",
-        ...(a.model_source ? { modelSource: a.model_source } : {}), modelConfidence: a.model_confidence,
-        account: a.account || "", task: t.title || a.task, pr: t.pr_url || "", status: a.status || "working",
-        ago: last ? span(now - last) : "", taskState: t.state || "open", inbox: a.inbox,
-        held: a.state_since ? span(now - a.state_since) : "", taskId: a.task, ...(a.input_prompt ? { inputPrompt: a.input_prompt } : {}) };
-    });
-  }
-
   function swarmControls(state) {
-    return { start: state === "running", pause: state !== "running", stop: !["running", "paused", "drained"].includes(state),
-      stop_now: state === "stopped" };
+    return { start: state === "running", pause: state !== "running", stop: !["running", "paused", "drained"].includes(state) };
   }
 
-  function doctorControls(sw) {
-    return { doctor_start: !!sw.peer, doctor_stop: !sw.peer };
+  function doctorOn(sw) {
+    return !!(sw && sw.doctor && sw.doctor.slug);
   }
 
-  function capStep(config, lane, step) {
-    const key = `max_${lane}`;
-    return { action: "set", [key]: Math.min(50, Math.max(0, (Number(config[key]) || 0) + step)) };
+  function capValues(sw) {
+    return { ...sw.config, compact_limit: sw.compact_limit };
   }
 
-  function capBounds(config) {
-    return { eng_down: config.max_eng <= 0, eng_up: config.max_eng >= 50, ci_down: config.max_ci <= 0, ci_up: config.max_ci >= 50, plan_down: config.max_plan <= 0, plan_up: config.max_plan >= 50, codex_down: config.codex_share <= 0, codex_up: config.codex_share >= 100 };
+  function capStep(values, lane, up) {
+    const [key, step, low, high] = STEPS[lane];
+    return { action: "set", [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
   }
 
-  function controlClick(action, armedNow) {
-    if ((action === "stop_now" || action === "close" || action === "doctor_stop") && armedNow !== action) return { send: false, armed: action };
-    return { send: true, armed: "" };
+  function capBounds(values) {
+    const off = {};
+    for (const [lane, [key, , low, high]] of Object.entries(STEPS)) {
+      off[`${lane}_down`] = !(Number(values[key]) > low);
+      off[`${lane}_up`] = !(Number(values[key]) < high);
+    }
+    return off;
   }
 
   function opNote(phase, action, error) {
-    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close", reopen: "Reopen", set: "Set caps", doctor_start: "Start doctor", doctor_stop: "Stop doctor",
-      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", verdict: "Verdict" }[action] || action;
+    const name = { start: "Start", pause: "Pause", stop: "Stop", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy",
+      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1582,24 +1541,19 @@ input, textarea { caret-color: var(--accent-2); }
     if (phase === "done") noteTimer = setTimeout(() => { $("swarm-note").textContent = ""; }, 4000);
   }
 
-  function setArmed(action) {
-    armed = action;
-    clearTimeout(armTimer);
-    if (action) armTimer = setTimeout(() => setArmed(""), 5000);
-    renderControls();
-  }
-
   function renderControls() {
     const config = swarm ? swarm.config : {};
-    const draft = { ...config, ...capDraft };
-    const off = swarm ? { ...swarmControls(config.state), ...doctorControls(swarm), ...capBounds(draft) } : swarmControls("");
+    const off = swarm ? { ...swarmControls(config.state), ...capBounds(capValues(swarm)) } : swarmControls("");
     for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
       const action = btn.dataset.swarm;
-      btn.hidden = (action === "start" && config.state === "running") || (action === "pause" && config.state !== "running")
-        || (action === "doctor_start" && !!(swarm && swarm.peer)) || (action === "doctor_stop" && !(swarm && swarm.peer));
-      btn.disabled = !swarm || !!pending || !!off[action] || (action === "set" && !Object.keys(capDraft).some((key) => capDraft[key] !== config[key]));
+      btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
+      btn.disabled = !swarm || !!pending || !!off[action];
       btn.classList.toggle("sending", pending === action);
       btn.setAttribute("aria-busy", pending === action ? "true" : "false");
+    }
+    for (const btn of $("swarm-modes").querySelectorAll("button[data-autonomy]")) {
+      btn.setAttribute("aria-pressed", String(btn.dataset.autonomy === (config.autonomy || "delegate")));
+      btn.disabled = !swarm || !!pending;
     }
   }
 
@@ -1611,7 +1565,6 @@ input, textarea { caret-color: var(--accent-2); }
       const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
       if (resp.ok) {
         swarm = await resp.json();
-        if (op === "set") { codexDraft = null; capDraft = {}; }
         showNote("done", op);
       } else {
         showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
@@ -1629,201 +1582,163 @@ input, textarea { caret-color: var(--accent-2); }
   });
 
   $("swarm-box").addEventListener("click", (event) => {
+    const mode = event.target.closest("button[data-autonomy]");
+    if (mode && !mode.disabled) return swarmControl({ action: "set", autonomy: mode.dataset.autonomy }, "autonomy");
+    const restore = event.target.closest("button[data-restore-choice]");
+    if (restore && !restore.disabled) return swarmControl({ action: "restore-decision", agent: restore.dataset.agent, choice: restore.dataset.restoreChoice });
     const btn = event.target.closest("button[data-swarm]");
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
-    if (action === "set") return swarmControl({ action, max_eng: Number($("cap-eng").value), max_ci: Number($("cap-ci").value), max_plan: Number($("cap-plan").value), codex_share: Number($("cap-codex").value) });
-    const step = action.match(/^(eng|ci|plan|codex)_(up|down)$/);
-    if (step) {
-      const lane = step[1], key = lane === "codex" ? "codex_share" : "max_" + lane;
-      const value = Number($("cap-" + lane).value) + (step[2] === "up" ? 1 : -1) * (lane === "codex" ? 5 : 1);
-      capDraft[key] = Math.min(lane === "codex" ? 100 : 50, Math.max(0, value));
-      $("cap-" + lane).value = capDraft[key];
-      return renderControls();
-    }
-    const consequence = {
-      stop_now: "Retire every agent now. Work in progress stays in its worktree.",
-      close: "Write the summary, retire every agent and close this ledger. Reopen brings it back.",
-      doctor_stop: "Stop the Doctor crew and close its linked ledger."
-    }[action];
-    if (!consequence || confirm(consequence)) swarmControl({ action });
+    const step = action.match(/^(eng|ci|plan|codex|compact)_(up|down)$/);
+    if (step) return swarmControl(capStep(capValues(swarm), step[1], step[2] === "up"), action);
+    if (action === "doctor_stop" && !confirm("Stop the Doctor crew and close its linked ledger.")) return;
+    swarmControl({ action });
   });
 
-  for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-plan", "max_plan"], ["cap-codex", "codex_share"]]) {
-    $(id).addEventListener("input", () => {
-      capDraft[key] = Number($(id).value);
-      renderControls();
+  $("health").addEventListener("change", (event) => {
+    const pick = event.target.closest("select.hl-pick");
+    if (!pick || !pick.value) return;
+    const row = pick.closest("tr");
+    swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note: row.querySelector(".hl-note").value.trim() });
+  });
+
+  function label(text, tone) {
+    return h("span", { class: `lbl ${tone || String(text).replace(/\s+/g, "-")}`, text });
+  }
+
+  function cells(...values) {
+    return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
+  }
+
+  function emptyRow(columns, text) {
+    return h("tr", { class: "sw-empty" }, h("td", { colspan: String(columns), text }));
+  }
+
+  function openFindings(sw) {
+    return (sw.findings || []).filter((f) => !f.verdict);
+  }
+
+  function liveCaps(sw) {
+    const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
+    return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
+  }
+
+  function capText(values) {
+    return { eng: values.max_eng, ci: values.max_ci, plan: values.max_plan, codex: `${values.codex_share ?? 0}%`, compact: values.compact_limit ? `${values.compact_limit}k` : "—" };
+  }
+
+  function modelText(a) {
+    if (a.harness === "codex") return "codex";
+    return [(a.model || "").replace(/^claude-/, "").replace(/-[\d.-]+$/, ""), a.effort].filter(Boolean).join(" ");
+  }
+
+  function agentRows(sw, now) {
+    const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
+    return agents.map((a) => {
+      const master = a.lane === "master";
+      return { name: a.name, lane: master ? "—" : a.lane, model: modelText(a) || "—", task: master ? "" : a.task || "",
+        state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
     });
   }
 
-  function renderPlanShape(shape) {
-    const node = $("swarm-plan-shape");
-    node.hidden = !shape || !shape.has_dependencies;
-    node.replaceChildren(...(!node.hidden ? [["Chain", shape.chain_length], ["Parallel", shape.parallel_width]].map(([label, count]) =>
-      h("div", {}, h("span", { class: "figure-value", text: String(count) }), h("span", { text: label }))) : []));
+  function taskFigures(sw, d) {
+    const t = sw.tasks || {}, phases = inScope(d.phases), next = phases.find((p) => !p.done);
+    const inbox = (sw.agents || []).reduce((n, a) => n + (a.inbox || []).length, 0);
+    return [["open", t.open || 0], ["claimed", t.claimed || 0], ["in pr", t.pr || 0], ["blocked", t.blocked || 0], ["done today", sw.done_today || 0],
+      ["phases", `${phases.filter((p) => p.done).length} / ${phases.length}`], ["next phase", next ? next.id : "—"], ["inbox pending", inbox]];
+  }
+
+  function percent(v) {
+    return v == null ? "—" : `${Math.round(v)}%`;
+  }
+
+  function quotaRows(sw) {
+    const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
+    return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, five: percent(r.five_hour_left), seven: percent(r.seven_day_left),
+      sessions: `${r.sessions}/${quota.cap ?? "—"}`, here: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
+  }
+
+  function doctorFigures(doctor, now) {
+    const on = !!(doctor && doctor.slug);
+    return [["state", on ? doctor.state : "not running"], ["last check", on && doctor.last_check ? `${span(now - doctor.last_check)} ago` : "—"], ["findings", on ? String(doctor.findings) : "—"]];
+  }
+
+  function seatText(seat) {
+    return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
+  }
+
+  function clock(at) {
+    return at ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  }
+
+  function kv(id, pairs) {
+    $(id).replaceChildren(...pairs.map(([key, value]) => h("div", { class: "kv" }, h("dt", { text: key }), h("dd", {}, value && value.nodeType ? value : String(value)))));
   }
 
   function renderSwarm(sw) {
     swarm = sw;
-    $("swarm-status-box").hidden = !sw && !swarmReadError;
-    $("swarm-state").className = `sw-state ${sw ? sw.config.state : "unavailable"}`;
-    $("swarm-state").textContent = sw ? sw.config.state : "unavailable";
-    $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: $("swarm-state").textContent }),
-      sw && ((sw.findings || []).some((f) => !f.verdict) || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
+    const state = sw ? sw.config.state : "unavailable";
+    $("swarm-state").className = `sw-state ${state}`;
+    $("swarm-state").textContent = state;
+    $("swarm-name").textContent = (sw && sw.config.slug) || SLUG;
+    $("swarm-tick").textContent = !sw ? "" : sw.last_tick ? `tick ${age(Date.now() - sw.last_tick)} ago` : "tick not recorded";
+    $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: state }),
+      sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
+    renderControls();
     if (!sw) {
-      $("swarm-agents").replaceChildren(h("li", { class: "sw-empty", text: "No agents running. Start the swarm to work the open tasks." }));
+      $("swarm-agents").replaceChildren(emptyRow(6, "No agents running. Start the swarm to work the open tasks."));
       return;
     }
-    const c = sw.config, counts = { ...sw.tasks, agents: (sw.agents || []).length };
-    $("swarm-autonomy").textContent = autonomyText(c);
-    $("swarm-tick").textContent = sw.last_tick ? `last tick ${age(Date.now() - sw.last_tick)} ago` : "last tick not recorded";
-    $("swarm-figs").replaceChildren(...FIGURES.map(([key, label]) => h("div",
-      { class: key === "blocked" && counts[key] ? "warn" : key === "agents" && counts[key] ? "lit" : "" },
-      h("button", { class: "count-filter", type: "button", "aria-pressed": workFilter === key, on: { click: () => setWorkFilter(key) } },
-        h("span", { class: "figure-value", text: String(counts[key] || 0) }), h("span", { text: label })))));
-    renderPlanShape(sw.plan_shape);
-    for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-plan", "max_plan"], ["cap-codex", "codex_share"]]) {
-      if (document.activeElement !== $(id)) $(id).value = capDraft[key] ?? c[key];
-    }
-    const spawns = sw.spawns || {}, codex = spawns.codex || 0, total = Object.values(spawns).reduce((sum, n) => sum + n, 0);
-    $("codex-split").textContent = `Codex share: percent of new engineers started on Codex. So far ${codex} of ${total} started on Codex (${total ? Math.floor(codex * 100 / total) : 0}%).`;
-    renderControls();
-    renderWork(sw);
-    if (!$("health").contains(document.activeElement)) renderHealth(sw.findings);
-    renderCrew();
+    const now = Date.now(), open = openFindings(sw), values = capValues(sw);
+    $("swarm-alert").hidden = !open.length;
+    $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
+    $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
+    $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
+    for (const [lane, text] of Object.entries(capText(values))) $("cap-" + lane).textContent = String(text);
+    const agents = agentRows(sw, now);
+    $("agents-count").textContent = `${agents.length} live`;
+    $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(a.name, a.lane, a.model,
+      a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age)) : [emptyRow(6, "No agents running. Start the swarm to work the open tasks.")]));
+    $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
+    kv("swarm-tasks", taskFigures(sw, doc));
+    const quota = quotaRows(sw);
+    $("quota-count").textContent = `${quota.length} ${quota.length === 1 ? "account" : "accounts"}`;
+    $("swarm-quota").replaceChildren(...(quota.length ? quota.map((q) => cells(q.account, q.harness, q.five, q.seven, q.sessions, q.here ? label("here", "here") : h("span")))
+      : [emptyRow(6, "No quota observed yet. Run agentihooks balance.")]));
+    const doctor = sw.doctor || {};
+    $("doctor-state").replaceChildren(label(doctorOn(sw) ? "on" : "off", doctorOn(sw) ? "on" : "off"));
+    const figures = doctorFigures(doctor, now);
+    if (doctorOn(sw)) figures[0][1] = h("a", { href: "/" + doctor.slug, text: doctor.state });
+    kv("swarm-doctor", figures);
+    if (!$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
+    renderHandoffs(sw.handoffs || []);
     renderStats();
-    const restored = restoreCards(sw.restored, doc ? doc.tasks : []);
-    $("restore-box").hidden = !restored.length;
-    $("swarm-restore-box").hidden = !restored.length;
-    $("swarm-restore-count").textContent = `· ${restored.length}`;
-    const resumed = restored.filter((r) => r.outcome === "resumed").length;
-    const awaiting = restored.filter((r) => r.outcome === "awaiting-decision").length;
-    const fresh = restored.filter((r) => r.outcome === "fresh").length;
-    $("restore-summary").textContent = `Restored after a reboot: ${resumed} reopened, ${awaiting} awaiting decision, ${fresh} explicitly fresh.`;
-    $("swarm-restore").replaceChildren(...restored.map(restoreCard));
-    const titles = Object.fromEntries((doc ? doc.tasks : []).map((t) => [t.id, t.title]));
-    const transfers = (sw.transfers || []).map((r) => ({...r, task: titles[r.task] || r.task}));
-    $("handoff-box").hidden = !transfers.length;
-    $("swarm-transfers-box").hidden = !transfers.length;
-    $("swarm-transfers-count").textContent = `· ${transfers.length}`;
-    $("swarm-transfers").replaceChildren(...transfers.map(transferCard));
-    $("doctor-link").hidden = !sw.peer;
-    if (sw.peer) { $("doctor-link").href = "/" + sw.peer; $("doctor-link").textContent = "Open Doctor ledger"; }
   }
 
-  function setWorkFilter(key) {
-    workFilter = workFilter === key ? "" : key;
-    renderSwarm(swarm);
-  }
-
-  function renderWork(sw) {
-    const tasks = doc ? doc.tasks : [];
-    const cards = swarmCards(sw, tasks, doc ? lastSeen() : {}, Date.now());
-    const matches = (a) => !workFilter || workFilter === "agents" || a.lane === "master" || a.taskState === workFilter;
-    $("swarm-master").replaceChildren(...cards.filter((a) => a.lane === "master" && matches(a)).map(swarmCard));
-    const workers = cards.filter((a) => a.lane !== "master" && matches(a));
-    $("swarm-agents-count").textContent = `· ${cards.length}`;
-    $("swarm-agents").replaceChildren(...(workers.length ? workers.map(swarmCard) : [h("li", { class: "sw-empty", text: workFilter ? "No agents match this filter." : "No agents running. Start the swarm to work the open tasks." })]));
-    const work = tasks.filter((t) => !t.out_of_scope && (!workFilter ? !t.done : workFilter === "agents" ? !!t.claimed_by : t.state === workFilter));
-    $("swarm-work-count").textContent = `· ${work.length}`;
-    $("swarm-work").replaceChildren(...work.map((t) => h("li", { class: "sw-card" },
-      h("a", { href: `#item-tasks-${t.id}`, class: "sw-task", text: t.title }),
-      h("span", { class: "hint", text: t.state || "open" }))));
-    $("filter-clear").hidden = !workFilter;
-  }
-
-  function restoreCards(restored, tasks) {
-    const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
-    return (restored || []).map((r) => ({ name: r.name, outcome: r.outcome, reason: r.reason,
-      task: (byId[r.task] || {}).title || r.task }));
-  }
-
-  function restoreCard(r) {
-    return h("li", { class: "sw-card" },
-      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: r.name, title: r.name }),
-        h("span", { class: `sw-status ${r.outcome}`, text: r.outcome === "awaiting-decision" ? "Awaiting decision" : r.outcome })),
-      h("span", { class: "sw-task", text: r.task, title: r.task }),
-      h("div", { class: "sw-meta" }, h("span", { text: r.reason })),
-      r.outcome === "awaiting-decision" ? h("div", { class: "sw-ctl" },
-        ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button", "data-agent": r.name,
-          "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? "Resume" : "Fresh" }))) : null);
-  }
-
-  function transferCard(r) {
-    return h("li", { class: "sw-card" },
-      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: r.seat }),
-        h("span", { class: "sw-status", text: r.reason })),
-      h("span", { class: "sw-task", text: r.task }),
-      h("div", { class: "sw-meta" },
-        h("span", { text: `Continuity: ${r.continuity.state}` }),
-        h("span", { text: `Binding: ${r.binding.state}` })),
-      r.continuity.next ? h("div", { class: "sw-meta", text: `Next: ${r.continuity.next}` }) : null,
-      r.continuity.gap ? h("div", { class: "sw-meta", text: r.continuity.gap }) : null);
-  }
-
-  $("swarm-restore").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-restore-choice]");
-    if (btn && !btn.disabled) swarmControl({ action: "restore-decision", agent: btn.dataset.agent, choice: btn.dataset.restoreChoice });
-  });
-
-  function autonomyText(config) {
-    return `autonomy ${config.autonomy || "delegate"}`;
-  }
-
-  function swarmCard(a) {
-    const task = (doc ? doc.tasks : []).find((t) => t.id === a.taskId) || {};
-    const box = h("details", { class: "fold", id: "agent-" + a.name },
-      h("summary", {},
-        h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: a.name, title: a.name }),
-          h("span", { class: `sw-status ${a.status}`, text: a.status === "waiting" ? "Waiting on input" : a.status }),
-          h("span", { class: "hint", text: a.held || "duration not recorded" })),
-        h("span", { class: "sw-task", text: a.task }),
-        h("div", { class: "sw-meta" }, h("span", { text: { eng: "engineer", ci: "CI agent", master: "master" }[a.lane] || a.lane }),
-          h("span", { text: `profile ${a.profile}` }), h("span", { text: `model ${a.model}` }),
-          a.modelSource ? h("span", { text: `source ${a.modelSource}` }) : null,
-          a.modelConfidence != null ? h("span", { text: `confidence ${Math.round(a.modelConfidence * 100)}%` }) : null, a.account ? h("span", { text: a.account }) : null,
-          h("span", { class: "sw-ago", text: a.ago ? `last activity ${a.ago} ago` : "last activity not recorded" }))),
-      a.inputPrompt ? h("p", { class: "sw-meta", text: `Prompt: ${a.inputPrompt}` }) : null,
-      h("p", { class: "hint", text: ((task.workspace_tail || {}).latest_progress || "").split("\n").filter((line) => line.trim()).at(-1) || "Progress not recorded." }),
-      a.pr ? h("a", { class: "sw-task", href: a.pr, target: "_blank", rel: "noopener", text: `Pull request · ${task.checks_state || "checks not reported"}` }) : null,
-      h("ul", { class: "pending-inbox" }, ...(a.inbox || []).map((i) => h("li", { class: "hint", text: i.text }))),
-      h("p", { class: "hint", text: a.inbox ? `Pending inbox items: ${a.inbox.length}` : "Pending inbox items not reported." }),
-      h("div", { class: "sw-ctl" },
-        h("button", { class: "sw-btn", type: "button", text: "Message", on: { click: () => { showChat(true); $("chat-to").value = a.lane === "master" ? "" : a.name; } } }),
-        h("button", { class: "sw-btn danger", type: "button", text: "Terminate", on: { click: () => {
-          if (confirm(`Terminate ${a.name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name: a.name });
-        } } })));
-    collapsible(box);
-    return h("li", { class: a.lane === "master" ? "sw-card master" : "sw-card" }, box);
-  }
-
-  function renderHealth(findings) {
+  function renderHealth(findings, now = Date.now()) {
     const list = findings || [];
-    $("health-count").textContent = list.length ? `· ${list.length}` : "";
-    $("health").replaceChildren(...(list.length ? list.map(healthCard) : [h("li", { class: "sw-empty", text: "No health findings. The swarm checks every minute." })]));
+    $("health-count").textContent = `${list.length} open`;
+    $("health").replaceChildren(...(list.length ? list.map((f) => healthRow(f, now)) : [emptyRow(7, "No health findings. The swarm checks every minute.")]));
   }
 
-  function healthCard(f) {
-    return h("li", { class: "sw-card" },
-      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: f.subject, title: f.subject }),
-        h("span", { class: "hl-kind", text: f.kind })),
-      h("p", { class: "hl-summary", text: f.summary }),
-      h("ul", { class: "hl-evidence" }, ...(f.evidence || []).map((entry) => h("li", { text: entry }))),
-      h("p", { class: "hl-threshold", text: `threshold ${f.threshold}` }),
-      f.verdict ? h("p", { class: "hl-earlier", text: `earlier verdict ${f.verdict.value.replace(/-/g, " ")} by ${f.verdict.by}${f.verdict.note ? `: ${f.verdict.note}` : ""}` }) : null,
-      h("div", { class: "hl-verdict" },
-        h("select", { class: "hl-pick", "aria-label": "Verdict" },
-          ...["false-positive", "early-real", "established", "insufficient-evidence", "resolved"].map((v) => h("option", { value: v, text: v.replace(/-/g, " ") }))),
-        h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "note", "aria-label": "Verdict note" }),
-        h("button", { class: "sw-btn", type: "button", "data-verdict": f.id, text: "Give verdict" })));
+  function healthRow(f, now) {
+    const earlier = f.verdict || {};
+    const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id },
+      h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
+    pick.value = earlier.value || "";
+    const note = h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "—", "aria-label": `Verdict note on ${f.kind} ${f.subject}` });
+    note.value = earlier.note || "";
+    return cells(f.kind, f.subject, (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
   }
 
-  $("swarm-box").addEventListener("click", (event) => {
-    const btn = event.target.closest("button[data-verdict]");
-    if (!btn) return;
-    const card = btn.closest("li");
-    swarmControl({ action: "verdict", id: btn.dataset.verdict, verdict: card.querySelector(".hl-pick").value, note: card.querySelector(".hl-note").value.trim() });
-  });
+  function renderHandoffs(rows) {
+    $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
+    $("swarm-handoffs").replaceChildren(...(rows.length ? rows.map((r) => cells(seatText(r.seat), clock(r.at), r.reason,
+      r.continuity ? label(r.continuity) : "—", r.binding ? label(r.binding) : "—",
+      r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
+        "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor))
+      : [emptyRow(6, "No seats yet. Seats appear when agents start.")]));
+  }
 
   function itemState(list, i) {
     if (!["phases", "tasks", "questions", "followups"].includes(list)) return undefined;
@@ -2294,24 +2209,8 @@ input, textarea { caret-color: var(--accent-2); }
     const placeRail = () => {
       for (const btn of railButtons) rail.append(btn);
     };
-    const grid = document.querySelector(".swarm-grid");
-    const workColumn = h("div", { class: "swarm-work-column" });
-    const sideColumn = h("div", { class: "swarm-side-column" });
-    const parts = ["agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "handoff-box", "restore-box"].map($);
-    const counts = document.querySelector(".counts-row");
-    const placePanels = () => {
-      placeRail();
-      if (innerWidth < 1024) grid.replaceChildren(parts[0], counts, ...parts.slice(1));
-      else {
-        $("swarm-status-box").after(counts);
-        workColumn.replaceChildren(parts[0], parts[4]);
-        sideColumn.replaceChildren(parts[1], parts[2], parts[3], parts[5], parts[6]);
-        grid.replaceChildren(workColumn, sideColumn);
-      }
-    };
-    placePanels();
-    window.addEventListener("resize", placePanels);
-    $("filter-clear").addEventListener("click", () => { workFilter = ""; renderSwarm(swarm); });
+    placeRail();
+    window.addEventListener("resize", placeRail);
     $("main-content").addEventListener("scroll", markOutline, { passive: true });
     poll();
     pollSwarm();

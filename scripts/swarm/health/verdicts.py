@@ -26,7 +26,7 @@ class VerdictStore:
                 self.redis.hset(self.key, finding.id, json.dumps(record))
             if show:
                 earlier = {k: verdict[k] for k in ("value", "note", "by", "at")} if verdict else None
-                shown.append({"id": finding.id, **finding.as_dict(), "verdict": earlier})
+                shown.append({"id": finding.id, **finding.as_dict(), "verdict": earlier, "seen_at": record["seen_at"]})
         return shown
 
     def judge(self, finding_id, value, note, by, now_ms):

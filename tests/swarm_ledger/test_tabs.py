@@ -86,25 +86,21 @@ def test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches(tab):
 
 
 @pytest.mark.parametrize("width", [1440, 390])
-def test_swarm_contains_the_operational_panels_and_controls_do_not_cover_text(tab, width):
+def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width):
     tab.set_viewport_size({"width": width, "height": 844})
     tab.get_by_role("tab", name="Swarm").click()
-    for name in ["Agents", "Capacity", "Swarm health", "Doctor", "Crew history"]:
-        assert tab.locator("#swarm").get_by_text(name, exact=True).count() == 1
+    for name in ["Capacity", "Agents", "Tasks", "Quota", "Doctor", "Health", "Handoff outcomes"]:
+        assert tab.locator("#swarm").get_by_text(name, exact=True).count() == 1, name
+    for gone in ["Needs you", "Crew history", "Last restore"]:
+        assert tab.locator("#swarm").get_by_text(gone, exact=True).count() == 0, gone
+    assert tab.locator("#swarm #cap-eng").inner_text() == "3"
+    assert tab.locator("#swarm #cap-codex").inner_text() == "30%"
+    assert tab.locator("#swarm-alert").is_hidden()
     assert tab.get_by_text("Needs you", exact=True).count() == 0
     assert tab.locator("#needs-you-box, #needs-you").count() == 0
     tab.get_by_role("tab", name="Ledger").click()
     assert "Choose the first phase" in tab.locator("#priorities").inner_text()
     tab.get_by_role("tab", name="Swarm").click()
-    assert tab.locator("#swarm #cap-eng").count() == 1
-    assert tab.locator("#swarm #health").count() == 1
-    assert tab.locator("#swarm #crew").count() == 1
-    assert tab.locator("#swarm-restore-box").is_hidden()
-    assert tab.locator("#swarm-agents-box").get_attribute("open") is not None
-    assert tab.locator("#codex-split").inner_text() == (
-        "Codex share: percent of new engineers started on Codex. So far 6 of 19 started on Codex (31%)."
-    )
-    assert tab.locator('[data-swarm="set"]').is_disabled()
     assert tab.locator("body").evaluate("el => el.scrollWidth") == width, tab.evaluate(
         "() => [...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.getBoundingClientRect().right > innerWidth).map(el => [el.id, el.className, el.getBoundingClientRect().right])"
     )
@@ -113,43 +109,10 @@ def test_swarm_contains_the_operational_panels_and_controls_do_not_cover_text(ta
         assert tab.locator("#bell").evaluate("el => !!el.closest('#icon-strip')")
 
 
-def test_plan_shape_shows_only_labelled_counts_for_open_dependencies(tab):
-    sw = {
-        **SWARM,
-        "plan_shape": {
-            "has_dependencies": True,
-            "chain_length": 2,
-            "parallel_width": 3,
-            "summary": "Critical path should not appear",
-            "warning": "Warnings should not appear as plan prose",
-        },
-    }
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=sw))
-    tab.reload()
+def test_an_agent_row_links_its_task_id_to_the_task_in_the_ledger(tab):
     tab.get_by_role("tab", name="Swarm").click()
-    assert tab.locator("#swarm-plan-shape").inner_text() == "2\nChain\n3\nParallel"
-    sw["plan_shape"]["has_dependencies"] = False
-    tab.reload()
-    tab.get_by_role("tab", name="Swarm").click()
-    assert tab.locator("#swarm-plan-shape").is_hidden()
-
-
-def test_agent_details_use_task_identity_and_the_published_progress_field(tab):
-    doc = {
-        **DOC,
-        "tasks": [
-            {"id": "one", "title": "Same title", "workspace_tail": {"latest_progress": "First task progress"}},
-            {"id": "two", "title": "Same title", "workspace_tail": {"latest_progress": "Second task progress"}},
-        ],
-        "_meta": {"rev": 10},
-    }
-    sw = {**SWARM, "agents": [{"name": "engineer", "lane": "eng", "task": "two"}]}
-    tab.route("**/api/**", lambda route: route.fulfill(json=sw if "/swarm/" in route.request.url else doc))
-    tab.reload()
-    tab.get_by_role("tab", name="Swarm").click()
-    tab.locator("#agent-engineer > summary").click()
-    assert "Second task progress" in tab.locator("#agent-engineer").inner_text()
-    assert "First task progress" not in tab.locator("#agent-engineer").inner_text()
+    link = tab.locator("#swarm-agents a", has_text="one")
+    assert link.get_attribute("href") == "#item-tasks-one"
 
 
 def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab):
@@ -193,5 +156,4 @@ def test_failed_status_read_keeps_the_observed_state_and_reports_the_failure(tab
     assert "null" not in tab.locator("#tab-swarm").text_content()
     tab.get_by_role("tab", name="Ledger").click()
     tab.locator("#phases input[type=checkbox]").first.check()
-    assert tab.locator("#swarm-status-box").get_attribute("hidden") is None
     assert "Could not read swarm status" in tab.locator("#swarm-note").text_content()
