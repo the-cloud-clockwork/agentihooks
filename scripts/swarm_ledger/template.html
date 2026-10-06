@@ -439,12 +439,18 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
 .sw-alert-kinds { letter-spacing: .06em; color: var(--warn); text-shadow: var(--glow); }
 .sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
-.sw-capacity { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-tight); }
-.sw-caps, .sw-gates { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
+.sw-capacity { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: var(--space-tight) var(--space-row); }
+.sw-caps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
 .sw-caps { column-gap: var(--space-tight); }
+.sw-gates { --gate-w: calc(30.5ch + 3 * var(--space-tight)); display: grid; grid-template-columns: repeat(auto-fill, var(--gate-w)); gap: var(--space-tight) var(--space-row); max-width: calc(5 * var(--gate-w) + 4 * var(--space-row)); font-size: var(--fs-meta); }
+#gates-label, .sw-gates { grid-column: 1 / -1; }
+.sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 7.5ch 7.5ch 3.5ch; gap: var(--space-tight); align-items: center; }
+.sw-gate .sw-cap-name { margin: 0; text-align: right; white-space: nowrap; }
+.sw-gate .sw-mode { min-height: 28px; text-align: left; padding: 4px 0; font-size: inherit; }
+@media (max-width: 1599px) { .sw-caps { grid-column: 1 / -1; } }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
 .sw-cap { display: inline-flex; align-items: center; gap: 2px; }
-.sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--text); }
 .sw-field { display: inline-flex; align-items: baseline; gap: 2px; }
 .sw-num { field-sizing: content; min-width: 2ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-1); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
 @supports not (field-sizing: content) { .sw-num { width: 4ch; } }
@@ -1762,8 +1768,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function renderGates(sw) {
     const gates = Object.entries((sw && sw.gate_modes) || {});
     $("gates-label").hidden = !gates.length;
+    const modes = JSON.stringify(gates);
+    if ($("swarm-gates").dataset.modes === modes) return;
+    $("swarm-gates").dataset.modes = modes;
     $("swarm-gates").replaceChildren(...gates.map(([name, mode]) => h("div", { class: "sw-cap sw-gate", role: "group", "aria-label": `${name} gate mode` },
-      h("span", { class: "sw-cap-name", text: name }),
+      h("span", { class: "sw-cap-name", "data-gate-name": name, text: name }),
       ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode), text: m })))));
   }
 
