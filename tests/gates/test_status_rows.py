@@ -48,3 +48,38 @@ def test_status_text_prints_one_line_per_recent_gate_row(monkeypatch, capsys):
     cli.cmd_status(saved(), SimpleNamespace(slug="sw", json=False))
     lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate ")]
     assert lines == ["gate  observe  talk  engineer@1-1  t1  over budget"]
+
+
+def _a_deny_among_thirty_count_rows():
+    log.append("sw", log.Row.of("subagents", "count", WHO, "Agent", "sub agent call", now_ms=0))
+    log.append("sw", log.Row.of("talk", "deny", WHO, "Bash", "over budget", now_ms=1))
+    for at in range(2, 31):
+        log.append("sw", log.Row.of("reruns", "count", WHO, "Bash", "ci rerun", now_ms=at))
+
+
+def test_status_report_lists_only_decision_rows_and_keeps_count_rows_in_the_log():
+    _a_deny_among_thirty_count_rows()
+    log.append("sw", log.Row.of("talk", "observe", WHO, "Bash", "would deny", now_ms=31))
+    log.append("sw", log.Row.of("talk", "lift", WHO, reason="lifted", now_ms=32))
+    log.append("sw", log.Row.of("talk", "fail-open", WHO, "Bash", "crashed", now_ms=33))
+    gates = status.status_report(saved(), "sw", {"tasks": []})["gates"]
+    assert [(r["kind"], r["at"]) for r in gates] == [("deny", 1), ("observe", 31), ("lift", 32), ("fail-open", 33)]
+    assert [r["kind"] for r in log.recent("sw", limit=None)].count("count") == 30
+
+
+def test_status_text_shows_the_deny_among_thirty_count_rows(monkeypatch, capsys):
+    from tests.swarm.test_tick import FakeLedger
+
+    _a_deny_among_thirty_count_rows()
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    cli.cmd_status(saved(), SimpleNamespace(slug="sw", json=False))
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("gate ")]
+    assert lines == ["gate  deny  talk  engineer@1-1  t1  over budget"]
+
+
+def test_decisions_keeps_the_last_twenty_decision_rows_of_the_given_home(tmp_path):
+    for at in range(21):
+        log.append("sw", log.Row.of("talk", "deny", WHO, "Bash", "over budget", now_ms=at), tmp_path)
+        log.append("sw", log.Row.of("reruns", "count", WHO, "Bash", "ci rerun", now_ms=at), tmp_path)
+    assert [r["at"] for r in log.decisions("sw", home=tmp_path)] == list(range(1, 21))
+    assert log.decisions("sw") == []

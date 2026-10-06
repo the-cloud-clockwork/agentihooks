@@ -1046,6 +1046,28 @@ def _operator_question(payload: dict) -> str:
         return ""
 
 
+def _operator_reminder(payload: dict) -> None:
+    try:
+        from hooks.common import inject_context
+        from hooks.context import operator_mode
+
+        text = operator_mode.reminder(payload.get("session_id"))
+        if text:
+            inject_context(text, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("operator reminder failed", {"error": str(e)})
+
+
+def _operator_quiet(payload: dict) -> str:
+    try:
+        from hooks.context import operator_mode
+
+        return operator_mode.quiet_block(payload.get("session_id"), payload.get("last_assistant_message"))
+    except Exception as e:
+        log("operator quiet check failed", {"error": str(e)})
+        return ""
+
+
 def _arm_gate_lifts(payload: dict) -> None:
     try:
         from scripts.gates.base import Who
@@ -1133,6 +1155,7 @@ def on_pre_tool_use(payload: dict) -> None:
     _question_block = _operator_question(payload)
     if _question_block:
         raise BlockAction(_question_block)
+    _operator_reminder(payload)
 
     try:
         from scripts.swarm.health.activity import record as _record_swarm_activity
@@ -2015,6 +2038,9 @@ def on_stop(payload: dict) -> None:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
+    _quiet_block = _operator_quiet(payload)
+    if _quiet_block:
+        raise BlockAction(_quiet_block)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")

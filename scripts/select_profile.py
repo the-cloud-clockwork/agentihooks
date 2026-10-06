@@ -28,10 +28,8 @@ def prepare(
     )
     profiles.render(agent, name)
     env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name)}
-    if agent == "claude":
-        env["CLAUDE_CONFIG_DIR"] = str(profiles.rendered_root() / name / "claude")
-    else:
-        flags = ["-p", name, *flags]
+    home = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
+    env[home] = str(profiles.rendered_root() / name / agent)
     return env, [*flags, *remaining]
 
 

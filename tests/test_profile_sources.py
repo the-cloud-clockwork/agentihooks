@@ -34,7 +34,9 @@ def test_claude_render_writes_a_row_per_rule_and_doctrine_file(bundle):
     found = _by_source(row for row in rows if row["locator"]["repo"] == str(bundle))
     packaged = [row for row in rows if row["locator"]["repo"] != str(bundle)]
     assert [(row["layer"], Path(row["locator"]["path"]).name) for row in packaged] == [
-        ("rule", "agentihooks-toolbelt.md")
+        ("rule", "agentihooks-toolbelt.md"),
+        ("rule", "code-intelligence.md"),
+        ("rule", "worktrees.md"),
     ]
     assert {source: row["layer"] for source, row in found.items()} == {
         "bundle/.claude/CLAUDE.md": "doctrine",
@@ -62,7 +64,7 @@ def test_codex_render_writes_the_same_rows(bundle):
     root = render.rendered_root()
     claude = json.loads(sources.path("rb-role", "claude", root).read_text())
     codex = json.loads(sources.path("rb-role", "codex", root).read_text())
-    assert codex == claude and len(codex) == 7
+    assert codex == claude and len(codex) == 9
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -132,10 +134,7 @@ def _correct_passage(bundle, rel, quote):
 
 
 def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeypatch):
-    import tomllib
-
     from scripts.profiles import render
-    from scripts.targets.codex_target import codex_home
 
     monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
     out = render.render_claude("rb-role")
@@ -150,16 +149,12 @@ def test_a_confirmed_correction_renders_its_notice_and_rerenders(bundle, monkeyp
     assert f"ROLE RULE MARKER\n\n{notice}" in persona
     assert f"ROLE PERSONA MARKER\n\n{notice}" in persona
     assert f"BUNDLE RULE MARKER\n\n{notice}" not in persona
-    render.render_codex("rb-role")
-    codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
+    codex = (render.render_codex("rb-role") / "AGENTS.md").read_text()
     assert f"ROLE RULE MARKER\n\n{notice}" in codex and f"ROLE PERSONA MARKER\n\n{notice}" in codex
 
 
 def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypatch):
-    import tomllib
-
     from scripts.profiles import render
-    from scripts.targets.codex_target import codex_home
 
     monkeypatch.delenv("AGENTIHOOKS_GATE_QUARANTINE", raising=False)
     rel = "profiles/rb-kit/.claude/rules/role-rule.md"
@@ -167,7 +162,7 @@ def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypa
     _correct_passage(bundle, rel, "ROLE RULE MARKER")
 
     out = render.render_claude("rb-role")
-    render.render_codex("rb-role")
+    codex = (render.render_codex("rb-role") / "AGENTS.md").read_text()
 
     held = (
         f"> CORRECTION: bundle/{rel} was marked wrong more than once and is held whole until the operator releases it."
@@ -176,6 +171,5 @@ def test_a_rule_corrected_twice_renders_as_the_held_notice_only(bundle, monkeypa
     assert f"<!-- rule: role-rule.md (rule) -->\n{held}\n" in persona
     assert "<!-- rule: bundle-rule.md (rule) -->\nBUNDLE RULE MARKER\n" in persona
     assert "ROLE RULE MARKER" not in persona
-    codex = tomllib.loads((codex_home() / "rb-role.config.toml").read_text())["developer_instructions"]
     assert f"<!-- rule: role-rule.md (rule) -->\n{held}" in codex
     assert "ROLE RULE MARKER" not in codex

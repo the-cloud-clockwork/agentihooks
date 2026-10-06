@@ -275,6 +275,24 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
 
+def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store):
+    from scripts.gates import log
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    tick("sw", store, ledger, runtime, now_ms=1_500)
+    assert log.recent("sw") == []
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    rows = [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"], r["at"]) for r in log.recent("sw")]
+    assert rows == [
+        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 1", 2_000),
+        ("idle-ticks", "count", "engineer@a1b2c3-0001", "t1", "idle tick 2", 3_000),
+    ]
+
+
 @pytest.mark.parametrize("state", ["pending", "delivered", "read"])
 def test_a_retired_stalled_agent_leaves_its_items_on_its_seat(store, state):
     from scripts.inbox.store import InboxStore

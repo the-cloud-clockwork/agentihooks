@@ -27,6 +27,7 @@ LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
 IDLE_NUDGE_TICKS = 3
 IDLE_KILL_TICKS = 10
+IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
 NUDGE = (
@@ -204,6 +205,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
+    who = Who(name=agent.name, task=agent.task)
+    gate_log.append(
+        slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
+    )
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudged {agent.name}"]

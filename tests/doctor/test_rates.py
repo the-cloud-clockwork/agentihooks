@@ -209,7 +209,29 @@ def test_idle_counts_findings_first_seen_in_the_window_and_minutes_from_merge_to
         ev(160, "task done", "tasks/t3", by="swarm"),
     ]
     got = rates.idle(recs(findings=findings, tasks=tasks, pulls=pulls, events=events), WIN)
-    assert got == {"idle findings": 1, "minutes from merge to done": 20.0}
+    assert got == {
+        "idle findings": 1,
+        "minutes from merge to done": 20.0,
+        "idle ticks": 0,
+        "idle ticks per claimed task": None,
+    }
+
+
+def test_idle_counts_idle_ticks_per_task_claimed_or_ticking_in_the_window():
+    events = [ev(110, "task claimed", "tasks/t1", by="swarm"), ev(120, "task claimed", "tasks/t2", by="swarm")]
+    log = [
+        {"gate": "idle-ticks", "kind": "count", "task": "t1", "at": 111 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "t1", "at": 112 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "t1", "at": 113 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "t3", "at": 114 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "t4", "at": 300 * MIN},
+        {"gate": "idle-ticks", "kind": "deny", "task": "t5", "at": 115 * MIN},
+        {"gate": "quiet", "kind": "count", "task": "t6", "at": 116 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "at": 117 * MIN},
+        {"gate": "idle-ticks", "kind": "count", "task": "", "at": 118 * MIN},
+    ]
+    got = rates.idle(recs(events=events, gate_log=log), WIN)
+    assert (got["idle ticks"], got["idle ticks per claimed task"]) == (6, 2.0)
 
 
 def test_stale_counts_findings_and_their_quiet_minutes():
@@ -219,7 +241,17 @@ def test_stale_counts_findings_and_their_quiet_minutes():
         "stale-claim/t3": finding("stale claim", 10, 90),
         "idle-with-claim/a": finding("idle with claim", 110, 3),
     }
-    assert rates.stale(recs(findings=findings), WIN) == {"stale findings": 2, "quiet minutes per finding": 50.0}
+    log = [
+        {"gate": "quiet", "kind": "count", "task": "t1", "at": 115 * MIN},
+        {"gate": "quiet", "kind": "count", "task": "t2", "at": 116 * MIN},
+        {"gate": "quiet", "kind": "deny", "task": "t2", "at": 117 * MIN},
+        {"gate": "quiet", "kind": "count", "task": "t3", "at": 300 * MIN},
+    ]
+    assert rates.stale(recs(findings=findings, gate_log=log), WIN) == {
+        "stale findings": 2,
+        "quiet minutes per finding": 50.0,
+        "quiet flags raised": 2,
+    }
 
 
 def test_premature_completion_counts_code_tasks_done_without_a_merged_pull_request():

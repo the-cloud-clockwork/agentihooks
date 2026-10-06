@@ -98,7 +98,9 @@ class StatsSync(unittest.TestCase):
         state, rejected = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t1"}])
         self.assertEqual(rejected, [])
         event = [e for e in state["_meta"]["events"] if e["kind"] == "stats sync requested"][0]
-        self.assertIn("time left", event["text"])
+        self.assertTrue(event["text"].startswith("Operator stats check, computed now. "))
+        self.assertIn("Undecided follow-ups: check disk. ", event["text"])
+        self.assertIn("Time left: the page shows ", event["text"])
         self.assertEqual(len(gate.unhandled_for(state["_meta"], "boss")), 1)
         self.assertEqual(gate.unhandled_for(state["_meta"], "eng"), [])
 

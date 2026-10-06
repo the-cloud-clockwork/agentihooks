@@ -38,7 +38,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       AskUserQuestion answer this session recorded in the last hour
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
-  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
+  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
            [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
@@ -420,6 +420,8 @@ def cmd_task(args):
             lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
+        if args.profile:
+            lists["profile"] = args.profile
         if args.plan:
             lists["plan_url"] = args.plan
         if args.scaffold:
@@ -566,6 +568,7 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
+    task.add_argument("--profile")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")

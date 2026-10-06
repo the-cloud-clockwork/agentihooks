@@ -1,0 +1,18 @@
+[
+  {
+    "query": "You are a planner in swarm app-build, slice phase p3",
+    "expected_behavior": "Writes the plan, publishes it with ledger publish-plan for the phase, adds pull request sized tasks with depends on and territory, and closes with swarm done --slice and the task ids."
+  },
+  {
+    "query": "one slice task restarts a service and checks it answers",
+    "expected_behavior": "Adds it as an ops task carrying --must, --check and --judge as its proof contract."
+  },
+  {
+    "query": "the plan task came back with a send back note asking for smaller tasks",
+    "expected_behavior": "Reads the note in steering.md, reslices the phase into smaller tasks, and closes with the new slice."
+  },
+  {
+    "query": "can you also fix the parser while you are at it",
+    "expected_behavior": "Edits no code; proposes the fix as a follow up or a task in the slice."
+  }
+]

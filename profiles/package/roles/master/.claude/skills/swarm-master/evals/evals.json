@@ -1,0 +1,22 @@
+[
+  {
+    "query": "You are the master of swarm app-build",
+    "expected_behavior": "Joins the ledger with --role orchestrator, keeps the ledger watch running, posts the page link and answers every inbox item."
+  },
+  {
+    "query": "the operator asks to add a task that checks the backup restores",
+    "expected_behavior": "Adds an ops task with ledger task add carrying --must, --check and --judge, and edits no code itself."
+  },
+  {
+    "query": "a planner finished slicing phase p2",
+    "expected_behavior": "Reviews the slice against the phase intent and runs swarm plan approve or swarm plan send-back with a note."
+  },
+  {
+    "query": "swarm status shows a new idle with claim finding",
+    "expected_behavior": "Checks its evidence and records swarm verdict with the finding id, a verdict and a note."
+  },
+  {
+    "query": "an engineer's resume failed and the seat awaits a decision",
+    "expected_behavior": "Runs swarm restore-decision for that agent with resume or fresh."
+  }
+]
