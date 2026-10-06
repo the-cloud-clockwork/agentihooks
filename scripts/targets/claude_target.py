@@ -109,6 +109,63 @@ def settings_document(rendered: dict) -> dict:
     return rendered
 
 
+def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
+    from scripts.targets._common import _atomic_write
+
+    _i = _install_module()
+    _i._remove_agentihooks_symlinks(dst, "rule")
+    items = {}
+    for src in sources:
+        if src.is_dir():
+            items.update(
+                {item.name: item for item in src.iterdir() if filter_fn(item) and not item.name.startswith(".")}
+            )
+    dst.mkdir(exist_ok=True)
+    records = []
+    for name, src in sorted(items.items()):
+        path = dst / name
+        if path.exists() or path.is_symlink():
+            continue
+        _atomic_write(path, src.read_text())
+        records.append((path, src, "rules"))
+    if not records:
+        return
+    _i._state_record_links(records)
+    state = _i._load_state()
+    copied = {str(path) for path, _, _ in records}
+    for entry in state["managed_links"]:
+        if entry["link"] in copied:
+            entry["rule_sources"] = [str(src) for src in sources]
+    _i._save_state(state)
+
+
+def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: bool) -> str:
+    from hooks.context.rules_refresh import collect_profile_rules
+    from scripts.profiles.render import render_claude, rendered_root
+
+    if not dry_run:
+        home = rules_dir.parent
+        if home == rendered_root() / home.parent.name / "claude":
+            render_claude(home.parent.name, force=True)
+        else:
+            _i = _install_module()
+            layers = next(
+                (
+                    entry["rule_sources"]
+                    for link, entry in _i._state_links().items()
+                    if Path(link).parent == rules_dir and not Path(link).is_symlink() and "rule_sources" in entry
+                ),
+                None,
+            )
+            if layers:
+                _install_rule_files(
+                    rules_dir,
+                    [Path(src) for src in layers],
+                    lambda path: path.suffix == ".md" and path.name != "README.md",
+                )
+    return collect_profile_rules(rules_dir, claude_md, local_md)
+
+
 class ClaudeAdapter:
     name = "claude"
 
@@ -137,6 +194,9 @@ class ClaudeAdapter:
     def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn) -> None:
         _i = _install_module()
         dst = _i.CLAUDE_HOME / subdir
+        if subdir == "rules":
+            _install_rule_files(dst, [src for _, src in layers], filter_fn)
+            return
         for label, src in layers:
             _i._symlink_dir_contents(src, dst, label=label, filter_fn=filter_fn)
 
