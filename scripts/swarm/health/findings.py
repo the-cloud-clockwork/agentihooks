@@ -277,23 +277,33 @@ def stale_claims(events, tasks, now_ms, limits):
     return found
 
 
+def watch_limits(by, limits):
+    if _is_master(by):
+        return limits.master_watch_min, limits.master_watch_ratio
+    return limits.watch_min, limits.watch_ratio
+
+
+def over_watched(counts, least, ratio):
+    return counts["since"] > least and counts["watch"] / max(counts["act"], 1) > ratio
+
+
 def over_monitoring(activity, limits):
     found = []
     for by, counts in sorted(activity.items()):
-        watch, act = counts.get("watch", 0), counts.get("act", 0)
-        if _is_master(by):
-            least, ratio = limits.master_watch_min, limits.master_watch_ratio
-        else:
-            least, ratio = limits.watch_min, limits.watch_ratio
-        if watch >= least and watch / max(act, 1) > ratio:
+        least, ratio = watch_limits(by, limits)
+        if over_watched(counts, least, ratio):
             found.append(
                 Finding(
                     "over monitoring",
                     by,
                     "more watch calls than actions",
-                    (f"{watch} watch calls", _plural(act, "action")),
-                    f"at least {least} watch calls and more than {ratio} per action",
-                    watch,
+                    (
+                        f"{counts['since']} watch calls since the last action",
+                        f"{counts['watch']} watch calls",
+                        _plural(counts["act"], "action"),
+                    ),
+                    f"more than {least} watch calls since the last action and more than {ratio} per action",
+                    counts["since"],
                 )
             )
     return found

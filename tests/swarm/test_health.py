@@ -39,7 +39,7 @@ def healthy():
         "_meta": {"events": events},
     }
     agents = [agent("sw-master-1", "master", "master"), agent("sw-eng-2", task_id="t2", idle_ticks=1)]
-    activity = {"sw-eng-2": {"watch": 6, "act": 9}, "sw-master-1": {"watch": 30, "act": 10}}
+    activity = {"sw-eng-2": {"watch": 6, "act": 9, "since": 0}, "sw-master-1": {"watch": 30, "act": 10, "since": 0}}
     return ledger, agents, activity
 
 
@@ -207,7 +207,7 @@ def test_an_agent_waiting_on_checks_does_not_trip_idle_with_claim():
 def test_each_finding_carries_a_stable_id_and_the_measure_its_evidence_grows_by():
     ledger = {"tasks": [task("t1", state="claimed", pr_url="")], "_meta": {"events": []}}
     [idle] = health.findings(ledger, [agent(idle_ticks=4)], {}, NOW, LIMITS)
-    [watch] = health.over_monitoring({"sw-eng-1": {"watch": 33, "act": 2}}, LIMITS)
+    [watch] = health.over_monitoring({"sw-eng-1": {"watch": 40, "act": 2, "since": 33}}, LIMITS)
     assert (idle.id, idle.measure) == ("idle-with-claim/sw-eng-1", 4)
     assert (watch.id, watch.measure) == ("over-monitoring/sw-eng-1", 33)
     assert "measure" not in watch.as_dict()
@@ -230,35 +230,65 @@ def test_a_claim_with_no_change_names_the_task_its_holder_and_the_quiet_time():
     ]
 
 
-def test_over_monitoring_names_the_agent_and_both_counts():
-    assert run({"tasks": [], "_meta": {"events": []}}, activity={WORKER: {"watch": 40, "act": 3}}) == [
+def test_over_monitoring_names_the_agent_and_its_counts():
+    activity = {WORKER: {"watch": 40, "act": 3, "since": 21}}
+    assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == [
         {
             "kind": "over monitoring",
             "subject": WORKER,
             "summary": "more watch calls than actions",
-            "evidence": ["40 watch calls", "3 actions"],
-            "threshold": "at least 20 watch calls and more than 5 per action",
+            "evidence": ["21 watch calls since the last action", "40 watch calls", "3 actions"],
+            "threshold": "more than 20 watch calls since the last action and more than 5 per action",
         }
     ]
 
 
+def test_an_agent_the_watch_gate_held_at_its_budget_gets_no_finding():
+    activity = {WORKER: {"watch": 40, "act": 3, "since": 20}}
+    assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == []
+
+
+def test_watching_after_the_last_action_within_the_ratio_gets_no_finding():
+    activity = {WORKER: {"watch": 25, "act": 5, "since": 25}}
+    assert run({"tasks": [], "_meta": {"events": []}}, activity=activity) == []
+
+
 def test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents():
-    counts = {"watch": 40, "act": 4}
+    counts = {"watch": 40, "act": 4, "since": 40}
     found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": counts, WORKER: counts})
     assert [f["subject"] for f in found] == [WORKER]
 
 
 def test_a_master_past_its_looser_limit_still_gets_a_finding():
-    found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": {"watch": 70, "act": 3}})
+    found = run({"tasks": [], "_meta": {"events": []}}, activity={"sw-master-1": {"watch": 70, "act": 3, "since": 61}})
     assert found == [
         {
             "kind": "over monitoring",
             "subject": "sw-master-1",
             "summary": "more watch calls than actions",
-            "evidence": ["70 watch calls", "3 actions"],
-            "threshold": "at least 60 watch calls and more than 15 per action",
+            "evidence": ["61 watch calls since the last action", "70 watch calls", "3 actions"],
+            "threshold": "more than 60 watch calls since the last action and more than 15 per action",
         }
     ]
+
+
+@pytest.mark.parametrize(("by", "least", "ratio"), [("sw-eng-1", 20, 5), ("sw-ci-1", 20, 5), ("sw-master-1", 60, 15)])
+def test_watch_limits_pick_the_master_pair_only_for_the_master(by, least, ratio):
+    assert health.watch_limits(by, LIMITS) == (least, ratio)
+
+
+@pytest.mark.parametrize(
+    ("counts", "over"),
+    [
+        ({"watch": 21, "act": 0, "since": 21}, True),
+        ({"watch": 20, "act": 0, "since": 20}, False),
+        ({"watch": 30, "act": 6, "since": 21}, False),
+        ({"watch": 31, "act": 6, "since": 21}, True),
+        ({"watch": 6, "act": 1, "since": 21}, True),
+    ],
+)
+def test_over_watched_needs_both_the_since_count_and_the_ratio(counts, over):
+    assert health.over_watched(counts, 20, 5) is over
 
 
 def test_master_watch_limits_come_from_the_environment():

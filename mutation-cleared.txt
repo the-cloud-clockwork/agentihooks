@@ -486,5 +486,13 @@
   "hooks/context/conditions.py:hooks.context.conditions.x_parse_filename__mutmut_18:a6288aca9993c9d6efea2ba799f9170d9579e894edd31f3ebe21f43c79c132cc": {
     "reader": "Standards",
     "reason": "tool_matcher.parse lowercases its input, so inserting any or ANY yields the same matcher, key and index bucket."
+  },
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_2:423fbca59abf4c06741e3f0559c5ced30eb8a0a01742e757a875ef7ad400629a": {
+    "reader": "Standards",
+    "reason": "The recorder writes json.dumps rows, which are ASCII, so every ASCII compatible locale codec decodes them to the same text."
+  },
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_4:9e1ebae557e612a845bc7237c35999a4b6215d20f6b7ef4724741ea44b81cb8b": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same codec and decode identical text."
   }
 }

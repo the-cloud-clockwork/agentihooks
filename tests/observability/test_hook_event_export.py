@@ -9,6 +9,13 @@ from pathlib import Path
 import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Under runner load the worker's SDK init alone outlasts the 1s production flush budget.
+_HOOK_WITH_LOAD_PROOF_FLUSH = (
+    "import runpy\n"
+    "from hooks.observability import otel\n"
+    "otel.FLUSH_TIMEOUT_SEC = 30\n"
+    "runpy.run_module('hooks', run_name='__main__')\n"
+)
 
 
 @pytest.fixture
@@ -49,7 +56,7 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
         "transcript_path": "",
     }
     result = subprocess.run(
-        [sys.executable, "-m", "hooks"],
+        [sys.executable, "-c", _HOOK_WITH_LOAD_PROOF_FLUSH],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
