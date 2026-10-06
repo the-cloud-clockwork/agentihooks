@@ -174,6 +174,18 @@ def test_an_operator_lift_lets_the_write_through_for_an_hour(redis, tmp_path):
     assert rejected == []
 
 
+def test_a_page_lift_for_the_agent_lets_the_write_through(redis, tmp_path):
+    from scripts.gates import lift
+    from scripts.gates.base import Who
+
+    mode(redis, "enforce")
+    fill(redis, tmp_path)
+    lift.lift_agent(Who(name=CI, swarm=SLUG), "talk", tmp_path)
+    assert say(redis, tmp_path, n=98)[1] != []
+    lift.lift_agent(Who(name=ENG, swarm=SLUG), "talk", tmp_path)
+    assert say(redis, tmp_path, n=99)[1] == []
+
+
 def test_a_lift_of_another_gate_or_agent_or_an_old_lift_does_not_count():
     events = [
         {"kind": "gate lifted", "by": ENG, "gate": "identity", "at": 10_000_000},
@@ -292,6 +304,19 @@ def at_budget(redis, by=ENG):
 
 
 CHAT = {"op": "add", "thread": "chat", "id": "m1", "text": "hi", "by": ENG}
+
+
+def test_a_page_lift_holds_one_hour_on_the_ledger_clock(redis, tmp_path):
+    from scripts.gates import lift
+    from scripts.gates.base import Who
+
+    mode(redis, "enforce")
+    at_budget(redis)
+    at, who = 10_000_000, Who(name=ENG, swarm=SLUG)
+    lift.lift_agent(who, "talk", tmp_path, now=at / 1000 - lift.LIFT_SECONDS + 1)
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT, at=at)[0] is True
+    lift.lift_agent(who, "talk", tmp_path, now=at / 1000 - lift.LIFT_SECONDS)
+    assert direct(redis, tmp_path, {"tasks": []}, CHAT, at=at)[0] is False
 
 
 def test_an_operator_event_on_a_task_the_agent_claimed_is_owed(redis, tmp_path):

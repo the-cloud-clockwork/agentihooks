@@ -136,10 +136,11 @@ def test_parent_lookup_keeps_builtin_bundle_and_linked_precedence(tmp_path, monk
     expected = [("parent", builtin / "parent"), ("external", linked), ("child", child)]
     assert profile_chain.profile_dirs(bundle, "child", links) == expected
     assert install._resolve_profile_chain("child") == expected
+    roles = profile_chain.PACKAGE_ROLES
     assert profile_chain.profile_candidates(bundle, "child", links) == [
-        ("parent", [builtin / "parent", bundle / "profiles" / "parent", linked]),
-        ("external", [builtin / "external", bundle / "profiles" / "external", linked]),
-        ("child", [builtin / "child", child]),
+        ("parent", [builtin / "parent", bundle / "profiles" / "parent", linked, roles / "parent"]),
+        ("external", [builtin / "external", bundle / "profiles" / "external", linked, roles / "external"]),
+        ("child", [builtin / "child", child, roles / "child"]),
     ]
 
 
@@ -226,3 +227,79 @@ def test_persona_identity_skips_profiles_reached_through_extends(tmp_path, monke
     assert f"You are **{identity}**" in text
     assert f"answer as **{identity}**" in text
     assert layers in text
+
+
+@pytest.fixture
+def package_roles(tmp_path, monkeypatch):
+    roles = tmp_path / "package-roles"
+    roles.mkdir()
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+
+    def create(name, parents=None):
+        root = roles / name
+        root.mkdir()
+        if parents is not None:
+            (root / "profile.yml").write_text(yaml.safe_dump({"extends": parents}))
+        return root
+
+    return create
+
+
+def test_package_role_resolves_when_no_other_root_defines_it(profiles, package_roles):
+    _create, resolve = profiles
+    role = package_roles("engineer")
+    assert resolve("engineer") == [("engineer", role)]
+
+
+def test_bundle_profile_wins_over_package_role(profiles, package_roles):
+    create, resolve = profiles
+    package_roles("engineer")
+    bundle_role = create("engineer")
+    assert resolve("engineer") == [("engineer", bundle_role)]
+
+
+def test_bundle_profile_extending_package_role_layers_on_top(profiles, package_roles):
+    create, resolve = profiles
+    base = package_roles("base")
+    package_role = package_roles("engineer", ["base"])
+    bundle_role = create("engineer", ["package:engineer"])
+    assert resolve("engineer") == [("base", base), ("package:engineer", package_role), ("engineer", bundle_role)]
+
+
+def test_package_prefix_reaches_only_the_package_roles_folder(tmp_path, package_roles):
+    bundle = tmp_path / "bundle"
+    (bundle / "profiles" / "engineer").mkdir(parents=True)
+    role = package_roles("engineer")
+    assert profile_chain.profile_candidates(bundle, "package:engineer", {}) == [("package:engineer", [role])]
+    assert profile_chain.profile_candidates(bundle, "engineer", {"engineer": tmp_path})[0][1][-2:] == [tmp_path, role]
+
+
+def test_install_labels_and_lists_package_roles(tmp_path, monkeypatch, package_roles):
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    monkeypatch.setattr(install, "PROFILES_DIR", builtin)
+    install.STATE_JSON.write_text("{}")
+    role = package_roles("engineer")
+    assert install._resolve_profile_dir("package:engineer") == role
+    assert install._profile_source_label("engineer") == "package"
+    assert install._profile_source_label("package:engineer") == "package"
+    package_roles("_draft")
+    (role.parent / "notes.md").write_text("not a role\n")
+    assert install._available_profiles() == ["engineer"]
+    assert install._resolve_profile_dir("package:missing") is None
+
+
+def test_enforcements_and_conditions_load_from_package_role(tmp_path, monkeypatch, package_roles):
+    from hooks.context import conditions, enforcement
+
+    role = package_roles("engineer")
+    entry = {"id": "pkg-1", "message": "package rule", "cadence": 3}
+    (role / "enforcements.json").write_text(json.dumps({"enforcements": [entry]}))
+    monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "engineer")
+    monkeypatch.setattr(enforcement, "_get_linked_profiles", lambda: {})
+    assert [e["id"] for e in enforcement._load_profile_enforcements()] == ["pkg-1"]
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+    layers, _probed = conditions.layer_dirs({})
+    assert ("profile:engineer", role / ".claude" / "conditions") in layers
