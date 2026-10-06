@@ -69,3 +69,20 @@ def test_installer_guard_refuses_write_before_mutation(tmp_path, monkeypatch, op
     assert result.returncode == 1, result.stdout + result.stderr
     assert "refusing installer write outside the test directory" in result.stdout
     assert list(sentinel.iterdir()) == []
+
+
+@pytest.mark.parametrize("operation", ["os.ftruncate(stream.fileno(), 0)", "os.fchmod(stream.fileno(), 0)"])
+def test_guard_refuses_mutation_through_an_open_descriptor(tmp_path, monkeypatch, operation):
+    monkeypatch.setenv("OPERATOR_HOME", str(tmp_path / "operator"))
+    preload = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "stream = (Path(os.environ['OPERATOR_HOME']) / '.claude.json').open('w+')\n"
+        "stream.write('sentinel')\n"
+        "stream.flush()\n"
+    )
+    result, sentinel = _run_probe(tmp_path, f"    {operation}\n", preload)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "refusing installer write outside the test directory" in result.stdout
+    assert (sentinel / ".claude.json").read_text() == "sentinel"
+    assert (sentinel / ".claude.json").stat().st_mode & 0o600 == 0o600
