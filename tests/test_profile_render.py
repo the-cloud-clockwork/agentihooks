@@ -588,6 +588,7 @@ def test_codex_render_without_global_servers_or_skills(world, config):
         _write(home / ".codex" / "config.toml", config)
     for skill in (home / ".agents" / "skills").iterdir():
         skill.unlink() if skill.is_file() else skill.rmdir()
+    _write(world["role"] / ".codex" / "config.overrides.toml", "[mcp_servers.layer-srv]\ncommand = 'x'\n")
 
     doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
 
