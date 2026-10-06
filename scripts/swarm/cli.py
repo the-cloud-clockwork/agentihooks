@@ -40,6 +40,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hooks.context import injection_trace
 from scripts.doctor import priming
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
@@ -59,6 +60,7 @@ from scripts.swarm import (
     phase_state,
     phases,
     plan_review,
+    priming_trace,
     priority_sweep,
     prompt,
     snapshot,
@@ -309,12 +311,14 @@ def cmd_take_master(store, args):
         store.update(args.slug, state="running")
         timer.ensure(_bin())
     config = store.config(args.slug)
-    task = {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)}
-    print(
-        prompt.build_master(
-            args.slug, config.repo, record.name, primed(store, args.slug, record.seat, task), config.autonomy
-        )
+    task = primed(
+        store,
+        args.slug,
+        record.seat,
+        {"id": MASTER, "handoff": store.handoff(args.slug, MASTER), "peer": store.peer(args.slug)},
     )
+    print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
+    injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
     store.clear_handoff(args.slug, MASTER)
 
 

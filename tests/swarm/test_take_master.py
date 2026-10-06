@@ -70,6 +70,21 @@ def test_a_dead_master_record_is_dropped_without_replace(taker):
     assert [m[0] for m in _masters(store)] == ["master@a1b2c3-0002"]
 
 
+def test_take_master_traces_the_priming_it_printed_into_this_session(taker, monkeypatch):
+    from hooks.context import injection_trace
+
+    store, _, _, _ = taker
+    store.culture.set("sw", "- merge fast")
+    store.memory.learn("master@sw", "m0", "keep the ledger current", 1)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-master")
+    assert run("sw", "take-master") == 0
+    rows = [(r["layer"], r["source"], r["text"]) for r in injection_trace.trace("sess-master")]
+    assert rows == [
+        ("culture", "culture:sw#1", "- merge fast"),
+        ("learned", "learned:master@sw#1", "keep the ledger current"),
+    ]
+
+
 def test_take_master_reopens_a_closed_ledger_and_runs_a_stopped_swarm(taker):
     store, ledger, _, _ = taker
     store.update("sw", state="stopped")

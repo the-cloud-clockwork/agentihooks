@@ -115,3 +115,133 @@ def test_an_injection_dropped_for_lack_of_a_pretool_channel_is_not_recorded(caps
 
     assert trace([SID]) == 0
     assert capsys.readouterr().out == ""
+
+
+def _rule_row(tmp_path, layer="rule", body="# Worktrees\nNever edit the primary checkout.\n"):
+    repo = tmp_path / "bundle"
+    (repo / "rules").mkdir(parents=True, exist_ok=True)
+    (repo / "rules" / "worktrees.md").write_text(body)
+    locator = {"repo": str(repo), "path": "rules/worktrees.md", "blob": "b1"}
+    return {"layer": layer, "source": "bundle/rules/worktrees.md", "locator": locator, "text": "# Worktrees"}
+
+
+def _manifest(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows))
+
+
+def test_session_start_records_the_render_and_priming_manifests_once(tmp_path, capsys):
+    from hooks import config
+    from hooks.context import injection_trace
+
+    home = config.AGENTIHOOKS_HOME
+    note = {"layer": "learned", "source": "learned:eng-2@sw#3", "locator": {"seat": "eng-2@sw", "note": 3}}
+    _manifest(home / "profiles" / "engineer" / "codex.sources.json", [_rule_row(tmp_path)])
+    _manifest(home / "profiles" / "engineer" / "claude.sources.json", [{**_rule_row(tmp_path), "source": "other"}])
+    _manifest(home / "swarm" / "sw" / "prompts" / "eng@x-1.sources.json", [{**note, "text": "merge fast"}])
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "eng@x-1"}
+
+    injection_trace.record_session_start(SID, env, "codex")
+    injection_trace.record_session_start(SID, env, "codex")
+
+    assert trace([SID]) == 0
+    rows = _rows(capsys.readouterr().out)
+    located = f"repo={tmp_path / 'bundle'} path=rules/worktrees.md blob=b1"
+    assert [(row[1], row[2], row[3], row[4]) for row in rows] == [
+        ("rule", "bundle/rules/worktrees.md", located, "# Worktrees"),
+        ("learned", "learned:eng-2@sw#3", "seat=eng-2@sw note=3", "merge fast"),
+    ]
+
+
+def test_session_start_outside_a_profile_and_swarm_records_nothing(tmp_path, capsys):
+    from hooks import config
+    from hooks.context import injection_trace
+
+    _manifest(config.AGENTIHOOKS_HOME / "profiles" / "engineer" / "claude.sources.json", [_rule_row(tmp_path)])
+    injection_trace.record_session_start(SID, {"AGENTIHOOKS_SWARM": "sw"}, "claude")
+    assert trace([SID]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_an_unreadable_manifest_records_nothing(capsys):
+    from hooks import config
+    from hooks.context import injection_trace
+
+    path = config.AGENTIHOOKS_HOME / "profiles" / "engineer" / "claude.sources.json"
+    path.parent.mkdir(parents=True)
+    for text in ("{not json", json.dumps({"rows": []})):
+        path.write_text(text)
+        injection_trace.record_session_start(SID, {"AGENTIHOOKS_PROFILE": "engineer"}, "claude")
+    assert trace([SID]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_the_session_start_hook_records_the_manifests_for_its_target(monkeypatch):
+    import hooks.common as common
+    from hooks import hook_manager
+    from hooks.context import injection_trace
+
+    calls = []
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+    monkeypatch.setattr(common, "inject_context", lambda *a, **k: None)
+    monkeypatch.setattr(injection_trace, "record_session_start", lambda *args: calls.append(args))
+    hook_manager.on_session_start({"hook_event_name": "SessionStart", "session_id": SID, "cwd": "/tmp"})
+    [(session, environ, target)] = calls
+    assert (session, environ["AGENTIHOOKS_PROFILE"], target) == (SID, "engineer", "codex")
+
+
+def _received(tmp_path, layer="rule"):
+    from hooks.context import injection_trace
+
+    row = _rule_row(tmp_path, layer)
+    injection_trace.record_rows(SID, [row])
+    return row
+
+
+def test_a_quoted_passage_of_a_received_rule_file_is_kept_on_the_correction(tmp_path, capsys):
+    from hooks.context import injection_trace
+
+    row = _received(tmp_path)
+    quote = "Never edit the   primary checkout."
+    assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "wrong here", "--quote", quote]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].split("\t")[-2:] == ["wrong here", quote]
+    stored = injection_trace.corrections()[-1]
+    assert (stored["layer"], stored["quote"]) == ("rule", quote)
+
+
+def test_a_correction_without_a_quote_keeps_no_quote(tmp_path, capsys):
+    from hooks.context import injection_trace
+
+    row = _received(tmp_path)
+    assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "x"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].split("\t")[-1] == "x"
+    assert "quote" not in injection_trace.corrections()[-1]
+
+
+def test_a_quote_absent_from_the_file_is_refused(tmp_path, capsys):
+    from hooks.context import injection_trace
+
+    row = _received(tmp_path)
+    assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "x", "--quote", "not in it"]) == 2
+    assert "the quoted passage is not in" in capsys.readouterr().err
+    assert injection_trace.corrections() == []
+
+
+def test_a_quote_on_a_directive_that_is_not_a_file_is_refused(tmp_path, capsys):
+    from hooks.context import injection_trace
+
+    row = _received(tmp_path, layer="learned")
+    assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "x", "--quote", "Never"]) == 2
+    assert "is a learned directive" in capsys.readouterr().err
+    assert injection_trace.corrections() == []
+
+
+def test_a_quote_on_a_doctrine_file_that_moved_is_refused(tmp_path, capsys):
+    from hooks.context import injection_trace
+
+    row = _received(tmp_path, layer="doctrine")
+    (tmp_path / "bundle" / "rules" / "worktrees.md").unlink()
+    assert trace([SID, "--wrong", row["source"], "--repo", "/r", "--reason", "x", "--quote", "Never"]) == 2
+    assert "cannot read" in capsys.readouterr().err
+    assert injection_trace.corrections() == []
