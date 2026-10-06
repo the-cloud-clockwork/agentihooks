@@ -22,11 +22,22 @@ target-specific path or schema goes through the adapter from `get_adapter()`.
 
 ### §2.1 Events
 
-Wired in `CODEX_HOOK_EVENTS` — the ten supported by both `codex` `hooks.json`
+Wired in `CODEX_HOOK_EVENTS` — the ten events handled by both `codex` `hooks.json`
 and `hook_manager.EVENT_HANDLERS`:
 
 `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `Stop`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PermissionRequest`.
+
+Codex 0.160.0 fires `PreCompact`, then `PostCompact`, then `SessionStart`
+with `source: "compact"` during automatic compaction. AgentiHooks uses the
+registered `PreCompact` to mark refocus pending and compact `SessionStart` to
+restore current swarm intent immediately. A master receives the ledger overview,
+active phases, priorities and its coordination obligations without a task claim;
+a worker retains its phase and task intent. The session refocus state consumes
+that pending refresh once. Ordinary startup keeps refocus on the first prompt.
+
+`PostCompact` is deliberately unregistered: compact `SessionStart` covers the
+observed delivery contract, so the overlapping event adds no second refresh.
 
 `Notification` has no codex hook event. Codex instead has a fixed `notify`
 program invoked with `agent-turn-complete` JSON as `argv[1]` and stdin closed;
@@ -238,8 +249,10 @@ written to disk — a HARD FLOOR path.
 - **Hook trust** cannot be verified from outside codex — `doctor()` says so
   rather than implying a green check covers it.
 - **Agents** have no codex equivalent (§3 row 16).
-- **`Interrupt` and `PostCompact`** exist in codex's `HooksToml` schema and are
-  not in `CODEX_HOOK_EVENTS`; neither has a `hook_manager` handler today.
+- **`Interrupt`** exists in codex's `HooksToml` schema and is not in
+  `CODEX_HOOK_EVENTS`; it has no `hook_manager` handler today.
+- **`PostCompact`** fires in codex-cli 0.160.0. It remains unregistered because
+  the subsequent compact `SessionStart` restores swarm intent (§2.1).
 
 ## §9 Verification
 
@@ -254,6 +267,7 @@ uv run python -m pytest tests/test_codex_target.py tests/test_codex_e2e.py tests
 
 | Claim | Established by |
 |---|---|
+| Automatic compaction events and master refocus | codex-cli 0.160.0, lowered `model_auto_compact_token_limit` scratch run; captured PreCompact → PostCompact → SessionStart compact; QA payload replay controls in `tests/context/test_swarm_refocus.py` |
 | Hook events, `hooks.json` shape, content-hash trust | codex-cli 0.147.0, 2026-08-10; encoded in `CODEX_HOOK_EVENTS` and asserted by `tests/test_codex_target.py::TestHooksJson` |
 | One-JSON-object stdout contract | reproduced pre-fix as a two-line stdout; regression-guarded by `tests/test_codex_e2e.py` |
 | PreToolUse deny-only, no context channel | codex-cli 0.147.0; encoded in `hooks/targets/capabilities.py` |

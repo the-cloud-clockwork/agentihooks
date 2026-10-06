@@ -162,3 +162,72 @@ def test_codex_receives_the_block_on_the_first_prompt(bound, monkeypatch, capsys
     out = _prompt(capsys)
     assert "Inject a refocus block." in json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "Inject a refocus block." not in _prompt(capsys)
+
+
+@pytest.fixture
+def compact_events():
+    from pathlib import Path
+
+    return json.loads((Path(__file__).parents[1] / "fixtures" / "codex_compact_events.json").read_text())
+
+
+def _session_start(payload, capsys):
+    hook_manager.on_session_start(payload)
+    flush("SessionStart")
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize("task_id", ["master", "i1"])
+def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, compact_events, task_id):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task_id)
+    session_id = compact_events[0]["session_id"]
+    refocus.refocus_context(session_id, "prompt")
+    hook_manager.on_pre_compact(compact_events[0])
+    assert "PostCompact" not in hook_manager.EVENT_HANDLERS
+    out = _session_start(compact_events[2], capsys)
+    assert "SWARM REFOCUS" in out
+    if task_id == "master":
+        assert "Master obligations:" in out
+        assert "Your task master" not in out
+    else:
+        assert "Inject a refocus block." in out
+    assert "SWARM REFOCUS" not in _session_start(compact_events[2], capsys)
+    assert refocus.refocus_context(session_id, "tool") == ""
+    hook_manager.on_pre_compact(compact_events[0])
+    assert "SWARM REFOCUS" in _session_start(compact_events[2], capsys)
+
+
+@pytest.mark.parametrize("task_id", ["master", "i1"])
+def test_codex_ordinary_startup_keeps_refocus_on_first_prompt(bound, monkeypatch, capsys, task_id):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task_id)
+    assert "SWARM REFOCUS" not in _session_start({"session_id": "s1", "source": "startup"}, capsys)
+    out = _prompt(capsys)
+    assert "SWARM REFOCUS" in out
+    assert "SWARM REFOCUS" not in _prompt(capsys)
+
+
+def test_master_block_carries_current_intent_phases_priorities_and_obligations():
+    ledger = {
+        "title": "Continuity",
+        "overview": "Preserve current mission",
+        "phases": [
+            {"id": "p1", "title": "Finished", "done": True},
+            {"id": "p2", "title": "Active", "description": "Restore intent", "done": False},
+        ],
+        "priorities": [{"text": "Compaction first"}],
+        "tasks": [],
+    }
+    block = refocus.build_block(ledger, "master", 1500)
+    for text in ["Continuity", "Preserve current mission", "Active", "Restore intent", "Compaction first"]:
+        assert text in block
+    assert "Master obligations:" in block
+    assert "never claim tasks" in block
+    assert "Finished" not in block
+    assert "Your task" not in block
+    ledger["overview"] = "x" * 10000
+    ledger["phases"][1]["description"] = "y" * 10000
+    block = refocus.build_block(ledger, "master", 1500)
+    assert len(block) <= 1500
+    assert "Master obligations:" in block

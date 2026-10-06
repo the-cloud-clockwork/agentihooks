@@ -1,0 +1,29 @@
+[
+  {
+    "session_id": "01a1135e-b0f0-7750-a468-f9edd4ea4e11",
+    "turn_id": "01a1135e-b334-7712-b654-d65398f02f32",
+    "transcript_path": "/scratch/compact-proof/rollout.jsonl",
+    "cwd": "/scratch/compact-proof",
+    "hook_event_name": "PreCompact",
+    "model": "gpt-6.1-sol",
+    "trigger": "auto"
+  },
+  {
+    "session_id": "01a1135e-b0f0-7750-a468-f9edd4ea4e11",
+    "turn_id": "01a1135e-b334-7712-b654-d65398f02f32",
+    "transcript_path": "/scratch/compact-proof/rollout.jsonl",
+    "cwd": "/scratch/compact-proof",
+    "hook_event_name": "PostCompact",
+    "model": "gpt-6.1-sol",
+    "trigger": "auto"
+  },
+  {
+    "session_id": "01a1135e-b0f0-7750-a468-f9edd4ea4e11",
+    "transcript_path": "/scratch/compact-proof/rollout.jsonl",
+    "cwd": "/scratch/compact-proof",
+    "hook_event_name": "SessionStart",
+    "model": "gpt-6.1-sol",
+    "permission_mode": "bypassPermissions",
+    "source": "compact"
+  }
+]

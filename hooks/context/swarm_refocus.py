@@ -13,6 +13,8 @@ DEFAULT_MAX_CHARS = 1500
 
 
 def build_block(ledger, task_id, cap):
+    if task_id == "master":
+        return _master_block(ledger, cap)
     task = next((t for t in ledger.get("tasks", []) if t.get("id") == task_id), None)
     if not task:
         return ""
@@ -25,6 +27,25 @@ def build_block(ledger, task_id, cap):
         f"Your task {task_id}: {task.get('title', '')}\n"
     )
     return _clip(head + task.get("description", ""), cap)
+
+
+def _master_block(ledger: dict, cap: int) -> str:
+    share = cap // 5
+    phases = "; ".join(
+        f"{phase.get('title', '')}: {phase.get('description', '')}"
+        for phase in ledger.get("phases", [])
+        if not phase.get("done") and phase.get("state") not in {"done", "cancelled"}
+    )
+    priorities = "; ".join(item.get("text", "") for item in ledger.get("priorities", []))
+    return _clip(
+        f"=== SWARM REFOCUS: {_clip(ledger.get('title', ''), share)} ===\n"
+        "Master obligations: Coordinate the swarm, handle operator inbox items, "
+        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
+        f"Active phases: {_clip(phases, share * 2)}\n"
+        f"Priorities: {_clip(priorities, share)}",
+        cap,
+    )
 
 
 def refocus_context(session_id, event, environ=None):
