@@ -73,6 +73,7 @@ class AgentSpec:
     exclude: str = ""
     fallback_bare: bool = True
     resume: str = ""
+    profile: str = ""
 
 
 def _collector(environ: dict[str, str]) -> str:
@@ -164,13 +165,19 @@ def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> l
     return model_flags(agent, "" if has_model else model, "" if has_effort else effort)
 
 
+def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
+    if not spec.profile:
+        return command
+    return [command[0], "select-profile", spec.profile, "--agent", spec.agent, "--", *command[2:]]
+
+
 def _agent_command(
     spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str], directory: Path
 ) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
     if spec.agent == "codex":
-        return [
+        command = [
             agentihooks_bin,
             "codex",
             "--agentihooks-report",
@@ -180,7 +187,8 @@ def _agent_command(
             *_codex_trust_args(directory, environ),
             *_model_args("codex", agent_args, environ),
             *agent_args,
-        ], ""
+        ]
+        return _profile_command(command, spec), ""
     command = [
         agentihooks_bin,
         "claude",
@@ -194,7 +202,7 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
-    return command, ""
+    return _profile_command(command, spec), ""
 
 
 def _write_launcher(
@@ -363,6 +371,7 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
     )
+    parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
@@ -418,6 +427,13 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             exclude = "" if current == UNROUTED else current
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
+        if args.profile:
+            from scripts.select_profile import prepare
+
+            profile_env, claude_args = prepare(args.profile, agent, "", "", claude_args, active_env)
+            active_env.update(profile_env)
+            if agent == "codex":
+                claude_args = claude_args[2:]
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
@@ -425,7 +441,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             prompt,
             claude_args,
             active_env,
-            AgentSpec(agent=agent, exclude=exclude, fallback_bare=not args.handoff, resume=args.resume),
+            AgentSpec(
+                agent=agent, exclude=exclude, fallback_bare=not args.handoff, resume=args.resume, profile=args.profile
+            ),
         )
         host, explicit = _select_host(args.host, active_env)
         command: list[str] = []
@@ -438,6 +456,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     report = [
         f"agent={agent}",
         f"agent_reason={reason}",
+        *([f"profile={args.profile}"] if args.profile else []),
         f"directory={directory}",
         f"name={name}",
         f"claude_args={shlex.join(claude_args)}",

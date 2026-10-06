@@ -6298,6 +6298,10 @@ def main() -> None:
 
         _load_claude_runtime_env()
         raise SystemExit(codex_main(_argv[1:]))
+    if _argv and _argv[0] == "select-profile":
+        from scripts.select_profile import main as select_profile_main
+
+        raise SystemExit(select_profile_main(_argv[1:]))
     if _argv and _argv[0] == "init-agent":
         from scripts.init_agent import main as terminal_main
 
@@ -6484,6 +6488,7 @@ def main() -> None:
 
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
+    sub.add_parser("select-profile", help="Select a profile, model and effort for one routed run")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("run-in-terminal", help="Run a command in a new herdr tab or terminal")
