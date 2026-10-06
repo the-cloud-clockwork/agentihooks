@@ -6,6 +6,7 @@ import time
 from datetime import date, datetime
 
 from scripts.agents_quota import page_quota
+from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
 from scripts.swarm import snapshot
@@ -148,4 +149,5 @@ def status_report(store, slug, state):
         "done_today": done_today(tasks, events, local_midnight_ms()),
         "doctor": doctor_report(store, slug),
         "quota": page_quota(),
+        "gates": gate_log.recent(slug),
     }

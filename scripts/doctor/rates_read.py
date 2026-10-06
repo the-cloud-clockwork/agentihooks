@@ -9,6 +9,7 @@ from hooks import config
 from hooks.context import injection_trace
 from scripts.doctor import read
 from scripts.doctor.rates import Pull, Records
+from scripts.gates.log import gate_log_path
 from scripts.swarm.health import activity
 from scripts.swarm.ledger_events import iso_ms
 from scripts.swarm.runtime import SWARM_HOME
@@ -17,10 +18,6 @@ from scripts.swarm.store import PREFIX
 FIELDS = "state,mergedAt,additions,deletions,files"
 OPEN_TTL_S = 300
 SETTLED_TTL_S = 7 * 24 * 3600
-
-
-def gate_log_path(slug, home=SWARM_HOME):
-    return Path(home) / slug / "gates" / "log.jsonl"
 
 
 def _lines(path):

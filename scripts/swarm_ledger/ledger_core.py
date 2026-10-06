@@ -68,7 +68,7 @@ THREADS = {
     "tasks": ("comments",),
 }
 SCALARS = ("title", "overview", "sources", "orchestrator", "chat_instructions", "policy", "time_left_minutes")
-AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass")
+AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass", "gate_lift")
 ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 OPERATOR_THREADS = re.compile(r"^(notes|questions/[^/]+/answers)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
