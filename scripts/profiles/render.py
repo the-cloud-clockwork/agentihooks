@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context import quarantine
@@ -267,6 +268,8 @@ def _operator_codex_home() -> Path:
 def _link(link: Path, target: Path) -> None:
     if link.is_symlink():
         link.unlink()
+    elif link.exists():
+        shutil.move(link, link.with_name(f"{link.name}.bak.{datetime.now(timezone.utc):%Y%m%d%H%M%S}"))
     link.symlink_to(target)
 
 

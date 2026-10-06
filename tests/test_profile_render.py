@@ -634,6 +634,23 @@ def test_codex_render_retires_the_old_profile_config(world):
     assert hand.read_text() == 'model = "hand-written"\n'
 
 
+def test_codex_render_backs_up_an_old_plain_sources_file(world):
+    from scripts.profiles import render
+
+    manifest = render.sources.path("rb-role", "codex", render.rendered_root())
+    old = _write(manifest, '{"old": true}\n')
+    beside = _write(manifest.parent / "notes.json", "hand written\n")
+
+    assert render.render_codex("rb-role") is not None
+    render.render_codex("rb-role", force=True)
+
+    assert os.readlink(manifest) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
+    backups = sorted(old.parent.glob(f"{old.name}.bak.*"))
+    assert [b.read_text() for b in backups] == ['{"old": true}\n']
+    assert re.fullmatch(rf"{re.escape(old.name)}\.bak\.\d{{14}}", backups[0].name)
+    assert beside.read_text() == "hand written\n"
+
+
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_render_leaves_global_install_untouched(world, target):
     from scripts.profiles import render
