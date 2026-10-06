@@ -387,6 +387,8 @@ The flag is global (single file at `~/.agentihooks/controls_flags/active.flag` +
 | `disable controls`, `turn off controls`, `deactivate controls`, `kill controls` | Activate bypass |
 | `enable controls`, `turn on controls`, `activate controls`, `restore controls` | Restore gates |
 
+The phrases count only in a prompt the operator typed. A prompt the swarm sends (an opening or handoff prompt, a learned note, the culture, a wake nudge, an inbox delivery) never flips bypass or voice, even when it quotes a phrase.
+
 A `CONTROLS` banner is injected on every transition and on each turn while bypass is active, so the operator (and the agent) can never silently forget the gates are down.
 
 ### Configuration

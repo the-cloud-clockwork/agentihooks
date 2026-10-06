@@ -165,6 +165,21 @@ class SeatMemory:
         self.redis.lset(key, number - 1, json.dumps(entry))
         return entry
 
+    def retire(self, address, number, by, reason, at):
+        """Retire learned note `number` (1 based) so no later occupant reads it; its number stays taken."""
+        key = self.key(address, "learned")
+        raw = self.redis.lindex(key, number - 1) if number > 0 else None
+        if raw is None:
+            raise SeatError(f"seat {address} has no learned note {number}")
+        entry = _entry(raw)
+        if "retired" in entry:
+            raise SeatError(f"learned note {number} is already retired")
+        if not reason.strip():
+            raise SeatError("a retirement needs a reason")
+        entry = {**entry, "retired": {"by": by, "reason": reason, "at": at}}
+        self.redis.lset(key, number - 1, json.dumps(entry))
+        return entry
+
 
 class SwarmCulture:
     """One shared text per swarm, kept apart from the swarm's own keys so it outlives a swarm remove."""
