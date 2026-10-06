@@ -429,6 +429,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
 .sw-cap { display: inline-flex; align-items: center; gap: 6px; }
 .sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.sw-gates { display: contents; }
 .sw-num { min-width: 4ch; text-align: right; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
 .sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
@@ -568,7 +569,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <div class="sw-cap"><span class="sw-cap-name">ci</span><span class="sw-num" id="cap-ci"></span><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div></div>
+<div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
 <div class="sw-grip sw-grip-x" data-grip="split" data-row="swarm-row-work" role="separator" aria-orientation="vertical" aria-label="Move the Agents and Tasks split" aria-valuemin="15" aria-valuemax="85" tabindex="0"></div><div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
@@ -1608,6 +1610,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
+  const GATE_MODES = ["enforce", "observe", "off"];
   const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100], compact: ["compact_limit", 50, 100, 1000] };
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
@@ -1662,9 +1665,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function opNote(phase, action, error) {
-    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy",
+    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
-      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict" }[action] || action;
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict", lift: "Lift the gate" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1693,6 +1696,15 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       btn.setAttribute("aria-pressed", String(btn.dataset.autonomy === (config.autonomy || "delegate")));
       btn.disabled = !swarm || !!pending;
     }
+    for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
+  }
+
+  function renderGates(sw) {
+    const gates = Object.entries((sw && sw.gate_modes) || {});
+    $("gates-label").hidden = !gates.length;
+    $("swarm-gates").replaceChildren(...gates.map(([name, mode]) => h("div", { class: "sw-cap sw-gate", role: "group", "aria-label": `${name} gate mode` },
+      h("span", { class: "sw-cap-name", text: name }),
+      ...GATE_MODES.map((m) => h("button", { class: "sw-btn sw-mode", type: "button", "data-gate": name, "data-gate-mode": m, "aria-pressed": String(m === mode), text: m })))));
   }
 
   async function swarmControl(body, op = body.action) {
@@ -1722,6 +1734,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   $("swarm-box").addEventListener("click", (event) => {
     const mode = event.target.closest("button[data-autonomy]");
     if (mode && !mode.disabled) return swarmControl({ action: "set", autonomy: mode.dataset.autonomy }, "autonomy");
+    const gate = event.target.closest("button[data-gate]");
+    if (gate && !gate.disabled) return swarmControl({ action: "set", gates: { [gate.dataset.gate]: gate.dataset.gateMode } }, "gate");
     const message = event.target.closest("button[data-message]");
     if (message) {
       showChat(true);
@@ -1734,6 +1748,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
       return;
     }
+    const lift = event.target.closest("button[data-lift]");
+    if (lift && !lift.disabled) return swarmControl({ action: "lift", agent: lift.dataset.agent, gate: lift.dataset.lift });
     const restore = event.target.closest("button[data-restore-choice]");
     if (restore && !restore.disabled) return swarmControl({ action: "restore-decision", agent: restore.dataset.agent, choice: restore.dataset.restoreChoice });
     const btn = event.target.closest("button[data-swarm]");
@@ -1787,21 +1803,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function modelText(a) {
-    if (a.harness === "codex") return "codex";
-    return [(a.model || "").replace(/^claude-/, "").replace(/-[\d.-]+$/, ""), a.effort].filter(Boolean).join(" ");
+    const model = a.harness === "codex" ? a.model : (a.model || "").replace(/^claude-/, "").replace(/-[\d.-]+$/, "");
+    return [model, a.effort].filter(Boolean).join(" ");
   }
 
   function agentRows(sw, now) {
     const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
     return agents.map((a) => {
       const master = a.lane === "master";
-      return { name: a.name, master, lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
+      return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
         state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
     });
   }
 
   function agentActions(a) {
     return h("div", { class: "sw-acts" },
+      ...a.gates.map((g) => g.lifted ? label(`${g.gate} lifted`, "on")
+        : h("button", { class: "sw-btn", type: "button", "data-lift": g.gate, "data-agent": a.name, "aria-label": `Lift the ${g.gate} gate for ${a.name}`, disabled: !!pending, text: `lift ${g.gate}` })),
       h("button", { class: "sw-btn", type: "button", "data-message": a.master ? "" : a.name, "aria-label": `Message ${a.name}`, text: "message" }),
       h("button", { class: "sw-btn danger", type: "button", "data-terminate": a.name, "aria-label": `Terminate ${a.name}`, disabled: !!pending, text: "terminate" }));
   }
@@ -1849,6 +1867,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("swarm-tick").textContent = !sw ? "" : sw.last_tick ? `tick ${age(Date.now() - sw.last_tick)} ago` : "tick not recorded";
     $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: state }),
       sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
+    renderGates(sw);
     renderControls();
     if (!sw) {
       $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));

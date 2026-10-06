@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from scripts.swarm.health import activity
@@ -104,6 +106,74 @@ def test_other_watches_count_every_call(tmp_path):
     for second in range(4):
         activity.record("Bash", {"command": "gh pr checks 3"}, BOUND, tmp_path, now_ms=second * 1000)
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 4, "act": 0, "since": 4}}
+
+
+def test_a_marked_re_arm_is_tagged_and_left_out_of_the_count(tmp_path):
+    activity.record("Bash", {"command": "gh pr checks 3"}, BOUND, tmp_path, now_ms=0)
+    activity.mark_revived("sw", "sw-eng-1", tmp_path, now_ms=1000)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=2000)
+    assert activity.rows_of("sw", "sw-eng-1", tmp_path)[-1] == {
+        "kind": "watch",
+        "at": 2000,
+        "rearm": True,
+        "revived": True,
+    }
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_a_mark_tags_one_re_arm_and_is_used_up(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path, now_ms=0)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=1000)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=WINDOW + 2000)
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_a_mark_tags_only_a_re_arm_row(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path, now_ms=0)
+    activity.record("Bash", {"command": "gh pr checks 3"}, BOUND, tmp_path, now_ms=1000)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=2000)
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_a_stale_mark_tags_nothing(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path, now_ms=0)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=activity.REVIVE_MARK_MS + 1)
+    assert "revived" not in activity.rows_of("sw", "sw-eng-1", tmp_path)[-1]
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_a_mark_at_the_expiry_limit_still_tags(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path, now_ms=0)
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=activity.REVIVE_MARK_MS)
+    assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 0, "act": 0, "since": 0}}
+
+
+def test_a_mark_written_now_tags_a_re_arm_recorded_now(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path)
+    activity.record("Monitor", REARM, BOUND, tmp_path)
+    assert activity.rows_of("sw", "sw-eng-1", tmp_path)[-1]["revived"] is True
+
+
+def test_a_mark_written_now_is_stale_past_the_expiry_limit(tmp_path):
+    activity.mark_revived("sw", "sw-eng-1", tmp_path)
+    later = int(time.time() * 1000) + activity.REVIVE_MARK_MS + 1000
+    activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=later)
+    assert "revived" not in activity.rows_of("sw", "sw-eng-1", tmp_path)[-1]
+
+
+def test_a_mark_creates_missing_folders_and_a_later_mark_replaces_it(tmp_path):
+    root = tmp_path / "fresh" / "activity"
+    activity.mark_revived("sw", "sw-eng-1", root, now_ms=0)
+    activity.mark_revived("sw", "sw-eng-1", root, now_ms=10 * activity.REVIVE_MARK_MS)
+    activity.record("Monitor", REARM, BOUND, root, now_ms=10 * activity.REVIVE_MARK_MS + 1)
+    assert activity.counts("sw", root) == {"sw-eng-1": {"watch": 0, "act": 0, "since": 0}}
+
+
+def test_a_mark_for_an_unsafe_name_writes_nothing(tmp_path):
+    activity.mark_revived("../sw", "sw-eng-1", tmp_path, now_ms=0)
+    activity.mark_revived("sw", "x/../y", tmp_path, now_ms=0)
+    assert not (tmp_path.parent / "sw").exists()
+    assert not (tmp_path / "sw").exists()
 
 
 def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_does(tmp_path):

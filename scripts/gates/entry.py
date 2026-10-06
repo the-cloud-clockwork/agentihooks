@@ -47,16 +47,21 @@ def main(argv=None, stdin=None, environ=None, home=None):
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
-    if modes.mode(gate, environ) == "off" or not gate.matches(call):
+    if not gate.matches(call):
         return 0
     who = Who.from_env(environ)
+    mode = modes.mode(gate, environ, modes.swarm_gates(who.swarm, environ))
+    if mode == "off":
+        return 0
     decision = _decide(gate, call, who, home)
     if decision.allowed:
         return 0
-    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home):
+    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.agent_lifted(
+        who.swarm, who.name, gate.name, home
+    ):
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, LIFTED + decision.reason), home)
         return 0
-    if modes.mode(gate, environ) == "observe":
+    if mode == "observe":
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, decision.reason), home)
         return 0
     _record(who, log.Row.of(gate.name, "deny", who, call.tool, decision.reason), home)
