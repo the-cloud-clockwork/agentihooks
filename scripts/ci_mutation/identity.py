@@ -7,13 +7,12 @@ from pathlib import Path
 
 
 class ShortNameAlias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    def __init__(self, path: str) -> None:
+    def __init__(self, root: Path, path: str) -> None:
         parts = Path(path).with_suffix("").parts
         if parts[-1] == "__init__":
             parts = parts[:-1]
         self.module = ".".join(parts)
-        self.origin = Path(path).resolve()
-        self.spec = None
+        self.origin = (root / path).resolve()
 
     def find_spec(self, name, path=None, target=None):
         if not self.module.endswith(f".{name}"):
@@ -40,6 +39,6 @@ def pytest_addoption(parser) -> None:
 def pytest_load_initial_conftests(early_config, parser, args) -> None:
     path = early_config.known_args_namespace.mutated_path
     if path:
-        finder = ShortNameAlias(path)
+        finder = ShortNameAlias(early_config.rootpath, path)
         sys.meta_path.insert(0, finder)
         early_config.add_cleanup(lambda: sys.meta_path.remove(finder))

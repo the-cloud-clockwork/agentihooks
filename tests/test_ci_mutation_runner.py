@@ -114,6 +114,21 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert not (work / "hooks/old.pyc").exists()
 
 
+def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(tmp_path):
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, "scripts/ci_mutation/identity.py", ["tests/test_ci_mutation_identity.py"])
+    args = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]["pytest_add_cli_args"]
+    assert args == ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
+
+
 @pytest.mark.parametrize(
     "statuses,reason",
     [
