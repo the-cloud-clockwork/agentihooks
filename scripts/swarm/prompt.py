@@ -21,6 +21,7 @@ CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", 
 OLDER_RECAPS = 3
 
 LANE_ROLE = {
+    "plan": "a planner whose task is to slice its phase into tasks for review",
     "eng": "an engineer",
     "ci": "a CI engineer whose only job is CI speed: find the slowest jobs and steps, fix the bottleneck so CI runs "
     "as parallel and as fast as possible, and propose each further bottleneck you find as a follow up",
@@ -89,7 +90,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
             if autonomy == FULL
             else []
         ),
-        f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N, {me} pause, {me} start, "
+        f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N max-plan-agents=N, {me} pause, {me} start, "
         f"{me} stop, {me} status.",
         f"- Give every new health finding a verdict once you have checked its evidence: {me} verdict <finding id> "
         f'{"|".join(VERDICTS)} --note "<why>". {me} status lists each finding with its id. A verdicted finding '

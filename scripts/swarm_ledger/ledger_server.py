@@ -289,6 +289,7 @@ def control_argv(body):
     for key, flag, limit in (
         ("max_eng", "max-eng-agents", MAX_CAP),
         ("max_ci", "max-ci-agents", MAX_CAP),
+        ("max_plan", "max-plan-agents", MAX_CAP),
         ("codex_share", "codex-share", 100),
     ):
         value = body.get(key)
@@ -298,7 +299,7 @@ def control_argv(body):
             raise ValueError(f"{key} must be a whole number from 0 to {limit}")
         pairs.append(f"{flag}={value}")
     if not pairs:
-        raise ValueError("set needs max_eng, max_ci or codex_share")
+        raise ValueError("set needs max_eng, max_ci, max_plan or codex_share")
     return ["set", *pairs]
 
 

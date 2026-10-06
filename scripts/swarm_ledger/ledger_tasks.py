@@ -8,7 +8,7 @@ import ledger_kinds
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
-LANES = ("eng", "ci")
+LANES = ("eng", "ci", "plan")
 STATES = ("open", "claimed", "blocked", "pr", "done")
 UPDATABLE = (
     "state",

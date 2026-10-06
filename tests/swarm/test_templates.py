@@ -15,7 +15,7 @@ def test_every_built_in_template_loads_with_both_lanes(environ):
     found = {t.name: source for t, source in templates.available(environ)}
     assert {"default", "codex-ci"} <= set(found) and set(found.values()) == {"built-in"}
     for name in found:
-        assert set(templates.load(name, environ).lanes) == {"eng", "ci", "master"}
+        assert set(templates.load(name, environ).lanes) == {"eng", "ci", "plan", "master"}
 
 
 def test_a_missing_lane_takes_the_default_cap_and_auto_choices():

@@ -521,6 +521,7 @@ input, textarea { caret-color: var(--accent-2); }
 <div class="sw-caps">
 <label for="cap-eng">Engineers <button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_eng" id="cap-eng" aria-label="Engineer agent cap"><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></label>
 <label for="cap-ci">CI agents <button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_ci" id="cap-ci" aria-label="CI agent cap"><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></label>
+<label for="cap-plan">Planner agents <button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><input class="sw-cap" type="number" min="0" max="50" data-swarm="max_plan" id="cap-plan" aria-label="Planner agent cap"><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></label>
 <label for="cap-codex">Codex share <button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><input class="sw-cap" type="number" min="0" max="100" step="5" data-swarm="codex_share" id="cap-codex" aria-label="Codex share percent"><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button><span>%</span></label>
 <p class="hint" id="codex-split" aria-live="polite"></p><button class="sw-btn" type="button" data-swarm="set">Apply caps</button></div></details></section>
 <section id="health-box"><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
@@ -1506,7 +1507,7 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function capBounds(config) {
-    return { eng_down: config.max_eng <= 0, eng_up: config.max_eng >= 50, ci_down: config.max_ci <= 0, ci_up: config.max_ci >= 50, codex_down: config.codex_share <= 0, codex_up: config.codex_share >= 100 };
+    return { eng_down: config.max_eng <= 0, eng_up: config.max_eng >= 50, ci_down: config.max_ci <= 0, ci_up: config.max_ci >= 50, plan_down: config.max_plan <= 0, plan_up: config.max_plan >= 50, codex_down: config.codex_share <= 0, codex_up: config.codex_share >= 100 };
   }
 
   function controlClick(action, armedNow) {
@@ -1516,7 +1517,7 @@ input, textarea { caret-color: var(--accent-2); }
 
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close", reopen: "Reopen", set: "Set caps", doctor_start: "Start doctor", doctor_stop: "Stop doctor",
-      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", verdict: "Verdict" }[action] || action;
+      eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1581,8 +1582,8 @@ input, textarea { caret-color: var(--accent-2); }
     const btn = event.target.closest("button[data-swarm]");
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
-    if (action === "set") return swarmControl({ action, max_eng: Number($("cap-eng").value), max_ci: Number($("cap-ci").value), codex_share: Number($("cap-codex").value) });
-    const step = action.match(/^(eng|ci|codex)_(up|down)$/);
+    if (action === "set") return swarmControl({ action, max_eng: Number($("cap-eng").value), max_ci: Number($("cap-ci").value), max_plan: Number($("cap-plan").value), codex_share: Number($("cap-codex").value) });
+    const step = action.match(/^(eng|ci|plan|codex)_(up|down)$/);
     if (step) {
       const lane = step[1], key = lane === "codex" ? "codex_share" : "max_" + lane;
       const value = Number($("cap-" + lane).value) + (step[2] === "up" ? 1 : -1) * (lane === "codex" ? 5 : 1);
@@ -1598,7 +1599,7 @@ input, textarea { caret-color: var(--accent-2); }
     if (!consequence || confirm(consequence)) swarmControl({ action });
   });
 
-  for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-codex", "codex_share"]]) {
+  for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-plan", "max_plan"], ["cap-codex", "codex_share"]]) {
     $(id).addEventListener("input", () => {
       capDraft[key] = Number($(id).value);
       renderControls();
@@ -1631,7 +1632,7 @@ input, textarea { caret-color: var(--accent-2); }
       h("button", { class: "count-filter", type: "button", "aria-pressed": workFilter === key, on: { click: () => setWorkFilter(key) } },
         h("span", { class: "figure-value", text: String(counts[key] || 0) }), h("span", { text: label })))));
     renderPlanShape(sw.plan_shape);
-    for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-codex", "codex_share"]]) {
+    for (const [id, key] of [["cap-eng", "max_eng"], ["cap-ci", "max_ci"], ["cap-plan", "max_plan"], ["cap-codex", "codex_share"]]) {
       if (document.activeElement !== $(id)) $(id).value = capDraft[key] ?? c[key];
     }
     const spawns = sw.spawns || {}, codex = spawns.codex || 0, total = Object.values(spawns).reduce((sum, n) => sum + n, 0);
