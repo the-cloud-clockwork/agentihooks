@@ -1,0 +1,372 @@
+import copy
+import json
+from unittest.mock import patch
+
+import pytest
+
+from scripts.swarm_ledger import ledger, ledger_phase_cli, ledger_phases, new_ledger
+from scripts.swarm_ledger import ledger_core as core
+
+SLUG = "phase-fields-proof"
+
+
+@pytest.fixture(autouse=True)
+def phase_ledger_dir(ledger_dir, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", ledger_dir)
+
+
+def make_ledger(phases=None):
+    content = {"title": "Demo", "phases": phases or [{"title": "First"}]}
+    html, state = core.paths(SLUG)
+    html.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765))
+    state.unlink(missing_ok=True)
+    return core.sync(SLUG)[0]
+
+
+def operation(kind, **fields):
+    return {"op": kind, "id": "phase-operation", "by": "engineer", **fields}
+
+
+def apply(kind, **fields):
+    op = operation(kind, **fields)
+    core.check_op(op)
+    return core.sync(SLUG, ops=[op])
+
+
+def edit_seed(change):
+    html, _ = core.paths(SLUG)
+    source = html.read_text()
+    seed = core.parse_seed(source)
+    change(seed)
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], source))
+    return core.sync(SLUG)[0]
+
+
+def test_phase_add_and_update_store_fields():
+    make_ledger()
+    state, rejected = apply("phase_add", phase="p2", title="Second", depends_on=["p1"], planning="auto", release=True)
+    assert rejected == []
+    assert state["phases"][1] == {
+        "id": "p2",
+        "title": "Second",
+        "description": "",
+        "done": False,
+        "comments": [],
+        "depends_on": ["p1"],
+        "planning": "auto",
+        "release": True,
+    }
+    state, rejected = apply(
+        "phase_update",
+        item="phases/p2",
+        fields={"title": "Changed", "description": "Intent", "planning": "manual", "release": False, "depends_on": []},
+    )
+    assert rejected == []
+    assert state["phases"][1]["title"] == "Changed"
+    assert state["phases"][1]["description"] == "Intent"
+    assert state["phases"][1]["planning"] == "manual"
+    assert state["phases"][1]["release"] is False
+    assert state["phases"][1]["depends_on"] == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("depends_on", "p1"),
+        ("depends_on", [1]),
+        ("depends_on", [""]),
+        ("planning", "automatic"),
+        ("planning", 1),
+        ("release", 1),
+        ("release", "true"),
+        ("title", 1),
+        ("description", False),
+        ("review", {"state": "approved"}),
+    ],
+)
+def test_phase_fields_are_validated(field, value):
+    with pytest.raises(ValueError):
+        core.check_op(operation("phase_update", item="phases/p1", fields={field: value}))
+    with pytest.raises(ValueError):
+        core.check_op(
+            operation("phase_add", phase="p2", title="Second", **{field: value})
+            if field != "title"
+            else operation("phase_add", phase="p2", title=value)
+        )
+
+
+def test_unknown_dependency_and_cycle_are_refused_without_changes():
+    before = make_ledger()
+    state, rejected = apply("phase_add", phase="p2", title="Second", depends_on=["missing"])
+    assert rejected == ["phase-operation"]
+    assert state["phases"] == before["phases"]
+    assert "missing" in " ".join(state["_meta"]["warnings"])
+    apply("phase_add", phase="p2", title="Second", depends_on=["p1"])
+    state, rejected = apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
+    assert rejected == ["phase-operation"]
+    assert "p1 -> p2 -> p1" in " ".join(state["_meta"]["warnings"])
+    assert "depends_on" not in state["phases"][0]
+    state, rejected = apply("phase_update", item="phases/absent", fields={"planning": "auto"})
+    assert rejected == ["phase-operation"]
+
+
+def test_review_op_changes_only_review_and_seed_cannot_forge_it():
+    before = make_ledger()["phases"][0]
+    state, rejected = apply("phase_review", item="phases/p1", state="approved", rounds=2, note="Reviewed")
+    assert rejected == []
+    phase = state["phases"][0]
+    review = phase["review"]
+    assert {k: v for k, v in phase.items() if k != "review"} == before
+    assert review == {
+        "state": "approved",
+        "by": "engineer",
+        "at": state["_meta"]["updated_at"],
+        "rounds": 2,
+        "note": "Reviewed",
+    }
+    state = edit_seed(
+        lambda seed: seed["phases"][0].update(
+            title="Edited", depends_on=[], planning="auto", release=True, review={"state": "sent_back"}
+        )
+    )
+    assert state["phases"][0] == {
+        **before,
+        "title": "Edited",
+        "depends_on": [],
+        "planning": "auto",
+        "release": True,
+        "review": review,
+    }
+    state = edit_seed(
+        lambda seed: seed["phases"].append({"id": "p2", "title": "Second", "review": {"state": "approved"}})
+    )
+    assert "review" not in state["phases"][1]
+    state = edit_seed(lambda seed: seed["phases"][1].update(review={"state": "approved"}))
+    assert "review" not in state["phases"][1]
+
+
+def test_initial_page_seed_cannot_approve_a_plan():
+    make_ledger()
+    html, state = core.paths(SLUG)
+    source = html.read_text()
+    seed = core.parse_seed(source)
+    seed["phases"][0]["review"] = {"state": "approved"}
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], source))
+    state.unlink()
+    assert "review" not in core.sync(SLUG)[0]["phases"][0]
+
+
+def test_seed_graph_validation_and_old_phase_round_trip():
+    before = make_ledger()["phases"]
+    assert core.sync(SLUG)[0]["phases"] == before
+    assert not any(k in before[0] for k in ("depends_on", "planning", "release", "review"))
+    state = edit_seed(lambda seed: seed["phases"][0].update(depends_on=["p1"]))
+    assert state["phases"] == before
+    assert "p1 -> p1" in state["_meta"]["seed_error"]
+
+
+def test_content_builds_phase_fields_and_rejects_bad_graph():
+    content = {
+        "title": "Demo",
+        "phases": [{"title": "First"}, {"title": "Second", "depends_on": ["p1"], "planning": "auto", "release": True}],
+    }
+    assert new_ledger.check(content) == []
+    phase = new_ledger.build_doc(content)["phases"][1]
+    assert (phase["depends_on"], phase["planning"], phase["release"]) == (["p1"], "auto", True)
+    bad = copy.deepcopy(content)
+    bad["phases"][0]["depends_on"] = ["p2"]
+    assert "p1 -> p2 -> p1" in " ".join(new_ledger.check(bad))
+    bad["phases"][0]["depends_on"] = ["missing"]
+    assert "missing" in " ".join(new_ledger.check(bad))
+
+
+def test_phase_cli_preserves_old_command_and_sends_new_ops():
+    sent = []
+    with patch.object(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields))):
+        for command in (
+            ["phase", "p1", "done"],
+            ["phase", "add", "p2", "Second", "--depends-on", "p1", "--planning", "auto", "--release"],
+            ["phase", "set", "p2", "depends_on=p1", "planning=manual", "release=false"],
+        ):
+            args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", *command])
+            ledger.cmd_phase(args)
+    assert sent == [
+        ("set", {"path": "phases/p1/done", "value": True}),
+        (
+            "phase_add",
+            {
+                "phase": "p2",
+                "title": "Second",
+                "description": "",
+                "depends_on": ["p1"],
+                "planning": "auto",
+                "release": True,
+            },
+        ),
+        (
+            "phase_update",
+            {"item": "phases/p2", "fields": {"depends_on": ["p1"], "planning": "manual", "release": False}},
+        ),
+    ]
+
+
+def test_page_mirrors_fields_except_review():
+    source = core.TEMPLATE.read_text()
+    assert (
+        'phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"])'
+        in source
+    )
+
+
+def test_concurrent_seed_changes_cannot_form_a_cycle():
+    state = make_ledger([{"title": "First"}, {"title": "Second"}])
+    html, _ = core.paths(SLUG)
+    stale = html.read_text()
+    apply("phase_update", item="phases/p1", fields={"depends_on": ["p2"]})
+    seed = core.parse_seed(stale)
+    seed["phases"][1]["depends_on"] = ["p1"]
+    html.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], stale))
+    result = core.sync(SLUG)[0]
+    assert result["phases"] == [{**state["phases"][0], "depends_on": ["p2"]}, state["phases"][1]]
+    assert "cycle" in " ".join(result["_meta"]["warnings"])
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"by": ""},
+        {"by": 1},
+        {"by": "bad/name"},
+        {"phase": 1},
+        {"phase": "bad/name"},
+        {"title": ""},
+        {"title": " "},
+    ],
+)
+def test_phase_add_rejects_invalid_identity(fields):
+    with pytest.raises(ValueError):
+        core.check_op({**operation("phase_add", phase="p2", title="Second"), **fields})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"item": "tasks/p1"},
+        {"item": "phases/"},
+        {"fields": {}},
+        {"fields": []},
+        {"fields": {"done": True}},
+    ],
+)
+def test_phase_update_rejects_invalid_target_or_fields(fields):
+    with pytest.raises(ValueError):
+        core.check_op({**operation("phase_update", item="phases/p1", fields={"planning": "auto"}), **fields})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"state": "done"},
+        {"rounds": -1},
+        {"rounds": True},
+        {"rounds": 1.5},
+        {"note": 1},
+        {"escalated": 1},
+        {"title": "Changed"},
+    ],
+)
+def test_review_validation(fields):
+    with pytest.raises(ValueError):
+        core.check_op({**operation("phase_review", item="phases/p1", state="pending"), **fields})
+
+
+def test_review_defaults_operator_and_escalation():
+    make_ledger()
+    op = {**operation("phase_review", item="phases/p1", state="pending", escalated=True), "by": "operator"}
+    core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == []
+    assert state["phases"][0]["review"] == {
+        "state": "pending",
+        "by": "operator",
+        "at": state["_meta"]["updated_at"],
+        "rounds": 0,
+        "note": "",
+        "escalated": True,
+    }
+    state, rejected = apply("phase_review", item="phases/missing", state="approved")
+    assert rejected == ["phase-operation"]
+
+
+def test_phase_add_retry_and_no_change_update_are_idempotent():
+    make_ledger()
+    state, _ = apply("phase_add", phase="p2", title="Second")
+    assert state["phases"][1] == {"id": "p2", "title": "Second", "description": "", "done": False, "comments": []}
+    events = state["_meta"]["events"]
+    state, rejected = apply("phase_add", phase="p2", title="Another")
+    assert rejected == []
+    assert state["phases"][1]["title"] == "Second"
+    assert state["_meta"]["events"] == events
+    state, rejected = apply("phase_update", item="phases/p2", fields={"title": "Second"})
+    assert rejected == []
+    assert state["_meta"]["events"] == events
+
+
+def test_dependency_diamond_is_valid_and_self_cycle_is_refused():
+    phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}, {"id": "p3", "depends_on": ["p1", "p2"]}]
+    ledger_phases.validate(phases)
+    with pytest.raises(ValueError, match="p1 -> p1"):
+        ledger_phases.validate([{"id": "p1", "depends_on": ["p1"]}])
+
+
+@pytest.mark.parametrize("value", ["yes", "1", "True"])
+def test_cli_release_requires_boolean(value):
+    args = ledger.build_parser().parse_args(["phase", "set", "p1", f"release={value}"])
+    with pytest.raises(SystemExit, match="release must be true or false"):
+        ledger_phase_cli.operation(args)
+
+
+def test_cli_set_requires_pairs_and_splits_trimmed_dependencies():
+    args = ledger.build_parser().parse_args(["phase", "set", "p1", "bad"])
+    with pytest.raises(SystemExit, match="FIELD=VALUE"):
+        ledger_phase_cli.operation(args)
+    args = ledger.build_parser().parse_args(["phase", "set", "p1", "depends_on= p2,, p3 ", "release=true"])
+    assert ledger_phase_cli.operation(args) == (
+        "phase_update",
+        {"item": "phases/p1", "fields": {"depends_on": ["p2", "p3"], "release": True}},
+    )
+
+
+@pytest.mark.parametrize("command", [["phase", "p1", "bad"], ["phase", "p1", "done", "extra"]])
+def test_cli_old_command_rejects_invalid_state(command):
+    args = ledger.build_parser().parse_args(command)
+    with pytest.raises(SystemExit, match="phase takes"):
+        ledger.cmd_phase(args)
+
+
+@pytest.mark.parametrize("fields", [{"depends_on": "p1"}, {"depends_on": [1]}, {"planning": "bad"}, {"release": 1}])
+def test_content_and_seed_reject_invalid_fields(fields):
+    content = {"title": "Demo", "phases": [{"title": "First", **fields}]}
+    assert new_ledger.check(content)
+    with pytest.raises(ValueError):
+        core.validate({"phases": [{"id": "p1", **fields}]})
+
+
+def test_seed_added_fields_are_preserved():
+    make_ledger()
+    state = edit_seed(
+        lambda seed: seed["phases"].append(
+            {"id": "p2", "title": "Second", "depends_on": ["p1"], "planning": "auto", "release": True}
+        )
+    )
+    assert state["phases"][1]["depends_on"] == ["p1"]
+    assert state["phases"][1]["planning"] == "auto"
+    assert state["phases"][1]["release"] is True
+
+
+def test_phase_cli_refusal_names_the_dependency_chain():
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", "phase", "set", "p1", "depends_on=p2"])
+    reply = {"rejected": ["phase-operation"], "_meta": {"warnings": ["phase dependency cycle: p1 -> p2 -> p1"]}}
+    with patch.object(ledger, "call", return_value=reply):
+        with pytest.raises(SystemExit, match="p1 -> p2 -> p1"):
+            ledger.cmd_phase(args)
