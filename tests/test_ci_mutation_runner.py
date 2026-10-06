@@ -1,0 +1,205 @@
+import sys
+
+import pytest
+
+from scripts.ci_mutation.runner import run_gate, run_process
+
+
+def test_over_budget_reports_every_unfinished_file_by_name(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    changes = {"hooks/slow.py": {1}, "scripts/next.py": {2}}
+    report = run_gate(tmp_path, changes, tmp_path / "output", 0)
+    assert report["failed"]
+    assert report["not_mutated"] == [
+        {"path": "hooks/slow.py", "reason": "over budget"},
+        {"path": "scripts/next.py", "reason": "over budget"},
+    ]
+    assert "hooks/slow.py: not mutated, over budget" in capsys.readouterr().out
+
+
+def test_missing_tests_fails_closed(tmp_path):
+    (tmp_path / "tests").mkdir()
+    report = run_gate(tmp_path, {"hooks/unknown.py": {1}}, tmp_path / "output", 60)
+    assert report["failed"]
+    assert report["not_mutated"] == [{"path": "hooks/unknown.py", "reason": "no matching or importing test modules"}]
+
+
+def test_process_timeout_returns_no_status_and_records_output(tmp_path):
+    log = tmp_path / "process.log"
+    code = "import time; print('started', flush=True); time.sleep(10)"
+    assert run_process([sys.executable, "-c", code], tmp_path, 0.2, log) is None
+    assert log.read_text() == "started\n"
+
+
+def test_process_exit_status_is_preserved(tmp_path):
+    assert run_process([sys.executable, "-c", "raise SystemExit(7)"], tmp_path, 10, tmp_path / "log") == 7
+
+
+def test_process_runs_in_requested_directory_and_captures_stderr(tmp_path):
+    log = tmp_path / "process.log"
+    command = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; import sys; print(Path.cwd()); print('error', file=sys.stderr)",
+    ]
+    assert run_process(command, tmp_path, 10, log) == 0
+    assert sorted(log.read_text().splitlines()) == sorted([str(tmp_path), "error"])
+
+
+def test_empty_scope_passes_without_mutmut(tmp_path):
+    report = run_gate(tmp_path, {}, tmp_path / "output", 60)
+    assert report == {"files": [], "not_mutated": [], "failed": False}
+    assert (tmp_path / "output" / "report.json").exists()
+
+
+def test_module_without_functions_is_reported_and_passes(tmp_path, capsys):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/__init__.py").write_text("")
+    report = run_gate(tmp_path, {"hooks/__init__.py": set()}, tmp_path / "output", 60)
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {}
+    assert "hooks/__init__.py: no mutable functions" in capsys.readouterr().out
+
+
+def test_existing_nested_output_folder_and_multiple_empty_modules_pass(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/one.py").write_text("")
+    (tmp_path / "hooks/two.py").write_text("")
+    output = tmp_path / "nested/output"
+    report = run_gate(tmp_path, {"hooks/one.py": set(), "hooks/two.py": set()}, output, 60)
+    assert report["files"] == [
+        {"path": "hooks/one.py", "counts": {}, "failures": [], "untouched_survivors": [], "cleared": []},
+        {"path": "hooks/two.py", "counts": {}, "failures": [], "untouched_survivors": [], "cleared": []},
+    ]
+    assert run_gate(tmp_path, {}, output, 60)["failed"] is False
+
+
+def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\nasyncio_mode="auto"\n')
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
+        (root / name).mkdir()
+        (root / name / "asset.txt").write_text(name)
+    (root / "hooks" / "__pycache__").mkdir()
+    (root / "hooks" / "__pycache__" / "old.pyc").write_bytes(b"old")
+    (root / "hooks" / "old.pyc").write_bytes(b"old")
+    work = tmp_path / "nested" / "work"
+    work.mkdir(parents=True)
+    prepare_workspace(root, work, "hooks/sample.py", ["tests/test_sample.py"])
+    config = tomllib.loads((work / "pyproject.toml").read_text())
+    assert config["tool"]["pytest"]["ini_options"] == {"asyncio_mode": "auto"}
+    assert config["tool"]["mutmut"]["source_paths"] == ["hooks/", "scripts/"]
+    assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py"]
+    assert config["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests/test_sample.py"]
+    assert config["tool"]["mutmut"]["also_copy"] == ["profiles/", "docs/", ".github/"]
+    assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
+        "-q",
+        "-x",
+        "-o",
+        "addopts=",
+        "-p",
+        "pytest_asyncio.plugin",
+    ]
+    for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
+        assert (work / name / "asset.txt").read_text() == name
+    assert not (work / "hooks/__pycache__").exists()
+    assert not (work / "hooks/old.pyc").exists()
+
+
+@pytest.mark.parametrize(
+    "statuses,reason",
+    [
+        ([None], "over budget"),
+        ([7], "mutmut failed with exit 7"),
+        ([0, None], "over budget"),
+        ([0, 7], "report failed with exit 7"),
+        ([0, 0], ""),
+    ],
+)
+def test_external_mutation_run_failures_and_results_are_preserved(tmp_path, monkeypatch, statuses, reason):
+    import json
+
+    from scripts.ci_mutation.runner import mutate_file
+
+    commands = []
+
+    def prepare(root, work, path, tests):
+        assert (root, work, path, tests) == (tmp_path, tmp_path / "work", "hooks/sample.py", ["tests/test_sample.py"])
+        work.mkdir()
+
+    def process(command, cwd, timeout, log):
+        commands.append(command)
+        assert cwd == tmp_path / "work"
+        assert timeout == 10
+        assert log == cwd / ("run.log" if len(commands) == 1 else "report.log")
+        if len(commands) == 2:
+            (cwd / "results.json").write_text(json.dumps([{"status": "killed"}]))
+        return statuses[len(commands) - 1]
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", prepare)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 10)
+    rows, error = mutate_file(tmp_path, "hooks/sample.py", tmp_path / "work", ["tests/test_sample.py"], 20)
+    expected = reason
+    if reason.startswith("mutmut failed"):
+        expected += f"; see {tmp_path / 'work/run.log'}"
+    if reason.startswith("report failed"):
+        expected += f"; see {tmp_path / 'work/report.log'}"
+    assert error == expected
+    assert rows == ([{"status": "killed"}] if reason == "" else [])
+    assert commands[0] == [sys.executable, "-m", "mutmut", "run", "--max-children", "1"]
+    if len(commands) == 2:
+        assert commands[1] == [
+            sys.executable,
+            "-m",
+            "scripts.ci_mutation.report",
+            "hooks/sample.py",
+            str(tmp_path / "work/results.json"),
+        ]
+
+
+@pytest.mark.parametrize("changed,clearance,fails", [(2, False, True), (3, False, False), (2, True, False)])
+def test_gate_persists_full_mutation_evidence_and_respects_reader_clearance(
+    tmp_path, monkeypatch, capsys, changed, clearance, fails
+):
+    import json
+
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "hooks/sample.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "tests/test_sample.py").write_text("pass\n")
+    row = {"name": "hooks.sample.x_f__mutmut_1", "status": "survived", "lines": [2], "fingerprint": "abc"}
+
+    def mutate(root, path, work, tests, deadline):
+        assert root == tmp_path
+        assert path == "hooks/sample.py"
+        assert work.parent == tmp_path / "output"
+        assert work.name.startswith("0-")
+        assert work.is_dir()
+        assert tests == ["tests/test_sample.py"]
+        assert deadline > 0
+        return [row], ""
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_file", mutate)
+    if clearance:
+        (tmp_path / "mutation-cleared.txt").write_text(
+            json.dumps(
+                {
+                    "hooks/sample.py:hooks.sample.x_f__mutmut_1:abc": {
+                        "reader": "Standards",
+                        "reason": "Only an unobserved message changes",
+                    }
+                }
+            )
+        )
+    report = run_gate(tmp_path, {"hooks/sample.py": {changed}}, tmp_path / "output", 60)
+    assert report["failed"] is fails
+    assert report["files"][0]["counts"] == {"survived": 1}
+    assert report["not_mutated"] == []
+    assert json.loads((tmp_path / "output/report.json").read_text()) == report
+    assert json.loads(capsys.readouterr().out) == report["files"][0]

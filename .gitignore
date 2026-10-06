@@ -51,3 +51,4 @@ profiles/*/.claude/settings.json
 # Built-in installable features live under profiles/package/ instead.
 # Root-anchored so profiles/*/.claude/ (profile sources) stay tracked.
 /.claude/
+.mutation-gate/

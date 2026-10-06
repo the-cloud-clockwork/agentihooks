@@ -10,6 +10,7 @@ from scripts.swarm import cli as swarm_cli
 from scripts.swarm import prompt
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.status import status_report
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
@@ -279,6 +280,19 @@ def test_swarm_status_json_names_the_peer_for_the_page(env, capsys):
     capsys.readouterr()
     swarm_cli.main([WATCHED, "status", "--json"])
     assert json.loads(capsys.readouterr().out)["peer"] == DOCTOR
+
+
+def test_swarm_status_json_prints_the_status_report_from_one_ledger_read(env, monkeypatch, capsys):
+    store, _, _ = env
+    reads = []
+    monkeypatch.setattr(FileLedger, "_call", lambda self, slug, ops=None: reads.append(ops) or state(slug))
+    swarm_cli.main([WATCHED, "status", "--json"])
+    printed = json.loads(capsys.readouterr().out)
+    report = status_report(store, WATCHED, state(WATCHED))
+    assert reads == [None]
+    assert printed.keys() == report.keys()
+    assert printed["config"] == report["config"]
+    assert printed["tasks"] == report["tasks"]
 
 
 def test_the_cli_routes_a_crew_verb_to_the_crew_and_leaves_the_hook_doctor_alone(monkeypatch):
