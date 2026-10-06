@@ -37,6 +37,7 @@ class PullRequest:
     pushed_at: int | None
     red: bool
     resolved: bool = False
+    failed: tuple = ()
 
 
 def iso_ms(text):
@@ -52,6 +53,11 @@ def pull_request(raw):
         iso_ms(commits[-1]["committedDate"]) if commits else None,
         any(result in RED for result in results),
         bool(results) and all(result and result not in WAITING for result in results),
+        tuple(
+            check.get("name") or check.get("context") or "a check"
+            for check, result in zip(checks, results)
+            if result in RED
+        ),
     )
 
 

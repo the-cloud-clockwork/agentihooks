@@ -357,6 +357,17 @@ def test_verb_parser_defaults_to_no_ledger_and_no_session(monkeypatch):
     assert (args.ledger, args.session) == ("sw", "sess-9")
 
 
+def test_a_legacy_correction_without_text_refuses_by_its_received_text():
+    _received()
+    legacy = {"at": "2026-01-01T00:00:00Z", "session": SID, "layer": "bundle", "source": "bad-1", "locator": {}}
+    injection_trace._append(injection_trace._corrections_path(), {**legacy, "repo": "/repos/qitp", "reason": "old"})
+
+    assert [quarantine.patch_refusal(text) for text in (OTHER, "", "None", "XXXX")] == ["", "", "", ""]
+    assert quarantine.patch_refusal(f"note: {TEXT} because") == (
+        "this text carries a directive under correction (bad-1: old); fix it at its source instead of restating it here"
+    )
+
+
 def test_a_confirmed_enforcement_is_withheld_and_logged_once():
     _confirmed()
 

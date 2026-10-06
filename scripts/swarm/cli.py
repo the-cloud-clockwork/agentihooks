@@ -73,6 +73,7 @@ from scripts.swarm import (
     templates,
     timer,
     trace_plan,
+    waits,
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
@@ -145,6 +146,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
         actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
+        actions += waits.end_pass(store, slug, {t["id"]: t for t in doc["tasks"]}, inbox, ledger_events.view)
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -592,11 +594,11 @@ def cmd_done(store, args):
 
 def cmd_block(store, args):
     agent = _worker(store, args)
-    _block(store, args.slug, agent, args.note, LedgerClient())
+    block_agent(store, args.slug, agent, args.note, LedgerClient())
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 
 
-def _block(store, slug, agent, note, ledger):
+def block_agent(store, slug, agent, note, ledger):
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     _retire(store, slug, agent, "blocked its task and exited")
@@ -614,18 +616,36 @@ def cmd_trace_plan(store, args):
     except ValueError as exc:
         raise SwarmError(str(exc)) from exc
     if block:
-        _block(store, args.slug, agent, trace_plan.block_note(record), ledger)
+        block_agent(store, args.slug, agent, trace_plan.block_note(record), ledger)
     print(json.dumps(trace_plan.report(agent.task, record, block)))
 
 
 def cmd_wait(store, args):
     agent = _me(store, args)
-    if args.minutes <= 0:
+    held = waits.on(*args.on) if args.on else None
+    if held is None and (args.minutes or 0) <= 0:
         raise SwarmError("a wait lasts a whole number of minutes above zero")
+    if held is None and args.minutes > waits.BARE_MAX_MINUTES:
+        raise SwarmError(
+            f"a bare wait lasts at most {waits.BARE_MAX_MINUTES} minutes; wait on checks, a reply or a task with --on"
+        )
+    if held is not None:
+        rows = {t["id"]: t for t in LedgerClient().tasks(args.slug)}
+        get = InboxStore(store.redis).get
+        if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
+            raise SwarmError(problem)
     at = now_ms()
-    until = at + args.minutes * 60_000
-    idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at)
-    print(json.dumps({"agent": agent.name, "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat()}))
+    until = at + (args.minutes or waits.CHECKED_MINUTES) * 60_000
+    idle.declare_wait(store.redis, args.slug, agent.name, until, args.reason, at, on=held)
+    print(
+        json.dumps(
+            {
+                "agent": agent.name,
+                "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat(),
+                **({"on": held} if held else {}),
+            }
+        )
+    )
 
 
 def cmd_plan(store, args):
@@ -817,7 +837,8 @@ def build_parser():
         decision.add_argument("phase")
         decision.add_argument("--note", required=action == "send-back")
     wait = sub.add_parser("wait")
-    wait.add_argument("minutes", type=int)
+    wait.add_argument("minutes", type=int, nargs="?")
+    wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
     wait.add_argument("--reason", default="")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")

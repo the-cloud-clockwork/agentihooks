@@ -252,3 +252,17 @@ def test_every_new_health_finding_goes_to_the_master_once(store):
     returned = [finding("stale-claim/t1", {"value": "early-real", "at": 5})]
     ledger_events.findings_pass(inbox, store, "sw", returned)
     assert len(texts(store, MASTER_SEAT)) == 3
+
+
+def test_a_pull_request_names_its_failed_checks():
+    assert answer("open_red").failed == ("unit (3.11, 1, early)",)
+    assert answer("merged").failed == ()
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [
+            {"context": "ci/status", "state": "ERROR"},
+            {"conclusion": "TIMED_OUT"},
+            {"name": "lint", "conclusion": "SUCCESS"},
+        ],
+    }
+    assert ledger_events.pull_request(raw).failed == ("ci/status", "a check")
