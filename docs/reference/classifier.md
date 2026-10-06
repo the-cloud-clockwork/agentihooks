@@ -77,6 +77,9 @@ effort in read-only mode without the shared daemon, so its hooks inherit the chi
 environment. Its model slug is read from the Codex model catalog, defaulting to
 `gpt-6-luna`. Both receive `AGENTIHOOKS_CLASSIFIER_CHILD=1`; the hook manager returns
 before reading stdin, dispatching handlers or registering the child session.
+If a routed Claude shell retains only its account token, the Haiku child receives
+that same token as native OAuth. An existing native OAuth token takes precedence;
+the fallback never selects another account or changes provider settings.
 
 A fallback is any object with a `name` and a `decide(DecisionRequest) -> DecisionResult`
 method (the `Backend` protocol) that raises `BackendFailure` when it cannot answer.
