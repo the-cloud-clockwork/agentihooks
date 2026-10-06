@@ -337,6 +337,8 @@ def test_a_release_phase_gets_one_release_task_on_the_tick_its_build_tasks_are_d
     build_task(ledger, "t9", pid="p2", done=False)
     set_phase("p1", release=True)
     actions = run(store, ledger)
+    assert phase("p1")["done"] is False
+    assert [t["id"] for t in tasks("p1")] == ["t1", "release-p1"]
     run(store, ledger)
     [release] = [t for t in tasks("p1") if t["id"] != "t1"]
     assert (release["id"], release["lane"], release["kind"], release["state"]) == ("release-p1", "eng", "ops", "open")
