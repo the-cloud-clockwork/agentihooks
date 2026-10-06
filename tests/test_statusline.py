@@ -54,3 +54,10 @@ def test_statusline_shows_default_for_direct_authentication():
 
     assert "account:" in output
     assert "default" in output
+
+
+def test_statusline_names_selected_run_profile(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "zz-selected")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", _run_statusline())
+
+    assert "agentihooks: zz-selected  settings:zz-selected" in plain
