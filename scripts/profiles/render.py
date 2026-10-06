@@ -131,6 +131,15 @@ def _relink(dst: Path, items: dict[str, Path]) -> None:
         (dst / name).symlink_to(src)
 
 
+def _render_rules(dst: Path, items: dict[str, Path]) -> None:
+    dst.mkdir(exist_ok=True)
+    for old in dst.iterdir():
+        if old.is_file() or old.is_symlink():
+            old.unlink()
+    for name, src in items.items():
+        _atomic_write(dst / name, src.read_text())
+
+
 def _read_json(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
@@ -143,12 +152,20 @@ def render_claude(name: str, force: bool = False) -> Path | None:
     bundle, dirs = _i._get_bundle_path(), _chain(name)
     current = _stamp(bundle, dirs)
     out = rendered_root() / name / "claude"
-    if not force and _read_json(out / STAMP) == current:
+    if (
+        not force
+        and _read_json(out / STAMP) == current
+        and not any(rule.is_symlink() for rule in (out / "rules").iterdir())
+    ):
         return None
     out.mkdir(parents=True, exist_ok=True)
     _i.save_json(out / "settings.json", _claude_settings(bundle, dirs))
     for subdir, keep in FEATURES:
-        _relink(out / subdir, _features(subdir, keep, bundle, dirs))
+        items = _features(subdir, keep, bundle, dirs)
+        if subdir == "rules":
+            _render_rules(out / subdir, items)
+        else:
+            _relink(out / subdir, items)
     _atomic_write(out / "CLAUDE.md", build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER))
     _claude_json(out, bundle, dirs)
     shared = claude_home(_global_env())
