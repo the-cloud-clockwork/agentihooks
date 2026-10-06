@@ -32,6 +32,8 @@ def test_sweep_refuses_to_run_twice_at_once(tmp_path):
 
 
 def test_scratch_new_creates_a_leased_dir(monkeypatch, tmp_path, capsys):
+    for key in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "CLAUDE_CODE_SESSION_ID"):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(gc_cli, "take_snapshot", lambda: snap())
     monkeypatch.setattr(gc_cli, "owner_holder", lambda _snap: Holder("s-1", 9, 9, "boot-1"))
     assert gc_cli.main(["scratch", "new", "repo/task"]) == 0

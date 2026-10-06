@@ -303,6 +303,142 @@
     "reader": "Standards",
     "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
   },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_4:7eb9df48341711ef7344d46516437927658a4f1f065ff883a2baea322165d793": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_8:915250a1ca1031d8e199f284abd1b773aceff4ddb82e37915432831c67693df3": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_13:771f38c7ac22eabed121f1e31d06bec7e6cc799228c034d1957e2fd61fe98a83": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_14:30803c70a20627caa4f349217216829071f7eea0ffd45fddb86a5252d3e93ce3": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_17:cf3be2cb8612a1a919938521ec5d0324dc23a3bc8c293f8162a3daa785883d9c": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_19:dcd47f069e9f4c1dd727dc484113e78a954eb6f2dc76c9c90aedd2dd35de8c11": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_22:8fc3ed03ff8d4a39c70c566e255db2df117c3ca739d205e779f08dedc74ac7f6": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_23:a8ee159be55375bece2b5515a6999bfbc155374b04e3a47c2d0897ce1fbda967": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_24:f4026ee04d561a653a794370d1fbe1bc53c8213a5bd1072b8c9287000dc1bddd": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_37:93e3778243ca0e3455779679b643cb2c53fb2f640d01ede7ce1a9e0e1aef964b": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_40:fa22858010ed9382a50d0c1fc22666cb2d79f28952365dbff0078e0ed8e6ce28": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_44:f1b6fed5fb5bd4dfc68d3e1f799cbf60d792e01636411f6f0a4f6770829963c1": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_45:8e653fcdc87d8ae2c56587f97f700e49849b4eabb7f97ef6e9a5d0ce9f4e2424": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_46:f117a576f5c7798cf7f0d8045d8e5ea8a52e112698771bca7054c398a8d0c67d": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_48:06e35632fa73b69b86083ebef3c1fc1ccbb9637478792d97f77d756da488ec66": {
+    "reader": "Standards",
+    "reason": "The check default only feeds truth tests, where None and the empty string act the same."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_49:94eeeb534814489dc95d56bb13e8de8a4fe59a075a2201deb921a37f9839236f": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_51:0fb2ebf5fd7039d92d540422513bcfed350be43c733fee9070b4ae07254f5666": {
+    "reader": "Standards",
+    "reason": "The check default only feeds truth tests, where None and the empty string act the same."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_52:9aac2733a7aaabc91635a9265a8a5bc0b86bd0f7a8e67a194d62e58e1ed5b961": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_56:1d48a6b30b78b5b6d9fe124cc63b03923c056d82f69d7eb7af1cae22cd50d2ff": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_57:1a50d823181b83d3b56cd9f3c846d2f9186f5561f18114a7ced662e57a8dfda5": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_58:4a67fc5e7f0d8c9ae35f014ada2c83e65a102854bfbdaab90849505ccf7987ce": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__scratch_new__mutmut_6:7835e08b538729f87d3555b9739426427b6911716bea99d510b3591bcf5e16e1": {
+    "reader": "Standards",
+    "reason": "The built name only feeds truth tests and an or fallback, where None and the empty string act the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_space__mutmut_1:681eaca2f4e66cd0a3553171332fd6b1655f9d80e82d11b95502037ef032a2a2": {
+    "reader": "Standards",
+    "reason": "A changed default slug is still not a proof slug, so the label stays repo and code."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x__clean__mutmut_12:4fb4618b48213b4eab942a5786cf204463c2648cf06eea1421b16feb92548c53": {
+    "reader": "Standards",
+    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_5:cea2e7ee10d185b0dc8894880204201dc8db0f2267fb5844060bc9b406ede81f": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_9:7255a9b5ff4351838ec93ba7be6dcd17ae44bbc4e1420a524fdc3bda1028ff49": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_23:2b3d98ff355d60b711fb2b1139e036ce124cac16d96d7d1bd18ec9ae4ce187ee": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_25:5384ddd7792fa78525c37eac7fc7a3a1b626494561441f35d0602d0c47e6e622": {
+    "reader": "Standards",
+    "reason": "A placeholder path that is not a git dir falls back to the folder name exactly like the empty path."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_session_base__mutmut_25:ed4b344397b1099febd47535f333babb792d1a11ce0427de3ecff5bad9ad6416": {
+    "reader": "Standards",
+    "reason": "The placeholder has no hex characters after lowering and stripping, so it acts as a missing id."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_worktree__mutmut_14:50cbeaffaf4b85db159528ee201b0c67f17961a40424951b58ca394b3e66f878": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_tmp_worktree__mutmut_14:e902f20f3d1d342c3697f42354b21dfdd07e4b0df302ba4536653f1dac137fd5": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_plan_slug__mutmut_15:b0d4a10470d0f0e1e021b02a9fdc6a2c1cab0837db75c02abfcb77ff584360fc": {
+    "reader": "Standards",
+    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_proof_slug__mutmut_42:ebfc1495213a90b5992410dd5ab704e473860d5a6ee8858a94e57b7954d01a74": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_is_built_slug__mutmut_4:d2882cb3fe0c11f9cad4339cc890853c6ff2d26179b72a832527f41597cc3e3f": {
+    "reader": "Standards",
+    "reason": "A placeholder matches no slug pattern, exactly like the empty string."
+  },
   "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
     "reader": "Standards",
     "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."

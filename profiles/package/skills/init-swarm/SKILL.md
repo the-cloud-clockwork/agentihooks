@@ -21,7 +21,7 @@ ledger as orchestrator; the master does.
 ## 1. Write the ledger content
 
 Write `content.json` under `~/scratchpad/<repo>/<task>/`
-(`agentihooks scratch new <repo>/<task>`):
+(`agentihooks scratch new`, which prints the folder it built):
 
 ```json
 {"title": "Delivery", "overview": "", "sources": [], "phases": [{"title": "Prepare", "description": "", "planning": "manual"}, {"title": "Build", "description": "", "depends_on": [1], "planning": "auto"}], "questions": [], "followups": []}

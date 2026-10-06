@@ -448,9 +448,13 @@ def cmd_names(store, args):
     config = store.ensure_code(args.slug)
     rows = store.names.names(args.slug)
     if args.json:
-        print(json.dumps({"code": config.code, "space": naming.space(config.repo, config.code), "names": rows}))
+        print(
+            json.dumps(
+                {"code": config.code, "space": naming.space(config.repo, config.code, config.slug), "names": rows}
+            )
+        )
         return
-    print(f"code {config.code}\tspace {naming.space(config.repo, config.code)}")
+    print(f"code {config.code}\tspace {naming.space(config.repo, config.code, config.slug)}")
     for row in rows:
         retired = row["retired_at"] or "-"
         print(

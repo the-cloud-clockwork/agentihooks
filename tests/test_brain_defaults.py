@@ -47,7 +47,11 @@ def brain_env(tmp_path, monkeypatch):
 
         return importlib.reload(config)
 
-    return home, _load
+    yield home, _load
+    monkeypatch.undo()
+    import hooks.config as config
+
+    importlib.reload(config)
 
 
 def test_both_off_without_a_brain_url(brain_env):

@@ -34,8 +34,9 @@ def create(slug, *argv, env=None):
     path = core.LEDGER_DIR / f".content-{slug}.json"
     path.write_text(json.dumps(CONTENT), encoding="utf-8")
     out = io.StringIO()
-    argv = ["agentihooks ledger new", "--content", str(path), "--slug", slug, *argv]
+    argv = ["agentihooks ledger new", "--content", str(path), *argv]
     with (
+        unittest.mock.patch.object(new_ledger, "built_slug", lambda args: slug),
         unittest.mock.patch.object(sys, "argv", argv),
         unittest.mock.patch.dict(os.environ, env or {}),
         contextlib.redirect_stdout(out),
