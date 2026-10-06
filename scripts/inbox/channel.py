@@ -65,18 +65,40 @@ def _tool():
     )
 
 
+async def _recheck(store, me, pubsub):
+    import anyio
+
+    finished = anyio.Event()
+
+    async def wait():
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(lambda: pubsub.get_message(timeout=RECHECK_S))
+        finished.set()
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(wait)
+        try:
+            await finished.wait()
+        finally:
+            if not finished.is_set():
+                store.redis.publish(NOTIFY, me)
+
+
 async def _push(store, me, write, ready, pubsub):
     import anyio
     import mcp.types as types
     from mcp.shared.message import SessionMessage
 
-    await ready.wait()
-    await anyio.sleep(SETTLE_S)
-    while True:
-        for item in claim(store, me):
-            note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
-            await write.send(SessionMessage(types.JSONRPCMessage(note)))
-        await anyio.to_thread.run_sync(lambda: pubsub.get_message(timeout=RECHECK_S), abandon_on_cancel=True)
+    try:
+        await ready.wait()
+        await anyio.sleep(SETTLE_S)
+        while True:
+            for item in claim(store, me):
+                note = types.JSONRPCNotification(jsonrpc="2.0", **event(item))
+                await write.send(SessionMessage(types.JSONRPCMessage(note)))
+            await _recheck(store, me, pubsub)
+    finally:
+        pubsub.close()
 
 
 async def run(store, me, read, write):
