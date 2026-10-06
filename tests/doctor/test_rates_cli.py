@@ -1,4 +1,5 @@
 import json
+import time
 
 import pytest
 
@@ -133,6 +134,20 @@ def test_rates_refuses_a_bad_window(loaded, capsys, flags, error):
 
 def test_a_time_without_a_zone_is_read_as_utc():
     assert doctor._at_ms("2026-10-06T10:00") == AT_MS == doctor._at_ms("2026-10-06T12:00+02:00")
+
+
+@pytest.fixture
+def berlin(monkeypatch):
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_times_read_and_print_as_utc_whatever_the_host_zone(berlin):
+    assert doctor._at_ms("2026-10-06T10:00") == AT_MS
+    assert rates._when(AT_MS) == "2026-10-06T10:00Z"
 
 
 def test_the_after_window_never_runs_past_now():
