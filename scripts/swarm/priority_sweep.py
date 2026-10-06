@@ -3,7 +3,9 @@
 The sweep clears an agent's priority whose item is done, out of scope, merged or gone. Then each new comment, answer or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
-reason on the item; a no or a silent classifier leaves it.
+reason on the item; a no or a silent classifier leaves it. A priority that waits on an operator decision, a question,
+a merge approval, a follow-up flagged for him or an escalated plan, counts only the operator's writes, a verified
+master relay among them; an agent's write on it is never judged.
 """
 
 import re
@@ -18,6 +20,7 @@ PATH = re.compile(r"([a-z]+)/([^/]+)")
 RESOLVES = "the write resolves what the priority asks"
 WAITS = "the priority still waits"
 YES = 0.5
+OPERATOR = "operator"
 SELF = ("swarm", "ledger")
 WRITES = {
     "comment added": "comment",
@@ -37,7 +40,7 @@ class Write:
 
     @property
     def who(self):
-        return "the operator" if self.by == "operator" else "an agent"
+        return "the operator" if self.by == OPERATOR else "an agent"
 
 
 def priority_pass(store, slug, doc, ledger, judge=None, github=None):
@@ -104,8 +107,23 @@ def _writes(doc, rows, events):
         if not write.text.strip():
             continue
         for row in rows:
-            if row["at"] <= event["at"] and _about(row, write):
+            if row["at"] <= event["at"] and _about(row, write) and _counts(doc, row, write):
                 yield row, write
+
+
+def _counts(doc, row, write):
+    return write.by == OPERATOR or not _operator_decides(row["item"], _item(doc, row["item"]))
+
+
+def _operator_decides(path, item):
+    name = _split(path)[0]
+    if name == "questions":
+        return True
+    if name == "tasks":
+        return item.get("awaiting") == "approval"
+    if name == "followups":
+        return bool(item.get("needs_operator"))
+    return bool((item.get("review") or {}).get("escalated"))
 
 
 def _text(doc, event):
@@ -151,7 +169,7 @@ def _resolve(ledger, slug, row, write, reason):
     name = _split(row["item"])[0]
     if name == "followups":
         ledger.mark_done(slug, row["item"])
-    if name == "questions" and write.by == "operator" and write.kind == "comment":
+    if name == "questions" and write.by == OPERATOR and write.kind == "comment":
         ledger.answer_as_operator(slug, row["item"], write.text)
     ledger.comment_item(slug, row["item"], f"Priority cleared by the swarm: {reason}.")
 

@@ -258,7 +258,10 @@ comment edit, answer or chat line by the operator or an agent on an item that ca
 counts for an item whose id it names) asks the classifier one yes or no question, with purpose
 `priority-resolve`: does this write resolve what the priority asks. A yes clears the priority, marks a follow up
 done, records an operator comment on a question as its answer and comments the classifier's verdict on the item.
-A no, or no classifier answer, leaves it. Every automatic clear is a `priority cleared` event by `swarm` with a
+A no, or no classifier answer, leaves it. A priority that waits on an operator decision (a question, a task
+awaiting merge approval, a follow up flagged for the operator, a plan escalated to him) counts only the operator's
+writes, a master `relay` carrying his verified words among them: an agent's comment, answer or chat line on it is
+never judged, even one that asks him for the decision. Every automatic clear is a `priority cleared` event by `swarm` with a
 `reason` in the ledger history.
 
 ### Safe retire
