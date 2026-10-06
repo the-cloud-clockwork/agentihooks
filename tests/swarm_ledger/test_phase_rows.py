@@ -149,6 +149,7 @@ def test_approve_sends_the_review_op_as_the_operator(review_page):
     page, sent = review_page
     page.click("#item-phases-p1 .phase-review button:has-text('Approve plan')")
     page.wait_for_function("() => document.querySelector('#item-phases-p1 .phase-state').textContent === 'Building'")
+    assert page.locator("#item-phases-p1 .phase-review").count() == 0
     assert review_ops(page, sent) == [
         {"op": "phase_review", "by": "operator", "item": "phases/p1", "state": "approved"}
     ]
@@ -172,3 +173,19 @@ def test_send_back_needs_a_note_and_sends_it(review_page):
             "note": "Split the parser task",
         }
     ]
+
+
+@pytest.mark.parametrize("escalated, shown", [(True, 1), (False, 0)])
+def test_a_sent_back_phase_shows_the_buttons_only_once_escalated(browser, escalated, shown):
+    review = {"state": "sent_back", "rounds": 3, "escalated": escalated}
+    doc = {**REVIEW_DOC, "phases": [{**REVIEW_DOC["phases"][0], "review": review}, *REVIEW_DOC["phases"][1:]]}
+    context = browser.new_context(viewport={"width": 1600, "height": 900})
+    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(doc))
+    context.route(
+        "**/*",
+        lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
+    )
+    page = context.new_page()
+    page.goto(URL)
+    assert page.locator("#item-phases-p1 .phase-review").count() == shown
+    context.close()
