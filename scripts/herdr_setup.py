@@ -61,7 +61,7 @@ def config_path() -> Path:
 
 
 def turn_off_copy_on_select(path: Path) -> bool:
-    doc = tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
+    doc = tomlkit.parse(path.read_bytes().decode()) if path.exists() else tomlkit.document()
     ui = doc.get("ui")
     if ui is None:
         ui = doc["ui"] = tomlkit.table()
@@ -69,7 +69,7 @@ def turn_off_copy_on_select(path: Path) -> bool:
         return False
     ui["copy_on_select"] = False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    path.write_bytes(tomlkit.dumps(doc).encode())
     return True
 
 

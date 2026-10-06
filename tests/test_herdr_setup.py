@@ -10,10 +10,12 @@ from scripts import herdr_setup
 class Runner:
     def __init__(self, status: str = ""):
         self.calls: list[list[str]] = []
+        self.options: dict[tuple[str, ...], dict] = {}
         self.status = status
 
     def __call__(self, command, **kwargs):
         self.calls.append(list(command))
+        self.options[tuple(command)] = kwargs
         out = self.status if command[1:] == ["integration", "status"] else ""
         return subprocess.CompletedProcess(command, 0, out, "")
 
@@ -92,7 +94,7 @@ def test_init_runs_the_herdr_step_once_for_all_targets(monkeypatch):
 
 
 def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
-    path = tmp_path / "herdr" / "config.toml"
+    path = tmp_path / "xdg" / "herdr" / "config.toml"
     if existing is not None:
         path.parent.mkdir(parents=True)
         path.write_text(existing, encoding="utf-8")
@@ -104,9 +106,9 @@ def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
 def test_configure_adds_a_ui_section_that_turns_copy_on_select_off(monkeypatch, runner, tmp_path, capsys):
     text = _configured(monkeypatch, runner, tmp_path, 'onboarding = false\n\n[theme]\nname = "one-dark"\n')
     assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n'
-    assert ["/bin/herdr", "server", "reload-config"] in runner.calls
+    assert runner.options[("/bin/herdr", "server", "reload-config")] == {"capture_output": True}
     printed = capsys.readouterr().out.splitlines()[-1]
-    assert printed == f"[herdr] config: copy_on_select = false in {tmp_path / 'herdr' / 'config.toml'}"
+    assert printed == f"[herdr] config: copy_on_select = false in {tmp_path / 'xdg' / 'herdr' / 'config.toml'}"
 
 
 def test_configure_merges_copy_on_select_into_an_existing_ui_section(monkeypatch, runner, tmp_path):
