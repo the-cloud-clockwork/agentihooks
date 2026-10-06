@@ -31,7 +31,7 @@ def image_page(browser):
                 base64.b64encode(png(int(image.get_attribute("width")), int(image.get_attribute("height")))).decode()
             )
         )
-    tab.locator("#item-phases-p1 details").evaluate("el => el.open = true")
+    tab.locator("#item-phases-p1 details[data-key]").evaluate("el => el.open = true")
     yield tab
     tab.close()
 

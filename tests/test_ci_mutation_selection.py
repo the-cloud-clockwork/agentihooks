@@ -153,3 +153,23 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
     assert all(name.startswith("x_g__") for name in names)
     with pytest.raises(PragmaParseError, match="scripts/sample.py"):
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
+
+
+def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_path, monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    package = tmp_path / "mutants/scripts/ci_mutation"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").touch()
+    (package / "__init__.py").touch()
+    (package / "report.py").touch()
+    monkeypatch.syspath_prepend(str(tmp_path / "mutants"))
+    for name in ("scripts", "scripts.ci_mutation", "scripts.ci_mutation.report"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    _, names = selected_mutants("scripts/sample.py", "def f(a, b):\n    return a - b\n", {2})
+    assert len(names) == 1

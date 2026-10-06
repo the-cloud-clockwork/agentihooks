@@ -167,6 +167,62 @@
     "reader": "Standards",
     "reason": "json.dumps treats ensure_ascii as a truth value, so None and False write identical bytes."
   },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_2:0766c7e16ccc270811e3db18723200a340c54931164ede9f6cd6904a89a9bac3": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_3:0cda8c824382f55f9e4e0b9f399856f9365e6883790bf10ff3030f514843c2c9": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_10:3136ccf21897a7566d6b8b5ba04f2ca68861c2a1648f24a686d3db428cf56f6e": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_13:c5d8c3f9ca7a5543fb0edc5454af4dce15c3f4b71baf0ef546af1e9d5c4327ac": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_20:91a2107bb666bd0a8d6236d009b4f0cb8e001ba1ecedb7ea2398368526606ca9": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_22:91b1cf229879c499c0af05f2689df00140bc8befc565e914c2cf442fc07f7952": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_46:2085aef4a54ce95ccf47db3617526cd578ed796cd23e20b77a6aa199310358e9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_47:5421a566d31e45e68a56112d16a54a8f9b3f2e6b4898eaf779cdc8bd09324d87": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_49:377a6610a3c77277eda2730d2dcfaa2a237606aade63eceb93f0a3dec2b653d9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_51:4c921b9cf51d37eb17a03454fec807127891e96d74072dd4727c93bef3ee4e37": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_35:7c0a36c84aafb488f246e9d44e97322663e734ec1a168bc42d2eaca8d774f03a": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_37:972a27b9dc1bbf70ca5df60a0b7301cb66c0d98cf5b8781e46529431cfae995f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_43:7287b0e795ede253d6db09994deaa8690effb47dde4a441d6b8647f3001b557f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_46:71b315daf5b45ef7aa8e2c0bf9c396a176389f9026a537f846852bb6fd17451c": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
   "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_port_held__mutmut_7:f81d7fd245b87bb253cce437f7d57b97d3f88a2b187ad9fb823e14e3d471b215": {
     "reader": "Standards",
     "reason": "Linux SO_REUSEADDR treats both 1 and 2 as enabled. The independent reader observed getsockopt returning 1 and an occupied listener returning bind errno 98 for both values."
