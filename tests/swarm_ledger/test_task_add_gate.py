@@ -161,3 +161,22 @@ def test_task_add_with_a_dash_mints_the_next_id_and_prints_it(monkeypatch, capsy
     cli(monkeypatch, "add", "-", "build", "it", "--phase", "p1")
     assert json.loads(capsys.readouterr().out) == {"task": "t5", "added": "build it"}
     assert [(t["id"], t["title"]) for t in core.sync(SLUG)[0]["tasks"]] == [("t4", "a"), ("t5", "build it")]
+
+
+def test_the_refusal_names_a_task_without_a_state_as_open():
+    ctx = SimpleNamespace(refused=[])
+    assert ledger_tasks._add({"tasks": [{"id": "t1", "title": "old"}]}, {"task": "t1", "by": "swarm"}, ctx) is False
+    assert ctx.refused == ['task t1 already exists as "old" (open): pick another id, or pass - as the id to mint one']
+
+
+def test_task_add_with_a_dash_mints_t1_on_a_ledger_without_tasks(monkeypatch, capsys):
+    sent = []
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {})
+    ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "add", "-", "first"]))
+    assert [op["task"] for op in sent[1]] == ["t1"]
+
+
+def test_task_help_says_a_dash_mints_the_id(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["task", "--help"])
+    assert "id task id; task add - mints the next free t<n> values" in " ".join(capsys.readouterr().out.split())
