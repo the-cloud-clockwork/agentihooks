@@ -432,6 +432,16 @@ def test_stamp_redoes_render_when_operator_plugins_change(world, target):
     assert render.render(target, "rb-role") is None
 
 
+def test_stamp_reads_operator_plugins_from_the_default_home(world, monkeypatch, tmp_path):
+    from scripts.profiles import render
+
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(tmp_path / "rendered" / "settings.json", json.dumps({"enabledPlugins": {"other@m": True}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "rendered"))
+
+    assert render.stamp("rb-role")["plugins"] == {"mine@m": True}
+
+
 def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 
