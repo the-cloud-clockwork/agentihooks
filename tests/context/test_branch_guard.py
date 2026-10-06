@@ -156,6 +156,19 @@ class TestOnlyTheCommandsOwnOperands:
     @pytest.mark.parametrize(
         "command",
         [
+            'git checkout -b topic && gh issue comment 5 --body "then git push origin main"',
+            "git branch topic && gh issue comment 5 --body 'then git merge master'",
+        ],
+    )
+    def test_branch_create_with_protected_word_in_a_comment_allowed(self, command):
+        from unittest.mock import patch
+
+        with patch("hooks.context.branch_guard._has_branch_signal", return_value=True):
+            self._check(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             'git push origin "main"',
             "git push origin 'HEAD:main'",
             "git branch -D 'master'",
