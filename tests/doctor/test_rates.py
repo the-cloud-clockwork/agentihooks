@@ -140,6 +140,8 @@ def test_proof_loops_count_claims_and_pr_moves_per_task():
         "tasks claimed": 2,
         "claims per task": 1.5,
         "review rounds per task": 1.5,
+        "CI reruns per task": 0.0,
+        "sub-agent calls per task": 0.0,
     }
 
 
@@ -250,8 +252,34 @@ def test_gate_counts_group_the_gate_log_by_gate_and_kind_in_the_window():
         {"gate": "talk", "at": 116 * MIN},
     ]
     assert rates.gate_counts(recs(gate_log=log), WIN) == {
-        "talk": {"deny": 2, "observe": 0, "lift": 1, "fail-open": 0},
-        "watch": {"deny": 0, "observe": 0, "lift": 0, "fail-open": 1},
+        "talk": {"deny": 2, "observe": 0, "lift": 1, "fail-open": 0, "count": 0},
+        "watch": {"deny": 0, "observe": 0, "lift": 0, "fail-open": 1, "count": 0},
+    }
+
+
+def test_proof_loops_count_ci_reruns_and_sub_agent_calls_per_task_from_count_rows():
+    events = [ev(110, "task claimed", "tasks/t1", by="swarm"), ev(120, "task claimed", "tasks/t2", by="swarm")]
+    log = [
+        {"gate": "reruns", "kind": "count", "task": "t1", "at": 111 * MIN},
+        {"gate": "reruns", "kind": "count", "task": "t1", "at": 112 * MIN},
+        {"gate": "reruns", "kind": "count", "task": "t2", "at": 113 * MIN},
+        {"gate": "reruns", "kind": "deny", "task": "t2", "at": 114 * MIN},
+        {"gate": "reruns", "kind": "count", "task": "t2", "at": 300 * MIN},
+        {"gate": "subagents", "kind": "count", "task": "t1", "at": 115 * MIN},
+        {"gate": "subagents", "kind": "count", "task": "t1", "at": 116 * MIN},
+        {"gate": "subagents", "kind": "observe", "task": "t1", "at": 117 * MIN},
+        {"gate": "talk", "kind": "count", "task": "t1", "at": 118 * MIN},
+        {"gate": "reruns", "kind": "count"},
+        {"gate": "reruns", "kind": "count", "at": 119 * MIN},
+    ]
+    found = rates.proof_loops(recs(events=events, gate_log=log), WIN)
+    assert (found["CI reruns per task"], found["sub-agent calls per task"]) == (2.0, 1.0)
+
+
+def test_count_rows_are_a_gate_kind():
+    log = [{"gate": "reruns", "kind": "count", "at": 110 * MIN}]
+    assert rates.gate_counts(recs(gate_log=log), WIN) == {
+        "reruns": {"deny": 0, "observe": 0, "lift": 0, "fail-open": 0, "count": 1}
     }
 
 
