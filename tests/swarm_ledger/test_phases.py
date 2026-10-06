@@ -1,5 +1,6 @@
 import copy
 import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -180,9 +181,17 @@ def test_content_builds_phase_fields_and_rejects_bad_graph():
     assert "missing" in " ".join(new_ledger.check(bad))
 
 
-def test_phase_cli_preserves_old_command_and_sends_new_ops():
+def test_phase_cli_preserves_old_command_and_sends_new_ops(capsys):
     sent = []
-    with patch.object(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields))):
+    with patch.object(
+        ledger,
+        "send",
+        lambda args, kind, **fields: (
+            sent.append((kind, fields))
+            if args.slug == SLUG and args.name == "engineer"
+            else pytest.fail("lost caller identity")
+        ),
+    ):
         for command in (
             ["phase", "p1", "done"],
             ["phase", "add", "p2", "Second", "--depends-on", "p1", "--planning", "auto", "--release"],
@@ -190,6 +199,19 @@ def test_phase_cli_preserves_old_command_and_sends_new_ops():
         ):
             args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", *command])
             ledger.cmd_phase(args)
+    outputs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert outputs == [
+        {"phase": "p1", "state": "done"},
+        {
+            "phase": "p2",
+            "title": "Second",
+            "description": "",
+            "depends_on": ["p1"],
+            "planning": "auto",
+            "release": True,
+        },
+        {"item": "phases/p2", "fields": {"depends_on": ["p1"], "planning": "manual", "release": False}},
+    ]
     assert sent == [
         ("set", {"path": "phases/p1/done", "value": True}),
         (
@@ -210,12 +232,35 @@ def test_phase_cli_preserves_old_command_and_sends_new_ops():
     ]
 
 
-def test_page_mirrors_fields_except_review():
+def test_page_round_trip_preserves_phase_fields_and_old_phases():
+    phases = [
+        {"id": "p1", "title": "First", "description": "", "done": False, "out_of_scope": False, "comments": []},
+        {
+            "id": "p2",
+            "title": "Second",
+            "description": "",
+            "done": False,
+            "out_of_scope": False,
+            "depends_on": ["p1"],
+            "planning": "auto",
+            "release": True,
+            "review": {"state": "approved"},
+            "comments": [],
+        },
+    ]
     source = core.TEMPLATE.read_text()
-    assert (
-        'phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"])'
-        in source
+    functions = "\n".join(
+        "function " + name + "(" + source.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
+        for name in ("entries", "withDefaults")
     )
+    script = (
+        functions
+        + "\nprocess.stdout.write(JSON.stringify(withDefaults("
+        + json.dumps({"phases": phases})
+        + ").phases));"
+    )
+    result = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout) == phases
 
 
 def test_concurrent_seed_changes_cannot_form_a_cycle():
@@ -340,8 +385,9 @@ def test_cli_set_requires_pairs_and_splits_trimmed_dependencies():
 @pytest.mark.parametrize("command", [["phase", "p1", "bad"], ["phase", "p1", "done", "extra"]])
 def test_cli_old_command_rejects_invalid_state(command):
     args = ledger.build_parser().parse_args(command)
-    with pytest.raises(SystemExit, match="phase takes"):
+    with pytest.raises(SystemExit) as error:
         ledger.cmd_phase(args)
+    assert str(error.value) == "phase takes ID done|open, add ID TITLE, or set ID FIELD=VALUE"
 
 
 @pytest.mark.parametrize("fields", [{"depends_on": "p1"}, {"depends_on": [1]}, {"planning": "bad"}, {"release": 1}])
@@ -370,3 +416,26 @@ def test_phase_cli_refusal_names_the_dependency_chain():
     with patch.object(ledger, "call", return_value=reply):
         with pytest.raises(SystemExit, match="p1 -> p2 -> p1"):
             ledger.cmd_phase(args)
+
+
+def test_cli_add_defaults_manual_planning_and_no_release():
+    args = ledger.build_parser().parse_args(["phase", "add", "p2", "Second"])
+    assert ledger_phase_cli.operation(args) == (
+        "phase_add",
+        {"phase": "p2", "title": "Second", "description": "", "depends_on": [], "planning": "manual", "release": False},
+    )
+    args = ledger.build_parser().parse_args(
+        ["phase", "add", "p2", "Second", "--planning", "manual", "--description", "Intent"]
+    )
+    assert ledger_phase_cli.operation(args)[1]["description"] == "Intent"
+    assert args.planning == "manual"
+    with pytest.raises(SystemExit) as error:
+        ledger.build_parser().parse_args(["phase", "add", "p2", "Second", "--planning", "bad"])
+    assert error.value.code == 2
+
+
+def test_cli_reopens_old_phase():
+    args = ledger.build_parser().parse_args(["phase", "p1", "open"])
+    with patch.object(ledger, "send") as sent:
+        ledger.cmd_phase(args)
+    sent.assert_called_once_with(args, "set", path="phases/p1/done", value=False)
