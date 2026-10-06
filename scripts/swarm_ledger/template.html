@@ -128,6 +128,36 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .notif[hidden], .chat-panel[hidden], .sync-badge[hidden] { display: none; }
 .fab-chat { left: auto; right: 16px; }
+.art-row { display: flex; flex-direction: column; align-items: flex-start; }
+.art-title { margin: 2px -6px 0; padding: 4px 6px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; font-weight: 700;
+  text-align: left; overflow-wrap: anywhere; cursor: pointer; transition: background .15s; }
+.art-title:hover, .art-title:focus-visible { background: var(--hover); outline: none; }
+.art-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.art-body { padding: 0 4px; }
+.image-scroll.art-body img { max-width: 100%; height: auto; }
+.art-doc ul, .art-doc ol { margin: 8px 0; padding-left: 1.6em; }
+.art-doc ul { list-style: disc; }
+.art-doc ol { list-style: decimal; }
+.art-doc { max-width: 90ch; margin: 0 auto; line-height: 1.6; overflow-wrap: anywhere; }
+.art-doc h1, .art-doc h2, .art-doc h3, .art-doc h4, .art-doc h5, .art-doc h6 { margin: 1.2em 0 .5em; line-height: 1.3; letter-spacing: normal; text-transform: none; }
+.art-doc table { border-collapse: collapse; margin: 12px 0; display: block; overflow-x: auto; }
+.art-doc th, .art-doc td { padding: 6px 10px; border: 1px solid var(--edge); text-align: left; vertical-align: top; }
+.art-doc th { background: var(--surface-2); }
+.art-doc pre { padding: 12px; border-radius: 6px; background: var(--surface-2); overflow-x: auto; }
+.art-doc pre code { white-space: pre; }
+.art-doc code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+.art-doc :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: var(--surface-2); }
+.art-doc blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--edge); color: var(--text-2); }
+.art-doc a { color: var(--link); }
+.json-tree { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-meta); line-height: 1.6; }
+.json-tree details { margin: 0; padding-left: 18px; }
+.json-tree > details { padding-left: 0; }
+.json-tree .json-leaf, .json-tree .json-close { padding-left: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.json-tree summary { cursor: pointer; text-transform: none; letter-spacing: normal; }
+.json-tree details:not([open]) > summary::after { content: " … " attr(data-close); color: var(--muted); }
+.json-string { color: var(--positive); }
+.json-number, .json-boolean { color: var(--accent-2); }
+.json-null { color: var(--muted); }
 .chat-panel { z-index: 12; left: auto; right: 16px; bottom: 72px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100vh - 100px)); max-height: none; }
 .chat-panel.big { width: min(760px, calc(100vw - 32px)); height: calc(100vh - 100px); }
 .chat-panel .chat-log { padding: 0 14px; }
@@ -421,6 +451,7 @@ section { margin-bottom: var(--space-group); padding: var(--space-row); }
 #to-top { bottom: 136px; }
 #bell { bottom: 192px; }
 #home { bottom: 248px; }
+#art-fab { bottom: 304px; }
 #outline-toggle { display: none; }
 .header-actions { display: none; gap: var(--space-tight); }
 .header-actions .sync { position: relative; left: auto; right: auto; bottom: auto; width: 40px; height: 40px; }
@@ -439,7 +470,7 @@ input, textarea { caret-color: var(--accent-2); }
   .status { white-space: normal; flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
   .header-actions { flex-shrink: 1; min-width: 0; }
   .header-actions { display: flex; flex-basis: 100%; }
-  .header-actions #home, .header-actions #bell, .header-actions #to-top, .header-actions #sync, .header-actions #chat-fab { position: static; }
+  .header-actions #home, .header-actions #bell, .header-actions #to-top, .header-actions #sync, .header-actions #chat-fab, .header-actions #art-fab { position: static; }
   .tab-body { padding: var(--space-row); }
   .tabs { padding: 0 var(--space-row); }
   .tab { padding: var(--space-tight); }
@@ -517,6 +548,14 @@ input, textarea { caret-color: var(--accent-2); }
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
   <span class="sync-badge" id="chat-badge" hidden></span>
 </button>
+<button class="sync" id="art-fab" type="button" title="Artifacts" aria-label="Artifacts" aria-expanded="false" aria-controls="art-panel">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+  <span class="sync-badge" id="art-badge" hidden></span>
+</button>
+<section class="notif" id="art-panel" role="dialog" aria-modal="false" aria-label="Artifacts" hidden><details class="sources-box fold panel-fold" id="art-fold" open>
+  <summary class="notif-head">Artifacts<span class="end"><button class="link" id="art-close" type="button">Close</button></span></summary>
+  <ul class="notif-list" id="art-list"></ul>
+</details></section>
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
   <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
@@ -599,6 +638,7 @@ input, textarea { caret-color: var(--accent-2); }
       closed_at: Number.isInteger(d.closed_at) ? d.closed_at : null,
       priorities: (Array.isArray(d.priorities) ? d.priorities : []).filter((p) => p && typeof p.id === "string" && typeof p.item === "string"),
       notifications: (Array.isArray(d.notifications) ? d.notifications : []).filter((n) => n && typeof n.id === "string" && typeof n.item === "string"),
+      artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
       phases: list("phases", ["title", "description", "done", "out_of_scope"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
@@ -752,6 +792,134 @@ input, textarea { caret-color: var(--accent-2); }
     document.body.append(viewer);
     show(index);
     viewer.showModal();
+  }
+
+  function artifactUrl(id) {
+    return `${API.replace(`/api/${SLUG}`, `/artifacts/${SLUG}`)}/${id}`;
+  }
+
+  function inline(text) {
+    const out = [];
+    const re = /(`[^`]+`)|\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+    let last = 0;
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      out.push(text.slice(last, m.index));
+      if (m[1]) out.push(h("code", { text: m[1].slice(1, -1) }));
+      else if (m[2]) out.push(h("strong", { text: m[2] }));
+      else if (m[3]) out.push(h("em", { text: m[3] }));
+      else out.push(h("a", { href: m[5], target: "_blank", rel: "noopener noreferrer", text: m[4] }));
+      last = re.lastIndex;
+    }
+    out.push(text.slice(last));
+    return out;
+  }
+
+  const MD_LIST = /^\s*([-*+]|\d+[.)])\s+/;
+  const MD_BREAK = /^(#{1,6}\s|\s*```|\s*~~~|>)/;
+
+  function markdown(text) {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+    const blocks = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = line.match(/^\s*(```|~~~)/);
+      if (fence) {
+        const body = [];
+        for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
+        i++;
+        blocks.push(h("pre", {}, h("code", { text: body.join("\n") })));
+      } else if (/^#{1,6}\s/.test(line)) {
+        blocks.push(h(`h${line.match(/^#+/)[0].length}`, {}, ...inline(line.replace(/^#+\s+/, "").replace(/\s+#+\s*$/, ""))));
+        i++;
+      } else if (line.includes("|") && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] || "")) {
+        const head = cells(line);
+        const rows = [];
+        for (i += 2; i < lines.length && lines[i].includes("|"); i++) rows.push(cells(lines[i]));
+        blocks.push(h("table", {}, h("thead", {}, h("tr", {}, ...head.map((c) => h("th", {}, ...inline(c))))),
+          h("tbody", {}, ...rows.map((r) => h("tr", {}, ...r.map((c) => h("td", {}, ...inline(c))))))));
+      } else if (MD_LIST.test(line)) {
+        const ordered = /^\s*\d/.test(line);
+        const items = [];
+        for (; i < lines.length && MD_LIST.test(lines[i]); i++) items.push(h("li", {}, ...inline(lines[i].replace(MD_LIST, ""))));
+        blocks.push(h(ordered ? "ol" : "ul", {}, ...items));
+      } else if (/^>/.test(line)) {
+        const quote = [];
+        for (; i < lines.length && /^>/.test(lines[i]); i++) quote.push(lines[i].replace(/^>\s?/, ""));
+        blocks.push(h("blockquote", {}, ...markdown(quote.join("\n"))));
+      } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+        blocks.push(h("hr", {}));
+        i++;
+      } else if (!line.trim()) {
+        i++;
+      } else {
+        const para = [line.trim()];
+        for (i++; i < lines.length && lines[i].trim() && !MD_BREAK.test(lines[i]) && !MD_LIST.test(lines[i]); i++) para.push(lines[i].trim());
+        blocks.push(h("p", {}, ...inline(para.join(" "))));
+      }
+    }
+    return blocks;
+  }
+
+  function jsonTree(value, key) {
+    const label = key === undefined ? "" : `${JSON.stringify(key)}: `;
+    const keys = value && typeof value === "object" ? Object.keys(value) : [];
+    if (!keys.length) {
+      const kind = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+      return h("div", { class: "json-leaf" }, label, h("span", { class: `json-${kind}`, text: JSON.stringify(value) }));
+    }
+    const list = Array.isArray(value);
+    return h("details", { open: "" },
+      h("summary", { text: label + (list ? "[" : "{"), "data-close": list ? "]" : "}" }),
+      ...keys.map((k) => jsonTree(value[k], list ? undefined : k)),
+      h("div", { class: "json-close", text: list ? "]" : "}" }));
+  }
+
+  async function artifactBody(file) {
+    const url = artifactUrl(file.id);
+    if (file.type.startsWith("image/")) return [h("img", { src: url, alt: "Artifact image", width: file.width, height: file.height })];
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`the server answered ${resp.status}`);
+    const text = await resp.text();
+    if (file.type === "application/json") return [h("div", { class: "json-tree" }, jsonTree(JSON.parse(text)))];
+    return [h("div", { class: "art-doc" }, ...markdown(text))];
+  }
+
+  function artifactMeta(a) {
+    return [a.by, a.task ? `#${a.task}` : "", when(a.at)].filter(Boolean).join(" · ");
+  }
+
+  function openArtifact(a) {
+    const previousFocus = document.activeElement;
+    const body = h("div", { class: "image-scroll art-body" }, h("p", { class: "hint", text: "Loading…" }));
+    const viewer = h("dialog", { class: "image-viewer", "aria-label": "Artifact viewer" },
+      h("div", { class: "image-toolbar" },
+        h("div", { class: "art-head" }, h("strong", { text: a.title }), h("span", { class: "notif-meta", text: artifactMeta(a) })),
+        h("button", { class: "link image-close", type: "button", text: "Close", "aria-label": "Close artifact", on: { click: () => viewer.close() } })),
+      body);
+    viewer.addEventListener("click", (ev) => { if (ev.target === viewer) viewer.close(); });
+    viewer.addEventListener("keydown", (ev) => { if (ev.key === "Escape") ev.stopPropagation(); });
+    viewer.addEventListener("close", () => { viewer.remove(); previousFocus.focus(); });
+    document.body.append(viewer);
+    viewer.showModal();
+    artifactBody(a.file).then((nodes) => body.replaceChildren(...nodes),
+      (err) => body.replaceChildren(h("p", { class: "attach-note", text: `This artifact could not be opened: ${err.message}` })));
+  }
+
+  function renderArtifacts() {
+    const list = [...doc.artifacts].sort((a, b) => (b.at || 0) - (a.at || 0));
+    $("art-badge").hidden = !list.length;
+    $("art-badge").textContent = String(list.length);
+    $("art-list").replaceChildren(...list.map((a) => h("li", { class: "notif-row art-row" },
+      h("div", { class: "notif-meta", text: artifactMeta(a) }),
+      h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }))));
+    if (!list.length) $("art-list").append(h("li", { class: "empty", text: "No artifacts yet." }));
+  }
+
+  function showArtifacts(open) {
+    $("art-panel").hidden = !open;
+    $("art-fab").setAttribute("aria-expanded", String(open));
   }
 
   function thumb(att, list = [att], index = 0) {
@@ -1024,6 +1192,7 @@ input, textarea { caret-color: var(--accent-2); }
     renderSync();
     renderPriorities();
     renderNotifications();
+    renderArtifacts();
     renderChat();
     renderChatBadge();
     renderStats();
@@ -1963,6 +2132,8 @@ input, textarea { caret-color: var(--accent-2); }
     $("to-top").addEventListener("click", () => document.querySelector(".tab-body:not([hidden])").scrollTo({ top: 0, behavior: "smooth" }));
     $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
     $("notif-close").addEventListener("click", () => showNotifications(false));
+    $("art-fab").addEventListener("click", () => showArtifacts($("art-panel").hidden));
+    $("art-close").addEventListener("click", () => showArtifacts(false));
     $("notif-clear-all").addEventListener("click", () => { if (confirm("Clear every notification?")) clearNotification("all"); });
     try {
       chatSeen = Number(localStorage.getItem(CHAT_SEEN)) || lastChatAt();
@@ -1979,6 +2150,7 @@ input, textarea { caret-color: var(--accent-2); }
       if (ev.key !== "Escape" || ev.defaultPrevented) return;
       if ($("outline").classList.contains("open")) showOutline(false);
       else if (!$("notif").hidden) showNotifications(false);
+      else if (!$("art-panel").hidden) showArtifacts(false);
       else if (!$("chat-panel").hidden) showChat(false);
     });
     $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
@@ -2034,7 +2206,7 @@ input, textarea { caret-color: var(--accent-2); }
     wireTabs();
     const rail = h("div", { class: "header-actions", id: "header-actions" });
     document.querySelector("header").append(rail);
-    const railButtons = ["home", "bell", "to-top", "sync", "chat-fab"].map($);
+    const railButtons = ["home", "bell", "to-top", "sync", "art-fab", "chat-fab"].map($);
     const placeRail = () => {
       const narrow = innerWidth < 1024;
       for (const btn of railButtons) (narrow ? rail : document.body).append(btn);
