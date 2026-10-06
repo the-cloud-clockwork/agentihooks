@@ -99,6 +99,43 @@ class Outline(unittest.TestCase):
         home = int(re.search(r"\.fab-home \{ bottom: (\d+)px", page).group(1))
         self.assertGreater(bottom, home + 46)
 
+    def test_operator_notes_sit_right_after_priorities_on_the_page_and_in_the_outline(self):
+        order = [
+            "sec-priorities",
+            "sec-notes",
+            "sec-questions",
+            "sec-phases",
+            "sec-tasks",
+            "sec-followups",
+            "sec-sources",
+        ]
+        page = TEMPLATE.read_text(encoding="utf-8")
+        column = page.split('<div class="col">', 1)[1].split('id="swarm" role="tabpanel"', 1)[0]
+        sections = [
+            {"id": sid, "list": name, "title": title}
+            for sid, name, title in re.findall(
+                r'<section id="([^"]+)" data-outline="([^"]+)"><details[^>]*><summary>([^<]+)<', column
+            )
+        ]
+        self.assertEqual([s["id"] for s in sections], order)
+        shim = (
+            f"const SECS = {json.dumps(sections)};\n"
+            "const document = { querySelectorAll: () => SECS.map((s) => ({ id: s.id, hidden: false,"
+            " dataset: { outline: s.list }, querySelector: () => ({ firstChild: { textContent: s.title } }) })) };\n"
+        )
+        script = (
+            shim
+            + function_source("itemState")
+            + "\n"
+            + function_source("outlineOf")
+            + "\n"
+            + function_source("pageHeads")
+            + f"\nprocess.stdout.write(JSON.stringify(outlineOf({json.dumps(new_ledger.build_doc(CONTENT))}, pageHeads())));"
+        )
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+        self.assertEqual([s["id"] for s in out], order)
+        self.assertEqual(out[1]["title"], "Operator notes")
+
 
 if __name__ == "__main__":
     unittest.main()
