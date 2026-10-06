@@ -79,7 +79,7 @@ DEFAULT_CHAT_INSTRUCTIONS = (
     "Answer with agentihooks ledger say, in plain words for the operator: no times, ids, hashes, paths "
     "or capital labels. Under 100 words unless the operator asks, in a separate message, to expand."
 )
-SEEDS_KEPT = 50
+SEEDS_KEPT = 5
 EVENTS_KEPT = 2000
 MAX_TEXT = 20000
 LOG_MAX_BYTES = 5 << 20
@@ -317,6 +317,15 @@ def atomic_write(path, text):
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
     os.replace(tmp, path)
+
+
+def write_if_changed(path, text):
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return
+    except FileNotFoundError:
+        pass
+    atomic_write(path, text)
 
 
 def text_diff(old, new):
@@ -692,10 +701,15 @@ def sync(slug, changes=None, ops=None):
         ctx = Context(meta, now_ms())
         meta.setdefault("members", {})
         meta["created_at"] = earliest(meta, ctx.at)
-        if seed is not None:
-            base = normalize(meta["seeds"].get(str(seed.get("_rev"))) or meta["seeds"][str(meta["rev"])])
-            reconcile_fields(doc, base, seed, ctx)
-            reconcile_threads(doc, base, seed, ctx)
+        seed_rev = None if seed is None else seed.get("_rev", meta["rev"])
+        base = None if seed is None else meta["seeds"].get(str(seed_rev))
+        if base is not None:
+            reconcile_fields(doc, normalize(base), seed, ctx)
+            reconcile_threads(doc, normalize(base), seed, ctx)
+        elif seed is not None:
+            ctx.refused.append(
+                f"the page copy at revision {seed_rev} is too old to merge, its agent edits were ignored"
+            )
         rejected = apply_changes(doc, changes or [], ctx)
         rejected += [op["id"] for op in ops or [] if not apply_op(doc, op, ctx)]
         import ledger_media
@@ -711,7 +725,7 @@ def sync(slug, changes=None, ops=None):
         meta["seeds"][str(meta["rev"])] = doc
         meta["seeds"] = {k: v for k, v in meta["seeds"].items() if int(k) > meta["rev"] - SEEDS_KEPT}
         state = {**doc, "_meta": meta}
-        atomic_write(json_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+        write_if_changed(json_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
         if seed is not None:
             rewrite_seed(html_path, html, doc, meta["rev"])
         return state, rejected
