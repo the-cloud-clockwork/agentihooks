@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.swarm import done_gate
@@ -86,6 +85,8 @@ def task(task_id="t1", **fields):
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
