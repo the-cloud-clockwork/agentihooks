@@ -7,7 +7,7 @@ from scripts.inbox import channel
 from scripts.inbox import store as store_module
 from scripts.inbox.store import InboxError, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+pytestmark = pytest.mark.xdist_group("mcp-sdk")
 
 INSTRUCTIONS = (
     'Inbox items for bob arrive as <channel source="inbox" item_id="..." sender="..." sent_at_ms="...">. '
