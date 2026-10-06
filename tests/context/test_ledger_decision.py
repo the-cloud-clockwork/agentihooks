@@ -230,6 +230,11 @@ def test_an_unbound_plan_still_directs_init_swarm(isolated, capsys, monkeypatch)
     assert "plan phases" not in out
 
 
+def test_a_plan_without_a_session_id_gets_nothing(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    assert decision.directive(recorded("claude_plan_accept", session_id="")) == ""
+
+
 def test_the_binding_defaults_to_the_home_ledger_folder(capsys, monkeypatch):
     monkeypatch.delenv("LEDGER_DIR")
     sessions = Path.home() / "development-ledger" / ".sessions"
