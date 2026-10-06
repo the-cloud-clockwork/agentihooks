@@ -67,6 +67,16 @@ def restore(slug, now=None):
         return True
 
 
+def bin_closed(slug, closed_at, now=None):
+    with LOCK:
+        found, marks = entries(), restored()
+        if slug in found or (slug in marks and marks[slug] >= closed_at):
+            return False
+        found[slug] = core.now_ms() if now is None else now
+        _save(found)
+        return True
+
+
 def purge_expired(now=None):
     now = core.now_ms() if now is None else now
     with LOCK:

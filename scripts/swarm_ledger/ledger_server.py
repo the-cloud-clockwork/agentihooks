@@ -65,9 +65,11 @@ def all_summaries():
         except (ValueError, OSError):
             seed = None
         try:
-            doc, _, _ = core.load_state(json_path, seed)
+            doc, meta, _ = core.load_state(json_path, seed)
         except (ValueError, OSError):
             continue
+        items = [i for i in doc.get("tasks") or doc.get("phases") or [] if not i.get("out_of_scope")]
+        done = sum(1 for i in items if i.get("done") is True)
         found.append(
             {
                 "slug": path.stem,
@@ -75,6 +77,9 @@ def all_summaries():
                 "overview": ledger_close.intro(doc.get("overview") or ""),
                 "closed_at": doc.get("closed_at"),
                 "size": ledger_size.size_of(doc),
+                "open": len(items) - done,
+                "done": done,
+                "updated_at": meta.get("updated_at"),
             }
         )
     return found
@@ -100,40 +105,61 @@ HOME_STYLE = (
     "*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;min-height:100vh;color:var(--text);"
     "font:13px/1.6 ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);"
     "background-image:var(--backdrop);background-attachment:fixed}"
-    "main{max-width:960px;margin:0 auto;padding:40px 16px 96px}section.closed{margin-top:24px}"
-    "h1{display:flex;align-items:center;gap:10px;margin:0;padding:14px 18px;font-size:12px;font-weight:700;"
-    "letter-spacing:.16em;text-transform:uppercase;color:var(--text);background:var(--surface-1);border-radius:6px 6px 0 0;"
-    "border-bottom:1px solid var(--signal-soft)}"
+    "::selection{background:var(--selection);color:var(--text)}"
+    "main{padding:32px clamp(16px,3vw,48px) 96px}"
+    "header{display:flex;align-items:baseline;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}"
+    "h1{display:flex;align-items:center;gap:10px;margin:0;font-size:12px;font-weight:700;letter-spacing:.16em;"
+    "text-transform:uppercase;color:var(--text)}"
     "h1::before{content:'';width:2px;height:14px;background:var(--signal);box-shadow:0 0 8px var(--signal)}"
-    "ul{margin:0;padding:4px 18px 8px 36px;background:var(--surface-1);border-radius:0 0 6px 6px}"
-    "li{padding:12px 0;border-top:1px solid var(--rule)}li::marker{color:var(--signal)}"
-    "li:first-child{border-top:0}.row{display:flex;gap:12px;align-items:flex-start}.info{flex:1;min-width:0}"
-    "a{color:var(--link);font-size:14px;font-weight:700;text-decoration:none}"
-    "a:hover{text-decoration:underline}a:focus-visible{outline:1px solid var(--link);outline-offset:3px;border-radius:2px}"
-    "p{margin:2px 0 0;color:var(--muted);overflow-wrap:anywhere}"
-    ".meta{display:flex;gap:14px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}"
-    ".left{color:var(--link);text-shadow:0 0 8px currentColor}"
-    ".size{margin-left:10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--signal);"
-    "text-shadow:0 0 8px currentColor}"
-    ".act{flex:none;width:32px;height:32px;display:grid;place-content:center;border:1px solid transparent;"
-    "border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;"
-    "transition:background .15s,border-color .15s,box-shadow .15s,color .15s}"
-    ".act svg{width:16px;height:16px}.act:disabled{opacity:.3;cursor:wait}"
-    ".act.reopen{width:auto;padding:0 10px;color:var(--link)}"
-    ".act:hover,.act:focus-visible{outline:none;background:var(--hover);border-color:var(--edge);"
-    "box-shadow:0 0 12px -2px currentColor}"
+    ".total{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}"
+    "ul{list-style:none;margin:0;padding:0}"
+    ".row{display:grid;grid-template-columns:minmax(160px,280px) 56px minmax(0,1fr) 64px 72px 112px 80px 104px;"
+    "align-items:center;gap:20px;min-height:40px;padding:6px 12px;border-bottom:1px solid var(--rule);"
+    "white-space:nowrap;font-variant-numeric:tabular-nums;transition:background .15s}"
+    ".bin .row{grid-template-columns:minmax(160px,280px) 56px minmax(0,1fr) 112px 104px 104px}"
+    "li.row:hover,li.row:focus-within{background:var(--hover)}"
+    ".head{min-height:0;padding-top:14px;padding-bottom:8px;font-size:10px;letter-spacing:.14em;"
+    "text-transform:uppercase;color:var(--dim)}"
+    ".title{overflow:hidden;text-overflow:ellipsis;color:var(--link);font-size:14px;font-weight:700;text-decoration:none}"
+    ".title:hover{text-decoration:underline;text-underline-offset:3px}"
+    ".title:focus-visible{outline:1px solid var(--link);outline-offset:3px;border-radius:2px}"
+    ".kind{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);"
+    "text-shadow:0 0 6px currentColor}"
+    ".ov{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}"
+    ".num{text-align:right;color:var(--dim)}.num b{font-weight:700}"
+    ".num.open b{color:var(--link);text-shadow:0 0 8px currentColor}"
+    ".num.done b{color:var(--positive);text-shadow:0 0 8px currentColor}"
+    ".state{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}"
+    ".state::before{content:'';flex:none;width:6px;height:6px;border-radius:50%;background:currentColor}"
+    ".s-running{color:var(--positive);text-shadow:0 0 8px currentColor}"
+    ".s-drained{color:var(--accent-2);text-shadow:0 0 8px currentColor}"
+    ".s-paused,.s-stopping{color:var(--warn);text-shadow:0 0 8px currentColor}"
+    ".s-closed{color:var(--signal);text-shadow:0 0 8px currentColor}"
+    ".s-stopped,.s-none{color:var(--dim)}"
+    ".when,.deleted{text-align:right;color:var(--dim)}.head .r{text-align:right}"
+    ".left{text-align:right;color:var(--link);text-shadow:0 0 8px currentColor}"
+    ".acts{display:flex;justify-content:flex-end;gap:4px}"
+    ".act{flex:none;height:30px;min-width:30px;display:inline-flex;align-items:center;justify-content:center;gap:6px;"
+    "padding:0 7px;border:0;border-radius:8px;background:transparent;color:var(--muted);font:inherit;font-size:12px;"
+    "cursor:pointer;transition:background .15s,box-shadow .15s,color .15s,filter .15s}"
+    ".act svg{width:15px;height:15px}"
+    ".act:hover,.act:focus-visible{outline:none;background:var(--hover);box-shadow:inset 0 0 0 1px var(--edge);"
+    "filter:drop-shadow(0 0 6px currentColor)}"
     ".act:focus-visible{outline:1px solid currentColor;outline-offset:2px}"
+    ".act:disabled{opacity:.3;cursor:wait;filter:none}"
     ".act.del:hover,.act.del:focus-visible{color:var(--destructive)}"
-    ".act.restore:hover,.act.restore:focus-visible{color:var(--link)}"
-    ".fab{position:fixed;left:16px;bottom:16px;z-index:10;width:44px;height:44px;border-radius:12px;display:grid;"
-    "place-content:center;color:var(--signal);background:var(--surface-2);border:1px solid transparent;"
-    "backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);"
-    "transition:background .15s,border-color .15s,box-shadow .15s,color .15s}"
-    ".fab svg{width:20px;height:20px}.fab:hover,.fab:focus-visible{background:var(--hover);"
-    "border-color:var(--edge);box-shadow:0 0 14px -2px currentColor}"
+    ".act.reopen,.act.restore{color:var(--link)}"
+    ".empty{padding:28px 12px;color:var(--muted)}"
+    ".fab{position:fixed;left:16px;bottom:16px;z-index:10;width:44px;height:44px;border:0;border-radius:12px;"
+    "display:grid;place-content:center;color:var(--signal);background:transparent;"
+    "transition:background .15s,filter .15s}"
+    ".fab svg{width:20px;height:20px}"
+    ".fab:hover,.fab:focus-visible{background:var(--hover);filter:drop-shadow(0 0 6px currentColor);outline:none}"
     ".fab:focus-visible{outline:1px solid var(--signal);outline-offset:2px}"
     ".count{position:absolute;top:-6px;right:-4px;font-size:11px;font-weight:700;color:var(--destructive);"
     "text-shadow:0 0 6px currentColor}"
+    "@media (max-width:760px){.row,.bin .row{grid-template-columns:minmax(0,1fr) auto auto;gap:12px}"
+    ".head,.kind,.ov,.num,.when,.deleted{display:none}}"
 )
 ICON = (
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
@@ -159,58 +185,90 @@ BIN_SCRIPT = (
 )
 
 
-def ledger_row(s, control):
-    slug, title = html.escape(s["slug"]), html.escape(s["title"])
-    size = f'<span class="size">{html.escape(s["size"])}</span>'
+def ledger_row(s, cells, control):
+    slug, title, overview = html.escape(s["slug"]), html.escape(s["title"]), html.escape(s["overview"])
     return (
-        f'<li><div class="row"><div class="info"><a href="/{slug}">{title}</a>{size}'
-        f"<p>{html.escape(s['overview'])}</p>{s.get('meta', '')}</div>{control.format(slug=slug, title=title)}</div></li>"
+        f'<li class="row"><a class="title" href="/{slug}" title="{title}">{title}</a>'
+        f'<span class="kind">{html.escape(s["size"])}</span><span class="ov" title="{overview}">{overview}</span>'
+        f'{cells}<span class="acts">{control.format(slug=slug, title=title)}</span></li>'
     )
 
 
-def bin_meta(s):
+def ago(at, now):
+    minutes = (now - at) // 60000
+    for unit, size in (("d", 1440), ("h", 60), ("m", 1)):
+        if minutes >= size:
+            return f"{minutes // size}{unit} ago"
+    return "just now"
+
+
+def activity(at, now):
+    if not at:
+        return '<span class="when">unknown</span>'
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at / 1000))
+    local = time.strftime("%Y-%m-%d %H:%M", time.localtime(at / 1000))
+    return f'<time class="when" datetime="{stamp}" title="{local}">{ago(at, now)}</time>'
+
+
+def home_cells(s, state, now):
+    state = "closed" if s["closed_at"] else state
+    label, css = html.escape(state or "no swarm"), html.escape(state or "none")
+    return (
+        f'<span class="num open"><b>{s["open"]}</b> open</span><span class="num done"><b>{s["done"]}</b> done</span>'
+        f'<span class="state s-{css}">{label}</span>{activity(s["updated_at"], now)}'
+    )
+
+
+def bin_cells(s):
     deleted = time.strftime("%Y-%m-%d", time.localtime(s["deleted_at"] / 1000))
     days = s["days_left"]
-    return f'<p class="meta"><span>Deleted {deleted}</span><span class="left">{days} day{"" if days == 1 else "s"} left</span></p>'
+    return f'<span class="deleted">{deleted}</span><span class="left">{days} day{"" if days == 1 else "s"} left</span>'
 
 
-def closed_meta(s):
-    return f'<p class="meta"><span>Closed {time.strftime("%Y-%m-%d", time.localtime(s["closed_at"] / 1000))}</span></p>'
+HEADS = {
+    "home": ("Ledger", "Kind", "Overview", ">Open", ">Done", "Swarm", ">Activity", ""),
+    "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
+}
+DELETE = (
+    '<button class="act del" type="button" data-act="delete" data-slug="{slug}" '
+    f'title="Move to the bin" aria-label="Move {{title}} to the bin">{TRASH}</button>'
+)
+REOPEN = (
+    '<button class="act reopen" type="button" data-act="reopen" data-slug="{slug}" '
+    'aria-label="Reopen {title}">Reopen</button>'
+)
+RESTORE_BUTTON = (
+    '<button class="act restore" type="button" data-act="restore" data-slug="{slug}" '
+    f'title="Restore to HOME" aria-label="Restore {{title}} to HOME">{RESTORE}Restore</button>'
+)
 
 
-def index_page(view="home"):
-    closed = ""
+def index_page(view="home", now=None):
+    now = core.now_ms() if now is None else now
     if view == "bin":
         heading, empty = "BIN", "The bin is empty."
-        control = (
-            '<button class="act restore" type="button" data-act="restore" data-slug="{slug}" '
-            f'title="Restore to HOME" aria-label="Restore {{title}} to HOME">{RESTORE}</button>'
-        )
-        rows = [ledger_row({**s, "meta": bin_meta(s)}, control) for s in bin_summaries()]
+        rows = [ledger_row(s, bin_cells(s), RESTORE_BUTTON) for s in bin_summaries(now)]
         fab = f'<a class="fab" id="home-fab" href="/" title="HOME" aria-label="HOME">{HOME_ICON}</a>'
     else:
         heading, empty = "HOME", "No ledgers yet."
-        control = (
-            '<button class="act del" type="button" data-act="delete" data-slug="{slug}" '
-            f'title="Move to the bin" aria-label="Move {{title}} to the bin">{TRASH}</button>'
-        )
-        summaries = ledger_summaries()
-        rows = [ledger_row(s, control) for s in summaries if not s["closed_at"]]
-        reopen = (
-            '<button class="act reopen" type="button" data-act="reopen" data-slug="{slug}" '
-            'aria-label="Reopen {title}">Reopen</button>'
-        )
-        ended = [ledger_row({**s, "meta": closed_meta(s)}, reopen + control) for s in summaries if s["closed_at"]]
-        if ended:
-            closed = f'<section class="closed"><h1>CLOSED</h1><ul>{"".join(ended)}</ul></section>'
+        rows = [
+            ledger_row(s, home_cells(s, swarm_state(s["slug"]), now), (REOPEN if s["closed_at"] else "") + DELETE)
+            for s in ledger_summaries()
+        ]
         count = len(ledger_bin.entries())
         badge = f'<span class="count">{count}</span>' if count else ""
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" title="Bin" aria-label="Bin">{TRASH}{badge}</a>'
-    body = "\n".join(rows) or f"<li>{empty}</li>"
+    total = f'<span class="total">{len(rows)} ledger{"" if len(rows) == 1 else "s"}</span>'
+    head = "".join(
+        f'<span class="r">{label[1:]}</span>' if label.startswith(">") else f"<span>{label}</span>"
+        for label in HEADS[view]
+    )
+    body = "".join(rows) or f'<li class="empty">{empty}</li>'
     return (
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{heading}</title><style>{core.PALETTE.read_text(encoding='utf-8')}{HOME_STYLE}</style>"
-        f"<main><h1>{heading}</h1><ul>{body}</ul>{closed}</main>{fab}{BIN_SCRIPT}"
+        f'<main class="{view}"><header><h1>{heading}</h1>{total}</header>'
+        f'<div class="row head" aria-hidden="true">{head}</div><ul>{body}</ul></main>{fab}{BIN_SCRIPT}'
     )
 
 
@@ -252,6 +310,18 @@ def swarm_status(slug):
         return None
     except Exception as exc:  # the page keeps its last observed state; the log keeps why this read failed
         sys.stderr.write(f"swarm status {slug}: {exc}\n")
+        return None
+
+
+def swarm_state(slug):
+    from scripts.swarm.store import SwarmError
+
+    try:
+        return swarm_store().config(slug).state
+    except SwarmError:
+        return None
+    except Exception as exc:  # HOME still renders; the log keeps why this read failed
+        sys.stderr.write(f"swarm state {slug}: {exc}\n")
         return None
 
 

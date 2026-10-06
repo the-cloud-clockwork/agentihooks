@@ -55,6 +55,7 @@ class Ledger(Protocol):
     def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm") -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
+    def bin_closed(self, slug: str, closed_at: int) -> bool: ...
 
 
 class Runtime(Protocol):
@@ -85,7 +86,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.state == "stopped":
         retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
         if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return actions + _close_space(slug, config, store, runtime)
+            return actions + _close_space(slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     sleeping = lifetime.sleeping(slug, store, rows)
@@ -106,6 +107,12 @@ def tick(slug, store, ledger, runtime, now_ms):
 def _close_space(slug, config, store, runtime):
     if not store.agents(slug):
         runtime.close_space(config)
+    return []
+
+
+def _bin_closed(slug, store, ledger, doc):
+    if doc.get("closed_at") and not store.agents(slug) and ledger.bin_closed(slug, doc["closed_at"]):
+        return ["the closed ledger moved to the bin"]
     return []
 
 
