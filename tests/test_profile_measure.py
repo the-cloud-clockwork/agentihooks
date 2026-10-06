@@ -1,16 +1,18 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from scripts import select_profile
-from scripts.profiles import measure
+from scripts.profiles import measure, render
 
 CLAUDE_STREAM = "\n".join(
     json.dumps(event)
     for event in (
+        42,
         {
             "type": "system",
             "subtype": "init",
@@ -18,7 +20,7 @@ CLAUDE_STREAM = "\n".join(
         },
         {
             "type": "assistant",
-            "message": {"usage": {"input_tokens": 2, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 8}},
+            "message": {"usage": {"input_tokens": 2, "cache_creation_input_tokens": 50}},
         },
         {
             "type": "assistant",
@@ -65,7 +67,7 @@ def _runner(stdout):
     seen = {}
 
     def run(argv, **kwargs):
-        seen.update(argv=argv, **kwargs)
+        seen.update(argv=argv, work=os.listdir(kwargs["cwd"]), **kwargs)
         home = kwargs["env"].get("CLAUDE_CONFIG_DIR")
         if home:
             seen["home"] = {p.name: Path(os.readlink(p)) if p.is_symlink() else None for p in Path(home).iterdir()}
@@ -80,23 +82,22 @@ def test_claude_first_turn_is_the_first_request_input(rendered):
     run, seen = _runner(CLAUDE_STREAM)
     environ = {"AGENTIHOOKS_SWARM": "s", "AGENTIHOOKS_SWARM_TASK": "t", "AGENTIHOOKS_AGENT_NAME": "a", "KEEP": "1"}
     assert measure.measure("engineer", "claude", frozenset(), environ=environ, run=run) == measure.Reading(
-        60, ("gateway-tools",)
+        52, ("gateway-tools",)
     )
-    assert seen["argv"][:2] == ["agentihooks", "claude"]
-    assert seen["argv"][-7:] == [
-        "-p",
-        measure.PROMPT,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--max-turns",
-        "1",
-    ]
+    _, flags = select_profile.prepare("engineer", "claude", "", "", measure.CLAUDE_ARGS, {})
+    assert seen["argv"] == ["agentihooks", "claude", *flags]
+    assert flags[-7:] == ["-p", measure.PROMPT, "--output-format", "stream-json", "--verbose", "--max-turns", "1"]
+    assert seen["work"] == [] and seen["cwd"] != seen["env"]["CLAUDE_CONFIG_DIR"]
+    assert (seen["stdin"], seen["capture_output"], seen["text"], seen["timeout"]) == (
+        subprocess.DEVNULL,
+        True,
+        True,
+        measure.TIMEOUT_S,
+    )
     env = seen["env"]
     assert env["KEEP"] == "1" and env["AGENTIHOOKS_PROFILE"] == "engineer"
     assert not {"AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"} & set(env)
     assert Path(env["CLAUDE_CONFIG_DIR"]) != rendered
-    assert seen["cwd"] != str(rendered) and seen["stdin"] is not None
     assert seen["home"]["CLAUDE.md"] == rendered / "CLAUDE.md"
     assert seen["home"]["rules"] == rendered / "rules"
     assert seen["home"]["settings.json"] is None and seen["home"][".claude.json"] is None
@@ -149,12 +150,34 @@ def test_codex_full_run_has_no_overrides(rendered):
     assert argv[argv.index("-c") + 1].startswith("model_reasoning_effort=")
 
 
-def test_missing_usage_names_the_failure(rendered):
-    def run(argv, **kwargs):
-        return Mock(returncode=1, stdout="not json\n", stderr="login required\n")
+def test_hooks_off_when_the_profile_has_no_hooks(rendered):
+    (rendered / "settings.json").write_text(json.dumps({"env": {}}))
+    run, seen = _runner(CLAUDE_STREAM)
+    measure.measure("engineer", "claude", frozenset({"hooks"}), environ={}, run=run)
+    assert seen["settings"] == {"env": {}}
 
-    with pytest.raises(measure.MeasureError, match="login required"):
+
+def test_codex_mcp_off_without_installed_servers(rendered):
+    (measure.codex_home() / "config.toml").write_text("")
+    run, seen = _runner(CODEX_STREAM)
+    measure.measure("engineer", "codex", frozenset({"mcp"}), environ={}, run=run)
+    assert not [a for a in seen["argv"] if a.startswith("mcp_servers.")]
+
+
+def test_init_without_servers_and_usage_without_cache_keys():
+    stdout = '{"subtype": "init"}\n{"type": "assistant", "message": {"usage": {"input_tokens": 3}}}'
+    assert measure.first_turn("claude", stdout) == measure.Reading(3, ())
+
+
+def test_missing_usage_names_the_failure(rendered):
+    stderr = "x" * 600 + "login required\n"
+
+    def run(argv, **kwargs):
+        return Mock(returncode=1, stdout="not json\n", stderr=stderr)
+
+    with pytest.raises(measure.MeasureError) as exc:
         measure.measure("engineer", "claude", frozenset(), environ={}, run=run)
+    assert str(exc.value) == "no usage in session output: " + stderr.strip()[-500:]
 
 
 def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
@@ -168,12 +191,12 @@ def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
     calls = []
 
     def fake(name, agent, off, **kwargs):
-        calls.append(off)
+        calls.append((name, agent, off))
         return tokens[off]
 
     monkeypatch.setattr(measure, "measure", fake)
-    assert select_profile.dispatch(["profiles", "measure", "engineer", "--breakdown"]) == 0
-    assert calls == [frozenset(), *(frozenset({layer}) for layer in measure.LAYERS)]
+    assert render.main(["measure", "engineer", "--agent", "claude", "--breakdown"]) == 0
+    assert calls == [("engineer", "claude", off) for off in [frozenset(), *(frozenset({n}) for n in measure.LAYERS)]]
     assert capsys.readouterr().out.split("\n") == [
         "engineer (claude) first turn input tokens",
         "layer    tokens  cost  mcp not connected",
@@ -186,18 +209,50 @@ def test_breakdown_runs_full_then_each_layer_off(capsys, monkeypatch):
     ]
 
 
-def test_single_run_with_layers_off(capsys, monkeypatch):
+@pytest.mark.parametrize(
+    "argv,reading,line",
+    [
+        (
+            ["master", "--agent", "codex", "--without", "mcp", "--without", "persona"],
+            measure.Reading(42, ("gateway-tools", "serena")),
+            "master (codex) without mcp,persona: 42 first turn input tokens, mcp not connected: gateway-tools,serena",
+        ),
+        (["engineer"], measure.Reading(42, ()), "engineer (claude): 42 first turn input tokens"),
+    ],
+)
+def test_single_run(capsys, monkeypatch, argv, reading, line):
     seen = []
-    monkeypatch.setattr(
-        measure,
-        "measure",
-        lambda name, agent, off, **kw: seen.append((name, agent, off)) or measure.Reading(42, ("gateway-tools",)),
-    )
-    assert select_profile.dispatch(["profile", "measure", "master", "--agent", "codex", "--without", "mcp"]) == 0
-    assert seen == [("master", "codex", frozenset({"mcp"}))]
-    assert capsys.readouterr().out == (
-        "master (codex) without mcp: 42 first turn input tokens, mcp not connected: gateway-tools\n"
-    )
+    monkeypatch.setattr(measure, "measure", lambda name, agent, off, **kw: seen.append((name, agent, off)) or reading)
+    assert select_profile.dispatch(["profiles", "measure", *argv]) == 0
+    assert seen == [(argv[0], "codex" if "codex" in argv else "claude", frozenset(argv[4::2]))]
+    assert capsys.readouterr().out == line + "\n"
+
+
+@pytest.mark.parametrize("argv", [["engineer", "--agent", "copilot"], ["engineer", "--without", "skills"]])
+def test_unknown_agent_or_layer_is_refused(argv, monkeypatch):
+    monkeypatch.setattr(measure, "measure", Mock())
+    with pytest.raises(SystemExit) as exc:
+        render.main(["measure", *argv])
+    assert exc.value.code == 2
+    measure.measure.assert_not_called()
+
+
+def test_help_lists_measure(capsys):
+    with pytest.raises(SystemExit):
+        render.main(["--help"])
+    assert "Print a profile's first turn input tokens" in capsys.readouterr().out
+
+
+def test_installer_dispatches_profiles(monkeypatch):
+    from scripts import install
+
+    dispatch = Mock(return_value=5)
+    monkeypatch.setattr(select_profile, "dispatch", dispatch)
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "profiles", "measure", "engineer"])
+    with pytest.raises(SystemExit) as exc:
+        install.main()
+    assert exc.value.code == 5
+    dispatch.assert_called_once_with(["profiles", "measure", "engineer"])
 
 
 def test_failure_exits_nonzero(capsys, monkeypatch):

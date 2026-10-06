@@ -39,7 +39,6 @@ def _environment(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 def _claude_home(rendered: Path, dst: Path, off: frozenset[str]) -> Path:
-    dst.mkdir()
     for item in rendered.iterdir():
         if item.name not in COPIED and not ("persona" in off and item.name in PERSONA):
             (dst / item.name).symlink_to(item)
@@ -100,14 +99,12 @@ def measure(
     base = _environment(os.environ if environ is None else environ)
     native = CLAUDE_ARGS if agent == "claude" else [*_codex_overrides(off), *CODEX_ARGS]
     env, flags = select_profile.prepare(name, agent, "", "", native, base)
-    with tempfile.TemporaryDirectory(prefix="agentihooks-measure-") as scratch:
-        root = Path(scratch)
-        (root / "work").mkdir()
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
         if agent == "claude":
-            env["CLAUDE_CONFIG_DIR"] = str(_claude_home(Path(env["CLAUDE_CONFIG_DIR"]), root / "home", off))
+            env["CLAUDE_CONFIG_DIR"] = str(_claude_home(Path(env["CLAUDE_CONFIG_DIR"]), Path(home), off))
         result = run(
             ["agentihooks", agent, *flags],
-            cwd=str(root / "work"),
+            cwd=work,
             env={**base, **env},
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -141,7 +138,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("name")
     parser.add_argument("--agent", choices=("claude", "codex"), default="claude")
     parser.add_argument("--without", action="append", choices=LAYERS, default=[])
-    parser.add_argument("--breakdown", action="store_true", help="Run once in full, then once per layer switched off")
+    parser.add_argument("--breakdown", action="store_true")
 
 
 def main(args: argparse.Namespace) -> int:
