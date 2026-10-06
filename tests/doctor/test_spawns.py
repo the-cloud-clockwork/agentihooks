@@ -88,6 +88,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
                     "title": "Task",
                     "description": "",
                     "lane": "eng",
+                    "profile": "engineer",
                     "state": "open",
                     "depends_on": [],
                     "territory": [],
