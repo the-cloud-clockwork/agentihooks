@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import re
@@ -56,8 +57,12 @@ def test_statusline_shows_default_for_direct_authentication():
     assert "default" in output
 
 
-def test_statusline_names_selected_run_profile(monkeypatch):
+def test_statusline_names_selected_run_profile(monkeypatch, capsys):
+    from hooks import statusline
+
     monkeypatch.setenv("AGENTIHOOKS_PROFILE", "zz-selected")
-    plain = re.sub(r"\x1b\[[0-9;]*m", "", _run_statusline())
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "statusline-profile"})))
+    statusline.main()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
     assert "agentihooks: zz-selected  settings:zz-selected" in plain

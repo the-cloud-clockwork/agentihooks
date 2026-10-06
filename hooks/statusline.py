@@ -286,7 +286,7 @@ def main() -> None:
                 _g_profile = _ah_rec.get("profile", "") or "none"
                 _g_sp = _ah_rec.get("settings_profile", "") or "none"
 
-            _run_profile = os.environ.get("AGENTIHOOKS_PROFILE", "")
+            _run_profile = os.environ.get("AGENTIHOOKS_PROFILE")
             if _run_profile:
                 _g_profile = _run_profile
                 _g_sp = "none"
