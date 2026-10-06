@@ -173,6 +173,16 @@ class TestWriteGuard:
             ("Bash", {"command": "cd ~/.agentihooks && tee conditions/pre-any-x.sh < /tmp/x"}),
             ("Bash", {"command": "rm .claude/conditions/pre-bash-x.sh"}),
             ("Bash", {"command": "find .claude/conditions -name '*.sh' -delete"}),
+            ("Bash", {"command": "sed -i s/a/b/ .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "sed -ni s/a/b/p .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "sed --in-place s/a/b/ .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "sed -n '1,9w .claude/conditions/pre-bash-y.sh' /tmp/x"}),
+            ("Bash", {"command": "sed 's/a/b/w .claude/conditions/pre-bash-y.sh' /tmp/x"}),
+            ("Bash", {"command": "git show HEAD:a.sh > .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "git checkout dev -- .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "touch .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "cp /tmp/x .claude/conditions/pre-bash-x.sh"}),
+            ("Bash", {"command": "for f in a b; do cp $f .claude/conditions/; done"}),
         ],
     )
     def test_blocked_until_armed(self, tool, tool_input):
@@ -199,6 +209,31 @@ class TestWriteGuard:
     )
     def test_reads_and_unrelated_paths_pass(self, tool, tool_input):
         assert conditions.write_guard(tool, tool_input, SID) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git show origin/dev:profiles/m/.claude/conditions/pre-bash-x.sh | sed -n 1,40p",
+            "sed -n '/write/,/^$/p' .claude/conditions/pre-bash-x.sh",
+            "sed -E 's/a/b/' .claude/conditions/pre-bash-x.sh",
+            "nl .claude/conditions/pre-bash-x.sh",
+            "cut -c1-80 .claude/conditions/pre-bash-x.sh",
+            "ls .claude/conditions | tr '\\n' ' '",
+            'for f in .claude/conditions/*; do echo "== $f"; cat "$f"; done',
+            "if test -d .claude/conditions; then ls .claude/conditions; fi",
+            "printf '%s\\n' x; printenv HOME; date; ls -la ~/.agentihooks/conditions/.gate/",
+            "basename .claude/conditions/a.sh; dirname .claude/conditions/a.sh",
+            "realpath .claude/conditions/a.sh; readlink -f .claude/conditions/a.sh",
+            "sha256sum .claude/conditions/a.sh; md5sum .claude/conditions/a.sh",
+            "true && ls .claude/conditions",
+            "git branch --show-current && git ls-files profiles/e/.claude/conditions",
+            "git rev-parse HEAD && git ls-tree HEAD .claude/conditions/",
+            "git cat-file -p HEAD:.claude/conditions/a.sh",
+            "git grep -n exit -- .claude/conditions",
+        ],
+    )
+    def test_read_only_commands_on_condition_files_pass(self, command):
+        assert conditions.write_guard("Bash", {"command": command}, SID) is None
 
     def test_pre_tool_use_blocks_the_mcp_call(self, monkeypatch):
         monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
