@@ -149,6 +149,15 @@ def test_ruff_runs_in_the_tests_workflow_only():
     assert [w.name for w in workflows if "ruff" in w.read_text()] == ["test.yml"]
 
 
+def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    runs = [s.get("run", "") for s in steps]
+    install = next(i for i, run in enumerate(runs) if "playwright install --with-deps chromium" in run)
+    check = runs.index("python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*")
+    assert install < check
+    assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
