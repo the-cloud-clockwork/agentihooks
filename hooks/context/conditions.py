@@ -680,9 +680,11 @@ _READ_ONLY_GIT = frozenset(
 )
 _SED_WRITE = re.compile(r"\bsed\b[^|;&\n]*?(?:\s-[a-zA-Z]*i|\s--in-place|[\s'\"/;}0-9$][wW]\s)")
 _HARMLESS_REDIRECT = re.compile(r"\d*>&\d+|&?\d*>\s*/dev/null")
-_REDIRECT = re.compile(r">>?\|?\s*([^\s;&|<>()]+)")
-_PATH_TOKEN = re.compile(r"[^\s'\"`;|&<>()=]+")
-_CD_TARGET = re.compile(r"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+([^\s;&|)]+)")
+_WORD = r"""(?:[^\s;&|<>()'"`\\]|\\.|"[^"]*"|'[^']*')+"""
+_REDIRECT = re.compile(rf">>?\|?\s*({_WORD})")
+_PATH_TOKEN = re.compile(_WORD)
+_UNQUOTE = re.compile(r"""\\(.)|["']""")
+_CD_TARGET = re.compile(rf"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+({_WORD})")
 _CAT_HEREDOC = re.compile(
     r"((?:^|[;&|(])[ \t]*(?:cat|tee)\b[^\n;&|]*?)<<-?[ \t]*(['\"]?)(\w+)\2([^\n]*)\n.*?^[ \t]*\3[ \t]*$",
     re.DOTALL | re.MULTILINE,
@@ -792,8 +794,8 @@ def _staged(paths: list[Path], cwd: str | None) -> bool:
 
 def _expand(token: str, base: str | None) -> Path | None:
     """*token* as an absolute path, or None when a variable or an unknown directory hides it."""
-    token = re.sub(r"^\$\{?HOME\}?(?=/|$)", "~", token)
-    if "$" in token:
+    token = re.sub(r"^\$\{?HOME\}?(?=/|$)", "~", _UNQUOTE.sub(lambda m: m.group(1) or "", token))
+    if "$" in token or "`" in token:
         return None
     token = os.path.expanduser(token)
     if not os.path.isabs(token):
@@ -822,7 +824,7 @@ def _ordinary_target(token: str, bases: list[str | None], cwd: str | None) -> bo
     paths = _resolve(token, bases)
     if paths is None:
         return False
-    conditional = [p for p in paths if "conditions" in p.parts or _touches_conditions(str(p))]
+    conditional = [p for p in paths if "conditions" in p.resolve().parts]
     return not conditional or _staged(conditional, cwd)
 
 
@@ -830,14 +832,15 @@ def _staged_command(command: str, cwd: str | None) -> bool:
     """Every path *command* names resolves, at least one is a condition path, and all of them are staged."""
     bases = _bases(command, cwd)
     paths: list[Path] = []
-    for token in _PATH_TOKEN.findall(command):
-        if "/" not in token and "$" not in token and not token.startswith("~") and token != "conditions":
-            continue
-        resolved = _resolve(token, bases)
-        if resolved is None:
-            return False
-        paths += resolved
-    return any("conditions" in p.parts for p in paths) and _staged(paths, cwd)
+    for word in _PATH_TOKEN.findall(command):
+        for token in filter(None, word.split("=")):
+            if not (cwd or re.search(r"[/$`~]", token) or token == "conditions"):
+                continue
+            resolved = _resolve(token, bases)
+            if resolved is None:
+                return False
+            paths += resolved
+    return any("conditions" in p.resolve().parts for p in paths) and _staged(paths, cwd)
 
 
 def _read_only_shell(command: str, cwd: str | None = None) -> bool:
@@ -885,7 +888,8 @@ def _touches_live(name: str, tool_input: dict, cwd: str | None) -> bool:
         return None in resolved or not _staged(resolved, cwd)
     if name == "Bash":
         command = _CAT_HEREDOC.sub(r"\1\4", str(tool_input.get("command") or ""))
-        if not (_NEAR_CONDITIONS.search(command) or _touches_conditions(command)):
+        plain = _UNQUOTE.sub(lambda m: m.group(1) or "", command)
+        if not any(_NEAR_CONDITIONS.search(text) or _touches_conditions(text) for text in (command, plain)):
             return False
         return not _read_only_shell(command, cwd) and not _staged_command(command, cwd)
     return False

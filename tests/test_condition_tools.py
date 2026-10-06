@@ -384,6 +384,11 @@ class TestLiveFolders:
             lambda c: f"cd {c['bundle']}/.claude && echo exit > conditions/pre-bash-x.sh",
             lambda c: f'cat {c["bundle"]}/.claude/conditions/a.sh > "$OUT"',
             lambda c: "echo exit > .claude/conditions/pre-bash-x.sh",
+            lambda c: f'echo exit > "{c["bundle"]}/.claude/conditions/pre-bash-x.sh"',
+            lambda c: f'echo exit > {c["bundle"]}/".claude"/conditions/pre-bash-x.sh',
+            lambda c: f"echo exit > {c['bundle']}/.cla\\ude/conditions/pre-bash-x.sh",
+            lambda c: f'cp /tmp/x "{str(c["bundle"])[:-2]}"le/.claude/conditions/pre-bash-x.sh',
+            lambda c: f"echo exit > `echo {c['bundle']}`/.claude/conditions/pre-bash-x.sh",
         ],
     )
     def test_a_redirect_into_a_live_conditions_folder_needs_the_operators_words(self, checkouts, make_command):
@@ -391,6 +396,36 @@ class TestLiveFolders:
         assert conditions.write_guard("Bash", {"command": command}, SID, str(checkouts["primary"])) == (
             conditions.GATE_MESSAGE
         )
+
+    def test_the_base_branch_setting_and_origins_head_are_live(self, checkouts, monkeypatch):
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        monkeypatch.setenv("WT_BASE_BRANCH", "feat")
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+        monkeypatch.setenv("WT_BASE_BRANCH", "dev")
+        assert conditions.write_guard("Write", write, SID) is None
+        primary = checkouts["primary"]
+        _git(primary, "update-ref", "refs/remotes/origin/feat", "HEAD")
+        _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/feat")
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_a_detached_head_is_live(self, checkouts):
+        _git(checkouts["worktree"], "checkout", "-q", "--detach")
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_without_git_every_conditions_path_is_live(self, checkouts, monkeypatch):
+        def missing(*args, **kwargs):
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(conditions.subprocess, "run", missing)
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    @pytest.mark.parametrize("home", ["$HOME", "${HOME}", "~"])
+    def test_the_home_variable_resolves_to_the_home_folder(self, checkouts, monkeypatch, home):
+        monkeypatch.setenv("HOME", str(checkouts["tmp"]))
+        command = f"cp /tmp/x {home}/wt/.claude/conditions/pre-bash-x.sh"
+        assert conditions.write_guard("Bash", {"command": command}, SID, str(checkouts["primary"])) is None
 
     def test_pre_tool_use_passes_the_session_cwd(self, checkouts, monkeypatch):
         monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
