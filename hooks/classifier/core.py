@@ -7,7 +7,8 @@ from typing import Protocol
 
 from hooks.classifier import decision_log, down_cache
 from hooks.classifier.api import DecisionsApiBackend
-from hooks.classifier.errors import BackendFailure, ClassifierUnavailable
+from hooks.classifier.errors import BackendFailure, ClassifierRequestError, ClassifierUnavailable
+from hooks.classifier.fallbacks import cli_backends
 from hooks.classifier.questions import validate
 from hooks.classifier.result import DecisionRequest, DecisionResult
 from hooks.classifier.settings import MODEL_CONTEXT_TOKENS, Settings, api_configured, load
@@ -28,27 +29,39 @@ def api_backends(request: DecisionRequest, settings: Settings) -> list:
     ]
 
 
-def _ask_api(request: DecisionRequest, settings: Settings) -> DecisionResult | None:
-    if not api_configured(settings) or down_cache.is_down(settings.down_ttl_s):
+def _ask_api(
+    request: DecisionRequest,
+    settings: Settings,
+    failures: list,
+    api_down_cached: bool,
+) -> DecisionResult | None:
+    if not api_configured(settings):
+        return None
+    if api_down_cached:
+        failures.extend(down_cache.failures())
         return None
     backends = api_backends(request, settings)
     for backend in backends:
         try:
             return backend.decide(request)
         except BackendFailure as failure:
+            failures.append(decision_log.failure_record(backend.name, failure))
             if failure.skip_api:
                 break
+        except ClassifierRequestError as failure:
+            failures.append(decision_log.failure_record(backend.name, failure))
+            raise
     if backends:
-        down_cache.mark_down()
+        down_cache.mark_down(failures)
     return None
 
 
-def _ask_fallbacks(request: DecisionRequest, fallbacks: Sequence[Backend]) -> DecisionResult | None:
+def _ask_fallbacks(request: DecisionRequest, fallbacks: Sequence[Backend], failures: list) -> DecisionResult | None:
     for backend in fallbacks:
         try:
             return backend.decide(request)
-        except BackendFailure:
-            continue
+        except BackendFailure as failure:
+            failures.append(decision_log.failure_record(backend.name, failure))
     return None
 
 
@@ -57,14 +70,23 @@ def decide(
     questions: dict,
     *,
     purpose: str,
-    fallbacks: Sequence[Backend] = (),
+    harness: str | None = None,
+    fallbacks: Sequence[Backend] | None = None,
 ) -> DecisionResult:
     validate(questions)
     request = DecisionRequest(state, questions)
+    settings = load()
+    cached = api_configured(settings) and down_cache.is_down(settings.down_ttl_s)
+    failures = []
+    result = None
     started = time.monotonic()
-    result = _ask_api(request, load()) or _ask_fallbacks(request, fallbacks)
-    latency_ms = int((time.monotonic() - started) * 1000)
-    decision_log.append(purpose, state, result, latency_ms)
+    try:
+        result = _ask_api(request, settings, failures, cached)
+        if result is None:
+            result = _ask_fallbacks(request, cli_backends(harness) if fallbacks is None else fallbacks, failures)
+    finally:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        decision_log.append(purpose, state, result, latency_ms, failures, cached)
     if result is None:
         raise ClassifierUnavailable("no decision backend answered")
     return replace(result, latency_ms=latency_ms)

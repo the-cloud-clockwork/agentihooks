@@ -47,6 +47,8 @@ def test_answered_line_shape():
         "cost": 0.5,
         "answers": {"a": {"type": "noul", "noul": 0.9}},
         "state_digest": decision_log.state_digest({"task": "t"}),
+        "failures": [],
+        "api_down_cached": False,
     }
 
 
@@ -62,6 +64,8 @@ def test_unanswered_line_shape():
         "cost": None,
         "answers": {},
         "state_digest": decision_log.state_digest("s"),
+        "failures": [],
+        "api_down_cached": False,
     }
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -18,10 +19,17 @@ def is_down(ttl_s: float) -> bool:
     return time.time() - marked < ttl_s
 
 
-def mark_down() -> None:
+def mark_down(failures: list | None = None) -> None:
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch()
+    path.write_text(json.dumps(failures or []))
+
+
+def failures() -> list:
+    try:
+        return json.loads(marker_path().read_text())
+    except (OSError, ValueError):
+        return []
 
 
 def clear() -> None:

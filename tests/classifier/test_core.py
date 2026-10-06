@@ -233,7 +233,18 @@ def test_decision_log_line_shape(monkeypatch):
     _wire(monkeypatch, ALL_OK)
     decide({"task": "typo"}, QUESTIONS, purpose="model-pick")
     (line,) = _log_lines()
-    assert set(line) == {"ts", "purpose", "source", "calibrated", "latency_ms", "cost", "answers", "state_digest"}
+    assert set(line) == {
+        "ts",
+        "purpose",
+        "source",
+        "calibrated",
+        "latency_ms",
+        "cost",
+        "answers",
+        "state_digest",
+        "failures",
+        "api_down_cached",
+    }
     assert line["purpose"] == "model-pick"
     assert line["source"] == "pplx-decider-v1-27b"
     assert line["calibrated"] is True

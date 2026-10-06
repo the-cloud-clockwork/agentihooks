@@ -2424,6 +2424,8 @@ def main() -> None:
     """
     # Bound before the try so the outer BlockAction handler can name the event
     # even when the block fires before dispatch resolved one.
+    if os.environ.get("AGENTIHOOKS_CLASSIFIER_CHILD") == "1":
+        return
     _blocked_event = "Unknown"
     try:
         # Read payload from stdin. Raw text is kept for the parse-failure path:

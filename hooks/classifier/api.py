@@ -50,12 +50,18 @@ class DecisionsApiBackend:
                 payload = json.loads(response.read())
         except HTTPError as error:
             raise _http_failure(self.name, error, key) from None
+        except TimeoutError:
+            raise BackendFailure(f"{self.name}: timeout") from None
         except (URLError, OSError) as error:
-            raise BackendFailure(f"{self.name}: unreachable ({type(error).__name__})") from None
+            reason = "timeout" if isinstance(getattr(error, "reason", None), TimeoutError) else "connection error"
+            raise BackendFailure(f"{self.name}: {reason}") from None
         except ValueError:
-            raise BackendFailure(f"{self.name}: response is not JSON") from None
-        return DecisionResult(
-            answers=parse_answers(payload, request.questions, self.name),
-            source=self.name,
-            cost=(payload.get("usage") or {}).get("cost"),
-        )
+            raise BackendFailure(f"{self.name}: parse error, response is not JSON") from None
+        try:
+            return DecisionResult(
+                answers=parse_answers(payload, request.questions, self.name),
+                source=self.name,
+                cost=(payload.get("usage") or {}).get("cost"),
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise BackendFailure(f"{self.name}: parse error, invalid answers") from None
