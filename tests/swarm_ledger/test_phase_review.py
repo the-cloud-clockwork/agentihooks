@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_phases
+from scripts.swarm_ledger import ledger_phases, ledger_priorities
 from tests.swarm_ledger.test_phases import SLUG, make_ledger
 
 
@@ -133,3 +133,23 @@ def test_send_back_validation(fields, message):
 
 def test_round_cap_is_three():
     assert ledger_phases.ROUND_CAP == 3
+
+
+ESCALATED = {"state": "sent_back", "rounds": 3, "escalated": True, "notes": ["Split it", "Name the done condition"]}
+
+
+@pytest.mark.parametrize(
+    "review, extra, asked",
+    [
+        (ESCALATED, {}, "Decide the plan, sent back 3 times: Split it; Name the done condition"),
+        ({**ESCALATED, "escalated": False}, {}, None),
+        ({**ESCALATED, "state": "approved"}, {}, None),
+        (ESCALATED, {"out_of_scope": True}, None),
+        ({**ESCALATED, "rounds": 4, "notes": [" ".join(["word"] * 20)]}, {},
+         "Decide the plan, sent back 4 times: " + " ".join(["word"] * 16) + "…"),
+    ],
+)  # fmt: skip
+def test_an_escalated_review_asks_the_operator_naming_the_notes(review, extra, asked):
+    doc = {"phases": [{"id": "p1", "title": "Build", "review": review, **extra}, {"id": "p2", "title": "Later"}]}
+    assert ledger_priorities.wanted(doc).get("phases/p1") == asked
+    assert "phases/p2" not in ledger_priorities.wanted(doc)
