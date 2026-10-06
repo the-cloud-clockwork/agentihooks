@@ -16,6 +16,8 @@ Run tests took 55 to 84 seconds per matrix job on a single process. The Tests wo
 
 The unit job now runs each Python version as four shards on four runners (pytest-split, `--splitting-algorithm least_duration`), each shard still on `-n auto`. Shards are balanced from `.test_durations`; refresh it with `python -m tests.refresh_durations`, which runs the suite five times and stores each test's median. A single `--store-durations` run is too noisy: against two held-out runs it split the shards 4.4 to 9.6 seconds of test time, the five-run median 7.7 to 8.9. A test fails once a tenth of the suite has no stored duration. Locally the four shards take 8.6 to 9.9 seconds each with two workers.
 
+Each unit shard stores the durations it measured (`--store-durations`) and uploads them as the `durations-<python>-<shard>` artifact. `python -m tests.refresh_durations --ci 3` downloads those from the last three runs that kept them and stores each test's median, so the shards balance on CI times; local times differ from CI per test (a fakeredis inbox test took 1.9 s locally and 8.6 s on CI).
+
 Coverage was most of each shard's Run tests time. Only the 3.12 shards measure it now, with `COVERAGE_CORE=sysmon`; the 3.11 shards run without it. Run tests per shard went from 26 to 35 seconds (run 37239540788) to 13 to 18 seconds on 3.11 and 16 to 26 seconds on 3.12 (run 37239888769).
 
 The Tests workflow no longer measures coverage on any shard; Sonar measures it in its own workflow. Before the change the slowest 3.12 shard ran 21 to 26 seconds against 15 to 22 seconds for the slowest 3.11 shard (runs 37241498657, 37241419135, 37241352383).
