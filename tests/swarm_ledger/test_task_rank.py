@@ -116,3 +116,61 @@ def test_a_task_row_shows_its_rank_in_a_select(rank, shown):
     task = {**PLAIN, **({"rank": rank} if rank else {})}
     (pick,) = nodes(render(task)["tree"], f"rank-pick rank-{shown}")
     assert [option[2] for option in pick[3]] == list(ledger_rank.RANKS)
+
+
+@pytest.mark.parametrize(
+    ("task", "position"),
+    [({"rank": "urgent"}, 0), ({"rank": "high"}, 1), ({}, 2), ({"rank": "x"}, 2), ({"rank": "low"}, 3)],
+)
+def test_order_puts_each_rank_in_its_place(task, position):
+    assert ledger_rank.order(task) == position
+
+
+def test_the_page_rank_op_refusal_names_its_shape():
+    with pytest.raises(
+        ValueError, match=r"^task_rank is the operator's and takes only an id, an item tasks/<id> and a rank$"
+    ):
+        ledger_rank.check({"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": "high", "by": MASTER})
+
+
+class FakeContext:
+    def __init__(self):
+        self.stamps, self.events, self.dirty = [], [], False
+
+    def stamp(self, path, by):
+        self.stamps.append((path, by))
+
+    def record(self, by, kind, target, **extra):
+        self.events.append((by, kind, target, extra))
+
+
+def page_rank(rank):
+    return {"op": "task_rank", "id": "p", "item": "tasks/t1", "rank": rank}
+
+
+def test_the_page_rank_op_records_the_operator_and_marks_the_ledger_changed():
+    doc, ctx = {"tasks": [{"id": "t0"}, {"id": "t1"}]}, FakeContext()
+    assert ledger_rank.apply(doc, page_rank("next"), ctx) is True
+    assert doc["tasks"][1] == {"id": "t1", "rank": "urgent"} and doc["tasks"][0] == {"id": "t0"}
+    assert ctx.stamps == [("tasks/t1/rank", "operator")]
+    assert ctx.events == [("operator", "rank set", "tasks/t1", {"text": "urgent"})]
+    assert ctx.dirty is True
+
+
+@pytest.mark.parametrize(("task", "rank"), [({"id": "t1"}, "normal"), ({"id": "t1", "rank": "low"}, "low")])
+def test_setting_the_rank_a_task_already_has_changes_nothing(task, rank):
+    doc, ctx = {"tasks": [task]}, FakeContext()
+    assert ledger_rank.apply(doc, page_rank(rank), ctx) is True
+    assert (doc["tasks"][0], ctx.stamps, ctx.events, ctx.dirty) == (dict(task), [], [], False)
+
+
+def test_the_page_rank_op_on_a_ledger_without_tasks_is_rejected():
+    assert ledger_rank.apply({}, page_rank("low"), FakeContext()) is False
+
+
+def test_task_add_help_names_the_ranks(capsys):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["task", "--help"])
+    assert "queue rank: urgent, high, normal (default) or low; next means urgent" in " ".join(
+        capsys.readouterr().out.split()
+    )
