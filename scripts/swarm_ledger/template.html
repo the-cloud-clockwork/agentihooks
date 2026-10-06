@@ -425,18 +425,20 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
 .sw-alert-kinds { letter-spacing: .06em; color: var(--warn); text-shadow: var(--glow); }
 .sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
-.sw-capacity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-group); }
+.sw-capacity { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-tight); }
+.sw-caps, .sw-gates { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
+.sw-caps { column-gap: var(--space-tight); }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
-.sw-cap { display: inline-flex; align-items: center; gap: 6px; }
-.sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
-.sw-gates { display: contents; }
+.sw-cap { display: inline-flex; align-items: center; gap: 2px; }
+.sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
 .sw-field { display: inline-flex; align-items: baseline; gap: 2px; }
-.sw-num { width: 5ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-1); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
+.sw-num { field-sizing: content; min-width: 2ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-1); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
+@supports not (field-sizing: content) { .sw-num { width: 4ch; } }
 .sw-num:hover { background: var(--hover); }
 .sw-num:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .sw-num[aria-invalid="true"] { color: var(--destructive); text-shadow: var(--glow); }
 .sw-unit { font-size: var(--fs-meta); color: var(--muted); }
-.sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
+.sw-btn.sw-step { min-width: 24px; min-height: 28px; padding: 0; background: transparent; font-size: var(--fs-item); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
 .sw-pair > .sw-block ~ .sw-block { border-left: 1px solid var(--rule); }
@@ -514,8 +516,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   .sw-grip { display: none; }
   .sw-modes, .sw-layout { padding-left: 0; border-left: 0; }
   .sw-live { margin-left: 0; }
-  .sw-capacity { gap: var(--space-tight) var(--space-row); }
-  .sw-capacity .sw-label { flex-basis: 100%; }
   .sw-actions { margin-left: 0; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -570,12 +570,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
 <div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
 <div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
-<div class="sw-cap"><span class="sw-cap-name">eng</span><label class="sw-field"><input class="sw-num" id="cap-eng" type="text" inputmode="numeric" autocomplete="off" data-cap="max_eng" aria-label="Engineer cap"></label><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
+<div class="sw-caps"><div class="sw-cap"><span class="sw-cap-name">eng</span><label class="sw-field"><input class="sw-num" id="cap-eng" type="text" inputmode="numeric" autocomplete="off" data-cap="max_eng" aria-label="Engineer cap"></label><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">ci</span><label class="sw-field"><input class="sw-num" id="cap-ci" type="text" inputmode="numeric" autocomplete="off" data-cap="max_ci" aria-label="CI cap"></label><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">plan</span><label class="sw-field"><input class="sw-num" id="cap-plan" type="text" inputmode="numeric" autocomplete="off" data-cap="max_plan" aria-label="Planner cap"></label><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">codex share</span><label class="sw-field"><input class="sw-num" id="cap-codex" type="text" inputmode="numeric" autocomplete="off" data-cap="codex_share" aria-label="Codex share"><span class="sw-unit">%</span></label><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">compact limit</span><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
-<button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button>
+<button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>

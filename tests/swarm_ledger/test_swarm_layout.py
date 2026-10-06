@@ -245,6 +245,24 @@ def test_an_invalid_capacity_value_is_refused_before_sending(open_page, lane, ty
     assert page.puts == []
 
 
+def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
+    page = open_page(status(gate_modes={"talk": "observe", "watch": "enforce"}))
+    page.tab.set_viewport_size({"width": 1440, "height": 900})
+    boxes = page.tab.evaluate(
+        """() => {
+          const box = (el) => el.getBoundingClientRect();
+          return {
+            row: [...document.querySelectorAll('#capacity-box .sw-caps > *')].map((el) => [box(el).top, box(el).bottom]),
+            gates: box(document.getElementById('gates-label')).top,
+          };
+        }"""
+    )
+    assert len(boxes["row"]) == 6
+    middle = (boxes["row"][0][0] + boxes["row"][0][1]) / 2
+    assert all(top <= middle <= bottom for top, bottom in boxes["row"])
+    assert boxes["gates"] >= max(bottom for _, bottom in boxes["row"])
+
+
 @pytest.mark.parametrize(("limit", "down", "up"), [(100, True, False), (1000, False, True), (600, False, False)])
 def test_compact_limit_steps_stop_at_100_and_1000(open_page, limit, down, up):
     page = open_page(status(compact_limit=limit))
