@@ -73,24 +73,34 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
         f.write(json.dumps(entry) + "\n")
 
 
-def counts(slug, root=None):
+def entries(slug, root=None):
     folder = Path(root or default_root()) / slug
     found = {}
     for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
-        tally, armed = {"watch": 0, "act": 0}, None
+        rows = []
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
-                entry = json.loads(line)
+                rows.append(json.loads(line))
             except ValueError:
                 continue
-            if entry.get("rearm"):
-                if armed is not None and entry["at"] - armed < REARM_WINDOW_MS:
-                    continue
-                armed = entry["at"]
-            if entry.get("kind") in tally:
-                tally[entry["kind"]] += 1
-        found[path.stem] = tally
+        found[path.stem] = rows
     return found
+
+
+def tally(rows):
+    found, armed = {"watch": 0, "act": 0}, None
+    for entry in rows:
+        if entry.get("rearm"):
+            if armed is not None and entry["at"] - armed < REARM_WINDOW_MS:
+                continue
+            armed = entry["at"]
+        if entry.get("kind") in found:
+            found[entry["kind"]] += 1
+    return found
+
+
+def counts(slug, root=None):
+    return {name: tally(rows) for name, rows in entries(slug, root).items()}
 
 
 def first_events(slug, root=None):
