@@ -101,19 +101,19 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
-        actions = tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
+        inbox = InboxStore(store.redis)
+        actions = phases.phase_pass(inbox, store, slug, ledger.state(slug), ledger)
+        actions += tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor
 
             actions += doctor.timer(store, slug, now_ms())
         herdr = messenger or delivery.HerdrMessenger()
-        inbox = InboxStore(store.redis)
         delivery.migrate_outbox(store, slug, inbox)
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
-        actions += phases.phase_pass(inbox, store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)
