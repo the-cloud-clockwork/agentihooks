@@ -19,7 +19,12 @@ SLUG = "rows-2026-01-03"
 
 
 def rule(selector):
-    return re.search(r"(?:^|})" + re.escape(selector) + r"\{([^}]*)\}", server.HOME_STYLE).group(1)
+    return re.search(r"(?:^|})" + re.escape(selector) + r"\{([^}]*)\}", home_style()).group(1)
+
+
+def home_style():
+    page = server.HOME_PAGE.read_text(encoding="utf-8")
+    return re.search(r"<style>__HOME_PALETTE__(.*?)</style>", page, re.S).group(1).replace("\n", "")
 
 
 def make(slug, title="T", overview="O", size="swarm", phases=()):

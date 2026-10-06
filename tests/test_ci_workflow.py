@@ -124,9 +124,9 @@ def test_unit_tests_run_from_the_venv():
     assert path_index < run_index
 
 
-def test_unit_install_excludes_playwright_and_the_grpc_exporter():
+def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     excludes = (_ROOT / ".github/test-excludes.txt").read_text().split()
-    assert excludes == ["playwright", "opentelemetry-exporter-otlp-proto-grpc"]
+    assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
 def test_unit_matrix_runs_one_shard_per_split():
