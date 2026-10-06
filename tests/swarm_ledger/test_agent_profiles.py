@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_agent_rows_show_the_model_and_effort_and_codex_by_harness():
+def test_agent_rows_show_the_model_and_effort_for_claude_and_codex():
     page = (Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html").read_text()
     functions = []
     for name in ("span", "modelText", "agentRows"):
@@ -17,6 +17,7 @@ const raw = {agents: [
   {name: 'e', lane: 'eng', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', task: 't1', profile: 'engineer'},
   {name: 'm', lane: 'master', harness: 'claude', model: 'sonnet', effort: 'low'},
   {name: 'x', lane: 'eng', harness: 'codex', model: 'gpt-6-luna', effort: 'high'},
+  {name: 'y', lane: 'eng', harness: 'codex', model: 'gpt-6', effort: 'xhigh'},
   {name: 'old', lane: 'ci'}
 ]};
 console.log(JSON.stringify(agentRows(raw, 0)));
@@ -26,8 +27,9 @@ console.log(JSON.stringify(agentRows(raw, 0)));
     assert [(r["name"], r["model"]) for r in rows] == [
         ("m", "sonnet low"),
         ("e", "opus high"),
-        ("x", "codex"),
+        ("x", "gpt-6-luna high"),
+        ("y", "gpt-6 xhigh"),
         ("old", "—"),
     ]
-    assert [r["profile"] for r in rows] == ["—", "engineer", "—", "—"]
+    assert [r["profile"] for r in rows] == ["—", "engineer", "—", "—", "—"]
     assert [(r["lane"], r["task"], r["state"]) for r in rows[:2]] == [("—", "", "live"), ("eng", "t1", "working")]
