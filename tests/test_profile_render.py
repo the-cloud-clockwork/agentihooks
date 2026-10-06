@@ -558,3 +558,49 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
         install.main()
     line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
+
+
+@pytest.fixture
+def package_role(world, tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    roles = tmp_path / "package-roles"
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    role = roles / "rb-pkg"
+    _write(role / "profile.yml", "name: rb-pkg\n")
+    _write(role / "CLAUDE.md", "PACKAGE PERSONA MARKER\n")
+    _write(
+        role / ".claude" / "settings.overrides.json", json.dumps({"env": {"PACKAGE_FLAG": "1", "WINNER": "package"}})
+    )
+    _write(role / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"pkg-srv": {"command": "pkg-server"}}}))
+    _write(role / ".claude" / "rules" / "pkg-rule.md", "PACKAGE RULE MARKER\n")
+    return role
+
+
+def test_package_role_renders_with_no_bundle_linked(world, package_role):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    out = render.render_claude("rb-pkg")
+
+    assert "PACKAGE PERSONA MARKER" in (out / "CLAUDE.md").read_text()
+    assert json.loads((out / "settings.json").read_text())["env"]["PACKAGE_FLAG"] == "1"
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["pkg-srv"] == {"command": "pkg-server"}
+    assert (out / "rules" / "pkg-rule.md").read_text() == "PACKAGE RULE MARKER\n"
+    assert json.loads((out / render.STAMP).read_text())["chain"] == ["rb-pkg"]
+
+
+def test_bundle_overlay_extending_package_role_sits_on_top(world, package_role):
+    from scripts.profiles import render
+
+    overlay = world["bundle"] / "profiles" / "rb-pkg"
+    _write(overlay / "profile.yml", "name: rb-pkg\nextends: [package:rb-pkg]\n")
+    _write(overlay / "CLAUDE.md", "OVERLAY PERSONA MARKER\n")
+    _write(overlay / ".claude" / "settings.overrides.json", json.dumps({"env": {"WINNER": "bundle"}}))
+    out = render.render_claude("rb-pkg")
+
+    persona = (out / "CLAUDE.md").read_text()
+    assert persona.index("PACKAGE PERSONA MARKER") < persona.index("OVERLAY PERSONA MARKER")
+    env = json.loads((out / "settings.json").read_text())["env"]
+    assert (env["PACKAGE_FLAG"], env["WINNER"]) == ("1", "bundle")
+    assert json.loads((out / render.STAMP).read_text())["chain"] == ["package:rb-pkg", "rb-pkg"]

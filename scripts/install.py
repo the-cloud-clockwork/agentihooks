@@ -862,8 +862,19 @@ def _resolve_linked_profile_dir(profile_name: str) -> Path | None:
     return None
 
 
+def _package_role_dir(profile_name: str) -> Path | None:
+    from hooks.context.profile_chain import PACKAGE_PREFIX, PACKAGE_ROLES
+
+    path = PACKAGE_ROLES / profile_name.removeprefix(PACKAGE_PREFIX)
+    return path if path.is_dir() else None
+
+
 def _resolve_profile_dir(profile_name: str) -> Path | None:
-    """Resolve a profile name to its directory — built-in, bundle, then linked."""
+    """Resolve a profile name to its directory — built-in, bundle, linked, then package roles."""
+    from hooks.context.profile_chain import PACKAGE_PREFIX
+
+    if profile_name.startswith(PACKAGE_PREFIX):
+        return _package_role_dir(profile_name)
     # Built-in profiles
     local = PROFILES_DIR / profile_name
     if local.is_dir():
@@ -878,11 +889,11 @@ def _resolve_profile_dir(profile_name: str) -> Path | None:
     linked = _resolve_linked_profile_dir(profile_name)
     if linked is not None:
         return linked
-    return None
+    return _package_role_dir(profile_name)
 
 
 def _profile_source_label(profile_name: str) -> str:
-    """Return 'built-in', 'bundle', or 'linked' for a profile name."""
+    """Return 'built-in', 'bundle', 'linked' or 'package' for a profile name."""
     if (PROFILES_DIR / profile_name).is_dir():
         return "built-in"
     bundle = _get_bundle_path()
@@ -890,6 +901,8 @@ def _profile_source_label(profile_name: str) -> str:
         return "bundle"
     if _resolve_linked_profile_dir(profile_name) is not None:
         return "linked"
+    if _package_role_dir(profile_name) is not None:
+        return "package"
     return "unknown"
 
 
@@ -2722,8 +2735,12 @@ def _resolve_profile_hook_paths(settings: dict, profile_dir: Path) -> dict:
 
 
 def _available_profiles() -> list[str]:
-    """Return profile names from built-in profiles/, linked bundle, and linked external dirs."""
+    """Return profile names from built-in profiles/, linked bundle, linked external dirs and package roles."""
+    from hooks.context.profile_chain import PACKAGE_ROLES
+
     names = {d.name for d in PROFILES_DIR.iterdir() if d.is_dir() and not d.name.startswith("_")}
+    if PACKAGE_ROLES.is_dir():
+        names.update(d.name for d in PACKAGE_ROLES.iterdir() if d.is_dir() and not d.name.startswith("_"))
     bundle = _get_bundle_path()
     if bundle:
         bp = bundle / "profiles"

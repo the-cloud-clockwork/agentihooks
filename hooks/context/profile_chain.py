@@ -10,6 +10,8 @@ from pathlib import Path
 import yaml
 
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
+PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
+PACKAGE_PREFIX = "package:"
 
 
 def state_path() -> Path:
@@ -96,11 +98,14 @@ def profile_candidates(
     """Each chained profile name with its candidate dirs, highest priority first."""
 
     def candidates(name):
+        if name.startswith(PACKAGE_PREFIX):
+            return [PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)]
         paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
             paths.append(bundle / "profiles" / name)
         if name in linked:
             paths.append(linked[name])
+        paths.append(PACKAGE_ROLES / name)
         return paths
 
     def resolve(name):
