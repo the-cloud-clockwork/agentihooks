@@ -282,6 +282,69 @@ def test_an_auto_work_lane_spawn_asks_for_the_codex_share_with_the_swarm_setting
     assert seen["argv"][seen["argv"].index("--agent") + 1] == "codex"
 
 
+@pytest.mark.parametrize(
+    ("profile", "lane_agent", "harness"),
+    [("frontend", "auto", "claude"), ("frontend", "codex", "claude"), ("engineer", "auto", "codex")],
+)
+def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one_hundred(
+    tmp_path, monkeypatch, profile, lane_agent, harness
+):
+    from scripts import agent_choice
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
+    monkeypatch.setattr(agent_choice, "at_cap", lambda *_: False)
+    monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested or "claude", "x"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": lane_agent}},
+        autonomy="delegate",
+        codex_share=100,
+        codex_min_week_left=5,
+    )
+    task = {"id": "t1", "title": "x", "profile": profile}
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", task, spawns={"claude": 3})
+    assert seen["argv"][seen["argv"].index("--agent") + 1] == harness
+    assert placed.harness == harness
+
+
+def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
+    monkeypatch.setenv("AGENTIHOOKS_PROBE", "1")
+    seen = {}
+
+    def choose(requested, environ):
+        seen.update(requested=requested, probe=environ.get("AGENTIHOOKS_PROBE"))
+        return requested, "requested"
+
+    def run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": "codex"}},
+        autonomy="delegate",
+    )
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "profile": "frontend"})
+    assert seen == {"requested": "claude", "probe": "1"}
+
+
 def _listed(pane_id, session):
     return {"name": pane_id, "pane_id": pane_id, "agent": "claude", "agent_status": "working", "agent_session": session}
 

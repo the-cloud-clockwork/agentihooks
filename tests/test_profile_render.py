@@ -282,6 +282,27 @@ def test_a_profile_extending_a_role_keeps_its_defaults(world):
     }
 
 
+def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
+    from scripts.profiles import plugins
+
+    profiles = world["bundle"] / "profiles"
+    _write(world["bundle"] / ".claude" / "settings.overrides.json", json.dumps({"enabledPlugins": {"g@m": True}}))
+    _write(profiles / "engineer" / "profile.yml", "name: engineer\n")
+    _write(profiles / "rb-front" / "profile.yml", "name: rb-front\nextends: [engineer]\n")
+    front = {"enabledPlugins": {"frontend-design@claude-plugins-official": True}}
+    _write(profiles / "rb-front" / ".claude" / "settings.overrides.json", json.dumps(front))
+    _write(profiles / "rb-kid" / "profile.yml", "name: rb-kid\nextends: [rb-front]\n")
+    _write(profiles / "rb-off" / "profile.yml", "name: rb-off\n")
+    off = {"enabledPlugins": {"frontend-design@claude-plugins-official": False}}
+    _write(profiles / "rb-off" / ".claude" / "settings.overrides.json", json.dumps(off))
+
+    assert plugins.claude_only("rb-front") is True
+    assert plugins.claude_only("rb-kid") is True
+    assert plugins.claude_only("engineer") is False
+    assert plugins.claude_only("rb-off") is False
+    assert plugins.claude_only("rb-role") is False
+
+
 def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     from hooks.context import profile_chain
     from scripts.profiles import render
