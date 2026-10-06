@@ -24,7 +24,7 @@ def render(task):
     )
     script = (
         stubs
-        + "".join(function_source(n) + "\n" for n in ("itemClass", "taskBlockers", "taskProof", "taskRow"))
+        + "".join(function_source(n) + "\n" for n in ("itemClass", "taskBlockers", "taskProof", "taskLink", "taskRow"))
         + f"const t = {json.dumps(task)}; const el = taskRow(t, [t]);"
         + "const proof = (function find(n) { if (!n || typeof n !== 'object') return null;"
         + " if (n.tag === 'details') return n; for (const k of n.kids) { const f = find(k); if (f) return f; } return null; })(el);"
@@ -67,7 +67,12 @@ class TaskProofOnThePage(unittest.TestCase):
                                 "",
                                 "",
                                 [
-                                    ["div", "item-title", "Build the inbox", []],
+                                    [
+                                        "div",
+                                        "item-title",
+                                        "",
+                                        [["a", "task-id", "t1", []], ["span", "", "Build the inbox", []]],
+                                    ],
                                     ["p", "desc", "d", []],
                                     [
                                         "div",

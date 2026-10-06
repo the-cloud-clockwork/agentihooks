@@ -111,6 +111,9 @@ details.phase-fold > summary::before { align-self: center; }
 .prio:first-child { border-top: 0; }
 .prio-link { flex: none; color: var(--destructive); font-weight: 700; text-decoration: none; text-shadow: var(--glow); }
 .prio-link:hover, .prio-link:focus-visible { text-decoration: underline; outline: none; }
+.task-id { color: var(--destructive); font-weight: 700; text-decoration: none; text-shadow: var(--glow); }
+.item-title > .task-id { margin-right: .5em; }
+.task-id:hover, .task-id:focus-visible { text-decoration: underline; }
 .prio-text { flex: 1; min-width: 0; }
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { from { background: var(--hover); } to { background: transparent; } }
@@ -1027,7 +1030,7 @@ input, textarea { caret-color: var(--accent-2); }
       h("button", { class: "link", type: "button", text: "Add image", title: "Pick, paste or drop images", on: { click: () => pick.click() } }), trayView(key));
   }
 
-  function entryBody(text) {
+  function entryBody(text, ids = new Set()) {
     const body = h("div", { class: "entry-body" });
     let offset = 0;
     for (const match of text.matchAll(/\bhttps?:\/\/[^\s<>"']+/gi)) {
@@ -1035,10 +1038,10 @@ input, textarea { caret-color: var(--accent-2); }
       for (const [open, close] of [["(", ")"], ["[", "]"], ["{", "}"]]) {
         while (url.endsWith(close) && url.split(close).length > url.split(open).length) url = url.slice(0, -1);
       }
-      body.append(text.slice(offset, match.index), h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: url }), match[0].slice(url.length));
+      body.append(...taskMentions(text.slice(offset, match.index), ids), h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: url }), match[0].slice(url.length));
       offset = match.index + match[0].length;
     }
-    body.append(text.slice(offset));
+    body.append(...taskMentions(text.slice(offset), ids));
     return body;
   }
 
@@ -1203,6 +1206,22 @@ input, textarea { caret-color: var(--accent-2); }
     return box;
   }
 
+  function taskLink(id) {
+    return h("a", { class: "task-id", href: `#item-tasks-${id}`, text: id, on: { click: (ev) => jumpTo(ev, `tasks/${id}`) } });
+  }
+
+  function taskMentions(text, ids) {
+    const out = [];
+    let offset = 0;
+    for (const match of text.matchAll(/\w+/g)) {
+      if (!ids.has(match[0])) continue;
+      out.push(text.slice(offset, match.index), taskLink(match[0]));
+      offset = match.index + match[0].length;
+    }
+    out.push(text.slice(offset));
+    return out;
+  }
+
   function taskRow(item, tasks) {
     const key = `tasks/${item.id}`;
     const waits = taskBlockers(item, tasks || []);
@@ -1212,7 +1231,7 @@ input, textarea { caret-color: var(--accent-2); }
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
       link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
-    const body = h("div", {}, h("div", { class: "item-title", text: item.title }),
+    const body = h("div", {}, h("div", { class: "item-title" }, taskLink(item.id), h("span", { text: item.title })),
       item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
       waits ? h("p", { class: "desc", text: waits }) : null);
     const row = h("div", { class: "row" }, body, scopeDot(key, item));
@@ -1783,14 +1802,14 @@ input, textarea { caret-color: var(--accent-2); }
 
   function outlineOf(doc, heads) {
     const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
-      : { id: `item-${list}-${i.id}`, title: i.title || i.text || i.item || i.id, state: itemState(list, i) };
+      : { id: `item-${list}-${i.id}`, title: list === "tasks" ? `${i.id} ${i.title}` : i.title || i.text || i.item || i.id, state: itemState(list, i) };
     return heads.map((head) => {
       const list = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
       const grouped = ["tasks", "followups"].includes(head.list);
       const counts = grouped ? [...new Set(list.map((i) => i.state || (i.done ? "done" : "open")))]
         .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length} ${state}`).join(" · ") : "";
       return { id: head.id, title: head.title + (counts ? ` · ${counts}` : ""),
-        items: grouped ? [] : list.map(entry(head.list)) };
+        items: head.list === "followups" ? [] : list.map(entry(head.list)) };
     });
   }
 
@@ -2002,7 +2021,7 @@ input, textarea { caret-color: var(--accent-2); }
     log.dataset.sig = sig;
     log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
       h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
-      entryBody(e.text), attachmentsView(e.attachments))));
+      entryBody(e.text, new Set(doc.tasks.map((t) => t.id))), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
     if (stick) {
       log.scrollTop = log.scrollHeight;
