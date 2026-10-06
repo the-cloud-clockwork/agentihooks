@@ -251,8 +251,8 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
     shards = {
-        "durations-3.11-1": {"t.py::a@fakeredis": 1.0},
-        "durations-3.12-1": {"t.py::a@fakeredis": 3.0, "t.py::b[x@y]": 2.0},
+        "durations-3.11-1": {"t.py::a@group": 1.0},
+        "durations-3.12-1": {"t.py::a@group": 3.0, "t.py::b[x@y]": 2.0},
     }
     for name, durations in shards.items():
         (tmp_path / "7" / name).mkdir(parents=True)
