@@ -18,6 +18,12 @@ import new_ledger  # noqa: E402
 
 SLUG = "relay-2026-01-01"
 WORDS = "Use the queue, and approve it"
+MESSAGES = {
+    "relay needs by": "relay needs by, the relaying agent's name",
+    "relay needs item": "relay needs item <list>/<id>",
+    "relay needs text": f"relay needs text up to {ledger_relay.MAX_TEXT} characters",
+    "relay needs quote": f"relay needs quote up to {ledger_relay.MAX_TEXT} characters",
+}
 
 
 def make_ledger():
@@ -121,8 +127,9 @@ class Relay(unittest.TestCase):
             (relay(22, self.question, quote=""), "relay needs quote"),
             ({k: v for k, v in relay(23, self.question).items() if k != "quote"}, "relay needs quote"),
         ):
-            with self.subTest(op=op), self.assertRaisesRegex(ValueError, message):
+            with self.subTest(op=op), self.assertRaises(ValueError) as refused:
                 ledger_relay.check(op)
+            self.assertEqual(str(refused.exception), MESSAGES[message])
 
     def test_verified_is_empty_without_recorded_words(self):
         self.assertEqual(ledger_relay.verified("nobody", "use the queue"), "")
@@ -157,8 +164,11 @@ def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
 def test_cli_refuses_words_the_operator_never_said(monkeypatch):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
-    with pytest.raises(SystemExit, match="the quote is not in an operator prompt"):
+    with pytest.raises(SystemExit) as refused:
         _cli(monkeypatch, question, "use the queue")
+    assert refused.value.code == (
+        "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
+    )
     state, _ = core.sync(SLUG)
     assert state["questions"][0]["answers"] == []
 
