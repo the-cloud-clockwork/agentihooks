@@ -2,6 +2,7 @@ import pytest
 
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
+from scripts.swarm import idle
 from scripts.swarm.store import MASTER, AgentRecord
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -11,11 +12,14 @@ MASTER_NAME = "sw-master-1"
 
 
 class FakeHerdr:
-    def __init__(self, status):
-        self.status, self.prompts = dict(status), []
+    def __init__(self, status, typed=None):
+        self.status, self.prompts, self.typed = dict(status), [], dict(typed or {})
 
     def agent_status(self, agent):
         return self.status.get(agent.pane_id, "unknown")
+
+    def typed_input(self, agent):
+        return self.typed.get(agent.pane_id, "")
 
     def prompt(self, agent, text):
         self.prompts.append((agent.pane_id, text))
@@ -300,25 +304,34 @@ def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
 
 
 def test_a_pane_holding_typed_input_is_left_alone_until_the_operator_sends_it(inbox):
-    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
-    herdr = FakeHerdr({"p1": "idle"})
-    herdr.has_input_text = lambda pane_id: pane_id == "p1"
-    run(inbox, herdr, FakeLedger(), sent_at(item))
+    item = inbox.send("sw-eng-2", MASTER_NAME, "check the plan")
+    herdr = FakeHerdr({"pm": "idle"}, {"pm": "wait, before you"})
+    assert run(inbox, herdr, FakeLedger(), sent_at(item) + 1) == []
     assert herdr.prompts == [] and events(inbox, item.id) == []
-    herdr.has_input_text = lambda pane_id: False
-    run(inbox, herdr, FakeLedger(), sent_at(item) + W)
-    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
-    assert events(inbox, item.id) == ["woken"]
+    herdr.typed["pm"] = ""
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 2)
+    assert herdr.prompts == [("pm", wake.WAKE_TEXT)]
 
 
-def test_a_pane_that_recently_received_an_operator_prompt_is_left_alone(inbox):
-    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
-    herdr = FakeHerdr({"p1": "idle"})
-    sent_time = sent_at(item)
-    herdr.last_operator_prompt_at = lambda pane_id: sent_time if pane_id == "p1" else None
-    run(inbox, herdr, FakeLedger(), sent_time + 10_000)
-    assert herdr.prompts == [] and events(inbox, item.id) == []
-    herdr.last_operator_prompt_at = lambda pane_id: None
-    run(inbox, herdr, FakeLedger(), sent_time + W)
-    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
-    assert events(inbox, item.id) == ["woken"]
+def test_typed_input_keeps_todays_escalation_timing(inbox):
+    item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
+    herdr, ledger = FakeHerdr({"p1": "idle"}, {"p1": "half a sentence"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W)
+    assert herdr.prompts == [] and events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_pane_the_operator_prompted_inside_the_quiet_window_is_left_alone(inbox):
+    item = inbox.send("sw-eng-2", MASTER_NAME, "check the plan")
+    herdr = FakeHerdr({"pm": "idle"})
+    idle.prompted(inbox.redis, "sw", MASTER_NAME, sent_at(item))
+    assert run(inbox, herdr, FakeLedger(), sent_at(item) + wake.DEFAULT_QUIET_S * 1000 - 1) == []
+    assert herdr.prompts == []
+    run(inbox, herdr, FakeLedger(), sent_at(item) + wake.DEFAULT_QUIET_S * 1000)
+    assert herdr.prompts == [("pm", wake.WAKE_TEXT)]
+
+
+def test_the_quiet_window_comes_from_the_environment():
+    assert wake.quiet_ms({}) == wake.DEFAULT_QUIET_S * 1000
+    assert wake.quiet_ms({wake.QUIET_ENV: "30"}) == 30_000

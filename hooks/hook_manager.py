@@ -684,7 +684,7 @@ def on_user_prompt_submit(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
-    _swarm_heartbeat("working")
+    _swarm_heartbeat("working", payload.get("prompt", ""))
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -989,11 +989,13 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
         inject_context(context, also_log=False, skip_compression=True)
 
 
-def _swarm_heartbeat(state: str) -> None:
+def _swarm_heartbeat(state: str, prompt: str | None = None) -> None:
     try:
-        from hooks.context.swarm_heartbeat import beat
+        from hooks.context.swarm_heartbeat import beat, heard
 
         beat(state)
+        if prompt is not None:
+            heard(prompt)
     except Exception as e:
         log("swarm heartbeat failed", {"error": str(e)})
 

@@ -201,6 +201,18 @@ def test_a_concurrent_tick_is_skipped(env):
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["another tick is running"]
 
 
+def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    calls = []
+    monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
+    monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
+    monkeypatch.setenv(cli.wake.QUIET_ENV, "7")
+    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: calls.append(args[-3:]) or [])
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert calls == [(9_000_000, 60_000, 7_000)]
+
+
 def test_timer_units_and_enable(tmp_path):
     calls = []
     ok = timer.ensure(
