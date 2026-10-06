@@ -265,7 +265,11 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.put_agent(slug, record)
             try:
                 state = "pr" if task.get("pr_url") else "claimed"
-                fields = {"state": state, "claimed_by": name, "workspace": str(ledger_workspace.scaffold(slug, task))}
+                fields = {
+                    "state": state,
+                    "claimed_by": name,
+                    "workspace": str(ledger_workspace.scaffold(slug, task, doc)),
+                }
                 kind = config.lanes.get(lane, {}).get("kind", "")
                 if kind not in ("", "auto") and not task.get("kind"):
                     fields["kind"] = kind

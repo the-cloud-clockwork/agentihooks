@@ -185,8 +185,12 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
         f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
         "successor continues the task from it and the seat recap is derived from the same document.",
-        "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
-        f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
+        (
+            f'If you cannot finish: {me} block "<plain words naming the blocker>" and stop.'
+            if ledger_kinds.kind(task) == "plan"
+            else "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
+            f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.'
+        ),
         "",
         f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
@@ -380,7 +384,22 @@ def research_steps(me, led, name, phase):
     ]
 
 
+def plan_steps(me, led, name, phase):
+    return [
+        "Work it end to end, then stop:",
+        "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",
+        f"2. Slice only phase {phase}. Edit no code. Add tasks with {led} task add <id> <title> --phase {phase} "
+        '--lane <eng or ci> --kind <kind> --description "<scope and Done when sentence>" '
+        "--depends-on <ids> --territory <areas>; include --must, --check and --judge for work beyond code.",
+        "3. Keep each code or ci task to one pull request, at most six territory areas and twelve tasks in the slice.",
+        f'4. Propose work outside this phase as a follow up: {led} followup add "<plain words>".',
+        f"5. Leave the crew with {led} leave, then close with {me} done --slice <ids>, the comma separated ids "
+        f"of the tasks you added in this phase. The ledger refuses invalid slice ids. {CLOSES}",
+    ]
+
+
 STEPS = {
+    "plan": plan_steps,
     "code": code_steps,
     "ci": ci_steps,
     "ops": ops_steps,

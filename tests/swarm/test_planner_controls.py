@@ -86,7 +86,7 @@ def test_zero_planner_cap_keeps_task_open_and_drained_swarm_wakes(store):
 
 
 def test_ledger_accepts_planner_lane_and_prompt_names_role():
-    ledger_tasks.check_task({"id": "slice", "lane": "plan"})
+    ledger_tasks.check_task({"id": "slice", "lane": "plan", "kind": "plan"})
     text = prompt.build("sw", "/repo", "plan", "planner@abcdef-0001", {"id": "slice", "title": "Slice"})
     assert "a planner" in text
     assert not _is_worker("planner@abcdef-0001")
