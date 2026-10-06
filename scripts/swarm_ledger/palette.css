@@ -46,4 +46,5 @@
   --destructive: var(--red-500);
   --pending: var(--slate-050);
   --selection: var(--blue-700);
+  --grip: var(--blue-400);
 }
