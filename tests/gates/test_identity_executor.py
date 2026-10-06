@@ -10,7 +10,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 ME, OTHER, SLUG = "engineer@1-1", "engineer@1-2", "demo"
-SHIM = "from scripts.gates.entry import main\n\nraise SystemExit(main(['identity']))\n"
+SHIM = (
+    "import runpy\nimport sys\n\nsys.argv[1:] = ['identity']\nrunpy.run_module('scripts.gates', run_name='__main__')\n"
+)
 
 
 @pytest.fixture

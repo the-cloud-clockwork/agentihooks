@@ -119,6 +119,12 @@ class TestDecide:
             f"cd ~ && agentihooks ledger --slug {SLUG} --as {OTHER} say hi",
             f"bash -c 'agentihooks ledger --slug {SLUG} --as {OTHER} say hi'",
             f"/usr/bin/agentihooks msg --as {OTHER} inbox",
+            f"bash -x -c 'agentihooks ledger --slug {SLUG} --as {OTHER} say hi'",
+            f"eval 'agentihooks ledger --slug {SLUG} --as {OTHER} say hi'",
+            f"agentihooks swarm {SLUG} say hi --as {OTHER}",
+            f"agentihooks ledger --slug {SLUG} --as {OTHER} say -n",
+            f"env -C /tmp agentihooks msg --as {OTHER} inbox",
+            f"timeout 30 agentihooks msg --as {OTHER} inbox",
         ],
     )
     def test_denies_another_agents_name(self, command):
@@ -136,10 +142,18 @@ class TestDecide:
             f"agentihooks ledger --slug {SLUG} --as {ME} say '--as {OTHER}'",
             f"echo agentihooks ledger --as {OTHER}",
             "agentihooks",
+            f"git commit -m 'agentihooks ledger --slug {SLUG} --as {OTHER} say'",
+            f"mytool swarm {SLUG} --as {OTHER}; agentihooks msg inbox",
+            "env; agentihooks msg inbox",
+            f"agentihooks ledger --slug {SLUG} --as",
         ],
     )
     def test_allows_own_name_and_other_commands(self, command):
         assert decide(command) == Decision()
+
+    def test_the_whole_name_is_read(self):
+        decision = decide(f"agentihooks ledger --slug {SLUG} --as eXtra@1-2 say hi")
+        assert decision.reason == refusal("eXtra@1-2", Who.from_env(SWARM_ENV))
 
     @pytest.mark.parametrize(
         "command",

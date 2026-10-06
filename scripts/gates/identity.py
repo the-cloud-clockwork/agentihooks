@@ -56,7 +56,7 @@ def _nests(current, token):
 def simple_commands(text):
     commands, current = [], []
     for token in _tokens(text):
-        if token and set(token) <= CONTROL:
+        if token and CONTROL.issuperset(token):
             commands.append(current)
             current = []
             continue
@@ -69,11 +69,10 @@ def simple_commands(text):
 
 def _program_index(words):
     for index, word in enumerate(words):
-        previous = words[index - 1] if index else ""
         if (
             ANY_ASSIGNMENT.match(word)
             or word.startswith("-")
-            or previous in OPTION_ARGS
+            or (index and words[index - 1] in OPTION_ARGS)
             or DURATION.match(word)
             or PurePosixPath(word).name in WRAPPERS
         ):
@@ -87,7 +86,7 @@ def _pinned_args(words):
     if index is None or PurePosixPath(words[index]).name != "agentihooks":
         return None
     rest = words[index + 1 :]
-    return rest[1:] if rest[:1] and rest[0] in PINNED_CLIS else None
+    return rest[1:] if rest and rest[0] in PINNED_CLIS else None
 
 
 def _as_names(args):
