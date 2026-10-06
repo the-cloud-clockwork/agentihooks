@@ -2380,6 +2380,7 @@ class TestSkillFolderWithoutSkillFile:
         (skills / "kept" / "SKILL.md").write_text("---\nname: kept\ndescription: kept\n---\n")
         (skills / "moved" / "node_modules" / "pkg").mkdir(parents=True)
         (skills / "moved" / "node_modules" / "pkg" / "index.js").write_text("")
+        (skills / "README.md").write_text("")
         return skills
 
     def test_folder_with_only_ignored_files_is_skipped_and_named_once(self, tmp_path, monkeypatch, capsys):
@@ -2391,6 +2392,8 @@ class TestSkillFolderWithoutSkillFile:
         out = capsys.readouterr().out
         assert (home / ".claude" / "skills" / "kept").is_symlink()
         assert not (home / ".claude" / "skills" / "moved").exists()
+        assert not (home / ".claude" / "skills" / "README.md").exists()
+        assert "Linked profile skill 'kept'" in out
         assert out.count("moved") == 1
         assert "Skipped skill folder with no SKILL.md" in out
 
