@@ -10,8 +10,14 @@ import time
 from pathlib import Path
 
 from hooks.context.ledger_decision import _bound
+from scripts.swarm_ledger.ledger_gate import DEFAULT_POLICY
 
 WINDOW_SEC = 1800
+QUIET_EVERY = 2
+QUIET_WORDS = 10
+STOP_CAP = DEFAULT_POLICY["stop_blocks"]
+REMINDER = "Operator not present: replies stay under ten words."
+QUIET_REFUSAL = "The operator is not present: your final message has {words} words. Say it in ten words or fewer."
 SWITCH = re.compile(r"operator (on|off)\b")
 ON_NOTICE = "Operator on: the operator is present in this pane until thirty minutes after his last typed message."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
@@ -59,8 +65,9 @@ def observe(session_id, prompt, typed, now=None):
         return ""
     now = time.time() if now is None else now
     word = switch(prompt)
-    if word or _on(_load(session_id), now):
-        _save(session_id, {"on": word != "off", "at": now})
+    state = _load(session_id)
+    if word or _on(state, now):
+        _save(session_id, {**state, "on": word != "off", "at": now})
     return word
 
 
@@ -94,3 +101,32 @@ def question_block(tool_name, session_id, environ=None, now=None):
         return ""
     slug, name = _binding(env, session_id)
     return ASK_REFUSAL.format(slug=slug, name=name)
+
+
+def _away(session_id, environ, now):
+    return bool(session_id) and not present(session_id, environ, now)
+
+
+def reminder(session_id, environ=None, now=None):
+    """The one line quiet reminder, on the first and every second tool call while the operator is away."""
+    if not _away(session_id, environ, now):
+        return ""
+    state = _load(session_id)
+    calls = state.get("calls", 0) + 1
+    _save(session_id, {**state, "calls": calls})
+    return REMINDER if calls % QUIET_EVERY == 1 else ""
+
+
+def quiet_block(session_id, message, environ=None, now=None):
+    """The Stop refusal of a final message over ten words while the operator is away; the cap lets it through."""
+    if not _away(session_id, environ, now):
+        return ""
+    state = _load(session_id)
+    words = len(str(message or "").split())
+    blocks = state.get("blocks", 0)
+    if words <= QUIET_WORDS or blocks >= STOP_CAP:
+        if blocks:
+            _save(session_id, {**state, "blocks": 0})
+        return ""
+    _save(session_id, {**state, "blocks": blocks + 1})
+    return QUIET_REFUSAL.format(words=words)

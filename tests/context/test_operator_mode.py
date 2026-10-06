@@ -225,3 +225,107 @@ def test_a_failing_question_check_is_logged_and_lets_the_call_through(monkeypatc
     monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
     assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == ""
     assert logged == [("operator question check failed", {"error": "disk full"})]
+
+
+REMINDER = "Operator not present: replies stay under ten words."
+QUIET = "The operator is not present: your final message has {words} words. Say it in ten words or fewer."
+TWELVE = "one two three four five six seven eight nine ten eleven twelve"
+TEN = "one two three four five six seven eight nine ten"
+
+
+def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
+    seen = [operator_mode.reminder("s1", SWARM, now=100) for _ in range(6)]
+    assert seen == [REMINDER, "", REMINDER, "", REMINDER, ""]
+    assert operator_mode.QUIET_EVERY == 2
+
+
+def test_the_reminder_counts_tool_calls_upward_from_the_first(monkeypatch):
+    monkeypatch.setattr(operator_mode, "QUIET_EVERY", 3)
+    seen = [operator_mode.reminder("s1", SWARM, now=100) for _ in range(4)]
+    assert seen == [REMINDER, "", "", REMINDER]
+
+
+def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers):
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert [operator_mode.reminder("s1", SWARM, now=101) for _ in range(3)] == ["", "", ""]
+    assert operator_mode.reminder("s2", {"LEDGER_DIR": str(ledgers)}, now=101) == ""
+    assert operator_mode.reminder("", SWARM, now=101) == ""
+    assert operator_mode.present("s1", SWARM, now=102)
+
+
+def test_a_twelve_word_final_message_is_blocked_until_the_cap_then_released():
+    cap = operator_mode.STOP_CAP
+    assert cap == 3
+    blocked = [operator_mode.quiet_block("s1", TWELVE, SWARM, now=100) for _ in range(cap)]
+    assert blocked == [QUIET.format(words=12)] * cap
+    assert operator_mode.quiet_block("s1", TWELVE, SWARM, now=100) == ""
+    assert operator_mode.quiet_block("s1", TWELVE, SWARM, now=100) == QUIET.format(words=12)
+
+
+def test_ten_words_pass_and_a_short_stop_restarts_the_count():
+    assert operator_mode.quiet_block("s1", TEN, SWARM, now=100) == ""
+    assert operator_mode.quiet_block("s1", None, SWARM, now=100) == ""
+    assert operator_mode.quiet_block("s1", TWELVE, SWARM, now=100) == QUIET.format(words=12)
+    assert operator_mode.quiet_block("s1", "Done.", SWARM, now=100) == ""
+    again = [operator_mode.quiet_block("s1", TWELVE, SWARM, now=100) for _ in range(operator_mode.STOP_CAP)]
+    assert again == [QUIET.format(words=12)] * operator_mode.STOP_CAP
+
+
+def test_a_long_final_message_passes_while_on_unbound_or_without_a_session(ledgers):
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.quiet_block("s1", TWELVE, SWARM, now=101) == ""
+    assert operator_mode.quiet_block("s2", TWELVE, {"LEDGER_DIR": str(ledgers)}, now=101) == ""
+    assert operator_mode.quiet_block("", TWELVE, SWARM, now=101) == ""
+
+
+def test_the_quiet_counts_survive_a_typed_prompt():
+    operator_mode.reminder("s1", SWARM, now=100)
+    operator_mode.quiet_block("s1", TWELVE, SWARM, now=100)
+    operator_mode.observe("s1", "operator on", True, now=101)
+    operator_mode.observe("s1", "operator off", True, now=102)
+    assert operator_mode.reminder("s1", SWARM, now=103) == ""
+    assert [operator_mode.quiet_block("s1", TWELVE, SWARM, now=103) for _ in range(3)] == [
+        QUIET.format(words=12)
+    ] * 2 + [""]
+
+
+def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    injected = []
+    monkeypatch.setattr("hooks.common.inject_context", lambda *a, **k: injected.append((a, k)))
+    hook_manager._operator_reminder({"session_id": "s1"})
+    hook_manager._operator_reminder({"session_id": "s1"})
+    assert injected == [((REMINDER,), {"also_log": False, "skip_compression": True})]
+
+
+def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    injected = []
+    monkeypatch.setattr("hooks.common.inject_context", lambda text, *a, **k: injected.append(text))
+    for _ in range(3):
+        hook_manager.on_pre_tool_use({"session_id": "s7", "tool_name": "Read", "tool_input": {"file_path": "x"}})
+    assert injected.count(REMINDER) == 2
+
+
+def test_the_stop_hook_blocks_a_twelve_word_final_message(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_stop({"session_id": "s1", "last_assistant_message": TWELVE, "hook_event_name": "Stop"})
+    assert str(blocked.value) == QUIET.format(words=12)
+
+
+def test_failing_quiet_checks_are_logged_and_never_raise_into_the_hook(monkeypatch):
+    logged = []
+    boom = lambda *a: (_ for _ in ()).throw(OSError("disk full"))  # noqa: E731
+    monkeypatch.setattr(operator_mode, "reminder", boom)
+    monkeypatch.setattr(operator_mode, "quiet_block", boom)
+    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
+    hook_manager._operator_reminder({"session_id": "s1"})
+    assert hook_manager._operator_quiet({"session_id": "s1", "last_assistant_message": TWELVE}) == ""
+    assert logged == [
+        ("operator reminder failed", {"error": "disk full"}),
+        ("operator quiet check failed", {"error": "disk full"}),
+    ]
