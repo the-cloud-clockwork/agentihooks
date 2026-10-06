@@ -175,7 +175,9 @@ def _gate_bypass(doc, op, ctx):
 
 
 def _gate_lift(doc, op, ctx):
-    ctx.record(op["by"], "gate lifted", "", text=f"the operator lifted the {op['gate']} gate for one hour")
+    ctx.record(
+        op["by"], "gate lifted", "", text=f"the operator lifted the {op['gate']} gate for one hour", gate=op["gate"]
+    )
     return True
 
 

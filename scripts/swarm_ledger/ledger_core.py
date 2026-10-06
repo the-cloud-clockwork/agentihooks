@@ -687,7 +687,11 @@ def rewrite_seed(html_path, html, doc, rev):
         atomic_write(html_path, new)
 
 
-def sync(slug, changes=None, ops=None):
+def gated(gate, doc, op, ctx):
+    return gate.apply(doc, op, ctx, apply_op) if gate else apply_op(doc, op, ctx)
+
+
+def sync(slug, changes=None, ops=None, gate=None):
     """Fold agent seed edits and operator changes/ops into the JSON, then rewrite the seed.
 
     Returns (state, rejected). The JSON is written before the HTML so a crash in between
@@ -714,7 +718,7 @@ def sync(slug, changes=None, ops=None):
                 f"the page copy at revision {seed_rev} is too old to merge, its agent edits were ignored"
             )
         rejected = apply_changes(doc, changes or [], ctx)
-        rejected += [op["id"] for op in ops or [] if not apply_op(doc, op, ctx)]
+        rejected += [op["id"] for op in ops or [] if not gated(gate, doc, op, ctx)]
         import ledger_artifacts
         import ledger_media
 

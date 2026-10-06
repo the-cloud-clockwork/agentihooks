@@ -75,6 +75,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 BASE = ledger_link.base()
+TALK_REFUSED = "talk refused"
 
 
 def request(slug, ops=None):
@@ -105,8 +106,21 @@ def op(kind, args, /, **fields):
     return {"op": kind, "id": f"{kind}-{uuid.uuid4().hex[:10]}", "by": args.name, **fields}
 
 
+def talk_refused(state):
+    if state.get("rejected"):
+        gated = [w for w in state.get("_meta", {}).get("warnings", []) if w.startswith(TALK_REFUSED)]
+        if gated:
+            sys.exit("; ".join(gated))
+
+
+def posted(state):
+    talk_refused(state)
+    print(json.dumps({"posted": not state.get("rejected")}))
+
+
 def send(args, kind, /, **fields):
     state = call(args.slug, [op(kind, args, **fields)])
+    talk_refused(state)
     if state.get("rejected"):
         if kind.startswith("phase_") or kind == "task_add":
             sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
@@ -160,7 +174,7 @@ def cmd_say(args):
     if args.long:
         op["long"] = True
     state = call(args.slug, [op])
-    print(json.dumps({"posted": not state.get("rejected")}))
+    posted(state)
 
 
 def upload_image(slug: str, name: str, path: str) -> dict:
@@ -198,7 +212,7 @@ def cmd_comment(args):
     if attachments:
         entry["attachments"] = attachments
     state = call(args.slug, [entry])
-    print(json.dumps({"posted": not state.get("rejected")}))
+    posted(state)
 
 
 def cmd_artifact(args):
