@@ -22,7 +22,7 @@ from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -267,7 +267,7 @@ def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     picked = []
-    for t in rows.values():
+    for t in sorted(rows.values(), key=ledger_rank.order):
         if (
             t.get("lane") == lane
             and t.get("state") == "open"

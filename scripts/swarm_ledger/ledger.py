@@ -41,12 +41,15 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
-           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact]
+           [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact] [--rank R]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
                                       --scaffold creates its work folder (steering, progress, proof) in the same call;
-                                      --artifact marks a file the operator asked for, so the task may publish it
-  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind or
+                                      --artifact marks a file the operator asked for, so the task may publish it;
+                                      R is the queue rank, urgent, high, normal (default) or low, next meaning
+                                      urgent: the swarm claims eligible tasks highest rank first, ledger order
+                                      within a rank; only the master, a planner or the operator sets it
+  task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank or
                                       artifact (yes or no) of a task;
                                       proof.KEY=VALUE and contract.KEY=VALUE pairs form one object, e.g.
                                       proof.command=C proof.output=O
@@ -433,6 +436,8 @@ def cmd_task(args):
             lists["artifact"] = True
         if args.profile:
             lists["profile"] = args.profile
+        if args.rank:
+            lists["rank"] = args.rank
         if args.plan:
             lists["plan_url"] = args.plan
         if args.scaffold:
@@ -580,6 +585,7 @@ def build_parser():
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     task.add_argument("--profile")
+    task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")

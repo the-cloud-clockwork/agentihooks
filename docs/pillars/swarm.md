@@ -217,7 +217,7 @@ between ticks. `start` installs and enables it. Each tick, per swarm:
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left.
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
-   under its session cap.
+   under its session cap. Claimable tasks are taken highest [queue rank](#queue-rank) first.
 6. Mark the swarm `stopped` when no agent is left, or `drained` when only the master is and nothing remains to do.
 7. Post inbox replies to the operator on the page chat.
 8. Run the [ledger event pass](#ledger-event-pass): agent writes and time rules become inbox items.
@@ -286,6 +286,23 @@ goes on (a handoff, or a task reopened for a successor), each item moves to its 
 nobody takes the task up (it is done or blocked, for example), each item is withdrawn and its sender gets an
 item naming the agent and the message; a sender that has itself left is told through the master. Agents that
 exited between ticks are settled at the start of the next tick.
+
+## Queue rank
+
+Every task carries a queue rank: `urgent`, `high`, `normal` or `low`. A task without one, every task written
+before ranks existed included, counts as `normal`. `next` is accepted as an alias and stores `urgent`, the top
+rank; it puts a task first in the queue until someone changes its rank again.
+
+The tick orders claimable tasks highest rank first and keeps ledger order within a rank, then applies the usual
+rules: lane, phase, open dependencies, territories and live claims still decide whether a task is claimable, so an
+urgent task never skips a dependency that is not done and never takes a task or a territory another agent holds.
+Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every
+pass, so a change applies on the next tick.
+
+Set it with `agentihooks ledger task add ... --rank R` or `task set ID rank=R`, or from the select on each task row
+of the ledger page, which lists open tasks in claim order. The master, a planner and the operator may set it; an
+engineer or CI agent is refused and proposes the change as a follow up. The queue rank is separate from the
+Priorities panel, which holds decisions waiting on the operator.
 
 ## Redis
 
