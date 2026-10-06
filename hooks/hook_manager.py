@@ -1622,18 +1622,7 @@ def on_pre_tool_use(payload: dict) -> None:
             _pretool_blocks.insert(0, _drained)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    from hooks.context import planner_plan
-
-    if planner_plan.accepts(tool_name):
-        # Claude Code keeps the plan approval prompt for an allow that does not return the tool input.
-        emit_permission_decision(
-            "PreToolUse",
-            "allow",
-            planner_plan.REASON,
-            updated_input=tool_input,
-            additional_context="\n\n".join(_pretool_blocks) or None,
-        )
-    elif _credential_rewrite or _cond_decision in ("allow", "ask"):
+    if _credential_rewrite or _cond_decision in ("allow", "ask"):
         _updated, _note = _credential_rewrite or ({}, "")
         _rewritten = bool(_credential_rewrite) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
@@ -2430,6 +2419,10 @@ def on_permission_request(payload: dict) -> None:
     """Handle PermissionRequest event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Permission requested: {tool_name}", {"tool": tool_name})
+    from hooks.context import planner_plan
+
+    if planner_plan.accepts(tool_name):
+        print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
 
 
 def emit_permission_decision(
