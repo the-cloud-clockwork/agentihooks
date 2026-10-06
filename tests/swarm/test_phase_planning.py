@@ -169,7 +169,7 @@ def test_a_long_problem_list_fits_the_comment_limit_and_the_item_carries_all(env
     assert comment["text"] == f"The slice check found these problems. {shown} And 4 more in the review item."
     assert len(comment["text"].split()) <= 50
     [item] = [i for i in items(store, MASTER_SEAT) if "Review" in i.text]
-    assert all(f"Task t{i} has a description under 20 words." in item.text for i in range(8))
+    assert item.text.endswith(" ".join(f"Task t{i} has a description under 20 words." for i in range(8)))
 
 
 def test_manual_autonomy_raises_a_priority_for_the_operator_and_no_master_item(env):
@@ -179,7 +179,9 @@ def test_manual_autonomy_raises_a_priority_for_the_operator_and_no_master_item(e
     run(store, ledger)
     slice_done(ledger, ("t1", DONE_WHEN))
     run(store, ledger)
-    assert [p["item"] for p in state(SLUG)["priorities"]] == ["phases/p1"]
+    assert [(p["item"], p["text"]) for p in state(SLUG)["priorities"]] == [
+        ("phases/p1", "Approve the slice planned for this phase or send it back.")
+    ]
     assert not any("Review" in i.text for i in items(store, MASTER_SEAT))
 
 
