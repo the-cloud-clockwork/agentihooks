@@ -47,7 +47,12 @@ def test_build_and_parse_round_trip():
 def test_creating_a_swarm_mints_one_code_kept_on_its_record_and_in_the_registry(store):
     code = store.config("sw").code
     assert re.fullmatch(r"[0-9a-f]{6}", code)
-    assert store.names.swarm(code) == {"swarm": "sw", "ledger": "sw", "repo": "/home/x/dev/agentihooks"}
+    assert store.names.swarm(code) == {
+        "swarm": "sw",
+        "name": f"swarm@{code}",
+        "ledger": "sw",
+        "repo": "/home/x/dev/agentihooks",
+    }
     assert store.names.code_of("sw") == code
 
 
@@ -227,7 +232,7 @@ def test_names_lists_the_code_space_and_every_name(store, capsys):
     name = store.next_name("sw", "eng", at=7)
     cli.cmd_names(store, Namespace(slug="sw", json=False))
     out = capsys.readouterr().out
-    assert out.splitlines()[0] == "code a1b2c3\tspace agentihooks-a1b2c3"
+    assert out.splitlines()[0] == "name swarm@a1b2c3\tcode a1b2c3\tspace agentihooks-a1b2c3"
     assert out.splitlines()[1].startswith(f"{name}\tengineer\t1\t-\t7\t-")
 
 

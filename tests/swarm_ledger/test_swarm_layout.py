@@ -33,6 +33,7 @@ def status(**changes):
     base = {
         "config": {
             "slug": "rig",
+            "name": "swarm@a1b2c3",
             "state": "running",
             "max_eng": 3,
             "max_ci": 1,
@@ -189,7 +190,7 @@ def test_column_pairs_sit_side_by_side_on_desktop_and_stack_on_a_phone(open_page
 
 def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
     page = open_page()
-    assert page.text("#swarm-name") == "rig"
+    assert page.text("#swarm-name") == "swarm@a1b2c3"
     assert page.text("#swarm-state").lower() == "running"
     assert page.text("#swarm-tick") == "tick 12s ago"
     controls = page.tab.eval_on_selector_all("#swarm-ctl button", "bs => bs.map(b => [b.textContent, b.disabled])")

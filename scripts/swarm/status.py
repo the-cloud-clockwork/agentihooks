@@ -15,6 +15,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import snapshot
 from scripts.swarm.health import activity, checks, verdicts
 from scripts.swarm.health import findings as health
+from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, codex_split
 from scripts.swarm.tick import agent_status
 from scripts.swarm_ledger import plan_shape
@@ -132,7 +133,11 @@ def status_report(store, slug, state):
     handed = transfers.list_transfers(store, slug)
     active = lift.active(gate_log.recent(slug, limit=None), now_ms())
     return {
-        "config": {**config.__dict__, "codex_share": codex_split(config, os.environ)[0]},
+        "config": {
+            **config.__dict__,
+            "name": swarm_name(config.code),
+            "codex_share": codex_split(config, os.environ)[0],
+        },
         "agents": [
             {
                 **a.__dict__,
