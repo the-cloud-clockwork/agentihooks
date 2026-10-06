@@ -595,7 +595,7 @@ _NOT_A_NAME = (
 _SIGNAL = re.compile(
     r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
     rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
-    rf"(?:(?!(?:{_DETERMINER}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
+    rf"(?:(?!(?:a|an|the|this|that|these|those|my|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
     re.IGNORECASE,
 )
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
