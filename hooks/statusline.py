@@ -286,6 +286,11 @@ def main() -> None:
                 _g_profile = _ah_rec.get("profile", "") or "none"
                 _g_sp = _ah_rec.get("settings_profile", "") or "none"
 
+            _run_profile = os.environ.get("AGENTIHOOKS_PROFILE")
+            if _run_profile:
+                _g_profile = _run_profile
+                _g_sp = "none"
+
             # Channels — env-driven via AGENTIHOOKS_BASE_CHANNELS (single source
             # of truth in hooks.config; broadcast.py re-exports the same value).
             from hooks.config import BASE_CHANNELS as _BASE_CHANNELS
