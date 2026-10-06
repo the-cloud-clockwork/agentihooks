@@ -212,12 +212,12 @@ def test_fallback_receives_the_request(monkeypatch):
 def test_latency_is_measured_in_milliseconds_and_logged(monkeypatch):
     from hooks.classifier import core
 
-    clock = iter([10.0, 10.25])
+    clock = iter([10.0, 11.5])
     monkeypatch.setattr(core.time, "monotonic", lambda: next(clock))
     _wire(monkeypatch, ALL_OK)
-    assert decide("typo", QUESTIONS, purpose="test").latency_ms == 250
+    assert decide("typo", QUESTIONS, purpose="test").latency_ms == 1500
     (line,) = _log_lines()
-    assert line["latency_ms"] == 250
+    assert line["latency_ms"] == 1500
 
 
 def test_nothing_reachable_raises_unavailable_and_logs_it(monkeypatch):
