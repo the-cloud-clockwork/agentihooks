@@ -83,9 +83,8 @@ def _binding(env, session_id):
         bound = json.loads((ledgers / ".sessions" / f"{session_id}.json").read_text())
     except (OSError, ValueError):
         bound = {}
-    return bound.get("slug") or env.get("AGENTIHOOKS_SWARM", ""), bound.get("name") or env.get(
-        "AGENTIHOOKS_AGENT_NAME", ""
-    )
+    slug = bound.get("slug") or env.get("AGENTIHOOKS_SWARM") or "<slug>"
+    return slug, bound.get("name") or env.get("AGENTIHOOKS_AGENT_NAME") or "<name>"
 
 
 def question_block(tool_name, session_id, environ=None, now=None):

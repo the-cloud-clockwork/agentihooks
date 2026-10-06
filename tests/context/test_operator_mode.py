@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -170,6 +171,21 @@ def test_a_ledger_bound_session_is_told_its_own_ledger_and_name(ledgers):
     env = {**SWARM, "LEDGER_DIR": str(ledgers)}
     assert operator_mode.question_block("AskUserQuestion", "s2", env, now=100) == ASK.format(
         slug="work", name="eng-2@work"
+    )
+
+
+def test_an_unreadable_binding_falls_back_to_the_swarm_and_names_what_is_unknown(ledgers):
+    (ledgers / ".sessions" / "s4.json").write_text("{not json")
+    env = {"AGENTIHOOKS_SWARM": "demo", "LEDGER_DIR": str(ledgers)}
+    assert operator_mode.question_block("AskUserQuestion", "s4", env, now=100) == ASK.format(slug="demo", name="<name>")
+
+
+def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
+    sessions = Path.home() / "development-ledger" / ".sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "s5.json").write_text(json.dumps({"name": "eng-2@work"}))
+    assert operator_mode.question_block("AskUserQuestion", "s5", {}, now=100) == ASK.format(
+        slug="<slug>", name="eng-2@work"
     )
 
 

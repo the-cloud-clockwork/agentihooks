@@ -1,8 +1,8 @@
 import json
 
-import ledger
 import ledger_core as core
 
+from scripts.swarm_ledger import ledger
 from tests.swarm_ledger.test_priorities import SLUG, make_ledger
 
 
