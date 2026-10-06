@@ -83,6 +83,7 @@ def isolated_server(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.mark.timeout(1)
 def test_occupied_unresponsive_port_times_out_without_starting(isolated_server, monkeypatch):
     monkeypatch.setattr(server, "SERVER_WAIT", 0.15)
     with socket.socket() as held:
@@ -113,6 +114,11 @@ def test_free_port_starts_once_and_waits_for_readiness(isolated_server, monkeypa
         server.ensure()
     start.assert_called_once()
     assert start.call_args.args[0][-1] == "--serve"
+    options = start.call_args.kwargs
+    assert options["stdout"].name == str(server.LOGFILE)
+    assert options["stderr"] is options["stdout"]
+    assert options["stdin"] == subprocess.DEVNULL
+    assert options["start_new_session"] is True
     assert capsys.readouterr().out.strip() == server.BASE
 
 
@@ -149,3 +155,43 @@ def test_bind_errors_other_than_occupied_are_reported(isolated_server):
         probe.return_value.__enter__.return_value.bind.side_effect = PermissionError(errno.EACCES, "denied")
         server.ensure()
     start.assert_not_called()
+
+
+def test_start_creates_missing_parent_folders(isolated_server, monkeypatch):
+    folder = isolated_server / "parent" / "ledger"
+    monkeypatch.setattr(server.core, "LEDGER_DIR", folder)
+    monkeypatch.setattr(server, "PIDFILE", folder / ".server.pid")
+    monkeypatch.setattr(server, "LOGFILE", folder / ".server.log")
+    with (
+        patch.object(server, "serving_dir", side_effect=[None, str(folder)]),
+        patch.object(server.subprocess, "Popen") as start,
+    ):
+        server.ensure()
+    assert folder.is_dir()
+    start.assert_called_once()
+
+
+def test_deadline_is_enforced_at_exact_expiry(isolated_server):
+    with (
+        patch.object(server, "serving_dir", return_value=None),
+        patch.object(server.time, "monotonic", side_effect=[100, 100.5]),
+        patch.object(server.subprocess, "Popen") as start,
+        pytest.raises(SystemExit, match="did not answer"),
+    ):
+        server.ensure()
+    start.assert_not_called()
+
+
+def test_health_requests_use_short_timeouts(isolated_server):
+    with patch.object(server.urllib.request, "urlopen") as health:
+        health.return_value.__enter__.return_value.read.return_value = b'{"dir": "/ready"}'
+        assert server.serving_dir() == "/ready"
+        health.assert_called_once_with(f"{server.BASE}/healthz", timeout=1)
+    with (
+        patch.object(server.time, "monotonic", return_value=100),
+        patch.object(server, "SERVER_WAIT", 5),
+        patch.object(server, "serving_dir", side_effect=[None, str(isolated_server)]) as ready,
+        patch.object(server.subprocess, "Popen"),
+    ):
+        server.ensure()
+    assert ready.call_args.kwargs["timeout"] == 1
