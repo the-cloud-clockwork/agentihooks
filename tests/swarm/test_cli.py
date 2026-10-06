@@ -220,15 +220,48 @@ def test_a_binned_ledger_keeps_retiring_until_no_agent_is_left(env):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    stuck = next(a.name for a in store.agents("sw") if a.lane == "master")
-    rt.stuck = {stuck}
+    stuck = [a.name for a in store.agents("sw") if a.lane != "ci"]
+    rt.stuck = set(stuck)
     ledger.bin = {"sw"}
-    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [f"the ledger is in the bin, still retiring {stuck}"]
-    assert [a.name for a in store.agents("sw")] == [stuck] and rt.closed_spaces == []
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [
+        f"the ledger is in the bin, still retiring {stuck[0]}, {stuck[1]}"
+    ]
+    assert [a.name for a in store.agents("sw")] == stuck and rt.closed_spaces == []
     assert store.config("sw").state == "stopping"
     rt.stuck = set()
     assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert store.agents("sw") == [] and rt.closed_spaces == ["sw"]
+
+
+def test_binning_releases_and_reopens_only_this_swarms_claims(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert {store.claimant("sw", t) for t in ("t1", "t2")} == {a.name for a in store.agents("sw") if a.lane != "master"}
+    tasks, update = ledger.tasks, ledger.update_task
+    ledger.tasks = lambda slug: tasks(slug) if slug == "sw" else []
+    ledger.update_task = lambda slug, task_id, fields, by="swarm": slug == "sw" and update(slug, task_id, fields, by)
+    states, retire = [], rt.retire
+    rt.retire = lambda agent, live: states.append(store.config("sw").state) or retire(agent, live)
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, None, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert states == ["stopping", "stopping", "stopping"]
+    assert [(ledger.rows[t]["state"], ledger.rows[t]["claimed_by"]) for t in ("t1", "t2")] == [
+        ("open", ""),
+        ("open", ""),
+    ]
+    assert (store.claimant("sw", "t1"), store.claimant("sw", "t2")) == (None, None)
+
+
+def test_stop_now_prints_its_state_and_who_is_still_running(env, capsys):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    stuck = next(a.name for a in store.agents("sw") if a.lane == "master")
+    rt.stuck = {stuck}
+    capsys.readouterr()
+    assert run("sw", "stop", "--now") == 0
+    assert capsys.readouterr().out == json.dumps({"swarm": "sw", "state": "stopping", "still_running": [stuck]}) + "\n"
 
 
 @pytest.mark.parametrize("state", ["running", "paused", "stopped"])
