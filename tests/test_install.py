@@ -2373,6 +2373,43 @@ class TestInstallGlobalHonoursTarget:
         assert "claude" not in state["targets"]["global"]
 
 
+class TestSkillFolderWithoutSkillFile:
+    def _skills(self, tmp_path):
+        skills = tmp_path / "profiles" / "tiny" / ".claude" / "skills"
+        (skills / "kept").mkdir(parents=True)
+        (skills / "kept" / "SKILL.md").write_text("---\nname: kept\ndescription: kept\n---\n")
+        (skills / "moved" / "node_modules" / "pkg").mkdir(parents=True)
+        (skills / "moved" / "node_modules" / "pkg" / "index.js").write_text("")
+        return skills
+
+    def test_folder_with_only_ignored_files_is_skipped_and_named_once(self, tmp_path, monkeypatch, capsys):
+        installer = TestInstallGlobalHonoursTarget()
+        installer._tiny_profile(tmp_path)
+        self._skills(tmp_path)
+        monkeypatch.setattr(installer, "_tiny_profile", lambda tmp_path: tmp_path / "profiles")
+        home = installer._run(tmp_path, monkeypatch, "claude")
+        out = capsys.readouterr().out
+        assert (home / ".claude" / "skills" / "kept").is_symlink()
+        assert not (home / ".claude" / "skills" / "moved").exists()
+        assert out.count("moved") == 1
+        assert "Skipped skill folder with no SKILL.md" in out
+
+    def test_reinstall_drops_the_link_of_a_folder_whose_skill_file_moved(self, tmp_path, monkeypatch, capsys):
+        installer = TestInstallGlobalHonoursTarget()
+        installer._tiny_profile(tmp_path)
+        skills = self._skills(tmp_path)
+        monkeypatch.setattr(installer, "_tiny_profile", lambda tmp_path: tmp_path / "profiles")
+        (skills / "moved" / "SKILL.md").write_text("---\nname: moved\ndescription: moved\n---\n")
+        home = installer._run(tmp_path, monkeypatch, "claude")
+        assert (home / ".claude" / "skills" / "moved").is_symlink()
+        (skills / "moved" / "SKILL.md").unlink()
+        capsys.readouterr()
+        installer._run(tmp_path, monkeypatch, "claude")
+        out = capsys.readouterr().out
+        assert not (home / ".claude" / "skills" / "moved").is_symlink()
+        assert out.count("Skipped skill folder with no SKILL.md") == 1
+
+
 class TestAgentienvMalformedNames:
     def test_agentienv_warns_with_file_and_line_only(self, tmp_path):
         import os
