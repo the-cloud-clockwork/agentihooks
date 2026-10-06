@@ -160,13 +160,21 @@ def test_the_route_reads_the_defaults_then_the_saved_layout(port):
 
 def test_the_route_refuses_a_bad_layout_and_keeps_the_saved_one(port):
     call(port, "PUT", SAVED)
-    assert call(port, "PUT", {"nowhere": {"height": 100}}) == (400, "unknown row nowhere")
-    assert call(port, "PUT", b"{oops") == (400, "body is not JSON")
+    assert send(port, "PUT", {"nowhere": {"height": 100}}) == (400, "unknown row nowhere", "text/plain")
+    assert send(port, "PUT", b"{oops") == (400, "body is not JSON", "text/plain")
     assert json.loads(call(port)[1]) == SAVED
 
 
 def test_the_route_refuses_writes_from_another_origin_or_without_json(port):
-    assert call(port, "PUT", SAVED, origin="http://evil.test") == (403, "origin not allowed")
-    assert call(port, "PUT", SAVED, origin=None) == (403, "origin not allowed")
-    assert call(port, "PUT", SAVED, ctype="text/plain") == (415, "Content-Type must be application/json")
+    assert send(port, "PUT", SAVED, origin="http://evil.test") == (403, "origin not allowed", "text/plain")
+    assert send(port, "PUT", SAVED, origin=None) == (403, "origin not allowed", "text/plain")
+    assert send(port, "PUT", SAVED, ctype="text/plain") == (
+        415,
+        "Content-Type must be application/json",
+        "text/plain",
+    )
     assert call(port) == (200, "{}")
+
+
+def test_only_the_path_before_the_first_question_mark_names_the_route(port):
+    assert call(port, "PUT", SAVED, query="?a?b") == (200, json.dumps(SAVED))

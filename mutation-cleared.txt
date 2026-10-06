@@ -446,5 +446,45 @@
   "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
     "reader": "Standards",
     "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_3:598997e79f7d412167c6beee1ac5fbdcca3b57fb3508ad28c522061f439fef33": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_4:9b560b3ea8ee97b8922ab8351286750b7970668329d2c637234a54bdcaa23c49": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_22:26bef4343065a27111b4674bf5791768f1b78a1edc7883bd3910126b2247e099": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_44:ff6bf571515052f282afd075fe537c98e6917c4f74038e1db2466cbf96d9d1fe": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_45:dd9465c9ef8129804fadd87b9b90455a5b5e605b288544bb0bd62198c9e1cadc": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
+    "reader": "Standards",
+    "reason": "A missing Content-Type falls back to a string that still fails the JSON prefix check, so the reply stays 415."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_46:7374461744906904efa61ede8f451b72aa1902b3c6c0fd7178d398d59476d96c": {
+    "reader": "Standards",
+    "reason": "Without Content-Length the one byte read meets the end of the request and loads treats it like the empty body, so the layout resets the same way."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_4:36d3beba1cd47ad89a91902da0d676d2b1ad9b87097be0a3cc581c2935f66222": {
+    "reader": "Standards",
+    "reason": "Splitting on every question mark leaves the same first piece, so the route match is unchanged."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
+    "reader": "Standards",
+    "reason": "A second split point leaves the same first piece, so the route match is unchanged."
   }
 }
