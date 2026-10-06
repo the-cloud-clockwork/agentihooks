@@ -63,19 +63,19 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
@@ -103,19 +103,19 @@
     "reader": "Standards reviewer /root/standards",
     "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
@@ -162,5 +162,61 @@
   "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_9:db650bcc5795fba8ce5b52cdf81787eff48ad84aac2763ff09f571e17b294e40": {
     "reader": "Standards",
     "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_2:0766c7e16ccc270811e3db18723200a340c54931164ede9f6cd6904a89a9bac3": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_3:0cda8c824382f55f9e4e0b9f399856f9365e6883790bf10ff3030f514843c2c9": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_10:3136ccf21897a7566d6b8b5ba04f2ca68861c2a1648f24a686d3db428cf56f6e": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_13:c5d8c3f9ca7a5543fb0edc5454af4dce15c3f4b71baf0ef546af1e9d5c4327ac": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_20:91a2107bb666bd0a8d6236d009b4f0cb8e001ba1ecedb7ea2398368526606ca9": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_22:91b1cf229879c499c0af05f2689df00140bc8befc565e914c2cf442fc07f7952": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_46:2085aef4a54ce95ccf47db3617526cd578ed796cd23e20b77a6aa199310358e9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_47:5421a566d31e45e68a56112d16a54a8f9b3f2e6b4898eaf779cdc8bd09324d87": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_49:377a6610a3c77277eda2730d2dcfaa2a237606aade63eceb93f0a3dec2b653d9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_51:4c921b9cf51d37eb17a03454fec807127891e96d74072dd4727c93bef3ee4e37": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_35:7c0a36c84aafb488f246e9d44e97322663e734ec1a168bc42d2eaca8d774f03a": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_37:972a27b9dc1bbf70ca5df60a0b7301cb66c0d98cf5b8781e46529431cfae995f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_43:7287b0e795ede253d6db09994deaa8690effb47dde4a441d6b8647f3001b557f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_46:71b315daf5b45ef7aa8e2c0bf9c396a176389f9026a537f846852bb6fd17451c": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
   }
 }
