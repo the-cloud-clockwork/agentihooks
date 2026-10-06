@@ -417,12 +417,27 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
     assert render.render(target, "rb-role") is not None
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_stamp_redoes_render_when_operator_plugins_change(world, target):
+    from scripts.profiles import render
+
+    settings = world["home"] / ".claude" / "settings.json"
+    _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+    _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
+    assert render.stamp("rb-role")["plugins"] == {"later@m": True, "mine@m": True}
+    assert render.render(target, "rb-role") is not None
+    assert render.render(target, "rb-role") is None
+
+
 def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
-    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": ["rb-base", "rb-kit", "rb-role"]}
-    assert render._stamp(None, []) == {"bundle_commit": "", "chain": []}
+    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": ["rb-base", "rb-kit", "rb-role"], "plugins": {}}
+    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}}
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 
