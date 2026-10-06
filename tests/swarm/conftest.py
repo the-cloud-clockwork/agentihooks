@@ -1,7 +1,8 @@
 import pytest
 
 from hooks.classifier import ClassifierUnavailable
-from scripts.swarm import model_pick, priority_sweep, slice_screen
+from scripts.gates import intent
+from scripts.swarm import model_pick, priority_sweep, slice_screen, trace_plan
 
 
 @pytest.fixture(autouse=True)
@@ -11,5 +12,9 @@ def isolate_classifier(monkeypatch):
 
     monkeypatch.setattr(model_pick, "decide", unavailable)
     monkeypatch.setattr(slice_screen, "decide", unavailable)
+    monkeypatch.setattr(trace_plan, "decide", unavailable)
     monkeypatch.setattr(priority_sweep, "decide", unavailable)
     monkeypatch.setattr(priority_sweep.ledger_events, "view", lambda url: None)
+    monkeypatch.setattr(intent, "decide", unavailable)
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: False)
+    monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)

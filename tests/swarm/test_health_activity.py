@@ -173,3 +173,22 @@ def test_rows_of_reads_one_agents_rows(tmp_path):
     assert activity.rows_of("sw", "sw-eng-1", tmp_path) == [{"kind": "watch", "at": 1}]
     assert activity.rows_of("sw", "sw-eng-3", tmp_path) == []
     assert activity.rows_of("none", "sw-eng-1", tmp_path / "missing") == []
+
+
+@pytest.mark.parametrize("slug", ["", ".", "..", "sw/..", "sw/eng", "absolute"])
+def test_clear_refuses_a_name_that_is_not_one_folder_under_the_root(tmp_path, slug):
+    root = tmp_path / "activity"
+    activity.record("Monitor", {}, BOUND, root)
+    with pytest.raises(ValueError, match="refusing to clear swarm activity for .*: not one folder under"):
+        activity.clear(str(tmp_path) if slug == "absolute" else slug, root)
+    assert activity.counts("sw", root) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}
+
+
+def test_clear_removes_only_the_named_swarm(tmp_path):
+    root = tmp_path / "activity"
+    activity.record("Monitor", {}, BOUND, root)
+    activity.record("Monitor", {}, {**BOUND, "AGENTIHOOKS_SWARM": "other"}, root)
+    activity.clear("sw", root)
+    activity.clear("sw", root)
+    assert activity.counts("sw", root) == {}
+    assert activity.counts("other", root) == {"sw-eng-1": {"watch": 1, "act": 0, "since": 1}}

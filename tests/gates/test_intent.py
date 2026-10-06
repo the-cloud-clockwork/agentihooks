@@ -1,0 +1,484 @@
+import json
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
+from hooks.classifier import ClassifierUnavailable, YesNo
+from scripts.gates import Call, Gate, Who, entry, intent
+from scripts.gates.verdicts import Verdicts
+
+SLUG, ME, TASK = "demo", "engineer@1-1", "t1"
+WHO = Who(name=ME, swarm=SLUG, lane="eng", task=TASK)
+URL = "https://github.com/o/r/pull/9"
+NOW = 1_000_000_000
+DOC = {
+    "overview": "Gates in code.",
+    "phases": [
+        {"id": "p1", "title": "Other", "description": "not this"},
+        {"id": "p8", "title": "Gates", "description": "Stop failures."},
+    ],
+    "tasks": [
+        {
+            "id": TASK,
+            "phase": "p8",
+            "title": "Intent check",
+            "description": "Refuse merge on a failed check.",
+            "state": "pr",
+            "pr_url": URL,
+            "claimed_by": ME,
+        },
+    ],
+}
+PR = {"title": "Add the intent gate", "body": "Closes 1", "files": ["scripts/gates/intent.py"]}
+
+
+def bash(command):
+    return Call("Bash", {"command": command})
+
+
+def verdicts(tmp_path):
+    return Verdicts(SLUG, "intent", tmp_path)
+
+
+def rows(tmp_path):
+    path = tmp_path / SLUG / "gates" / "log.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def answer(noul):
+    return SimpleNamespace(noul=noul)
+
+
+def classifier(usable, delivers=0.9, reachable=0.9, seen=None):
+    def decide(state, questions, purpose):
+        if seen is not None:
+            seen.append((state, questions, purpose))
+        return SimpleNamespace(
+            answers={"usable": answer(usable), "delivers": answer(delivers), "reachable": answer(reachable)}
+        )
+
+    return decide
+
+
+class Ran:
+    def __init__(self, *results):
+        self.results, self.calls = list(results), []
+
+    def __call__(self, args, **kwargs):
+        self.calls.append((args, kwargs))
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        code, out = result
+        return subprocess.CompletedProcess(args, code, stdout=out, stderr="")
+
+
+class TestGate:
+    def test_it_is_a_registered_gate_that_ships_in_observe(self):
+        gate = intent.IntentGate()
+        assert isinstance(gate, Gate)
+        assert (gate.name, gate.default_mode) == ("intent", "observe")
+        assert isinstance(entry.GATES["intent"], intent.IntentGate)
+
+    def test_it_matches_bash_calls_naming_merge_or_done(self):
+        gate = intent.IntentGate()
+        assert gate.matches(bash("gh pr merge 9 --squash"))
+        assert gate.matches(bash("agentihooks swarm demo done --pr x"))
+        assert not gate.matches(bash("gh pr view 9"))
+        assert not gate.matches(Call("Read", {"command": "gh pr merge 9"}))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh pr merge 9 --squash",
+            "cd x && /usr/bin/gh pr merge --rebase 9",
+            f"agentihooks swarm {SLUG} done --pr {URL}",
+            f"env A=1 agentihooks swarm {SLUG} done",
+        ],
+    )
+    def test_a_failed_verdict_refuses_merge_and_done(self, tmp_path, command):
+        verdicts(tmp_path).write(TASK, "fail", "the phase can use this change at probability 0.10", NOW)
+        decision = intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path))
+        assert not decision.allowed
+        assert decision.reason == (
+            f"intent check failed for task {TASK}: the phase can use this change at probability 0.10. Deliver the "
+            f"missing piece, then run agentihooks swarm {SLUG} pr <url> for a new check, or block with "
+            f'agentihooks swarm {SLUG} block "<why>"'
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh pr view 9",
+            "gh pr checks 9",
+            "echo gh pr merge",
+            "agentihooks swarm demo pr x",
+            "agentihooks swarm done",
+            "agentihooks ledger demo done",
+            "git merge dev",
+            "A=1; gh pr view 9",
+        ],
+    )
+    def test_other_commands_pass_a_failed_verdict(self, tmp_path, command):
+        verdicts(tmp_path).write(TASK, "fail", "no", NOW)
+        assert intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path)).allowed
+
+    @pytest.mark.parametrize(
+        "who",
+        [Who(name=ME, swarm="", task=TASK), Who(name="", swarm=SLUG, task=TASK), Who(name=ME, swarm=SLUG, task="")],
+    )
+    def test_a_session_outside_a_swarm_task_passes(self, tmp_path, who):
+        verdicts(tmp_path).write(TASK, "fail", "no", NOW)
+        verdicts(tmp_path).write("", "fail", "no", NOW)
+        assert intent.IntentGate().decide(bash("gh pr merge 9"), who, verdicts(tmp_path)).allowed
+
+    @pytest.mark.parametrize("verdict", [None, "pass", "unchecked"])
+    def test_no_verdict_a_pass_and_unchecked_let_merge_through(self, tmp_path, verdict):
+        if verdict:
+            verdicts(tmp_path).write(TASK, verdict, "fine", NOW)
+        assert (
+            intent.IntentGate(clock=lambda: NOW / 1000).decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+        )
+        assert rows(tmp_path) == []
+
+    def test_the_refusal_names_the_whole_seconds_waited(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW)
+        gate = intent.IntentGate(clock=lambda: (NOW + 100_000) / 1000)
+        assert "started 100 s ago" in gate.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).reason
+
+    def test_a_pending_verdict_refuses_for_two_minutes_then_passes_unchecked_and_counted(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW)
+        early = intent.IntentGate(clock=lambda: (NOW + 119_999) / 1000)
+        decision = early.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path))
+        assert not decision.allowed
+        assert decision.reason == (
+            f"intent check running for task {TASK}, started 119 s ago; it passes unchecked at 120 s. Wait for it: "
+            f'agentihooks swarm {SLUG} wait 2 --reason "intent check"'
+        )
+        assert rows(tmp_path) == []
+        late = intent.IntentGate(clock=lambda: (NOW + 120_000) / 1000)
+        assert late.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+        [row] = rows(tmp_path)
+        assert (row["gate"], row["kind"], row["agent"], row["task"], row["tool"]) == (
+            "intent",
+            "count",
+            ME,
+            TASK,
+            "Bash",
+        )
+        assert row["reason"] == "intent check still pending after two minutes, passed unchecked"
+
+
+class TestBody:
+    def test_the_section_names_project_phase_and_task(self):
+        assert intent.section(DOC, DOC["tasks"][0]) == (
+            f"{intent.START}\n## Parent intent\n\n**Project:** Gates in code.\n\n**Phase Gates:** Stop failures.\n\n"
+            f"**Task {TASK}, Intent check:** Refuse merge on a failed check.\n{intent.END}"
+        )
+
+    def test_a_task_with_no_phase_gets_empty_phase_fields(self):
+        text = intent.section({"overview": "o", "phases": []}, {"id": "x", "title": "T", "description": "d"})
+        assert "**Phase :** \n" in text
+
+    def test_with_intent_appends_once_and_replaces_after(self):
+        first = intent.with_intent("Closes 1\n\n", "S1")
+        assert first == "Closes 1\n\nS1"
+        assert intent.with_intent("", "S1") == "S1"
+        old = f"Top\n\n{intent.START}\nold\n{intent.END}\n\nTail"
+        assert intent.with_intent(old, "NEW") == "Top\n\nNEW\n\nTail"
+
+    def test_only_the_first_section_is_replaced_up_to_its_own_end(self):
+        start, end = intent.START, intent.END
+        assert intent.with_intent(f"{start}\na\n{end}\nmid {end}", "N\\1") == f"N\\1\nmid {end}"
+        assert intent.with_intent(f"{start}a{end} mid {start}b{end}", "N") == f"N mid {start}b{end}"
+
+    def test_a_start_marker_without_its_end_appends(self):
+        assert intent.with_intent(f"x {intent.START} y", "S") == f"x {intent.START} y\n\nS"
+        assert intent.with_intent(f"{intent.END} x {intent.START}", "S") == f"{intent.END} x {intent.START}\n\nS"
+
+    def test_stamp_body_reads_the_body_and_patches_it_through_gh_api(self):
+        ran = Ran((0, json.dumps({"body": "Closes 1"})), (0, "{}"))
+        assert intent.stamp_body(URL, DOC, DOC["tasks"][0], run=ran)
+        (read, read_kw), (patch, patch_kw) = ran.calls
+        assert read == ["gh", "pr", "view", URL, "--json", "body"]
+        assert patch == ["gh", "api", "--method", "PATCH", "repos/o/r/pulls/9", "--input", "-"]
+        assert json.loads(patch_kw["input"]) == {"body": "Closes 1\n\n" + intent.section(DOC, DOC["tasks"][0])}
+        for kwargs in (read_kw, patch_kw):
+            assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
+
+    def test_a_null_body_is_treated_as_empty(self):
+        ran = Ran((0, json.dumps({"body": None})), (0, "{}"))
+        assert intent.stamp_body(URL, DOC, DOC["tasks"][0], run=ran)
+        assert json.loads(ran.calls[1][1]["input"])["body"] == intent.section(DOC, DOC["tasks"][0])
+
+    @pytest.mark.parametrize(
+        "results",
+        [
+            [(1, "")],
+            [(0, json.dumps({"body": "x"})), (1, "")],
+            [(0, "not json")],
+            [OSError("no gh")],
+            [subprocess.TimeoutExpired("gh", 1)],
+        ],
+    )
+    def test_stamp_body_reports_failure_without_raising(self, results):
+        assert intent.stamp_body(URL, DOC, DOC["tasks"][0], run=Ran(*results)) is False
+
+    def test_a_url_that_is_not_a_pull_request_is_not_stamped(self):
+        ran = Ran()
+        assert intent.stamp_body("https://example.com/x", DOC, DOC["tasks"][0], run=ran) is False
+        assert ran.calls == []
+
+
+@pytest.fixture
+def stamped(monkeypatch):
+    seen = []
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task: seen.append((url, doc, task)) or bool(seen))
+    return seen
+
+
+class TestStamp:
+    def test_stamp_arms_a_pending_verdict_and_writes_the_body(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, TASK, URL, DOC, "observe", NOW, home=tmp_path) == {
+            "verdict": "pending",
+            "body": True,
+        }
+        assert stamped == [(URL, DOC, DOC["tasks"][0])]
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
+
+    def test_off_writes_the_body_and_arms_nothing(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, TASK, URL, DOC, "off", NOW, home=tmp_path) == {"verdict": "off", "body": True}
+        assert verdicts(tmp_path).read(TASK) is None
+
+    def test_an_unknown_task_writes_no_body(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, "nope", URL, DOC, "enforce", NOW, home=tmp_path)["body"] is False
+        assert stamped == []
+
+
+class TestJudge:
+    def test_judge_asks_three_yes_no_questions_under_its_purpose(self):
+        seen = []
+        assert intent.judge({"s": 1}, decide=classifier(0.8, seen=seen)) == (
+            "pass",
+            "the phase can use it as delivered at probability 0.80",
+        )
+        [(state, questions, purpose)] = seen
+        assert (state, purpose) == ({"s": 1}, "intent-check")
+        assert list(questions) == ["usable", "delivers", "reachable"]
+        assert all(isinstance(q, YesNo) for q in questions.values())
+
+    def test_exactly_the_line_passes(self):
+        assert intent.judge({}, decide=classifier(0.3))[0] == "pass"
+
+    def test_under_the_line_fails_with_the_low_diagnostics_as_reasons(self):
+        assert intent.judge({}, decide=classifier(0.29, delivers=0.49, reachable=0.2)) == (
+            "fail",
+            "the phase can use this change at probability 0.29, under 0.3; the change may not deliver what the task "
+            "text asks; nothing in the change may let the phase reach it",
+        )
+        assert intent.judge({}, decide=classifier(0.1, delivers=0.5, reachable=0.5)) == (
+            "fail",
+            "the phase can use this change at probability 0.10, under 0.3",
+        )
+
+    def test_a_classifier_that_does_not_answer_gives_unchecked(self):
+        def down(state, questions, purpose):
+            raise ClassifierUnavailable("down")
+
+        assert intent.judge({}, decide=down) == ("unchecked", "the classifier did not answer")
+
+
+class TestState:
+    def test_the_state_carries_intent_the_pull_request_and_the_proof(self, tmp_path):
+        (tmp_path / "proof.md").write_text("x" * 10 + "tail of proof")
+        task = {**DOC["tasks"][0], "workspace": str(tmp_path), "proof": {"command": "pytest"}}
+        state = intent.state_of({**DOC, "tasks": [task]}, task, PR, proof_chars=13)
+        assert state == {
+            "overview": "Gates in code.",
+            "phase": "Gates",
+            "phase_intent": "Stop failures.",
+            "task": "Intent check",
+            "task_text": "Refuse merge on a failed check.",
+            "pull_request_title": "Add the intent gate",
+            "pull_request_body": "Closes 1",
+            "changed_files": ["scripts/gates/intent.py"],
+            "proof": {"command": "pytest"},
+            "proof_notes": "tail of proof",
+        }
+
+    def test_a_task_without_a_workspace_has_no_proof_notes(self):
+        state = intent.state_of(DOC, DOC["tasks"][0], PR)
+        assert (state["proof"], state["proof_notes"]) == ({}, "")
+        missing = intent.state_of(DOC, {**DOC["tasks"][0], "workspace": "/nonexistent/x"}, PR)
+        assert missing["proof_notes"] == ""
+
+    def test_a_task_with_no_phase_has_empty_phase_fields(self):
+        state = intent.state_of({**DOC, "phases": []}, DOC["tasks"][0], PR)
+        assert (state["phase"], state["phase_intent"]) == ("", "")
+
+    @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
+    def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
+        raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
+        ran = Ran((0, json.dumps(raw)))
+        assert intent.pr_view(URL, run=ran) == {"title": "T", "body": expected, "files": ["a.py", "b.py"]}
+        args, kwargs = ran.calls[0]
+        assert args == ["gh", "pr", "view", URL, "--json", "title,body,files"]
+        assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
+
+    @pytest.mark.parametrize("results", [[(1, "")], [(0, "nope")], [OSError("x")], [(0, json.dumps({"body": "b"}))]])
+    def test_pr_view_returns_none_when_github_does_not_answer(self, results):
+        assert intent.pr_view(URL, run=Ran(*results)) is None
+
+
+class Ledger:
+    def __init__(self):
+        self.updates, self.comments = [], []
+
+    def update_task(self, slug, task_id, fields, by="swarm"):
+        self.updates.append((slug, task_id, fields, by))
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((slug, task_id, text, by))
+
+
+class Mail:
+    def __init__(self):
+        self.sent = []
+
+    def engineer(self, task):
+        return f"seat-of-{task.get('claimed_by')}"
+
+    def send(self, key, address, text, ref=""):
+        self.sent.append((key, address, text, ref))
+        return [f"told {address}: {key}"]
+
+
+def check(tmp_path, mode="enforce", view=lambda url: PR, ask=None, ledger=None, mail=None):
+    return intent.Check(SLUG, mode, NOW, ledger or Ledger(), mail or Mail(), view, ask, home=tmp_path)
+
+
+def run_pass(tmp_path, mode="enforce", usable=0.1, doc=DOC, view=None):
+    ledger, mail, viewed = Ledger(), Mail(), []
+
+    def read(url):
+        viewed.append(url)
+        return PR if view is None else view
+
+    def ask(state):
+        return intent.judge(state, classifier(usable))
+
+    actions = check(tmp_path, mode, read, ask, ledger, mail).run(doc)
+    return SimpleNamespace(actions=actions, ledger=ledger, mail=mail, viewed=viewed)
+
+
+FAIL_REASON = "the phase can use this change at probability 0.10, under 0.3"
+FAIL_TEXT = (
+    f"The intent check failed: {FAIL_REASON}. Deliver the missing piece and run swarm pr again, "
+    "or block the task with these reasons."
+)
+
+
+class TestCheckPass:
+    def test_a_fail_under_enforce_returns_the_task_to_its_agent(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW - 5)
+        got = run_pass(tmp_path)
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "fail", "reason": FAIL_REASON, "at": NOW}
+        assert got.viewed == [URL]
+        assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
+        assert got.ledger.comments == [(SLUG, TASK, FAIL_TEXT, "swarm")]
+        assert got.mail.sent == [(f"intent-fail:{TASK}:{NOW}", f"seat-of-{ME}", FAIL_TEXT, f"tasks/{TASK}")]
+        [row] = rows(tmp_path)
+        assert (row["gate"], row["kind"], row["agent"], row["task"], row["reason"]) == (
+            "intent",
+            "deny",
+            ME,
+            TASK,
+            FAIL_REASON,
+        )
+        assert got.actions == [f"task {TASK} intent check fail", f"told seat-of-{ME}: intent-fail:{TASK}:{NOW}"]
+
+    def test_a_fail_under_observe_is_only_logged(self, tmp_path):
+        got = run_pass(tmp_path, mode="observe")
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "fail"
+        assert (got.ledger.updates, got.ledger.comments, got.mail.sent) == ([], [], [])
+        assert [(r["kind"], r["agent"], r["reason"]) for r in rows(tmp_path)] == [("observe", ME, FAIL_REASON)]
+        assert got.actions == [f"task {TASK} intent check fail"]
+
+    def test_off_skips_the_check(self, tmp_path):
+        got = run_pass(tmp_path, mode="off")
+        assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
+
+    def test_a_task_in_pr_with_no_verdict_is_armed_and_judged_in_the_same_pass(self, tmp_path):
+        got = run_pass(tmp_path, usable=0.9)
+        assert verdicts(tmp_path).read(TASK) == {
+            "verdict": "pass",
+            "reason": "the phase can use it as delivered at probability 0.90",
+            "at": NOW,
+        }
+        assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
+        assert got.actions == [f"task {TASK} intent check pass"]
+
+    @pytest.mark.parametrize("verdict", ["pass", "fail", "unchecked"])
+    def test_a_judged_task_is_not_asked_again(self, tmp_path, verdict):
+        verdicts(tmp_path).write(TASK, verdict, "done before", NOW - 5)
+        got = run_pass(tmp_path)
+        assert (got.actions, got.viewed) == ([], [])
+        assert verdicts(tmp_path).read(TASK)["at"] == NOW - 5
+
+    @pytest.mark.parametrize("task", [{"state": "claimed"}, {"pr_url": ""}, {"state": "done"}])
+    def test_only_tasks_in_pr_with_a_pull_request_are_checked(self, tmp_path, task):
+        doc = {**DOC, "tasks": [{**DOC["tasks"][0], **task}]}
+        got = run_pass(tmp_path, doc=doc)
+        assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
+
+    def test_an_unreadable_pull_request_stays_pending(self, tmp_path):
+        assert check(tmp_path, view=lambda url: None).run(DOC) == []
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
+
+    def test_an_unanswered_classifier_writes_unchecked_and_counts_it(self, tmp_path):
+        ledger, mail = Ledger(), Mail()
+        down = check(tmp_path, ask=lambda s: ("unchecked", "the classifier did not answer"), ledger=ledger, mail=mail)
+        assert down.run(DOC) == [f"task {TASK} intent check unchecked"]
+        assert verdicts(tmp_path).read(TASK)["verdict"] == "unchecked"
+        assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(tmp_path)] == [
+            ("intent", "count", ME, TASK, "the classifier did not answer")
+        ]
+        assert (ledger.updates, mail.sent) == ([], [])
+
+    def test_the_classifier_is_asked_with_the_task_state(self, tmp_path):
+        seen = []
+        check(tmp_path, "observe", ask=lambda s: seen.append(s) or ("pass", "ok")).run(DOC)
+        assert seen == [intent.state_of(DOC, DOC["tasks"][0], PR)]
+
+    def test_a_task_with_no_claim_is_logged_with_no_agent(self, tmp_path):
+        task = {k: v for k, v in DOC["tasks"][0].items() if k != "claimed_by"}
+        run_pass(tmp_path, mode="observe", doc={**DOC, "tasks": [task]})
+        assert [(r["agent"], r["task"]) for r in rows(tmp_path)] == [("", TASK)]
+
+    def test_skipped_tasks_do_not_stop_the_pass(self, tmp_path):
+        base = DOC["tasks"][0]
+        tasks = [
+            {**base, "id": "a", "state": "claimed"},
+            {**base, "id": "b"},
+            {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
+            {**base, "id": "d"},
+        ]
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5)
+
+        def view(url):
+            return None if url.endswith("/404") else PR
+
+        actions = check(tmp_path, "observe", view=view, ask=lambda s: ("pass", "ok")).run({**DOC, "tasks": tasks})
+        assert actions == ["task d intent check pass"]
+        assert [verdicts(tmp_path).read(t)["verdict"] for t in "bcd"] == ["pass", "pending", "pass"]
+
+
+class TestModeOf:
+    @pytest.mark.parametrize(
+        "value,expected",
+        [("enforce", "enforce"), ("off", "off"), ("observe", "observe"), ("bogus", "observe"), (None, "observe")],
+    )
+    def test_the_swarm_setting_picks_the_tick_mode(self, value, expected):
+        gates = {} if value is None else {"intent": value}
+        assert intent.mode_of(SimpleNamespace(gates=gates)) == expected

@@ -13,6 +13,7 @@ from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
+from scripts.gates.intent import IntentGate
 from scripts.gates.reruns import RerunBudget
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
@@ -20,7 +21,10 @@ from scripts.gates.watch import WatchBudget
 
 LIFTED = "lifted by the operator: "
 
-GATES = {gate.name: gate for gate in (PinnedIdentity(), WatchBudget(), SubagentBudget(), RerunBudget(), ClaimStop())}
+GATES = {
+    gate.name: gate
+    for gate in (PinnedIdentity(), WatchBudget(), SubagentBudget(), RerunBudget(), IntentGate(), ClaimStop())
+}
 
 
 def main(argv=None, stdin=None, environ=None, home=None):

@@ -20,7 +20,7 @@ PLAIN = {
 
 def ruling(task, pull, waiting):
     """The work this stop leaves owed ('' when it may pass), and the pull request whose pending checks become the wait."""
-    url = task.get("pr_url", "")
+    url = task.get("pr_url")
     if url and pull is None:
         return "", ""
     if pull is not None and pull.state == "MERGED":
@@ -38,7 +38,7 @@ def ruling(task, pull, waiting):
 
 
 def refusal(owed, slug, task, pull):
-    url, block = task.get("pr_url", ""), f'agentihooks swarm {slug} block "<why>"'
+    url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     if owed == "merged":
         return f"your pull request {url} merged: close the task now with agentihooks swarm {slug} done --pr {url}"
     if owed == "red":
@@ -74,14 +74,14 @@ class ClaimStop:
         from scripts.swarm import idle
 
         store, now = self.connect(), self.now()
-        url = task.get("pr_url", "")
+        url = task.get("pr_url")
         held = idle.wait(store.redis, who.swarm, who.name)
-        live = held if held and held.get("until", 0) > now else None
+        live = held if held and held["until"] > now else None
         pull = self.github()(url) if url else None
         owed, checks = ruling(task, pull, live)
         if checks:
             on = {"kind": "checks", "target": checks}
-            idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, "", now, on=on)
+            idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
         streak = Streak(store, who.swarm, who.name)
         if not owed:
             streak.clear()
@@ -93,7 +93,7 @@ class ClaimStop:
         block_task(
             store, ledger, who, f"Blocked by the stop gate: the agent stopped {count} times while {PLAIN[owed]}."
         )
-        log.append(state.slug, log.Row.of(self.name, "blocked", who, "Stop", reason), state.home)
+        log.append(state.slug, log.Row.of(self.name, "blocked", who, call.tool, reason), state.home)
         return Decision()
 
     def connect(self):
@@ -135,9 +135,9 @@ class Streak:
     def bump(self, now):
         from scripts.gates.progress import Progress
 
-        held = json.loads(self.store.redis.get(self.key) or "{}")
+        held = json.loads(self.store.redis.get(self.key) or '{"count": 0, "at": 0}')
         outcome_at = Progress(self.store.redis, self.slug).read(self.name).outcome_at
-        count = held.get("count", 0) if outcome_at <= held.get("at", 0) else 0
+        count = held["count"] if outcome_at <= held["at"] else 0
         self.store.redis.set(self.key, json.dumps({"count": count + 1, "at": now}))
         return count + 1
 
@@ -146,12 +146,8 @@ class Streak:
 
 
 def block_task(store, ledger, who, note):
-    from scripts.swarm.cli import retire
+    from scripts.swarm.cli import block_agent
+    from scripts.swarm.store import AgentRecord
 
-    ledger.update_task(who.swarm, who.task, {"state": "blocked"}, by=who.name)
-    ledger.comment(who.swarm, who.task, note, by=who.name)
-    agent = next((a for a in store.agents(who.swarm) if a.name == who.name), None)
-    if agent is not None:
-        retire(store, who.swarm, agent, "blocked its task and exited")
-    else:
-        store.release(who.swarm, who.task, who.name)
+    found = next((a for a in store.agents(who.swarm) if a.name == who.name), None)
+    block_agent(store, who.swarm, found or AgentRecord(who.name, lane_of(who.name), who.task), note, ledger)

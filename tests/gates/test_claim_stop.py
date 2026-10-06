@@ -26,16 +26,17 @@ CLOSED = PullRequest("CLOSED", None, 1, False, True)
 class FakeLedger:
     def __init__(self, task):
         self.rows = {task["id"]: task}
-        self.comments = []
+        self.comments, self.updates = [], []
 
     def tasks(self, slug):
-        return list(self.rows.values())
+        return list(self.rows.values()) if slug == SLUG else []
 
     def update_task(self, slug, task_id, fields, by="swarm"):
+        self.updates.append((slug, task_id, fields, by))
         self.rows[task_id].update(fields)
 
     def comment(self, slug, task_id, text, by):
-        self.comments.append((task_id, text, by))
+        self.comments.append((slug, task_id, text, by))
 
 
 @pytest.fixture
@@ -137,12 +138,13 @@ def test_a_stop_on_pending_checks_passes_and_records_a_checked_wait(rig):
     held = idle.wait(rig.store.redis, SLUG, ME)
     assert held["on"] == {"kind": "checks", "target": URL}
     assert held["at"] == rig.clock[0] and held["until"] > rig.clock[0]
+    assert held["reason"] == f"checks on {URL}"
 
 
 def test_a_live_wait_lets_the_stop_through_and_an_expired_one_does_not(rig):
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "reviewers", rig.clock[0])
     assert rig.stop().allowed
-    rig.clock[0] += 120_000
+    rig.clock[0] += 60_000
     assert not rig.stop().allowed
 
 
@@ -152,14 +154,16 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
     assert not second.allowed and second.reason.endswith("(stop block 2 of 2; the next one blocks the task)")
     assert rig.stop().allowed
     assert rig.ledger.rows["t1"]["state"] == "blocked"
-    (task_id, text, by) = rig.ledger.comments[0]
-    assert (task_id, by) == ("t1", ME)
+    assert rig.ledger.updates == [(SLUG, "t1", {"state": "blocked"}, ME)]
+    (slug, task_id, text, by) = rig.ledger.comments[0]
+    assert (slug, task_id, by) == (SLUG, "t1", ME)
     assert text == (
         "Blocked by the stop gate: the agent stopped 3 times while it held the task with no pull request and no wait."
     )
     assert rig.store.claimant(SLUG, "t1") is None
     assert [a.state for a in rig.store.agents(SLUG)] == ["finished"]
-    assert [(r["gate"], r["kind"], r["agent"]) for r in rig.rows()] == [("claim-stop", "blocked", ME)]
+    assert [(r["gate"], r["kind"], r["agent"], r["tool"]) for r in rig.rows()] == [("claim-stop", "blocked", ME, "")]
+    assert rig.store.redis.get(f"agentihooks:swarm:{SLUG}:stop-blocks:{ME}") is None
 
 
 @pytest.mark.parametrize("owed", sorted(PLAIN))
@@ -175,7 +179,7 @@ def test_the_block_note_names_what_was_owed(rig, pull, owed):
     for _ in range(STREAK):
         rig.stop()
     assert rig.ledger.rows["t1"]["state"] == "blocked"
-    assert rig.ledger.comments[0][1].endswith(f"while {PLAIN[owed]}.")
+    assert rig.ledger.comments[0][2].endswith(f"while {PLAIN[owed]}.")
     assert rig.rows()[0]["reason"] == refusal(owed, SLUG, rig.task, pull)
 
 
@@ -242,6 +246,29 @@ def test_the_third_block_with_no_agent_record_still_blocks_the_task(rig):
     rig.stop()
     assert rig.stop().allowed
     assert rig.ledger.rows["t1"]["state"] == "blocked"
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert [(a.name, a.lane, a.task, a.state) for a in rig.store.agents(SLUG)] == [(ME, "eng", "t1", "finished")]
+
+
+def test_an_outcome_before_the_first_block_leaves_the_count_running(rig):
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", rig.clock[0] - 5)
+    assert not rig.stop().allowed
+    second = rig.stop()
+    assert second.reason.endswith("(stop block 2 of 2; the next one blocks the task)")
+    held = json.loads(rig.store.redis.get(f"agentihooks:swarm:{SLUG}:stop-blocks:{ME}"))
+    assert held == {"count": 2, "at": rig.clock[0]}
+
+
+def test_an_outcome_at_the_moment_of_a_block_belongs_before_it(rig):
+    assert not rig.stop().allowed
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", rig.clock[0])
+    assert rig.stop().reason.endswith("(stop block 2 of 2; the next one blocks the task)")
+
+
+def test_the_real_clock_reads_milliseconds():
+    import time
+
+    assert abs(ClaimStop().now() - time.time() * 1000) < 5_000
 
 
 def test_the_gate_entry_runs_it_by_name():

@@ -20,6 +20,7 @@ def started(env, monkeypatch):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
+    ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
     return store, ledger
 
 
@@ -36,7 +37,17 @@ def test_a_wait_on_checks_lasts_until_the_tick_ends_it(started, capsys):
         "at": 1_000,
         "on": {"kind": "checks", "target": URL},
     }
-    assert json.loads(capsys.readouterr().out)["on"] == {"kind": "checks", "target": URL}
+    assert json.loads(capsys.readouterr().out) == {
+        "agent": ME,
+        "until": "1970-01-01T12:00:01+00:00",
+        "on": {"kind": "checks", "target": URL},
+    }
+
+
+def test_the_wait_usage_names_its_kind_and_target(capsys):
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["sw", "wait", "--help"])
+    assert "--on KIND TARGET" in capsys.readouterr().out
 
 
 def test_minutes_bound_a_checked_wait(started):
@@ -67,6 +78,8 @@ def test_checked_wait_targets_are_checked(started, capsys):
 
 def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
     store, _ = started
+    assert run("sw", "--as", ME, "wait", "1") == 0
+    assert held(store)["until"] == 1_000 + 60_000
     assert run("sw", "--as", ME, "wait", "60") == 0
     assert held(store)["until"] == 1_000 + 60 * 60_000 and "on" not in held(store)
     assert run("sw", "--as", ME, "wait", "61") == 1
@@ -75,15 +88,14 @@ def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
     assert "a wait lasts a whole number of minutes above zero" in capsys.readouterr().err
 
 
-def test_the_tick_ends_a_checked_wait_whose_task_is_done(started):
+def test_the_tick_ends_a_checked_wait_whose_checks_resolved(started):
     from tests.swarm.test_delivery import FakeHerdr
     from tests.swarm.test_tick import FakeRuntime
 
     store, ledger = started
-    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
-    ledger.rows["t2"].update(state="done")
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
     actions = cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
-    assert f"ended the wait of {ME}: task t2, now done" in actions
+    assert f"ended the wait of {ME}: pull request {URL}, now merged" in actions
     assert held(store) is None
 
 
@@ -188,6 +200,18 @@ def test_bare_waits_and_finished_agents_are_left_alone(tick):
     tick.hold("task", "t2")
     tick.store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw", state="finished"))
     assert tick.end({}) == []
+
+
+def test_a_skipped_agent_never_stops_the_pass_for_the_next(tick):
+    bare, running, done = (f"engineer@a1b2c3-000{n}" for n in (0, 2, 3))
+    for name in (bare, running, done):
+        tick.store.put_agent("sw", AgentRecord(name=name, lane="eng", task="t1"))
+    tick.store.drop_agent("sw", ME)
+    idle.declare_wait(tick.store.redis, "sw", bare, 10_000_000, "deploy", 1)
+    idle.declare_wait(tick.store.redis, "sw", running, 10_000_000, "", 1, on={"kind": "task", "target": "t2"})
+    idle.declare_wait(tick.store.redis, "sw", done, 10_000_000, "", 1, on={"kind": "task", "target": "t3"})
+    rows = {"t2": {"id": "t2", "state": "claimed"}, "t3": {"id": "t3", "state": "done"}}
+    assert tick.end(rows) == [f"ended the wait of {done}: task t3, now done"]
 
 
 def test_an_agent_without_a_seat_is_told_by_name(tick):

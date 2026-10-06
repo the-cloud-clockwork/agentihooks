@@ -24,6 +24,7 @@ agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
+agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
 --evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
 """
@@ -42,7 +43,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace
 from scripts.doctor import priming
-from scripts.gates import Who, progress
+from scripts.gates import Who, intent, modes, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -71,6 +72,7 @@ from scripts.swarm import (
     take_master,
     templates,
     timer,
+    trace_plan,
     waits,
 )
 from scripts.swarm.health import activity
@@ -80,7 +82,7 @@ from scripts.swarm.runtime import HerdrRuntime, _bin
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
 from scripts.swarm.tick import agent_status, primed, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, plan_shape
+from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 
 SETTABLE = {
     "max-eng-agents": "max_eng",
@@ -92,7 +94,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
-GATE_KEYS = {"talk-gate": "talk"}
+GATE_KEYS = {"talk-gate": "talk", "intent-gate": intent.NAME}
 GATE_MODES = ("enforce", "observe", "off")
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
@@ -141,6 +143,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
+        actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         actions += waits.end_pass(store, slug, {t["id"]: t for t in doc["tasks"]}, inbox, ledger_events.view)
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
@@ -561,10 +565,13 @@ def cmd_issue(store, args):
 
 def cmd_pr(store, args):
     agent = _worker(store, args)
-    awaiting = "approval" if store.config(args.slug).autonomy == ASSIST else ""
+    config = store.config(args.slug)
+    awaiting = "approval" if config.autonomy == ASSIST else ""
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting}
-    LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
-    print(json.dumps({"task": agent.task, "pr_url": args.url}))
+    ledger = LedgerClient()
+    checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())
+    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    print(json.dumps({"task": agent.task, "pr_url": args.url, "intent": checked}))
 
 
 def cmd_done(store, args):
@@ -581,23 +588,42 @@ def cmd_done(store, args):
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    retire(store, args.slug, agent, "finished its task and exited")
+    _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
 
 
 def cmd_block(store, args):
     agent = _worker(store, args)
-    ledger = LedgerClient()
-    ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
-    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
-    retire(store, args.slug, agent, "blocked its task and exited")
+    block_agent(store, args.slug, agent, args.note, LedgerClient())
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+
+
+def block_agent(store, slug, agent, note, ledger):
+    ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
+    ledger.comment(slug, agent.task, note, by=agent.name)
+    _retire(store, slug, agent, "blocked its task and exited")
+
+
+def cmd_trace_plan(store, args):
+    agent = _worker(store, args)
+    ledger = LedgerClient()
+    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    who = Who(name=agent.name, swarm=args.slug, task=agent.task)
+    folder = ledger_workspace.folder(args.slug, agent.task)
+    mode = modes.mode(trace_plan.GATE, os.environ)
+    try:
+        record, block = trace_plan.run(folder, state, ledger, who, mode)
+    except ValueError as exc:
+        raise SwarmError(str(exc)) from exc
+    if block:
+        block_agent(store, args.slug, agent, trace_plan.block_note(record), ledger)
+    print(json.dumps(trace_plan.report(agent.task, record, block)))
 
 
 def cmd_wait(store, args):
     agent = _me(store, args)
     held = waits.on(*args.on) if args.on else None
-    if held is None and not (args.minutes and args.minutes > 0):
+    if held is None and (args.minutes or 0) <= 0:
         raise SwarmError("a wait lasts a whole number of minutes above zero")
     if held is None and args.minutes > waits.BARE_MAX_MINUTES:
         raise SwarmError(
@@ -746,7 +772,7 @@ def _seat(agent):
     return agent.seat
 
 
-def retire(store, slug, agent, exit_text):
+def _retire(store, slug, agent, exit_text):
     store.release(slug, agent.task, agent.name)
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, "", exit_text)
@@ -799,6 +825,7 @@ def build_parser():
     for key in ledger_kinds.PROOF_KEYS:
         done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
     sub.add_parser("block").add_argument("note")
+    sub.add_parser("trace-plan")
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
