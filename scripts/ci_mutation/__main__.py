@@ -1,0 +1,25 @@
+import argparse
+import os
+from pathlib import Path
+
+from scripts.ci_mutation.runner import run_gate
+from scripts.ci_mutation.scope import discover_changes
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", default="origin/dev")
+    parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--output", type=Path, default=Path(".mutation-gate"))
+    parser.add_argument("--budget", type=float, default=1080)
+    args = parser.parse_args()
+    os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    root = Path.cwd()
+    changes = discover_changes(root, args.base, args.head)
+    print(f"Changed Python files: {len(changes)}", flush=True)
+    report = run_gate(root, changes, args.output.resolve(), args.budget)
+    return int(report["failed"])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
