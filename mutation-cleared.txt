@@ -494,5 +494,9 @@
   "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_4:9e1ebae557e612a845bc7237c35999a4b6215d20f6b7ef4724741ea44b81cb8b": {
     "reader": "Standards",
     "reason": "UTF-8 and utf-8 resolve to the same codec and decode identical text."
+  },
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_5:f5e23bf533a952c9edfe36d3d3648ec52d1334ecc4fcb592118c37debc4ca22e": {
+    "reader": "Standards",
+    "reason": "build_persona only checks if pending_rules, so None and an empty list take the same branch for every input."
   }
 }
