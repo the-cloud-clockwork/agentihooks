@@ -318,3 +318,22 @@ def test_selector_usage_names_command_exactly(capsys):
     with pytest.raises(SystemExit):
         select_profile.main(["--help"])
     assert capsys.readouterr().out.startswith("usage: agentihooks select-profile ")
+
+
+@pytest.mark.parametrize("args", [["--help"], ["-h"], ["--mode", "unrelated"], ["--eff", "unrelated"]])
+def test_native_help_and_abbreviations_are_forwarded(profile, args):
+    _, result = select_profile.prepare("engineer", "claude", "", "", args, {})
+    assert result == ["--model", "sonnet", "--effort", "medium", *args]
+
+
+@pytest.mark.parametrize("flag", ["-cother=true", "--config=other=true"])
+def test_other_attached_codex_config_preserves_order(profile, flag):
+    _, result = select_profile.prepare("qa", "codex", "", "", ["exec", flag, "OK"], {})
+    assert result == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", flag, "OK"]
+
+
+def test_profile_render_dispatch_forwards_arguments_and_exit(monkeypatch):
+    main = Mock(return_value=7)
+    monkeypatch.setattr(select_profile.profiles, "main", main)
+    assert select_profile.dispatch(["profile", "render", "engineer", "--target", "claude"]) == 7
+    main.assert_called_once_with(["render", "engineer", "--target", "claude"])
