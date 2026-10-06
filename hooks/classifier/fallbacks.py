@@ -27,6 +27,11 @@ def luna_model() -> str:
 def _run(args: list[str], request: DecisionRequest, cwd: Path) -> subprocess.CompletedProcess:
     env = {**os.environ, "AGENTIHOOKS_CLASSIFIER_CHILD": "1"}
     env.pop("CLAUDECODE", None)
+    if args[0] == "claude" and not env.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        route = env.get("AGENTIHOOKS_ROUTE_ACCOUNT", "")
+        token = env.get(f"AH_CC_TOKEN_{route}", "") if route else ""
+        if token:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     try:
         result = subprocess.run(
             args,
