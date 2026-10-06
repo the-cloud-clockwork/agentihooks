@@ -9,10 +9,15 @@ from typing import Protocol, runtime_checkable
 class Call:
     tool: str
     tool_input: dict = field(default_factory=dict)
+    cwd: str = ""
 
     @classmethod
     def from_payload(cls, payload):
-        return cls(tool=str(payload.get("tool_name") or ""), tool_input=payload.get("tool_input") or {})
+        return cls(
+            tool=str(payload.get("tool_name") or ""),
+            tool_input=payload.get("tool_input") or {},
+            cwd=str(payload.get("cwd") or ""),
+        )
 
     @property
     def command(self):
