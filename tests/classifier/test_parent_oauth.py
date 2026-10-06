@@ -36,6 +36,7 @@ def test_claude_child_preserves_routed_parent_oauth(monkeypatch, native, route, 
         if value is not None:
             monkeypatch.setenv(name, value)
     monkeypatch.setenv("AH_CC_TOKEN_other", "other-placeholder")
+    monkeypatch.setenv("AH_CC_TOKEN_XXXX", "unselected-placeholder")
     seen = []
 
     def run(args, **kwargs):
