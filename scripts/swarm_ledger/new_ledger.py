@@ -173,9 +173,14 @@ def render(doc, slug, port):
         "DATA": core.seed_text(doc, 0),
         "PAGE": core.page_version(),
         "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
+        "TOOLTIPS": core.TOOLTIPS.read_text(encoding="utf-8"),
     }
     page = TEMPLATE.read_text(encoding="utf-8")
-    return re.sub(r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__", lambda m: values[m.group(1)], page)
+    return re.sub(
+        r"/\*__LEDGER_(TOOLTIPS)__\*/|__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
+        lambda m: values[m.group(1) or m.group(2)],
+        page,
+    )
 
 
 def upgrade_page(slug):
@@ -193,10 +198,11 @@ def upgrade_page(slug):
         "DATA": core.seed_text(doc, state["_meta"]["rev"]),
         "PAGE": core.page_version(),
         "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
+        "TOOLTIPS": core.TOOLTIPS.read_text(encoding="utf-8"),
     }
     page = re.sub(
-        r"__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
-        lambda m: values[m.group(1)],
+        r"/\*__LEDGER_(TOOLTIPS)__\*/|__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
+        lambda m: values[m.group(1) or m.group(2)],
         TEMPLATE.read_text(encoding="utf-8"),
     )
     core.atomic_write(html_path, page)

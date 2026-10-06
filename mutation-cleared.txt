@@ -502,5 +502,29 @@
   "scripts/profiles/measure.py:scripts.profiles.measure.x_measure__mutmut_13:c8099a38eb6035b20a2650133bd54d65e9c7330a8d55a76cbca66c32146f094b": {
     "reader": "Standards",
     "reason": "prepare treats an empty and a None effort the same: select_profile.prepare falls back with `effort or native_effort or default_effort`, so the profile default applies either way."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_1:22c036ec25caa9297fe7ec7adc4e062a2b37bf413c1d29cce86032f8ee4907a6": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_3:27ea0c4ceebdf02082cc8d9f1216648744f9179bf5c9da88f3b7025a20993eff": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_4:b9c9543d038e1b0a69b604664227b815ca5136cbf40f82e9f8b9f7e6926461d6": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_6:1f6a63fb480bb4fbae1e1b4ba37449e208522e88087198be1e33f6e376fe1acf": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_4:4fe314b3d1f16cda1066861a9ccd963e611f6967fd06f237750723688b7bb23a": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
+  },
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_6:c9be4449868d4c7f9452753211d2131461aefd29ed69a06e16a0b01036b3c3ff": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   }
 }
