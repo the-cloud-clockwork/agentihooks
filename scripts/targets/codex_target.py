@@ -10,7 +10,7 @@ Writes the Codex-shaped install surface (docs/reference/CODEX-COMPAT.md §5):
 - ``~/.codex/AGENTS.md`` — persona: bundle CLAUDE.md ⊕ profile-chain
   CLAUDE.mds ⊕ compiled rules (codex has no rules dir) ⊕ CI manifesto.
 - ``~/.agents/skills/`` — skills symlinks (open agent-skills standard dir).
-- ``~/.codex/prompts/`` — commands translated to custom prompts.
+- ``~/.codex/prompts/`` — never written; prompts an earlier install translated are removed.
 - ``[mcp_servers.*]`` — MCP registration (stdio + http url; SSE entries are
   skipped with a warning until the server side exposes streamable HTTP).
 
@@ -263,7 +263,7 @@ class CodexAdapter:
             for label, src in layers:
                 _i._symlink_dir_contents(src, dst, label=f"codex {label}", filter_fn=filter_fn)
         elif subdir == "commands":
-            self._translate_prompts(layers, filter_fn)
+            self._reap_prompts()
         elif subdir == "rules":
             # Codex has no auto-loaded rules dir — compile into AGENTS.md.
             collected: dict[str, tuple[str, str, str]] = {}
@@ -283,72 +283,19 @@ class CodexAdapter:
                 "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16)."
             )
 
-    def _translate_prompts(self, layers: list[tuple[str, Path]], filter_fn) -> None:
-        """commands/*.md → ~/.codex/prompts/*.md (flat, frontmatter rewritten).
-
-        Real files, not symlinks — the frontmatter differs from the source.
-        Later layers override earlier ones by filename, mirroring the claude
-        symlink semantics. Files we wrote previously but that no source layer
-        provides anymore are removed (tracked via a manifest sidecar).
-        """
-        import yaml
-
+    def _reap_prompts(self) -> None:
+        """Remove the prompts an earlier install translated; Codex 0.160 no longer reads ~/.codex/prompts."""
         _i = _install_module()
-        dst_dir = self.home() / "prompts"
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        manifest_path = dst_dir / ".agentihooks-manifest.json"
-        previous: list[str] = []
+        prompts_dir = self.home() / "prompts"
+        manifest_path = prompts_dir / ".agentihooks-manifest.json"
         if manifest_path.exists():
             try:
-                previous = json.loads(manifest_path.read_text())
+                for name in json.loads(manifest_path.read_text()):
+                    (prompts_dir / name).unlink(missing_ok=True)
             except (json.JSONDecodeError, OSError):
-                previous = []
-
-        sources: dict[str, Path] = {}
-        for _label, src in layers:
-            if not src.is_dir():
-                continue
-            for f in sorted(src.iterdir()):
-                if filter_fn(f):
-                    sources[f.name] = f
-
-        written: list[str] = []
-        for name, src in sources.items():
-            dst_file = dst_dir / name
-            if dst_file.exists() and name not in previous:
-                _i._cprint(f"  [!!] {dst_file} exists and is not agentihooks-managed — skipping (operator file wins)")
-                continue
-            try:
-                text = src.read_text()
-            except OSError:
-                continue
-            front: dict = {}
-            body = text
-            if text.startswith("---"):
-                parts = text.split("---", 2)
-                if len(parts) == 3:
-                    try:
-                        front = yaml.safe_load(parts[1]) or {}
-                    except yaml.YAMLError:
-                        front = {}
-                    body = parts[2].lstrip("\n")
-            out_front: dict = {}
-            if isinstance(front, dict):
-                if front.get("description"):
-                    out_front["description"] = front["description"]
-                if front.get("argument-hint") or front.get("argument_hint"):
-                    out_front["argument-hint"] = front.get("argument-hint") or front.get("argument_hint")
-            out = ""
-            if out_front:
-                out += "---\n" + yaml.safe_dump(out_front, sort_keys=False).strip() + "\n---\n\n"
-            out += body
-            dst_file.write_text(out)
-            written.append(name)
-
-        for stale in set(previous) - set(written):
-            (dst_dir / stale).unlink(missing_ok=True)
-        _atomic_write(manifest_path, json.dumps(sorted(written)))
-        _i._cprint(f"  [OK] {len(written)} command(s) translated → {dst_dir} (invoke with /prompts:<name>)")
+                pass
+            manifest_path.unlink()
+            _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
 
     # ------------------------------------------------------------------
     # persona: AGENTS.md
@@ -615,17 +562,7 @@ class CodexAdapter:
 
         strip_persona(home / "AGENTS.md", _MANAGED_HEADER, _MANAGED_FOOTER)
 
-        # Translated prompts: reap everything the manifest owns.
-        prompts_dir = home / "prompts"
-        manifest_path = prompts_dir / ".agentihooks-manifest.json"
-        if manifest_path.exists():
-            try:
-                for name in json.loads(manifest_path.read_text()):
-                    (prompts_dir / name).unlink(missing_ok=True)
-            except (json.JSONDecodeError, OSError):
-                pass
-            manifest_path.unlink(missing_ok=True)
-            _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
+        self._reap_prompts()
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
         _i = _install_module()

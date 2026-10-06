@@ -44,6 +44,14 @@ def test_every_command_exists():
     assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger - {"new"})
 
 
+def test_a_plan_continuing_a_ledger_appends_its_phases_with_a_parsed_command():
+    from scripts.swarm_ledger import ledger
+
+    [line] = re.findall(r"^agentihooks ledger (--slug <slug> --as <name> plan phases \S+)$", SKILL.read_text(), re.M)
+    args = ledger.build_parser().parse_args(line.split())
+    assert (args.command, args.action, args.path) == ("plan", "phases", "<phases.json>")
+
+
 def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():
     from scripts.trace_cli import build_sweep_parser
 
