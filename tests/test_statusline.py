@@ -81,6 +81,7 @@ def test_statusline_names_the_brain_overlay(monkeypatch, capsys, channels, enabl
 
     monkeypatch.setattr(config, "BASE_CHANNELS", channels)
     monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    monkeypatch.setattr(config, "BRAIN_CHANNEL", "brain")
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "statusline-brain"})))
     statusline.main()
     plain = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
