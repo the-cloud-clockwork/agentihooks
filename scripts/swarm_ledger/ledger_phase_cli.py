@@ -25,3 +25,41 @@ def operation(args) -> tuple[str, dict]:
 
 def comma_list(value: str) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def append_phases(plan, taken: list[str]) -> list[dict]:
+    entries = plan.get("phases") if isinstance(plan, dict) else None
+    if not isinstance(entries, list) or not entries:
+        sys.exit("the plan file needs a nonempty phases list")
+    if not all(isinstance(entry, dict) for entry in entries):
+        sys.exit("each plan phase is an object")
+    used = set(taken) | {entry["id"] for entry in entries if entry.get("id")}
+    number = max((int(i[1:]) for i in taken if i[:1] == "p" and i[1:].isdigit()), default=0)
+    ids = []
+    for entry in entries:
+        if not entry.get("id"):
+            number += 1
+            while f"p{number}" in used:
+                number += 1
+        ids.append(entry.get("id") or f"p{number}")
+    return [phase_entry(position, entry, ids) for position, entry in enumerate(entries, 1)]
+
+
+def phase_entry(position: int, entry: dict, ids: list[str]) -> dict:
+    values, depends_on = entry.get("depends_on", []), []
+    if not isinstance(values, list):
+        sys.exit(f"phase {position} depends_on must be a list")
+    for value in values:
+        if type(value) is int and not 1 <= value <= len(ids):
+            sys.exit(f"phase {position} depends on position {value}, outside the plan")
+        depends_on.append(ids[value - 1] if type(value) is int else value)
+    phase = {
+        "phase": ids[position - 1],
+        "title": entry.get("title", ""),
+        "description": entry.get("description", ""),
+        "depends_on": depends_on,
+        "planning": "manual",
+    }
+    if "release" in entry:
+        phase["release"] = entry["release"]
+    return phase

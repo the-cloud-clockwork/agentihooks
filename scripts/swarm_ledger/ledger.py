@@ -19,6 +19,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       publish an accepted plan: a GitHub issue where the repo has issues, else a
                                       ledger artifact; links it on each phase, comments the phase, and every task
                                       added to those phases carries the link
+  plan phases PATH                    append a plan's phases (JSON, the init-swarm content phases shape) to the
+                                      ledger, planned manually and in review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
   followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
@@ -269,6 +271,15 @@ def cmd_publish_plan(args):
     if state.get("rejected"):
         sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases}))
+
+
+def cmd_plan(args):
+    from scripts.swarm_ledger import ledger_phase_cli
+
+    plan = json.loads(Path(args.path).read_text(encoding="utf-8"))
+    phases = ledger_phase_cli.append_phases(plan, [phase["id"] for phase in call(args.slug)["phases"]])
+    send(args, "phase_append", phases=phases)
+    print(json.dumps({"appended": [phase["phase"] for phase in phases], "planning": "manual", "review": "pending"}))
 
 
 def cmd_artifact_purge(args):
@@ -575,6 +586,9 @@ def build_parser():
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
     publish.add_argument("--title", default="", help="default the plan's first heading")
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
+    plan = sub.add_parser("plan")
+    plan.add_argument("action", choices=["phases"])
+    plan.add_argument("path", help="JSON file with the plan's phases list, the init-swarm content shape")
     return parser
 
 

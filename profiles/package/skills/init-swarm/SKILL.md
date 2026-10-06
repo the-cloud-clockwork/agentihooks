@@ -38,6 +38,22 @@ Leave automatic phases without tasks.
 Done when every plan phase, dependency and planning mode is present and every
 source path exists.
 
+### A plan that continues an existing ledger
+
+When the plan adds work to a ledger that already exists, write only the
+`phases` list in the same shape (an optional `id` per phase; one based positions
+in `depends_on` point inside this plan, existing ids such as `p3` at the ledger)
+and append it instead of building a ledger:
+
+```bash
+agentihooks ledger --slug <slug> --as <name> plan phases <phases.json>
+```
+
+Every phase lands planned manually and in review, through the same checks as
+`phase add`; a phase without `id` takes the next free `p<n>`. A phase id already
+taken refuses the whole plan and the ledger is unchanged. Done when it prints
+the appended ids; then add their tasks (step 3) and skip steps 2 and 4.
+
 ## 2. Build the ledger
 
 ```bash
