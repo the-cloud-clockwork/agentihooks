@@ -8,6 +8,7 @@ from datetime import date, datetime
 from scripts.agents_quota import page_quota
 from scripts.gates import catalog, lift, progress
 from scripts.gates import log as gate_log
+from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
@@ -42,13 +43,14 @@ def verdict_store(store, slug):
 
 
 def findings(store, slug, config, tasks, events):
-    rows, limits = [a.__dict__ for a in store.agents(slug)], health.limits()
+    agents, limits = store.agents(slug), health.limits()
+    quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
+    rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name)} for a in agents]
     return verdict_store(store, slug).visible(
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},
             rows,
             activity.counts(slug),
-            now_ms(),
             limits,
             checks.waiting(
                 rows,

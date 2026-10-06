@@ -18,7 +18,10 @@ TALK = ("comment added", "comment edited", "message added")
 OUTCOMES = ("task pr", "task done")
 GATE_KINDS = ("deny", "observe", "lift", "fail-open", "count")
 GATE_FIELDS = {"at", "gate", "kind"}
+TICK_FIELDS = GATE_FIELDS | {"task"}
 MERGED = "MERGED"
+IDLE_TICKS = "idle-ticks"
+QUIET = "quiet"
 
 
 @dataclass(frozen=True)
@@ -176,21 +179,40 @@ def _findings(records, window, kind):
     return [r for fid, r in records.findings.items() if fid.startswith(kind + "/") and window.holds(r["seen_at"])]
 
 
+def _ticking(records, window):
+    return {
+        row["task"]
+        for row in records.gate_log
+        if TICK_FIELDS <= row.keys()
+        and window.holds(row["at"])
+        and (row["gate"], row["kind"]) == (IDLE_TICKS, "count")
+        and row["task"]
+    }
+
+
 def idle(records, window):
     waits = []
     for tid, at in _done(records, window).items():
         pull = _pull(records, tid)
         if pull and pull.merged_at:
             waits.append((at - pull.merged_at) / MINUTE_MS)
+    ticks = _spends(records, window, IDLE_TICKS)
+    claimed = {_task(e) for e in _in(records, window, "task claimed")} | _ticking(records, window)
     return {
         "idle findings": len(_findings(records, window, "idle-with-claim")),
         "minutes from merge to done": _average(waits),
+        "idle ticks": ticks,
+        "idle ticks per claimed task": ratio(ticks, len(claimed)),
     }
 
 
 def stale(records, window):
     found = _findings(records, window, "stale-claim")
-    return {"stale findings": len(found), "quiet minutes per finding": _average([r["measure"] for r in found])}
+    return {
+        "stale findings": len(found),
+        "quiet minutes per finding": _average([r["measure"] for r in found]),
+        "quiet flags raised": _spends(records, window, QUIET),
+    }
 
 
 def premature(records, window):
