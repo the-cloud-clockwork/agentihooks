@@ -31,6 +31,7 @@ def homes(tmp_path, monkeypatch):
         ("codex", ("codex", "-m", "gpt-7", "-c", 'model="gpt-6"', "-c", "approval"), ("gpt-7", "")),
         ("codex", ("codex", "-c", "model_reasoning_effort=xhigh", "-m"), ("", "xhigh")),
         ("codex", ("codex", "--effort", "high"), ("", "")),
+        ("codex", ("codex", "-c", 'model="local=1"'), ("local=1", "")),
     ],
 )
 def test_launch_flags_name_the_model_and_effort(homes, harness, argv, expected):
