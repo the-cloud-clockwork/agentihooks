@@ -55,6 +55,10 @@ class TestLog:
         assert log.gate_log_path(SLUG, tmp_path) == tmp_path / SLUG / "gates" / "log.jsonl"
         assert rates_read.gate_log_path is log.gate_log_path
 
+    def test_slug_stays_inside_the_swarm_home(self, tmp_path):
+        assert log.gate_log_path("../..", tmp_path) == tmp_path / "_____" / "gates" / "log.jsonl"
+        assert log.safe_name("") == "_" and log.safe_name("engineer@1-1") == "engineer@1-1"
+
     def test_default_home_is_the_swarm_home(self, tmp_path):
         from pathlib import Path
 
@@ -147,6 +151,10 @@ class TestVerdicts:
         assert store.read("t1")["verdict"] == "pass"
         assert [p.name for p in store.path("t1").parent.iterdir()] == ["t1"]
 
+    def test_gate_and_slug_stay_inside_the_swarm_home(self, tmp_path):
+        path = Verdicts("../../x", "../g", tmp_path).path("t1")
+        assert path == tmp_path / "______x" / "gates" / "___g" / "t1"
+
     def test_default_home_is_the_swarm_home(self):
         from pathlib import Path
 
@@ -204,6 +212,8 @@ class TestLift:
 
     def test_lift_path_keeps_session_and_gate_inside_the_lifts_folder(self, tmp_path):
         assert lift.lift_path(SLUG, "../s", "talk", tmp_path) == tmp_path / SLUG / "gates" / "lifts" / "___s" / "talk"
+        assert lift.lift_path(SLUG, SID, "../../etc", tmp_path).name == "______etc"
+        assert lift.lift_path("../x", SID, "talk", tmp_path) == tmp_path / "___x" / "gates" / "lifts" / SID / "talk"
 
     def test_arm_from_prompt_arms_logs_and_posts_known_gates(self, tmp_path):
         posted = []

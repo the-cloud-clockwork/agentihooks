@@ -52,7 +52,7 @@ def check(op):
         ledger_comments.check(op["text"], "item")
     if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
         raise ValueError("gate_bypass needs an integer unhandled")
-    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate") or "")):
+    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
         raise ValueError("gate_lift needs the gate's name")
     if "status" in op:
         if not _text(op["status"]):

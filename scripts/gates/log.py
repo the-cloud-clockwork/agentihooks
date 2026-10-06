@@ -1,11 +1,17 @@
 """The swarm's gate log: one JSON row per deny, would-be deny, lift and fail-open, read by doctor rates and swarm status."""
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 TAIL_BYTES = 65536
+UNSAFE = re.compile(r"[^A-Za-z0-9@_-]")
+
+
+def safe_name(text):
+    return UNSAFE.sub("_", text) or "_"
 
 
 def swarm_home():
@@ -13,7 +19,7 @@ def swarm_home():
 
 
 def gates_dir(slug, home=None):
-    return Path(home or swarm_home()) / slug / "gates"
+    return Path(home or swarm_home()) / safe_name(slug) / "gates"
 
 
 def gate_log_path(slug, home=None):

@@ -6,7 +6,7 @@ import time
 import uuid
 
 from scripts.gates import log
-from scripts.gates.verdicts import safe_name
+from scripts.gates.log import safe_name
 
 LIFT_SECONDS = 3600
 LIFT_REASON = "the operator lifted it for one hour"
@@ -18,7 +18,7 @@ def requested(prompt):
 
 
 def lift_path(slug, session_id, gate, home=None):
-    return log.gates_dir(slug, home) / "lifts" / safe_name(session_id) / gate
+    return log.gates_dir(slug, home) / "lifts" / safe_name(session_id) / safe_name(gate)
 
 
 def arm(slug, session_id, gate, home=None, now=None):
