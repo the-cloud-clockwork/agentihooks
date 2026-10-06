@@ -59,3 +59,8 @@ def test_an_unguarded_update_carries_no_guard_and_names_its_author(sent):
 
 def test_an_update_of_a_task_the_ledger_lacks_returns_an_empty_row(sent):
     assert ledger_client.LedgerClient().update_task("demo", "t9", {"state": "open"}) == {}
+
+
+def test_an_update_answered_without_tasks_returns_an_empty_row(monkeypatch):
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, batch: {"rejected": []}))
+    assert ledger_client.LedgerClient().update_task("demo", "t1", {"state": "open"}) == {}
