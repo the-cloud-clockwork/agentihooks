@@ -53,7 +53,9 @@ class TestLedger:
 
 def run_swarm(monkeypatch, argv):
     seen = []
-    monkeypatch.setattr(swarm_cli, "connect", lambda: SimpleNamespace(resolve=lambda slug: slug))
+    monkeypatch.setattr(
+        swarm_cli, "connect", lambda: SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda slug: slug))
+    )
     monkeypatch.setattr(swarm_cli, "cmd_status", lambda store, args: seen.append(args.name))
     return swarm_cli.main(argv), seen
 

@@ -68,8 +68,9 @@ def parse(name):
 
 
 def swarm_name(code):
-    """The swarm's own name, `swarm@<code>`, the convention its agents' names already follow."""
-    return f"swarm@{code}"
+    """The swarm's own name, `swarm@<code>` as its agents' names; empty before the swarm holds a code. The code is
+    minted once and never replaced, so the name never changes."""
+    return f"swarm@{code}" if code else ""
 
 
 def swarm_code(name):

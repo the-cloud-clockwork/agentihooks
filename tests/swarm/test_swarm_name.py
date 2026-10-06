@@ -30,37 +30,36 @@ def test_the_swarm_name_is_swarm_at_its_code():
 
 def test_creating_a_swarm_registers_it_as_swarm_at_its_code(store):
     config = store.config("sw")
-    assert config.name == f"swarm@{config.code}"
+    assert naming.swarm_name(config.code) == f"swarm@{config.code}"
     assert store.names.swarm(config.code) == {
         "swarm": "sw",
-        "name": config.name,
+        "name": naming.swarm_name(config.code),
         "ledger": "sw",
         "repo": "/home/x/dev/agentihooks",
     }
 
 
 def test_the_slug_or_the_name_resolves_the_same_swarm(store):
-    name = store.config("sw").name
-    assert store.resolve("sw") == "sw"
-    assert store.resolve(name) == "sw"
-    assert store.resolve("swarm@ffffff") == "swarm@ffffff"
+    name = naming.swarm_name(store.config("sw").code)
+    assert store.names.swarm_slug("sw") == "sw"
+    assert store.names.swarm_slug(name) == "sw"
+    assert store.names.swarm_slug("swarm@ffffff") == "swarm@ffffff"
     with pytest.raises(SwarmError, match="no swarm swarm@ffffff"):
-        store.config(store.resolve("swarm@ffffff"))
+        store.config(store.names.swarm_slug("swarm@ffffff"))
 
 
 def test_a_removed_swarm_name_no_longer_resolves(store):
-    name = store.config("sw").name
+    name = naming.swarm_name(store.config("sw").code)
     store.remove("sw")
-    assert store.resolve(name) == name
+    assert store.names.swarm_slug(name) == name
 
 
 def test_the_name_is_derived_from_the_code_and_never_changes(store):
-    config = store.config("sw")
-    assert config.name == f"swarm@{config.code}"
-    assert store.update("sw", state="paused").name == config.name
-    assert store.ensure_code("sw").name == config.name
-    assert "name" not in store.redis.hgetall(store.key("sw", "config"))
-    assert SwarmConfig("x", "/r", 1, 1).name == ""
+    code = store.config("sw").code
+    assert store.update("sw", state="paused").code == code
+    assert store.ensure_code("sw").code == code
+    assert naming.swarm_name(code) == f"swarm@{code}"
+    assert naming.swarm_name("") == ""
 
 
 def test_rename_migrates_an_existing_swarm_keeping_agents_claims_and_seats(env, monkeypatch):  # noqa: F811
@@ -79,21 +78,21 @@ def test_rename_migrates_an_existing_swarm_keeping_agents_claims_and_seats(env, 
     item = InboxStore(store.redis).send("operator", seat, "carry on")
     store.redis.hset(store.key("old", "config"), "code", "")
     store.names.release("old")
-    assert store.config("old").name == ""
+    assert naming.swarm_name(store.config("old").code) == ""
     assert run("rename") == 0
     config = store.config("old")
-    assert config.name == f"swarm@{config.code}"
+    assert naming.swarm_name(config.code) == f"swarm@{config.code}"
     assert [a.name for a in store.agents("old")] == [agent]
     assert store.claimant("old", "t1") == agent
     assert store.seats.occupant(seat).occupant == agent
-    assert store.resolve(config.name) == "old"
+    assert store.names.swarm_slug(naming.swarm_name(config.code)) == "old"
     assert [i.id for i in InboxStore(store.redis).pending_mail(agent)] == [item.id]
 
 
 def test_status_list_and_names_show_the_swarm_name(env, capsys):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    name = store.config("sw").name
+    name = naming.swarm_name(store.config("sw").code)
     capsys.readouterr()
     run("sw", "status")
     assert capsys.readouterr().out.splitlines()[0].startswith(f"{name}  sw  paused")
@@ -113,7 +112,7 @@ def test_status_list_and_names_show_the_swarm_name(env, capsys):  # noqa: F811
 def test_a_command_given_the_name_acts_on_the_swarm(env, capsys):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    name = store.config("sw").name
+    name = naming.swarm_name(store.config("sw").code)
     assert run(name, "pause") == 0
     assert store.config("sw").state == "paused"
     capsys.readouterr()
@@ -129,15 +128,15 @@ def test_a_name_cannot_create_a_swarm(env, capsys):  # noqa: F811
 def test_a_swarm_registry_emptied_by_a_restore_is_adopted_with_its_name(store):
     config = store.config("sw")
     store.redis.delete(naming.NameRegistry.key("codes"), naming.NameRegistry.key("code-of"))
-    assert store.resolve(config.name) == config.name
+    assert store.names.swarm_slug(naming.swarm_name(config.code)) == naming.swarm_name(config.code)
     store.ensure_code("sw")
     assert store.names.swarm(config.code) == {
         "swarm": "sw",
-        "name": config.name,
+        "name": naming.swarm_name(config.code),
         "ledger": "sw",
         "repo": "/home/x/dev/agentihooks",
     }
-    assert store.resolve(config.name) == "sw"
+    assert store.names.swarm_slug(naming.swarm_name(config.code)) == "sw"
 
 
 def test_status_of_a_swarm_not_yet_named_marks_the_name_missing(env, capsys):  # noqa: F811
@@ -156,7 +155,7 @@ def test_names_json_carries_the_swarm_name(env, capsys):  # noqa: F811
     run("sw", "names", "--json")
     config = store.config("sw")
     assert json.loads(capsys.readouterr().out) == {
-        "name": config.name,
+        "name": naming.swarm_name(config.code),
         "code": config.code,
         "space": f"repo-{config.code}",
         "names": [],

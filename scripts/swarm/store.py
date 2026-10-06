@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm.naming import NameRegistry, swarm_name
+from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
@@ -39,11 +39,6 @@ class SwarmConfig:
     code: str = ""
     max_plan: int = 1
     gates: dict = field(default_factory=dict)
-
-    @property
-    def name(self):
-        """`swarm@<code>`, empty until the swarm holds a code; a code is never replaced, so neither is the name."""
-        return swarm_name(self.code) if self.code else ""
 
 
 @dataclass(frozen=True)
@@ -114,9 +109,6 @@ class RedisStore:
             int(raw.get("max_plan", 1)),
             json.loads(raw.get("gates") or "{}"),
         )
-
-    def resolve(self, ref):
-        return self.names.swarm_slug(ref)
 
     def update(self, slug, **changes):
         if changes.get("state", STATES[0]) not in STATES:
