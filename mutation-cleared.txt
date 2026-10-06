@@ -1,66 +1,10 @@
 {
-  "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_52:01622f33bcc9fe0c5032b2b0b2ab5be8e6195e4407cac994d0799c1ee82d0e02": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_35:d50ca94a7ad62d23b42962df006ce068499d70ef774a1dc14508a43125c6dc99": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "When rounds is absent, changing the type-check default from zero to one preserves integer validation. Supplied rounds is unchanged and the stored review still defaults to zero."
   },
-  "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_54:f40aa8de26834cff3a76f33d2539b9eb491e80097df90269fd567af5df10a500": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_55:f5a6acaa18d8253bdbec52380601a98a42979ff7cd40c9b17704b652af31dccc": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_collect_results__mutmut_15:4c31ff4c9cef31a75436241f29437b57349c727663afc691a4458e551ea2a764": {
-    "reader": "Standards",
-    "reason": "Click parses true and TRUE identically; both current mutmut result commands returned the same 12827 bytes."
-  },
-  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_mutation_lines__mutmut_6:73518390e47e0dc254e1f244bd729b7d61bfe9279039c4890e43747b6a54cfc7": {
-    "reader": "Standards",
-    "reason": "SequenceMatcher treats False and None identically for autojunk; repeated line opcodes are unchanged."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_109:3be6150dc00f3dcb9d6044d1d4f096bd50af0c7d3308af033412d230cf3426b6": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_111:a9c0ae9f18fb78a80bf6cf4ed29b8e2ca13dcea861a9790cdfc80e74310ef2e6": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_113:e7bf2189eb2831bee2af8b783ad0dc481f6e769fefd46da9bd7d5743a3a0c304": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_36:83433bd8fab11b4d51707086ab9f4f4b2c10c1709d7fbab24b49febca091226d": {
-    "reader": "Standards",
-    "reason": "The changed argument is unused by evaluate when the mutation rows are empty; its report is identical."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_37:a46646990403f5338f6d7ce3aca8f8f7fa524fd4f87af208496cb6d2ce40e49c": {
-    "reader": "Standards",
-    "reason": "The changed argument is unused by evaluate when the mutation rows are empty; its report is identical."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_43:afd32663a7e7a8fa9444fd808e43de580c635c606c22d29fc30397802f0f9f08": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_45:cd5a3b92cd2d6f61a1f68e018c22aaa761c4f80b959671aa0dcdb31d4c8b7a24": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_46:69c65ee69734c0675c302b79083270dc82347af6a45fb81dbe4fb8c6b62a97dd": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_87:96e556888aab74dcf4ad7d64b190994a08369bf7b4eaaeca17dbbab037e5158e": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_89:e90cecee54827a0d9ef00279fe7ccdb4ebc73450814c32c72693c07d6e0efa67": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
-  },
-  "scripts/ci_mutation/runner.py:scripts.ci_mutation.runner.x_run_gate__mutmut_90:0be9d950e28bba947ff7a88c71c75941a2aa85b96630c5188ce2ac5660ce4d16": {
-    "reader": "Standards",
-    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_43:ad2c72a392f5327baa8e97d84cc58b6798d5fc2c98cf52127ee02860045f0e48": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "When rounds is absent, changing the negative-comparison default from zero to one preserves acceptance because both are nonnegative. Supplied rounds is unchanged and the stored review still defaults to zero."
   }
 }

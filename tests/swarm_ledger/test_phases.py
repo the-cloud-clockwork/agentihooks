@@ -598,3 +598,24 @@ def test_omitting_an_optional_seed_field_preserves_current_value():
     assert state["phases"][0]["depends_on"] == []
     assert state["phases"][0]["planning"] == "auto"
     assert state["phases"][0]["release"] is True
+
+
+def test_large_ordered_phase_graph_validates_without_revisiting():
+    phases = [{"id": f"p{n}", "depends_on": [f"p{n - 1}"] if n else []} for n in range(1100)]
+    ledger_phases.validate(phases)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"rejected": ["phase-operation"]},
+        {"rejected": ["phase-operation"], "_meta": {}},
+        {"rejected": ["phase-operation"], "_meta": {"warnings": []}},
+    ],
+)
+def test_phase_cli_reports_refusal_without_warning_details(reply):
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "engineer", "phase", "set", "p1", "planning=auto"])
+    with patch.object(ledger, "call", return_value=reply):
+        with pytest.raises(SystemExit) as error:
+            ledger.cmd_phase(args)
+    assert str(error.value) == "rejected: ['phase-operation']"
