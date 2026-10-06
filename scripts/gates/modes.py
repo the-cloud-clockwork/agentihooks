@@ -22,9 +22,11 @@ def mode(gate, environ, gates=None):
 def swarm_gates(swarm, environ):
     if not swarm:
         return None
-    try:
-        from scripts.swarm.store import RedisStore, redis_client
+    import redis
 
+    from scripts.swarm.store import RedisStore, SwarmError, redis_client
+
+    try:
         return RedisStore(redis_client(environ)).config(swarm).gates
-    except Exception:  # an unreadable swarm config falls back to the environment
+    except (redis.RedisError, SwarmError, ValueError):  # an unreadable swarm config falls back to the environment
         return None

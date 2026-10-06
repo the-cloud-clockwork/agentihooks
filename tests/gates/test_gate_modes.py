@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import redis
 
 from scripts.gates import catalog, entry, intent, log, modes, talk
 from scripts.gates.base import Decision
@@ -65,7 +66,7 @@ class TestSwarmGates:
     @pytest.mark.parametrize("slug", ["demo", "gone"])
     def test_an_unreadable_config_falls_back_to_the_environment(self, store, monkeypatch, slug):
         def unreachable(environ=None):
-            raise ConnectionError("redis down")
+            raise redis.ConnectionError("redis down")
 
         monkeypatch.setattr(
             "scripts.swarm.store.redis_client", unreachable if slug == "demo" else lambda e=None: store.redis
