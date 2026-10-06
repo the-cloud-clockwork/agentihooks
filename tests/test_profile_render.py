@@ -223,6 +223,40 @@ def test_claude_render_enables_operator_fleet_and_chain_plugins(world):
     }
 
 
+def test_claude_render_subscribes_every_profile_to_brain(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "brain"
+    assert render.channels("rb-role") == "brain"
+
+
+def test_brain_joins_the_profile_channels_once(world):
+    from scripts.profiles import render
+
+    overrides = world["role"] / ".claude" / "settings.overrides.json"
+    settings = json.loads(overrides.read_text())
+    settings["env"] = {"AGENTIHOOKS_BASE_CHANNELS": "amygdala, ops"}
+    overrides.write_text(json.dumps(settings))
+    assert render.channels("rb-role") == "amygdala,ops,brain"
+
+    settings["env"] = {"AGENTIHOOKS_BASE_CHANNELS": "brain,amygdala"}
+    overrides.write_text(json.dumps(settings))
+    out = render.render_claude("rb-role", force=True)
+    assert json.loads((out / "settings.json").read_text())["env"]["AGENTIHOOKS_BASE_CHANNELS"] == "brain,amygdala"
+    assert render.channels("rb-role") == "brain,amygdala"
+
+
+def test_channels_read_the_bundle_layer(world):
+    from scripts.profiles import render
+
+    overrides = {"env": {"AGENTIHOOKS_BASE_CHANNELS": "amygdala"}}
+    (world["bundle"] / ".claude" / "settings.overrides.json").write_text(json.dumps(overrides))
+
+    assert render.channels("rb-role") == "amygdala,brain"
+
+
 def test_claude_render_excludes_default_home_instructions(world):
     from scripts.profiles import render
 

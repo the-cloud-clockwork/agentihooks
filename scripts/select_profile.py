@@ -27,7 +27,7 @@ def prepare(
         agent, model or native_model or default_model, _effort(agent, effort or native_effort or default_effort)
     )
     profiles.render(agent, name)
-    env = {"AGENTIHOOKS_PROFILE": name}
+    env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name)}
     if agent == "claude":
         env["CLAUDE_CONFIG_DIR"] = str(profiles.rendered_root() / name / "claude")
     else:

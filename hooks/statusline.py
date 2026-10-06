@@ -308,6 +308,11 @@ def main() -> None:
             _ch_str = ",".join(_l_channels)
             _ch_display = f"{_DIM}{_ch_str}{_RESET}"
 
+            from hooks import config as _ah_config
+
+            _brain_on = _ah_config.BRAIN_ENABLED and _ah_config.BRAIN_CHANNEL in _l_channels
+            _ovl_display = f"{_CYAN}brain{_RESET}" if _brain_on else f"{_DIM}none{_RESET}"
+
             _voice_str = ""
             _voice_sid = payload.get("session_id", "")
             if _voice_sid:
@@ -320,6 +325,7 @@ def main() -> None:
             print(
                 f"  {_DIM}agentihooks:{_RESET} {_prof_display}"
                 f"  {_DIM}settings:{_RESET}{_sp_display}"
+                f"  {_DIM}overlay:{_RESET}{_ovl_display}"
                 f"  {_DIM}channels:{_RESET}{_ch_display}"
                 f"{_voice_str}"
             )
