@@ -84,6 +84,11 @@ class TestActive:
         recent = [self.row("watch", "deny", now - 5), self.row("watch", "lift", now - 4)]
         assert lift.active(recent, now) == {ME: [{"gate": "watch", "lifted": True}]}
 
+    def test_a_deny_after_a_lift_shows_the_gate_unlifted_again(self):
+        now = 10 * HOUR_MS
+        recent = [self.row("watch", "lift", now - 5), self.row("watch", "deny", now - 4)]
+        assert lift.active(recent, now) == {ME: [{"gate": "watch", "lifted": False}]}
+
     def test_counts_observes_and_nameless_rows_are_not_active(self):
         now = 10 * HOUR_MS
         recent = [

@@ -57,7 +57,7 @@ def active(rows, now_ms):
     for row in rows:
         if row.get("kind") in ("deny", "lift") and row.get("agent") and row.get("at", 0) > since:
             key = (row["agent"], row.get("gate"))
-            gates[key] = gates.get(key, False) or row["kind"] == "lift"
+            gates[key] = row["kind"] == "lift"
     by_agent = {}
     for (agent, gate), was_lifted in sorted(gates.items()):
         by_agent.setdefault(agent, []).append({"gate": gate, "lifted": was_lifted})
