@@ -1,0 +1,81 @@
+"""The classifier pre-screen of a slice: advisory flags for a task that may be too big or off the phase intent.
+
+Flags never send a slice back. At full autonomy the tick approves a slice only when `hold` returns nothing.
+"""
+
+from dataclasses import dataclass
+
+from hooks.classifier import ClassifierError, Score, YesNo, decide
+from scripts.swarm import slice_check
+from scripts.swarm_ledger import ledger_kinds
+
+PURPOSE = "phase-slice"
+SIZES = ["trivial", "one pull request", "several pull requests", "a whole phase"]
+ONE_PR = SIZES.index("one pull request")
+OFF_INTENT = 0.3
+SIZE = Score("How much work is this task?", SIZES)
+SERVES = YesNo("Does this task serve the phase intent?", true="it advances the phase", false="it serves something else")
+
+
+@dataclass(frozen=True)
+class Screen:
+    flags: tuple = ()
+    reason: str = ""
+
+
+def slice_tasks(phase, doc):
+    known = {t["id"]: t for t in doc["tasks"]}
+    ids = slice_check.slice_ids(slice_check.plan_task(phase, doc))
+    return [known[tid] for tid in ids if known.get(tid, {}).get("phase") == phase["id"]]
+
+
+def screen(phase, doc, confidence):
+    mine = slice_tasks(phase, doc)
+    state = {
+        "phase": phase["title"],
+        "intent": phase.get("description", ""),
+        "overview": doc.get("overview", ""),
+        "tasks": [
+            {
+                "title": t.get("title", ""),
+                "description": t.get("description", ""),
+                "kind": ledger_kinds.kind(t),
+                "territory": t.get("territory") or [],
+            }
+            for t in mine
+        ],
+    }
+    questions = {}
+    for i in range(len(mine)):
+        questions[f"size_{i}"] = SIZE
+        questions[f"serves_{i}"] = SERVES
+    try:
+        result = decide(state, questions, purpose=PURPOSE)
+    except ClassifierError:
+        return Screen(reason="the classifier did not answer")
+    reason = "" if result.calibrated else f"the answer came from the fallback {result.source}"
+    return Screen(tuple(flags(result.answers, mine, confidence)), reason)
+
+
+def flags(answers, mine, confidence):
+    found = []
+    for i, task in enumerate(mine):
+        size, serves = answers[f"size_{i}"], answers[f"serves_{i}"]
+        level = round(size.score)
+        if level > ONE_PR and size.confidence >= confidence:
+            found.append(
+                f"Classifier: task {task['id']} may be too big, {SIZES[level]} at confidence {size.confidence:.2f}."
+            )
+        if serves.noul < OFF_INTENT:
+            found.append(
+                f"Classifier: task {task['id']} may be off intent, serves the phase at probability {serves.noul:.2f}."
+            )
+    return found
+
+
+def hold(problems, result):
+    if problems:
+        return "the slice check found problems"
+    if result.flags:
+        return "the classifier flagged a task"
+    return result.reason
