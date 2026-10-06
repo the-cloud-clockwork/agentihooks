@@ -27,16 +27,22 @@ def started(env, monkeypatch):  # noqa: F811
     return store, ledger, stamped
 
 
-def test_swarm_pr_arms_the_intent_check_and_stamps_the_body(started, capsys):
+@pytest.mark.parametrize("autonomy,awaiting", [("assist", "approval"), ("delegate", "")])
+def test_swarm_pr_arms_the_intent_check_and_stamps_the_body(started, capsys, monkeypatch, autonomy, awaiting):
     store, ledger, stamped = started
+    store.update("sw", autonomy=autonomy)
+    calls, update, state = [], ledger.update_task, ledger.state
+    ledger.update_task = lambda slug, task, fields, by="swarm": calls.append((slug, by)) or update(slug, task, fields)
+    ledger.state = lambda slug: calls.append((slug, "state")) or state(slug)
+    monkeypatch.setattr(cli, "now_ms", lambda: 4242)
     assert run("sw", "pr", URL) == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert out == {"task": "t1", "pr_url": URL, "intent": {"verdict": "pending", "body": True}}
-    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("pr", URL)
+    assert [ledger.rows["t1"][k] for k in ("state", "pr_url", "awaiting")] == ["pr", URL, awaiting]
+    assert calls == [("sw", "state"), ("sw", ME)]
     [(url, doc, task)] = stamped
     assert (url, task["id"], task["title"], doc["phases"]) == (URL, "t1", "Intent", ledger.phases)
-    record = Verdicts("sw", "intent").read("t1")
-    assert (record["verdict"], record["reason"]) == ("pending", "intent check running")
+    assert Verdicts("sw", "intent").read("t1") == {"verdict": "pending", "reason": "intent check running", "at": 4242}
 
 
 def test_swarm_pr_with_the_intent_gate_off_arms_nothing(started, capsys, monkeypatch):
@@ -79,3 +85,13 @@ def test_the_tick_leaves_the_task_alone_under_the_default_observe(started, monke
     assert "task t1 intent check fail" in cli.run_tick(store, "sw")
     assert ledger.rows["t1"]["state"] == "pr"
     assert Verdicts("sw", "intent").read("t1")["verdict"] == "fail"
+
+
+def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
+    store, ledger, _ = started
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": []})
+    monkeypatch.setattr(intent, "judge", lambda state: ("pass", "ok"))
+    monkeypatch.setattr(cli, "now_ms", lambda: 777)
+    cli.run_tick(store, "sw")
+    assert Verdicts("sw", "intent").read("t1") == {"verdict": "pass", "reason": "ok", "at": 777}

@@ -117,6 +117,7 @@ class TestGate:
             "agentihooks swarm done",
             "agentihooks ledger demo done",
             "git merge dev",
+            "A=1; gh pr view 9",
         ],
     )
     def test_other_commands_pass_a_failed_verdict(self, tmp_path, command):
@@ -140,6 +141,11 @@ class TestGate:
             intent.IntentGate(clock=lambda: NOW / 1000).decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
         )
         assert rows(tmp_path) == []
+
+    def test_the_refusal_names_the_whole_seconds_waited(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW)
+        gate = intent.IntentGate(clock=lambda: (NOW + 100_000) / 1000)
+        assert "started 100 s ago" in gate.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).reason
 
     def test_a_pending_verdict_refuses_for_two_minutes_then_passes_unchecked_and_counted(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", "intent check running", NOW)
@@ -182,6 +188,11 @@ class TestBody:
         old = f"Top\n\n{intent.START}\nold\n{intent.END}\n\nTail"
         assert intent.with_intent(old, "NEW") == "Top\n\nNEW\n\nTail"
 
+    def test_only_the_first_section_is_replaced_up_to_its_own_end(self):
+        start, end = intent.START, intent.END
+        assert intent.with_intent(f"{start}\na\n{end}\nmid {end}", "N\\1") == f"N\\1\nmid {end}"
+        assert intent.with_intent(f"{start}a{end} mid {start}b{end}", "N") == f"N mid {start}b{end}"
+
     def test_a_start_marker_without_its_end_appends(self):
         assert intent.with_intent(f"x {intent.START} y", "S") == f"x {intent.START} y\n\nS"
         assert intent.with_intent(f"{intent.END} x {intent.START}", "S") == f"{intent.END} x {intent.START}\n\nS"
@@ -220,27 +231,29 @@ class TestBody:
         assert ran.calls == []
 
 
+@pytest.fixture
+def stamped(monkeypatch):
+    seen = []
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task: seen.append((url, doc, task)) or bool(seen))
+    return seen
+
+
 class TestStamp:
-    def test_stamp_arms_a_pending_verdict_and_writes_the_body(self, tmp_path):
-        ran = Ran((0, json.dumps({"body": ""})), (0, "{}"))
-        assert intent.stamp(SLUG, TASK, URL, DOC, "observe", NOW, run=ran, home=tmp_path) == {
+    def test_stamp_arms_a_pending_verdict_and_writes_the_body(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, TASK, URL, DOC, "observe", NOW, home=tmp_path) == {
             "verdict": "pending",
             "body": True,
         }
+        assert stamped == [(URL, DOC, DOC["tasks"][0])]
         assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
 
-    def test_off_writes_the_body_and_arms_nothing(self, tmp_path):
-        ran = Ran((1, ""))
-        assert intent.stamp(SLUG, TASK, URL, DOC, "off", NOW, run=ran, home=tmp_path) == {
-            "verdict": "off",
-            "body": False,
-        }
+    def test_off_writes_the_body_and_arms_nothing(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, TASK, URL, DOC, "off", NOW, home=tmp_path) == {"verdict": "off", "body": True}
         assert verdicts(tmp_path).read(TASK) is None
 
-    def test_an_unknown_task_writes_no_body(self, tmp_path):
-        ran = Ran()
-        assert intent.stamp(SLUG, "nope", URL, DOC, "enforce", NOW, run=ran, home=tmp_path)["body"] is False
-        assert ran.calls == []
+    def test_an_unknown_task_writes_no_body(self, tmp_path, stamped):
+        assert intent.stamp(SLUG, "nope", URL, DOC, "enforce", NOW, home=tmp_path)["body"] is False
+        assert stamped == []
 
 
 class TestJudge:
@@ -300,10 +313,15 @@ class TestState:
         missing = intent.state_of(DOC, {**DOC["tasks"][0], "workspace": "/nonexistent/x"}, PR)
         assert missing["proof_notes"] == ""
 
-    def test_pr_view_reads_title_body_and_file_paths(self):
-        raw = {"title": "T", "body": None, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
+    def test_a_task_with_no_phase_has_empty_phase_fields(self):
+        state = intent.state_of({**DOC, "phases": []}, DOC["tasks"][0], PR)
+        assert (state["phase"], state["phase_intent"]) == ("", "")
+
+    @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
+    def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
+        raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
         ran = Ran((0, json.dumps(raw)))
-        assert intent.pr_view(URL, run=ran) == {"title": "T", "body": "", "files": ["a.py", "b.py"]}
+        assert intent.pr_view(URL, run=ran) == {"title": "T", "body": expected, "files": ["a.py", "b.py"]}
         args, kwargs = ran.calls[0]
         assert args == ["gh", "pr", "view", URL, "--json", "title,body,files"]
         assert (kwargs["capture_output"], kwargs["text"], kwargs["timeout"]) == (True, True, intent.GH_TIMEOUT_SEC)
@@ -336,24 +354,21 @@ class Mail:
         return [f"told {address}: {key}"]
 
 
-def run_pass(tmp_path, mode="enforce", usable=0.1, doc=DOC, view=None, now=NOW):
+def check(tmp_path, mode="enforce", view=lambda url: PR, ask=None, ledger=None, mail=None):
+    return intent.Check(SLUG, mode, NOW, ledger or Ledger(), mail or Mail(), view, ask, home=tmp_path)
+
+
+def run_pass(tmp_path, mode="enforce", usable=0.1, doc=DOC, view=None):
     ledger, mail, viewed = Ledger(), Mail(), []
 
     def read(url):
         viewed.append(url)
         return PR if view is None else view
 
-    actions = intent.check_pass(
-        SLUG,
-        doc,
-        ledger,
-        mail,
-        mode,
-        now,
-        view=read,
-        ask=lambda state: intent.judge(state, classifier(usable)),
-        home=tmp_path,
-    )
+    def ask(state):
+        return intent.judge(state, classifier(usable))
+
+    actions = check(tmp_path, mode, read, ask, ledger, mail).run(doc)
     return SimpleNamespace(actions=actions, ledger=ledger, mail=mail, viewed=viewed)
 
 
@@ -418,47 +433,45 @@ class TestCheckPass:
         assert (got.actions, got.viewed, verdicts(tmp_path).read(TASK)) == ([], [], None)
 
     def test_an_unreadable_pull_request_stays_pending(self, tmp_path):
-        ledger, mail = Ledger(), Mail()
-        actions = intent.check_pass(
-            SLUG, DOC, ledger, mail, "enforce", NOW, view=lambda url: None, ask=None, home=tmp_path
-        )
-        assert actions == []
+        assert check(tmp_path, view=lambda url: None).run(DOC) == []
         assert verdicts(tmp_path).read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
 
     def test_an_unanswered_classifier_writes_unchecked_and_counts_it(self, tmp_path):
         ledger, mail = Ledger(), Mail()
-        actions = intent.check_pass(
-            SLUG,
-            DOC,
-            ledger,
-            mail,
-            "enforce",
-            NOW,
-            view=lambda url: PR,
-            ask=lambda s: ("unchecked", "the classifier did not answer"),
-            home=tmp_path,
-        )
-        assert actions == [f"task {TASK} intent check unchecked"]
+        down = check(tmp_path, ask=lambda s: ("unchecked", "the classifier did not answer"), ledger=ledger, mail=mail)
+        assert down.run(DOC) == [f"task {TASK} intent check unchecked"]
         assert verdicts(tmp_path).read(TASK)["verdict"] == "unchecked"
-        assert [(r["kind"], r["agent"], r["reason"]) for r in rows(tmp_path)] == [
-            ("count", ME, "the classifier did not answer")
+        assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(tmp_path)] == [
+            ("intent", "count", ME, TASK, "the classifier did not answer")
         ]
         assert (ledger.updates, mail.sent) == ([], [])
 
     def test_the_classifier_is_asked_with_the_task_state(self, tmp_path):
         seen = []
-        intent.check_pass(
-            SLUG,
-            DOC,
-            Ledger(),
-            Mail(),
-            "observe",
-            NOW,
-            view=lambda url: PR,
-            ask=lambda s: seen.append(s) or ("pass", "ok"),
-            home=tmp_path,
-        )
+        check(tmp_path, "observe", ask=lambda s: seen.append(s) or ("pass", "ok")).run(DOC)
         assert seen == [intent.state_of(DOC, DOC["tasks"][0], PR)]
+
+    def test_a_task_with_no_claim_is_logged_with_no_agent(self, tmp_path):
+        task = {k: v for k, v in DOC["tasks"][0].items() if k != "claimed_by"}
+        run_pass(tmp_path, mode="observe", doc={**DOC, "tasks": [task]})
+        assert [(r["agent"], r["task"]) for r in rows(tmp_path)] == [("", TASK)]
+
+    def test_skipped_tasks_do_not_stop_the_pass(self, tmp_path):
+        base = DOC["tasks"][0]
+        tasks = [
+            {**base, "id": "a", "state": "claimed"},
+            {**base, "id": "b"},
+            {**base, "id": "c", "pr_url": "https://github.com/o/r/pull/404"},
+            {**base, "id": "d"},
+        ]
+        verdicts(tmp_path).write("b", "pass", "judged", NOW - 5)
+
+        def view(url):
+            return None if url.endswith("/404") else PR
+
+        actions = check(tmp_path, "observe", view=view, ask=lambda s: ("pass", "ok")).run({**DOC, "tasks": tasks})
+        assert actions == ["task d intent check pass"]
+        assert [verdicts(tmp_path).read(t)["verdict"] for t in "bcd"] == ["pass", "pending", "pass"]
 
 
 class TestModeOf:

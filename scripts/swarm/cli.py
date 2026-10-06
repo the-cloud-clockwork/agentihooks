@@ -141,7 +141,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
         mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-        actions += intent.check_pass(slug, doc, ledger, mail, mode, now_ms(), intent.pr_view, intent.judge)
+        actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))

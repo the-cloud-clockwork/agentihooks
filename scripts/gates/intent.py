@@ -5,7 +5,9 @@ import json
 import re
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Callable
 
 from hooks.classifier import ClassifierError, YesNo, decide
 from scripts.gates import log
@@ -26,6 +28,7 @@ GH_TIMEOUT_SEC = 20
 PROOF_CHARS = 4000
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 QUESTIONS = {
     "usable": YesNo(
         "Can the phase use this change as delivered, given the project overview, the phase intent and the task?",
@@ -56,23 +59,21 @@ def mode_of(config):
 
 
 def _phase(doc, task):
-    return next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
+    return next((p for p in doc["phases"] if p.get("id") == task.get("phase")), {})
 
 
 def section(doc, task):
     phase = _phase(doc, task)
     return (
-        f"{START}\n## Parent intent\n\n**Project:** {doc.get('overview', '')}\n\n"
+        f"{START}\n## Parent intent\n\n**Project:** {doc['overview']}\n\n"
         f"**Phase {phase.get('title', '')}:** {phase.get('description', '')}\n\n"
-        f"**Task {task['id']}, {task.get('title', '')}:** {task.get('description', '')}\n{END}"
+        f"**Task {task['id']}, {task['title']}:** {task['description']}\n{END}"
     )
 
 
 def with_intent(body, text):
-    start = body.find(START)
-    end = body.find(END, start) if start >= 0 else -1
-    if end >= 0:
-        return body[:start] + text + body[end + len(END) :]
+    if SECTION.search(body):
+        return SECTION.sub(lambda _: text, body, count=1)
     return f"{body.rstrip()}\n\n{text}" if body.strip() else text
 
 
@@ -97,9 +98,9 @@ def stamp_body(url, doc, task, run=subprocess.run):
     return sent.returncode == 0
 
 
-def stamp(slug, task_id, url, doc, mode, now_ms, run=subprocess.run, home=None):
-    task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
-    body = task is not None and stamp_body(url, doc, task, run)
+def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
+    task = next((t for t in doc["tasks"] if t.get("id") == task_id), None)
+    body = task is not None and stamp_body(url, doc, task)
     if mode == "off":
         return {"verdict": "off", "body": body}
     Verdicts(slug, NAME, home).write(task_id, PENDING, RUNNING, now_ms)
@@ -112,7 +113,7 @@ def pr_view(url, run=subprocess.run):
         raw = json.loads(done.stdout) if done.returncode == 0 else None
         if raw is None:
             return None
-        return {"title": raw["title"], "body": raw.get("body") or "", "files": [f["path"] for f in raw["files"]]}
+        return {"title": raw["title"], "body": raw["body"] or "", "files": [f["path"] for f in raw["files"]]}
     except (OSError, subprocess.SubprocessError, ValueError, KeyError):
         return None
 
@@ -127,11 +128,11 @@ def _proof_notes(task, proof_chars):
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     phase = _phase(doc, task)
     return {
-        "overview": doc.get("overview", ""),
+        "overview": doc["overview"],
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
-        "task": task.get("title", ""),
-        "task_text": task.get("description", ""),
+        "task": task["title"],
+        "task_text": task["description"],
         "pull_request_title": pr["title"],
         "pull_request_body": pr["body"],
         "changed_files": pr["files"],
@@ -152,42 +153,53 @@ def judge(state, decide=decide):
     return FAIL, "; ".join([f"the phase can use this change at probability {usable:.2f}, under {FAIL_LINE}", *reasons])
 
 
-def _failed(slug, task, reason, ledger, mail, mode, now_ms, home):
-    who = Who(name=task.get("claimed_by", ""), task=task["id"])
-    log.append(slug, log.Row.of(NAME, "deny" if mode == "enforce" else "observe", who, reason=reason), home)
-    if mode != "enforce":
-        return []
-    text = (
-        f"The intent check failed: {reason}. Deliver the missing piece and run swarm pr again, "
-        "or block the task with these reasons."
-    )
-    ledger.update_task(slug, task["id"], {"state": "claimed"})
-    ledger.comment(slug, task["id"], text, by="swarm")
-    return mail.send(f"intent-fail:{task['id']}:{now_ms}", mail.engineer(task), text, ref=f"tasks/{task['id']}")
+@dataclass(frozen=True)
+class Check:
+    slug: str
+    mode: str
+    now_ms: int
+    ledger: object
+    mail: object
+    view: Callable
+    ask: Callable
+    home: object = None
 
-
-def check_pass(slug, doc, ledger, mail, mode, now_ms, view, ask, home=None):
-    if mode == "off":
-        return []
-    verdicts, actions = Verdicts(slug, NAME, home), []
-    for task in doc.get("tasks", []):
-        if task.get("state") != "pr" or not task.get("pr_url"):
-            continue
-        record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, now_ms)
-        if record["verdict"] != PENDING:
-            continue
-        pr = view(task["pr_url"])
-        if pr is None:
-            continue
-        verdict, reason = ask(state_of(doc, task, pr))
-        verdicts.write(task["id"], verdict, reason, now_ms)
-        actions.append(f"task {task['id']} intent check {verdict}")
-        if verdict == UNCHECKED:
+    def run(self, doc):
+        if self.mode == "off":
+            return []
+        verdicts, actions = Verdicts(self.slug, NAME, self.home), []
+        for task in doc["tasks"]:
+            if task.get("state") != "pr" or not task.get("pr_url"):
+                continue
+            record = verdicts.read(task["id"]) or verdicts.write(task["id"], PENDING, RUNNING, self.now_ms)
+            if record["verdict"] != PENDING:
+                continue
+            pr = self.view(task["pr_url"])
+            if pr is None:
+                continue
+            verdict, reason = self.ask(state_of(doc, task, pr))
+            verdicts.write(task["id"], verdict, reason, self.now_ms)
+            actions.append(f"task {task['id']} intent check {verdict}")
             who = Who(name=task.get("claimed_by", ""), task=task["id"])
-            log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
-        elif verdict == FAIL:
-            actions += _failed(slug, task, reason, ledger, mail, mode, now_ms, home)
-    return actions
+            if verdict == UNCHECKED:
+                log.append(self.slug, log.Row.of(NAME, "count", who, reason=reason), self.home)
+            elif verdict == FAIL:
+                actions += self._failed(task, who, reason)
+        return actions
+
+    def _failed(self, task, who, reason):
+        kind = "deny" if self.mode == "enforce" else "observe"
+        log.append(self.slug, log.Row.of(NAME, kind, who, reason=reason), self.home)
+        if self.mode != "enforce":
+            return []
+        text = (
+            f"The intent check failed: {reason}. Deliver the missing piece and run swarm pr again, "
+            "or block the task with these reasons."
+        )
+        self.ledger.update_task(self.slug, task["id"], {"state": "claimed"})
+        self.ledger.comment(self.slug, task["id"], text, by="swarm")
+        key, ref = f"intent-fail:{task['id']}:{self.now_ms}", f"tasks/{task['id']}"
+        return self.mail.send(key, self.mail.engineer(task), text, ref=ref)
 
 
 def _gated(words):
