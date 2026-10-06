@@ -9,6 +9,7 @@ import ledger_core as core
 import ledger_server as server
 import pytest
 
+from scripts.swarm_ledger import ledger_artifacts as artifacts
 from tests.swarm_ledger.test_bin import make_ledger
 
 MASTER = "master@abcdef-0001"
@@ -18,6 +19,7 @@ CONTENT = b"# Requested audit\n\nDesign and architecture findings.\n"
 
 @pytest.fixture
 def publication(ledger_dir, tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "ledger_artifacts", artifacts)
     folder = tmp_path / "ledgers"
     folder.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", folder)
@@ -106,6 +108,7 @@ def test_master_requires_operator_request(publication, request_id):
         op["request"] = request_id
     state = ledger.call(slug, [op])
     assert state["rejected"] == ["refused"]
+    assert artifacts.REFUSED in state["_meta"]["warnings"]
     assert state["artifacts"] == []
 
 
