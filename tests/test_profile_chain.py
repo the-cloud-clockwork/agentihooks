@@ -3,11 +3,19 @@ import json
 import sys
 from pathlib import Path
 
-import install
 import pytest
 import yaml
 
 from hooks.context import profile_chain
+from scripts import install
+
+
+@pytest.fixture(autouse=True)
+def installer_home(_isolate_real_user_paths, monkeypatch):
+    import install as legacy_install
+
+    for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC", "AGENTIHOOKS_ROOT"):
+        monkeypatch.setattr(install, name, getattr(legacy_install, name))
 
 
 @pytest.fixture(params=["runtime", "install"])
@@ -160,6 +168,7 @@ def test_init_installs_inherited_assets_and_child_settings(tmp_path, monkeypatch
     monkeypatch.setattr(install, "_install_cli_tool", lambda: None)
     monkeypatch.setattr(install, "_seed_user_env_file", lambda: [])
     monkeypatch.setattr(install, "_resolve_hooks_python", lambda: Path(sys.executable))
+    monkeypatch.setattr("install._resolve_hooks_python", lambda: Path(sys.executable))
     install.install_global(argparse.Namespace(profile="child", settings_profile="", install_target="claude"))
     home = Path.home()
     settings = json.loads((home / ".claude" / "settings.json").read_text())
