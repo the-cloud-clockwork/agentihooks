@@ -513,7 +513,7 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
-    task.add_argument("--profile", default="", help="profile the claimant runs, such as frontend; default the lane's")
+    task.add_argument("--profile")
     return parser
 
 

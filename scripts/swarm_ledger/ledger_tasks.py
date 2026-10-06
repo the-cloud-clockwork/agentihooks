@@ -99,8 +99,9 @@ def check_bools(fields):
 
 
 def check_profile(fields):
-    profile = fields.get("profile", "")
-    if not isinstance(profile, str) or (profile and not ID_RE.match(profile)):
+    if "profile" in fields and not (
+        fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
+    ):
         raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
 
 
