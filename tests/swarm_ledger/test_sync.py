@@ -109,6 +109,35 @@ class StatsSync(unittest.TestCase):
         _, rejected = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t4"}])
         self.assertEqual(rejected, ["t4"])
 
+    def answers(self, state):
+        return [e for e in state["_meta"]["events"] if e["kind"] == "stats check answered"]
+
+    def test_the_orchestrators_ack_answers_the_stats_check_once(self):
+        rev = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t5"}])[0]["_meta"]["rev"]
+        state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a2", "by": "boss", "rev": rev}])
+        self.assertEqual(
+            [(e["by"], e["id"], e["at"]) for e in self.answers(state)], [("boss", "t5", state["_meta"]["updated_at"])]
+        )
+        state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a3", "by": "boss", "rev": state["_meta"]["rev"]}])
+        self.assertEqual(len(self.answers(state)), 1)
+
+    def test_a_members_ack_or_an_older_ack_leaves_the_stats_check_sent(self):
+        rev = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t6"}])[0]["_meta"]["rev"]
+        state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a4", "by": "eng", "rev": rev}])
+        self.assertEqual(self.answers(state), [])
+        state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a5", "by": "boss", "rev": rev - 1}])
+        self.assertEqual(self.answers(state), [])
+
+    def test_an_ack_answers_only_the_latest_stats_check(self):
+        state, _ = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t7"}])
+        for event in state["_meta"]["events"]:
+            if event["kind"] == "stats sync requested":
+                event["at"] -= core.SYNC_COOLDOWN_MS + 1000
+        core.paths(SLUG)[1].write_text(core.json.dumps(state), encoding="utf-8")
+        rev = core.sync(SLUG, ops=[{"op": "stats_sync", "id": "t8"}])[0]["_meta"]["rev"]
+        state, _ = core.sync(SLUG, ops=[{"op": "ack", "id": "a6", "by": "boss", "rev": rev}])
+        self.assertEqual([e["id"] for e in self.answers(state)], ["t8"])
+
 
 if __name__ == "__main__":
     unittest.main()
