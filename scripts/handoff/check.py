@@ -67,6 +67,10 @@ def _sections(lines):
     return sections
 
 
+def section(text: str, heading: str) -> str:
+    return "\n".join(dict(_sections(text.splitlines())).get(heading, [])).strip()
+
+
 def _title(lines):
     first = next((line.strip() for line in lines if line.strip()), "")
     return [] if first == TITLE else [f"the first line must be {TITLE}"]

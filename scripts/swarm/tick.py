@@ -274,7 +274,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
 
 def primed(store, slug, seat, task):
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
-    return {**task, "seat": seat, "culture": store.culture.get(slug), **memory}
+    envelope = store.handoff_envelope(slug, task["id"])
+    return {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
 
 
 def _free_seat(slug, lane, taken, preferred):

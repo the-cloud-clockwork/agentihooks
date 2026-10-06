@@ -71,26 +71,41 @@ def test_a_handoff_writes_a_recap_under_the_seat(env, tmp_path):  # noqa: F811
     assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", str(recap)) == 0
     (entry,) = swarm.memory.recaps("eng-1@sw")
     assert (entry["occupant"], entry["task"]) == ("engineer@a1b2c3-0001", "t1")
-    assert entry["text"] == "did seam 1, stopped at seam 2, promised the master a pr"
+    assert "## Done\n- Seam one green" in entry["text"]
+    assert "## Stopped at\nSeam two test red" in entry["text"]
+    assert "## Next\n1. Make seam two green" in entry["text"]
+    assert "promised the master a pr" not in entry["text"]
 
 
-def test_a_handoff_refuses_a_missing_recap_file(env, tmp_path, capsys):  # noqa: F811
+def test_a_malformed_handoff_writes_no_recap(env, tmp_path, capsys):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     doc = tmp_path / "handoff.md"
     doc.write_text("doc")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc), "--recap", "/no/such/recap.md") == 1
-    assert "recap" in capsys.readouterr().err
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)) == 1
+    assert "handoff refused" in capsys.readouterr().err
     assert swarm.handoff("sw", "t1") == ""
+    assert swarm.memory.recaps("eng-1@sw") == []
 
 
 def test_learned_appends_a_note_to_the_callers_seat(env):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "the ledger refuses dashes in chat") == 0
-    assert [n["text"] for n in swarm.memory.learned("eng-1@sw")] == ["the ledger refuses dashes in chat"]
+    assert (
+        run(
+            "sw",
+            "--as",
+            "engineer@a1b2c3-0001",
+            "learned",
+            "the ledger refuses dashes in chat because chat must use plain words",
+        )
+        == 0
+    )
+    assert [n["text"] for n in swarm.memory.learned("eng-1@sw")] == [
+        "the ledger refuses dashes in chat because chat must use plain words"
+    ]
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["note"]
 
 
@@ -175,9 +190,22 @@ def test_learned_takes_a_maturity_and_only_the_master_writes_canon(env):  # noqa
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "a raw figure", "--maturity", "data") == 0
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "learned", "law", "--maturity", "canon") == 1
-    assert run("sw", "--as", "master@a1b2c3-0001", "learned", "law", "--maturity", "canon") == 0
+    assert (
+        run(
+            "sw",
+            "--as",
+            "engineer@a1b2c3-0001",
+            "learned",
+            "a raw figure because it was measured",
+            "--maturity",
+            "data",
+        )
+        == 0
+    )
+    assert (
+        run("sw", "--as", "engineer@a1b2c3-0001", "learned", "law because it always held", "--maturity", "canon") == 1
+    )
+    assert run("sw", "--as", "master@a1b2c3-0001", "learned", "law because it always held", "--maturity", "canon") == 0
     assert [n["maturity"] for n in swarm.memory.learned("eng-1@sw")] == ["data"]
     assert [n["maturity"] for n in swarm.memory.learned("master@sw")] == ["canon"]
 
@@ -186,7 +214,7 @@ def test_promote_rules_by_caller(env, capsys):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     assert run("sw", "--as", "ci@a1b2c3-0001", "promote", "eng-1", "1", "insight", "--reason", "held twice") == 0
     assert run("sw", "--as", "engineer@a1b2c3-0001", "promote", "eng-1", "1", "canon", "--reason", "always") == 1
     assert "only the master or the operator" in capsys.readouterr().err
@@ -206,7 +234,7 @@ def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
     swarm, _, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     assert run("sw", "promote", "eng-1", "1", "canon", "--reason", "the operator says so") == 0
     assert swarm.memory.learned("eng-1@sw")[0]["promotions"][0]["by"] == "operator"
 
@@ -214,11 +242,14 @@ def test_the_operator_may_promote_to_canon(env, monkeypatch):  # noqa: F811
 def test_learned_without_text_lists_entries_with_seat_and_number(env, capsys):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one")
-    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two", "--maturity", "insight")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice", "--maturity", "insight")
     capsys.readouterr()
     assert run("sw", "learned") == 0
-    assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t1\tnote\tlesson one", "eng-1@sw\t2\tinsight\tlesson two"]
+    assert capsys.readouterr().out.splitlines() == [
+        "eng-1@sw\t1\tnote\tlesson one because it held",
+        "eng-1@sw\t2\tinsight\tlesson two because it held twice",
+    ]
 
 
 def test_culture_set_and_show_survive_swarm_remove(env, tmp_path, capsys):  # noqa: F811
