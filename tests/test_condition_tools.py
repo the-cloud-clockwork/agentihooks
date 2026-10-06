@@ -60,6 +60,8 @@ class TestSignal:
             "add the no-code-edits conditions",
             "remove the git guard condition",
             "set up a new kubectl gitops reminder condition",
+            "set the cd one proof condition",
+            "add the brand new guard condition",
         ],
     )
     def test_arms(self, prompt):
