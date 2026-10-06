@@ -99,6 +99,8 @@ def op(kind, args, /, **fields):
 def send(args, kind, /, **fields):
     state = call(args.slug, [op(kind, args, **fields)])
     if state.get("rejected"):
+        if kind.startswith("phase_"):
+            sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
         sys.exit(f"rejected: {state['rejected']}")
     return state
 
@@ -200,6 +202,15 @@ def cmd_artifact(args):
 
 
 def cmd_phase(args):
+    if args.id in ("add", "set") and args.values:
+        from scripts.swarm_ledger import ledger_phase_cli
+
+        kind, fields = ledger_phase_cli.operation(args)
+        send(args, kind, **fields)
+        print(json.dumps(fields))
+        return
+    if args.state not in ("done", "open") or args.values:
+        sys.exit("phase takes ID done|open, add ID TITLE, or set ID FIELD=VALUE")
     send(args, "set", **with_status(args, path=f"phases/{args.id}/done", value=args.state == "done"))
     print(json.dumps({"phase": args.id, "state": args.state}))
 
@@ -390,8 +401,13 @@ def build_parser():
     artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
     phase = sub.add_parser("phase")
     phase.add_argument("id")
-    phase.add_argument("state", choices=["done", "open"])
+    phase.add_argument("state")
+    phase.add_argument("values", nargs="*")
     phase.add_argument("--status")
+    phase.add_argument("--description", default="")
+    phase.add_argument("--depends-on", default="")
+    phase.add_argument("--planning", choices=["manual", "auto"], default="manual")
+    phase.add_argument("--release", action="store_true")
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
