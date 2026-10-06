@@ -115,3 +115,41 @@ class KindCli(unittest.TestCase):
             )
         self.assertEqual((sent[0][1]["kind"], sent[0][1]["contract"]), ("tune", CONTRACT))
         self.assertEqual(sent[1][1]["fields"], {"kind": "ops"})
+
+    def test_task_set_sends_a_dotted_proof_as_one_object_the_ledger_stores(self):
+        import ledger
+
+        make_ledger([{"task": "t1", "title": "restart the cache", "lane": "eng", "kind": "ops"}])
+        sent = []
+        argv = ["--slug", SLUG, "--as", "x", "task", "set", "t1", "state=done"]
+        argv += ["proof.command=kubectl get pods", "proof.output=cache-0 Running=1/1"]
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            ledger.cmd_task(ledger.build_parser().parse_args(argv))
+        fields = sent[0][1]["fields"]
+        self.assertEqual(
+            fields, {"state": "done", "proof": {"command": "kubectl get pods", "output": "cache-0 Running=1/1"}}
+        )
+        state, rejected = core.sync(SLUG, ops=[op("task_update", 1, item="tasks/t1", fields=fields)])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["tasks"][0]["proof"], fields["proof"])
+        self.assertTrue(state["tasks"][0]["done"])
+
+    def test_task_set_keeps_plain_values_as_strings_for_a_code_task(self):
+        import ledger
+
+        sent = []
+        argv = ["--slug", SLUG, "--as", "x", "task", "set", "t1", "state=pr", "pr_url=https://github.com/o/r/pull/1"]
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            ledger.cmd_task(ledger.build_parser().parse_args(argv))
+        self.assertEqual(sent[0][1]["fields"], {"state": "pr", "pr_url": "https://github.com/o/r/pull/1"})
+
+    def test_task_set_refuses_a_plain_and_a_dotted_proof_together(self):
+        import ledger
+
+        sent = []
+        argv = ["--slug", SLUG, "--as", "x", "task", "set", "t1", "proof=ran it", "proof.command=kubectl get pods"]
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            with self.assertRaises(SystemExit) as exit_:
+                ledger.cmd_task(ledger.build_parser().parse_args(argv))
+        self.assertIn("not both", str(exit_.exception.code))
+        self.assertEqual(sent, [])
