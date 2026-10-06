@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tests import installer_isolation
 from tests.shards import (
     assign_files,
     discover_test_files,
@@ -190,6 +191,18 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     # the operator's real condition scripts and write the real cache and counters.
     fake_state_dir = fake_home / ".agentihooks"
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
+    monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
+    monkeypatch.setattr("hooks.config.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
+    monkeypatch.setattr("hooks.context.broadcast.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
+    monkeypatch.setattr(
+        "hooks.config.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
+    )
+    monkeypatch.setattr(
+        "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
+    )
+    monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", fake_state_dir / "brain_feed_hash")
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
     monkeypatch.setattr("hooks.context.conditions._cache_path", lambda *a: fake_state_dir / "cache" / "conditions.json")
     monkeypatch.setattr("hooks.context.conditions.runtime_dir", lambda: fake_state_dir / "conditions")
@@ -208,46 +221,57 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(emitter, "_hook_fields", {})
     monkeypatch.setattr(emitter, "_top_fields", {})
 
-    try:
-        import install
-    except Exception:  # suite runs fine without the installer importable
-        yield
-        return
+    import install
 
-    monkeypatch.setattr(install, "CLAUDE_HOME", fake_home / ".claude", raising=False)
-    monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", fake_home / ".agentihooks", raising=False)
-    monkeypatch.setattr(install, "STATE_JSON", fake_home / ".agentihooks" / "state.json", raising=False)
-    monkeypatch.setattr(install, "_CLAUDE_JSON", fake_home / ".claude.json", raising=False)
-    monkeypatch.setattr(install, "_BASHRC", fake_home / ".bashrc", raising=False)
+    import scripts.install as package_install
+
+    installer_paths = {
+        "CLAUDE_HOME": fake_home / ".claude",
+        "AGENTIHOOKS_STATE_DIR": fake_state_dir,
+        "STATE_JSON": fake_state_dir / "state.json",
+        "_CLAUDE_JSON": fake_home / ".claude.json",
+        "_BASHRC": fake_home / ".bashrc",
+        "_ENV_FILE_DST": fake_state_dir / ".env",
+        "_SYNC_LOCK_FILE": fake_state_dir / "sync.lock",
+        "AGENTIHOOKS_ROOT": tmp_path / "_repo",
+    }
+    for module in (install, package_install):
+        for name, value in installer_paths.items():
+            monkeypatch.setattr(module, name, value)
+            assert Path(getattr(module, name)).resolve().is_relative_to(tmp_path.resolve()), (
+                f"{module.__name__}.{name} escapes the test directory — refusing to run"
+            )
+    monkeypatch.setattr(installer_isolation, "WRITE_ROOT", tmp_path.resolve())
+    monkeypatch.setattr(
+        installer_isolation,
+        "PROTECTED_PATHS",
+        tuple(
+            (real_home / name).resolve()
+            for name in (
+                ".claude",
+                ".claude.json",
+                ".codex",
+                ".copilot",
+                ".agentihooks",
+                ".agents",
+                ".bashrc",
+                ".local/bin",
+                ".config/systemd/user",
+            )
+        ),
+    )
     monkeypatch.setattr("scripts.deps_preflight.manifest_path", lambda: None)
-    # AGENTIHOOKS_ROOT is `Path(__file__).parent.parent` — the real checkout. It
-    # feeds `_managed_roots()`, so leaving it real means every ownership test runs
-    # with the developer's own repo silently trusted as a source. Nothing collides
-    # with it today, which is luck, not isolation.
-    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", tmp_path / "_repo", raising=False)
     # Same reasoning for the env-var bundle: `_managed_roots()` takes it verbatim,
     # so a developer with it exported would run a different suite than CI.
     monkeypatch.delenv("AGENTIHOOKS_BUNDLE_PATH", raising=False)
 
-    for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC", "AGENTIHOOKS_ROOT"):
-        if not hasattr(install, name):
-            continue
-        value = Path(getattr(install, name))
-        assert real_home not in value.parents and value != real_home, (
-            f"install.{name} still resolves under the real home ({value}) — refusing to run"
-        )
     assert Path.home() != real_home, "Path.home() still returns the real home — refusing to run"
 
     # Codex and copilot write through their own resolvers, not install.py
     # globals, so the loop above cannot see them. Assert the same refusal bar.
-    try:
-        from targets._common import agents_skills_home
-        from targets.codex_target import codex_home
-        from targets.copilot_target import copilot_home
-    except Exception:
-        yield
-        return
-    from targets.copilot_target import CopilotAdapter
+    from targets._common import agents_skills_home
+    from targets.codex_target import codex_home
+    from targets.copilot_target import CopilotAdapter, copilot_home
 
     from hooks.context.codex_context_pin import catalog_path
     from scripts.claude_config import claude_home, claude_json
