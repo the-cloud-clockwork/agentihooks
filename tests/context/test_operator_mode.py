@@ -225,6 +225,12 @@ def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
     assert operator_mode.QUIET_EVERY == 2
 
 
+def test_the_reminder_counts_tool_calls_upward_from_the_first(monkeypatch):
+    monkeypatch.setattr(operator_mode, "QUIET_EVERY", 3)
+    seen = [operator_mode.reminder("s1", SWARM, now=100) for _ in range(4)]
+    assert seen == [REMINDER, "", "", REMINDER]
+
+
 def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers):
     operator_mode.observe("s1", "operator on", True, now=100)
     assert [operator_mode.reminder("s1", SWARM, now=101) for _ in range(3)] == ["", "", ""]
@@ -277,6 +283,16 @@ def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkey
     hook_manager._operator_reminder({"session_id": "s1"})
     hook_manager._operator_reminder({"session_id": "s1"})
     assert injected == [((REMINDER,), {"also_log": False, "skip_compression": True})]
+
+
+def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    injected = []
+    monkeypatch.setattr("hooks.common.inject_context", lambda text, *a, **k: injected.append(text))
+    for _ in range(3):
+        hook_manager.on_pre_tool_use({"session_id": "s7", "tool_name": "Read", "tool_input": {"file_path": "x"}})
+    assert injected.count(REMINDER) == 2
 
 
 def test_the_stop_hook_blocks_a_twelve_word_final_message(monkeypatch):
