@@ -323,7 +323,10 @@ Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 Folder trust: before a Claude launch, a folder Claude has not trusted (neither it
 nor a parent has `hasTrustDialogAccepted` in `$CLAUDE_CONFIG_DIR/.claude.json`,
 else `~/.claude.json`) is recorded as trusted, so the session never waits at the
-trust question. `trust=trusted|marked|untrusted` names the outcome;
+trust question. The launcher pins the session to that same config home: it
+exports the caller's `CLAUDE_CONFIG_DIR`, or unsets it when the caller has none,
+so a herdr pane's own environment cannot point Claude at another file.
+`trust=trusted|marked|untrusted` names the outcome;
 `AGENTIHOOKS_TRUST_LAUNCH_DIR=0` turns marking off. On `untrusted` the launch
 still goes ahead and stderr says the session waits for someone to answer.
 
