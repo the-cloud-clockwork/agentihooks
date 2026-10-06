@@ -332,7 +332,7 @@ agentihooks doctor --target copilot                 # per-target health check
 | Persona | `CLAUDE.md` | `AGENTS.md` | `copilot-instructions.md` |
 | Skills | `~/.claude/skills` | `~/.agents/skills` | `~/.agents/skills` |
 | Agents | native | not supported | `~/.copilot/agents` |
-| Commands | native | `~/.codex/prompts` | translated to skills |
+| Commands | native | profile homes, as hardlinked skills | translated to skills |
 | MCP | `.mcp.json` | `[mcp_servers.*]` | `mcp-config.json` |
 | MCP over SSE | yes | no | yes |
 | Status line | command | built-in items only | command |

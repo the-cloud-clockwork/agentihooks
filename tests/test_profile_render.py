@@ -497,12 +497,55 @@ def test_codex_render_links_into_the_claude_profile(world):
     claude = render.rendered_root() / "rb-role" / "claude"
     assert out == render.rendered_root() / "rb-role" / "codex"
     assert os.readlink(out / "AGENTS.md") == str(claude / "CLAUDE.md")
-    linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir()}
+    linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
     assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
     assert {"bundle-skill", "role-skill"} <= set(linked)
     assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == ["config.toml", "skills"]
     sources = render.sources.path("rb-role", "codex", render.rendered_root())
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
+
+
+def test_codex_render_offers_each_command_as_a_hardlinked_skill(world):
+    from scripts.profiles import render
+
+    bundle_cmd = _write(world["bundle"] / ".claude" / "commands" / "deploy.md", "---\ndescription: Deploy\n---\nGo.\n")
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "commands"
+    role_cmd = _write(kit / "triage.md", "---\ndescription: Triage\nargument-hint: [n]\n---\nTriage $ARGUMENTS.\n")
+    _write(kit / "bare.md", "No frontmatter, so Codex refuses it.\n")
+
+    out = render.render_codex("rb-role")
+
+    skills = out / "skills"
+    for name, source in (("deploy", bundle_cmd), ("triage", role_cmd)):
+        skill = skills / name / "SKILL.md"
+        assert not skill.is_symlink()
+        assert skill.samefile(source)
+    assert not (skills / "bare").exists()
+    assert not (out / "prompts").exists()
+
+
+def test_codex_render_lets_a_skill_keep_its_name_over_a_command(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / ".claude" / "commands" / "role-skill.md", "---\ndescription: Clash\n---\nBody.\n")
+
+    out = render.render_codex("rb-role")
+
+    assert (out / "skills" / "role-skill").is_symlink()
+
+
+def test_codex_render_drops_the_skill_of_a_removed_command(world):
+    from scripts.profiles import render
+
+    command = _write(world["bundle"] / ".claude" / "commands" / "deploy.md", "---\ndescription: Deploy\n---\nGo.\n")
+    out = render.render_codex("rb-role")
+    _write(out / "skills" / ".system" / "codex" / "SKILL.md", "codex's own\n")
+    command.unlink()
+
+    render.render_codex("rb-role", force=True)
+
+    assert not (out / "skills" / "deploy").exists()
+    assert (out / "skills" / ".system" / "codex" / "SKILL.md").read_text() == "codex's own\n"
 
 
 def test_codex_render_config_has_no_persona_and_only_profile_servers(world):

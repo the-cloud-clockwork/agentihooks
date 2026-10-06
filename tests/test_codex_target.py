@@ -327,50 +327,24 @@ class TestPersona:
 
 
 class TestPrompts:
-    def _layer(self, tmp_path, name, text):
+    def _commands(self, tmp_path):
         d = tmp_path / "commands"
         d.mkdir(exist_ok=True)
-        (d / name).write_text(text)
-        return d
+        (d / "deploy.md").write_text("---\ndescription: Deploy\n---\n\nDeploy now.\n")
+        return [("command", d)]
 
-    def test_frontmatter_rewritten(self, adapter, tmp_path):
-        src = self._layer(
-            tmp_path,
-            "deploy.md",
-            "---\ndescription: Deploy the stack\nallowed-tools: Bash\n---\n\nDeploy $ARGUMENTS now.\n",
-        )
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        out = (codex_home() / "prompts" / "deploy.md").read_text()
-        assert "description: Deploy the stack" in out
-        assert "allowed-tools" not in out
-        assert "Deploy $ARGUMENTS now." in out
+    def test_commands_write_no_prompts_folder(self, adapter, tmp_path):
+        adapter.install_features("commands", self._commands(tmp_path), lambda p: p.suffix == ".md")
+        assert not (codex_home() / "prompts").exists()
 
-    def test_stale_prompts_removed_on_rerun(self, adapter, tmp_path):
-        src = self._layer(tmp_path, "old.md", "body")
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        assert (codex_home() / "prompts" / "old.md").exists()
-        (src / "old.md").unlink()
-        (src / "new.md").write_text("body2")
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        assert not (codex_home() / "prompts" / "old.md").exists()
-        assert (codex_home() / "prompts" / "new.md").exists()
-
-    def test_operator_file_not_overwritten_on_first_init(self, adapter, tmp_path):
-        """A file the manifest has never claimed is an operator file — it wins."""
+    def test_prompts_an_earlier_install_wrote_are_removed(self, adapter, tmp_path):
         dst_dir = codex_home() / "prompts"
         dst_dir.mkdir(parents=True)
-        (dst_dir / "deploy.md").write_text("# operator's own prompt\n")
-        src = self._layer(tmp_path, "deploy.md", "body from agentihooks")
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        assert (dst_dir / "deploy.md").read_text() == "# operator's own prompt\n"
-
-    def test_manifest_owned_prompt_still_overwritten_on_rerun(self, adapter, tmp_path):
-        src = self._layer(tmp_path, "deploy.md", "body v1")
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        assert "body v1" in (codex_home() / "prompts" / "deploy.md").read_text()
-        (src / "deploy.md").write_text("body v2")
-        adapter.install_features("commands", [("command", src)], lambda p: p.suffix == ".md")
-        assert "body v2" in (codex_home() / "prompts" / "deploy.md").read_text()
+        (dst_dir / "deploy.md").write_text("translated by an earlier install\n")
+        (dst_dir / "mine.md").write_text("# operator's own prompt\n")
+        (dst_dir / ".agentihooks-manifest.json").write_text('["deploy.md"]')
+        adapter.install_features("commands", self._commands(tmp_path), lambda p: p.suffix == ".md")
+        assert sorted(p.name for p in dst_dir.iterdir()) == ["mine.md"]
 
 
 class TestMcp:
