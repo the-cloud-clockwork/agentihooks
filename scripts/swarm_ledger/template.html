@@ -1442,8 +1442,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
     const pct = total ? Math.round(100 * done / total) : 0;
     const row = (label, value, extra) => h("div", { class: "stat" }, h("dt", { text: label }), h("dd", {}, value, extra));
-    const check = statsCheck(meta.events || [], doc.chat, statsSent);
-    const reply = check && check.reply ? h("a", { class: "stats-reply", href: `#chat-${check.reply}`, text: " · reply", on: { click: (ev) => showReply(ev, check.reply) } }) : null;
     $("stats").replaceChildren(
       row("Started", started ? when(started) : "—"),
       row("Elapsed", elapsed === null ? "—" : span(elapsed)),
@@ -1453,19 +1451,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       row("Follow-ups", `${upsDone} / ${ups.length}`),
       ...(out ? [row("Out of scope", String(out))] : []),
       row("Agents · 2 h", String(activeAgents())),
-      row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
-      ...(check ? [row("Stats check", statsCheckText(check), reply)] : []));
-  }
-
-  function showReply(ev, id) {
-    ev.preventDefault();
-    showChat(true);
-    const el = document.getElementById(`chat-${id}`);
-    if (!el) return;
-    el.scrollIntoView({ block: "center" });
-    el.classList.remove("flash");
-    void el.offsetWidth;
-    el.classList.add("flash");
+      row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
   }
 
   function jumpTo(ev, item) {
@@ -1564,14 +1550,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
   }
 
-  function statsCheck(events, chat, local) {
+  function statsCheck(events, local) {
     if (local && !events.some((e) => e.id === local.id)) return { state: "sent", at: local.at };
     const sent = [...events].reverse().find((e) => e.kind === "stats sync requested");
     if (!sent) return null;
     const answer = events.find((e) => e.kind === "stats check answered" && e.id === sent.id);
     if (!answer) return { state: "sent", at: sent.at };
-    const reply = chat.find((m) => m.by === answer.by && m.at >= sent.at && !m.deleted);
-    return { state: "answered", at: sent.at, answered_at: answer.at, by: answer.by, reply: reply ? reply.id : "" };
+    return { state: "answered", at: sent.at, answered_at: answer.at };
   }
 
   function statsCheckText(check) {
@@ -1596,7 +1581,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
     const statsWait = cooldown("stats_sync", "stats sync requested");
     $("stats-sync").disabled = !!statsWait;
-    const check = statsCheck(meta.events || [], doc.chat, statsSent);
+    const check = statsCheck(meta.events || [], statsSent);
     const checked = check ? `Stats check ${statsCheckText(check)}` : "";
     $("stats-sync").ariaLabel = [checked, statsWait ? `Stats check ${statsWait}` : "Ask master to recheck"].filter(Boolean).join(" · ");
     $("stats-state").textContent = check ? statsCheckText(check) : "";
@@ -2198,7 +2183,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     if (log.dataset.sig === sig) return;
     const stick = log.dataset.sig === undefined || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
     log.dataset.sig = sig;
-    log.replaceChildren(...list.map((e) => h("div", { id: `chat-${e.id}`, class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
+    log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
       h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
       entryBody(e.text, new Set(doc.tasks.map((t) => t.id))), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));

@@ -135,6 +135,9 @@ def _lock():
 
 
 def ensure(*, quiet: bool = False) -> int:
+    from scripts.skill_links import repair
+
+    repair()
     path = manifest_path()
     if path is None or stamp_fresh(path):
         return 0
@@ -163,10 +166,15 @@ def ensure(*, quiet: bool = False) -> int:
 
 
 def unsatisfied() -> list[Dep]:
+    from scripts.skill_links import dangling
+
+    missing = [
+        Dep(id=f"skill:{link.name}", kind="skill", check=(), hint=f"dangling link: {link}") for link in dangling()
+    ]
     path = manifest_path()
-    if path is None:
-        return []
-    return [dep for dep in parse(json.loads(path.read_text())) if not satisfied(dep)]
+    if path is not None:
+        missing.extend(dep for dep in parse(json.loads(path.read_text())) if not satisfied(dep))
+    return missing
 
 
 def main(argv: list[str]) -> int:
