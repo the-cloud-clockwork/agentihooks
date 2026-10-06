@@ -153,7 +153,7 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
     runs = [s.get("run", "") for s in steps]
     install = next(i for i, run in enumerate(runs) if "playwright install --with-deps chromium" in run)
-    check = runs.index("python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*")
+    check = next(i for i, run in enumerate(runs) if run.endswith(".artifact_sanity tests/fixtures/artifacts/*"))
     assert install < check
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
