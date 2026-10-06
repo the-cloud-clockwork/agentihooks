@@ -87,7 +87,7 @@ class DoctorControls(unittest.TestCase):
 
     def test_stop_doctor_asks_for_a_confirm_and_names_itself(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
-        self.assertIn('if (action === "doctor_stop" && !confirm(', page)
+        self.assertIn('doctor_stop: "Stop the Doctor crew and close its linked ledger."', page)
         out = run_js(["opNote"], '[opNote("done", "doctor_start"), opNote("pending", "doctor_stop")]')
         self.assertEqual(
             out, [{"cls": "ok", "text": "Start doctor: done"}, {"cls": "pending", "text": "Stop doctor: sending"}]

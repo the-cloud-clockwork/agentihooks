@@ -14,7 +14,7 @@ def test_agent_rows_show_the_model_and_effort_and_codex_by_harness():
         "\n".join(functions)
         + """
 const raw = {agents: [
-  {name: 'e', lane: 'eng', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', task: 't1'},
+  {name: 'e', lane: 'eng', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', task: 't1', profile: 'engineer'},
   {name: 'm', lane: 'master', harness: 'claude', model: 'sonnet', effort: 'low'},
   {name: 'x', lane: 'eng', harness: 'codex', model: 'gpt-6-luna', effort: 'high'},
   {name: 'old', lane: 'ci'}
@@ -29,4 +29,5 @@ console.log(JSON.stringify(agentRows(raw, 0)));
         ("x", "codex"),
         ("old", "—"),
     ]
+    assert [r["profile"] for r in rows] == ["—", "engineer", "—", "—"]
     assert [(r["lane"], r["task"], r["state"]) for r in rows[:2]] == [("—", "", "live"), ("eng", "t1", "working")]
