@@ -213,3 +213,108 @@ def test_init_codex_profile_resume_preserves_route_and_trust(profile, monkeypatc
     assert "model_reasoning_effort=" in text
     assert "trust_level" in text
     assert "profile=qa" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("args", [["-c"], ["-c", "continue prompt"]])
+def test_claude_continue_is_forwarded(profile, args):
+    _, result = select_profile.prepare("engineer", "claude", "", "", args, {})
+    assert result == ["--model", "sonnet", "--effort", "medium", *args]
+
+
+@pytest.mark.parametrize("flag", ['-cmodel_reasoning_effort="low"', '--config=model_reasoning_effort="low"'])
+def test_attached_codex_effort_wins_over_manifest(profile, flag):
+    _, result = select_profile.prepare("qa", "codex", "", "", [flag, "exec", "OK"], {})
+    assert result == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="low"', "exec", "OK"]
+
+
+def test_attached_codex_model_cannot_override_selector(profile):
+    _, result = select_profile.prepare("qa", "codex", "chosen", "", ["-mnative", "exec", "OK"], {})
+    assert result == ["-p", "qa", "-m", "chosen", "-c", 'model_reasoning_effort="medium"', "exec", "OK"]
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_profile_command_keeps_executable_and_has_no_before_code(monkeypatch, tmp_path, agent):
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks")
+    command, before = init_agent._agent_command(
+        init_agent.AgentSpec(agent=agent, profile="engineer"), tmp_path / "route", "run", [], {}, tmp_path
+    )
+    assert command[:6] == ["/bin/agentihooks", "select-profile", "engineer", "--agent", agent, "--"]
+    assert before == ""
+
+
+def test_terminal_profile_usage(capsys):
+    assert init_agent._parser().parse_args([]).profile == ""
+    with pytest.raises(SystemExit) as exc:
+        init_agent.main(["--help"])
+    assert exc.value.code == 0
+    assert "--profile PROFILE Role profile for this run" in " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
+def test_cli_accepts_all_efforts_for_explicit_claude(profile, capsys, effort):
+    assert select_profile.main(["engineer", "--agent", "claude", "--effort", effort, "--dry-run"]) == 0
+    assert "--effort " + ("low" if effort == "minimal" else effort) in capsys.readouterr().out
+
+
+def test_invalid_agent_is_a_usage_error(profile, capsys):
+    with pytest.raises(SystemExit) as exc:
+        select_profile.main(["engineer", "--agent", "invalid"])
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args", [["-m"], ["--model"]])
+def test_missing_native_model_is_usage_error(profile, capsys, args):
+    with pytest.raises(SystemExit) as exc:
+        select_profile.main(["engineer", "--", *args])
+    assert exc.value.code == 2
+    assert "expected one argument" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("args", [["-c"], ["--config"]])
+def test_missing_codex_config_is_reported(profile, capsys, args):
+    assert select_profile.main(["qa", "--agent", "codex", "--", *args]) == 2
+    assert "requires a value" in capsys.readouterr().err
+
+
+def test_defaults_resolve_the_requested_profile(profile, monkeypatch):
+    root, _ = profile
+    chain = Mock(return_value=[("engineer", root / "engineer")])
+    monkeypatch.setattr(select_profile.profiles, "_chain", chain)
+    select_profile.prepare("engineer", "claude", "", "", [], {})
+    chain.assert_called_once_with("engineer")
+
+
+def test_terminal_profile_prepares_model_and_environment_once(profile, monkeypatch, tmp_path):
+    prepare = Mock(
+        return_value=(
+            {"AGENTIHOOKS_PROFILE": "qa"},
+            ["-p", "qa", "-m", "selected", "-c", 'model_reasoning_effort="low"'],
+        )
+    )
+    launch = Mock(return_value=(tmp_path / "launcher", None))
+    monkeypatch.setattr(select_profile, "prepare", prepare)
+    monkeypatch.setattr(init_agent, "_write_launcher", launch)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    env = {"HOME": str(tmp_path)}
+    assert init_agent.main(["--profile", "qa", "--agent", "codex", "--dir", str(tmp_path), "--dry-run"], env) == 0
+    prepare.assert_called_once_with("qa", "codex", "", "", [], {**env, "AGENTIHOOKS_PROFILE": "qa"})
+    assert launch.call_args.args[3] == ["-m", "selected", "-c", 'model_reasoning_effort="low"']
+    assert launch.call_args.args[4] == {**env, "AGENTIHOOKS_PROFILE": "qa"}
+
+
+def test_installer_help_has_exact_selector_entry(monkeypatch, capsys):
+    from scripts import install
+
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit):
+        install.main()
+    assert "select-profile Select a profile, model and effort for one routed run" in " ".join(
+        capsys.readouterr().out.split()
+    )
+
+
+def test_selector_usage_names_command_exactly(capsys):
+    with pytest.raises(SystemExit):
+        select_profile.main(["--help"])
+    assert capsys.readouterr().out.startswith("usage: agentihooks select-profile ")

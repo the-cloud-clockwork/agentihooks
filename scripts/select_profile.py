@@ -21,15 +21,18 @@ def prepare(
     for key in ("model", "effort"):
         if defaults.get(key):
             active[f"{prefix}_{key.upper()}"] = defaults[key]
-    native_model, native_effort = init_agent.model_effort(agent, agent_args, active)
-    flags = init_agent.model_flags(agent, model or native_model, _effort(agent, effort or native_effort))
+    native_model, native_effort, remaining = _native_options(agent, agent_args)
+    default_model, default_effort = init_agent.model_effort(agent, [], active)
+    flags = init_agent.model_flags(
+        agent, model or native_model or default_model, _effort(agent, effort or native_effort or default_effort)
+    )
     profiles.render(agent, name)
     env = {"AGENTIHOOKS_PROFILE": name}
     if agent == "claude":
         env["CLAUDE_CONFIG_DIR"] = str(profiles.rendered_root() / name / "claude")
     else:
         flags = ["-p", name, *flags]
-    return env, [*flags, *_without_model_flags(agent_args)]
+    return env, [*flags, *remaining]
 
 
 def _defaults(name: str) -> dict:
@@ -48,21 +51,37 @@ def _effort(agent: str, effort: str) -> str:
     return mapped
 
 
-def _without_model_flags(args: list[str]) -> list[str]:
-    kept = []
+def _native_options(agent: str, args: list[str]) -> tuple[str, str, list[str]]:
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--model", "-m", default="")
+    parser.add_argument("--effort", default="")
+    options, remaining = parser.parse_known_args(args)
+    effort = options.effort
+    if agent == "codex":
+        effort, remaining = _config_effort(remaining)
+    return options.model, effort, remaining
+
+
+def _config_effort(args: list[str]) -> tuple[str, list[str]]:
+    effort, kept = "", []
     arguments = iter(args)
     for argument in arguments:
-        if argument in ("--model", "-m", "--effort"):
-            next(arguments)
-        elif argument in ("-c", "--config"):
-            value = next(arguments)
-            if not value.startswith("model_reasoning_effort="):
-                kept.extend((argument, value))
-        elif not argument.startswith(
-            ("--model=", "--effort=", "-cmodel_reasoning_effort=", "--config=model_reasoning_effort=")
-        ):
+        if argument in ("-c", "--config"):
+            value = next(arguments, None)
+            if value is None:
+                raise ValueError(f"{argument} requires a value")
+            pair = [argument, value]
+        elif argument.startswith(("-c", "--config=")):
+            value = argument[2:] if argument.startswith("-c") else argument.split("=", 1)[1]
+            pair = [argument]
+        else:
             kept.append(argument)
-    return kept
+            continue
+        if value.startswith("model_reasoning_effort="):
+            effort = value.split("=", 1)[1].strip('"')
+        else:
+            kept.extend(pair)
+    return effort, kept
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -85,3 +104,9 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
     return subprocess.run(command, env={**os.environ, **env}).returncode
+
+
+def dispatch(argv: list[str]) -> int:
+    if argv[0] == "profile":
+        return profiles.main(argv[1:])
+    return main(argv[1:])
