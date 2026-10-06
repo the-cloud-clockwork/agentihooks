@@ -82,15 +82,15 @@ def mark_revived(slug, name, root=None, now_ms=None):
     folder = Path(root or default_root()) / slug
     folder.mkdir(parents=True, exist_ok=True)
     at = int(time.time() * 1000) if now_ms is None else now_ms
-    (folder / f"{name}.revive").write_text(str(at), encoding="utf-8")
+    (folder / f"{name}.revive").write_text(str(at))
 
 
 def _take_mark(path, at):
     try:
-        marked = int(path.read_text(encoding="utf-8"))
+        marked = int(path.read_text())
+        path.unlink()
     except (OSError, ValueError):
         return False
-    path.unlink(missing_ok=True)
     return at - marked <= REVIVE_MARK_MS
 
 
