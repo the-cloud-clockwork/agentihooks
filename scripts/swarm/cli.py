@@ -25,7 +25,7 @@ agentihooks swarm <id> issue URL | pr URL | done [--pr URL] | block NOTE | hando
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed TASK; research --finding URL
+--evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
 """
 
 import argparse
