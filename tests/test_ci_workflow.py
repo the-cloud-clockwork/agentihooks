@@ -87,7 +87,7 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
     assert install["run"].strip().splitlines() == [
-        'uv venv "$HOME/venv"',
+        'uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"',
         'uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
@@ -99,7 +99,10 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files():
     assert cache["with"]["path"] == "~/venv"
     assert "${{ runner.os }}" in key
     assert f"${{{{ steps.{python['id']}.outputs.python-version }}}}" in key
-    assert "${{ hashFiles('pyproject.toml', 'uv.lock', '.github/test-excludes.txt') }}" in key
+    assert "${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}" in key
+    _, day = _unit_step_index(lambda s: s.get("id") == "day")
+    assert day["run"] == 'echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"'
+    assert "${{ steps.day.outputs.date }}" in key
     assert "matrix.shard" not in key
 
 

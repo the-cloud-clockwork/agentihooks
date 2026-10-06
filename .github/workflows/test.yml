@@ -51,15 +51,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # The venv links to the exact interpreter, so its version belongs to the key.
-      # It lives outside the checkout: tests scan modules loaded from the repo root.
+      # Dependencies resolve unpinned (no lock file is tracked), so the key rolls
+      # daily to pick up new releases. The venv lives outside the checkout: tests
+      # scan modules loaded from the repo root.
+      - name: Stamp the day
+        if: steps.lookup.outputs.skip != 'true'
+        id: day
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Restore the test environment
         if: steps.lookup.outputs.skip != 'true'
         id: venv
         uses: actions/cache@v4
         with:
           path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock', '.github/test-excludes.txt') }}
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
 
       - name: Set up uv
         if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
@@ -76,7 +82,7 @@ jobs:
       - name: Install dependencies
         if: steps.lookup.outputs.skip != 'true' && steps.venv.outputs.cache-hit != 'true'
         run: |
-          uv venv "$HOME/venv"
+          uv venv --python "${{ steps.python.outputs.python-path }}" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Use the test environment
