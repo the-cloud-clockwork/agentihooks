@@ -2042,7 +2042,7 @@ input, textarea { caret-color: var(--accent-2); }
     const grid = document.querySelector(".swarm-grid");
     const workColumn = h("div", { class: "swarm-work-column" });
     const sideColumn = h("div", { class: "swarm-side-column" });
-    const parts = ["needs-you-box", "agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "restore-box"].map($);
+    const parts = ["needs-you-box", "agents-box", "capacity-box", "health-box", "doctor-box", "history-box", "handoff-box", "restore-box"].map($);
     const counts = document.querySelector(".counts-row");
     const placePanels = () => {
       placeRail();
@@ -2050,7 +2050,7 @@ input, textarea { caret-color: var(--accent-2); }
       else {
         $("swarm-status-box").after(counts);
         workColumn.replaceChildren(parts[1], parts[5]);
-        sideColumn.replaceChildren(parts[0], parts[2], parts[3], parts[4], parts[6]);
+        sideColumn.replaceChildren(parts[0], parts[2], parts[3], parts[4], parts[6], parts[7]);
         grid.replaceChildren(workColumn, sideColumn);
       }
     };
