@@ -150,5 +150,17 @@
   "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_22:2f277ca5be3c78f23d53bcab7aa9925a8fe6db9ea04763ee34d1b9433ce4c206": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Omitted selected token default is None; no native OAuth assignment occurs for an absent token. Present selected tokens are unchanged."
+  },
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_61:741607c5da72527617c61861300147033b70a9a1edcbe32ab56a84a37d9a4585": {
+    "reader": "Standards",
+    "reason": "build_persona reads pending_rules only through a truthiness check, so an empty list and None render the same persona."
+  },
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_7:6ef10d40716dffe816d0047f12c2c6aa17de202e1bc4f34b60cab5f6bdf66508": {
+    "reader": "Standards",
+    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
+  },
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_9:db650bcc5795fba8ce5b52cdf81787eff48ad84aac2763ff09f571e17b294e40": {
+    "reader": "Standards",
+    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
   }
 }

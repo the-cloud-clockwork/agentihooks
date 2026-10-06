@@ -6334,6 +6334,10 @@ def main() -> None:
         from hooks.classifier import cli as classifier_cli
 
         raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
+    if _argv and _argv[0] == "profile":
+        from scripts.profiles.render import main as profile_main
+
+        raise SystemExit(profile_main(_argv[1:]))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6500,6 +6504,7 @@ def main() -> None:
     )
     sub.add_parser("classify", help="Ask the decision models typed questions: --state FILE --questions FILE")
     sub.add_parser("classifier", help="Decision classifier records: stats [--purpose P]")
+    sub.add_parser("profile", help="Render a profile into its own home: render NAME --target claude|codex [--force]")
     sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
 
     balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
