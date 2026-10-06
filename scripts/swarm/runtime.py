@@ -104,7 +104,7 @@ class HerdrRuntime:
         if lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)
         else:
-            picked = model_pick.ModelPick(chosen.get("model", ""), chosen.get("effort", ""))
+            picked = model_pick.ModelPick(chosen.get("model"), chosen.get("effort"))
         placed = self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, picked.__dict__, environ)])
         return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 

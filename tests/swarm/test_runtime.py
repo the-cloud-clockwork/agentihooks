@@ -380,10 +380,10 @@ def test_master_and_plan_seats_never_take_the_task_classifier_pick(tmp_path, mon
 
 
 def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
-    lanes = {"master": {"agent": "claude", "model": "sonnet", "effort": "auto"}}
+    lanes = {"master": {"agent": "claude", "model": "sonnet", "effort": "max"}}
     assert _launched(tmp_path, monkeypatch, "master", SEAT_TASKS["master"], lanes) == [
         "--model",
         "sonnet",
         "--effort",
-        "high",
+        "max",
     ]
