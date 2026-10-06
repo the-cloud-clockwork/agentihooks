@@ -38,6 +38,7 @@
     ['[data-gate-name="build"]', "Checks edits and commits against the traced plan and task territory. Refuses failed or stale plans and changes outside approved areas."],
     ['[data-gate-name="quiet"]', "Checks claimed tasks for thirty minutes without progress. Holds tool calls until the agent reports progress; ledger commands remain available."],
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent during tracing. Fails plans mostly outside that intent or larger than one pull request."],
+    ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-gate-mode="enforce"]', "Enforce this gate. A call it catches is refused, and the refusal is logged."],
     ['[data-gate-mode="observe"]', "Observe this gate. A call it catches goes through, and the refusal it would have made is only logged."],
     ['[data-gate-mode="off"]', "Turn this gate off. It checks nothing and logs nothing."],

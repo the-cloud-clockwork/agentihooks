@@ -3,13 +3,18 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from scripts.claude_quota_balancer import _duration, _percent, _span
 
 PAGE_TTL_S = 60
+REFRESH_MIN_S = 60
 _page_cache: dict = {}
+_last_refresh: dict = {}
+_refresh_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -22,13 +27,17 @@ class QuotaRow:
     seven_day_left: float | None
     seven_day_resets_at: int | None
     source: str
+    five_hour_resets_at: int | None = None
+    observed_at: float | None = None
 
 
 def _left(used: float | None) -> float | None:
     return None if used is None else max(0.0, 100.0 - used)
 
 
-def claude_rows(results: list, sessions: dict[str, int], source: str) -> list[QuotaRow]:
+def claude_rows(
+    results: list, sessions: dict[str, int], source: str, observed: dict[str, float] | None = None
+) -> list[QuotaRow]:
     return [
         QuotaRow(
             agent="claude",
@@ -39,6 +48,8 @@ def claude_rows(results: list, sessions: dict[str, int], source: str) -> list[Qu
             seven_day_left=result.seven_day.remaining,
             seven_day_resets_at=result.seven_day.resets_at,
             source=source,
+            five_hour_resets_at=result.five_hour.resets_at,
+            observed_at=(observed or {}).get(result.account),
         )
         for result in results
     ]
@@ -59,13 +70,15 @@ def codex_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: floa
                 seven_day_left=_left(quota.seven_day.used) if quota else None,
                 seven_day_resets_at=quota.seven_day.resets_at if quota else None,
                 source=f"session-log {_span(max(0, int(now - quota.observed_at)))} ago" if quota else "no session log",
+                five_hour_resets_at=quota.five_hour.resets_at if quota else None,
+                observed_at=quota.observed_at if quota else None,
             )
         )
     return rows
 
 
 def render(rows: list[QuotaRow], now: int) -> str:
-    headers = ["AGENT", "ACCOUNT", "STATE", "SESSIONS", "5H LEFT", "7D LEFT", "7D RESET", "SOURCE"]
+    headers = ["AGENT", "ACCOUNT", "STATE", "SESSIONS", "5H LEFT", "5H RESET", "7D LEFT", "7D RESET", "SOURCE"]
     table = [
         [
             row.agent,
@@ -73,6 +86,7 @@ def render(rows: list[QuotaRow], now: int) -> str:
             row.state,
             str(row.sessions),
             _percent(row.five_hour_left),
+            _duration(row.five_hour_resets_at, now),
             _percent(row.seven_day_left),
             _duration(row.seven_day_resets_at, now),
             row.source,
@@ -118,12 +132,18 @@ def _page_quota(now: float) -> dict:
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router
 
-    claude = [result for _, result in claude_quota_balancer.cached_observations()]
+    cached = claude_quota_balancer.cached_observations()
+    observed = {result.account: at for at, result in cached}
     pool = codex_router.routing_pool(os.environ)
-    rows = claude_rows(claude, account_sessions.sessions_by_account(), "cached") + codex_rows(
+    claude = claude_rows([result for _, result in cached], account_sessions.sessions_by_account(), "cached", observed)
+    rows = claude + codex_rows(
         pool, codex_router.quotas(pool, os.environ), account_sessions.codex_sessions_by_account(), now
     )
-    return {"cap": account_sessions.max_sessions(), "rows": [asdict(row) for row in rows]}
+    return {
+        "cap": account_sessions.max_sessions(),
+        "probed_at": max(observed.values(), default=None),
+        "rows": [asdict(row) for row in rows],
+    }
 
 
 def page_quota(now: float | None = None) -> dict:
@@ -131,6 +151,18 @@ def page_quota(now: float | None = None) -> dict:
     if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
         _page_cache.update(at=now, quota=_page_quota(now))
     return _page_cache["quota"]
+
+
+def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> str:
+    with _refresh_lock:
+        now = time.time() if now is None else now
+        if "at" in _last_refresh and now - _last_refresh["at"] < REFRESH_MIN_S:
+            return ""
+        error = probe()
+        if not error:
+            _last_refresh["at"] = now
+            _page_cache.clear()
+        return error
 
 
 def main(argv: list[str] | None = None) -> int:

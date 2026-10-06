@@ -80,16 +80,29 @@ def test_rows_list_every_claude_account_and_codex():
         "SESSIONS",
         "5H",
         "LEFT",
+        "5H",
+        "RESET",
         "7D",
         "LEFT",
         "7D",
         "RESET",
         "SOURCE",
     ]
-    assert table[1].split()[:6] == ["claude", "ncgma", "NORMAL", "2", "95%", "60%"]
-    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1", "?", "54%"]
+    assert table[1].split()[:8] == ["claude", "ncgma", "NORMAL", "2", "95%", "16m", "60%", "2h13m"]
+    assert table[2].split()[:6] == ["codex", "default", "NORMAL", "1", "?", "?"]
     assert table[2].endswith("session-log 2m ago")
-    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0", "?", "?", "?", "no", "session", "log"]
+    assert table[3].split() == ["codex", "alpha", "UNKNOWN", "0", "?", "?", "?", "?", "no", "session", "log"]
+
+
+def test_rows_carry_both_reset_times_and_when_each_was_observed():
+    claude = ProbeResult("ncgma", "allowed", "NORMAL", 60.0, QuotaWindow(5.0, 2000), QuotaWindow(40.0, 9000))
+    [row] = agents_quota.claude_rows([claude], {}, "cached", {"ncgma": 1500.0})
+    assert (row.five_hour_resets_at, row.seven_day_resets_at, row.observed_at) == (2000, 9000, 1500.0)
+    five = {"used_percent": 10.0, "window_minutes": 300, "resets_at": 1791600000}
+    quota = codex_quota.parse_event(_event("2026-10-04T15:00:00Z", five, WEEK))
+    [codex] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=quota.observed_at)
+    assert (codex.five_hour_resets_at, codex.seven_day_resets_at) == (1791600000, WEEK["resets_at"])
+    assert codex.observed_at == quota.observed_at
 
 
 def test_a_signed_out_default_login_is_listed_as_signed_out():
@@ -158,6 +171,8 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "seven_day_left": 40.0,
             "seven_day_resets_at": 9000,
             "source": "cached",
+            "five_hour_resets_at": None,
+            "observed_at": None,
         }
     ]
 
@@ -202,6 +217,32 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     assert quota["rows"][0]["five_hour_left"] == 92.0
     assert quota["rows"][0]["seven_day_left"] == 78.0
     assert quota["rows"][1]["five_hour_left"] is None
+    assert quota["rows"][0]["observed_at"] == 1.0
+    assert quota["probed_at"] == 1.0
+
+
+def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):
+    agents_quota._page_cache.clear()
+    agents_quota._last_refresh.clear()
+    probes = []
+    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [now]})
+    agents_quota.page_quota(now=1000.0)
+    assert agents_quota.refresh_page_quota(lambda: probes.append(1) or "", now=1010.0) == ""
+    assert agents_quota.page_quota(now=1011.0)["rows"] == [1011.0]
+    assert agents_quota.refresh_page_quota(lambda: probes.append(2) or "", now=1069.0) == ""
+    assert probes == [1]
+    assert agents_quota.refresh_page_quota(lambda: probes.append(3) or "", now=1070.0) == ""
+    assert probes == [1, 3]
+
+
+def test_a_failed_refresh_keeps_the_cache_and_retries_on_the_next_call(monkeypatch):
+    agents_quota._page_cache.clear()
+    agents_quota._last_refresh.clear()
+    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [now]})
+    agents_quota.page_quota(now=1000.0)
+    assert agents_quota.refresh_page_quota(lambda: "probe timed out", now=1010.0) == "probe timed out"
+    assert agents_quota.page_quota(now=1011.0)["rows"] == [1000.0]
+    assert agents_quota.refresh_page_quota(lambda: "", now=1011.0) == ""
 
 
 def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
