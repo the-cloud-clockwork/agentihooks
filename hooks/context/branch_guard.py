@@ -11,6 +11,7 @@ Public API:
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -278,6 +279,36 @@ _BLOCKED_PATTERNS = [
     ),
 ]
 
+_COMMAND_SEPARATORS = ";&|()\n"
+_INLINE_WHITESPACE = " \t\r"
+_WHITESPACE = re.compile(r"\s")
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_SHELL_SCRIPT_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+
+
+def _command_lines(command: str) -> str:
+    """One line per simple command, shell -c scripts included; a quoted string with spaces is dropped."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=_COMMAND_SEPARATORS)
+    lexer.whitespace = _INLINE_WHITESPACE
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return command
+    lines, words, script_next = [], [], False
+    for token in tokens:
+        if token and not token.strip(_COMMAND_SEPARATORS):
+            lines.append(" ".join(words))
+            words = []
+        elif script_next:
+            lines.append(_command_lines(token))
+        elif not _WHITESPACE.search(token):
+            words.append(token)
+        script_next = _SHELL_SCRIPT_FLAG.fullmatch(token) and any(Path(word).name in _SHELLS for word in words)
+    lines.append(" ".join(words))
+    return "\n".join(lines)
+
 
 def check_branch_guard(payload: dict) -> None:
     """Raise BlockAction if the Bash command targets main/master, or creates a
@@ -295,7 +326,7 @@ def check_branch_guard(payload: dict) -> None:
 
     from hooks.context._strip import strip_non_command_content
 
-    check_text = strip_non_command_content(command)
+    check_text = _command_lines(strip_non_command_content(command))
 
     try:
         from hooks.context.controls_toggle import is_controls_disabled
