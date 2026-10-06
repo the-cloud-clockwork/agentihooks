@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -431,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def agent_view(self):
-        return "view=agent" in self.path.partition("?")[2].split("&")
+        return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("view") == ["agent"]
 
     def reply_state(self, slug, changes=None, ops=None):
         try:

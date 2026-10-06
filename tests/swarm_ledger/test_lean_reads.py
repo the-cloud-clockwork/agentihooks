@@ -121,3 +121,27 @@ def test_the_agent_client_read_leaves_out_seeds_and_work_folder_tails(served):
     assert "seeds" not in state["_meta"]
     assert "workspace_tail" not in state["tasks"][0]
     assert state["_meta"]["rev"] > 0 and state["_meta"]["events"]
+
+
+def test_the_stored_file_stays_indented_and_keeps_text_as_written():
+    make_ledger()
+    core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": "m1", "text": "café ready"}])
+    text = core.paths(SLUG)[1].read_text(encoding="utf-8")
+    assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False) + "\n"
+    assert "café ready" in text
+
+
+def test_an_agent_write_returns_the_agent_view_with_its_result(served):
+    with_work_folder()
+    state = ledger.call(SLUG, [{"op": "join", "id": "j1", "by": "eng"}])
+    assert state["rejected"] == []
+    assert "eng" in state["_meta"]["members"]
+    assert "seeds" not in state["_meta"] and "workspace_tail" not in state["tasks"][0]
+
+
+def test_the_agent_view_is_read_from_any_position_in_the_query(served):
+    with_work_folder()
+    token = core.read_token(core.paths(SLUG)[0].read_text(encoding="utf-8"))
+    request = urllib.request.Request(f"{served}/api/{SLUG}?x=1&view=agent", headers={"X-Ledger-Token": token})
+    with urllib.request.urlopen(request) as response:
+        assert "workspace_tail" not in json.load(response)["tasks"][0]
