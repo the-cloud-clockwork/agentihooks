@@ -7,7 +7,7 @@ from pathlib import Path
 from scripts.doctor import priming
 from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
-from scripts.swarm import naming
+from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds
@@ -90,6 +90,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
             if autonomy == FULL
             else []
         ),
+        plan_review.review_line(me, autonomy),
         f"- Steer the swarm when asked: {me} set max-eng-agents=N max-ci-agents=N max-plan-agents=N, {me} pause, {me} start, "
         f"{me} stop, {me} status.",
         f"- Give every new health finding a verdict once you have checked its evidence: {me} verdict <finding id> "

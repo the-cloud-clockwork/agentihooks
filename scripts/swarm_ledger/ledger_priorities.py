@@ -89,6 +89,11 @@ def wanted(doc):
         line = None if task.get("out_of_scope") else _task_line(task)
         if line:
             found[f"tasks/{task['id']}"] = line
+    for phase in doc["phases"]:
+        review = phase.get("review") or {}
+        if review.get("escalated") and review.get("state") == "sent_back" and not phase.get("out_of_scope"):
+            notes = "; ".join(review["notes"])
+            found[f"phases/{phase['id']}"] = f"Decide the plan, sent back {review['rounds']} times: " + _short(notes)
     for f in doc.get("followups", []):
         if f.get("needs_operator") and not f.get("done") and not f.get("out_of_scope"):
             found[f"followups/{f['id']}"] = "Decide: " + _short(f.get("text", ""))

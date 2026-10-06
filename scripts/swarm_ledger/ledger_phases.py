@@ -6,6 +6,7 @@ ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ITEM_RE = re.compile(r"^phases/[A-Za-z][\w.-]{0,63}$")
 REVIEW_STATES = ("pending", "approved", "sent_back")
+ROUND_CAP = 3
 
 
 def check_fields(fields: dict) -> None:
@@ -96,6 +97,10 @@ def check_review(op: dict) -> None:
         raise ValueError("review note must be a string")
     if "escalated" in op and type(op["escalated"]) is not bool:
         raise ValueError("review escalated must be a boolean")
+    if op["state"] == "sent_back" and not op.get("note", "").strip():
+        raise ValueError("a send back needs a note")
+    if op["state"] == "sent_back" and ("rounds" in op or "escalated" in op):
+        raise ValueError("a send back counts its own rounds")
 
 
 def apply(doc: dict, op: dict, ctx) -> bool:
@@ -107,17 +112,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     if op["op"] != "phase_add" and phase is None:
         return False
     if op["op"] == "phase_review":
-        fields = {
-            "review": {
-                "state": op["state"],
-                "by": op["by"],
-                "at": ctx.at,
-                "rounds": op.get("rounds", 0),
-                "note": op.get("note", ""),
-            }
-        }
-        if "escalated" in op:
-            fields["review"]["escalated"] = op["escalated"]
+        fields = {"review": review_record(phase, op, ctx.at)}
     else:
         fields = {k: op[k] for k in FIELDS if k in op} if phase is None else op["fields"]
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
@@ -136,4 +131,36 @@ def apply(doc: dict, op: dict, ctx) -> bool:
         for key in changed:
             ctx.stamp(f"{target}/{key}", op["by"])
             ctx.record(op["by"], f"{key} changed", target)
+    if op["op"] == "phase_review":
+        decided(doc, phase_id, fields["review"], op["by"], ctx)
     return True
+
+
+def review_record(phase: dict, op: dict, at: int) -> dict:
+    prev = phase.get("review") or {}
+    record = {"state": op["state"], "by": op["by"], "at": at, "rounds": op.get("rounds", prev.get("rounds", 0))}
+    record["note"] = op.get("note", "")
+    if prev.get("notes"):
+        record["notes"] = prev["notes"]
+    if "escalated" in op:
+        record["escalated"] = op["escalated"]
+    if op["state"] == "sent_back":
+        record["rounds"] = prev.get("rounds", 0) + 1
+        record["notes"] = [*prev.get("notes", []), op["note"]]
+        record["escalated"] = not prev.get("escalated") and record["rounds"] >= ROUND_CAP
+    return record
+
+
+def decided(doc: dict, phase_id: str, review: dict, by: str, ctx) -> None:
+    if review["state"] == "pending":
+        return
+    item = f"phases/{phase_id}"
+    doc["priorities"] = [row for row in doc["priorities"] if row["item"] != item]
+    if review["state"] != "sent_back" or review["escalated"]:
+        return
+    plan = next((t for t in doc["tasks"] if t.get("phase") == phase_id and t.get("kind") == "plan"), None)
+    if plan is None or plan.get("state") == "open":
+        return
+    plan.update(state="open", claimed_by="", done=False)
+    ctx.stamp(f"tasks/{plan['id']}/state", by)
+    ctx.record(by, "task open", f"tasks/{plan['id']}")
