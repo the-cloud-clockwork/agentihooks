@@ -751,7 +751,10 @@ def test_agent_prompt_waits_on_checks_through_the_swarm():
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     merge = next(line for line in text.splitlines() if line.startswith("6. "))
-    assert "agentihooks swarm sw wait --on checks <pr url>" in merge
+    assert merge == (
+        "6. Wait on the checks with agentihooks swarm sw wait --on checks <pr url>: the tick ends the wait and tells "
+        "you when they resolve, so no Monitor is needed. Merge on green checks, then wt.sh done."
+    )
 
 
 def test_master_prompt_needs_no_ledger_watch():
@@ -766,8 +769,15 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
 
     task = {"id": "t1", "title": "x", "phase": "p1"}
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", task, autonomy="assist")
-    assert "agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1" in text
-    assert 'agentihooks swarm sw wait 60 --reason "operator merge approval"' in text
+    ask = next(line for line in text.splitlines() if line.startswith("6. "))
+    assert ask == (
+        "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
+        'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
+        'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
+        '--reason "operator merge approval"; his answer reaches you as an inbox message. Merge only after an '
+        "OPERATOR line on the ledger approves it, then wt.sh done. An OPERATOR line asking for changes: make them "
+        "and ask again."
+    )
     assert "ledger watch" not in text and "keep a Monitor" not in text
 
 

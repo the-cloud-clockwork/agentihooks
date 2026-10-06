@@ -185,7 +185,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
-        *kind_steps(ledger_kinds.kind(task), me, led, name, task, autonomy),
+        *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy, task["id"]),
         "",
         "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
         f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
@@ -456,8 +456,8 @@ def assist_ship(me, led, task_id):
 GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 
 
-def kind_steps(kind, me, led, name, task, autonomy):
-    steps = STEPS[kind](me, led, naming.plain(name), task.get("phase") or "<phase id>")
+def kind_steps(kind, me, led, name, phase, autonomy, task_id):
+    steps = STEPS[kind](me, led, naming.plain(name), phase)
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
-    return steps[:5] + GATED_SHIP[autonomy](me, led, task["id"])
+    return steps[:5] + GATED_SHIP[autonomy](me, led, task_id)
