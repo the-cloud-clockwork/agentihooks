@@ -1,0 +1,53 @@
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
+import ledger_bin  # noqa: E402
+import ledger_core as core  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def empty_bin():
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    ledger_bin.bin_path().unlink(missing_ok=True)
+    ledger_bin.restored_path().unlink(missing_ok=True)
+
+
+def test_a_closed_ledger_goes_to_the_bin_at_the_given_time():
+    assert ledger_bin.bin_closed("closed-one", closed_at=100, now=200) is True
+    assert ledger_bin.entries() == {"closed-one": 200}
+
+
+def test_a_ledger_already_in_the_bin_keeps_its_first_time():
+    ledger_bin.bin_closed("closed-one", closed_at=100, now=200)
+    assert ledger_bin.bin_closed("closed-one", closed_at=100, now=300) is False
+    assert ledger_bin.entries() == {"closed-one": 200}
+
+
+@pytest.mark.parametrize("restored_at", [100, 400])
+def test_a_restore_at_or_after_the_close_keeps_the_ledger_out(restored_at):
+    ledger_bin.bin_closed("closed-one", closed_at=50, now=60)
+    ledger_bin.restore("closed-one", now=restored_at)
+    assert ledger_bin.bin_closed("closed-one", closed_at=100, now=500) is (restored_at < 100)
+    assert "closed-one" not in ledger_bin.entries()
+
+
+def test_closing_again_after_a_restore_bins_it_again():
+    ledger_bin.bin_closed("closed-one", closed_at=50, now=60)
+    ledger_bin.restore("closed-one", now=99)
+    assert ledger_bin.bin_closed("closed-one", closed_at=100, now=700) is True
+    assert ledger_bin.entries() == {"closed-one": 700}
+
+
+def test_a_restore_of_another_ledger_does_not_shield_this_one():
+    ledger_bin.bin_closed("other", closed_at=1, now=2)
+    ledger_bin.restore("other", now=900)
+    assert ledger_bin.bin_closed("closed-one", closed_at=100, now=200) is True
+
+
+def test_without_a_time_the_ledger_is_binned_now():
+    before = core.now_ms()
+    assert ledger_bin.bin_closed("closed-one", closed_at=100) is True
+    assert before <= ledger_bin.entries()["closed-one"] <= core.now_ms()

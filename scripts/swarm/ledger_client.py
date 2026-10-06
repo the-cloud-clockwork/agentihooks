@@ -105,6 +105,16 @@ class LedgerClient:
 
     def reopen(self, slug, by):
         self._call(slug, [_op("reopen", by)])
+        _ledger()
+        import ledger_bin
+
+        ledger_bin.restore(slug)
+
+    def bin_closed(self, slug, closed_at):
+        _ledger()
+        import ledger_bin
+
+        return ledger_bin.bin_closed(slug, closed_at)
 
     def closed(self, slug):
         return bool(self._call(slug).get("closed_at"))

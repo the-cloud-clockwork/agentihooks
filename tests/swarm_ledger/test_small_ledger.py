@@ -114,8 +114,8 @@ class SizeOnCreate(unittest.TestCase):
         sizes = {s["slug"]: s["size"] for s in server.ledger_summaries()}
         self.assertEqual((sizes["home-small"], sizes["home-swarm"], sizes["home-legacy"]), ("small", "swarm", "swarm"))
         home = server.index_page()
-        self.assertIn('<span class="size">small</span>', home)
-        self.assertIn('<span class="size">swarm</span>', home)
+        self.assertIn('<span class="kind">small</span>', home)
+        self.assertIn('<span class="kind">swarm</span>', home)
 
 
 class Lifecycle(unittest.TestCase):
