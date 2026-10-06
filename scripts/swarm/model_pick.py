@@ -13,6 +13,12 @@ class ModelPick:
     confidence: float | None = None
 
 
+def frontier(harness: str) -> ModelPick:
+    from scripts.init_agent import EFFORT_DEFAULT, MODEL_DEFAULTS
+
+    return ModelPick(MODEL_DEFAULTS[harness], EFFORT_DEFAULT, "frontier")
+
+
 def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
     from scripts.init_agent import model_effort
 

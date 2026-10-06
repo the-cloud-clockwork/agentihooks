@@ -663,6 +663,24 @@ def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(st
     assert _conversations(store)["engineer@a1b2c3-0001"] == "5c90d80c"
 
 
+def test_a_model_switch_the_running_session_reports_reaches_its_agent_record_on_the_next_tick(store):
+    from hooks.context import swarm_heartbeat
+
+    ledger, rt = FakeLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, rt, 1_000)
+    name = "engineer@a1b2c3-0001"
+    swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": name}
+    assert swarm_heartbeat.report("claude-sonnet-5-5", "low", environ=swarm, redis=store.redis, now_ms=2_000) is True
+    tick("sw", store, ledger, rt, 3_000)
+    agent = next(a for a in store.agents("sw") if a.name == name)
+    assert (agent.model, agent.effort, agent.model_source, agent.model_confidence) == (
+        "claude-sonnet-5-5",
+        "low",
+        "session",
+        None,
+    )
+
+
 def idle_for(store, ledger, runtime, ticks, start):
     for n in range(ticks):
         tick("sw", store, ledger, runtime, now_ms=start + n * 60_000)

@@ -13,7 +13,7 @@ Native fields used from Claude Code's statusline JSON:
   - cost.total_cost_usd, total_duration_ms, total_api_duration_ms
   - rate_limits.five_hour.used_percentage/resets_at
   - rate_limits.seven_day.used_percentage/resets_at
-  - model.display_name, vim.mode, worktree.*
+  - model.id, model.display_name, effort.level, vim.mode, worktree.*
 """
 
 import json
@@ -193,6 +193,14 @@ def main() -> None:
             except Exception:
                 pass
 
+        effort = (payload.get("effort") or {}).get("level")
+        try:
+            from hooks.context.swarm_heartbeat import report
+
+            report(model_data.get("id"), effort)
+        except Exception:
+            pass
+
         # Context window — trust Claude Code's native used_percentage
         used_pct = cw.get("used_percentage") or 0.0
         ctx_size = cw.get("context_window_size") or 0
@@ -201,7 +209,7 @@ def main() -> None:
         total = ctx_size
 
         # Model
-        model_name = model_data.get("display_name", "")
+        model_name = " ".join(filter(None, (model_data.get("display_name"), effort)))
 
         # Cost
         cost_usd = cost_data.get("total_cost_usd")
