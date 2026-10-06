@@ -570,8 +570,8 @@ def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
         session_id,
         "broadcast",
         msgs,
-        lambda m: [m.get("id", ""), (m.get("origin") or {}).get("id", "")],
-        lambda m: m.get("message", ""),
+        lambda m: [m.get("id"), (m.get("origin") or {}).get("id")],
+        lambda m: m.get("message"),
     )
 
 

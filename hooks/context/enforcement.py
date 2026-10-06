@@ -518,7 +518,7 @@ def format_enforcement_context(msgs: list[dict]) -> str:
 
 def _deliver(session_id: str, entries: list[dict], *, record: bool = True) -> str | None:
     entries = quarantine.keep(
-        session_id, "enforcement", entries, lambda e: [e.get("id", "")], lambda e: e.get("message") or e.get("path", "")
+        session_id, "enforcement", entries, lambda e: [e.get("id")], lambda e: e.get("message") or e.get("path")
     )
     if not entries:
         return None

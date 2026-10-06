@@ -100,7 +100,7 @@ def main(argv=None):
 
 
 def _wrong(args):
-    slug = os.environ.get("AGENTIHOOKS_SWARM", "")
+    slug = os.environ.get("AGENTIHOOKS_SWARM")
     status = quarantine.PROPOSED if slug else ""
     try:
         row = injection_trace.correct(args.session, args.wrong, args.repo, args.reason, args.quote, status)

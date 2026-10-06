@@ -35,15 +35,15 @@ def rows(slug: str, task: dict) -> list[dict]:
     return found + list(task.get("withheld") or [])
 
 
-def withhold(slug: str, task: dict, environ=None) -> dict:
+def withhold(slug: str, task: dict) -> dict:
     """The task with culture lines and learned notes under a confirmed correction taken out, and a row for each."""
     from hooks.context import quarantine
 
-    current = quarantine.mode(environ)
+    current = quarantine.mode()
     held = quarantine.index() if current != "off" else []
     if not held:
         return task
-    seat, logged = task.get("seat", ""), []
+    seat, logged = task["seat"], []
 
     def hit(layer, source, text):
         found = quarantine.match(held, [source], text)

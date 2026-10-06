@@ -182,7 +182,7 @@ def find(correction: dict, root: str | Path) -> list[Hit]:
     hits += _condition_hits(correction, needle, condition_dirs)
     hits += _broadcast_hits(correction, needle)
     hits += _file_source_hits(correction)
-    hits += _priming_hits(correction, quarantine.needle(correction))
+    hits += _priming_hits(correction)
     return list(dict.fromkeys(hits))
 
 
@@ -190,9 +190,9 @@ def _file_source_hits(correction: dict) -> list[Hit]:
     locator = correction.get("locator") or {}
     if correction.get("layer") not in injection_trace.FILE_LAYERS or not locator.get("path"):
         return []
-    path = Path(locator.get("repo", "")) / locator["path"]
+    path = Path(locator["repo"]) / locator["path"]
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text()
     except (OSError, UnicodeDecodeError):
         return []
     quote = correction.get("quote")
@@ -208,13 +208,13 @@ def _home_of(path: Path) -> tuple[str, str]:
 def _priming_texts(correction: dict) -> list[str]:
     from scripts.swarm.store import connect
 
-    locator, store = correction.get("locator") or {}, connect()
+    locator, store = correction["locator"], connect()
     if correction["layer"] == "culture":
-        return (store.culture.get(locator.get("swarm", "")) or "").splitlines()
-    return [note["text"] for note in store.memory.learned(locator.get("seat", ""))]
+        return store.culture.get(locator["swarm"]).splitlines()
+    return [note["text"] for note in store.memory.learned(locator["seat"])]
 
 
-def _priming_hits(correction: dict, needle: str) -> list[Hit]:
+def _priming_hits(correction: dict) -> list[Hit]:
     if correction.get("layer") not in PRIMING_LAYERS:
         return []
     hit = Hit(correction["source"], correction["layer"], correction["source"], correction["source"], "held")
@@ -222,7 +222,7 @@ def _priming_hits(correction: dict, needle: str) -> list[Hit]:
         texts = _priming_texts(correction)
     except Exception:  # an unreadable store keeps the correction open rather than closing it unseen
         return [hit]
-    whole = _norm(correction.get("text", ""))
+    needle, whole = quarantine.needle(correction), _norm(correction["text"])
     found = any((needle and needle in _norm(text)) or _norm(text) == whole for text in texts)
     return [hit] if found else []
 
@@ -256,7 +256,7 @@ def _clear(hit: Hit, session_id: str) -> str:
 def _apply_one(hit: Hit, correction: dict, session_id: str, ledger: str) -> str:
     if hit.action == "clear":
         return _clear(hit, session_id)
-    repo = Path(correction.get("repo", "")).name
+    repo = Path(correction["repo"]).name
     if hit.action == "pr":
         plan = (
             f"pull request in {hit.repo}: remove {hit.key} from {hit.relpath} on a worktree off dev, "
@@ -264,7 +264,7 @@ def _apply_one(hit: Hit, correction: dict, session_id: str, ledger: str) -> str:
         )
         text = (
             f"One {hit.layer} directive in the {Path(hit.repo).name} repo is marked wrong for the {repo} repo: "
-            f"{correction.get('reason', '')}. Remove it by pull request into dev."
+            f"{correction['reason']}. Remove it by pull request into dev."
         )
         return f"{plan}; {_followup(ledger, text)}"
     if hit.action == "manual":
@@ -314,7 +314,6 @@ def plan_rows(report: dict) -> list[str]:
     rows += ["\t".join(("applied", h.source, h.layer, h.location, outcome)) for h, outcome in report["applied"]]
     rows += ["\t".join(("closed", c["source"], c.get("repo", ""), c.get("reason", ""))) for c in report["closed"]]
     rows += [
-        "\t".join(("proposed", c["source"], c.get("repo", ""), "waits for the operator to confirm"))
-        for c in report.get("proposed", [])
+        "\t".join(("proposed", c["source"], c["repo"], "waits for the operator to confirm")) for c in report["proposed"]
     ]
     return rows

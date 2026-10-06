@@ -11,6 +11,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
 from hooks.context import injection_trace
 
@@ -20,7 +21,7 @@ WITHHELD = "withheld"
 QUOTE_WORDS = 3
 PASSAGE_NOTICE = "> CORRECTION: the passage above is marked wrong for the {repo} repo: {reason}. Do not follow it."
 FILE_NOTICE = "> CORRECTION: this file is marked wrong for the {repo} repo: {reason}. Do not follow it."
-HELD_NOTICE = "> CORRECTION: {source} was marked wrong {count} times and is held whole until the operator releases it."
+HELD_NOTICE = "> CORRECTION: {source} was marked wrong more than once and is held whole until the operator releases it."
 OPERATOR_ONLY = (
     "only the operator {verb}s a correction: run it outside a swarm, or pass --quote with at least three of his own "
     "words from this session that say {verb} and correction, or have him comment that on your task"
@@ -41,7 +42,7 @@ class Held:
 
 def mode(environ=None) -> str:
     env = os.environ if environ is None else environ
-    value = str(env.get("AGENTIHOOKS_GATE_QUARANTINE") or "enforce").strip().lower()
+    value = str(env.get("AGENTIHOOKS_GATE_QUARANTINE")).strip().lower()
     return value if value in MODES else "enforce"
 
 
@@ -68,7 +69,7 @@ def is_proposed(row: dict, confirmed_keys: set) -> bool:
 
 
 def confirmed_keys() -> set:
-    return {row.get("correction") for row in injection_trace._read(_confirmations_path())}
+    return {row["correction"] for row in injection_trace._read(_confirmations_path())}
 
 
 def confirmed_rows() -> list[dict]:
@@ -76,13 +77,13 @@ def confirmed_rows() -> list[dict]:
     return [row for row in injection_trace.corrections() if not is_proposed(row, keys)]
 
 
-def confirm(rows: list[dict], by: str, words: str = "") -> None:
+def confirm(rows: list[dict], by: str, words: str) -> None:
     for row in rows:
         entry = {"at": injection_trace._now(), "correction": _key(row), "by": by, "words": words}
         injection_trace._append(_confirmations_path(), entry)
 
 
-def release(source: str, by: str, words: str = "") -> None:
+def release(source: str, by: str, words: str) -> None:
     entry = {"at": injection_trace._now(), "source": source, "by": by, "words": words}
     injection_trace._append(_releases_path(), entry)
 
@@ -98,9 +99,7 @@ def _keys(row: dict) -> frozenset:
 
 
 def _since_release(rows: list[dict]) -> Counter:
-    released: dict[str, str] = {}
-    for entry in injection_trace._read(_releases_path()):
-        released[entry["source"]] = max(released.get(entry["source"], ""), entry["at"])
+    released = {entry["source"]: entry["at"] for entry in injection_trace._read(_releases_path())}
     return Counter(row["source"] for row in rows if row["at"] > released.get(row["source"], ""))
 
 
@@ -131,13 +130,13 @@ def withheld_row(layer: str, source: str, hit: Held, current: str) -> dict:
         "layer": WITHHELD,
         "source": source,
         "locator": {"layer": layer, "correction": _key(correction), "mode": current},
-        "text": f"withheld under the correction of {correction['source']}: {correction.get('reason', '')}",
+        "text": f"withheld under the correction of {correction['source']}: {correction['reason']}",
     }
 
 
-def keep(session_id: str, layer: str, items, keys, text, environ=None) -> list:
+def keep(session_id: str, layer: str, items, keys, text) -> list:
     """The items to inject: those under a confirmed correction drop out in enforce mode; each is logged once per session."""
-    items, current = list(items), mode(environ)
+    items, current = list(items), mode()
     held = index() if items and current != "off" else []
     if not held:
         return items
@@ -154,25 +153,21 @@ def keep(session_id: str, layer: str, items, keys, text, environ=None) -> list:
 
 
 def _after(text: str, quote: str, notice: str) -> str:
-    found = re.search(r"\s+".join(map(re.escape, quote.split())), text)
+    found = re.search(r"\s+".join(map(re.escape, quote.split())) + r"[^\n]*", text)
     if found is None:
         return text
-    end = text.find("\n", found.end())
-    end = len(text) if end < 0 else end
-    return f"{text[:end]}\n\n{notice}\n{text[end:]}"
+    return f"{text[: found.end()]}\n\n{notice}\n{text[found.end() :]}"
 
 
 def _notice(template: str, correction: dict) -> str:
-    repo = os.path.basename(str(correction.get("repo", "")).rstrip("/"))
-    return template.format(repo=repo, reason=correction.get("reason", ""))
+    return template.format(repo=Path(correction["repo"]).name, reason=correction["reason"])
 
 
-def annotate(text: str, source: str = "", environ=None) -> str:
+def annotate(text: str, source: str) -> str:
     """The rendered copy of a rule or doctrine file: a notice after each corrected passage, or only a notice when held."""
-    held = index() if mode(environ) == "enforce" else []
-    whole = [h for h in held if h.whole and source in h.keys]
-    if source and whole:
-        return HELD_NOTICE.format(source=source, count=len(whole)) + "\n"
+    held = index() if mode() == "enforce" else []
+    if source and any(h.whole and source in h.keys for h in held):
+        return HELD_NOTICE.format(source=source) + "\n"
     for item in held:
         correction = item.correction
         if correction.get("layer") not in injection_trace.FILE_LAYERS:
@@ -195,19 +190,17 @@ def patch_refusal(text: str) -> str:
 
     norm = _norm(text)
     for row in trace_sweep.open_corrections():
-        found, whole = needle(row), _norm(row.get("text", ""))
+        found, whole = needle(row), _norm(row["text"])
         if (found and found in norm) or (whole and whole == norm):
-            return REFUSED_PATCH.format(source=row["source"], reason=row.get("reason", ""))
+            return REFUSED_PATCH.format(source=row["source"], reason=row["reason"])
     return ""
 
 
 def _asks(verb: str):
-    return lambda words: bool(
-        re.search(rf"\b{verb}", words or "", re.I) and re.search(r"\bcorrection", words or "", re.I)
-    )
+    return lambda words: bool(re.search(rf"\b{verb}", words.lower()) and re.search(r"\bcorrection", words.lower()))
 
 
-def operator_said(verb: str, quote: str = "", environ=None) -> str:
+def operator_said(verb: str, quote: str, environ=None) -> str:
     """Who stands behind a confirm or release: 'operator' outside a swarm, else his quoted words or his task comment."""
     env = os.environ if environ is None else environ
     if not env.get("AGENTIHOOKS_SWARM"):

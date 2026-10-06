@@ -170,7 +170,7 @@ def _render_rules(dst: Path, items: dict[str, Path]) -> None:
         if old.is_file() or old.is_symlink():
             old.unlink()
     for name, src in items.items():
-        _atomic_write(dst / name, quarantine.annotate(src.read_text(), sources.row("rule", src)["source"]))
+        _atomic_write(dst / name, quarantine.annotate(src.read_text(), sources.source(src)))
 
 
 def _read_json(path: Path) -> dict | None:
@@ -201,9 +201,8 @@ def render_claude(name: str, force: bool = False) -> Path | None:
             sources.write(sources.path(name, "claude", rendered_root()), sources.rows(bundle, dirs, items))
         else:
             _relink(out / subdir, items)
-    _atomic_write(
-        out / "CLAUDE.md", quarantine.annotate(build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER))
-    )
+    persona = build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER)
+    _atomic_write(out / "CLAUDE.md", quarantine.annotate(persona, ""))
     _claude_json(out, bundle, dirs)
     shared = claude_home(_global_env())
     for item in SHARED:
@@ -237,12 +236,9 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     doc: dict = {key: settings[key] for key in CODEX_KEYS if key in settings}
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(manifest, sources.rows(bundle, dirs, items))
-    rules = [
-        ("rule", n, quarantine.annotate(p.read_text(), sources.row("rule", p)["source"])) for n, p in items.items()
-    ]
-    doc["developer_instructions"] = quarantine.annotate(
-        build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
-    )
+    rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
+    persona = build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
+    doc["developer_instructions"] = quarantine.annotate(persona, "")
     global_config = codex_home() / "config.toml"
     installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}
     hidden_servers = sorted(set(installed) - set(_mcp_servers("codex", bundle, dirs)))

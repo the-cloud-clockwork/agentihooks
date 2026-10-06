@@ -23,15 +23,24 @@ def _repo(file: Path) -> Path | None:
     return next((parent for parent in file.parents if (parent / ".git").exists()), None)
 
 
+def _place(file: Path) -> tuple[Path | None, str]:
+    repo = _repo(file)
+    return repo, file.relative_to(repo).as_posix() if repo else str(file)
+
+
+def source(file: Path) -> str:
+    repo, rel = _place(file.resolve())
+    return f"{repo.name}/{rel}" if repo else rel
+
+
 def row(layer: str, file: Path) -> dict:
     file = file.resolve()
     data = file.read_bytes()
-    repo = _repo(file)
-    rel = file.relative_to(repo).as_posix() if repo else str(file)
+    repo, rel = _place(file)
     text = next((line.strip() for line in data.decode(errors="replace").splitlines() if line.strip()), "")
     return {
         "layer": layer,
-        "source": f"{repo.name}/{rel}" if repo else rel,
+        "source": source(file),
         "locator": {"repo": str(repo or ""), "path": rel, "blob": blob(data)},
         "text": text,
     }
