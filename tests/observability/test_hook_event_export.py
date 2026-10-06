@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-# The production flush budget also covers the worker's SDK init, which outlasts it on a loaded runner.
+# Under runner load the worker's SDK init alone outlasts the 1s production flush budget.
 _HOOK_WITH_LOAD_PROOF_FLUSH = (
     "import runpy\n"
     "from hooks.observability import otel\n"
