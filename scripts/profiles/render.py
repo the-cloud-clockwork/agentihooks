@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,21 @@ FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc))
 
 def rendered_root() -> Path:
     return _install_module().AGENTIHOOKS_STATE_DIR / "profiles"
+
+
+def live_root() -> Path:
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+
+
+def _refuse_live_render_from_another_checkout(name: str) -> None:
+    _i = _install_module()
+    running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
+    if running == installed or not rendered_root().resolve().is_relative_to(live_root().resolve()):
+        return
+    raise ValueError(
+        f"this run comes from {running}, not the installed agentihooks at {installed}, so it renders only "
+        f"into a scratch home: agentihooks profile render {name} --out <dir>"
+    )
 
 
 def _global_env() -> dict[str, str]:
@@ -84,7 +100,8 @@ def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path
 
 def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     _i = _install_module()
-    doc = _i.substitute_paths(_i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target]))
+    base = _i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target])
+    doc = _i.substitute_paths(base, dst=str(_i.install_root()))
     doc = _i.substitute_paths(doc, "__PYTHON__", str(_i._detect_venv() or sys.executable))
     for root in _roots(bundle, dirs):
         path = _i._native_layer_path(root, target, _i._NATIVE_SETTINGS_NAME)
@@ -191,6 +208,7 @@ def _read_json(path: Path) -> dict | None:
 
 
 def render_claude(name: str, force: bool = False) -> Path | None:
+    _refuse_live_render_from_another_checkout(name)
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
     current = _stamp(bundle, dirs)

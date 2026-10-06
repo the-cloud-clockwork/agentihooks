@@ -83,7 +83,10 @@ import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
+from importlib import metadata
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import yaml
 
@@ -122,6 +125,17 @@ def _is_source_checkout() -> bool:
     False when installed as a wheel into site-packages (PyPI install).
     """
     return (AGENTIHOOKS_ROOT / "pyproject.toml").exists()
+
+
+def install_root() -> Path:
+    try:
+        raw = metadata.distribution("agentihooks").read_text("direct_url.json")
+    except metadata.PackageNotFoundError:
+        return AGENTIHOOKS_ROOT
+    url = json.loads(raw) if raw else {}
+    if url.get("dir_info", {}).get("editable") and url.get("url", "").startswith("file:"):
+        return Path(url2pathname(urlparse(url["url"]).path))
+    return AGENTIHOOKS_ROOT
 
 
 PROFILES_DIR = AGENTIHOOKS_ROOT / "profiles"
