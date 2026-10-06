@@ -117,6 +117,20 @@ def test_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
     assert (placed.model, placed.effort) == ("opus", "high")
 
 
+def test_a_codex_spawn_records_the_model_and_effort_init_agent_launched_with(tmp_path):
+    out = "status=started\nroute_status=routed\npane_id=w1:p2\nagent=codex\nmodel=gpt-6.1-sol\neffort=high\n"
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        run=lambda argv, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""),
+        choose=lambda *_: ("codex", "open"),
+    )
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
+    assert (placed.harness, placed.model, placed.effort) == ("codex", "gpt-6.1-sol", "high")
+
+
 def _spawn_env(tmp_path, monkeypatch, **config):
     monkeypatch.delenv("AGENTIHOOKS_COMPACT_LIMIT", raising=False)
     seen = {}

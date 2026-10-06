@@ -1789,8 +1789,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function modelText(a) {
-    if (a.harness === "codex") return "codex";
-    return [(a.model || "").replace(/^claude-/, "").replace(/-[\d.-]+$/, ""), a.effort].filter(Boolean).join(" ");
+    const model = a.harness === "codex" ? a.model : (a.model || "").replace(/^claude-/, "").replace(/-[\d.-]+$/, "");
+    return [model, a.effort].filter(Boolean).join(" ");
   }
 
   function agentRows(sw, now) {
