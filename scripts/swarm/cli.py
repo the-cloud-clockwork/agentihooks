@@ -777,13 +777,13 @@ def cmd_promote(store, args):
 
 def cmd_retire(store, args):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_RETIRE)
     seat = _swarm_seat(args.slug, args.seat)
     try:
-        store.memory.retire(seat, args.number, name or "operator", args.reason, now_ms())
+        store.memory.retire(seat, args.number, name, args.reason, now_ms())
     except SeatError as exc:
         raise SwarmError(str(exc)) from exc
     print(json.dumps({"seat": seat, "number": args.number, "retired": True}))

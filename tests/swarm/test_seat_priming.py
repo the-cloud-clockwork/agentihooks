@@ -1,8 +1,9 @@
+import json
 from dataclasses import replace
 
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import cli, prompt
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
@@ -266,7 +267,7 @@ def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(env
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "retire", "eng-1", "1", "--reason", "stale") == 1
-    assert "only the master or the operator" in capsys.readouterr().err
+    assert cli.ONLY_MASTER_RETIRE in capsys.readouterr().err
     assert run("sw", "--as", "master@a1b2c3-0001", "retire", "eng-1@other", "1", "--reason", "x") == 1
     assert run("sw", "--as", "master@a1b2c3-0001", "retire", "eng-1", "1", "--reason", "stale") == 0
     assert swarm.memory.learned("eng-1@sw")[0]["retired"]["by"] == "master@a1b2c3-0001"
@@ -277,6 +278,33 @@ def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(env
     capsys.readouterr()
     assert run("sw", "learned") == 0
     assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t3\tnote\tlesson three because it held"]
+
+
+def test_retire_reports_what_it_did_and_names_each_refusal(env, capsys, monkeypatch):  # noqa: F811
+    swarm, _, _ = env
+    monkeypatch.setattr(cli, "now_ms", lambda: 7_000)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    capsys.readouterr()
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 1
+    assert cli.ONLY_MASTER_RETIRE in capsys.readouterr().err
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1b2c3-0001")
+    assert run("sw", "retire", "eng-1@other", "1", "--reason", "x") == 1
+    assert "eng-1@other is not a seat of swarm sw" in capsys.readouterr().err
+    assert run("sw", "retire", "eng-1", "9", "--reason", "x") == 1
+    assert "seat eng-1@sw has no learned note 9" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        run("sw", "retire", "eng-1", "1")
+    capsys.readouterr()
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 0
+    assert json.loads(capsys.readouterr().out) == {"seat": "eng-1@sw", "number": 1, "retired": True}
+    assert swarm.memory.learned("eng-1@sw")[0]["retired"] == {
+        "by": "master@a1b2c3-0001",
+        "reason": "stale",
+        "at": 7_000,
+    }
 
 
 def test_a_retired_note_no_longer_reaches_the_next_master(store):  # noqa: F811
