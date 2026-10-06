@@ -49,11 +49,14 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
 
 
 def test_argv_of_reads_a_process_command_line():
-    import os
-    from pathlib import Path
+    import subprocess
 
-    own = tuple(Path("/proc/self/cmdline").read_bytes().decode().split("\0")[:-1])
-    assert take_master.argv_of(os.getpid()) == own
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        assert take_master.argv_of(child.pid) == ("sleep", "30")
+    finally:
+        child.kill()
+        child.wait()
     assert take_master.argv_of(2**22 + 1) == ()
 
 
