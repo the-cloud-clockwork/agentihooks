@@ -109,6 +109,28 @@ def settings_document(rendered: dict) -> dict:
     return rendered
 
 
+def _install_rule_files(dst: Path, layers: list[tuple[str, Path]], filter_fn) -> None:
+    from scripts.targets._common import _atomic_write
+
+    _i = _install_module()
+    _i._remove_agentihooks_symlinks(dst, "rule")
+    items = {}
+    for _, src in layers:
+        if src.is_dir():
+            items.update(
+                {item.name: item for item in src.iterdir() if filter_fn(item) and not item.name.startswith(".")}
+            )
+    dst.mkdir(parents=True, exist_ok=True)
+    records = []
+    for name, src in sorted(items.items()):
+        path = dst / name
+        if path.exists() or path.is_symlink():
+            continue
+        _atomic_write(path, src.read_text())
+        records.append((path, src, "rules"))
+    _i._state_record_links(records)
+
+
 class ClaudeAdapter:
     name = "claude"
 
@@ -137,6 +159,9 @@ class ClaudeAdapter:
     def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn) -> None:
         _i = _install_module()
         dst = _i.CLAUDE_HOME / subdir
+        if subdir == "rules":
+            _install_rule_files(dst, layers, filter_fn)
+            return
         for label, src in layers:
             _i._symlink_dir_contents(src, dst, label=label, filter_fn=filter_fn)
 
