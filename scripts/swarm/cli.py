@@ -54,6 +54,7 @@ from scripts.swarm import (
     idle,
     ledger_events,
     naming,
+    phase_planning,
     phase_state,
     phases,
     prompt,
@@ -103,7 +104,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         return ["another tick is running"]
     try:
         inbox = InboxStore(store.redis)
-        actions = phases.phase_pass(inbox, store, slug, ledger.state(slug), ledger)
+        doc = ledger.state(slug)
+        actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
+        if actions:
+            doc = ledger.state(slug)
+        actions += phases.phase_pass(inbox, store, slug, doc, ledger)
         actions += tick(slug, store, ledger, runtime or HerdrRuntime(), now_ms())
         if store.config(slug).template == "doctor":
             from scripts.doctor import cli as doctor

@@ -290,5 +290,9 @@
   "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence__mutmut_88:ad63b86a19f7b8761207798ae88acf1a8d39c2124904d8f5fcfc0925a466292d": {
     "reader": "Standards",
     "reason": "ensure_ascii None and False select the same JSON encoding branch."
+  },
+  "scripts/swarm/slice_check.py:scripts.swarm.slice_check.x__task__mutmut_11:ba393c0fa500035d35fae755c4bfdb362d38932e495d22a7752b9b01fbaf4419": {
+    "reader": "Standards",
+    "reason": "Any default description under twenty words yields the same under twenty words problem line; an empty and an XXXX default both returned it."
   }
 }
