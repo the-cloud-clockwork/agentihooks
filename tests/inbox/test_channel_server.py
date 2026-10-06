@@ -1,13 +1,78 @@
 import contextlib
+import queue
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.inbox import channel
-from scripts.inbox import store as store_module
-from scripts.inbox.store import InboxError, InboxStore
+from scripts.inbox.store import NOTIFY, InboxError, Item
 
 pytestmark = pytest.mark.xdist_group("mcp-sdk")
+
+
+class FakePubSub:
+    def __init__(self):
+        self.notes, self.channels = queue.Queue(), []
+
+    def subscribe(self, name):
+        self.channels.append(name)
+        self.notes.put({"type": "subscribe", "data": 1})
+
+    def publish(self, name, data):
+        if name in self.channels:
+            self.notes.put({"type": "message", "data": data})
+
+    def get_message(self, timeout):
+        try:
+            return self.notes.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+
+class FakeStore:
+    """The inbox calls the channel server makes, in memory; the Redis store itself is covered in test_realtime."""
+
+    def __init__(self):
+        self.items, self.subs = {}, []
+        self.redis = SimpleNamespace(pubsub=self._pubsub)
+
+    def _pubsub(self):
+        self.subs.append(FakePubSub())
+        return self.subs[-1]
+
+    def send(self, sender, address, text, notify=True):
+        at = time.time_ns() // 1_000_000
+        item = Item(f"m{len(self.items) + 1}", sender, address, text, "pending", at, at)
+        self.items[item.id] = item
+        for sub in self.subs if notify else ():
+            sub.publish(NOTIFY, address)
+        return item
+
+    def get(self, item_id):
+        return self.items[item_id]
+
+    def inbox(self, address):
+        return [i for i in self.items.values() if i.address == address]
+
+    def pending_mail(self, me):
+        return [i for i in self.inbox(me) if i.state == "pending"]
+
+    def deliver(self, item_id, me):
+        if self.items[item_id].state != "pending":
+            return None
+        self.items[item_id] = replace(self.items[item_id], state="delivered")
+        return self.items[item_id]
+
+    def reply(self, item_id, replier, text):
+        item = self.items[item_id]
+        if item.address != replier:
+            raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
+        answer = self.send(replier, item.sender, text)
+        self.items[item_id] = replace(item, state="done")
+        return answer
+
 
 INSTRUCTIONS = (
     'Inbox items for bob arrive as <channel source="inbox" item_id="..." sender="..." sent_at_ms="...">. '
@@ -27,9 +92,7 @@ TOOL = {
 
 @pytest.fixture
 def store():
-    import fakeredis
-
-    return InboxStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    return FakeStore()
 
 
 def _message(**fields):
@@ -119,8 +182,7 @@ def test_an_item_whose_notify_was_missed_arrives_at_the_next_recheck(store, monk
 
     async def scenario(send, receive):
         await anyio.sleep(0.2)
-        monkeypatch.setattr(store_module, "NOTIFY", "elsewhere")
-        item = store.send("alice", "bob", "quiet")
+        item = store.send("alice", "bob", "quiet", notify=False)
         with anyio.fail_after(2):
             return item, await receive()
 
