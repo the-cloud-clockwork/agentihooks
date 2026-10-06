@@ -17,9 +17,9 @@ class CommentingLedger(FakeLedger):
     def state(self, slug):
         return {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
 
-    def update_task(self, slug, task_id, fields, by="swarm"):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
         assert (slug, by) == ("sw", "swarm")
-        super().update_task(slug, task_id, fields, by)
+        return super().update_task(slug, task_id, fields, by, if_state)
 
     def comment(self, slug, task_id, text, by):
         self.comments.append((slug, task_id, text, by))
