@@ -144,6 +144,7 @@ class TestOnlyTheCommandsOwnOperands:
             'gh issue comment 5 --body "run git checkout -b topic, or git switch -c topic"',
             "gh issue comment 5 --body 'name it with git branch topic'",
             "git branch -D old && echo master",
+            "git branch -D old;echo master",
             'grep -c "git push origin main" hooks.log',
             'sh notify.sh "git push origin main went through"',
             'git branch --format="%(refname:short) %(upstream:short)"',
