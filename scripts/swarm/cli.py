@@ -58,6 +58,7 @@ from scripts.swarm import (
     phase_state,
     phases,
     plan_review,
+    priority_sweep,
     prompt,
     snapshot,
     take_master,
@@ -124,6 +125,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
+        actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
         window = wake.window_ms(os.environ)

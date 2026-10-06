@@ -241,6 +241,17 @@ it wakes anyone, the tick closes an event item whose follow up or question was a
 (follow up closed or flagged, question answered or out of scope), so the master never handles a decision twice.
 A task item stays until the master closes it, so a done task's proof check always reaches the master.
 
+### Priorities clear themselves
+
+Each tick first sweeps the priorities agents raised: one whose item is done, out of scope or gone, or a task whose
+pull request merged, is cleared. Then it reads the ledger events since its own `priority-cursor`. Each comment,
+comment edit, answer or chat line by the operator or an agent on an item that carries a priority (a chat line
+counts for an item whose id it names) asks the classifier one yes or no question, with purpose
+`priority-resolve`: does this write resolve what the priority asks. A yes clears the priority, marks a follow up
+done, records an operator comment on a question as its answer and comments the classifier's verdict on the item.
+A no, or no classifier answer, leaves it. Every automatic clear is a `priority cleared` event by `swarm` with a
+`reason` in the ledger history.
+
 ### Safe retire
 
 The tick retires an agent for idleness only after 10 idle ticks, and a tick counts as idle only when all three

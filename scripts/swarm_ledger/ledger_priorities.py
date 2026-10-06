@@ -26,6 +26,8 @@ def check(op):
         ledger_comments.check(op["text"], "priority")
     elif not isinstance(op.get("target"), str) or not op["target"]:
         raise ValueError("priority_clear needs target: a priority id or all")
+    elif "reason" in op and (not isinstance(op["reason"], str) or not op["reason"].strip()):
+        raise ValueError("priority_clear reason must be text")
 
 
 def _add(doc, op, ctx):
@@ -49,7 +51,8 @@ def _clear(doc, op, ctx):
     for row in gone:
         if row["item"] in found:
             dismissed[row["item"]] = found[row["item"]]
-        ctx.record(op.get("by", "operator"), "priority cleared", row["item"], id=row["id"], text=row["text"])
+        reason = {"reason": op["reason"]} if "reason" in op else {}
+        ctx.record(op.get("by", "operator"), "priority cleared", row["item"], id=row["id"], text=row["text"], **reason)
     return True
 
 
