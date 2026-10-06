@@ -150,9 +150,13 @@ def _read_json(path: Path) -> dict | None:
 def render_claude(name: str, force: bool = False) -> Path | None:
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
-    current = {**_stamp(bundle, dirs), "rules_mode": "copy"}
+    current = _stamp(bundle, dirs)
     out = rendered_root() / name / "claude"
-    if not force and _read_json(out / STAMP) == current:
+    if (
+        not force
+        and _read_json(out / STAMP) == current
+        and not any(rule.is_symlink() for rule in (out / "rules").iterdir())
+    ):
         return None
     out.mkdir(parents=True, exist_ok=True)
     _i.save_json(out / "settings.json", _claude_settings(bundle, dirs))
