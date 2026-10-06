@@ -3,6 +3,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -149,19 +150,24 @@ class ClosedPage(unittest.TestCase):
 
 
 class Home(unittest.TestCase):
-    def test_home_lists_closed_ledgers_apart_from_active_ones(self):
+    def test_home_shows_a_closed_ledger_not_yet_binned_as_closed_in_its_row(self):
         make_ledger(OPEN_SLUG)
         make_ledger()
         apply({"op": "close", "id": "c2", "by": "swarm"})
         found = {s["slug"]: s for s in server.ledger_summaries()}
         self.assertIsInstance(found[SLUG]["closed_at"], int)
         self.assertIsNone(found[OPEN_SLUG]["closed_at"])
-        page = server.index_page()
-        active, closed = page.split("<h1>CLOSED</h1>", 1)
-        self.assertIn(f'href="/{OPEN_SLUG}"', active)
-        self.assertNotIn(f'href="/{SLUG}"', active)
-        self.assertIn(f'href="/{SLUG}"', closed)
-        self.assertIn("Closed ", closed)
+        with patch.object(server, "swarm_state", return_value="stopped"):
+            page = server.index_page()
+        self.assertNotIn("<h1>CLOSED</h1>", page)
+        rows = {
+            slug: row
+            for row in page.split('<li class="row"')[1:]
+            for slug in (SLUG, OPEN_SLUG)
+            if f'href="/{slug}"' in row
+        }
+        self.assertIn('<span class="state s-closed">closed</span>', rows[SLUG])
+        self.assertIn('<span class="state s-stopped">stopped</span>', rows[OPEN_SLUG])
 
     def test_the_page_close_runs_the_same_close_command_as_the_cli(self):
         self.assertEqual(server.control_argv({"action": "close"}), ["close"])
