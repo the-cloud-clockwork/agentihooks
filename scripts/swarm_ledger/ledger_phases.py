@@ -1,6 +1,6 @@
 import re
 
-OPS = ("phase_add", "phase_update", "phase_review")
+OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
 FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
@@ -72,6 +72,8 @@ def check(op: dict) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.fullmatch(by):
         raise ValueError("phase ops need by, an agent name or operator")
+    if op["op"] == "phase_append":
+        return check_append(op)
     if op["op"] == "phase_add":
         if not isinstance(op.get("phase"), str) or not ID_RE.fullmatch(op["phase"]):
             raise ValueError("phase_add needs a phase id")
@@ -106,7 +108,54 @@ def check_review(op: dict) -> None:
         raise ValueError("a send back counts its own rounds")
 
 
+def check_append(op: dict) -> None:
+    phases = op.get("phases")
+    if not isinstance(phases, list) or not phases:
+        raise ValueError("phase_append needs a list of phases")
+    seen = set()
+    for entry in phases:
+        if not isinstance(entry, dict):
+            raise ValueError("each appended phase is an object")
+        if entry.get("planning", "manual") != "manual":
+            raise ValueError("appended phases are planned manually")
+        check({**entry, "op": "phase_add", "by": op["by"]})
+        if entry["phase"] in seen:
+            raise ValueError(f"phase {entry['phase']} appears twice in the plan")
+        seen.add(entry["phase"])
+
+
+def append(doc: dict, op: dict, ctx) -> bool:
+    ids = {phase["id"] for phase in doc["phases"]}
+    taken = [f"phase id {entry['phase']} is already taken" for entry in op["phases"] if entry["phase"] in ids]
+    if taken:
+        ctx.refused.extend(taken)
+        return False
+    review = {"state": "pending", "by": op["by"], "at": ctx.at, "rounds": 0, "note": ""}
+    added = [
+        {
+            "id": entry["phase"],
+            "description": "",
+            "done": False,
+            **{k: entry[k] for k in FIELDS if k in entry},
+            "planning": "manual",
+            "review": dict(review),
+        }
+        for entry in op["phases"]
+    ]
+    try:
+        validate(doc["phases"] + added)
+    except ValueError as exc:
+        ctx.refused.append(str(exc))
+        return False
+    for phase in added:
+        doc["phases"].append(phase)
+        ctx.record(op["by"], "added", f"phases/{phase['id']}", text=phase["title"])
+    return True
+
+
 def apply(doc: dict, op: dict, ctx) -> bool:
+    if op["op"] == "phase_append":
+        return append(doc, op, ctx)
     phases = doc["phases"]
     phase_id = op["phase"] if op["op"] == "phase_add" else op["item"].split("/")[1]
     phase = next((phase for phase in phases if phase["id"] == phase_id), None)
