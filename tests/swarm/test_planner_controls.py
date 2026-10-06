@@ -10,7 +10,6 @@ from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_server, ledger_tasks
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
