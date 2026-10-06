@@ -652,7 +652,7 @@ def cmd_wait(store, args):
 
 def cmd_progress(store, args):
     agent = _worker(store, args)
-    line = quiet.report(store, LedgerClient(), args.slug, agent, args.doing, args.ends_when, now_ms())
+    line = quiet.report(store, LedgerClient(), args.slug, agent, quiet.Status(args.doing, args.ends_when), now_ms())
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 

@@ -4,6 +4,7 @@ The tick raises the flag as the verdict file gates/quiet/<agent>, which a bash s
 stands every call is refused except the ledger, swarm and msg commands, until `swarm <slug> progress` clears it.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from scripts.gates import log
@@ -96,8 +97,18 @@ def quiet_pass(store, slug, rows, now_ms, home=None):
     return actions
 
 
-def report(store, ledger, slug, agent, doing, ends_when, now_ms, home=None):
-    line = f"Doing {doing}. Done when {ends_when}."
+@dataclass(frozen=True)
+class Status:
+    doing: str
+    ends_when: str
+
+    @property
+    def line(self):
+        return f"Doing {self.doing}. Done when {self.ends_when}."
+
+
+def report(store, ledger, slug, agent, status, now_ms, home=None):
+    line = status.line
     Progress(store.redis, slug).outcome(agent.name, STATUS, now_ms)
     ledger.comment(slug, agent.task, line, agent.name)
     path = ledger_workspace.folder(slug, agent.task) / "progress.md"

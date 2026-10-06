@@ -1,3 +1,4 @@
+import io
 import json
 import os
 
@@ -97,6 +98,19 @@ def test_a_session_outside_a_swarm_is_never_refused(rig):
     assert gate.QuietClaim().decide(Call("Read"), Who(name=ME), rig.flags).allowed
 
 
+def test_a_malformed_flag_fails_open_through_the_gate_entry_and_is_counted(tmp_path):
+    from scripts.gates import entry, log
+
+    flags = Verdicts(SLUG, gate.NAME, tmp_path)
+    flags.path(ME).parent.mkdir(parents=True)
+    flags.path(ME).write_text('{"verdict": "quiet"}')
+    env = {"AGENTIHOOKS_SWARM": SLUG, "AGENTIHOOKS_AGENT_NAME": ME}
+    assert entry.main(["quiet"], io.StringIO(json.dumps({"tool_name": "Read"})), env, tmp_path) == 0
+    assert [(r["gate"], r["kind"], r["tool"]) for r in log.recent(SLUG, home=tmp_path)] == [
+        ("quiet", "fail-open", "Read")
+    ]
+
+
 def test_quiet_minutes_run_from_the_latest_progress_signal(rig):
     assert rig.minutes() == {ME: 40}
     Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10 * MIN)
@@ -190,7 +204,7 @@ def test_the_tick_clears_a_flag_whose_agent_left_the_swarm(rig):
 def test_progress_writes_the_ledger_and_progress_lines_records_an_outcome_and_clears_the_flag(rig):
     ledger, agent = FakeLedger(), rig.store.agents(SLUG)[0]
     rig.flags.write(ME, "quiet", FLAG)
-    line = gate.report(rig.store, ledger, SLUG, agent, "writing the tests", "they pass", NOW, rig.home)
+    line = gate.report(rig.store, ledger, SLUG, agent, gate.Status("writing the tests", "they pass"), NOW, rig.home)
     assert line == "Doing writing the tests. Done when they pass."
     assert ledger.comments == [(SLUG, "t1", line, ME)]
     progress = (ledger_workspace.folder(SLUG, "t1") / "progress.md").read_text()
@@ -198,5 +212,5 @@ def test_progress_writes_the_ledger_and_progress_lines_records_an_outcome_and_cl
     mark = Progress(rig.store.redis, SLUG).read(ME)
     assert (mark.outcome_at, mark.outcome, mark.talk) == (NOW, gate.STATUS, 0)
     assert rig.flags.read(ME) is None
-    gate.report(rig.store, ledger, SLUG, agent, "reviewing", "both readers close", NOW, rig.home)
+    gate.report(rig.store, ledger, SLUG, agent, gate.Status("reviewing", "both readers close"), NOW, rig.home)
     assert len((ledger_workspace.folder(SLUG, "t1") / "progress.md").read_text().splitlines()) == 2

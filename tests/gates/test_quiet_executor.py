@@ -112,7 +112,7 @@ def test_a_quiet_agent_is_refused_until_it_reports_progress(hook):
     assert hook(tool_input=LEDGER).returncode == 0, "the ledger command passes"
     assert [(r["gate"], r["kind"]) for r in hook.logged()] == [("quiet", "count"), ("quiet", "deny"), ("quiet", "deny")]
     agent = hook.store.agents(SLUG)[0]
-    quiet.report(hook.store, FakeLedger(), SLUG, agent, "writing tests", "they pass", NOW, hook.home)
+    quiet.report(hook.store, FakeLedger(), SLUG, agent, quiet.Status("writing tests", "they pass"), NOW, hook.home)
     assert hook().returncode == 0
     assert hook.tick(NOW + MIN) == []
 
