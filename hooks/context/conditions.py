@@ -23,7 +23,7 @@ from typing import Any
 
 from hooks.context import injection_trace, profile_chain, tool_matcher
 
-STEPS = {"pre": "PreToolUse", "post": "PostToolUse"}
+STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 _INDEX_VERSION = 1
 _FRESH_NS = 2_000_000_000
@@ -49,6 +49,10 @@ def parse_filename(filename: str) -> dict:
     if is_async:
         stem = stem[: -len(".async")]
     parts = stem.split("-")
+    if parts[0].lower() == "stop":
+        if len(parts) != 2:
+            raise ValueError("expected stop-<name>.<ext>: Stop has no tool to match")
+        parts.insert(1, "any")
     if len(parts) < 3:
         raise ValueError("expected <step>-<matcher>-<name>.<ext>")
     step, name = parts[0].lower(), parts[-1]
@@ -583,6 +587,14 @@ def post_effect(payload: dict) -> PostEffect | None:
     return effect
 
 
+def stop_block(payload: dict) -> str | None:
+    """The reason a stop condition gives for keeping the agent working; None lets the stop through."""
+    result = run_step("stop", payload)
+    if result is None or result.decision != "deny":
+        return None
+    return "\n".join(result.reasons) or "blocked by a condition"
+
+
 # ---------------------------------------------------------------------------
 # Operator gate — conditions are created or removed only when the operator
 # asks: his prompt this turn, his ledger comment or the master's relay of it
@@ -811,7 +823,8 @@ def create_condition(
     if not (script or "").strip():
         raise ConditionError("script is empty")
     ext, shebang = _LANGUAGES[language]
-    filename = f"{step}-{matcher}-{name}{'.async' if run_async else ''}{ext}"
+    head = step if step == "stop" and matcher in ("", "any") else f"{step}-{matcher}"
+    filename = f"{head}-{name}{'.async' if run_async else ''}{ext}"
     try:
         meta = parse_filename(filename)
     except ValueError as e:
