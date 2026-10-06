@@ -71,8 +71,7 @@ async def _recheck(store, me, pubsub):
     finished = anyio.Event()
 
     async def wait():
-        with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(lambda: pubsub.get_message(timeout=RECHECK_S))
+        await anyio.to_thread.run_sync(lambda: pubsub.get_message(timeout=RECHECK_S))
         finished.set()
 
     async with anyio.create_task_group() as group:

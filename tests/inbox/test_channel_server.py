@@ -6,6 +6,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from redis._parsers.encoders import Encoder
 
 from scripts.inbox import channel
 from scripts.inbox.store import NOTIFY, InboxError, Item
@@ -48,6 +49,7 @@ class FakeStore:
         return self.subs[-1]
 
     def _publish(self, name, data):
+        Encoder("utf-8", "strict", False).encode(data)
         for sub in self.subs:
             sub.publish(name, data)
 
