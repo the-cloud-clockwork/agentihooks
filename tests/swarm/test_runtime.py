@@ -318,6 +318,33 @@ def test_a_task_naming_a_claude_only_profile_spawns_on_claude_at_codex_share_one
     assert placed.harness == harness
 
 
+def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environment(tmp_path, monkeypatch):
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
+    monkeypatch.setenv("AGENTIHOOKS_PROBE", "1")
+    seen = {}
+
+    def choose(requested, environ):
+        seen.update(requested=requested, probe=environ.get("AGENTIHOOKS_PROBE"))
+        return requested, "requested"
+
+    def run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": "codex"}},
+        autonomy="delegate",
+    )
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "profile": "frontend"})
+    assert seen == {"requested": "claude", "probe": "1"}
+
+
 def _listed(pane_id, session):
     return {"name": pane_id, "pane_id": pane_id, "agent": "claude", "agent_status": "working", "agent_session": session}
 
