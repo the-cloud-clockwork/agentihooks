@@ -87,7 +87,8 @@ def test_without_a_pending_handoff_the_summary_says_none(store):  # noqa: F811
 
 
 def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("AGENTIHOOKS_GATE_CLAIMS", "observe")
+    monkeypatch.setenv("AGENTIHOOKS_GATE_CLAIMS", "enforce")
+    store.update("sw", gates={"claims": "observe"})
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 3)
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -96,13 +97,22 @@ def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store,
     assert [(r["kind"], r["reason"]) for r in gate_rows()] == [("observe", refusal(3, "none", "sw", "t1"))]
 
 
-def test_off_skips_the_cap(store, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("AGENTIHOOKS_GATE_CLAIMS", "off")
+def test_off_skips_the_cap(store):  # noqa: F811
+    store.update("sw", gates={"claims": "off"})
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 3)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert gate_rows() == []
+
+
+def test_the_tick_ignores_a_mode_in_its_own_environment(store, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("AGENTIHOOKS_GATE_CLAIMS", "off")
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    lives(store, 3)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []
+    assert ledger.rows["t1"]["state"] == "blocked"
 
 
 def test_a_crashed_cap_lets_the_claim_through_and_counts_a_fail_open_row(store, monkeypatch):  # noqa: F811

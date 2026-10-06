@@ -56,7 +56,11 @@ ALLOWED_HOSTS = {f"{HOST}:{PORT}", f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
-CODE_DIRS = (CODE_DIR, *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")))
+CODE_DIRS = (
+    CODE_DIR,
+    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
+    ROOT / "hooks",
+)
 
 
 def all_summaries():
@@ -398,9 +402,20 @@ def control_argv(body):
         if body["autonomy"] not in AUTONOMY:
             raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
         pairs.append(f"autonomy={body['autonomy']}")
+    if "gates" in body:
+        pairs += gate_pairs(body["gates"])
     if not pairs:
-        raise ValueError("set needs max_eng, max_ci, max_plan, codex_share, compact_limit or autonomy")
+        raise ValueError("set needs max_eng, max_ci, max_plan, codex_share, compact_limit, autonomy or gates")
     return ["set", *pairs]
+
+
+def gate_pairs(gates):
+    from scripts.gates import catalog, modes
+
+    names = catalog.defaults()
+    if not isinstance(gates, dict) or not gates or not all(n in names and m in modes.MODES for n, m in gates.items()):
+        raise ValueError(f"gates maps a gate of {', '.join(names)} to {', '.join(modes.MODES)}")
+    return [f"{name}-gate={mode}" for name, mode in gates.items()]
 
 
 def restore_decision_argv(body):

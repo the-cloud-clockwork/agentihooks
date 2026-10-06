@@ -1285,7 +1285,8 @@ def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env,
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setenv("AGENTIHOOKS_GATE_TRACE_PLAN", "enforce")
+    monkeypatch.setenv("AGENTIHOOKS_GATE_TRACE_PLAN", "off")
+    store.update("sw", gates={"trace-plan": "enforce"})
     folder, _ = _traced(env, monkeypatch, tmp_path, "- a generator | power | it powers a light\n", 0.1)
     writes = []
     update, comment = ledger.update_task, ledger.comment
