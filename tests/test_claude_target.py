@@ -2,9 +2,9 @@ import copy
 import json
 import re
 
+import install as fixture_install
 import pytest
 
-import install as fixture_install
 from scripts import install
 from scripts.targets.claude_target import settings_document
 
