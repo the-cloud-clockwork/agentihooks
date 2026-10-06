@@ -909,3 +909,16 @@ def test_scratch_render_runs_this_checkout_in_a_child(world, tmp_path, monkeypat
     assert Path(kw["cwd"]) / "scripts" / "profiles" / "render.py" == Path(render.__file__).resolve()
     assert kw["env"]["AGENTIHOOKS_HOME"] == str(tmp_path / "rel-home")
     assert kw["env"]["AGENTIHOOKS_BUNDLE_PATH"] == str(world["bundle"])
+
+
+def test_scratch_render_options_are_documented(capsys):
+    from scripts.profiles import render
+
+    with pytest.raises(SystemExit):
+        render.main(["render", "--help"])
+    out = _flat(capsys.readouterr().out)
+    assert "--out OUT Render into this scratch agentihooks home, not the live one" in out
+    assert "--bundle BUNDLE Bundle for --out (default: the linked bundle)" in out
+    with pytest.raises(SystemExit):
+        render.main(["render", "rb-role", "--bundle", "b"])
+    assert capsys.readouterr().err.endswith("render: error: --bundle needs --out\n")
