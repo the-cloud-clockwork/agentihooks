@@ -14,8 +14,9 @@ class ClaimCap:
 GATE = ClaimCap()
 
 
-def refusal(lives, reason):
+def refusal(lives, reason, slug, task):
     return (
-        f"The swarm blocked this task before a fourth agent life: it was claimed {lives} times and the cap is {CAP}. "
-        f"Last handoff reason: {reason}. Change its scope or split it, then reopen it for three more lives."
+        f"The swarm blocked this task before a fourth agent life: claimed {lives} times, cap {CAP}. "
+        f"Last handoff reason: {reason}. Change its scope or split it, then reopen it for three more lives with "
+        f"agentihooks ledger --slug {slug} task set {task} state=open"
     )

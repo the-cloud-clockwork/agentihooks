@@ -60,10 +60,10 @@ def test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master(store):  
     assert [task for _, _, task in runtime.spawned] == ["t2"]
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", refusal(3, "recycle"), "swarm")]
-    assert f"blocked t1: {refusal(3, 'recycle')}" in actions
+    assert ledger.comments == [("sw", "t1", refusal(3, "recycle", "sw", "t1"), "swarm")]
+    assert f"blocked t1: {refusal(3, 'recycle', 'sw', 't1')}" in actions
     assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in gate_rows()] == [
-        ("claims", "deny", "swarm", "t1", refusal(3, "recycle"))
+        ("claims", "deny", "swarm", "t1", refusal(3, "recycle", "sw", "t1"))
     ]
 
 
@@ -81,7 +81,7 @@ def test_without_a_pending_handoff_the_summary_says_none(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 4)
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert ledger.comments == [("sw", "t1", refusal(4, "none"), "swarm")]
+    assert ledger.comments == [("sw", "t1", refusal(4, "none", "sw", "t1"), "swarm")]
 
 
 def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store, monkeypatch):  # noqa: F811
@@ -91,7 +91,7 @@ def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store,
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert (ledger.rows["t1"]["state"], ledger.comments, store.claims("sw", "t1")) == ("claimed", [], 4)
-    assert [(r["kind"], r["reason"]) for r in gate_rows()] == [("observe", refusal(3, "none"))]
+    assert [(r["kind"], r["reason"]) for r in gate_rows()] == [("observe", refusal(3, "none", "sw", "t1"))]
 
 
 def test_off_skips_the_cap(store, monkeypatch):  # noqa: F811
@@ -101,3 +101,17 @@ def test_off_skips_the_cap(store, monkeypatch):  # noqa: F811
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert gate_rows() == []
+
+
+def test_a_crashed_cap_lets_the_claim_through_and_counts_a_fail_open_row(store, monkeypatch):  # noqa: F811
+    def broken(slug, task):
+        raise ConnectionError("redis blip")
+
+    monkeypatch.setattr(store, "claims", broken)
+    ledger, runtime = CommentingLedger([{"id": "t1"}, {"id": "t2"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1", "t2"]
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in gate_rows()] == [
+        ("claims", "fail-open", "swarm", "t1", "ConnectionError: redis blip"),
+        ("claims", "fail-open", "swarm", "t2", "ConnectionError: redis blip"),
+    ]

@@ -9,11 +9,13 @@ def test_the_cap_is_three_lives_and_ships_enforcing():
 
 
 def test_the_summary_names_the_lives_the_cap_the_last_handoff_reason_and_the_way_out():
-    assert refusal(3, "recycle") == (
-        "The swarm blocked this task before a fourth agent life: it was claimed 3 times and the cap is 3. "
-        "Last handoff reason: recycle. Change its scope or split it, then reopen it for three more lives."
+    assert refusal(3, "recycle", "rig-grade-swarm", "g10") == (
+        "The swarm blocked this task before a fourth agent life: claimed 3 times, cap 3. "
+        "Last handoff reason: recycle. Change its scope or split it, then reopen it for three more lives with "
+        "agentihooks ledger --slug rig-grade-swarm task set g10 state=open"
     )
 
 
 def test_the_summary_passes_the_ledger_comment_check():
-    assert problems(refusal(3, "none"), "comment") == []
+    for slug, task in (("rig-grade-swarm", "g10"), ("proof-323133-g10-1", "t1"), ("sw", "lg1")):
+        assert problems(refusal(13, "succession", slug, task), "comment") == []

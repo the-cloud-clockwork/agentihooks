@@ -334,10 +334,22 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 
 
 def _lives_spent(slug, store, ledger, rows, task):
+    try:
+        return _claim_cap(slug, store, ledger, rows, task)
+    except Exception as exc:  # a crashed gate lets the claim through, counted in the gate log
+        who = Who(name="swarm", task=task["id"])
+        gate_log.append(
+            slug, gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
+        )
+        return ""
+
+
+def _claim_cap(slug, store, ledger, rows, task):
     lives, mode = store.claims(slug, task["id"]), modes.mode(claim_cap.GATE, os.environ)
     if lives < claim_cap.CAP or mode == "off":
         return ""
-    reason = claim_cap.refusal(lives, (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none")
+    last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
+    reason = claim_cap.refusal(lives, last, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
     gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
     if kind == "observe":
