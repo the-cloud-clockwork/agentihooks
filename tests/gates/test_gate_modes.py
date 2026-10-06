@@ -169,9 +169,15 @@ class TestServerControl:
         argv = ledger_server.control_argv({"action": "set", "gates": {"talk": "enforce", "claims": "observe"}})
         assert argv == ["set", "talk-gate=enforce", "claims-gate=observe"]
 
+    def test_gate_modes_ride_with_the_other_settings_in_one_set(self):
+        argv = ledger_server.control_argv({"action": "set", "autonomy": "full", "gates": {"talk": "off"}})
+        assert argv == ["set", "autonomy=full", "talk-gate=off"]
+
     @pytest.mark.parametrize(
         "gates", [{"nope": "off"}, {"talk": "loud"}, ["talk"], {"talk": None}, {"-x": "off"}, {}], ids=str
     )
     def test_an_unknown_gate_or_mode_is_refused(self, gates):
-        with pytest.raises(ValueError, match="gates"):
+        refusal = f"gates maps a gate of {', '.join(catalog.defaults())} to enforce, observe, off"
+        with pytest.raises(ValueError) as caught:
             ledger_server.control_argv({"action": "set", "gates": gates})
+        assert str(caught.value) == refusal
