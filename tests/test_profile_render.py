@@ -174,11 +174,14 @@ def test_refresh_rules_updates_rendered_profile_copies(world, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(out))
     source = world["bundle"] / ".claude" / "rules" / "bundle-rule.md"
     _write(source, "UPDATED RENDERED RULE\n")
+    _write(out / "CLAUDE.local.md", "ROLE LOCAL OVERRIDE\n")
 
     payload = refresh_rules(out / "rules", out / "CLAUDE.md", out / "CLAUDE.local.md", False)
 
     assert (out / "rules" / "bundle-rule.md").read_text() == "UPDATED RENDERED RULE\n"
     assert "UPDATED RENDERED RULE" in payload
+    assert "ROLE PERSONA MARKER" in payload
+    assert "ROLE LOCAL OVERRIDE" in payload
 
 
 def test_claude_render_settings(world):

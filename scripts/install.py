@@ -4801,7 +4801,7 @@ def uninstall_global(args: argparse.Namespace) -> None:
     n_skills = _count_managed_symlinks(skills_dir)
     n_agents = _count_managed_symlinks(agents_dir)
     n_commands = _count_managed_symlinks(commands_dir)
-    n_rules = sum(1 for path in rules_dir.glob("*.md") if _link_is_managed(path, ledger))
+    n_rules = sum(1 for path in rules_dir.glob("*.md") if _link_is_managed(path))
 
     # Remove CLAUDE.md whether it's a legacy profiles/ symlink or a real file
     # written by install (tracked in state.json / manifesto marker).

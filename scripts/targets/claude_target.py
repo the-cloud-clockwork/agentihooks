@@ -155,7 +155,7 @@ def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: boo
                     for link, entry in _i._state_links().items()
                     if Path(link).parent == rules_dir and not Path(link).is_symlink() and "rule_sources" in entry
                 ),
-                [],
+                None,
             )
             if layers:
                 _install_rule_files(

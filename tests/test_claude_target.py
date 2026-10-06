@@ -93,7 +93,7 @@ def test_installed_claude_rules_stay_inside_global_home(tmp_path):
 
 
 def test_empty_claude_rule_install_keeps_user_files(tmp_path):
-    from scripts.targets.claude_target import ClaudeAdapter
+    from scripts.targets.claude_target import ClaudeAdapter, refresh_rules
 
     rules = install.CLAUDE_HOME / "rules"
     rules.mkdir(parents=True)
@@ -102,6 +102,9 @@ def test_empty_claude_rule_install_keeps_user_files(tmp_path):
 
     assert (rules / "user.md").read_text() == "USER RULE\n"
     assert install._state_links() == {}
+    assert "USER RULE" in refresh_rules(
+        rules, install.CLAUDE_HOME / "CLAUDE.md", install.CLAUDE_HOME / "CLAUDE.local.md", False
+    )
 
 
 def test_installed_claude_rules_refresh_and_preserve_foreign_files(tmp_path, capsys):
@@ -179,6 +182,8 @@ def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypa
     (source / "rule.md").write_text("OLD RULE\n")
     ClaudeAdapter().install_features("rules", [("rule", source)], lambda path: path.suffix == ".md")
     (source / "rule.md").write_text("NEW RULE\n")
+    (install.CLAUDE_HOME / "CLAUDE.md").write_text("GLOBAL PERSONA\n")
+    (install.CLAUDE_HOME / "CLAUDE.local.md").write_text("LOCAL OVERRIDE\n")
     rules = install.CLAUDE_HOME / "rules"
     (rules / "folder").mkdir()
     foreign = tmp_path / "foreign" / "rule.md"
@@ -208,6 +213,8 @@ def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypa
 
     assert (install.CLAUDE_HOME / "rules" / "rule.md").read_text() == "NEW RULE\n"
     assert "NEW RULE" in seen[0]
+    assert "GLOBAL PERSONA" in seen[0]
+    assert "LOCAL OVERRIDE" in seen[0]
     assert "OLD RULE" not in seen[0]
     assert (rules / "folder").is_dir()
     assert (rules / "linked.md").is_symlink()
