@@ -73,7 +73,7 @@ def request(slug, ops=None):
     headers = {"Content-Type": "application/json", "X-Ledger-Token": token}
     body = None if ops is None else json.dumps({"ops": ops}).encode()
     req = urllib.request.Request(
-        f"{BASE}/api/{slug}", data=body, headers=headers, method="GET" if ops is None else "PUT"
+        f"{BASE}/api/{slug}?view=agent", data=body, headers=headers, method="GET" if ops is None else "PUT"
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
