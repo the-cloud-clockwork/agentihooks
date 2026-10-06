@@ -343,6 +343,16 @@ def test_timer_units_and_enable(tmp_path):
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
 
 
+def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
+    calls = []
+    timer.ensure(
+        "/bin/agentihooks", tmp_path, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
+    )
+    service = (tmp_path / "agentihooks-inbox-waker.service").read_text()
+    assert 'ExecStart="/bin/agentihooks" swarm waker' in service and "Restart=always" in service
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-inbox-waker.service"] in calls
+
+
 def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     seen = []
 

@@ -598,3 +598,15 @@ def test_a_claude_launch_gets_no_codex_trust_override(tmp_path):
         tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent="claude")
     )
     assert "trust_level" not in launcher.read_text()
+
+
+@pytest.mark.parametrize(("agent", "named"), [("claude", True), ("codex", False)])
+def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch, tmp_path, capsys, agent, named):
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (agent, "requested"))
+    argv = ["--dir", str(tmp_path), "--agent", agent, "--inbox-channel", "--dry-run", "--", "--model", "opus"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("claude_args="))
+    assert line.startswith("claude_args='--mcp-config=") is named and (channel.FLAG in line) is named
+    assert line.endswith("--model opus")

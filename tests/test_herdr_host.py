@@ -232,3 +232,25 @@ def test_renaming_gives_up_when_no_agent_appears(monkeypatch):
 
     monkeypatch.setattr(herdr_host, "_cli", cli)
     assert herdr_host.rename_agent("w1:p1", "probe-codex", {}, timeout=0) is False
+
+
+def test_answer_waits_for_the_text_then_presses_enter(monkeypatch):
+    calls = []
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append(args) or {})
+    assert herdr_host.answer("w1:p2", "local development", {}, 5000)
+    assert calls == [
+        ["pane", "wait-output", "w1:p2", "--match", "local development", "--timeout", "5000"],
+        ["pane", "send-keys", "w1:p2", "Enter"],
+    ]
+
+
+def test_answer_presses_nothing_when_the_text_never_shows(monkeypatch):
+    calls = []
+
+    def cli(args, environ):
+        calls.append(args)
+        raise herdr_host.HerdrError("timed out")
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert not herdr_host.answer("w1:p2", "local development", {}, 5000)
+    assert [c[1] for c in calls] == ["wait-output"]
