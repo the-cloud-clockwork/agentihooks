@@ -638,3 +638,21 @@ def test_phase_content_missing_description_defaults_to_empty():
     assert new_ledger.build_doc({"title": "Demo", "phases": [{"title": "First"}]})["phases"] == [
         {"id": "p1", "title": "First", "description": "", "done": False, "comments": []}
     ]
+
+
+@pytest.mark.parametrize("phase_id", ["add", "set"])
+@pytest.mark.parametrize("state", ["done", "open"])
+def test_legacy_phase_ids_matching_new_commands_keep_state_syntax(phase_id, state):
+    args = ledger.build_parser().parse_args(["phase", phase_id, state])
+    with patch.object(ledger, "send") as sent:
+        ledger.cmd_phase(args)
+    sent.assert_called_once_with(args, "set", path=f"phases/{phase_id}/done", value=state == "done")
+
+
+def test_new_phase_add_can_use_a_state_word_as_its_id():
+    args = ledger.build_parser().parse_args(["phase", "add", "done", "Final"])
+    with patch.object(ledger, "send") as sent:
+        ledger.cmd_phase(args)
+    sent.assert_called_once_with(
+        args, "phase_add", phase="done", title="Final", description="", depends_on=[], planning="manual", release=False
+    )
