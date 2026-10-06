@@ -272,3 +272,149 @@ def test_run_tick_runs_the_priority_pass(env, monkeypatch):
     actions = swarm_cli.run_tick(store, SLUG, ledger, FakeRuntime(), FakeHerdr({}))
     assert f"cleared the priority on {path}: its item is done" in actions
     assert path not in priorities()
+
+
+class Recorder:
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        return lambda *args: self.calls.append((name, *args))
+
+
+def row(item, at=1, derived=False, rid=None):
+    return {"id": rid or f"p-{item}", "item": item, "text": ASK, "by": "swarm", "at": at, "derived": derived}
+
+
+def write(rev, target, text=None, kind="comment added", by="operator", at=10, wid="c1"):
+    event = {"rev": rev, "at": at, "by": by, "kind": kind, "target": target, "id": wid}
+    return event if text is None else {**event, "text": text}
+
+
+def dict_pass(rows, events=(), judge=None, github=no_github, **lists):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(store.key("d", priority_sweep.CURSOR), 0)
+    doc = {"phases": [], "questions": [], "followups": [], "tasks": [], **lists}
+    doc["_meta"] = {"rev": 99, "events": list(events)}
+    if rows is not None:
+        doc["priorities"] = rows
+    ledger = Recorder()
+    actions = priority_pass_on(store, doc, ledger, judge or Judge(), github)
+    return actions, ledger.calls
+
+
+def priority_pass_on(store, doc, ledger, judge, github):
+    return priority_sweep.priority_pass(store, "d", doc, ledger, judge=judge, github=github)
+
+
+def asked_texts(judge):
+    return [(s["item"], s["write"]["text"]) for s, _, _ in judge.asked]
+
+
+def test_a_doc_without_priorities_clears_nothing():
+    assert dict_pass(None, [write(1, "tasks/t1", "Done.")]) == ([], [])
+
+
+def test_the_sweep_leaves_a_derived_row_to_the_ledger():
+    actions, _ = dict_pass([row("tasks/t1", derived=True)], tasks=[{"id": "t1", "done": True}])
+    assert actions == []
+
+
+def test_a_task_in_state_done_is_done_without_its_flag():
+    _, calls = dict_pass([row("tasks/t1")], tasks=[{"id": "t1", "state": "done"}])
+    assert calls == [("clear_priority", "d", "p-tasks/t1", "its item is done")]
+
+
+def test_a_claimed_task_with_a_pull_request_is_not_looked_up():
+    actions, _ = dict_pass([row("tasks/t1")], tasks=[{"id": "t1", "state": "claimed", "pr_url": "u"}])
+    assert actions == []
+
+
+def test_a_swept_priority_is_not_judged_in_the_same_pass():
+    judge = Judge()
+    tasks = [{"id": "t1", "title": "Ship", "done": True, "comments": []}]
+    actions, _ = dict_pass([row("tasks/t1")], [write(1, "tasks/t1", "Shipped.")], judge, tasks=tasks)
+    assert judge.asked == []
+    assert actions == ["cleared the priority on tasks/t1: its item is done"]
+
+
+def test_one_text_is_judged_once_and_later_items_still_are():
+    judge = Judge(yes=0.1)
+    followups = [{"id": "f1", "text": "Pick a port", "comments": [{"id": "c1", "text": "Port nine."}]}]
+    tasks = [{"id": "t1", "title": "Ship", "comments": []}]
+    events = [
+        write(1, "followups/f1", "Port nine."),
+        write(2, "followups/f1", kind="comment edited"),
+        write(3, "tasks/t1", "Ship it."),
+    ]
+    dict_pass([row("followups/f1"), row("tasks/t1")], events, judge, followups=followups, tasks=tasks)
+    assert asked_texts(judge) == [("Pick a port", "Port nine."), ("Ship", "Ship it.")]
+
+
+def test_a_cleared_priority_is_not_judged_again_in_the_same_pass():
+    judge = Judge()
+    tasks = [{"id": "t1", "title": "Ship", "comments": []}]
+    events = [write(1, "tasks/t1", "Ship it."), write(2, "tasks/t1", "Really, ship it.")]
+    _, calls = dict_pass([row("tasks/t1")], events, judge, tasks=tasks)
+    assert asked_texts(judge) == [("Ship", "Ship it.")]
+    assert [c[0] for c in calls] == ["clear_priority", "comment_item"]
+
+
+def test_an_even_answer_counts_as_a_yes():
+    actions, _ = dict_pass([row("tasks/t1")], [write(1, "tasks/t1", "Go.")], Judge(yes=0.5), tasks=[{"id": "t1"}])
+    assert actions == [
+        "cleared the priority on tasks/t1: the classifier judged that the comment from the operator resolves it, "
+        "at probability 0.50"
+    ]
+
+
+def test_events_that_are_not_writes_or_carry_no_text_are_skipped():
+    judge = Judge(yes=0.1)
+    tasks = [{"id": "t1", "title": "Ship", "comments": []}]
+    events = [
+        {"rev": 1, "at": 10, "by": "engineer@sw-0001", "kind": "joined", "target": ""},
+        write(2, "tasks/t1", kind="comment edited", wid="missing"),
+        write(3, "tasks/t1", "Ship it."),
+    ]
+    dict_pass([row("tasks/t1")], events, judge, tasks=tasks)
+    assert asked_texts(judge) == [("Ship", "Ship it.")]
+
+
+@pytest.mark.parametrize("raised, judged", [(10, True), (11, False)])
+def test_a_write_counts_only_from_the_moment_its_priority_was_raised(raised, judged):
+    judge = Judge(yes=0.1)
+    dict_pass([row("tasks/t1", at=raised)], [write(1, "tasks/t1", "Go.", at=10)], judge, tasks=[{"id": "t1"}])
+    assert bool(judge.asked) is judged
+
+
+def test_an_edit_on_a_gone_item_is_skipped():
+    judge = Judge()
+    dict_pass([row("tasks/t9", derived=True)], [write(1, "tasks/t9", kind="comment edited")], judge)
+    assert judge.asked == []
+
+
+def test_an_edited_answer_is_judged_by_its_new_text():
+    judge = Judge(yes=0.1)
+    questions = [{"id": "q1", "text": "Which?", "comments": [], "answers": [{"id": "a1", "text": "The small one."}]}]
+    event = write(1, "questions/q1", kind="answer edited", wid="a1")
+    dict_pass([row("questions/q1", derived=True)], [event], judge, questions=questions)
+    assert asked_texts(judge) == [("Which?", "The small one.")]
+    assert judge.asked[0][0]["write"]["kind"] == "answer"
+
+
+def test_the_question_names_both_outcomes():
+    judge = Judge(yes=0.1)
+    dict_pass([row("tasks/t1")], [write(1, "tasks/t1", "Go.")], judge, tasks=[{"id": "t1"}])
+    (question,) = judge.asked[0][1].values()
+    assert question.criteria() == {
+        "true": "the write resolves what the priority asks",
+        "false": "the priority still waits",
+    }
+
+
+def test_the_pass_keeps_its_own_cursor(env):
+    store, _ = env
+    run(env)
+    assert store.redis.get(store.key(SLUG, "priority-cursor")) == str(state(SLUG)["_meta"]["rev"])

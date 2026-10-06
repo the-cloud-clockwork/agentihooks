@@ -14,6 +14,7 @@ from scripts.swarm import ledger_events
 
 PURPOSE = "priority-resolve"
 CURSOR = "priority-cursor"
+PATH = re.compile(r"([a-z]+)/([^/]+)")
 RESOLVES = "the write resolves what the priority asks"
 WAITS = "the priority still waits"
 YES = 0.5
@@ -86,35 +87,39 @@ def _stale(item, github):
 
 
 def _item(doc, path):
-    name, _, item_id = path.partition("/")
-    return next((i for i in doc.get(name, []) if isinstance(i, dict) and i.get("id") == item_id), {})
+    name, item_id = _split(path)
+    return next((i for i in doc[name] if i["id"] == item_id), {})
+
+
+def _split(path):
+    return PATH.fullmatch(path).groups()
 
 
 def _writes(doc, rows, events):
     for event in events:
-        kind = WRITES.get(event.get("kind"))
-        if kind is None or event.get("by") in SELF:
+        kind = WRITES.get(event["kind"])
+        if kind is None or event["by"] in SELF:
             continue
-        write = Write(event["by"], kind, event.get("target", ""), _text(doc, event))
+        write = Write(event["by"], kind, event["target"], _text(doc, event))
         if not write.text.strip():
             continue
         for row in rows:
-            if row.get("at", 0) <= event.get("at", 0) and _about(row, write):
+            if row["at"] <= event["at"] and _about(row, write):
                 yield row, write
 
 
 def _text(doc, event):
-    if event.get("text"):
+    if "text" in event:
         return event["text"]
-    item = _item(doc, event.get("target", ""))
+    item = _item(doc, event["target"])
     entries = item.get("comments", []) + item.get("answers", [])
-    return next((e.get("text", "") for e in entries if e.get("id") == event.get("id")), "")
+    return next((e["text"] for e in entries if e["id"] == event["id"]), "")
 
 
 def _about(row, write):
     if write.target != "chat":
         return write.target == row["item"]
-    item_id = row["item"].partition("/")[2]
+    item_id = _split(row["item"])[1]
     return re.search(rf"(?<![\w-]){re.escape(item_id)}(?![\w-])", write.text) is not None
 
 
@@ -143,7 +148,7 @@ def _judge(doc, row, write, judge):
 
 def _resolve(ledger, slug, row, write, reason):
     ledger.clear_priority(slug, row["id"], reason)
-    name = row["item"].partition("/")[0]
+    name = _split(row["item"])[0]
     if name == "followups":
         ledger.mark_done(slug, row["item"])
     if name == "questions" and write.by == "operator" and write.kind == "comment":
