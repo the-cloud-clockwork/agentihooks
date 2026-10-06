@@ -200,27 +200,89 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
-def test_claude_render_enables_operator_fleet_and_chain_plugins(world):
+def test_claude_render_enables_only_the_chain_plugins(world):
     from scripts.profiles import render
 
     home, bundle = world["home"], world["bundle"]
-    operator = {"mine@m": True, "off@m": False, "fleet@m": False}
-    _write(home / ".claude" / "settings.json", json.dumps({"model": "opus", "enabledPlugins": operator}))
+    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False}}
+    _write(home / ".claude" / "settings.json", json.dumps(operator))
     plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
-    deps = [{**plugin, "id": "fleet@m"}, {**plugin, "id": "muted@m"}, {**plugin, "id": "gone@m", "state": "absent"}]
-    _write(bundle / "deps.json", json.dumps({"deps": deps}))
-    kit = {"enabledPlugins": {"kit@m": True, "off@m": True, "muted@m": False}}
+    _write(bundle / "deps.json", json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
+    kit = {"enabledPlugins": {"kit@m": True, "muted@m": False}}
     _write(bundle / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
 
     out = render.render_claude("rb-role")
 
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"kit@m": True}
+    assert json.loads((home / ".claude" / "settings.json").read_text()) == operator
+
+
+MATTPOCOCK, PLAYWRIGHT = "mattpocock-skills@claude-plugins-official", "playwright@claude-plugins-official"
+
+
+@pytest.mark.parametrize(
+    ("role", "plugins"),
+    [("engineer", [MATTPOCOCK]), ("cicd", [MATTPOCOCK]), ("planner", [MATTPOCOCK]), ("master", [PLAYWRIGHT])],
+)
+def test_claude_render_enables_the_role_defaults(world, role, plugins):
+    from scripts.profiles import render
+
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [rb-base]\n")
+
+    out = render.render_claude(role)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == dict.fromkeys(plugins, True)
+
+
+@pytest.mark.parametrize(
+    ("layer", "plugins"),
+    [
+        ({"impeccable@impeccable": True}, {MATTPOCOCK: True, "impeccable@impeccable": True}),
+        ({MATTPOCOCK: False, "own@m": True}, {"own@m": True}),
+    ],
+)
+def test_a_same_name_profile_extends_or_replaces_the_role_defaults(world, layer, plugins):
+    from scripts.profiles import render
+
+    engineer = world["bundle"] / "profiles" / "engineer"
+    _write(engineer / "profile.yml", "name: engineer\n")
+    _write(engineer / ".claude" / "settings.overrides.json", json.dumps({"enabledPlugins": layer}))
+
+    out = render.render_claude("engineer")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == plugins
+
+
+def test_a_profile_extending_a_role_keeps_its_defaults(world):
+    from scripts.profiles import render
+
+    profiles = world["bundle"] / "profiles"
+    _write(profiles / "engineer" / "profile.yml", "name: engineer\n")
+    _write(profiles / "rb-front" / "profile.yml", "name: rb-front\nextends: [engineer]\n")
+    front = {"enabledPlugins": {"frontend-design@claude-plugins-official": True}}
+    _write(profiles / "rb-front" / ".claude" / "settings.overrides.json", json.dumps(front))
+
+    out = render.render_claude("rb-front")
+
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {
-        "mine@m": True,
-        "off@m": True,
-        "fleet@m": True,
-        "muted@m": False,
-        "kit@m": True,
+        MATTPOCOCK: True,
+        "frontend-design@claude-plugins-official": True,
     }
+
+
+def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+    from scripts.profiles import render
+
+    roles = tmp_path / "package-roles"
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    _write(roles / "master" / "profile.yml", "name: master\n")
+    world["install"]._save_state({})
+
+    out = render.render_claude("package:master")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {PLAYWRIGHT: True}
 
 
 def test_claude_render_subscribes_every_profile_to_brain(world):
@@ -292,6 +354,47 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_seeds_only_startup_state_from_the_default_home(world):
+    from scripts.profiles import render
+
+    project = {"hasTrustDialogAccepted": True, "mcpServers": {"own": {"command": "x"}}, "enabledMcpjsonServers": ["a"]}
+    operator = {
+        "hasCompletedOnboarding": True,
+        "userID": "u1",
+        "numStartups": 40,
+        "claudeAiMcpEverConnected": True,
+        "mcpServers": {"google-gmail": {"type": "http", "url": "https://gmail.example"}},
+        "projects": {"/w": project},
+    }
+    _write(world["home"] / ".claude.json", json.dumps(operator))
+
+    out = render.render_claude("rb-role")
+
+    claude_json = json.loads((out / ".claude.json").read_text())
+    assert {k: v for k, v in claude_json.items() if k != "mcpServers"} == {
+        "hasCompletedOnboarding": True,
+        "userID": "u1",
+        "projects": {"/w": {"hasTrustDialogAccepted": True}},
+    }
+    assert "google-gmail" not in claude_json["mcpServers"]
+
+
+@pytest.mark.parametrize("operator", [None, "not json", json.dumps({"projects": ["/w"], "userID": "u1"})])
+def test_claude_render_seeds_nothing_it_cannot_read(world, operator):
+    from scripts.profiles import render
+
+    path = world["home"] / ".claude.json"
+    if operator is None:
+        path.unlink()
+    else:
+        path.write_text(operator)
+
+    out = render.render_claude("rb-role")
+
+    claude_json = json.loads((out / ".claude.json").read_text())
+    assert set(claude_json) == ({"mcpServers", "userID"} if operator and "u1" in operator else {"mcpServers"})
 
 
 def test_claude_render_gives_each_home_its_own_plans_folder(world):
@@ -430,28 +533,28 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_stamp_redoes_render_when_operator_plugins_change(world, target):
+def test_stamp_ignores_operator_plugins(world, target):
     from scripts.profiles import render
 
     settings = world["home"] / ".claude" / "settings.json"
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
     assert render.render(target, "rb-role") is not None
-    assert render.render(target, "rb-role") is None
 
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
-    assert render.stamp("rb-role")["plugins"] == {"later@m": True, "mine@m": True}
-    assert render.render(target, "rb-role") is not None
     assert render.render(target, "rb-role") is None
 
 
-def test_stamp_reads_operator_plugins_from_the_default_home(world, monkeypatch, tmp_path):
-    from scripts.profiles import render
+def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
+    from scripts.profiles import plugins, render
 
-    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
-    _write(tmp_path / "rendered" / "settings.json", json.dumps({"enabledPlugins": {"other@m": True}}))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "rendered"))
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [rb-role]\n")
+    assert render.stamp("rb-role")["plugins"] == {}
+    assert render.stamp("master")["plugins"] == {PLAYWRIGHT: True}
+    assert render.render("claude", "master") is not None
 
-    assert render.stamp("rb-role")["plugins"] == {"mine@m": True}
+    monkeypatch.setitem(plugins.ROLE_PLUGINS, "master", ("other@m",))
+    assert render.stamp("master")["plugins"] == {"other@m": True}
+    assert render.render("claude", "master") is not None
 
 
 def test_rendered_profiles_lists_the_homes_each_target_has(world):
