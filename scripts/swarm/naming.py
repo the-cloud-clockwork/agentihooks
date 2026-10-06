@@ -8,6 +8,7 @@ counts each type on its own within the swarm and is never reused. Names the swar
 import json
 import re
 import secrets
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,22 @@ NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 MINT_ATTEMPTS = 20
+_BASE = r"(?:(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
+_REPO = r"[a-z0-9][a-z0-9._-]*"
+PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
+PATTERNS = {
+    "agent": NAME_RE,
+    "pane": re.compile(r"(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}"),
+    "space": re.compile(rf"{_REPO}-[0-9a-f]{{6}}|{PROOF_RE.pattern}"),
+    "worktree": re.compile(rf"{_BASE}(?:-\d+)?"),
+    "tmp": re.compile(rf"{_BASE}-tmp-\d+"),
+    "scratch": re.compile(rf"{_REPO}/(?:[a-z][a-z0-9._-]*-[a-z0-9]+|{_BASE})"),
+    "plan_slug": re.compile(r"[a-z0-9-]+-\d{4}-\d{2}-\d{2}"),
+    "small_slug": re.compile(rf"small-{_BASE}"),
+    "proof_slug": PROOF_RE,
+    "demo_slug": re.compile(r"doctor-demo-\d{20}"),
+}
+SLUG_KINDS = ("plan_slug", "small_slug", "proof_slug", "demo_slug")
 
 
 class NamingError(RuntimeError):
@@ -63,13 +80,94 @@ def lane_of(name):
     return found.group(2) if found else ""
 
 
-def space(repo, code):
-    return f"{Path(repo).name}-{code}"
+def space(repo, code, slug=""):
+    """The herdr workspace label: a proof swarm's own slug, else the git repository's name and the swarm code."""
+    return slug if PROOF_RE.fullmatch(slug) else f"{repo_name(repo)}-{code}"
 
 
 def plain(name):
     """The name for places that refuse an at sign: git branches, worktree folders and herdr agent names."""
     return name.replace("@", "-")
+
+
+def _clean(text):
+    return re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip("-.")
+
+
+def repo_name(path):
+    """The git repository holding path, the same from its primary checkout or any worktree; the folder outside git."""
+    try:
+        found = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        found = ""
+    common = Path(found)
+    return _clean(common.parent.name if common.name == ".git" else Path(path).name) or "repo"
+
+
+def session_base(environ):
+    """The plain name of the swarm agent this session is, else session- and the first eight of its session id."""
+    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME"))
+    if agent:
+        return plain(str(agent))
+    session = re.sub(r"[^0-9a-f]", "", environ.get("CLAUDE_CODE_SESSION_ID", "").lower())
+    if len(session) < 8:
+        raise NamingError("no swarm agent name and no session id: names are built from the session that asks")
+    return f"session-{session[:8]}"
+
+
+def _first_free(names, taken):
+    """The first of names not taken; names must hold one more candidate than taken, so one is always free."""
+    return next(name for name in names if name not in taken)
+
+
+def worktree(environ, taken=()):
+    base, taken = session_base(environ), set(taken)
+    return _first_free([base, *(f"{base}-{n}" for n in range(2, len(taken) + 2))], taken)
+
+
+def tmp_worktree(environ, taken=()):
+    base, taken = session_base(environ), set(taken)
+    return _first_free([f"{base}-tmp-{n}" for n in range(1, len(taken) + 2)], taken)
+
+
+def is_worktree(name, environ, tmp=False):
+    base = re.escape(session_base(environ))
+    return re.fullmatch(rf"{base}-tmp-\d+" if tmp else rf"{base}(?:-\d+)?", name) is not None
+
+
+def scratch(environ, cwd):
+    """`<repo>/<swarm>-<task>` for a swarm task, else `<repo>/<session base>`."""
+    swarm, task = environ.get("AGENTIHOOKS_SWARM"), _clean(environ.get("AGENTIHOOKS_SWARM_TASK") or "")
+    folder = f"{swarm}-{task}" if swarm and task else session_base(environ)
+    return f"{repo_name(cwd)}/{folder}"
+
+
+def plan_slug(plan, date):
+    stem = re.sub(r"[^a-z0-9]+", "-", Path(plan).stem.lower()).strip("-") or "plan"
+    return f"{stem}-{date}"
+
+
+def small_slug(environ):
+    return f"small-{session_base(environ)}"
+
+
+def proof_slug(environ, taken=()):
+    """`proof-<swarm code>-<task>-<n>`, from the swarm agent asking and its task."""
+    agent = parse(environ.get("AGENTIHOOKS_AGENT_NAME"))
+    task = re.sub(r"[^a-z0-9]", "", environ.get("AGENTIHOOKS_SWARM_TASK", "").lower())
+    if not agent or not task:
+        raise NamingError("a proof swarm is named from its swarm agent and task: create it from a swarm task session")
+    taken = set(taken)
+    return _first_free([f"proof-{agent.code}-{task}-{n}" for n in range(1, len(taken) + 2)], taken)
+
+
+def is_built_slug(slug):
+    return any(PATTERNS[kind].fullmatch(slug or "") for kind in SLUG_KINDS)
 
 
 def _mint():

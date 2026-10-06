@@ -148,7 +148,7 @@ class HerdrRuntime:
             "--host",
             "herdr",
             "--workspace",
-            naming.space(config.repo, config.code),
+            naming.space(config.repo, config.code, config.slug),
             "--dir",
             config.repo,
         ]
@@ -222,7 +222,7 @@ class HerdrRuntime:
         try:
             spaces = self.herdr(["workspace", "list"])["workspaces"]
             agents = self.herdr(["agent", "list"])["agents"]
-            closed, labels = False, (naming.space(config.repo, config.code), f"swarm-{config.slug}")
+            closed, labels = False, (naming.space(config.repo, config.code, config.slug), f"swarm-{config.slug}")
             for space in spaces:
                 if space.get("label") not in labels:
                     continue

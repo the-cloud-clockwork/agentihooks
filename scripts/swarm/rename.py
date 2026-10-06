@@ -32,7 +32,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
             for old in store.names.aliases(new):
                 ledger.rename_agent(slug, old, new)
             workspaces.add(pane["workspace_id"])
-        label = naming.space(config.repo, config.code)
+        label = naming.space(config.repo, config.code, config.slug)
         for workspace in runtime.herdr(["workspace", "list"])["workspaces"]:
             if workspace["workspace_id"] not in workspaces and workspace.get("label") != f"swarm-{slug}":
                 continue
