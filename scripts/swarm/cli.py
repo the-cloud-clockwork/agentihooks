@@ -29,6 +29,7 @@ done carries the proof its task's kind needs: ops and tune --command C --output 
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -42,7 +43,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace
 from scripts.doctor import priming
-from scripts.gates import Who
+from scripts.gates import Who, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -91,6 +92,8 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
+GATE_KEYS = {"talk-gate": "talk"}
+GATE_MODES = ("enforce", "observe", "off")
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -136,8 +139,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         agents = [a for a in store.agents(slug) if a.state != "finished"]
         delivery.relay_to_page(inbox, slug, agents, ledger)
         doc, config = ledger.state(slug), store.config(slug)
-        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
-        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        github = functools.cache(ledger_events.view)
+        actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms(), github)
+        actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), github)
+        actions += progress.checks_pass(store.redis, slug, doc.get("tasks", []), github, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
         actions += ledger_events.findings_pass(inbox, store, slug, found)
@@ -332,6 +337,15 @@ def cmd_take_master(store, args):
     store.clear_handoff(args.slug, MASTER)
 
 
+def gate_mode(key, value, environ=None):
+    env = os.environ if environ is None else environ
+    if env.get("AGENTIHOOKS_AGENT_NAME", "operator") != "operator":
+        raise SwarmError(f"only the operator sets {key}, from the ledger page or his own terminal")
+    if value not in GATE_MODES:
+        raise SwarmError(f"{key} takes {'|'.join(GATE_MODES)}")
+    return {GATE_KEYS[key]: value}
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     for pair in args.pairs:
@@ -343,6 +357,9 @@ def cmd_set(store, args):
             continue
         if key == "autonomy":
             changes["autonomy"] = value
+            continue
+        if key in GATE_KEYS:
+            changes["gates"] = {**changes.get("gates", store.config(args.slug).gates), **gate_mode(key, value)}
             continue
         if key not in SETTABLE or not value.isdigit():
             raise SwarmError(
@@ -571,8 +588,8 @@ def cmd_done(store, args):
 def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     ledger.update_task(args.slug, agent.task, {"state": "blocked"}, by=agent.name)
+    ledger.comment(args.slug, agent.task, args.note, by=agent.name)
     _retire(store, args.slug, agent, "blocked its task and exited")
     print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
 

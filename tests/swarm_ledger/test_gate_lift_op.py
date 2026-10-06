@@ -62,7 +62,12 @@ class GateLiftOp(unittest.TestCase):
         self.assertIs(ledger_agent_ops.HANDLERS["gate_lift"]({}, lift(), Ctx()), True)
         self.assertEqual(
             recorded,
-            [(("engineer@1-1", "gate lifted", ""), {"text": "the operator lifted the talk gate for one hour"})],
+            [
+                (
+                    ("engineer@1-1", "gate lifted", ""),
+                    {"text": "the operator lifted the talk gate for one hour", "gate": "talk"},
+                )
+            ],
         )
 
     def test_the_agent_op_check_names_the_missing_gate(self):

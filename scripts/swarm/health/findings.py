@@ -74,11 +74,11 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset()):
+def findings(ledger, agents, activity, now_ms, limits, waiting=frozenset(), green=frozenset(), talk=None):
     events = ledger.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in ledger.get("tasks", [])}
     return [
-        *ceremony(events, tasks, limits, green),
+        *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
         *idle_with_claim(agents, tasks, limits, waiting),
@@ -114,14 +114,14 @@ def _outcome(task):
     return bool(task.get("pr_url")) or (ledger_kinds.kind(task) in ledger_kinds.NEEDS and not ledger_kinds.unmet(task))
 
 
-def ceremony(events, tasks, limits, green=frozenset()):
+def ceremony(events, tasks, limits, green=frozenset(), talk=None):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
     delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
-        if not naming.lane_of(by) or by in delivering:
+        if not naming.lane_of(by) or by in delivering or (talk is not None and _is_worker(by)):
             continue
         outcomes = len(finished) if _is_master(by) else closed[by]
         if count >= limits.ceremony_min and count / max(outcomes, 1) > limits.ceremony_ratio:
@@ -135,7 +135,24 @@ def ceremony(events, tasks, limits, green=frozenset()):
                     count,
                 )
             )
-    return found
+    return found + over_budget(talk or {})
+
+
+def over_budget(talk):
+    from scripts.gates.talk import BUDGET
+
+    return [
+        Finding(
+            "ceremony",
+            by,
+            "talked past the budget since its last outcome",
+            (f"{_plural(count, 'talk write')} since its last outcome",),
+            f"more than {BUDGET} talk writes between outcomes",
+            count,
+        )
+        for by, count in sorted(talk.items())
+        if _is_worker(by) and count > BUDGET
+    ]
 
 
 def _gain(task):
