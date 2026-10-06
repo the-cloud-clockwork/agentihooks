@@ -253,7 +253,7 @@ def post_bypass(session, unhandled):
 
 def on_stop(payload, session, state, sfile):
     reasons, unhandled, pol = stop_reasons(session, state)
-    if not reasons:
+    if not reasons or payload.get("permission_mode") == "plan":
         write_session(sfile, session)
         return
     if session["blocks"] >= pol["stop_blocks"]:
