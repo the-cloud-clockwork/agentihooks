@@ -515,11 +515,12 @@ class TestStopStep:
             "stop-probe.py",
             _py(
                 "print('|'.join([os.environ['AH_STEP'], os.environ['AH_EVENT'], str(payload['stop_hook_active']), "
-                "payload['last_assistant_message']]), file=sys.stderr)\nsys.exit(2)\n"
+                "payload['last_assistant_message'], payload['session_id'], payload['transcript_path']]), "
+                "file=sys.stderr)\nsys.exit(2)\n"
             ),
         )
-        assert conditions.stop_block(_stop(stop_hook_active=True)) == (
-            "[condition stop-probe.py] stop|Stop|True|all done"
+        assert conditions.stop_block(_stop(stop_hook_active=True, transcript_path="/t/s.jsonl")) == (
+            "[condition stop-probe.py] stop|Stop|True|all done|sid-conditions|/t/s.jsonl"
         )
 
     @pytest.mark.parametrize(
