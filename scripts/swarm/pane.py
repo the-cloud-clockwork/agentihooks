@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class PaneObservation:
     state: str
     prompt_title: str = ""
+    typed: str = ""
 
 
 def selection_prompt(text: str) -> str:

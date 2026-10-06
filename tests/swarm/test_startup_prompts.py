@@ -28,9 +28,20 @@ def test_saved_import_prompt_overrides_herdr_working_status(tmp_path):
     assert observed.prompt_title == TITLE
     assert all(call[:2] in (["agent", "get"], ["pane", "read"]) for call in calls)
     assert [call for call in calls if call[:2] == ["pane", "read"]] == [
-        ["pane", "read", "w:p1", "--source", "visible", "--format", "text"],
-        ["pane", "read", "w:p1", "--source", "visible", "--format", "text"],
+        ["pane", "read", "w:p1", "--source", "visible", "--format", "ansi"],
+        ["pane", "read", "w:p1", "--source", "visible", "--format", "ansi"],
     ]
+
+
+def test_observe_reports_the_text_typed_into_the_input_line(tmp_path):
+    def herdr(args):
+        if args[:2] == ["pane", "read"]:
+            return {"text": "earlier output\n\x1b[2m────\x1b[0m\n❯ wait, before you\n────────\n  ? for shortcuts"}
+        return {"agent": {"name": "engineer-one", "pane_id": "w:p1", "agent_status": "idle"}}
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    observed = runtime.observe(AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    assert (observed.state, observed.typed) == ("idle", "wait, before you")
 
 
 def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
