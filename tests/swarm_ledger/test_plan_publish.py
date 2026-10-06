@@ -133,6 +133,14 @@ def test_publish_opens_an_issue_where_the_repo_has_issues():
     ]
 
 
+def test_publish_stops_when_gh_fails_for_another_reason_than_a_missing_repo():
+    def run(argv, **_):
+        return subprocess.CompletedProcess(argv, 1, "", "HTTP 401: Bad credentials")
+
+    with pytest.raises(ledger_publish.PublishError, match="Bad credentials"):
+        ledger_publish.publish("plan.md", "Slice plan", "", lambda *a: pytest.fail("no artifact"), run)
+
+
 def test_publish_stops_when_the_issue_cannot_be_opened():
     def run(argv, **_):
         if argv[:3] == ["gh", "repo", "view"]:

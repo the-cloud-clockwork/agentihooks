@@ -186,8 +186,12 @@ def next_id(tasks):
     return f"t{max(numbers, default=0) + 1}"
 
 
+def slice_ids(task: dict) -> list[str]:
+    return [item.strip() for item in task["proof"]["slice"].split(",")]
+
+
 def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
-    ids = [item.strip() for item in task["proof"]["slice"].split(",")]
+    ids = slice_ids(task)
     known = {item["id"]: item for item in tasks}
     return [
         item or "<empty>"
@@ -199,7 +203,7 @@ def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
 
 
 def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
-    ids = {item.strip() for item in task["proof"]["slice"].split(",")}
+    ids = set(slice_ids(task))
     return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
 
 

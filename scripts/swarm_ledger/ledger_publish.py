@@ -5,6 +5,7 @@ import re
 import subprocess
 
 HEADING_RE = re.compile(r"^#\s+(.+)$", re.M)
+NO_REPO = ("not a git repository", "point to a known GitHub host")
 
 
 class PublishError(RuntimeError):
@@ -20,8 +21,10 @@ def has_issues(repo: str, run=subprocess.run) -> bool:
     done = run(
         ["gh", "repo", "view", *([repo] if repo else []), "--json", "hasIssuesEnabled"], capture_output=True, text=True
     )
-    if done.returncode:
+    if done.returncode and any(marker in done.stderr for marker in NO_REPO):
         return False
+    if done.returncode:
+        raise PublishError(f"gh repo view failed: {(done.stderr or done.stdout).strip()}")
     return json.loads(done.stdout).get("hasIssuesEnabled") is True
 
 
