@@ -6,43 +6,46 @@ import tomllib
 from hooks.targets import codex_home
 from scripts.claude_config import claude_home
 
-CODEX_EFFORT = "model_reasoning_effort"
+CLAUDE_FLAGS = {"--model": "model", "--effort": "effort"}
+CLAUDE_KEYS = {"model": "model", "effortLevel": "effort"}
+CODEX_FLAGS = {"-m": "model", "--model": "model"}
+CODEX_KEYS = {"model": "model", "model_reasoning_effort": "effort"}
+CODEX_OVERRIDE = ("-c", "--config")
 
 
-def _values(argv, names):
-    return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg in names]
+def _named(argv, flags):
+    return {flags[arg]: argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg in flags}
 
 
-def _flag(argv, names):
-    return next(iter(_values(argv, names)), "")
+def _renamed(values, keys):
+    return {name: values[key] for key, name in keys.items() if key in values}
 
 
-def _codex_effort(argv):
-    pairs = (value.partition("=") for value in _values(argv, ("-c", "--config")))
-    return next((raw.strip("\"'") for key, _, raw in pairs if key == CODEX_EFFORT), "")
-
-
-def _codex_config():
+def _toml_value(raw):
     try:
-        config = tomllib.loads((codex_home() / "config.toml").read_text())
-    except (OSError, tomllib.TOMLDecodeError):
-        return "", ""
-    return config.get("model", ""), config.get(CODEX_EFFORT, "")
+        return tomllib.loads(f"v = {raw}")["v"]
+    except tomllib.TOMLDecodeError:
+        return raw
 
 
-def _claude_config():
+def _codex_overrides(argv):
+    pairs = (argv[i + 1].partition("=") for i, arg in enumerate(argv[:-1]) if arg in CODEX_OVERRIDE)
+    return {key: _toml_value(raw) for key, _, raw in pairs}
+
+
+def _load(path, parse, error):
     try:
-        settings = json.loads((claude_home() / "settings.json").read_text())
-    except (OSError, ValueError):
-        return "", ""
-    return settings.get("model", ""), settings.get("effortLevel", "")
+        return parse(path.read_text())
+    except (OSError, error):
+        return {}
 
 
 def read(harness, argv):
     if harness == "codex":
-        model, effort = _flag(argv, ("-m", "--model")), _codex_effort(argv)
-        config_model, config_effort = _codex_config()
+        config = _renamed(_load(codex_home() / "config.toml", tomllib.loads, tomllib.TOMLDecodeError), CODEX_KEYS)
+        flags = {**_renamed(_codex_overrides(argv), CODEX_KEYS), **_named(argv, CODEX_FLAGS)}
     else:
-        model, effort = _flag(argv, ("--model",)), _flag(argv, ("--effort",))
-        config_model, config_effort = _claude_config()
-    return model or config_model, effort or config_effort
+        config = _renamed(_load(claude_home() / "settings.json", json.loads, ValueError), CLAUDE_KEYS)
+        flags = _named(argv, CLAUDE_FLAGS)
+    found = {"model": "", "effort": "", **config, **flags}
+    return found["model"], found["effort"]

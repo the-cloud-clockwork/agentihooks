@@ -24,9 +24,11 @@ def homes(tmp_path, monkeypatch):
         ("codex", ("codex", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'), ("gpt-6.1-sol", "high")),
         (
             "codex",
-            ("codex", "--config", "x=1", "--model", "gpt-6", "-c", "model_reasoning_effort='low'"),
+            ("codex", "-c", "x=1", "--model", "gpt-6", "--config", "model_reasoning_effort='low'"),
             ("gpt-6", "low"),
         ),
+        ("codex", ("codex", "-c", 'model="gpt-6"', "-c", "model_reasoning_effort=xhigh"), ("gpt-6", "xhigh")),
+        ("codex", ("codex", "-m", "gpt-7", "-c", 'model="gpt-6"', "-c", "approval"), ("gpt-7", "")),
         ("codex", ("codex", "-c", "model_reasoning_effort=xhigh", "-m"), ("", "xhigh")),
         ("codex", ("codex", "--effort", "high"), ("", "")),
     ],
