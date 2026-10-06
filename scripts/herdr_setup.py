@@ -1,8 +1,12 @@
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+import tomlkit
 
 INSTALL_COMMAND = "curl -fsSL https://herdr.dev/install.sh | sh"
 INTEGRATIONS = ("claude", "codex")
@@ -49,6 +53,26 @@ def install() -> int:
     return rc
 
 
+def config_path() -> Path:
+    explicit = os.environ.get("HERDR_CONFIG_PATH")
+    if explicit:
+        return Path(explicit)
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "herdr" / "config.toml"
+
+
+def turn_off_copy_on_select(path: Path) -> bool:
+    doc = tomlkit.parse(path.read_bytes().decode()) if path.exists() else tomlkit.document()
+    ui = doc.get("ui")
+    if ui is None:
+        ui = doc["ui"] = tomlkit.table()
+    if "copy_on_select" in ui:
+        return False
+    ui["copy_on_select"] = False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(tomlkit.dumps(doc).encode())
+    return True
+
+
 def configure() -> int:
     exe = binary()
     if exe is None:
@@ -63,6 +87,10 @@ def configure() -> int:
         deps_main(["mark-changed", "--reason", f"herdr-integration:{','.join(changed)}"])
     after = integration_status()
     print("[herdr] integrations: " + " ".join(f"{name}={after.get(name, '?')}" for name in INTEGRATIONS))
+    path = config_path()
+    if turn_off_copy_on_select(path):
+        subprocess.run([exe, "server", "reload-config"], capture_output=True)
+        print(f"[herdr] config: copy_on_select = false in {path}")
     return 1 if failed else 0
 
 
