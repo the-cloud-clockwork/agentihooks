@@ -108,7 +108,7 @@ def op(kind, args, /, **fields):
 def send(args, kind, /, **fields):
     state = call(args.slug, [op(kind, args, **fields)])
     if state.get("rejected"):
-        if kind.startswith("phase_"):
+        if kind.startswith("phase_") or kind == "task_add":
             sys.exit("; ".join(state.get("_meta", {}).get("warnings", [])) or f"rejected: {state['rejected']}")
         sys.exit(f"rejected: {state['rejected']}")
     return state

@@ -25,7 +25,10 @@ def test_each_kind_gets_its_own_prompt():
         assert '--command "<command>" --output "<its output>"' in texts[kind]
         assert "done --pr" not in texts[kind]
     assert '--root-cause "<cause>" --evidence "<what shows it>"' in texts["troubleshoot"]
-    assert "--fix <pr url>" in texts["troubleshoot"] and "--filed <task id>" in texts["troubleshoot"]
+    assert (
+        "--fix <pr url>" in texts["troubleshoot"] and '--filed "<the follow up you proposed>"' in texts["troubleshoot"]
+    )
+    assert "task add" not in texts["troubleshoot"]
     assert "--finding <link>" in texts["research"]
     for text in texts.values():
         assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(

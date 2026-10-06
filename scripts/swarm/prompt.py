@@ -374,10 +374,10 @@ def troubleshoot_steps(me, led, name, phase):
         "quick-troubleshoot skill. Diagnostics stay read only.",
         "3. Show the root cause by evidence: a command and its output, a log line or a failing test.",
         f"4. Fix it with a pull request into dev through the dev-cycle skill in a worktree (wt.sh new {name}), or "
-        f'file the fix as a task: {led} task add <short id> "<plain title>" --lane eng --phase {phase}',
+        f'propose the fix as a follow up for the master: {led} followup add "<plain words>"',
         f'5. Leave the crew with {led} leave, then close the task with the proof: {me} done --root-cause "<cause>" '
-        '--evidence "<what shows it>" --fix <pr url>, or --filed <task id> instead of --fix. The ledger refuses '
-        f"done without the cause, the evidence and the fix or the filed task. {CLOSES}",
+        '--evidence "<what shows it>" --fix <pr url>, or --filed "<the follow up you proposed>" instead of --fix. '
+        f"The ledger refuses done without the cause, the evidence and the fix or the filed follow up. {CLOSES}",
     ]
 
 
