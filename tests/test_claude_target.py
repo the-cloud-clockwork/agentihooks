@@ -45,7 +45,7 @@ def test_strict_patterns_apply_and_every_hit_is_named(capsys):
     printed = capsys.readouterr().out
     assert "settings env var 'SLACK' looks like a credential (" in printed
     assert re.search(
-        r"settings env var 'BOTH' looks like a credential \(\w+, \w+\) — dropped from settings\.json\.", printed
+        r"settings env var 'BOTH' looks like a credential \([a-z_]+, [a-z_]+\) — dropped from settings\.json\.", printed
     )
     assert printed.count("Export it in the shell environment instead of writing it to disk.") == 2
 
