@@ -229,6 +229,7 @@ def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatc
     passes = []
 
     def wake_all(*args, **kwargs):
+        assert args[0] is store and args[1].redis is redis
         passes.append((args[2], args[3:], kwargs))
         return ["sw: woke sw-eng-1 for message m1"]
 

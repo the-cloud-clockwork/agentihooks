@@ -24,7 +24,7 @@ def units(binary):
     )
     waker = (
         "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
-        "[Service]\nType=simple\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm waker\n'

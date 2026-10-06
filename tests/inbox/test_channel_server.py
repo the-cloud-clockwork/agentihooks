@@ -142,6 +142,24 @@ def test_items_waiting_before_the_session_opened_arrive_once_it_lists_its_tools(
     assert session(store, scenario)[2] == [first.id, second.id]
 
 
+def test_an_idle_session_waits_on_redis_and_closes_without_waiting_out_the_recheck(store, monkeypatch):
+    import anyio
+
+    monkeypatch.setattr(channel, "SETTLE_S", 0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3.0)
+    claims = []
+    real = channel.claim
+    monkeypatch.setattr(channel, "claim", lambda *args: claims.append(1) or real(*args))
+
+    async def idle(send, receive):
+        await anyio.sleep(0.5)
+        return len(claims)
+
+    start = time.monotonic()
+    assert session(store, idle)[2] == 2
+    assert time.monotonic() - start < 2.0
+
+
 def test_serve_runs_the_session_over_stdio(store, monkeypatch):
     import mcp.server.stdio
 
@@ -167,14 +185,14 @@ def test_main_serves_this_sessions_identity(store, monkeypatch):
 
     ran = []
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
-    monkeypatch.setattr(channel, "connect", lambda env: store if env["AGENTIHOOKS_AGENT_NAME"] == "bob" else None)
+    monkeypatch.setattr(channel, "connect", lambda: store)
     monkeypatch.setattr(anyio, "run", lambda *args: ran.append(args))
     channel.main()
     assert ran == [(channel.serve, store, "bob")]
 
 
 def test_main_without_redis_exits_with_the_reason(monkeypatch, capsys):
-    def down(env):
+    def down():
         raise InboxError("Redis is unreachable")
 
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")

@@ -7,7 +7,6 @@ that runs without the channel.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -83,7 +82,7 @@ async def _push(store, me, write, ready, pubsub):
 async def run(store, me, read, write):
     import anyio
     import mcp.types as types
-    from mcp.server.lowlevel import NotificationOptions, Server
+    from mcp.server.lowlevel import Server
 
     server, ready = Server(NAME, instructions=_instructions(me)), anyio.Event()
 
@@ -98,9 +97,7 @@ async def run(store, me, read, write):
 
     pubsub = store.redis.pubsub()
     pubsub.subscribe(NOTIFY)
-    options = server.create_initialization_options(
-        NotificationOptions(), experimental_capabilities={"claude/channel": {}}
-    )
+    options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
         group.start_soon(_push, store, me, write, ready, pubsub)
         await server.run(read, write, options)
@@ -117,9 +114,8 @@ async def serve(store, me):
 def main():
     import anyio
 
-    env = dict(os.environ)
     try:
-        me, store = identity(env), connect(env)
+        me, store = identity(), connect()
     except InboxError as exc:
         print(f"agentihooks inbox channel: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

@@ -352,7 +352,7 @@ def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
     )
     assert (tmp_path / "agentihooks-inbox-waker.service").read_text() == (
         "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
-        "[Service]\nType=simple\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         'ExecStart="/bin/agentihooks" swarm waker\n'

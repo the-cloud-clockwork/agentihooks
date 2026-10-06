@@ -29,4 +29,4 @@ def run(store, herdr, now_ms, environ=None):
         if pubsub.get_message(timeout=RECHECK_S) is None:
             continue
         for action in wake_all(store, inbox, herdr, now_ms(), wake.window_ms(env), wake.quiet_ms(env)):
-            print(action, flush=True)
+            print(action)
