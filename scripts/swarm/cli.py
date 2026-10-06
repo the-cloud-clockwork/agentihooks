@@ -488,7 +488,7 @@ def cmd_status(store, args):
             print(f"  - {entry}")
         print(f"  threshold {f['threshold']}")
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
-    for row in gate_log.recent(args.slug):
+    for row in gate_log.decisions(args.slug):
         print(f"gate  {row.get('kind')}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}")
 
 
