@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.gates import Call, Decision, Gate, Who, entry
+from scripts.gates import entry
+from scripts.gates.base import Call, Decision, Gate, Who
 from scripts.gates.identity import PinnedIdentity, refusal
 
 ROOT = Path(__file__).resolve().parents[2]
