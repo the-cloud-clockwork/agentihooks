@@ -1,4 +1,6 @@
 import copy
+import json
+import re
 
 from scripts.targets.claude_target import settings_document
 
@@ -35,3 +37,24 @@ def test_env_removed_when_every_value_is_a_credential():
 def test_empty_or_non_dict_env_passes_through():
     assert settings_document({"env": {}}) == {"env": {}}
     assert settings_document({"env": ["A=" + TOKEN]}) == {"env": ["A=" + TOKEN]}
+
+
+def test_strict_patterns_apply_and_every_hit_is_named(capsys):
+    slack = "xoxb-" + "1" * 12
+    assert settings_document({"env": {"SLACK": slack, "BOTH": f"{TOKEN} {slack}"}}) == {}
+    printed = capsys.readouterr().out
+    assert "settings env var 'SLACK' looks like a credential (" in printed
+    assert re.search(
+        r"settings env var 'BOTH' looks like a credential \(\w+, \w+\) — dropped from settings\.json\.", printed
+    )
+    assert printed.count("Export it in the shell environment instead of writing it to disk.") == 2
+
+
+def test_write_settings_writes_the_settings_document():
+    from scripts.targets._common import _install_module
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    path = ClaudeAdapter().write_settings({"_agentihooks": {"env": {"A": "1"}}, "env": {"LEAKED": TOKEN}})
+
+    assert path == _install_module().CLAUDE_HOME / "settings.json"
+    assert json.loads(path.read_text())["env"] == {"A": "1"}
