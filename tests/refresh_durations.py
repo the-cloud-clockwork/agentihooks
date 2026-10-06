@@ -28,7 +28,7 @@ def ci_run_ids(limit: int, gh=_gh) -> list[str]:
 
 def ci_download(run_ids: list[str], folder: Path) -> None:
     for run in run_ids:
-        _gh(["run", "download", run, "--pattern", "durations-*", "--dir", str(folder / run)])
+        _gh(["run", "download", run, "--dir", str(folder / run)])
 
 
 def ci_samples(folder: Path) -> list[dict[str, float]]:
