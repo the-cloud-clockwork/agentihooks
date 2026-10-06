@@ -4,10 +4,15 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
 from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -70,11 +75,13 @@ RUN_HOOKS = """
 import io, json, os, sys
 sys.path.insert(0, sys.argv[1])
 import ledger_hook
+import hooks._redis
 requests, out = sys.stdin, sys.stdout
 for line in requests:
     request = json.loads(line)
     os.environ.clear()
     os.environ.update(request["env"])
+    hooks._redis._redis_client, hooks._redis._redis_checked = None, False
     sys.stdin, sys.stdout = io.StringIO(json.dumps(request["payload"])), io.StringIO()
     code = ledger_hook.main()
     text = sys.stdout.getvalue()
@@ -234,6 +241,26 @@ class Gate(unittest.TestCase):
         core.watch_path(SLUG, "boss").touch()
         os.utime(core.watch_path(SLUG, "boss"), (old, old))
         self.assertIn("watcher is not running", hook("Stop")["reason"])
+
+    def test_the_watcher_gate_holds_whatever_redis_an_earlier_hook_call_saw(self):
+        import redis
+        from fakeredis import TcpFakeServer
+
+        from scripts.swarm.naming import NameRegistry
+
+        server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            url = f"redis://127.0.0.1:{server.server_address[1]}"
+            redis.Redis.from_url(url).set(NameRegistry.key("alias", "boss"), "someone-else")
+            core.watch_path(SLUG, "boss").unlink()
+            with unittest.mock.patch.dict(os.environ, {"REDIS_URL": url}):
+                self.assertIsNone(hook("Stop"))
+            core.watch_path(SLUG, "boss").touch()
+            self.test_orchestrator_needs_a_live_watcher()
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_the_old_kill_switch_no_longer_disables_the_hook(self):
         ask("pending", 4)
