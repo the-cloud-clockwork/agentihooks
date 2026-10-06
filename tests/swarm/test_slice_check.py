@@ -132,3 +132,27 @@ def test_limits_read_the_environment_with_defaults():
     assert Limits.from_env({}) == Limits(12, 6)
     env = {"AGENTIHOOKS_PLAN_MAX_TASKS": "4", "AGENTIHOOKS_PLAN_MAX_AREAS": "2"}
     assert Limits.from_env(env) == Limits(4, 2)
+
+
+def test_the_plan_task_of_this_phase_is_read_even_after_another_phases_plan():
+    document = doc(task("a"))
+    other = {"id": "plan-p2", "phase": "p2", "lane": "plan", "kind": "plan", "state": "done", "proof": {"slice": ""}}
+    document["tasks"].insert(0, other)
+    assert check(document) == []
+
+
+def test_an_unknown_slice_id_does_not_stop_the_check_of_later_tasks():
+    assert check(doc(task("a", description="short"), slice_ids="ghost,a")) == [
+        "Task ghost is not in this phase.",
+        "Task a has a description under 20 words.",
+    ]
+
+
+def test_a_task_without_a_description_is_named():
+    bare = task("a")
+    del bare["description"]
+    assert check(doc(bare)) == ["Task a has a description under 20 words."]
+
+
+def test_a_dependency_the_ledger_does_not_know_is_not_a_slice_problem():
+    assert check(doc(task("a", depends_on=["ghost"]))) == []

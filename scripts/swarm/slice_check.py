@@ -22,7 +22,7 @@ class Limits:
 
 
 def slice_ids(plan):
-    return [item.strip() for item in (plan.get("proof") or {}).get("slice", "").split(",") if item.strip()]
+    return [item.strip() for item in plan["proof"]["slice"].split(",") if item.strip()]
 
 
 def plan_task(phase, doc):
@@ -74,7 +74,7 @@ def _task(task, phase, doc, limits):
 
 
 def _dependencies(task, phase, doc):
-    phases = {p["id"]: p for p in doc.get("phases", [])}
+    phases = {p["id"]: p for p in doc["phases"]}
     tasks = {t["id"]: t for t in doc["tasks"]}
     problems = []
     for dep in task.get("depends_on") or []:
