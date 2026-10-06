@@ -32,8 +32,16 @@ def _trusted(data: dict, directory: Path) -> bool:
         return False
     return any(
         isinstance(projects.get(str(path)), dict) and projects[str(path)].get("hasTrustDialogAccepted") is True
-        for path in (directory, *directory.parents)
+        for path in _scope(directory)
     )
+
+
+def _scope(directory: Path):
+    # Claude does not count a trusted folder above the launch folder's git root.
+    for path in (directory, *directory.parents):
+        yield path
+        if (path / ".git").exists():
+            return
 
 
 def _write(config: Path, data: dict) -> None:
