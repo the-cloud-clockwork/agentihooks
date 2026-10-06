@@ -1,0 +1,119 @@
+import json
+import re
+import shlex
+from pathlib import Path
+
+import pytest
+import yaml
+
+from scripts.inbox.cli import build_parser as msg_parser
+from scripts.swarm.cli import build_parser as swarm_parser
+from scripts.swarm_ledger.ledger import build_parser as ledger_parser
+from tests.test_profile_render import world as render_world
+
+world = render_world
+ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
+ROLE_SKILLS = {"master": "swarm-master", "engineer": "swarm-engineer", "cicd": "swarm-ci", "planner": "swarm-planner"}
+COMMON = (
+    "agentihooks ledger --slug <slug> --as <name> join",
+    "agentihooks ledger watch <slug> --as <name>",
+    "agentihooks ledger --slug <slug> --as <name> ack",
+    "agentihooks msg reply <id>",
+    "agentihooks msg close <id>",
+    "agentihooks swarm <slug> handoff <doc>",
+    "agentihooks swarm <slug> confirm-handoff",
+)
+WORKER = ("agentihooks swarm <slug> wait --on", "agentihooks swarm <slug> block", "agentihooks swarm <slug> done")
+LOOP = {
+    "master": (
+        "agentihooks swarm <slug> plan approve",
+        "agentihooks swarm <slug> plan send-back",
+        "agentihooks swarm <slug> verdict",
+        "--must",
+        "agentihooks swarm <slug> restore-decision",
+    ),
+    "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
+    "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
+    "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
+}
+LEAKS = re.compile(
+    r"\b(anton|smith|tcc|homeofanton|litellm|openbao|plane|manifesto|nestor|colt)\b|gateway[ _-]tools|§"
+    r"|\b10\.\d+\.\d+\.\d+|\b192\.168\.\d+\.\d+|\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[\w.+-]+@gmail\.com",
+    re.IGNORECASE,
+)
+PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
+PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
+
+
+def _skill(role: str) -> Path:
+    return ROLES / role / ".claude" / "skills" / ROLE_SKILLS[role] / "SKILL.md"
+
+
+def _commands(text: str) -> list[str]:
+    return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
+
+
+def _argv(command: str) -> tuple[str, list[str]]:
+    tokens = [t.split("|")[0] for t in shlex.split(command)[1:] if t != "..."]
+    tokens = ["x" if re.fullmatch(r"<[^>]+>", t) else t for t in tokens]
+    if tokens[0] == "swarm" and tokens[1] == "<slug>":
+        tokens[1] = "s"
+    return tokens[0], tokens[1:]
+
+
+@pytest.mark.parametrize("role", ROLE_SKILLS)
+def test_role_skill_passes_the_skill_gate(role):
+    skill = _skill(role)
+    _, front, body = skill.read_text().split("---", 2)
+    meta = yaml.safe_load(front)
+
+    assert meta["name"] == skill.parent.name == ROLE_SKILLS[role]
+    assert 0 < len(meta["description"]) <= 1024 and not re.search("[<>]", meta["description"])
+    assert len(body.splitlines()) < 500
+    evals = json.loads((skill.parent / "evals" / "evals.json").read_text())
+    assert len(evals) >= 3 and all(e["query"] and e["expected_behavior"] for e in evals)
+
+
+@pytest.mark.parametrize("role", ROLE_SKILLS)
+def test_role_skill_names_nothing_internal(role):
+    folder = _skill(role).parent
+    leaks = {p.name: LEAKS.findall(p.read_text()) for p in folder.rglob("*") if p.is_file()}
+
+    assert {name: found for name, found in leaks.items() if found} == {}
+    assert "~/.claude/skills" not in _skill(role).read_text()
+
+
+@pytest.mark.parametrize("planted", ["the anton cluster", "see the manifesto", "host 10.0.0.12", "gateway tools"])
+def test_leak_check_turns_red_on_a_planted_name(planted):
+    assert LEAKS.search(planted)
+
+
+@pytest.mark.parametrize("role", ROLE_SKILLS)
+def test_role_skill_covers_its_loop(role):
+    text = _skill(role).read_text()
+
+    assert [step for step in (*COMMON, *LOOP[role]) if step not in text] == []
+
+
+@pytest.mark.parametrize("role", ROLE_SKILLS)
+def test_every_role_skill_command_parses(role):
+    commands = [c for c in _commands(_skill(role).read_text()) if not c.startswith("agentihooks ledger watch")]
+
+    assert commands
+    for command in commands:
+        tool, argv = _argv(command)
+        assert PARSERS[tool](argv), command
+
+
+@pytest.mark.parametrize("role", ROLE_SKILLS)
+def test_role_home_lists_its_own_role_skill_only(world, role):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    out = render.render_claude(role)
+
+    listed = {p.name for p in (out / "skills").iterdir()}
+    assert ROLE_SKILLS[role] in listed
+    assert listed & set(ROLE_SKILLS.values()) == {ROLE_SKILLS[role]}
+    assert (out / "skills" / ROLE_SKILLS[role]).resolve() == _skill(role).parent
+    assert f"{ROLE_SKILLS[role]} skill" in (ROLES / role / "CLAUDE.md").read_text()

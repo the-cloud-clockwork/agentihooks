@@ -1,0 +1,22 @@
+[
+  {
+    "query": "You are an engineer in swarm docs-sweep, your task is d4",
+    "expected_behavior": "Joins the ledger, keeps the ledger watch running, reads steering.md, records the issue and pull request with swarm issue and swarm pr, and closes with swarm done --pr after the merge."
+  },
+  {
+    "query": "an inbox item from the master asks whether the parser change is merged",
+    "expected_behavior": "Answers with agentihooks msg reply and the item id, which closes the item done."
+  },
+  {
+    "query": "checks are running on the pull request and there is nothing else to do",
+    "expected_behavior": "Runs swarm wait --on checks with the pull request url instead of idling or a bare wait."
+  },
+  {
+    "query": "the task needs a secret that is not set anywhere",
+    "expected_behavior": "Pushes the branch, opens a draft pull request, runs swarm block with the blocker in plain words, and stops."
+  },
+  {
+    "query": "HANDOFF PREPARATION: write your handoff now",
+    "expected_behavior": "Writes the Handoff v2 body with the handoff skill, submits it with swarm handoff, and stops."
+  }
+]
