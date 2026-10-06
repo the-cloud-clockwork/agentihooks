@@ -362,9 +362,12 @@ def _claim_cap(slug, store, ledger, rows, task):
 
 
 def primed(store, slug, seat, task):
+    from scripts.swarm import priming_trace
+
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = store.handoff_envelope(slug, task["id"])
-    return {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    task = {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    return priming_trace.withhold(slug, task)
 
 
 def _free_seat(slug, lane, taken, preferred):

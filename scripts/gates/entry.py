@@ -11,6 +11,7 @@ import sys
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
+from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
@@ -23,7 +24,15 @@ LIFTED = "lifted by the operator: "
 
 GATES = {
     gate.name: gate
-    for gate in (PinnedIdentity(), WatchBudget(), SubagentBudget(), RerunBudget(), IntentGate(), ClaimStop())
+    for gate in (
+        PinnedIdentity(),
+        WatchBudget(),
+        SubagentBudget(),
+        RerunBudget(),
+        IntentGate(),
+        BuildGate(),
+        ClaimStop(),
+    )
 }
 
 

@@ -173,9 +173,17 @@ def test_apply_clears_the_runtime_layers_and_files_a_brain_followup(layers):
     assert not layers["runtime_condition"].exists()
     remaining = {m["id"] for m in json.loads(layers["broadcasts"].read_text())}
     assert remaining == {"bc-other", "bc-brain"}
-    assert filed == [
+    assert (
         "The operator intent brain entry still carries a directive marked wrong for the agentihooks repo: "
         "qitp rule leaked here. Brain regenerates it, so fix it at its source."
+    ) in filed
+    assert sorted(text for text in filed if text.startswith("One ")) == [
+        "One enforcement directive in the bundle repo is marked wrong for the agentihooks repo: "
+        "qitp rule leaked here. Remove it by pull request into dev.",
+        "One enforcement directive in the bundle repo is marked wrong for the agentihooks repo: "
+        "qitp rule leaked here. Remove it by pull request into dev.",
+        "One enforcement directive in the tracked repo is marked wrong for the agentihooks repo: "
+        "qitp rule leaked here. Remove it by pull request into dev.",
     ]
 
 
