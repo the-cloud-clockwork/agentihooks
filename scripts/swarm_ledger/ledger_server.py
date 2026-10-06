@@ -265,6 +265,8 @@ def control_argv(body):
         return ["terminate", name]
     if action == "verdict":
         return verdict_argv(body)
+    if action == "restore-decision":
+        return restore_decision_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
@@ -282,6 +284,15 @@ def control_argv(body):
     if not pairs:
         raise ValueError("set needs max_eng, max_ci or codex_share")
     return ["set", *pairs]
+
+
+def restore_decision_argv(body):
+    agent, choice = body.get("agent"), body.get("choice")
+    if not isinstance(agent, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9@_.-]{0,127}", agent):
+        raise ValueError("A restore decision needs an agent name")
+    if choice not in {"resume", "fresh"}:
+        raise ValueError("Choose resume or fresh")
+    return ["restore-decision", agent, choice]
 
 
 def verdict_argv(body):

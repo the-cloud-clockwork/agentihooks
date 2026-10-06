@@ -491,8 +491,10 @@ input, textarea { caret-color: var(--accent-2); }
 <section id="health-box"><details class="sources-box fold" id="health-fold" open><summary>Swarm health <span class="count" id="health-count"></span></summary><ul class="sw-list" id="health"></ul></details></section>
 <section id="doctor-box"><details class="sources-box fold" id="doctor-fold" open><summary>Doctor</summary><p class="hint">A Doctor crew watches this swarm on its own linked ledger and proposes fixes.</p><div class="sw-ctl"><button class="sw-btn" type="button" data-swarm="doctor_start">Start Doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">Stop Doctor</button></div><a id="doctor-link" class="sw-task" hidden></a></details></section>
 <section id="history-box"><details class="sources-box fold" id="crew-box"><summary>Crew history <span class="count" id="crew-count"></span></summary><div id="crew"></div></details></section>
+<section id="handoff-box" hidden><details class="sources-box fold" id="swarm-transfers-box" hidden><summary>Handoff outcomes <span class="count" id="swarm-transfers-count"></span></summary><ul class="sw-list" id="swarm-transfers"></ul></details></section>
 <section id="restore-box" hidden><details class="sources-box fold" id="swarm-restore-box" hidden><summary>Last restore <span class="count" id="swarm-restore-count"></span></summary><p class="hint" id="restore-summary"></p><ul class="sw-list" id="swarm-restore"></ul></details></section>
 </div></div></div>
+
 </main>
 <button class="sync" id="sync" type="button" title="Sync the crew" aria-label="Sync the crew">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
@@ -1436,8 +1438,16 @@ input, textarea { caret-color: var(--accent-2); }
     $("swarm-restore-box").hidden = !restored.length;
     $("swarm-restore-count").textContent = `· ${restored.length}`;
     const resumed = restored.filter((r) => r.outcome === "resumed").length;
-    $("restore-summary").textContent = `Restored after a reboot: ${resumed} agents reopened their conversations, ${restored.length - resumed} started fresh.`;
+    const awaiting = restored.filter((r) => r.outcome === "awaiting-decision").length;
+    const fresh = restored.filter((r) => r.outcome === "fresh").length;
+    $("restore-summary").textContent = `Restored after a reboot: ${resumed} reopened, ${awaiting} awaiting decision, ${fresh} explicitly fresh.`;
     $("swarm-restore").replaceChildren(...restored.map(restoreCard));
+    const titles = Object.fromEntries((doc ? doc.tasks : []).map((t) => [t.id, t.title]));
+    const transfers = (sw.transfers || []).map((r) => ({...r, task: titles[r.task] || r.task}));
+    $("handoff-box").hidden = !transfers.length;
+    $("swarm-transfers-box").hidden = !transfers.length;
+    $("swarm-transfers-count").textContent = `· ${transfers.length}`;
+    $("swarm-transfers").replaceChildren(...transfers.map(transferCard));
     $("doctor-link").hidden = !sw.peer;
     if (sw.peer) { $("doctor-link").href = "/" + sw.peer; $("doctor-link").textContent = "Open Doctor ledger"; }
   }
@@ -1471,6 +1481,7 @@ input, textarea { caret-color: var(--accent-2); }
         h("p", { class: "hint", text: t.blocked_reason || t.blocker || ((t.comments || []).filter((c) => !c.deleted).at(-1) || {}).text || (t.approval_required ? "Pull request awaits merge approval." : "Blocked: ask the master for the reason.") })));
     }
     if (!$("needs-you").contains(document.activeElement)) $("needs-you").replaceChildren(...(waiting.length ? waiting : [h("li", { class: "sw-empty", text: "Nothing waits on you." })]));
+
   }
 
   function restoreCards(restored, tasks) {
@@ -1482,10 +1493,30 @@ input, textarea { caret-color: var(--accent-2); }
   function restoreCard(r) {
     return h("li", { class: "sw-card" },
       h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: r.name, title: r.name }),
-        h("span", { class: `sw-status ${r.outcome}`, text: r.outcome })),
+        h("span", { class: `sw-status ${r.outcome}`, text: r.outcome === "awaiting-decision" ? "Awaiting decision" : r.outcome })),
       h("span", { class: "sw-task", text: r.task, title: r.task }),
-      h("div", { class: "sw-meta" }, h("span", { text: r.reason })));
+      h("div", { class: "sw-meta" }, h("span", { text: r.reason })),
+      r.outcome === "awaiting-decision" ? h("div", { class: "sw-ctl" },
+        ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button", "data-agent": r.name,
+          "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? "Resume" : "Fresh" }))) : null);
   }
+
+  function transferCard(r) {
+    return h("li", { class: "sw-card" },
+      h("div", { class: "sw-top" }, h("span", { class: "sw-name", text: r.seat }),
+        h("span", { class: "sw-status", text: r.reason })),
+      h("span", { class: "sw-task", text: r.task }),
+      h("div", { class: "sw-meta" },
+        h("span", { text: `Continuity: ${r.continuity.state}` }),
+        h("span", { text: `Binding: ${r.binding.state}` })),
+      r.continuity.next ? h("div", { class: "sw-meta", text: `Next: ${r.continuity.next}` }) : null,
+      r.continuity.gap ? h("div", { class: "sw-meta", text: r.continuity.gap }) : null);
+  }
+
+  $("swarm-restore").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-restore-choice]");
+    if (btn && !btn.disabled) swarmControl({ action: "restore-decision", agent: btn.dataset.agent, choice: btn.dataset.restoreChoice });
+  });
 
   function autonomyText(config) {
     return `autonomy ${config.autonomy || "delegate"}`;

@@ -36,8 +36,8 @@ def test_codex_agent_over_the_limit_gets_the_directive(monkeypatch):
     assert recycle.directive("s1", _swarm_env()) is not None
 
 
-def test_below_the_limit_nothing(monkeypatch):
-    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 599_999)
+def test_below_the_preparation_window_nothing(monkeypatch):
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 479_999)
     assert recycle.directive("s1", _swarm_env()) is None
 
 

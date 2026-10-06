@@ -207,6 +207,10 @@ def priming_lines(task):
     if not (handoff or culture or recaps or learned):
         return [f"{seat} has no history yet: no handoff document, no recap and no learned notes."]
     lines = [f"{seat} carries what earlier occupants left. Read it in this order:"]
+    if task.get("transfer"):
+        from scripts.handoff import transfers
+
+        lines.append(transfers.priming(task["seat"].rsplit("@", 1)[1], task["transfer"]))
     if handoff:
         lines += handoff_lines(task)
     else:

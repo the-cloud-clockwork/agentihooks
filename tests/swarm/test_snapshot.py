@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, snapshot
+from scripts.swarm import cli, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -127,14 +127,16 @@ def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     store.redis.flushall()
     outcomes = snapshot.restore(store, "sw", live=set())
     assert [(o.name, o.outcome, o.reason) for o in outcomes] == [
-        ("engineer@a1b2c3-0001", "fresh", "no conversation id"),
-        ("master@a1b2c3-0001", "fresh", "no conversation id"),
+        ("engineer@a1b2c3-0001", "awaiting-decision", "no conversation id"),
+        ("master@a1b2c3-0001", "awaiting-decision", "no conversation id"),
     ]
     assert store.config("sw").state == "paused"
-    assert {a.state for a in store.agents("sw")} == {"finished"}
+    assert {a.state for a in store.agents("sw")} == {"awaiting-decision"}
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}])
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0001")
     rt = FakeRuntime()
+    assert resume.decide(store, "sw", "engineer@a1b2c3-0001", "fresh", rt, 9000, ledger).outcome == "fresh"
+    assert resume.decide(store, "sw", "master@a1b2c3-0001", "fresh", rt, 9001, ledger).outcome == "fresh"
     actions = tick("sw", store, ledger, rt, 10_000)
     assert rt.spawned == [] and [m[0] for m in rt.masters] == ["master@a1b2c3-0002"]
     assert ledger.rows["t1"]["state"] == "open" and "retired engineer@a1b2c3-0001" in actions
@@ -216,6 +218,9 @@ def test_snapshot_and_restore_commands_bring_the_swarm_back_paused(env, capsys):
     store.redis.flushall()
     assert cli.main(["sw", "restore"]) == 0
     assert store.config("sw").state == "paused"
+    assert [m[0] for m in rt.masters] == ["master@a1b2c3-0001"]
+    assert cli.main(["sw", "--as", "operator", "restore-decision", "master@a1b2c3-0001", "fresh"]) == 0
+    assert cli.main(["tick"]) == 0
     assert [m[0] for m in rt.masters] == ["master@a1b2c3-0001", "master@a1b2c3-0002"]
 
 

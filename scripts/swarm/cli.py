@@ -42,6 +42,7 @@ from pathlib import Path
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
+from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
@@ -430,6 +431,7 @@ def cmd_status(store, args):
                     "findings": found,
                     "auto_snapshot": _auto_snapshot(config),
                     "restored": store.restored(args.slug),
+                    "transfers": transfers.list_transfers(store, args.slug),
                     "peer": store.peer(args.slug),
                     "plan_shape": plan_shape.report(tasks, config.max_eng),
                 }
@@ -607,6 +609,7 @@ def cmd_handoff(store, args):
     envelope = handoff_envelope.build(store, args.slug, agent, args.reason, _ledger_rows(ledger, args.slug), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(args.slug, agent.task, text, seat=agent.seat, envelope=envelope)
+    transfer = transfers.record(store, args.slug, agent, args.reason, text, now_ms())
     store.put_agent(args.slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
     print(
@@ -615,10 +618,29 @@ def cmd_handoff(store, args):
                 "task": agent.task,
                 "state": "handoff",
                 "envelope": envelope,
+                "transfer": transfer,
                 "next": "stop now; a successor continues from your document",
             }
         )
     )
+
+
+def cmd_confirm_handoff(store, args):
+    agent = _me(store, args)
+    if agent.name not in HerdrRuntime().live_names():
+        raise SwarmError("Only a live successor can confirm its handoff")
+    result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
+    print(json.dumps(result))
+
+
+def cmd_restore_decision(store, args):
+    from scripts.swarm import resume
+
+    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    if name not in {"", "operator"} and _me(store, args).lane != MASTER:
+        raise SwarmError("Only the master or operator can choose resume or fresh")
+    outcome = resume.decide(store, args.slug, args.agent, args.choice, HerdrRuntime(), now_ms(), LedgerClient())
+    print(json.dumps(asdict(outcome)))
 
 
 def _ledger_rows(ledger, slug):
@@ -750,6 +772,12 @@ def build_parser():
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
     handoff.add_argument("--reason", choices=handoff_envelope.REASONS, default="recycle")
+    confirm = sub.add_parser("confirm-handoff")
+    confirm.add_argument("transfer")
+    confirm.add_argument("--next", required=True)
+    decision = sub.add_parser("restore-decision")
+    decision.add_argument("agent")
+    decision.add_argument("choice", choices=("resume", "fresh"))
     learned = sub.add_parser("learned")
     learned.add_argument("text", nargs="?", default="")
     learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)
