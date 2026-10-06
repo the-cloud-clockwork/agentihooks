@@ -171,6 +171,6 @@ def test_the_page_rank_op_on_a_ledger_without_tasks_is_rejected():
 def test_task_add_help_names_the_ranks(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["task", "--help"])
-    assert "queue rank: urgent, high, normal (default) or low; next means urgent" in " ".join(
+    assert "--rank RANK queue rank: urgent, high, normal (default) or low; next means urgent --plan" in " ".join(
         capsys.readouterr().out.split()
     )
