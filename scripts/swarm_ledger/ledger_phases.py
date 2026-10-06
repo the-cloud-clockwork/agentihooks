@@ -136,7 +136,6 @@ def append(doc: dict, op: dict, ctx) -> bool:
             "id": entry["phase"],
             "description": "",
             "done": False,
-            "comments": [],
             **{k: entry[k] for k in FIELDS if k in entry},
             "planning": "manual",
             "review": dict(review),

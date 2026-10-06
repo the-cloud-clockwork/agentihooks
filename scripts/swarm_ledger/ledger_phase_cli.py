@@ -34,14 +34,9 @@ def append_phases(plan, taken: list[str]) -> list[dict]:
     if not all(isinstance(entry, dict) for entry in entries):
         sys.exit("each plan phase is an object")
     used = set(taken) | {entry["id"] for entry in entries if entry.get("id")}
-    number = max((int(i[1:]) for i in taken if i[:1] == "p" and i[1:].isdigit()), default=0)
-    ids = []
-    for entry in entries:
-        if not entry.get("id"):
-            number += 1
-            while f"p{number}" in used:
-                number += 1
-        ids.append(entry.get("id") or f"p{number}")
+    start = max((int(i[1:]) for i in taken if i[:1] == "p" and i[1:].isdigit()), default=0) + 1
+    free = (f"p{n}" for n in range(start, start + len(used) + len(entries)) if f"p{n}" not in used)
+    ids = [entry.get("id") or next(free) for entry in entries]
     return [phase_entry(position, entry, ids) for position, entry in enumerate(entries, 1)]
 
 

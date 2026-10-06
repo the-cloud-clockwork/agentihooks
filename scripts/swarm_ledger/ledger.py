@@ -276,7 +276,7 @@ def cmd_publish_plan(args):
 def cmd_plan(args):
     from scripts.swarm_ledger import ledger_phase_cli
 
-    plan = json.loads(Path(args.path).read_text(encoding="utf-8"))
+    plan = json.loads(Path(args.path).read_bytes())
     phases = ledger_phase_cli.append_phases(plan, [phase["id"] for phase in call(args.slug)["phases"]])
     send(args, "phase_append", phases=phases)
     print(json.dumps({"appended": [phase["phase"] for phase in phases], "planning": "manual", "review": "pending"}))
@@ -588,7 +588,7 @@ def build_parser():
     publish.add_argument("--repo", default="", help="OWNER/NAME for the issue; default the current repo")
     plan = sub.add_parser("plan")
     plan.add_argument("action", choices=["phases"])
-    plan.add_argument("path", help="JSON file with the plan's phases list, the init-swarm content shape")
+    plan.add_argument("path")
     return parser
 
 
