@@ -74,6 +74,7 @@ class AgentSpec:
     fallback_bare: bool = True
     resume: str = ""
     profile: str = ""
+    channel: bool = False
 
 
 def _collector(environ: dict[str, str]) -> str:
@@ -202,7 +203,9 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
-    return _profile_command(command, spec), ""
+    # A server on MCP revision 2026-07-28 never registers as a channel.
+    before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
+    return _profile_command(command, spec), before
 
 
 def _write_launcher(
@@ -462,7 +465,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             claude_args,
             active_env,
             AgentSpec(
-                agent=agent, exclude=exclude, fallback_bare=not args.handoff, resume=args.resume, profile=args.profile
+                agent=agent,
+                exclude=exclude,
+                fallback_bare=not args.handoff,
+                resume=args.resume,
+                profile=args.profile,
+                channel=channel,
             ),
         )
         host, explicit = _select_host(args.host, active_env)

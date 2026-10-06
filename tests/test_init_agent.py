@@ -610,3 +610,13 @@ def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch,
     line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("claude_args="))
     assert line.startswith("claude_args='--mcp-config=") is named and (channel.FLAG in line) is named
     assert line.endswith("--model opus")
+
+
+@pytest.mark.parametrize("channel", [True, False])
+def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    spec = init_agent.AgentSpec(channel=channel)
+    launcher, _ = init_agent._write_launcher(tmp_path, "eng", "", [], env, spec)
+    text = launcher.read_text()
+    assert ("export MCP_PROTOCOL_NEGOTIATION=legacy\n" in text) is channel
+    assert not channel or text.index("MCP_PROTOCOL_NEGOTIATION") < text.index(" claude ")
