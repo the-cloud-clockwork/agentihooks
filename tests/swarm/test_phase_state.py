@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from scripts.swarm import phase_state
@@ -16,28 +19,13 @@ def plan(phase, state="open"):
     return {"id": f"plan-{phase}", "phase": phase, "kind": "plan", "lane": "plan", "state": state}
 
 
-@pytest.mark.parametrize(
-    ("phase", "tasks", "expected"),
-    [
-        ({"id": "p2", "out_of_scope": True, "done": True}, [], "out_of_scope"),
-        ({"id": "p2", "done": True, "depends_on": ["p1"]}, [], "done"),
-        ({"id": "p2", "depends_on": ["p1"], "planning": "auto"}, [], "waiting"),
-        ({"id": "p2", "depends_on": ["gone"]}, [], "waiting"),
-        ({"id": "p2", "planning": "auto"}, [], "to_plan"),
-        ({"id": "p2", "planning": "auto"}, [plan("p3")], "to_plan"),
-        ({"id": "p2", "planning": "auto"}, [{"id": "t", "phase": "p2", "kind": "code"}], "to_plan"),
-        ({"id": "p2", "planning": "auto"}, [plan("p2")], "planning"),
-        ({"id": "p2", "planning": "auto", "review": {"state": "approved"}}, [plan("p2")], "planning"),
-        ({"id": "p2", "planning": "auto"}, [plan("p2", "done")], "in_review"),
-        ({"id": "p2", "planning": "auto", "review": {"state": "sent_back"}}, [plan("p2", "done")], "in_review"),
-        ({"id": "p2", "planning": "auto", "review": {"state": "approved"}}, [plan("p2", "done")], "building"),
-        ({"id": "p2", "depends_on": ["p0"]}, [], "building"),
-        ({"id": "p2", "planning": "manual"}, [], "building"),
-    ],
-)
-def test_lifecycle_row(phase, tasks, expected):
-    phases = [{"id": "p0", "done": True}, {"id": "p1"}, phase]
-    assert phase_state.lifecycle(phase, doc(phases, tasks)) == expected
+LIFECYCLE_CASES = json.loads((Path(__file__).parents[1] / "fixtures" / "phase_lifecycle.json").read_text())
+
+
+@pytest.mark.parametrize("case", LIFECYCLE_CASES)
+def test_lifecycle_row(case):
+    phase = next(p for p in case["phases"] if p["id"] == case["phase"])
+    assert phase_state.lifecycle(phase, doc(case["phases"], case["tasks"])) == case["state"]
 
 
 @pytest.mark.parametrize(
