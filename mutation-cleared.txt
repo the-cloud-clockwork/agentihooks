@@ -222,5 +222,13 @@
   "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_46:71b315daf5b45ef7aa8e2c0bf9c396a176389f9026a537f846852bb6fd17451c": {
     "reader": "Standards /root/standards",
     "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_port_held__mutmut_7:f81d7fd245b87bb253cce437f7d57b97d3f88a2b187ad9fb823e14e3d471b215": {
+    "reader": "Standards",
+    "reason": "Linux SO_REUSEADDR treats both 1 and 2 as enabled. The independent reader observed getsockopt returning 1 and an occupied listener returning bind errno 98 for both values."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_ensure__mutmut_3:83b5c3341eba581ced3779613419d723ad3759b23941b92a53d6879c071fd292": {
+    "reader": "Standards",
+    "reason": "False and None are only tested through not started before both branches assign True. The independent reader verified identical truth values at both reads; the value is never returned or printed."
   }
 }
