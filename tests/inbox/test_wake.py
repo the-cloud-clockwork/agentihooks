@@ -297,3 +297,28 @@ def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
     herdr = HandoverOnStatus({"p1": "idle"})
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, SEATED)
     assert herdr.prompts == [] and events(inbox, item.id) == []
+
+
+def test_a_pane_holding_typed_input_is_left_alone_until_the_operator_sends_it(inbox):
+    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
+    herdr = FakeHerdr({"p1": "idle"})
+    herdr.has_input_text = lambda pane_id: pane_id == "p1"
+    run(inbox, herdr, FakeLedger(), sent_at(item))
+    assert herdr.prompts == [] and events(inbox, item.id) == []
+    herdr.has_input_text = lambda pane_id: False
+    run(inbox, herdr, FakeLedger(), sent_at(item) + W)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]
+
+
+def test_a_pane_that_recently_received_an_operator_prompt_is_left_alone(inbox):
+    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
+    herdr = FakeHerdr({"p1": "idle"})
+    sent_time = sent_at(item)
+    herdr.last_operator_prompt_at = lambda pane_id: sent_time if pane_id == "p1" else None
+    run(inbox, herdr, FakeLedger(), sent_time + 10_000)
+    assert herdr.prompts == [] and events(inbox, item.id) == []
+    herdr.last_operator_prompt_at = lambda pane_id: None
+    run(inbox, herdr, FakeLedger(), sent_time + W)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]

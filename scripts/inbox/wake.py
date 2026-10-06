@@ -67,7 +67,12 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window):
         if agent and agent.name not in statuses:
             statuses[agent.name] = _status(herdr, agent)
         step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window)
-        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
+        if (
+            step == WOKEN
+            and _still_held(inbox, held)
+            and not _should_skip_wake(herdr, agent, now_ms, window)
+            and _wake(herdr, agent, prompted)
+        ):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name:
@@ -121,6 +126,29 @@ def _wake(herdr, agent, prompted):
         return False
     prompted.add(agent.name)
     return True
+
+
+def _should_skip_wake(herdr, agent, now_ms, window):
+    pane_id = agent.pane_id if agent else None
+    if not pane_id:
+        return False
+
+    if hasattr(herdr, "has_input_text"):
+        try:
+            if herdr.has_input_text(pane_id):
+                return True
+        except Exception:
+            pass
+
+    if hasattr(herdr, "last_operator_prompt_at"):
+        try:
+            last_prompt_at = herdr.last_operator_prompt_at(pane_id)
+            if last_prompt_at is not None and now_ms - last_prompt_at < window:
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 def _gist(item):
