@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 from scripts import select_profile
-from scripts.targets.codex_target import codex_home
 
 PROMPT = "Reply with the single word OK."
 LAYERS = ("plugins", "mcp", "persona", "hooks")
@@ -55,19 +54,24 @@ def _claude_home(rendered: Path, dst: Path, off: frozenset[str]) -> Path:
     return dst
 
 
-def _codex_overrides(off: frozenset[str]) -> list[str]:
-    pairs = []
-    if "plugins" in off:
-        pairs.append("features.plugins=false")
-    if "hooks" in off:
-        pairs.append("features.hooks=false")
-    if "persona" in off:
-        pairs.append('developer_instructions=""')
+def _codex_home(rendered: Path, dst: Path, off: frozenset[str]) -> Path:
+    import tomlkit
+
+    for item in rendered.iterdir():
+        if item.name != "config.toml" and not ("persona" in off and item.name == "AGENTS.md"):
+            (dst / item.name).symlink_to(item)
+    config = tomllib.loads((rendered / "config.toml").read_text())
+    for layer in ("plugins", "hooks"):
+        if layer in off:
+            config.setdefault("features", {})[layer] = False
     if "mcp" in off:
-        config = codex_home() / "config.toml"
-        servers = tomllib.loads(config.read_text()).get("mcp_servers", {}) if config.exists() else {}
-        pairs += [f"mcp_servers.{server}.enabled=false" for server in sorted(servers)]
-    return [arg for pair in pairs for arg in ("-c", pair)]
+        config.pop("mcp_servers", None)
+    state = config.get("hooks", {}).get("state")
+    if state:
+        # Codex keys hook trust by the hooks file path, so the copy's own path must carry it.
+        config["hooks"]["state"] = {k.replace(str(rendered), str(dst), 1): v for k, v in state.items()}
+    (dst / "config.toml").write_text(tomlkit.dumps(config))
+    return dst
 
 
 def first_turn(agent: str, stdout: str) -> Reading | None:
@@ -97,11 +101,13 @@ def measure(
     run: Callable = subprocess.run,
 ) -> Reading:
     base = _environment(os.environ if environ is None else environ)
-    native = CLAUDE_ARGS if agent == "claude" else [*_codex_overrides(off), *CODEX_ARGS]
+    native = CLAUDE_ARGS if agent == "claude" else CODEX_ARGS
     env, flags = select_profile.prepare(name, agent, "", "", native, base)
     with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
         if agent == "claude":
             env["CLAUDE_CONFIG_DIR"] = str(_claude_home(Path(env["CLAUDE_CONFIG_DIR"]), Path(home), off))
+        else:
+            env["CODEX_HOME"] = str(_codex_home(Path(env["CODEX_HOME"]), Path(home), off))
         result = run(
             ["agentihooks", agent, *flags],
             cwd=work,

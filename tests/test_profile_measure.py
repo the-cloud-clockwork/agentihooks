@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tomllib
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -52,14 +53,17 @@ def rendered(monkeypatch, tmp_path):
         json.dumps({"env": {"X": "1"}, "hooks": {"SessionStart": []}, "enabledPlugins": {"a@m": True, "b@m": False}})
     )
     (home / ".claude.json").write_text(json.dumps({"userID": "u", "mcpServers": {"serena": {"url": "x"}}}))
-    codex = tmp_path / "codex"
-    codex.mkdir()
-    (codex / "config.toml").write_text('[mcp_servers.serena]\nurl = "x"\n[mcp_servers.gateway-tools]\nurl = "y"\n')
+    codex = tmp_path / "rendered" / "engineer" / "codex"
+    (codex / "skills").mkdir(parents=True)
+    (codex / "AGENTS.md").symlink_to(home / "CLAUDE.md")
+    (codex / "hooks.json").symlink_to(tmp_path / "operator-hooks.json")
+    config = '[features]\nhooks = true\n[mcp_servers.serena]\nurl = "x"\n[mcp_servers.gateway-tools]\nurl = "y"\n'
+    config += f'[hooks.state."{codex}/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:aa"\n'
+    (codex / "config.toml").write_text(config)
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "render", Mock())
     monkeypatch.setattr(select_profile.profiles, "rendered_root", lambda: tmp_path / "rendered")
     monkeypatch.setattr(select_profile.profiles, "channels", lambda name: "brain")
-    monkeypatch.setattr(measure, "codex_home", lambda: codex)
     return home
 
 
@@ -68,6 +72,10 @@ def _runner(stdout):
 
     def run(argv, **kwargs):
         seen.update(argv=argv, work=os.listdir(kwargs["cwd"]), **kwargs)
+        codex = kwargs["env"].get("CODEX_HOME")
+        if codex:
+            seen["home"] = {p.name: Path(os.readlink(p)) if p.is_symlink() else None for p in Path(codex).iterdir()}
+            seen["config"] = tomllib.loads((Path(codex) / "config.toml").read_text())
         home = kwargs["env"].get("CLAUDE_CONFIG_DIR")
         if home:
             seen["home"] = {p.name: Path(os.readlink(p)) if p.is_symlink() else None for p in Path(home).iterdir()}
@@ -122,32 +130,41 @@ def test_claude_layer_off_changes_only_that_layer(rendered, layer, check):
     assert (rendered / "CLAUDE.md").exists()
 
 
-def test_codex_first_turn_and_layer_overrides(rendered):
+def test_codex_first_turn_runs_in_a_copy_of_the_profile_codex_home(rendered):
+    codex = rendered.parent / "codex"
     run, seen = _runner(CODEX_STREAM)
-    off = frozenset({"plugins", "mcp", "persona", "hooks"})
-    assert measure.measure("engineer", "codex", off, environ={"CLAUDE_CONFIG_DIR": "/x"}, run=run) == measure.Reading(
-        81794, ()
-    )
+    environ = {"CLAUDE_CONFIG_DIR": "/x"}
+    assert measure.measure("engineer", "codex", frozenset(), environ=environ, run=run) == measure.Reading(81794, ())
     argv = seen["argv"]
-    assert argv[:4] == ["agentihooks", "codex", "-p", "engineer"]
+    assert argv[:2] == ["agentihooks", "codex"] and "-p" not in argv
     assert argv[-4:] == ["exec", "--json", "--skip-git-repo-check", measure.PROMPT]
-    pairs = {argv[i + 1] for i, a in enumerate(argv) if a == "-c"}
-    assert {
-        "features.plugins=false",
-        "features.hooks=false",
-        'developer_instructions=""',
-        "mcp_servers.serena.enabled=false",
-        "mcp_servers.gateway-tools.enabled=false",
-    } <= pairs
-    assert "CLAUDE_CONFIG_DIR" not in seen["env"]
-
-
-def test_codex_full_run_has_no_overrides(rendered):
-    run, seen = _runner(CODEX_STREAM)
-    measure.measure("engineer", "codex", frozenset(), environ={}, run=run)
-    argv = seen["argv"]
     assert [argv[i + 1] for i, a in enumerate(argv) if a == "-c"] == [argv[argv.index("-c") + 1]]
-    assert argv[argv.index("-c") + 1].startswith("model_reasoning_effort=")
+    assert "CLAUDE_CONFIG_DIR" not in seen["env"]
+    home = Path(seen["env"]["CODEX_HOME"])
+    assert home != codex
+    assert seen["home"] == {
+        "AGENTS.md": codex / "AGENTS.md",
+        "skills": codex / "skills",
+        "hooks.json": codex / "hooks.json",
+        "config.toml": None,
+    }
+    assert seen["config"]["hooks"]["state"] == {f"{home}/hooks.json:stop:0:0": {"trusted_hash": "sha256:aa"}}
+    assert set(seen["config"]["mcp_servers"]) == {"serena", "gateway-tools"}
+
+
+@pytest.mark.parametrize(
+    "layer,check",
+    [
+        ("plugins", lambda s: s["config"]["features"] == {"hooks": True, "plugins": False}),
+        ("mcp", lambda s: "mcp_servers" not in s["config"]),
+        ("persona", lambda s: "AGENTS.md" not in s["home"] and "skills" in s["home"]),
+        ("hooks", lambda s: s["config"]["features"] == {"hooks": False}),
+    ],
+)
+def test_codex_layer_off_changes_only_that_layer(rendered, layer, check):
+    run, seen = _runner(CODEX_STREAM)
+    measure.measure("engineer", "codex", frozenset({layer}), environ={}, run=run)
+    assert check(seen)
 
 
 def test_hooks_off_when_the_profile_has_no_hooks(rendered):
@@ -155,13 +172,6 @@ def test_hooks_off_when_the_profile_has_no_hooks(rendered):
     run, seen = _runner(CLAUDE_STREAM)
     measure.measure("engineer", "claude", frozenset({"hooks"}), environ={}, run=run)
     assert seen["settings"] == {"env": {}}
-
-
-def test_codex_mcp_off_without_installed_servers(rendered):
-    (measure.codex_home() / "config.toml").write_text("")
-    run, seen = _runner(CODEX_STREAM)
-    measure.measure("engineer", "codex", frozenset({"mcp"}), environ={}, run=run)
-    assert not [a for a in seen["argv"] if a.startswith("mcp_servers.")]
 
 
 def test_init_without_servers_and_usage_without_cache_keys():
