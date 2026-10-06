@@ -77,6 +77,38 @@ def _keep_foreign_hooks(settings_path: Path, rendered: dict) -> dict:
     return merged
 
 
+def settings_document(rendered: dict) -> dict:
+    _i = _install_module()
+    rendered = deepcopy(rendered)
+    profile_env = rendered.pop("_agentihooks", {}).get("env", {})
+    if profile_env:
+        rendered["env"] = {**profile_env, **rendered.get("env", {})}
+
+    # rendered["env"] can carry connector-injected literal values, and this
+    # is the one adapter that copies the whole dict into settings verbatim
+    # — codex and copilot read only permissions.defaultMode. Scan each env
+    # value and drop credential-shaped literals before they reach disk;
+    # ${VAR}/$VAR references pass through untouched (claude expands them).
+    env_block = rendered.get("env")
+    if isinstance(env_block, dict) and env_block:
+        from hooks.secrets import scan as _scan_secrets
+        from scripts.targets._common import scannable
+
+        clean_env: dict = {}
+        for ek, ev in env_block.items():
+            hits = _scan_secrets(scannable(str(ev)), mode="strict")
+            if hits:
+                _i._cprint(
+                    f"  [!!] settings env var '{ek}' looks like a credential "
+                    f"({', '.join(hits)}) — dropped from settings.json. Export it in "
+                    "the shell environment instead of writing it to disk."
+                )
+                continue
+            clean_env[ek] = ev
+        rendered = {**rendered, "env": clean_env} if clean_env else {k: v for k, v in rendered.items() if k != "env"}
+    return rendered
+
+
 class ClaudeAdapter:
     name = "claude"
 
@@ -85,35 +117,7 @@ class ClaudeAdapter:
 
     def write_settings(self, rendered: dict) -> Path:
         _i = _install_module()
-        rendered = deepcopy(rendered)
-        profile_env = rendered.pop("_agentihooks", {}).get("env", {})
-        if profile_env:
-            rendered["env"] = {**profile_env, **rendered.get("env", {})}
-
-        # rendered["env"] can carry connector-injected literal values, and this
-        # is the one adapter that copies the whole dict into settings verbatim
-        # — codex and copilot read only permissions.defaultMode. Scan each env
-        # value and drop credential-shaped literals before they reach disk;
-        # ${VAR}/$VAR references pass through untouched (claude expands them).
-        env_block = rendered.get("env")
-        if isinstance(env_block, dict) and env_block:
-            from hooks.secrets import scan as _scan_secrets
-            from scripts.targets._common import scannable
-
-            clean_env: dict = {}
-            for ek, ev in env_block.items():
-                hits = _scan_secrets(scannable(str(ev)), mode="strict")
-                if hits:
-                    _i._cprint(
-                        f"  [!!] settings env var '{ek}' looks like a credential "
-                        f"({', '.join(hits)}) — dropped from settings.json. Export it in "
-                        "the shell environment instead of writing it to disk."
-                    )
-                    continue
-                clean_env[ek] = ev
-            rendered = (
-                {**rendered, "env": clean_env} if clean_env else {k: v for k, v in rendered.items() if k != "env"}
-            )
+        rendered = settings_document(rendered)
 
         existing_settings_path = _i.CLAUDE_HOME / "settings.json"
         personal = _i._preserve_personal_keys(existing_settings_path)
