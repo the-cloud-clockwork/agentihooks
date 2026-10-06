@@ -151,6 +151,7 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     assert list(browsers) == ["playwright-cmd"]
     assert browsers["playwright-cmd"]["command"] == str(world["python"])
     assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
+    assert render.stamp(role)["browser"] == browsers["playwright-cmd"]
     settings = json.loads((render.rendered_root() / role / "claude" / "settings.json").read_text())
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 

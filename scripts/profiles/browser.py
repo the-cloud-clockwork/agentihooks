@@ -39,7 +39,7 @@ def configure(servers: dict, chain: list[str]) -> dict:
 def output_folder() -> Path:
     from scripts.swarm_ledger.ledger_workspace import folder
 
-    swarm, task = os.environ.get("AGENTIHOOKS_SWARM", ""), os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    swarm, task = os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK")
     out = folder(swarm, task or "master") if swarm else Path.home() / ".agentihooks" / "browser"
     out.mkdir(parents=True, exist_ok=True)
     return out.resolve()

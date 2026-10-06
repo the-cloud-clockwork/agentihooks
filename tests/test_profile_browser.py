@@ -16,6 +16,7 @@ def test_task_browser_uses_the_task_folder_without_a_display(monkeypatch):
     folder = browser.output_folder()
     assert folder == Path.home() / ".agentihooks/swarm/proof-swarm/tasks/hp1"
     assert folder.is_dir()
+    assert browser.output_folder() == folder
     params = browser.parameters(folder, "/browser/chromium")
     assert params.cwd == str(folder)
     assert params.command == "playwright-mcp"
@@ -64,6 +65,14 @@ def test_browser_without_a_task_stays_outside_checkouts(monkeypatch, swarm, task
     assert browser.output_folder() == Path.home() / suffix
 
 
+def test_missing_swarm_environment_uses_the_standalone_folder(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    assert browser.output_folder() == Path.home() / ".agentihooks/browser"
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    assert browser.output_folder() == Path.home() / ".agentihooks/swarm/proof-swarm/tasks/master"
+
+
 @pytest.mark.asyncio
 async def test_proxy_exposes_upstream_tools_and_preserves_failures(tmp_path):
     session = AsyncMock()
@@ -105,6 +114,7 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch):
     result = types.CallToolResult(content=[types.TextContent(type="text", text="saved in task")])
     upstream.call_tool.return_value = result
     launch = {}
+    upstream_read, upstream_write = object(), object()
     to_server, server_read = anyio.create_memory_object_stream(10)
     to_client, client_read = anyio.create_memory_object_stream(10)
 
@@ -115,9 +125,10 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch):
     @asynccontextmanager
     async def transport(params):
         launch["params"] = params
-        yield None, None
+        yield upstream_read, upstream_write
 
-    def session(*args, **kwargs):
+    def session(read, write, **kwargs):
+        assert read is upstream_read and write is upstream_write
         launch["roots"] = kwargs["list_roots_callback"]
         return upstream
 
@@ -132,7 +143,7 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch):
     async with anyio.create_task_group() as group:
         group.start_soon(browser.serve)
         async with ClientSession(client_read, to_server) as client:
-            await client.initialize()
+            assert (await client.initialize()).serverInfo.name == "swarm-browser"
             assert (await client.list_tools()).tools == [tool]
             assert await client.call_tool("browser_take_screenshot", {"filename": "/repo/proof.png"}) == result
         group.cancel_scope.cancel()
