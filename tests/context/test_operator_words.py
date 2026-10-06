@@ -18,6 +18,12 @@ def test_a_typed_prompt_is_found_by_a_quote_in_any_case_and_spacing():
     assert operator_words.matching("eng-1@demo", "approve the broker merge", now=200) == ""
 
 
+def test_a_quote_matches_the_words_as_typed_and_not_their_upper_case_spelling():
+    assert operator_words.record("master@a1-1", "Use the Straße route", now=100)
+    assert operator_words.matching("master@a1-1", "strasse", now=101) == ""
+    assert operator_words.matching("master@a1-1", "STRAßE route", now=101) == "Use the Straße route"
+
+
 def test_words_are_kept_per_agent_under_the_state_home(tmp_path, monkeypatch):
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path / "fresh" / "home")
     assert operator_words.record("Master A/b c", "ship it", now=100)
