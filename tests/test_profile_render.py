@@ -200,6 +200,16 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
+def test_claude_render_excludes_default_home_instructions(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+
+    excludes = json.loads((out / "settings.json").read_text())["claudeMdExcludes"]
+    default_home = world["home"] / ".claude"
+    assert excludes == [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
+
+
 def test_claude_render_mcp_and_shared_data(world, capsys):
     from scripts.profiles import render
 
