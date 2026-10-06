@@ -387,3 +387,38 @@ def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
         "--effort",
         "max",
     ]
+
+
+@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("launch", ["spawn", "successor", "resume"])
+def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch, lane, harness, launch):
+    from scripts import select_profile
+    from scripts.swarm import model_pick
+    from scripts.swarm.templates import DEFAULT_PROFILES
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    monkeypatch.setattr(model_pick, "pick", lambda *a, **kw: model_pick.ModelPick("m", "high"))
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
+    runtime._holds = lambda *a: True
+    config = SimpleNamespace(slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="full")
+    if launch == "resume":
+        agent = AgentRecord("agent@a1b2c3-0001", lane, "t1", harness=harness, conversation_id="c0ffee")
+        runtime.resume(config, agent, "you were restored")
+    else:
+        handoff = {"handoff": "# Handoff\n<!-- handoff complete -->"} if launch == "successor" else {}
+        runtime.spawn(config, lane, "agent@a1b2c3-0001", {**SEAT_TASKS[lane], **handoff})
+    argv = seen["argv"]
+    profile = argv[argv.index("--profile") + 1]
+    assert profile == DEFAULT_PROFILES[lane]
+    root = tmp_path / profile
+    root.mkdir()
+    monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
+    monkeypatch.setattr(select_profile.profiles, "render", lambda *a: None)
+    env, _ = select_profile.prepare(profile, argv[argv.index("--agent") + 1], "", "", [], {})
+    assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")

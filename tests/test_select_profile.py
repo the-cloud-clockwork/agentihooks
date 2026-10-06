@@ -14,6 +14,7 @@ def profile(monkeypatch, tmp_path):
     monkeypatch.setattr(select_profile.profiles, "_chain", lambda name: [(name, root)])
     monkeypatch.setattr(select_profile.profiles, "render", renderer)
     monkeypatch.setattr(select_profile.profiles, "rendered_root", lambda: tmp_path / "rendered")
+    monkeypatch.setattr(select_profile.profiles, "channels", lambda name: "amygdala,brain")
     return tmp_path, renderer
 
 
@@ -25,6 +26,7 @@ def test_dry_run_parses_run_flags_and_preserves_harness_arguments(profile, capsy
     )
     assert capsys.readouterr().out == (
         "AGENTIHOOKS_PROFILE=engineer\n"
+        "AGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
         f"CLAUDE_CONFIG_DIR={root}/rendered/engineer/claude\n"
         "argv=agentihooks claude --model opus --effort low -p 'reply OK'\n"
     )
@@ -33,7 +35,7 @@ def test_dry_run_parses_run_flags_and_preserves_harness_arguments(profile, capsy
 
 def test_profile_defaults_and_native_codex_layer(profile):
     env, argv = select_profile.prepare("qa", "codex", "", "", ["exec", "reply OK"], {})
-    assert env == {"AGENTIHOOKS_PROFILE": "qa"}
+    assert env == {"AGENTIHOOKS_PROFILE": "qa", "AGENTIHOOKS_BASE_CHANNELS": "amygdala,brain"}
     assert argv == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", "reply OK"]
 
 
@@ -169,8 +171,8 @@ def test_codex_dry_run_from_sys_argv_has_only_run_environment(profile, monkeypat
     )
     assert select_profile.main() == 0
     assert (
-        capsys.readouterr().out
-        == "AGENTIHOOKS_PROFILE=qa\nargv=agentihooks codex -p qa -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
+        capsys.readouterr().out == "AGENTIHOOKS_PROFILE=qa\nAGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
+        "argv=agentihooks codex -p qa -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
     )
 
 
