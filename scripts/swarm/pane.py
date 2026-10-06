@@ -33,7 +33,7 @@ CHOICE = re.compile(r"[❯›→>]\s+\S")
 
 def _heading(raw):
     """A prompt without a question is titled by the first line of the paragraph just above its choices."""
-    above = raw[: next(i for i, line in enumerate(raw) if CHOICE.match(line))]
+    above = raw[: next((i for i, line in enumerate(raw) if CHOICE.match(line)), 0)]
     while above and not above[-1]:
         above.pop()
     start = max((i + 1 for i, line in enumerate(above) if not line), default=0)
