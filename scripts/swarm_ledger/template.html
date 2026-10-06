@@ -1486,8 +1486,8 @@ input, textarea { caret-color: var(--accent-2); }
         h("span", { class: `sw-status ${r.outcome}`, text: r.outcome === "awaiting-decision" ? "Awaiting decision" : r.outcome })),
       h("span", { class: "sw-task", text: r.task, title: r.task }),
       h("div", { class: "sw-meta" }, h("span", { text: r.reason })),
-      r.outcome === "awaiting-decision" ? h("div", { class: "sw-controls" },
-        ...["resume", "fresh"].map((choice) => h("button", { type: "button", "data-agent": r.name,
+      r.outcome === "awaiting-decision" ? h("div", { class: "sw-ctl" },
+        ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button", "data-agent": r.name,
           "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? "Resume" : "Fresh" }))) : null);
   }
 

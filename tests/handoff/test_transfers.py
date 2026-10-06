@@ -73,3 +73,36 @@ def test_a_missing_handoff_is_an_explicit_continuity_gap(setup):
     transfer = transfers.record(store, "sw", old, "restore", "", 2)
     assert transfer["continuity"]["state"] == "unknown"
     assert transfer["continuity"]["gap"] == "No handoff document"
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "master"])
+def test_a_failed_successor_keeps_its_outcome_and_a_retry_can_confirm(setup, monkeypatch, lane):
+    store, old = setup
+    store.drop_agent("sw", old.name)
+    old = replace(old, lane=lane, task="master" if lane == "master" else "t1")
+    store.put_agent("sw", old)
+    store.update("sw", max_eng=int(lane == "eng"), max_ci=int(lane == "ci"))
+    original = transfers.record(store, "sw", old, "recycle", DOC, 2)
+    store.put_handoff("sw", old.task, DOC, seat=old.seat)
+    runtime = FakeRuntime()
+    spawn = runtime.spawn
+
+    def fail(config, target_lane, *args, **kwargs):
+        if target_lane == lane:
+            raise RuntimeError("launch failed")
+        return spawn(config, target_lane, *args, **kwargs)
+
+    monkeypatch.setattr(runtime, "spawn", fail)
+    ledger = FakeLedger([] if lane == "master" else [{"id": "t1", "lane": lane}])
+    tick("sw", store, ledger, runtime, 10)
+    assert transfers.get(store, "sw", original["id"])["binding"]["state"] == "absent"
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    tick("sw", store, ledger, runtime, 20)
+    task = runtime.masters[-1][1] if lane == "master" else runtime.tasks[-1]
+    retry = task["transfer"]
+    assert retry is not None
+    assert retry["id"] != original["id"]
+    successor = next(a for a in store.agents("sw") if a.name == retry["successor"])
+    result = transfers.confirm(store, "sw", retry["id"], successor, retry["next"], 21)
+    assert result["binding"]["state"] == "live"
+    assert result["continuity"]["state"] == "confirmed"

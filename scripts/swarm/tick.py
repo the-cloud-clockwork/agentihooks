@@ -270,6 +270,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, now_ms):
                 task["transfer"] = transfers.attach(store, slug, record, now_ms)
                 placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task), spawns=store.spawns(slug))
             except Exception as exc:
+                transfers.failed(store, slug, record, now_ms)
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 return actions
             store.put_agent(slug, _placed(record, placed))
@@ -360,6 +361,7 @@ def _master(slug, config, store, runtime, now_ms):
             ),
         )
     except Exception as exc:
+        transfers.failed(store, slug, record, now_ms)
         store.drop_agent(slug, name)
         return [f"master spawn failed: {exc}"]
     store.put_agent(slug, _placed(record, placed))

@@ -22,6 +22,7 @@ SECTIONS = {
     "Doctor": True,
     "Crew history": False,
     "Last restore": False,
+    "Handoff outcomes": False,
     "Chat": True,
     "Notifications": True,
 }

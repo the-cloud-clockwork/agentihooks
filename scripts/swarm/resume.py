@@ -1,4 +1,4 @@
-"""Restore reopens each saved agent in its own conversation when it can, else marks it finished to start fresh."""
+"""Restore saved conversations and retain failed resumes for an explicit decision."""
 
 import json
 import os
@@ -80,6 +80,10 @@ class RestoreContext:
 
 
 def _attempt(store, slug, agent, worktree, context, transfer):
+    if agent.seat:
+        if store.seats.occupant(agent.seat).occupant != agent.name:
+            store.seats.occupy(agent.seat, agent.name, context.at)
+        transfers.attach(store, slug, agent, context.at)
     why = blocker(agent, worktree, has_quota=context.has_quota)
     if not why:
         try:
@@ -102,10 +106,6 @@ def _attempt(store, slug, agent, worktree, context, transfer):
     if why:
         agent = replace(agent, state=AWAITING)
     store.put_agent(slug, agent)
-    if agent.seat:
-        if store.seats.occupant(agent.seat).occupant != agent.name:
-            store.seats.occupy(agent.seat, agent.name, context.at)
-        transfers.attach(store, slug, agent, context.at)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live, context.at)
     return Outcome(

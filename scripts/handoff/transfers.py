@@ -83,6 +83,27 @@ def fresh(store, slug: str, transfer: str, at: int) -> dict:
     return _change(store, slug, transfer, change)
 
 
+def failed(store, slug: str, agent, at: int) -> None:
+    for row in list_transfers(store, slug):
+        if row["successor"] != agent.name or row["binding"]["state"] == "live":
+            continue
+
+        def change(current):
+            current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": "Launch failed"}
+
+        _change(store, slug, row["id"], change)
+        retry = {
+            **row,
+            "id": uuid4().hex,
+            "at": at,
+            "successor": "",
+            "continuity": {"state": "pending"} if row["handoff"] else row["continuity"],
+            "binding": {"state": "pending"},
+            "retry_of": row["id"],
+        }
+        store.redis.hset(store.key(slug, "transfers"), retry["id"], json.dumps(retry))
+
+
 def observe(store, slug: str, live: set[str], at: int) -> None:
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live":

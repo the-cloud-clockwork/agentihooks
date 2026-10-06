@@ -11,7 +11,6 @@ def test_page_shows_current_share_and_live_split(tab):
     assert "So far 6 of 19 started on Codex (31%)." in tab.locator("#codex-split").inner_text()
 
 
-
 def test_codex_steps_are_five_and_apply_sends_the_draft(tab):
     sent = []
 

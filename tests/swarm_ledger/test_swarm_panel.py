@@ -534,7 +534,6 @@ class SwarmPanel(unittest.TestCase):
         self.assertIn('id="crew-box"', page)
         self.assertIn("renderCrew();", function_source("renderSwarm"))
 
-
     def test_step_ops_report_pending_then_done_or_error_by_name(self):
         out = self.run_js(
             ["opNote"],
@@ -678,7 +677,6 @@ class HealthPanel(unittest.TestCase):
         source = function_source("renderSwarm")
         self.assertIn("renderHealth(sw.findings)", source)
         self.assertIn("renderNeedsYou(sw)", source)
-
 
     def test_health_styles_use_only_palette_tokens(self):
         page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
