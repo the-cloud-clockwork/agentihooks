@@ -6777,7 +6777,7 @@ examples:
         help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
     )
     cond_p.add_argument("action", choices=["list"], help="Conditions action")
-    cond_p.add_argument("--step", choices=["pre", "post", "stop"], default=None, help="Only this step")
+    cond_p.add_argument("--step", choices=["pre", "post", "stop"], help="Only this step")
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
