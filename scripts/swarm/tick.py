@@ -205,7 +205,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         return []
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
-    who = Who(name=agent.name, swarm=slug, lane=agent.lane, task=agent.task)
+    who = Who(name=agent.name, task=agent.task)
     gate_log.append(
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )

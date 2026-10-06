@@ -41,6 +41,8 @@ def test_progress_reports_the_status_line_and_clears_the_quiet_flag(started, cap
 def test_progress_needs_both_lines_and_a_worker(started, capsys):
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "progress", "--doing", "x"])
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["sw", "progress", "--ends-when", "y"])
     capsys.readouterr()
     assert run("sw", "--as", "master@a1b2c3-0001", "progress", "--doing", "x", "--ends-when", "y") == 1
     assert "master@a1b2c3-0001" in capsys.readouterr().err

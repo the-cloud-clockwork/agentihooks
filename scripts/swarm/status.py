@@ -45,7 +45,7 @@ def verdict_store(store, slug):
 def findings(store, slug, config, tasks, events):
     agents, limits = store.agents(slug), health.limits()
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name, 0)} for a in agents]
+    rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name)} for a in agents]
     return verdict_store(store, slug).visible(
         health.findings(
             {"tasks": tasks, "_meta": {"events": events}},

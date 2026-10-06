@@ -258,8 +258,8 @@ def waiting_on_input(agents: list[dict], tasks: dict[str, dict]) -> list[Finding
 def stale_claims(agents, tasks, limits):
     found = []
     for a in agents:
-        quiet = a.get("quiet_minutes", 0)
-        if quiet < limits.stale_minutes:
+        quiet = a.get("quiet_minutes")
+        if quiet is None or quiet < limits.stale_minutes:
             continue
         found.append(
             Finding(
