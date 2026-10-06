@@ -1,0 +1,81 @@
+import json
+
+import pytest
+
+from scripts.gates import intent
+from scripts.gates.verdicts import Verdicts
+from scripts.inbox.store import InboxStore
+from scripts.swarm import cli
+from tests.swarm.test_cli import env, run  # noqa: F401
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+ME = "engineer@a1b2c3-0001"
+URL = "https://github.com/o/r/pull/9"
+
+
+@pytest.fixture
+def started(env, monkeypatch):  # noqa: F811
+    store, ledger, _ = env
+    ledger.phases = [{"id": "p1", "title": "Gates", "description": "Stop failures."}]
+    ledger.rows["t1"].update(phase="p1", title="Intent", description="Refuse a failed merge.")
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    stamped = []
+    monkeypatch.setattr(intent, "stamp_body", lambda url, doc, task, run=None: stamped.append((url, doc, task)) or True)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)
+    return store, ledger, stamped
+
+
+def test_swarm_pr_arms_the_intent_check_and_stamps_the_body(started, capsys):
+    store, ledger, stamped = started
+    assert run("sw", "pr", URL) == 0
+    out = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert out == {"task": "t1", "pr_url": URL, "intent": {"verdict": "pending", "body": True}}
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["pr_url"]) == ("pr", URL)
+    [(url, doc, task)] = stamped
+    assert (url, task["id"], task["title"], doc["phases"]) == (URL, "t1", "Intent", ledger.phases)
+    record = Verdicts("sw", "intent").read("t1")
+    assert (record["verdict"], record["reason"]) == ("pending", "intent check running")
+
+
+def test_swarm_pr_with_the_intent_gate_off_arms_nothing(started, capsys, monkeypatch):
+    store, _, _ = started
+    store.update("sw", gates={"intent": "off"})
+    assert run("sw", "pr", URL) == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["intent"] == {"verdict": "off", "body": True}
+    assert Verdicts("sw", "intent").read("t1") is None
+
+
+@pytest.mark.parametrize("mode", ["enforce", "observe", "off"])
+def test_the_operator_sets_the_intent_gate_mode(env, monkeypatch, mode):  # noqa: F811
+    store, _, _ = env
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", f"intent-gate={mode}") == 0
+    assert store.config("sw").gates == {"intent": mode}
+
+
+def test_the_tick_returns_a_failed_task_to_its_agent_under_enforce(started, monkeypatch):
+    store, ledger, _ = started
+    store.update("sw", gates={"intent": "enforce"})
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": ["a.py"]})
+    monkeypatch.setattr(intent, "judge", lambda state: ("fail", "the phase can use this change at probability 0.10"))
+    actions = cli.run_tick(store, "sw")
+    assert "task t1 intent check fail" in actions
+    assert ledger.rows["t1"]["state"] == "claimed"
+    task, text, by = [c for c in ledger.comments if c[0] == "t1"][-1]
+    assert (text.startswith("The intent check failed:"), by) == (True, "swarm")
+    items = InboxStore(store.redis).inbox(next(a.seat for a in store.agents("sw") if a.name == ME))
+    assert any(item.text.startswith("The intent check failed") and item.ref == "tasks/t1" for item in items)
+
+
+def test_the_tick_leaves_the_task_alone_under_the_default_observe(started, monkeypatch):
+    store, ledger, _ = started
+    ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
+    monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": []})
+    monkeypatch.setattr(intent, "judge", lambda state: ("fail", "no"))
+    assert "task t1 intent check fail" in cli.run_tick(store, "sw")
+    assert ledger.rows["t1"]["state"] == "pr"
+    assert Verdicts("sw", "intent").read("t1")["verdict"] == "fail"

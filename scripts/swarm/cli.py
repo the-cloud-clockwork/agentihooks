@@ -42,7 +42,7 @@ from pathlib import Path
 
 from hooks.context import injection_trace
 from scripts.doctor import priming
-from scripts.gates import Who, progress
+from scripts.gates import Who, intent, progress
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -91,7 +91,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
-GATE_KEYS = {"talk-gate": "talk"}
+GATE_KEYS = {"talk-gate": "talk", "intent-gate": intent.NAME}
 GATE_MODES = ("enforce", "observe", "off")
 TICK_LOCK_MS = 10 * 60 * 1000
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
@@ -140,6 +140,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         doc, config = ledger.state(slug), store.config(slug)
         actions += ledger_events.event_pass(inbox, store, slug, doc, ledger, now_ms())
         actions += done_gate.recheck_pass(store, slug, doc, ledger, now_ms(), ledger_events.view)
+        mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
+        actions += intent.check_pass(slug, doc, ledger, mail, mode, now_ms(), intent.pr_view, intent.judge)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
@@ -559,10 +561,13 @@ def cmd_issue(store, args):
 
 def cmd_pr(store, args):
     agent = _worker(store, args)
-    awaiting = "approval" if store.config(args.slug).autonomy == ASSIST else ""
+    config = store.config(args.slug)
+    awaiting = "approval" if config.autonomy == ASSIST else ""
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting}
-    LedgerClient().update_task(args.slug, agent.task, fields, by=agent.name)
-    print(json.dumps({"task": agent.task, "pr_url": args.url}))
+    ledger = LedgerClient()
+    checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())
+    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    print(json.dumps({"task": agent.task, "pr_url": args.url, "intent": checked}))
 
 
 def cmd_done(store, args):
