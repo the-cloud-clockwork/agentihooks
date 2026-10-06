@@ -46,10 +46,11 @@ def serve(route):
     route.fulfill(body=body, content_type=ctype)
 
 
-@pytest.fixture(params=[(1440, 900), (390, 844)], ids=["desktop", "phone"])
+@pytest.fixture(params=[(1440, 900), (1249, 900), (390, 844)], ids=["desktop", "narrow-desktop", "phone"])
 def page(browser, request):
     width, height = request.param
     tab = browser.new_page(viewport={"width": width, "height": height})
+    tab.set_default_timeout(1500)
     tab.route("**/artifacts/**", serve)
     doc = {"title": "Artifacts proof", "tasks": [{"id": "av1", "title": "Artifacts"}], "artifacts": ROWS}
     html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))

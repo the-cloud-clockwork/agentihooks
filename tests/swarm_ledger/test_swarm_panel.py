@@ -299,7 +299,7 @@ class SwarmPanel(unittest.TestCase):
 
     def test_operational_panels_render_inside_the_swarm_tab(self):
         page = (SCRIPTS / "template.html").read_text()
-        swarm = page.split('id="swarm" role="tabpanel"', 1)[1].split("</main>", 1)[0]
+        swarm = page.split('id="swarm" role="tabpanel"', 1)[1].split('<aside id="stats-column"', 1)[0]
         for marker in (
             "swarm-box",
             "swarm-ctl",
