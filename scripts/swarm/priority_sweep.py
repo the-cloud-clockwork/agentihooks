@@ -1,6 +1,6 @@
 """Priorities that clear themselves on the minute tick, so the operator never clears the list by hand.
 
-The sweep clears an agent's priority whose item is done, out of scope or merged. Then each new comment, answer or
+The sweep clears an agent's priority whose item is done, out of scope, merged or gone. Then each new comment, answer or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
 reason on the item; a no or a silent classifier leaves it.
@@ -72,6 +72,8 @@ def sweep(doc, rows, github):
 
 
 def _stale(item, github):
+    if not item:
+        return "its item is gone"
     if item.get("out_of_scope"):
         return "its item is out of scope"
     if item.get("done") or item.get("state") == "done":

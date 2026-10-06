@@ -243,8 +243,8 @@ A task item stays until the master closes it, so a done task's proof check alway
 
 ### Priorities clear themselves
 
-Each tick first sweeps the priorities agents raised: one whose item is done, out of scope, or a task whose pull
-request merged is cleared. Then it reads the ledger events since its own `priority-cursor`. Each comment,
+Each tick first sweeps the priorities agents raised: one whose item is done, out of scope or gone, or a task whose
+pull request merged, is cleared. Then it reads the ledger events since its own `priority-cursor`. Each comment,
 comment edit, answer or chat line by the operator or an agent on an item that carries a priority (a chat line
 counts for an item whose id it names) asks the classifier one yes or no question, with purpose
 `priority-resolve`: does this write resolve what the priority asks. A yes clears the priority, marks a follow up

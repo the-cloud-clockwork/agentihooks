@@ -132,6 +132,11 @@ def test_sweep_keeps_open_items_and_leaves_derived_rows_to_the_ledger(env):
     assert priorities() == before
 
 
+def test_sweep_clears_a_priority_whose_item_is_gone():
+    row = {"id": "p1", "item": "tasks/t9", "text": ASK, "by": "swarm", "at": 1}
+    assert list(priority_sweep.sweep({"tasks": []}, [row], no_github)) == [(row, "its item is gone")]
+
+
 def test_first_pass_only_sets_the_cursor(env):
     path = item("followups")
     raise_priority(env, path)
