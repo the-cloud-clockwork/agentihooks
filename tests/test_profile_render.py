@@ -498,10 +498,45 @@ def test_codex_render_config_has_no_persona_and_only_profile_servers(world):
         {"path": str(skills / name / "SKILL.md"), "enabled": False}
         for name in ("bundle-skill", "other-skill", "role-skill")
     ]
-    claude_md = render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md"
-    assert doc["project_doc_max_bytes"] >= max(65536, len(claude_md.read_bytes()))
+    assert doc["project_doc_max_bytes"] == 65536
     assert doc["agentihooks"]["render"] == render.stamp("rb-role")
+    operator = (home / ".codex" / "config.toml").read_bytes()
+    assert doc["agentihooks"]["operator"] == hashlib.sha256(operator).hexdigest()
     assert render.render_codex("rb-role") is None
+
+
+def test_codex_render_keeps_hooks_on_and_layer_servers_out(world):
+    from scripts.profiles import render
+
+    layer = "[features]\nhooks = false\n\n[mcp_servers.layer-srv]\ncommand = 'x'\n"
+    _write(world["role"] / ".codex" / "config.overrides.toml", layer)
+
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
+
+    assert doc["features"]["hooks"] is True
+    assert set(doc["mcp_servers"]) == {"role-srv", "bundle-srv"}
+
+
+def test_codex_render_sizes_the_doc_cap_to_a_large_persona(world):
+    from scripts.profiles import render
+
+    _write(world["role"] / ".claude" / "rules" / "big.md", "x" * 100_000 + "\n")
+
+    out = render.render_codex("rb-role")
+
+    persona = len((render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md").read_bytes())
+    assert tomllib.loads((out / "config.toml").read_text())["project_doc_max_bytes"] == int(persona * 1.25)
+
+
+def test_codex_render_force_rerenders_the_claude_profile(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("rb-role")
+    persona = render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md"
+    persona.write_text("stale\n")
+
+    assert render.render_codex("rb-role", force=True) == out
+    assert "ROLE PERSONA MARKER" in (out / "AGENTS.md").read_text()
 
 
 def test_codex_render_links_state_back_to_the_operator_home(world):

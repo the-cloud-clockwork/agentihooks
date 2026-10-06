@@ -69,7 +69,7 @@ def _codex_home(rendered: Path, dst: Path, off: frozenset[str]) -> Path:
     state = config.get("hooks", {}).get("state")
     if state:
         # Codex keys hook trust by the hooks file path, so the copy's own path must carry it.
-        config["hooks"]["state"] = {k.replace(str(rendered), str(dst), 1): v for k, v in state.items()}
+        config["hooks"]["state"] = {f"{dst}{k.removeprefix(str(rendered))}": v for k, v in state.items()}
     (dst / "config.toml").write_text(tomlkit.dumps(config))
     return dst
 

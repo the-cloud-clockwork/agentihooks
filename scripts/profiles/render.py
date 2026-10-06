@@ -253,10 +253,10 @@ def _link(link: Path, target: Path) -> None:
 
 
 def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) -> dict:
-    doc = {k: v for k, v in settings.items() if not k.startswith("_") and k not in ("agentihooks", "mcp_servers")}
+    doc = {k: v for k, v in settings.items() if k != "mcp_servers"}
     doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
     doc["sqlite_home"] = str(operator)
-    doc.setdefault("features", {})["hooks"] = True
+    doc["features"]["hooks"] = True
     source = f"{operator / 'hooks.json'}:"
     state = (installed.get("hooks") or {}).get("state") or {}
     trusted = {f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)}
@@ -286,7 +286,7 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     ):
         return None
     claude = rendered_root() / name / "claude"
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(exist_ok=True)
     _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
     for item in CODEX_STATE:

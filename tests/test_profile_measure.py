@@ -167,6 +167,14 @@ def test_codex_layer_off_changes_only_that_layer(rendered, layer, check):
     assert check(seen)
 
 
+def test_codex_layers_off_on_a_bare_config(rendered):
+    (rendered.parent / "codex" / "config.toml").write_text('model = "m"\n')
+    run, seen = _runner(CODEX_STREAM)
+    off = frozenset({"plugins", "hooks", "mcp"})
+    measure.measure("engineer", "codex", off, environ={}, run=run)
+    assert seen["config"] == {"model": "m", "features": {"plugins": False, "hooks": False}}
+
+
 def test_hooks_off_when_the_profile_has_no_hooks(rendered):
     (rendered / "settings.json").write_text(json.dumps({"env": {}}))
     run, seen = _runner(CLAUDE_STREAM)
