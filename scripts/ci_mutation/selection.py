@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import sys
@@ -35,7 +36,33 @@ def run_selected(selection: Path) -> None:
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]))
-        out.write(code)
+        bootstrap = (
+            "import os as _mutmut_os\n"
+            "from pathlib import Path as _mutmut_Path\n"
+            "_mutmut_cwd = _mutmut_os.getcwd()\n"
+            "try:\n"
+            f"    _mutmut_os.chdir({str(Path.cwd())!r})\n"
+            "    from mutmut.configuration import Config as _mutmut_Config\n"
+            "    _mutmut_config = _mutmut_Config.get()\n"
+            f"    _mutmut_config.source_paths = [(_mutmut_Path({str(Path.cwd() / 'mutants')!r}) / path).resolve() for path in _mutmut_config.source_paths]\n"
+            "finally:\n"
+            "    _mutmut_os.chdir(_mutmut_cwd)\n"
+        )
+        statements = ast.parse(code).body
+        index = 0
+        for statement in statements:
+            if isinstance(statement, ast.ImportFrom) and statement.module == "__future__":
+                index = statement.end_lineno
+            elif (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            ):
+                index = statement.end_lineno
+            else:
+                break
+        source_lines = code.splitlines(keepends=True)
+        out.write("".join(source_lines[:index]) + bootstrap + "".join(source_lines[index:]))
         return names
 
     collect_stats = runner.collect_or_load_stats

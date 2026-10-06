@@ -1,3 +1,4 @@
+import ast
 import json
 import shutil
 import sys
@@ -64,6 +65,56 @@ def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, mo
     assert report["failed"] is False
 
 
+@pytest.mark.parametrize("child, fault", [(False, False), (True, False), (True, True)])
+def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child, fault):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    root = Path(__file__).parents[1]
+    for name in ("hooks", "scripts"):
+        shutil.copytree(root / name, tmp_path / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    (tmp_path / "tests").mkdir()
+    probe = (
+        "from scripts.swarm.store import _whole\n"
+        "assert _whole('7') == 7\n"
+        "assert _whole('0') == 0\n"
+        "assert _whole('') is None\n"
+    )
+    test = "import os, subprocess, sys\nfrom pathlib import Path\n\n"
+    test += "def test_store(tmp_path, monkeypatch):\n"
+    if child:
+        test += "".join("    " + line + "\n" for line in probe.splitlines())
+        test += (
+            "    result = subprocess.run([sys.executable, '-c', " + repr(probe) + "],\n"
+            "        cwd=tmp_path, env={**os.environ, 'PYTHONPATH': str(Path(__file__).parents[1])},\n"
+            "        capture_output=True, text=True)\n"
+            "    assert result.returncode == 0, result.stderr\n"
+        )
+    else:
+        test += "    monkeypatch.chdir(tmp_path)\n" + "".join("    " + line + "\n" for line in probe.splitlines())
+    (tmp_path / "tests/test_store.py").write_text(test)
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    store = tmp_path / "scripts/swarm/store.py"
+    function = next(
+        node
+        for node in ast.parse(store.read_text()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_whole"
+    )
+    if fault:
+        store.write_text(
+            store.read_text().replace("return int(raw) if raw else None", "return int(raw) + 1 if raw else None")
+        )
+    report = run_gate(tmp_path, {"scripts/swarm/store.py": {function.end_lineno}}, tmp_path / "evidence", 30)
+    logs = "\n".join(path.read_text() for path in (tmp_path / "evidence").glob("*/run.log"))
+    assert "FileNotFoundError" not in logs
+    if fault:
+        assert report["failed"] is True
+        assert "AssertionError" in logs
+        assert "assert 8 == 7" in logs
+    else:
+        assert report["not_mutated"] == [], logs
+        assert report["files"][0]["counts"]["killed"] > 0
+        assert report["failed"] is False
+
+
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import run_selected
 
@@ -102,7 +153,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         stream = __import__("io").StringIO()
         names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
         assert names == ["selected"]
-        assert stream.getvalue() == "generated"
+        assert stream.getvalue().endswith("generated")
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.collect_or_load_stats(test_runner) == "collected"
         assert config.source_paths == [Path("hooks/")]
