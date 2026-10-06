@@ -13,6 +13,7 @@ from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds
 
 CLOSES = "The swarm then closes this session; stop working."
+PUBLISHED = "It opens a GitHub issue where the repo has issues, else a ledger artifact"
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
     "request into dev and CI, never a live patch."
@@ -81,6 +82,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
         '--phase <phase id> --description "<seams and done condition>". Rewrite a task description with '
         f'{led} task set <id> description="<text>".',
+        "- When the operator accepts a plan of yours, add its phases, then publish it before adding its tasks: "
+        f"{led} publish-plan <plan file> --phase <phase ids>. {PUBLISHED}, links and comments each phase, and every "
+        "task added to those phases carries the link.",
         *(
             [
                 "- This swarm runs at full autonomy: turn a follow up an agent proposes into a task yourself, with "
@@ -397,13 +401,18 @@ def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
         "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",
-        f"2. Slice only phase {phase}. Edit no code. Add tasks with {led} task add <id> <title> --phase {phase} "
+        f"2. Slice only phase {phase}. Edit no code. Write the slice as a markdown plan: the plan you leave plan mode "
+        "with, or plan.md in your work folder.",
+        f"3. Publish the plan before adding tasks: {led} publish-plan <plan file> --phase {phase}. {PUBLISHED}, links "
+        "and comments the phase, and every task you add in this phase carries the link.",
+        f"4. Add tasks with {led} task add <id> <title> --phase {phase} "
         '--lane <eng or ci> --kind <kind> --description "<scope and Done when sentence>" '
         "--depends-on <ids> --territory <areas>; include --must, --check and --judge for work beyond code.",
-        "3. Keep each code or ci task to one pull request, at most six territory areas and twelve tasks in the slice.",
-        f'4. Propose work outside this phase as a follow up: {led} followup add "<plain words>".',
-        f"5. Leave the crew with {led} leave, then close with {me} done --slice <ids>, the comma separated ids "
-        f"of the tasks you added in this phase. The ledger refuses invalid slice ids. {CLOSES}",
+        "5. Keep each code or ci task to one pull request, at most six territory areas and twelve tasks in the slice.",
+        f'6. Propose work outside this phase as a follow up: {led} followup add "<plain words>".',
+        f"7. Leave the crew with {led} leave, then close with {me} done --slice <ids>, the comma separated ids "
+        f"of the tasks you added in this phase. The ledger refuses invalid slice ids and slice tasks without the "
+        f"plan link. {CLOSES}",
     ]
 
 
