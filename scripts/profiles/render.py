@@ -88,7 +88,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
 
     _i = _install_module()
     doc = _settings("claude", bundle, dirs)
-    env = doc.setdefault("env", {})
+    env = doc["env"]
     env[CHANNELS] = _with_brain(env.get(CHANNELS, ""))
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
@@ -110,7 +110,7 @@ def _with_brain(channels: str) -> str:
 
 
 def channels(name: str) -> str:
-    env = _settings("claude", _install_module()._get_bundle_path(), _chain(name)).get("env", {})
+    env = _settings("claude", _install_module()._get_bundle_path(), _chain(name))["env"]
     return _with_brain(env.get(CHANNELS, ""))
 
 
