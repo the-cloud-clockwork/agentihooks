@@ -300,7 +300,7 @@ def build_parser():
     sub.add_parser("measure").add_argument("finding")
     rated = sub.add_parser("rates")
     rated.add_argument("--hours", type=float, default=24)
-    rated.add_argument("--at", default="")
+    rated.add_argument("--at")
     rated.add_argument("--json", action="store_true")
     intervene = sub.add_parser("intervene")
     intervene.add_argument("action")

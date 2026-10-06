@@ -25,11 +25,11 @@ def gate_log_path(slug, home=SWARM_HOME):
 
 def _lines(path):
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError:
         return []
     rows = []
-    for line in text.splitlines():
+    for line in raw.splitlines():
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -86,15 +86,12 @@ def pulls(redis, slug, urls, run=subprocess.run):
 
 
 def _done_urls(events, tasks, span):
-    found = []
-    for e in events:
-        target = e.get("target", "")
-        if e.get("kind") != "task done" or not span.holds(e.get("at", -1)) or not target.startswith("tasks/"):
-            continue
-        url = tasks.get(target.split("/", 1)[1], {}).get("pr_url")
-        if url:
-            found.append(url)
-    return found
+    done = [
+        e["target"].removeprefix("tasks/")
+        for e in events
+        if e["kind"] == "task done" and span.holds(e["at"]) and e["target"].startswith("tasks/")
+    ]
+    return [tasks[tid]["pr_url"] for tid in done if tasks.get(tid, {}).get("pr_url")]
 
 
 def load(store, ledger, slug, span, run=subprocess.run, home=SWARM_HOME):

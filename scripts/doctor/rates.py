@@ -17,6 +17,7 @@ HOUR_MS = 60 * MINUTE_MS
 TALK = ("comment added", "comment edited", "message added")
 OUTCOMES = ("task pr", "task done")
 GATE_KINDS = ("deny", "observe", "lift", "fail-open")
+GATE_FIELDS = {"at", "gate", "kind"}
 MERGED = "MERGED"
 
 
@@ -58,12 +59,12 @@ def _average(values):
 
 
 def _in(records, window, *kinds):
-    return [e for e in records.events if e.get("kind") in kinds and window.holds(e.get("at", -1))]
+    return [e for e in records.events if e["kind"] in kinds and window.holds(e["at"])]
 
 
 def _task(event):
-    target = event.get("target", "")
-    return target.split("/", 1)[1] if target.startswith("tasks/") else ""
+    target = event["target"]
+    return target.removeprefix("tasks/") if target.startswith("tasks/") else ""
 
 
 def _worker(by):
@@ -71,8 +72,8 @@ def _worker(by):
 
 
 def _talk(event):
-    followup = event.get("kind") == "added" and event.get("target", "").startswith("followups/")
-    return event.get("kind") in TALK or followup
+    followup = event["kind"] == "added" and event["target"].startswith("followups/")
+    return event["kind"] in TALK or followup
 
 
 def _done(records, window):
@@ -80,11 +81,15 @@ def _done(records, window):
 
 
 def _pull(records, task_id):
-    return records.pulls.get(records.tasks[task_id].get("pr_url") or "")
+    return records.pulls.get(records.tasks[task_id].get("pr_url"))
+
+
+def _merged(pull):
+    return pull is not None and pull.state == MERGED
 
 
 def ceremony(records, window):
-    talk = [e for e in _in(records, window, *TALK, "added") if _talk(e) and _worker(e.get("by", ""))]
+    talk = [e for e in _in(records, window, *TALK, "added") if _talk(e) and _worker(e["by"])]
     outcomes = len(_in(records, window, *OUTCOMES))
     return {"talk writes": len(talk), "outcomes": outcomes, "talk per outcome": ratio(len(talk), outcomes)}
 
@@ -94,10 +99,10 @@ def _outside(files, territory):
 
 
 def scope_inflation(records, window):
-    merged = [tid for tid in _done(records, window) if getattr(_pull(records, tid), "state", "") == MERGED]
+    merged = [tid for tid in _done(records, window) if _merged(_pull(records, tid))]
     bounded = [tid for tid in merged if records.tasks[tid].get("territory")]
     outside = sum(_outside(_pull(records, tid).files, records.tasks[tid]["territory"]) for tid in bounded)
-    added = [e for e in _in(records, window, "added") if _task(e) and _worker(e.get("by", ""))]
+    added = [e for e in _in(records, window, "added") if _task(e) and _worker(e["by"])]
     return {
         "merged tasks": len(merged),
         "lines per merged task": _average([_pull(records, tid).lines for tid in merged]),
@@ -109,7 +114,7 @@ def scope_inflation(records, window):
 def context_narrowing(records, window):
     reached = {}
     for e in records.events:
-        if e.get("kind") in OUTCOMES:
+        if e["kind"] in OUTCOMES:
             reached.setdefault(_task(e), e["at"])
     opened = [e for e in _in(records, window, "task open") if reached.get(_task(e), e["at"]) < e["at"]]
     done = len(_in(records, window, "task done"))
@@ -145,7 +150,7 @@ def monitoring(records, window):
         lane = naming.lane_of(name)
         if lane not in ("eng", "ci", "master"):
             continue
-        counted = health_activity.tally([r for r in rows if window.holds(r.get("at", -1))])
+        counted = health_activity.tally([r for r in rows if "at" in r and window.holds(r["at"])])
         into = master if lane == "master" else workers
         for kind in into:
             into[kind] += counted[kind]
@@ -181,7 +186,7 @@ def stale(records, window):
 def premature(records, window):
     code = [tid for tid in _done(records, window) if ledger_kinds.kind(records.tasks[tid]) in ("code", "ci")]
     unread = [tid for tid in code if records.tasks[tid].get("pr_url") and _pull(records, tid) is None]
-    unmerged = [tid for tid in code if tid not in unread and getattr(_pull(records, tid), "state", "") != MERGED]
+    unmerged = [tid for tid in code if tid not in unread and not _merged(_pull(records, tid))]
     return {
         "code tasks done": len(code),
         "done without a merged pull request": len(unmerged),
@@ -209,8 +214,8 @@ def rates(records, window):
 def gate_counts(records, window):
     found = {}
     for row in records.gate_log:
-        if window.holds(row.get("at", -1)) and row.get("kind") in GATE_KINDS:
-            found.setdefault(row.get("gate", ""), dict.fromkeys(GATE_KINDS, 0))[row["kind"]] += 1
+        if GATE_FIELDS <= row.keys() and window.holds(row["at"]) and row["kind"] in GATE_KINDS:
+            found.setdefault(row["gate"], dict.fromkeys(GATE_KINDS, 0))[row["kind"]] += 1
     return found
 
 

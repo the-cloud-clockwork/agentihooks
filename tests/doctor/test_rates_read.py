@@ -27,7 +27,9 @@ class Run:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
-        return subprocess.CompletedProcess(argv, self.code, json.dumps(self.payload), "")
+        self.kwargs = kwargs
+        payload = self.payload(argv[3]) if callable(self.payload) else self.payload
+        return subprocess.CompletedProcess(argv, self.code, json.dumps(payload), "")
 
 
 def fake_redis():
@@ -45,6 +47,7 @@ def test_fetch_asks_gh_for_the_rate_fields_and_returns_none_on_failure():
     run = Run(RAW)
     assert rates_read.fetch(URL.format(1), run) == RAW
     assert run.calls == [["gh", "pr", "view", URL.format(1), "--json", rates_read.FIELDS]]
+    assert run.kwargs == {"capture_output": True, "text": True, "timeout": 20}
     assert rates_read.fetch(URL.format(1), Run(RAW, code=1)) is None
 
     def broken(*_, **__):
@@ -82,14 +85,26 @@ def home(monkeypatch, tmp_path):
 def test_injections_read_session_files_touched_since_the_window_and_time_each_row(home):
     folder = home / "injections"
     folder.mkdir()
+    first, later = "2026-10-06T10:00:00Z", "2026-10-06T11:00:00Z"
     (folder / "s1.jsonl").write_text(
-        json.dumps({"at": "2026-10-06T10:00:00Z", "source": "e1"}) + "\n{torn\n" + json.dumps({"source": "no-time"})
+        json.dumps({"at": first, "source": "e1"})
+        + "\n{torn\n"
+        + json.dumps({"source": "no-time"})
+        + "\n"
+        + json.dumps({"at": later, "source": "e2"})
     )
+    (folder / "s2.jsonl").write_text(json.dumps({"at": later, "source": "e3"}))
     old = folder / "s0.jsonl"
     old.write_text(json.dumps({"at": "2026-10-01T10:00:00Z", "source": "e0"}) + "\n")
-    os.utime(old, (1, 1))
-    rows = rates_read.injections(5_000)
-    assert rows == [{"at": rates_read.iso_ms("2026-10-06T10:00:00Z"), "source": "e1"}]
+    os.utime(folder / "s1.jsonl", (100, 100))
+    os.utime(folder / "s2.jsonl", (50, 50))
+    os.utime(old, (49.96, 49.96))
+    rows = rates_read.injections(50_000)
+    assert rows == [
+        {"at": rates_read.iso_ms(first), "source": "e1"},
+        {"at": rates_read.iso_ms(later), "source": "e2"},
+        {"at": rates_read.iso_ms(later), "source": "e3"},
+    ]
 
 
 def test_injections_without_a_folder_read_nothing(home):
@@ -98,9 +113,10 @@ def test_injections_without_a_folder_read_nothing(home):
 
 class Ledger:
     def __init__(self, state):
-        self._state = state
+        self._state, self.asked = state, []
 
     def state(self, slug):
+        self.asked.append(slug)
         return self._state
 
 
@@ -110,13 +126,17 @@ def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in
     (home / "swarm-activity" / "sw").mkdir(parents=True)
     (home / "swarm-activity" / "sw" / "sw-eng-1.jsonl").write_text(json.dumps({"kind": "watch", "at": 3}) + "\n")
     (home / "injection_corrections.jsonl").write_text(json.dumps({"at": "2026-10-06T10:00:00Z", "source": "e1"}))
+    (home / "injections").mkdir()
+    (home / "injections" / "s1.jsonl").write_text(json.dumps({"at": "2026-10-06T10:00:00Z", "source": "e1"}))
     gates = tmp_path / "swarm"
+    assert rates_read.gate_log_path("sw", gates) == gates / "sw" / "gates" / "log.jsonl"
     rates_read.gate_log_path("sw", gates).parent.mkdir(parents=True)
     rates_read.gate_log_path("sw", gates).write_text(json.dumps({"gate": "talk", "kind": "deny", "at": 4}) + "\n")
     events = [
-        {"at": 150 * MIN, "kind": "task done", "target": "tasks/t1"},
         {"at": 50 * MIN, "kind": "task done", "target": "tasks/t2"},
+        {"at": 150 * MIN, "kind": "task done", "target": "tasks/t1"},
         {"at": 150 * MIN, "kind": "task done", "target": "tasks/t3"},
+        {"at": 150 * MIN, "kind": "task done", "target": "tasks/gone"},
         {"at": 150 * MIN, "kind": "task done", "target": "phases/p1"},
         {"at": 150 * MIN, "kind": "task pr", "target": "tasks/t4"},
     ]
@@ -126,19 +146,33 @@ def test_load_reads_every_source_and_fetches_only_pull_requests_of_tasks_done_in
         {"id": "t3", "pr_url": ""},
         {"id": "t4", "pr_url": URL.format(4)},
     ]
-    run = Run(RAW)
-    records = rates_read.load(
-        store, Ledger({"tasks": tasks, "_meta": {"events": events}}), "sw", Window(100 * MIN, 200 * MIN), run, gates
-    )
+    run, ledger = Run(RAW), Ledger({"tasks": tasks, "_meta": {"events": events}})
+    records = rates_read.load(store, ledger, "sw", Window(100 * MIN, 200 * MIN), run, gates)
+    assert ledger.asked == ["sw"]
     assert [c[3] for c in run.calls] == [URL.format(1)]
     assert records.events == events
     assert sorted(records.tasks) == ["t1", "t2", "t3", "t4"]
     assert records.activity == {"sw-eng-1": [{"kind": "watch", "at": 3}]}
     assert records.findings == {"stale-claim/t1": {"seen_at": 5, "measure": 40}}
     assert records.gate_log == [{"gate": "talk", "kind": "deny", "at": 4}]
-    assert records.injections == []
+    assert records.injections == [{"at": rates_read.iso_ms("2026-10-06T10:00:00Z"), "source": "e1"}]
     assert records.corrections == [{"at": rates_read.iso_ms("2026-10-06T10:00:00Z"), "source": "e1"}]
     assert records.pulls == {URL.format(1): rates_read.pull(RAW)}
+
+
+def test_lines_skip_a_torn_line_and_keep_the_rest(tmp_path):
+    path = tmp_path / "log.jsonl"
+    path.write_text('{"a": 1}\n{torn\n{"b": 2}\n')
+    assert rates_read._lines(path) == [{"a": 1}, {"b": 2}]
+    assert rates_read._lines(tmp_path / "missing.jsonl") == []
+
+
+def test_an_unreadable_pull_request_does_not_stop_the_next_one():
+    def payload(url):
+        return RAW if url == URL.format(2) else ["not", "a", "pull"]
+
+    found = rates_read.pulls(fake_redis(), "sw", [URL.format(2), URL.format(1)], Run(payload))
+    assert found == {URL.format(2): rates_read.pull(RAW)}
 
 
 def test_a_missing_gate_log_and_ledger_meta_read_as_empty(home, tmp_path):
