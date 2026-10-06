@@ -6,54 +6,43 @@ import tomllib
 from hooks.targets import codex_home
 from scripts.claude_config import claude_home
 
-CODEX_CONFIG = ("-c", "--config")
+CODEX_EFFORT = "model_reasoning_effort"
+
+
+def _values(argv, names):
+    return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg in names]
 
 
 def _flag(argv, names):
-    for i, arg in enumerate(argv):
-        if arg in names and i + 1 < len(argv):
-            return argv[i + 1]
-        for name in names:
-            if name.startswith("--") and arg.startswith(f"{name}="):
-                return arg.split("=", 1)[1]
-    return ""
+    return next(iter(_values(argv, names)), "")
 
 
-def _codex_overrides(argv):
-    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg in CODEX_CONFIG]
-    values += [arg.split("=", 1)[1] for arg in argv if arg.startswith("--config=")]
-    pairs = (value.partition("=") for value in values)
-    return {key.strip(): raw.strip().strip("\"'") for key, _, raw in pairs}
+def _codex_effort(argv):
+    pairs = (value.partition("=") for value in _values(argv, ("-c", "--config")))
+    return next((raw.strip("\"'") for key, _, raw in pairs if key == CODEX_EFFORT), "")
 
 
 def _codex_config():
     try:
-        config = tomllib.loads((codex_home() / "config.toml").read_text(encoding="utf-8"))
+        config = tomllib.loads((codex_home() / "config.toml").read_text())
     except (OSError, tomllib.TOMLDecodeError):
         return "", ""
-    return str(config.get("model") or ""), str(config.get("model_reasoning_effort") or "")
+    return config.get("model", ""), config.get(CODEX_EFFORT, "")
 
 
 def _claude_config():
     try:
-        settings = json.loads((claude_home() / "settings.json").read_text(encoding="utf-8"))
+        settings = json.loads((claude_home() / "settings.json").read_text())
     except (OSError, ValueError):
         return "", ""
-    if not isinstance(settings, dict):
-        return "", ""
-    return str(settings.get("model") or ""), str(settings.get("effortLevel") or "")
+    return settings.get("model", ""), settings.get("effortLevel", "")
 
 
 def read(harness, argv):
     if harness == "codex":
-        overrides = _codex_overrides(argv)
-        model = _flag(argv, ("-m", "--model")) or overrides.get("model", "")
-        effort = overrides.get("model_reasoning_effort", "")
-        fallback = _codex_config
+        model, effort = _flag(argv, ("-m", "--model")), _codex_effort(argv)
+        config_model, config_effort = _codex_config()
     else:
         model, effort = _flag(argv, ("--model",)), _flag(argv, ("--effort",))
-        fallback = _claude_config
-    if model and effort:
-        return model, effort
-    config_model, config_effort = fallback()
+        config_model, config_effort = _claude_config()
     return model or config_model, effort or config_effort
