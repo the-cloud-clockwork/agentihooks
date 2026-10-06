@@ -45,6 +45,8 @@ class Placed:
     effort: str = ""
     placement: str = ""
     profile: str = ""
+    model_source: str = ""
+    model_confidence: float | None = None
 
 
 class Ledger(Protocol):
@@ -305,6 +307,8 @@ def _placed(record, placed):
         effort=placed.effort,
         placement=placed.placement,
         profile=placed.profile,
+        model_source=placed.model_source,
+        model_confidence=placed.model_confidence,
         state="working",
     )
 

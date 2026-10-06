@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
-from scripts.swarm import naming, prompt
+from scripts.swarm import model_pick, naming, prompt
 from scripts.swarm.store import SwarmConfig, codex_split
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import Placed, SpawnError
@@ -96,7 +96,9 @@ class HerdrRuntime:
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         argv = self._argv(config, name, agent, text, f"{name}.md", chosen.get("profile", DEFAULT_PROFILES[lane]))
-        return self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, chosen)])
+        picked = model_pick.pick(agent, chosen, task, environ)
+        placed = self._launch(config, lane, task["id"], name, [*argv, *_model_args(agent, picked.__dict__)])
+        return replace(placed, model_source=picked.source, model_confidence=picked.confidence)
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""

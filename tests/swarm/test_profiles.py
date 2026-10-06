@@ -130,6 +130,8 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
         "Task",
         "State",
         "Conversation",
+        "Model source",
+        "Confidence",
     ]
     agents = {row[0]: row for row in rows[1:]}
     assert agents["m"][3:5] == ["master", "sonnet low"]
