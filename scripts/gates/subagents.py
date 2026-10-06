@@ -1,8 +1,5 @@
 """The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name."""
 
-from dataclasses import dataclass
-from typing import ClassVar
-
 from scripts.gates import log
 from scripts.gates.base import Decision
 from scripts.gates.budget import Budget
@@ -18,12 +15,12 @@ def refusal(slug, task, counter, cap):
     )
 
 
-@dataclass(frozen=True)
 class SubagentBudget:
-    launches: int = 8
-    continuations: int = 8
-    name: ClassVar[str] = "subagents"
-    default_mode: ClassVar[str] = "observe"
+    name = "subagents"
+    default_mode = "observe"
+
+    def __init__(self, launches=8, continuations=8):
+        self.launches, self.continuations = launches, continuations
 
     def matches(self, call):
         return call.tool in LAUNCH_TOOLS or call.tool in CONTINUE_TOOLS

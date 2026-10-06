@@ -2,9 +2,8 @@
 
 import json
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Callable, ClassVar
 
 from scripts.gates import log
 from scripts.gates.base import Decision
@@ -73,12 +72,12 @@ def refusal(slug, head, cap):
     )
 
 
-@dataclass(frozen=True)
 class RerunBudget:
-    cap: int = 2
-    jobs: Callable = field(default=gh_jobs, compare=False)
-    name: ClassVar[str] = "reruns"
-    default_mode: ClassVar[str] = "enforce"
+    name = "reruns"
+    default_mode = "enforce"
+
+    def __init__(self, cap=2, jobs=gh_jobs):
+        self.cap, self.jobs = cap, jobs
 
     def matches(self, call):
         return call.tool == "Bash" and "gh" in call.command and "rerun" in call.command
