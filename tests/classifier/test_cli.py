@@ -145,6 +145,21 @@ def test_install_dispatches_both_commands(monkeypatch):
     assert seen == [("classify", ["--state", "s"]), ("classifier", ["stats"])]
 
 
+def test_agentihooks_help_lists_both_commands(monkeypatch, capsys):
+    from scripts import install
+
+    monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit) as done:
+        install.main()
+    assert done.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    for text in (
+        "classify Ask the decision models typed questions: --state FILE --questions FILE",
+        "classifier Decision classifier records: stats [--purpose P]",
+    ):
+        assert re.search(rf"(^|\s){re.escape(text)}($|\s)", out), text
+
+
 @pytest.mark.parametrize(
     ("main", "argv", "expected"),
     [
