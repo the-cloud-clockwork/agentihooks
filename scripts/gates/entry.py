@@ -15,10 +15,11 @@ from scripts.gates.identity import PinnedIdentity
 from scripts.gates.reruns import RerunBudget
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
+from scripts.gates.watch import WatchBudget
 
 LIFTED = "lifted by the operator: "
 
-GATES = {gate.name: gate for gate in (PinnedIdentity(), SubagentBudget(), RerunBudget())}
+GATES = {gate.name: gate for gate in (PinnedIdentity(), WatchBudget(), SubagentBudget(), RerunBudget())}
 
 
 def main(argv=None, stdin=None, environ=None, home=None):
