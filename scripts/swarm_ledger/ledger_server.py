@@ -375,6 +375,8 @@ def control_argv(body):
         return verdict_argv(body)
     if action == "restore-decision":
         return restore_decision_argv(body)
+    if action == "lift":
+        return lift_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
@@ -408,6 +410,15 @@ def restore_decision_argv(body):
     if choice not in {"resume", "fresh"}:
         raise ValueError("Choose resume or fresh")
     return ["restore-decision", agent, choice]
+
+
+def lift_argv(body):
+    agent, gate = body.get("agent"), body.get("gate")
+    if not isinstance(agent, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9@_.-]{0,127}", agent):
+        raise ValueError("A lift needs an agent name")
+    if not isinstance(gate, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", gate):
+        raise ValueError("A lift needs the gate's name")
+    return ["lift", agent, gate]
 
 
 def verdict_argv(body):

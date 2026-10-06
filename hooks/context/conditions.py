@@ -80,7 +80,8 @@ def _cache_path(repo: Path | None = None) -> Path:
     from hooks.config import AGENTIHOOKS_HOME
     from hooks.targets import current_target
 
-    key = f"{zlib.crc32('|'.join((str(_CODE_ROOT), str(repo or ''))).encode()):08x}"
+    profile = profile_chain.active_profile(profile_chain.read_state()) or ""
+    key = f"{zlib.crc32('|'.join((str(_CODE_ROOT), str(repo or ''), profile)).encode()):08x}"
     return AGENTIHOOKS_HOME / "cache" / f"conditions-index.{current_target()}.{key}.json"
 
 

@@ -71,6 +71,7 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_kinds  # noqa: E402
 import ledger_link  # noqa: E402
+import ledger_tasks  # noqa: E402
 import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
@@ -358,6 +359,8 @@ def cmd_claim(args):
 
 def cmd_task(args):
     if args.action == "add":
+        if args.id == "-":
+            args.id = ledger_tasks.next_id(call(args.slug).get("tasks", []))
         title = " ".join(args.values)
         lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
         if args.gain is not None:
@@ -488,7 +491,7 @@ def build_parser():
     sub.add_parser("claim").add_argument("item")
     task = sub.add_parser("task")
     task.add_argument("action", choices=["add", "set"])
-    task.add_argument("id")
+    task.add_argument("id", help="task id; task add - mints the next free t<n>")
     task.add_argument("values", nargs="+")
     task.add_argument("--lane", choices=["eng", "ci", "plan"], default="eng")
     task.add_argument("--phase", default="")

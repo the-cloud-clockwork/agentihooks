@@ -31,8 +31,42 @@ def arm(slug, session_id, gate, home=None, now=None):
 def lifted(slug, session_id, gate, home=None, now=None):
     if not (slug and session_id):
         return False
+    return _fresh(lift_path(slug, session_id, gate, home), now)
+
+
+def agent_lift_path(slug, agent, gate, home=None):
+    return log.gates_dir(slug, home) / "lifts" / "agents" / safe_name(agent) / safe_name(gate)
+
+
+def agent_lifted(slug, agent, gate, home=None, now=None):
+    if not (slug and agent):
+        return False
+    return _fresh(agent_lift_path(slug, agent, gate, home), now)
+
+
+def lift_agent(who, gate, home=None, now=None):
+    path = agent_lift_path(who.swarm, who.name, gate, home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": time.time() if now is None else now}))
+    log.append(who.swarm, log.Row.of(gate, "lift", who, reason=LIFT_REASON), home)
+
+
+def active(rows, now_ms):
+    since = now_ms - LIFT_SECONDS * 1000
+    gates = {}
+    for row in rows:
+        if row.get("kind") in ("deny", "lift") and row.get("agent") and row.get("at", 0) > since:
+            key = (row["agent"], row.get("gate"))
+            gates[key] = row["kind"] == "lift"
+    by_agent = {}
+    for (agent, gate), was_lifted in sorted(gates.items()):
+        by_agent.setdefault(agent, []).append({"gate": gate, "lifted": was_lifted})
+    return by_agent
+
+
+def _fresh(path, now):
     try:
-        record = json.loads(lift_path(slug, session_id, gate, home).read_text())
+        record = json.loads(path.read_text())
     except (OSError, ValueError):
         return False
     at = record.get("at") if isinstance(record, dict) else None
