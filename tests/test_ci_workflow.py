@@ -10,8 +10,9 @@ import pytest
 import yaml
 from _pytest.config import default_plugins
 
+from tests import refresh_durations
 from tests.conftest import COLLECTED_NODEIDS
-from tests.refresh_durations import median_durations
+from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
 pytestmark = pytest.mark.unit
 
@@ -230,6 +231,57 @@ def test_stored_durations_cover_the_collected_suite(request):
 def test_refreshed_durations_take_the_median_so_one_slow_run_does_not_move_a_test():
     runs = [{"a": 0.1, "b": 1.0}, {"a": 2.5, "b": 1.2}, {"a": 0.2, "b": 1.1}]
     assert median_durations(runs) == {"a": 0.2, "b": 1.1}
+
+
+def test_unit_shards_store_the_durations_they_measure():
+    command = _pytest_command()
+    assert "--store-durations --durations-path durations.json" in command
+    assert "no:pytest-split" not in command
+
+
+def test_unit_shards_upload_their_durations_for_the_refresh():
+    upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
+    run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
+    assert upload_index == run_index + 1
+    assert upload["if"] == "steps.lookup.outputs.skip != 'true'"
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
+    assert upload["with"]["path"] == "durations.json"
+
+
+def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
+    shards = {
+        "durations-3.11-1": {"t.py::a@group": 1.0},
+        "durations-3.12-1": {"t.py::a@group": 3.0, "t.py::b[x@y]": 2.0},
+    }
+    for name, durations in shards.items():
+        (tmp_path / "7" / name).mkdir(parents=True)
+        (tmp_path / "7" / name / "durations.json").write_text(json.dumps(durations))
+    assert ci_samples(tmp_path) == [{"t.py::a": 1.0}, {"t.py::a": 3.0, "t.py::b[x@y]": 2.0}]
+
+
+def test_ci_refresh_reads_the_newest_distinct_runs_that_kept_durations():
+    calls = []
+
+    def gh(args):
+        calls.append(args)
+        return "9\n9\n5\n3\n"
+
+    assert ci_run_ids(2, gh) == ["9", "5"]
+    assert "actions/artifacts?name=durations-3.12-1" in calls[0][1]
+
+
+def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, monkeypatch):
+    def download(run_ids, folder):
+        for run, seconds in zip(run_ids, (1.0, 5.0, 2.0)):
+            (folder / run / "durations-3.12-1").mkdir(parents=True)
+            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+
+    monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["1", "2", "3"][:limit])
+    monkeypatch.setattr(refresh_durations, "ci_download", download)
+    refresh_durations.main(["--ci", "3"])
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
