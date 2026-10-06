@@ -134,3 +134,31 @@ def test_runtime_read_failure_uses_the_observed_herdr_state(tmp_path):
     observed = runtime.observe(AgentRecord("engineer", "eng", "task", pane_id="w:p1"))
     assert observed.state == "idle"
     assert observed.prompt_title == ""
+
+
+def test_a_master_selection_prompt_is_visible_without_idle_nudges():
+    import fakeredis
+
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
+    agent = AgentRecord("master", "master", "")
+    store.put_agent("sw", agent)
+    runtime = FakeRuntime()
+    runtime.live.add(agent.name)
+    runtime.observe = lambda a: PaneObservation("waiting", TITLE)
+    tick("sw", store, FakeLedger([]), runtime, 1)
+    master = store.agents("sw")[0]
+    assert master.input_prompt == TITLE
+    assert master.input_ticks == 1
+    assert runtime.nudged == runtime.killed == []
+    runtime.observe = lambda a: PaneObservation("idle")
+    tick("sw", store, FakeLedger([]), runtime, 2)
+    master = store.agents("sw")[0]
+    assert master.input_prompt == ""
+    assert master.idle_ticks == 0
+    assert runtime.nudged == runtime.killed == []

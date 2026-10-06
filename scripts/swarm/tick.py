@@ -147,6 +147,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 actions.append(f"could not retire {agent.name}, retrying next tick")
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
+            actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
@@ -174,6 +175,9 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
     agent = replace(agent, input_prompt="", input_ticks=0)
+    if agent.lane == MASTER:
+        store.put_agent(slug, agent)
+        return []
     state = idle_state.verdict(
         observed.state,
         idle_state.heartbeat(store.redis, slug, agent.name),
