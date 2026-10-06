@@ -127,6 +127,52 @@ class TestBranchGuard:
         self._assert_allowed("echo 'do not push to main'")
 
 
+class TestOnlyTheCommandsOwnOperands:
+    """A protected word in other text of the call never blocks; an operand of the git command does."""
+
+    def _check(self, command: str):
+        from hooks.context.branch_guard import check_branch_guard
+
+        check_branch_guard({"tool_input": {"command": command}, "session_id": "test-operands"})
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git branch -D engineer-1 && gh issue comment 791 --body "Merged; master untouched"',
+            'gh issue comment 791 --body "do not run git branch -D master" && git branch -d old',
+            'git push origin feat && gh issue comment 5 --body "git push origin main is blocked"',
+            'gh issue comment 5 --body "run git checkout -b topic, or git switch -c topic"',
+            "gh issue comment 5 --body 'name it with git branch topic'",
+            "git branch -D old && echo master",
+            'grep -c "git push origin main" hooks.log',
+            'sh notify.sh "git push origin main went through"',
+            'git branch --format="%(refname:short) %(upstream:short)"',
+        ],
+    )
+    def test_protected_word_in_other_text_allowed(self, command):
+        self._check(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git push origin "main"',
+            "git push origin 'HEAD:main'",
+            "git branch -D 'master'",
+            "git push origin main; echo pushed",
+            'bash -c "git push origin main"',
+            "bash -lc 'git branch -D master'",
+            'sudo sh -c "git push origin HEAD:master"',
+            "curl https://example.com/X#top; git push origin main",
+            'git branch -D main "unterminated',
+        ],
+    )
+    def test_operand_of_the_git_command_blocked(self, command):
+        from hooks.hook_manager import BlockAction
+
+        with pytest.raises(BlockAction):
+            self._check(command)
+
+
 class TestPRBaseGuard:
     """gh pr create must name an explicit --base.
 
@@ -198,6 +244,16 @@ class TestPRBaseGuard:
         ):
             self._check("gh pr create --base dev --fill")
             self._check("gh pr create --base=dev --fill")
+
+    def test_pr_base_read_from_the_create_command_only(self):
+        from unittest.mock import patch
+
+        with (
+            patch("hooks.context.branch_guard._has_pr_signal", return_value=False),
+            patch("hooks.context.controls_toggle.is_controls_disabled", return_value=False),
+        ):
+            self._check('gh pr create --base dev --body "never use --base main"')
+            self._check('gh issue comment 5 --body "gh pr create --base main needs a signal"')
 
 
 class TestPrSignalResetsCounter:
