@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from hooks.classifier import ClassifierUnavailable, Score, decide
-from scripts.init_agent import model_effort
 
 EFFORTS = {"claude": ("low", "medium", "high", "max"), "codex": ("low", "medium", "high", "xhigh")}
 
@@ -15,6 +14,8 @@ class ModelPick:
 
 
 def pick(harness: str, lane: dict, task: dict, environ: dict) -> ModelPick:
+    from scripts.init_agent import model_effort
+
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
     levels = EFFORTS[harness]
     floor = model_effort(harness, [], environ)[1]

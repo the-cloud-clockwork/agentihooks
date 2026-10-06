@@ -393,13 +393,7 @@ def test_a_swarm_config_model_wins_over_the_seat_default(tmp_path, monkeypatch):
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 
-    return DecisionResult(
-        {
-            "tier": Answer("choice", choice="small", confidence=0.95),
-            "effort": Answer("score", score=0, confidence=0.95),
-        },
-        "luna",
-    )
+    return DecisionResult({"effort": Answer("score", score=0, confidence=0.95)}, "luna")
 
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
