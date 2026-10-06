@@ -15,26 +15,26 @@ def live(doc, name):
 
 
 def finished(task):
-    return bool(task.get("done")) or task.get("state") == "done"
+    return task.get("state") == "done"
 
 
 def stale_phases(doc):
     tasks = live(doc, "tasks")
     found = []
     for phase in live(doc, "phases"):
-        mine = [t for t in tasks if t.get("phase") == phase.get("id")]
+        mine = [t for t in tasks if t.get("phase") == phase["id"]]
         if not mine:
             continue
         unfinished = [t["id"] for t in mine if not finished(t)]
         if phase.get("done") and unfinished:
-            found.append(f"{phase['id']} {phase.get('title', '')} is done with {', '.join(unfinished)} not done")
+            found.append(f"{phase['id']} {phase['title']} is done with {', '.join(unfinished)} not done")
         elif not phase.get("done") and not unfinished:
-            found.append(f"{phase['id']} {phase.get('title', '')} is open with every task done")
+            found.append(f"{phase['id']} {phase['title']} is open with every task done")
     return found
 
 
 def undecided_followups(doc):
-    return [f.get("text", "") for f in live(doc, "followups") if not f.get("done")]
+    return [f["text"] for f in live(doc, "followups") if not f.get("done")]
 
 
 def task_counts(doc):
@@ -43,7 +43,7 @@ def task_counts(doc):
 
 
 def closed_last_hour(doc, events, now):
-    recent = {e.get("target", "") for e in events if e.get("kind") == "task done" and now - e.get("at", 0) <= HOUR_MS}
+    recent = {e["target"] for e in events if e["kind"] == "task done" and now - e["at"] <= HOUR_MS}
     return [t["id"] for t in live(doc, "tasks") if finished(t) and f"tasks/{t['id']}" in recent]
 
 
@@ -51,15 +51,9 @@ def mean_minutes(events, task_ids):
     spans = []
     for tid in task_ids:
         target = f"tasks/{tid}"
-        done = [e["at"] for e in events if e.get("kind") == "task done" and e.get("target") == target]
-        if not done:
-            continue
-        claims = [
-            e["at"]
-            for e in events
-            if e.get("kind") == "task claimed" and e.get("target") == target and e["at"] <= done[-1]
-        ]
-        if claims:
+        done = [e["at"] for e in events if e["kind"] == "task done" and e["target"] == target]
+        claims = [e["at"] for e in events if e["kind"] == "task claimed" and e["target"] == target]
+        if done and claims:
             spans.append(done[-1] - claims[-1])
     return round(sum(spans) / len(spans) / MINUTE_MS) if spans else None
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
-from scripts.swarm_ledger import ledger_stats  # noqa: E402
+from scripts.swarm_ledger import ledger_core, ledger_stats  # noqa: E402
 
 HOUR = 3_600_000
 NOW = 10 * HOUR
@@ -52,6 +52,13 @@ class TestStalePhases:
         )
         assert ledger_stats.stale_phases(d) == []
 
+    def test_a_phase_without_tasks_does_not_hide_later_phases(self):
+        d = doc(
+            phases=[{"id": "p0", "title": "Empty", "done": False}, {"id": "p1", "title": "One", "done": True}],
+            tasks=[task("a", "open"), task("b", "pr")],
+        )
+        assert ledger_stats.stale_phases(d) == ["p1 One is done with a, b not done"]
+
 
 class TestFollowupsAndCounts:
     def test_undecided_followups_are_the_open_ones_in_scope(self):
@@ -90,6 +97,10 @@ class TestRate:
         ]
         assert ledger_stats.closed_last_hour(d, events, NOW) == ["a", "b"]
 
+    def test_a_close_exactly_one_hour_ago_counts(self):
+        d = doc(tasks=[task("a", "done")])
+        assert ledger_stats.closed_last_hour(d, [event("task done", "a", NOW - HOUR)], NOW) == ["a"]
+
     def test_mean_minutes_runs_from_the_last_claim_to_the_last_done(self):
         events = [
             event("task claimed", "a", NOW - 90 * MINUTE),
@@ -103,6 +114,10 @@ class TestRate:
 
     def test_mean_minutes_is_none_without_a_claimed_close(self):
         assert ledger_stats.mean_minutes([event("task done", "c", NOW)], ["c"]) is None
+
+    def test_mean_minutes_skips_a_task_with_no_events_and_keeps_the_rest(self):
+        events = [event("task claimed", "b", NOW - 30 * MINUTE), event("task done", "b", NOW)]
+        assert ledger_stats.mean_minutes(events, ["a", "b"]) == 30
 
 
 class TestChain:
@@ -122,6 +137,10 @@ class TestChain:
     def test_a_dependency_cycle_ends_the_chain(self):
         d = doc(tasks=[task("a", "open", depends_on=["b"]), task("b", "open", depends_on=["a"])])
         assert ledger_stats.chain_length(d) == 2
+
+    def test_a_task_without_dependencies_and_an_empty_ledger(self):
+        assert ledger_stats.chain_length(doc(tasks=[{"id": "a", "state": "open"}])) == 1
+        assert ledger_stats.chain_length(doc()) == 0
 
 
 class TestTimeLeft:
@@ -207,3 +226,72 @@ class TestReview:
             "Close rate: 0 tasks in the last hour",
             "Time left: the page shows not set, no task closed in the last hour so code cannot compute it",
         ]
+
+
+class TestReviewBounds:
+    def closes(self, claimed):
+        events = []
+        for n, tid in enumerate(("a", "b", "c", "d")):
+            if claimed:
+                events.append(event("task claimed", tid, NOW - (40 + n) * MINUTE))
+            events.append(event("task done", tid, NOW - (10 + n) * MINUTE))
+        return {"events": events}
+
+    def ledger(self, time_left):
+        done = [task(tid, "done") for tid in ("a", "b", "c", "d")]
+        return doc(
+            phases=[{"id": "p1", "title": "One", "done": False}],
+            followups=[{"id": "f1", "text": "check disk.", "done": False}, {"id": "f2", "text": "rotate logs"}],
+            tasks=[*done, task("e", "open"), task("f", "open", depends_on=["e"])],
+            time_left_minutes=time_left,
+        )
+
+    def test_the_chain_bounds_the_review_when_it_is_longer(self):
+        assert ledger_stats.review(self.ledger(60), self.closes(True), NOW).split(". ")[2:6] == [
+            "Undecided follow-ups: check disk; rotate logs",
+            "Tasks: 2 open, 0 claimed, 0 pr",
+            "Close rate: 4 tasks in the last hour",
+            "Time left: the page shows 1h 0m, computed 1h 0m from 2 remaining at 4 an hour and a chain of 2 "
+            "at 30m a task, current",
+        ]
+
+    def test_closes_without_claims_leave_only_the_throughput_bound(self):
+        assert ledger_stats.review(self.ledger(60), self.closes(False), NOW).split(". ")[5] == (
+            "Time left: the page shows 1h 0m, computed 0h 30m from 2 remaining at 4 an hour and a chain of 2, stale"
+        )
+
+    def test_no_close_keeps_the_page_value_in_the_line(self):
+        assert ledger_stats.review(self.ledger(120), {"events": []}, NOW).split(". ")[5] == (
+            "Time left: the page shows 2h 0m, no task closed in the last hour so code cannot compute it"
+        )
+
+    def test_an_empty_ledger_reviews_to_nothing_left(self):
+        assert ledger_stats.review({}, {}, NOW) == (
+            "Operator stats check, computed now. "
+            "Stale phases: none. "
+            "Undecided follow-ups: none. "
+            "Tasks: 0 open, 0 claimed, 0 pr. "
+            "Close rate: 0 tasks in the last hour. "
+            "Time left: the page shows not set, computed 0h 0m from 0 remaining at 0 an hour and a chain of 0, stale. "
+            "Judge each line against the real work, fix what is stale, then ack."
+        )
+
+
+class TestStatsSyncEvent:
+    def ctx(self):
+        return ledger_core.Context({"rev": 0, "stamps": {}, "events": [], "members": {}}, NOW)
+
+    def test_the_stats_sync_event_carries_the_computed_review(self):
+        d = doc(phases=[{"id": "p1", "title": "One", "done": False}], tasks=[task("a", "done")])
+        ctx = self.ctx()
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "s1"}, ctx) is True
+        assert [(e["kind"], e["id"], e["text"]) for e in ctx.events] == [
+            ("stats sync requested", "s1", ledger_stats.review(d, ctx.meta, NOW))
+        ]
+        assert "Stale phases: p1 One is open with every task done. " in ctx.events[0]["text"]
+
+    def test_the_crew_sync_keeps_its_own_summary(self):
+        ctx = self.ctx()
+        assert ledger_core.record_sync(doc(), {"op": "sync", "id": "s2"}, ctx) is True
+        assert ctx.events[0]["kind"] == "sync requested"
+        assert ctx.events[0]["text"].startswith("Operator sync. ")
