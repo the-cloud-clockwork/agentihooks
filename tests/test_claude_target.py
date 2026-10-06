@@ -213,3 +213,29 @@ def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypa
     assert not (rules / "README.md").exists()
     assert "NEW RULE" in seen[1]
     assert "ADDED RULE" in seen[1]
+
+
+def test_refresh_ignores_sources_of_a_foreign_retargeted_rule(tmp_path):
+    from scripts.targets.claude_target import ClaudeAdapter, refresh_rules
+
+    adapter = ClaudeAdapter()
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "aaa.md").write_text("OLD PROFILE\n")
+    adapter.install_features("rules", [("rule", old)], lambda path: path.suffix == ".md")
+    rules = install.CLAUDE_HOME / "rules"
+    (rules / "aaa.md").unlink()
+    foreign = tmp_path / "foreign.md"
+    foreign.write_text("FOREIGN RULE\n")
+    (rules / "aaa.md").symlink_to(foreign)
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "rule.md").write_text("CURRENT PROFILE\n")
+    adapter.install_features("rules", [("rule", current)], lambda path: path.suffix == ".md")
+    (current / "rule.md").write_text("UPDATED PROFILE\n")
+
+    payload = refresh_rules(rules, install.CLAUDE_HOME / "CLAUDE.md", install.CLAUDE_HOME / "CLAUDE.local.md", False)
+
+    assert (rules / "aaa.md").is_symlink()
+    assert (rules / "rule.md").read_text() == "UPDATED PROFILE\n"
+    assert "UPDATED PROFILE" in payload
