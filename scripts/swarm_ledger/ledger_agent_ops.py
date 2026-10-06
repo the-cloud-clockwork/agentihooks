@@ -97,8 +97,19 @@ def _ack(doc, op, ctx):
     if member is None:
         return False
     member["handled_rev"] = max(member["handled_rev"], min(op["rev"], ctx.rev - 1))
+    if member.get("role") == "orchestrator":
+        _answer_stats(ctx, op["by"], member["handled_rev"])
     ctx.dirty = True
     return True
+
+
+def _answer_stats(ctx, by, rev):
+    events = ctx.meta["events"]
+    sent = next((e for e in reversed(events) if e.get("kind") == "stats sync requested"), None)
+    if sent is None or sent["rev"] > rev:
+        return
+    if not any(e.get("kind") == "stats check answered" and e.get("id") == sent["id"] for e in events):
+        ctx.record(by, "stats check answered", "", id=sent["id"])
 
 
 def _item(doc, path):
