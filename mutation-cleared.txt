@@ -530,5 +530,41 @@
   "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_6:c9be4449868d4c7f9452753211d2131461aefd29ed69a06e16a0b01036b3c3ff": {
     "reader": "Standards",
     "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  },
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_3:a444ba56d03f89d04462b9e55b8e29a151281708f2cfd246462c700e6a758ed6": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
+  },
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_5:7cceeab6b1acc148900d5f5a290cb0fcc7929fe0c2bf82f88c723d4b6c546b4a": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
+  },
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_10:5083d173913ca57a7cde46ad75ea8759760b5a2af928d3aaad4acedd7b7e3300": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
+  },
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_11:d76453fc01b08eb178c6115a5b2617fe7d060d695a445dc4f1cfa1b53a2c36b0": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
+  },
+  "scripts/deps_preflight.py:scripts.deps_preflight.x_unsatisfied__mutmut_4:3c279b2b1c55719f14a873a27f130ab523419d59f4d9d174e56e4fc199ea3634": {
+    "reader": "standards_reader",
+    "reason": "The synthetic skill dependency check field is unused by its sole consumer, which reads only id, kind and hint; CLI output and exit status are identical."
+  },
+  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_1:c51314edcc197dbd6ec40fd80806b8f5b874aeba677094e327d471fdf4d6e7ba": {
+    "reader": "standards_reader",
+    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
+  },
+  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_17:5fb6ac3e56aba36934fd369ec4beb2e18d0d4585e1b641e9904f278ca1264456": {
+    "reader": "standards_reader",
+    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
+  },
+  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_19:05aaf7f6758a961042c138d2344c19c8bdff9d1dae83ac06a45454f7d580dfc2": {
+    "reader": "standards_reader",
+    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
+  },
+  "scripts/skill_links.py:scripts.skill_links.x_repair__mutmut_12:006ff0d8d23d31f02ed9cff652cf641d86cf1c5cc5798763bbb7a5518ffb2f35": {
+    "reader": "standards_reader",
+    "reason": "The existing global install record helper defaults its target to claude, so omitting the explicit claude argument selects the same record and preserves output."
   }
 }
