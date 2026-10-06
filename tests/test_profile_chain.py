@@ -283,7 +283,9 @@ def test_install_labels_and_lists_package_roles(tmp_path, monkeypatch, package_r
     assert install._resolve_profile_dir("package:engineer") == role
     assert install._profile_source_label("engineer") == "package"
     assert install._profile_source_label("package:engineer") == "package"
-    assert "engineer" in install._available_profiles()
+    package_roles("_draft")
+    (role.parent / "notes.md").write_text("not a role\n")
+    assert install._available_profiles() == ["engineer"]
     assert install._resolve_profile_dir("package:missing") is None
 
 
