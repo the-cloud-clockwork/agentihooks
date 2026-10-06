@@ -1,4 +1,5 @@
-import subprocess
+import os
+from pathlib import Path
 
 import pytest
 
@@ -51,12 +52,8 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
 
 
 def test_argv_of_reads_a_process_command_line():
-    child = subprocess.Popen(["sleep", "30"])
-    try:
-        assert take_master.argv_of(child.pid) == ("sleep", "30")
-    finally:
-        child.kill()
-        child.wait()
+    own = Path("/proc/self/cmdline").read_bytes().split(b"\0")
+    assert take_master.argv_of(os.getpid()) == tuple(arg.decode() for arg in own if arg)
     assert take_master.argv_of(2**22 + 1) == ()
 
 
