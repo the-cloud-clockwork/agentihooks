@@ -24,7 +24,8 @@ class LedgerClient:
         except SystemExit as exc:
             raise SwarmError(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
-            raise SwarmError(f"ledger {slug} refused: {state['rejected']}")
+            detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
+            raise SwarmError(f"ledger {slug} refused: {detail}")
         return state
 
     def state(self, slug):
