@@ -4,12 +4,12 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from mcp import ClientSession, types
-from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.server.lowlevel import Server
-from mcp.server.stdio import stdio_server
-from playwright.async_api import async_playwright
+if TYPE_CHECKING:
+    from mcp import ClientSession, types
+    from mcp.client.stdio import StdioServerParameters
+    from mcp.server.lowlevel import Server
 
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
@@ -46,6 +46,8 @@ def output_folder() -> Path:
 
 
 def parameters(out: Path, executable: str) -> StdioServerParameters:
+    from mcp.client.stdio import StdioServerParameters
+
     env = {
         key: value
         for key, value in os.environ.items()
@@ -76,6 +78,8 @@ async def call(session: ClientSession, out: Path, name: str, arguments: dict) ->
 
 
 def proxy(session: ClientSession, out: Path) -> Server:
+    from mcp.server.lowlevel import Server
+
     server = Server("swarm-browser")
 
     @server.list_tools()
@@ -90,6 +94,11 @@ def proxy(session: ClientSession, out: Path) -> Server:
 
 
 async def serve() -> None:
+    from mcp import ClientSession, types
+    from mcp.client.stdio import stdio_client
+    from mcp.server.stdio import stdio_server
+    from playwright.async_api import async_playwright
+
     out = output_folder()
 
     async def roots(context) -> types.ListRootsResult:

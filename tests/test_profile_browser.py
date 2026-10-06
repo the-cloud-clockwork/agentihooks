@@ -2,9 +2,17 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp import types
 
 from scripts.profiles import browser
+
+pytestmark = pytest.mark.xdist_group("mcp-sdk")
+
+
+@pytest.fixture
+def types():
+    from mcp import types
+
+    return types
 
 
 def test_task_browser_uses_the_task_folder_without_a_display(monkeypatch):
@@ -35,7 +43,7 @@ def test_task_browser_uses_the_task_folder_without_a_display(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("filename", ["proof.png", "../../proof.png", "/repo/proof.png"])
-async def test_screenshot_names_stay_in_the_task_folder(tmp_path, filename):
+async def test_screenshot_names_stay_in_the_task_folder(tmp_path, filename, types):
     session = AsyncMock()
     result = types.CallToolResult(content=[types.TextContent(type="text", text="saved")])
     session.call_tool.return_value = result
@@ -74,7 +82,7 @@ def test_missing_swarm_environment_uses_the_standalone_folder(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_proxy_exposes_upstream_tools_and_preserves_failures(tmp_path):
+async def test_proxy_exposes_upstream_tools_and_preserves_failures(tmp_path, types):
     session = AsyncMock()
     tool = types.Tool(name="browser_take_screenshot", inputSchema={"type": "object"})
     session.list_tools.return_value = types.ListToolsResult(tools=[tool])
@@ -97,7 +105,7 @@ async def test_proxy_exposes_upstream_tools_and_preserves_failures(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_server_runs_the_task_browser_over_mcp(monkeypatch):
+async def test_server_runs_the_task_browser_over_mcp(monkeypatch, types):
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
 
@@ -136,10 +144,10 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch):
     async def stdio():
         yield server_read, to_client
 
-    monkeypatch.setattr(browser, "async_playwright", playwright)
-    monkeypatch.setattr(browser, "stdio_client", transport)
-    monkeypatch.setattr(browser, "ClientSession", session)
-    monkeypatch.setattr(browser, "stdio_server", stdio)
+    monkeypatch.setattr("playwright.async_api.async_playwright", playwright)
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", transport)
+    monkeypatch.setattr("mcp.ClientSession", session)
+    monkeypatch.setattr("mcp.server.stdio.stdio_server", stdio)
     async with anyio.create_task_group() as group:
         group.start_soon(browser.serve)
         async with ClientSession(client_read, to_server) as client:
