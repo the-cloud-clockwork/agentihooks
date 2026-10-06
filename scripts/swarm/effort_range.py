@@ -66,4 +66,4 @@ def launch_args(agent, args, environ):
     from scripts.init_agent import model_effort, model_flags
 
     effort = clamp(agent, model_effort(agent, args, environ)[1], parse(environ.get(VARIABLE, "")))
-    return [*_without_effort(args), *model_flags(agent, "", effort)]
+    return [*_without_effort(args), *model_flags(agent, effort=effort)]

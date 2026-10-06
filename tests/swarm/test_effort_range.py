@@ -5,6 +5,7 @@ import pytest
 from hooks.classifier import Answer, DecisionResult
 from scripts import init_agent
 from scripts.swarm import cli, effort_range, model_pick
+from scripts.swarm.store import SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_runtime import _launched, _passed, _resuming
 
@@ -84,6 +85,35 @@ def test_a_resumed_agent_relaunches_inside_the_range(tmp_path):
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "high"]
 
 
+def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
+    from dataclasses import replace
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    seen = []
+
+    def launch(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=launch, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"model": "fable", "effort": "max"}},
+        autonomy="delegate",
+        effort_min="low",
+        effort_max="max",
+    )
+    runtime.spawn(config, "eng", "engineer@a1b2c3-0001", TASK)
+    assert _passed(seen[-1]) == ["--model", "fable", "--effort", "max"]
+    resuming, _, agent, resumed = _resuming(tmp_path, "c0ffee")
+    resuming.resume(config, replace(agent, model="sonnet", effort="low"), "you were restored")
+    assert _passed(resumed["runs"][0]) == ["--route", "a1", "--model", "fable", "--effort", "max"]
+
+
 @pytest.mark.parametrize(
     "agent,args,environ,expected",
     [
@@ -156,6 +186,66 @@ def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "effort-max=xhigh") == 0
     assert store.config("sw").effort_max == "max"
+
+
+def test_bare_pairs_route_to_set_by_their_key_alone(env):  # noqa: F811
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "eng-role=a=b", "autonomy=full") == 0
+    config = store.config("sw")
+    assert (config.autonomy, config.lanes["eng"]["role"]) == ("full", "a=b")
+    assert run("sw", "autonomy=assist") == 0
+    assert store.config("sw").autonomy == "assist"
+    with pytest.raises(SystemExit):
+        run("sw")
+
+
+@pytest.fixture
+def saved():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
+def test_a_swarm_stored_before_the_range_reads_the_default_and_keeps_its_lanes_editable(saved):
+    saved.redis.hset(
+        "agentihooks:swarm:old:config",
+        mapping={
+            "slug": "old",
+            "repo": "/r",
+            "max_eng": 1,
+            "max_ci": 0,
+            "state": "paused",
+            "lanes": '{"eng": {"effort": "max"}}',
+        },
+    )
+    config = saved.config("old")
+    assert (config.effort_min, config.effort_max) == ("medium", "high")
+    assert saved.update("old", max_eng=3).max_eng == 3
+    with pytest.raises(SwarmError, match="lane eng effort max is outside the swarm effort range medium to high"):
+        saved.update("old", lanes={"eng": {"effort": "max"}})
+
+
+def test_store_update_checks_and_normalises_the_range(saved):
+    saved.create(SwarmConfig("sw", "/r", 1, 0))
+    config = saved.update("sw", effort_min="low", effort_max="xhigh")
+    assert (config.effort_min, config.effort_max) == ("low", "max")
+    assert saved.config("sw").effort_max == "max"
+    assert saved.update("sw", effort_min="xhigh").effort_min == "max"
+    config = saved.update("sw", effort_min="low")
+    with pytest.raises(SwarmError, match="effort-min high is above effort-max medium"):
+        saved.update("sw", effort_min="high", effort_max="medium")
+    with pytest.raises(SwarmError, match="one of low, medium, high, max"):
+        saved.update("sw", effort_max="huge")
+    assert (saved.config("sw").effort_min, saved.config("sw").effort_max) == ("low", "max")
+
+
+def test_store_create_refuses_an_out_of_range_lane_and_stores_nothing(saved):
+    with pytest.raises(SwarmError, match="lane ci effort low is outside the swarm effort range medium to high"):
+        saved.create(SwarmConfig("sw", "/r", 1, 0, lanes={"ci": {"effort": "low"}}))
+    assert saved.slugs() == [] and not saved.redis.exists("agentihooks:swarm:sw:config")
 
 
 def test_create_refuses_a_template_lane_effort_outside_the_range(env, tmp_path, monkeypatch, capsys):  # noqa: F811
