@@ -102,7 +102,7 @@ def _block(lines, i, counts):
         return _run(lines, i + 1, lambda row: not row.strip().startswith(fence[1])) + 1
     if HEADING.match(line):
         counts["h"] += 1
-        return i + 1
+        return i
     if "|" in line and i + 1 < len(lines) and TABLE_RULE.match(lines[i + 1]):
         counts["table"] += 1
         return _run(lines, i + 2, lambda row: "|" in row)
@@ -115,7 +115,7 @@ def _block(lines, i, counts):
         counts.update(expected_blocks("\n".join(re.sub(r"^>\s?", "", row) for row in lines[i:end])))
         return end
     if RULE.match(line) or not line.strip():
-        return i + 1
+        return i
     return _run(lines, i + 1, lambda row: row.strip() and not BREAK.match(row) and not LIST.match(row))
 
 

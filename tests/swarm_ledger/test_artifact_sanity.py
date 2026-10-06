@@ -85,6 +85,7 @@ class TestExpectedBlocks:
 
     def test_table_body_rows_are_never_read_as_a_new_table(self):
         assert sanity.expected_blocks("| a |\n|---|\n| b |\n|---|\n") == Counter(table=1)
+        assert sanity.expected_blocks("| a |\n|---|\n|---|\nend") == Counter(table=1)
 
     def test_a_paragraph_swallows_pipe_lines_that_follow_it(self):
         assert sanity.expected_blocks("intro\n| a |\n|---|\n") == Counter()
