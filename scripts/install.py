@@ -6334,10 +6334,10 @@ def main() -> None:
         from hooks.classifier import cli as classifier_cli
 
         raise SystemExit(classifier_cli.classifier_main(_argv[1:]))
-    if _argv and _argv[0] == "profile":
-        from scripts.profiles.render import main as profile_main
+    if _argv and _argv[0] in ("profile", "select-profile"):
+        from scripts.select_profile import dispatch
 
-        raise SystemExit(profile_main(_argv[1:]))
+        raise SystemExit(dispatch(_argv))
     if _argv and _argv[0] == "deps":
         from scripts.deps_preflight import main as deps_main
 
@@ -6481,9 +6481,9 @@ def main() -> None:
         default=None,
         help="Edit only this target's chain (default: every installed target). Ignored by unlink.",
     )
-
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
     sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
+    sub.add_parser("select-profile", help="Select a profile, model and effort for one routed run")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
     sub.add_parser("run-in-terminal", help="Run a command in a new herdr tab or terminal")
