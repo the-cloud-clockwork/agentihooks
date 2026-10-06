@@ -47,7 +47,7 @@ class Palette(unittest.TestCase):
         def value(role):
             return tokens[tokens[role][len("var(") : -1]]
 
-        expected = {"--canvas": "#03050b", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        expected = {"--canvas": "#010104", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
         for role, colour in expected.items():
             self.assertEqual(value(role), colour, role)
         self.assertEqual(value("--warn"), "#facc15")
@@ -103,6 +103,19 @@ class SurfaceLadder(unittest.TestCase):
                         continue
                     offsets = re.findall(r"-?[\d.]+(?:px)?", layer)[:2]
                     self.assertTrue(layer.strip().startswith("inset") or offsets == ["0", "0"], (name, layer))
+
+    def test_nothing_glows(self):
+        for name, css in self.pages.items():
+            self.assertNotIn("text-shadow", css, name)
+            self.assertNotIn("drop-shadow(", css, name)
+            self.assertNotIn("--glow", css, name)
+            for value in re.findall(r"box-shadow:\s*([^;}]+)", css):
+                for layer in value.split(","):
+                    self.assertFalse(re.match(r"\s*0\s+0\s+[\d.]+px", layer), (name, layer))
+
+    def test_the_canvas_has_no_wash_behind_it(self):
+        tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
+        self.assertEqual(tokens["--backdrop"].strip(), "none")
 
     def test_no_capsule_badges(self):
         ledger = self.pages["ledger"]

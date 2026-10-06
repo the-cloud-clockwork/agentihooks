@@ -64,7 +64,7 @@ def test_every_task_card_leads_its_title_with_its_id_as_a_link_to_itself(tab):
         assert task["title"] in title.text_content()
 
 
-def test_the_id_label_is_bare_red_glowing_text_in_the_priorities_red(tab):
+def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
     tab.locator("#tasks-box > summary").click()
     label = tab.locator("#item-tasks-rb3c .task-id")
     prio = tab.locator("#priorities .prio-link")
@@ -74,12 +74,12 @@ def test_the_id_label_is_bare_red_glowing_text_in_the_priorities_red(tab):
     color, shadow, background, border = label.evaluate(style)
     assert color == prio.evaluate("el => getComputedStyle(el).color")
     assert color == "rgb(239, 68, 68)"
-    assert color in shadow
+    assert shadow == "none"
     assert background == "rgba(0, 0, 0, 0)"
     assert border == "none"
     rule = css_rule(".task-id")
     assert "color: var(--destructive)" in rule
-    assert "text-shadow: var(--glow)" in rule
+    assert "text-shadow" not in rule
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(background|border):", rule)
     assert "color: var(--destructive)" in css_rule(".prio-link")
 

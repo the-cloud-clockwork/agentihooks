@@ -362,8 +362,12 @@ def gate_pairs(gates):
     from scripts.gates import catalog, modes
 
     names = catalog.defaults()
-    if not isinstance(gates, dict) or not gates or not all(n in names and m in modes.MODES for n, m in gates.items()):
-        raise ValueError(f"gates maps a gate of {', '.join(names)} to {', '.join(modes.MODES)}")
+    if (
+        not isinstance(gates, dict)
+        or not gates
+        or not all(n in names and isinstance(m, str) and modes.normalize(m) in modes.MODES for n, m in gates.items())
+    ):
+        raise ValueError(f"gates maps a gate of {', '.join(names)} to {', '.join(modes.LABELS.values())}")
     return [f"{name}-gate={mode}" for name, mode in gates.items()]
 
 

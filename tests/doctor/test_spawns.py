@@ -94,8 +94,8 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
                 }
             ]
 
-        def update_task(self, *args, **kwargs):
-            pass
+        def update_task(self, slug, task_id, fields, **kwargs):
+            return {"state": "open", "claimed_by": "", **fields}
 
         def notify(self, *args):
             pass

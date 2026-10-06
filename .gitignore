@@ -52,3 +52,7 @@ profiles/*/.claude/settings.json
 # Root-anchored so profiles/*/.claude/ (profile sources) stay tracked.
 /.claude/
 .mutation-gate/
+
+# Impeccable live mode runtime state; only the config is tracked
+.impeccable/live/*
+!.impeccable/live/config.json

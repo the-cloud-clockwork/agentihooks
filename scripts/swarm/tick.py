@@ -56,7 +56,7 @@ class Placed:
 
 class Ledger(Protocol):
     def state(self, slug: str) -> dict: ...
-    def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm") -> None: ...
+    def update_task(self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ...) -> dict: ...
     def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
@@ -222,8 +222,8 @@ def _orphans(slug, store, ledger, rows):
     actions = []
     for task_id, row in rows.items():
         if row.get("state") in ACTIVE and row.get("claimed_by") not in known and store.claimant(slug, task_id) is None:
-            _reopen(slug, ledger, rows, task_id)
-            actions.append(f"task {task_id} had no agent, reopened")
+            if _reopen(slug, ledger, rows, task_id):
+                actions.append(f"task {task_id} had no agent, reopened")
     return actions
 
 
@@ -248,8 +248,9 @@ def _session_models(slug, store):
 
 
 def _reopen(slug, ledger, rows, task_id):
-    ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
-    rows[task_id].update(state="open", claimed_by="")
+    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE)
+    rows[task_id].update(live)
+    return live["state"] == "open"
 
 
 def _claimable(slug, store, rows, doc, lane):
@@ -320,7 +321,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 kind = config.lanes.get(lane, {}).get("kind", "")
                 if kind not in ("", "auto") and not task.get("kind"):
                     fields["kind"] = kind
-                ledger.update_task(slug, task["id"], fields)
+                live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
+                task.update(live)
+                if live["claimed_by"] != name:
+                    store.release(slug, task["id"], name)
+                    store.drop_agent(slug, name)
+                    actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
+                    continue
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record, now_ms)
@@ -358,9 +365,11 @@ def _claim_cap(slug, store, ledger, rows, task):
     gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
     if kind == "observe":
         return ""
+    live = ledger.update_task(slug, task["id"], {"state": "blocked"}, if_state=("open",))
+    rows[task["id"]].update(live)
+    if live["state"] != "blocked":
+        return ""
     ledger.comment(slug, task["id"], reason, by="swarm")
-    ledger.update_task(slug, task["id"], {"state": "blocked"})
-    rows[task["id"]].update(state="blocked")
     store.reset_claims(slug, task["id"])
     return f"blocked {task['id']}: {reason}"
 

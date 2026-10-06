@@ -7,6 +7,16 @@ only outside a swarm.
 import re
 
 MODES = ("enforce", "observe", "off")
+LABELS = {"enforce": "deny", "observe": "log only", "off": "skip"}
+ALIASES = {label: mode for mode, label in LABELS.items()}
+
+
+def normalize(value: str) -> str:
+    return ALIASES.get(value, value)
+
+
+def label(value: str) -> str:
+    return LABELS.get(value, value)
 
 
 def env_name(gate_name):
