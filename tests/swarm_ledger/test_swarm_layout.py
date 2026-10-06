@@ -83,11 +83,11 @@ def status(**changes):
 
 
 class Page:
-    def __init__(self, browser, payload, width):
+    def __init__(self, browser, payload, width, **options):
         self.payload, self.puts = payload, []
         html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
         html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
-        self.context = browser.new_context(viewport={"width": width, "height": 2400})
+        self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         self.tab = self.context.new_page()
@@ -123,8 +123,8 @@ class Page:
 def open_page(browser):
     pages = []
 
-    def make(payload=None, width=1440):
-        page = Page(browser, payload or status(), width)
+    def make(payload=None, width=1440, **options):
+        page = Page(browser, payload or status(), width, **options)
         pages.append(page)
         return page
 
@@ -163,7 +163,13 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
     assert page.text("#swarm-state").lower() == "running"
     assert page.text("#swarm-tick") == "tick 12s ago"
     controls = page.tab.eval_on_selector_all("#swarm-ctl button", "bs => bs.map(b => [b.textContent, b.disabled])")
-    assert controls == [["start", True], ["pause", False], ["stop", False]]
+    assert controls == [
+        ["start", True],
+        ["pause", False],
+        ["stop", False],
+        ["stop now", False],
+        ["close ledger", False],
+    ]
     modes = page.tab.eval_on_selector_all(
         "#swarm-modes button", "bs => bs.map(b => [b.textContent, b.getAttribute('aria-pressed')])"
     )
@@ -218,8 +224,8 @@ def test_compact_limit_steps_stop_at_100_and_1000(open_page, limit, down, up):
 def test_agents_table_lists_the_master_first_and_tasks_block_counts(open_page):
     page = open_page()
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "opus high", "—", "LIVE", "2h 0m"],
-        ["eng-58", "eng", "opus high", "pb10", "IDLE", "1m"],
+        ["master-1", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["eng-58", "eng", "—", "opus high", "pb10", "IDLE", "1m", "message\nterminate"],
     ]
     assert page.text("#agents-count").lower() == "2 live"
     assert page.text("#tasks-open").lower() == "9 open"

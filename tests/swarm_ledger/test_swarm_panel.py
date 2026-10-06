@@ -366,11 +366,11 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(
             dict(zip(states, out)),
             {
-                "running": {"start": True, "pause": False, "stop": False},
-                "paused": {"start": False, "pause": True, "stop": False},
-                "stopping": {"start": False, "pause": True, "stop": True},
-                "stopped": {"start": False, "pause": True, "stop": True},
-                "drained": {"start": False, "pause": True, "stop": False},
+                "running": {"start": True, "pause": False, "stop": False, "stop_now": False},
+                "paused": {"start": False, "pause": True, "stop": False, "stop_now": False},
+                "stopping": {"start": False, "pause": True, "stop": True, "stop_now": False},
+                "stopped": {"start": False, "pause": True, "stop": True, "stop_now": True},
+                "drained": {"start": False, "pause": True, "stop": False, "stop_now": False},
             },
         )
 

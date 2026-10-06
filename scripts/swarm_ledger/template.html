@@ -437,10 +437,21 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-table td { padding: 6px 10px 6px 0; border-top: 1px solid var(--rule); color: var(--text); white-space: nowrap; }
 .sw-table th:last-child, .sw-table td:last-child { padding-right: 0; }
 .sw-table tbody tr:hover td { background: var(--surface-2); }
-.sw-table .r, #agents-table td:last-child, #quota-table td:nth-child(n+3):nth-child(-n+5) { text-align: right; }
+.sw-table .r, #agents-table td:nth-child(7), #quota-table td:nth-child(n+3):nth-child(-n+5) { text-align: right; }
 .sw-table a { color: inherit; text-decoration: none; }
 .sw-table a:hover, .sw-table a:focus-visible { color: var(--accent); text-shadow: var(--glow); }
 #agents-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
+#agents-table th, #agents-table td { padding-right: 6px; }
+#agents-table td:nth-child(3), #agents-table td:nth-child(4) { white-space: normal; }
+#agents-table td:has(> .sw-acts) { position: sticky; right: 0; width: 0; padding: 0; }
+.sw-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 4px; padding-left: var(--space-tight);
+  background: linear-gradient(var(--surface-2), var(--surface-2)), linear-gradient(var(--surface-1), var(--surface-1)), var(--canvas); opacity: 0; pointer-events: none; }
+#agents-table tr:hover .sw-acts, #agents-table tr:focus-within .sw-acts { opacity: 1; pointer-events: auto; }
+.sw-acts .sw-btn { min-height: 28px; padding: 2px 8px; }
+@media (hover: none), (pointer: coarse) {
+  #agents-table td:has(> .sw-acts) { position: static; width: auto; padding: 6px 0; }
+  .sw-acts { position: static; padding: 0; background: transparent; opacity: 1; pointer-events: auto; }
+}
 .sw-table .sw-empty td { white-space: normal; font-size: var(--fs-meta); color: var(--dim); }
 #health-table td:nth-child(3) { min-width: 20ch; white-space: normal; color: var(--text-2); }
 #health-table .hl-pick, #health-table .hl-note { border-bottom-color: transparent; font-size: var(--fs-body); }
@@ -518,7 +529,7 @@ input, textarea { caret-color: var(--accent-2); }
 
 <div class="tab-body" id="swarm" role="tabpanel" aria-labelledby="tab-swarm" hidden><div id="swarm-box">
 <div class="sw-row sw-head" id="swarm-head"><h2 class="sw-title"><span class="sw-word">Swarm</span><span class="sw-sep" aria-hidden="true">·</span><span id="swarm-name"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-state" id="swarm-state"></span><span class="sw-sep" aria-hidden="true">·</span><span class="sw-tick" id="swarm-tick"></span></h2>
-<div class="sw-actions"><div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">start</button><button class="sw-btn" type="button" data-swarm="pause">pause</button><button class="sw-btn" type="button" data-swarm="stop">stop</button></div>
+<div class="sw-actions"><div class="sw-ctl" id="swarm-ctl"><button class="sw-btn" type="button" data-swarm="start">start</button><button class="sw-btn" type="button" data-swarm="pause">pause</button><button class="sw-btn" type="button" data-swarm="stop">stop</button><button class="sw-btn danger" type="button" data-swarm="stop_now">stop now</button><button class="sw-btn danger" type="button" data-swarm="close">close ledger</button></div>
 <div class="sw-ctl sw-modes" id="swarm-modes" role="group" aria-label="Autonomy"><button class="sw-btn sw-mode" type="button" data-autonomy="manual" aria-pressed="false">manual</button><button class="sw-btn sw-mode" type="button" data-autonomy="assist" aria-pressed="false">assist</button><button class="sw-btn sw-mode" type="button" data-autonomy="delegate" aria-pressed="false">delegate</button><button class="sw-btn sw-mode" type="button" data-autonomy="full" aria-pressed="false">full</button></div></div></div>
 <p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
 <div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
@@ -528,7 +539,7 @@ input, textarea { caret-color: var(--accent-2); }
 <div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
 <div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div></div>
-<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>model</th><th>task</th><th>state</th><th class="r">age</th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
+<div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
 <div class="sw-block" id="swarm-tasks-box"><div class="sw-blockhead"><h3>Tasks</h3><span class="sw-count" id="tasks-open"></span></div><dl class="sw-kv" id="swarm-tasks"></dl></div></div>
 <div class="sw-row sw-pair" id="swarm-row-accounts"><div class="sw-block" id="quota-box"><div class="sw-blockhead"><h3>Quota</h3><span class="sw-count" id="quota-count"></span></div><div class="sw-scroll"><table class="sw-table" id="quota-table"><thead><tr><th>account</th><th>harness</th><th class="r">5h left</th><th class="r">7d left</th><th class="r">sessions</th><th><span class="sr-only">routing</span></th></tr></thead><tbody id="swarm-quota"></tbody></table></div></div>
 <div class="sw-block" id="doctor-box"><div class="sw-blockhead"><h3>Doctor</h3><span class="sw-count" id="doctor-state"></span></div><dl class="sw-kv" id="swarm-doctor"></dl><div class="sw-ctl sw-end"><button class="sw-btn" type="button" data-swarm="doctor_start">start doctor</button><button class="sw-btn danger" type="button" data-swarm="doctor_stop">stop doctor</button></div></div></div>
@@ -1498,7 +1509,7 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function swarmControls(state) {
-    return { start: state === "running", pause: state !== "running", stop: !["running", "paused", "drained"].includes(state) };
+    return { start: state === "running", pause: state !== "running", stop: !["running", "paused", "drained"].includes(state), stop_now: state === "stopped" };
   }
 
   function doctorOn(sw) {
@@ -1524,7 +1535,7 @@ input, textarea { caret-color: var(--accent-2); }
   }
 
   function opNote(phase, action, error) {
-    const name = { start: "Start", pause: "Pause", stop: "Stop", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy",
+    const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
       codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
@@ -1584,6 +1595,18 @@ input, textarea { caret-color: var(--accent-2); }
   $("swarm-box").addEventListener("click", (event) => {
     const mode = event.target.closest("button[data-autonomy]");
     if (mode && !mode.disabled) return swarmControl({ action: "set", autonomy: mode.dataset.autonomy }, "autonomy");
+    const message = event.target.closest("button[data-message]");
+    if (message) {
+      showChat(true);
+      $("chat-to").value = message.dataset.message;
+      return;
+    }
+    const terminate = event.target.closest("button[data-terminate]");
+    if (terminate && !terminate.disabled) {
+      const name = terminate.dataset.terminate;
+      if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
+      return;
+    }
     const restore = event.target.closest("button[data-restore-choice]");
     if (restore && !restore.disabled) return swarmControl({ action: "restore-decision", agent: restore.dataset.agent, choice: restore.dataset.restoreChoice });
     const btn = event.target.closest("button[data-swarm]");
@@ -1591,7 +1614,12 @@ input, textarea { caret-color: var(--accent-2); }
     const action = btn.dataset.swarm;
     const step = action.match(/^(eng|ci|plan|codex|compact)_(up|down)$/);
     if (step) return swarmControl(capStep(capValues(swarm), step[1], step[2] === "up"), action);
-    if (action === "doctor_stop" && !confirm("Stop the Doctor crew and close its linked ledger.")) return;
+    const consequence = {
+      stop_now: "Retire every agent now. Work in progress stays in its worktree.",
+      close: "Write the summary, retire every agent and close this ledger. Reopen brings it back.",
+      doctor_stop: "Stop the Doctor crew and close its linked ledger."
+    }[action];
+    if (consequence && !confirm(consequence)) return;
     swarmControl({ action });
   });
 
@@ -1636,9 +1664,15 @@ input, textarea { caret-color: var(--accent-2); }
     const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
     return agents.map((a) => {
       const master = a.lane === "master";
-      return { name: a.name, lane: master ? "—" : a.lane, model: modelText(a) || "—", task: master ? "" : a.task || "",
+      return { name: a.name, master, lane: master ? "—" : a.lane, profile: a.profile || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
         state: master && (a.status || "working") === "working" ? "live" : a.status || "working", age: a.started_at ? span(now - a.started_at) : "—" };
     });
+  }
+
+  function agentActions(a) {
+    return h("div", { class: "sw-acts" },
+      h("button", { class: "sw-btn", type: "button", "data-message": a.master ? "" : a.name, "aria-label": `Message ${a.name}`, text: "message" }),
+      h("button", { class: "sw-btn danger", type: "button", "data-terminate": a.name, "aria-label": `Terminate ${a.name}`, disabled: !!pending, text: "terminate" }));
   }
 
   function taskFigures(sw, d) {
@@ -1686,7 +1720,7 @@ input, textarea { caret-color: var(--accent-2); }
       sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
     renderControls();
     if (!sw) {
-      $("swarm-agents").replaceChildren(emptyRow(6, "No agents running. Start the swarm to work the open tasks."));
+      $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));
       return;
     }
     const now = Date.now(), open = openFindings(sw), values = capValues(sw);
@@ -1697,8 +1731,8 @@ input, textarea { caret-color: var(--accent-2); }
     for (const [lane, text] of Object.entries(capText(values))) $("cap-" + lane).textContent = String(text);
     const agents = agentRows(sw, now);
     $("agents-count").textContent = `${agents.length} live`;
-    $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(a.name, a.lane, a.model,
-      a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age)) : [emptyRow(6, "No agents running. Start the swarm to work the open tasks.")]));
+    $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(a.name, a.lane, a.profile, a.model,
+      a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—", label(a.state), a.age, agentActions(a))) : [emptyRow(8, "No agents running. Start the swarm to work the open tasks.")]));
     $("tasks-open").textContent = `${(sw.tasks || {}).open || 0} open`;
     kv("swarm-tasks", taskFigures(sw, doc));
     const quota = quotaRows(sw);
