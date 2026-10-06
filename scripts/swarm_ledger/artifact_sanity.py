@@ -86,8 +86,8 @@ MEASURE = """
 
 
 def expected_blocks(text: str) -> Counter:
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    counts = Counter(h=0, li=0, table=0, pre=0)
+    lines = re.split(r"\r\n?|\n", text)
+    counts = Counter()
     i = 0
     while i < len(lines):
         i = _block(lines, i, counts)
@@ -96,7 +96,6 @@ def expected_blocks(text: str) -> Counter:
 
 def _block(lines, i, counts):
     line = lines[i]
-    nxt = lines[i + 1] if i + 1 < len(lines) else ""
     if fence := FENCE.match(line):
         i += 1
         while i < len(lines) and not lines[i].strip().startswith(fence[1]):
@@ -106,7 +105,7 @@ def _block(lines, i, counts):
     if HEADING.match(line):
         counts["h"] += 1
         return i + 1
-    if "|" in line and TABLE_RULE.match(nxt):
+    if "|" in line and i + 1 < len(lines) and TABLE_RULE.match(lines[i + 1]):
         counts["table"] += 1
         return _run(lines, i + 2, lambda row: "|" in row)
     if LIST.match(line):
@@ -175,26 +174,19 @@ def _markdown(measure, expected):
 
 def page_html(files: list[Path]) -> str:
     rows = [
-        {
-            "id": f"art-{n}",
-            "title": path.name,
-            "by": "artifact-sanity",
-            "at": n,
-            "file": {"id": path.name, "type": TYPES[path.suffix], "size": path.stat().st_size},
-        }
+        {"id": f"art-{n}", "title": path.name, "file": {"id": path.name, "type": TYPES[path.suffix]}}
         for n, path in enumerate(files)
     ]
-    doc = {"title": "Artifact sanity", "tasks": [], "artifacts": rows}
-    html = TEMPLATE.read_text(encoding="utf-8").replace("__LEDGER_DATA__", json.dumps(doc))
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text(encoding="utf-8"))
-    return html.replace("__LEDGER_PORT__", "9").replace("__LEDGER_SLUG__", "artifact-sanity")
+    doc = {"title": "Artifact sanity", "artifacts": rows}
+    html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
+    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    return html.replace("__LEDGER_PORT__", "9")
 
 
-def run(browser, files: list[Path], css: str = "") -> dict[str, list[str]]:
+def run(browser, files: list[Path]) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
     tab = browser.new_page(viewport=VIEWPORT)
     try:
-        tab.route("**/api/**", lambda route: route.fulfill(status=503, body="offline"))
         tab.route(
             "**/artifacts/**",
             lambda route: route.fulfill(
@@ -203,8 +195,6 @@ def run(browser, files: list[Path], css: str = "") -> dict[str, list[str]]:
             ),
         )
         tab.set_content(page_html(files))
-        if css:
-            tab.add_style_tag(content=css)
         return {path.name: _view(tab, path) for path in files}
     finally:
         tab.close()
@@ -213,14 +203,14 @@ def run(browser, files: list[Path], css: str = "") -> dict[str, list[str]]:
 def _view(tab, path):
     if tab.locator("#art-panel").is_hidden():
         tab.locator("#art-fab").click()
-    tab.locator("#art-list").get_by_role("button", name=path.name, exact=True).click()
-    viewer = tab.get_by_role("dialog", name="Artifact viewer")
-    viewer.locator(".art-body .hint").wait_for(state="detached")
+    tab.locator("#art-list .art-title").get_by_text(path.name, exact=True).click()
+    viewer = tab.locator("dialog.image-viewer[open]")
+    viewer.locator(".art-body > :not(.hint)").first.wait_for()
     tab.wait_for_function("v => [...v.querySelectorAll('img')].every(i => i.complete)", arg=viewer.element_handle())
     script = MEASURE.replace("TOKEN_MAX", str(TOKEN_MAX)).replace("MIN_COLUMN_CH", str(MIN_COLUMN_CH))
     measure = viewer.evaluate(script)
-    viewer.get_by_role("button", name="Close artifact").click()
-    expected = expected_blocks(path.read_text(encoding="utf-8")) if path.suffix == ".md" else None
+    viewer.locator(".image-close").click()
+    expected = expected_blocks(path.read_text()) if path.suffix == ".md" else None
     return check(measure, expected)
 
 

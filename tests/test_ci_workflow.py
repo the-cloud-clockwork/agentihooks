@@ -158,6 +158,14 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
 
+def test_mutation_job_installs_chromium_before_mutating():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    names = [s.get("name") for s in steps]
+    install = names.index("Install the browser that page tests drive")
+    assert steps[install]["run"] == "python -m playwright install --with-deps chromium"
+    assert names.index("Install dependencies") < install < names.index("Mutate changed Python files")
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())

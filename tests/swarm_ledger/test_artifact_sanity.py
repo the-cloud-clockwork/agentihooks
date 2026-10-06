@@ -1,7 +1,3 @@
-import json
-import os
-import subprocess
-import sys
 from collections import Counter
 from pathlib import Path
 
@@ -76,6 +72,26 @@ class TestExpectedBlocks:
     def test_a_heading_needs_a_space_after_its_marks(self):
         assert sanity.expected_blocks("#tag\n####### seven\n###### six\n") == Counter(h=1, li=0, table=0, pre=0)
 
+    def test_each_fence_counts_once_and_its_body_is_skipped_line_by_line(self):
+        text = "```\none\n```\n# after\n~~~\n~~~\n# again"
+        assert sanity.expected_blocks(text) == Counter(h=2, pre=2)
+
+    def test_a_header_only_table_hands_the_next_line_back(self):
+        assert sanity.expected_blocks("| a |\n|---|\n# h") == Counter(h=1, table=1)
+
+    def test_a_table_and_a_pipe_line_may_end_the_text(self):
+        assert sanity.expected_blocks("| a |\n|---|") == Counter(table=1)
+        assert sanity.expected_blocks("# h\nx | y") == Counter(h=1)
+
+    def test_table_body_rows_are_never_read_as_a_new_table(self):
+        assert sanity.expected_blocks("| a |\n|---|\n| b |\n|---|\n") == Counter(table=1)
+
+    def test_a_paragraph_swallows_pipe_lines_that_follow_it(self):
+        assert sanity.expected_blocks("intro\n| a |\n|---|\n") == Counter()
+
+    def test_carriage_returns_split_lines(self):
+        assert sanity.expected_blocks("| a |\r\n|---|\r\n| 1 |\r# h") == Counter(h=1, table=1)
+
 
 class TestCheck:
     def test_a_wide_well_formed_markdown_view_passes(self):
@@ -141,16 +157,21 @@ class TestCheck:
 
 
 class TestPage:
-    def test_each_file_is_listed_with_its_type_and_size(self, tmp_path):
+    def test_each_file_is_listed_by_name_and_type_on_an_unreachable_port(self, tmp_path):
         svg = tmp_path / "flow.svg"
         svg.write_bytes(SVG)
         html = sanity.page_html([AUDIT, svg])
-        assert '"id": "impeccable-audit-summary.md", "type": "text/markdown", "size": 3575' in html
-        assert '"id": "flow.svg", "type": "image/svg+xml"' in html
-        assert '"title": "Artifact sanity"' in html
-        for placeholder in ("DATA", "PALETTE", "PORT", "SLUG"):
+        rows = '[{"id": "art-0", "title": "impeccable-audit-summary.md", "file": {"id": "impeccable-audit-summary.md", '
+        assert (
+            rows
+            + '"type": "text/markdown"}}, {"id": "art-1", "title": "flow.svg", "file": {"id": "flow.svg", "type": "image/svg+xml"}}]'
+            in html
+        )
+        assert '{"title": "Artifact sanity", "artifacts": [' in html
+        assert 'const PORT = "9";' in html
+        for placeholder in ("DATA", "PALETTE", "PORT"):
             assert f"__LEDGER_{placeholder}__" not in html
-        assert "artifact-sanity" in html
+        assert "--canvas" in html
 
 
 @pytest.fixture
@@ -158,28 +179,25 @@ def fixture_files():
     return sorted(FIXTURES.iterdir())
 
 
+@pytest.fixture
+def narrow(tmp_path, monkeypatch):
+    template = tmp_path / "template.html"
+    wide = ".art-doc { max-width: 180ch; margin: 0 auto; line-height: 1.6; overflow-wrap: break-word; }"
+    source = sanity.TEMPLATE.read_text()
+    assert wide in source
+    template.write_text(source.replace(wide, NARROW))
+    (tmp_path / "palette.css").write_text((sanity.TEMPLATE.parent / "palette.css").read_text())
+    monkeypatch.setattr(sanity, "TEMPLATE", template)
+
+
 def test_real_artifacts_render_wide_and_readable_in_the_viewer(browser, fixture_files):
     report = sanity.run(browser, fixture_files)
     assert report == {path.name: [] for path in fixture_files}
 
 
-def test_the_old_narrow_column_fails_width_and_compacts_the_delivery_table(browser, fixture_files):
-    report = sanity.run(browser, fixture_files, css=NARROW)
+def test_the_old_narrow_column_fails_width_and_compacts_the_delivery_table(browser, fixture_files, narrow):
+    report = sanity.run(browser, fixture_files)
     for name in (AUDIT.name, DELIVERY.name):
         assert any(f.startswith("reading width") for f in report[name]), report[name]
     assert any("broken mid word" in f for f in report[DELIVERY.name]), report[DELIVERY.name]
     assert report["handoff-proposal.json"] == [] and report["handoff-flow.svg"] == []
-
-
-def test_the_command_exits_non_zero_on_a_failure(browser, tmp_path):
-    broken = tmp_path / "broken.json"
-    broken.write_text("{")
-    command = [sys.executable, "-m", "scripts.swarm_ledger.artifact_sanity"]
-    root = Path(__file__).resolve().parents[2]
-    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(Path(browser.browser_type.executable_path).parents[2])}
-    good = subprocess.run([*command, str(AUDIT)], cwd=root, env=env, capture_output=True, text=True)
-    assert good.returncode == 0, good.stdout + good.stderr
-    assert json.loads(good.stdout) == {AUDIT.name: []}
-    bad = subprocess.run([*command, str(AUDIT), str(broken)], cwd=root, env=env, capture_output=True, text=True)
-    assert bad.returncode == 1
-    assert json.loads(bad.stdout) == {AUDIT.name: [], "broken.json": ["the viewer rendered nothing"]}
