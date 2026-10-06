@@ -5,6 +5,7 @@ from pathlib import Path
 from hooks.context.account_sessions import agent_pid
 from hooks.context.broadcast import name_session
 from scripts.inbox.seats import seat_address
+from scripts.swarm import launch_model
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 
 
@@ -13,6 +14,13 @@ def harness_of(pid):
 
     process = _process(pid, Path("/proc"))
     return (_target(process) if process else "") or "claude"
+
+
+def argv_of(pid):
+    from hooks.proc import _process
+
+    process = _process(pid, Path("/proc"))
+    return process.argv if process else ()
 
 
 def take(store, slug, name, runtime, now_ms, replace_live=False):
@@ -30,8 +38,17 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
         if not runtime.retire(agent, agent.name in live):
             raise SwarmError(f"could not retire {agent.name}; try again")
         store.drop_agent(slug, agent.name)
+    harness = harness_of(pid)
+    model, effort = launch_model.read(harness, argv_of(pid))
     record = AgentRecord(
-        name, MASTER, MASTER, harness=harness_of(pid), started_at=now_ms, seat=seat_address(slug, MASTER)
+        name,
+        MASTER,
+        MASTER,
+        harness=harness,
+        started_at=now_ms,
+        model=model,
+        effort=effort,
+        seat=seat_address(slug, MASTER),
     )
     store.seats.occupy(record.seat, name, now_ms)
     store.put_agent(slug, record)
