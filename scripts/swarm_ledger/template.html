@@ -712,7 +712,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
-      tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "done", "out_of_scope"], ["comments"]),
+      tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "plan_url", "done", "out_of_scope"], ["comments"]),
     };
   }
 
@@ -1304,7 +1304,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       h("span", { text: item.state }),
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
-      link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
+      link(item.plan_url, "plan"), link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
     const body = h("div", {}, h("div", { class: "item-title" }, taskLink(item.id), h("span", { text: item.title })),
       item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
       waits ? h("p", { class: "desc", text: waits }) : null);

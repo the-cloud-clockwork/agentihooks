@@ -25,15 +25,20 @@ UPDATABLE = (
     "workspace",
     "awaiting",
     "artifact",
+    "plan_url",
 )
 BOOL_FIELDS = ("artifact",)
 LIST_FIELDS = ("depends_on", "territory")
 OBJECT_FIELDS = ("contract", "proof")
-URL_FIELDS = ("issue_url", "pr_url")
+URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 WORKER_LANES = ("eng", "ci")
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
+PUBLISH = (
+    "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
+    "task set <id> plan_url=<link>"
+)
 
 
 def check_lane(task: dict) -> None:
@@ -59,6 +64,7 @@ def check(op):
             raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
         check_bools(op)
+        check_urls(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -147,6 +153,9 @@ def _add(doc, op, ctx):
     for key in ("gain", "contract", "workspace", "artifact"):
         if key in op:
             task[key] = op[key]
+    phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
+    if plan_url := op.get("plan_url") or phase.get("plan_url"):
+        task["plan_url"] = plan_url
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
     return True
@@ -189,6 +198,11 @@ def invalid_slice(task: dict, tasks: list[dict]) -> list[str]:
     ]
 
 
+def unlinked_slice(task: dict, tasks: list[dict]) -> list[str]:
+    ids = {item.strip() for item in task["proof"]["slice"].split(",")}
+    return [item["id"] for item in tasks if item["id"] in ids and not item.get("plan_url")]
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
@@ -204,6 +218,9 @@ def _update(doc, op, ctx):
         bad = invalid_slice(after, doc["tasks"])
         if bad:
             ctx.refused.append(f"{op['item']} has invalid slice task ids: {', '.join(bad)}")
+            return False
+        if unlinked := unlinked_slice(after, doc["tasks"]):
+            ctx.refused.append(f"{op['item']} slice tasks carry no plan link: {', '.join(unlinked)}. {PUBLISH}")
             return False
     changed = {k: v for k, v in op["fields"].items() if task.get(k) != v}
     task.update(changed)
