@@ -78,5 +78,9 @@
   "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "scripts/mcp_daemon.py:scripts.mcp_daemon.x__client_entry__mutmut_5:39a2235dabb2a3bc9148c4399c9d5f776829d26875120c3f9629b9be3531feb8": {
+    "reader": "Standards /root/standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   }
 }

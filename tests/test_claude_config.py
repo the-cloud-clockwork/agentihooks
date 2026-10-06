@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,30 @@ def test_profile_detection_and_project_data(tmp_path, monkeypatch):
     install._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=True))
 
 
+def test_refresh_reads_all_role_instructions(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from scripts import install
+
+    home = tmp_path / "role"
+    (home / "rules").mkdir(parents=True)
+    (home / "rules" / "role.md").write_text("Role rule content")
+    (home / "CLAUDE.md").write_text("Role persona content")
+    (home / "CLAUDE.local.md").write_text("Role local content")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    seen = []
+
+    def capture(profile, payload):
+        seen.append((profile, payload))
+        return {"marker_path": str(tmp_path / "marker"), "pending_count": 0, "content_hash": "proof"}
+
+    monkeypatch.setattr("hooks.context.rules_refresh.write_refresh_marker", capture)
+    install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
+    assert seen[0][0] == "engineer"
+    for expected in ("Role rule content", "Role persona content", "Role local content"):
+        assert expected in seen[0][1]
+
+
 @pytest.mark.parametrize("override", ["engineer", "engineer,brain"])
 def test_profile_override(override, monkeypatch):
     from hooks.context.profile_chain import active_profile
@@ -193,7 +218,14 @@ def test_resolver_is_isolated(monkeypatch):
 def test_status_script_starts_without_installed_package():
     path = Path(__file__).resolve().parents[1] / "scripts" / "status_checker.py"
     result = subprocess.run(
-        [sys.executable, "-I", "-S", "-c", f"import runpy; runpy.run_path({str(path)!r}, run_name='probe')"],
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            f"import importlib.util, runpy, sys; sys.path.append({sysconfig.get_path('purelib')!r}); "
+            f"assert importlib.util.find_spec('scripts') is None; runpy.run_path({str(path)!r}, run_name='probe')",
+        ],
         capture_output=True,
         text=True,
     )
@@ -226,7 +258,8 @@ def test_document_commands_read_role_home(tmp_path, monkeypatch, command, explic
     assert seen == [source]
 
 
-def test_init_checks_role_instructions_when_state_has_no_profile(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("managed", [False, True])
+def test_init_checks_role_instructions_when_state_has_no_profile(tmp_path, monkeypatch, capsys, managed):
     from argparse import Namespace
 
     from scripts import install
@@ -236,11 +269,15 @@ def test_init_checks_role_instructions_when_state_has_no_profile(tmp_path, monke
     (home / "CLAUDE.md").write_text("<!-- profile: engineer -->\n")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
-    monkeypatch.setattr(install, "_load_state", lambda: {})
+    saved = tmp_path / "saved.md"
+    saved.write_text("<!-- profile: planner -->\n")
+    state = {"managed_claude_md": str(saved)} if managed else {}
+    monkeypatch.setattr(install, "_load_state", lambda: state)
     with pytest.raises(SystemExit) as error:
         install.cmd_init_unified(Namespace(profile=None, target="claude", force=False, clean=False))
     assert error.value.code == 1
-    assert "agentihooks init --profile engineer" in capsys.readouterr().err
+    expected = "planner" if managed else "engineer"
+    assert f"agentihooks init --profile {expected}" in capsys.readouterr().err
 
 
 def test_daemon_reads_unicode_config_in_non_utf8_locale(tmp_path, monkeypatch):
