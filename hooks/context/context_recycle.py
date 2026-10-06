@@ -10,8 +10,7 @@ from scripts.codex_context import codex_context
 from scripts.handoff import check as handoff_check
 from scripts.swarm import naming
 
-_DIRECTIVE = (
-    "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
+_INSTRUCTIONS = (
     "in Handoff v2 form: the line # Handoff v2, then ## Intent, ## Done, ## Stopped at, ## Decisions and promises, "
     "## Next and ## Read first, each once and in that order, None under a heading with nothing to say, and "
     "<!-- handoff complete --> as the last line. Every Done bullet carries its evidence or the word hypothesis; "
@@ -21,6 +20,10 @@ _DIRECTIVE = (
     "promised) to files under ~/scratchpad, record any lesson for your seat with "
     '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc> --recap <recap>` '
     "and stop. A successor continues the task from them."
+)
+_DIRECTIVE = (
+    "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
+    + _INSTRUCTIONS
 )
 
 _ALLOWED = (
@@ -90,7 +93,7 @@ def directive(session_id: str, environ=None, now: datetime | None = None) -> str
     return (
         f"HANDOFF PREPARATION — this session holds {used // 1000}k tokens. Write your handoff now. "
         f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {_gate_limit()}k hard gate, whichever comes first. "
-        + _DIRECTIVE.split("Write a handoff document ", 1)[1].format(used=used // 1000, limit=_gate_limit(), slug=slug)
+        + _INSTRUCTIONS.format(slug=slug)
     )
 
 
