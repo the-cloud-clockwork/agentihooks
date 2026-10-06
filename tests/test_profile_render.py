@@ -481,17 +481,23 @@ def test_claude_render_seeds_nothing_it_cannot_read(world, operator):
 
 
 @pytest.mark.parametrize("role", ["frontend", "engineer"])
-def test_fresh_role_home_completes_onboarding_without_operator_state(world, role):
+@pytest.mark.parametrize("completed", [None, False])
+def test_fresh_role_home_completes_onboarding_without_operator_state(world, role, completed):
     from scripts.profiles import render
 
     _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\n")
     source = world["home"] / ".claude.json"
     source.unlink()
+    if completed is not None:
+        source.write_text(json.dumps({"hasCompletedOnboarding": completed}))
 
     out = render.render_claude(role)
 
     assert json.loads((out / ".claude.json").read_text())["hasCompletedOnboarding"] is True
-    assert not source.exists()
+    if completed is None:
+        assert not source.exists()
+    else:
+        assert json.loads(source.read_text()) == {"hasCompletedOnboarding": completed}
 
 
 def test_cached_role_home_fills_missing_onboarding_without_resetting_state(world):

@@ -167,6 +167,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
 def _seed(src: Path) -> dict:
     operator = _read_json(src) or {}
     doc = {key: operator[key] for key in SEED_KEYS if key in operator}
+    doc["hasCompletedOnboarding"] = True
     if isinstance(operator.get("projects"), dict):
         doc["projects"] = {
             path: {key: project[key] for key in PROJECT_SEED_KEYS if key in project}
