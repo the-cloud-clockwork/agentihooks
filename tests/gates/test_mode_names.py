@@ -1,6 +1,11 @@
 import pytest
 
-from tests.swarm.test_cli import env, run  # noqa: F401
+from scripts.swarm import cli
+from tests.swarm.test_cli import env  # noqa: F401
+
+
+def run(*args):
+    return cli.main(list(args))
 
 
 @pytest.mark.parametrize(
@@ -43,6 +48,9 @@ def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, 
         assert report["gate_modes"]["watch"] == "log only"
         assert report["gates"][0]["kind"] == "log only"
     else:
-        assert "identity=deny" in output
-        assert "watch=log only" in output
-        assert "gate  log only  watch" in output
+        lines = output.splitlines()
+        assert lines[1] == (
+            "gate modes  identity=deny  watch=log only  subagents=log only  reruns=deny  intent=log only  "
+            "build=log only  claim-stop=deny  quiet=deny  claims=deny  trace-plan=log only  talk=log only"
+        )
+        assert lines[-1] == "gate  log only  watch  agent  work  budget spent"

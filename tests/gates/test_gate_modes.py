@@ -188,3 +188,11 @@ class TestServerControl:
 @pytest.mark.parametrize("mode", ["deny", "log only", "skip"])
 def test_page_gate_control_accepts_new_mode_names(mode):
     assert ledger_server.control_argv({"action": "set", "gates": {"watch": mode}}) == ["set", f"watch-gate={mode}"]
+
+
+@pytest.mark.parametrize(
+    "stored,display",
+    [("enforce", "deny"), ("observe", "log only"), ("off", "skip"), ("lift", "lift"), ("fail-open", "fail-open")],
+)
+def test_gate_decision_labels_keep_non_mode_decisions(stored, display):
+    assert modes.label(stored) == display

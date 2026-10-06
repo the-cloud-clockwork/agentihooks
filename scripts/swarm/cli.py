@@ -503,7 +503,7 @@ def cmd_status(store, args):
         print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
     for row in gate_log.decisions(args.slug):
         print(
-            f"gate  {modes.label(row.get('kind', ''))}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
+            f"gate  {modes.label(row['kind'])}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"
         )
 
 
