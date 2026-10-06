@@ -107,7 +107,14 @@ class HerdrRuntime:
             config.slug, config.repo, lane, name, task, role=chosen.get("role", ""), autonomy=config.autonomy
         )
         priming_trace.write(self.home, config.slug, name, task)
-        argv = self._argv(config, name, agent, text, f"{name}.md", chosen.get("profile", DEFAULT_PROFILES[lane]))
+        argv = self._argv(
+            config,
+            name,
+            agent,
+            text,
+            f"{name}.md",
+            task.get("profile") or chosen.get("profile", DEFAULT_PROFILES[lane]),
+        )
         if lane in PICKED_LANES:
             picked = model_pick.pick(agent, chosen, task, environ)
         else:

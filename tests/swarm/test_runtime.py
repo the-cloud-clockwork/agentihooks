@@ -25,6 +25,31 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
+@pytest.mark.parametrize(
+    ("lanes", "task", "profile"),
+    [
+        ({}, {"profile": "frontend"}, "frontend"),
+        ({"eng": {"profile": "qa"}}, {"profile": "frontend"}, "frontend"),
+        ({"eng": {"profile": "qa"}}, {"profile": ""}, "qa"),
+        ({}, {}, "engineer"),
+    ],
+)
+def test_a_task_profile_wins_over_the_lane_profile_at_spawn(tmp_path, lanes, task, profile):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes=lanes, autonomy="delegate"
+    )
+    runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x", **task})
+    argv = seen["argv"]
+    assert argv[argv.index("--profile") + 1] == profile
+
+
 def test_status_and_nudge_in_a_long_named_swarm_reach_the_engineer_not_the_master(tmp_path):
     calls = []
     runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: calls.append(args) or {"agent_status": "idle"})

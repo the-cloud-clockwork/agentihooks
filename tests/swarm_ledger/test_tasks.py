@@ -230,6 +230,42 @@ class TaskDependencies(unittest.TestCase):
                 ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
         self.assertEqual([f.get("gain") for _, f in sent], [1.5, None])
 
+    def test_a_task_keeps_the_profile_its_claimant_runs(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        add = op("task_add", 1, task="t2", title="b", lane="eng", profile="frontend")
+        set_back = op("task_update", 2, item="tasks/t2", fields={"profile": ""})
+        core.check_op(add)
+        core.check_op(set_back)
+        state, rejected = core.sync(SLUG, ops=[add])
+        self.assertEqual((rejected, state["tasks"][1]["profile"]), ([], "frontend"))
+        self.assertNotIn("profile", state["tasks"][0])
+        state, rejected = core.sync(SLUG, ops=[set_back])
+        self.assertEqual((rejected, state["tasks"][1]["profile"]), ([], ""))
+        for bad in (
+            op("task_add", 3, task="t3", title="c", lane="eng", profile="--resume"),
+            op("task_add", 4, task="t3", title="c", lane="eng", profile=["frontend"]),
+            op("task_update", 5, item="tasks/t1", fields={"profile": "front end"}),
+        ):
+            with self.assertRaises(ValueError):
+                core.check_op(bad)
+        base = {"title": "t", "phases": [], "questions": [], "followups": []}
+        with self.assertRaises(ValueError):
+            core.validate({**base, "tasks": [{"id": "t1", "title": "a", "profile": "-x"}]})
+
+    def test_task_cli_sends_the_profile(self):
+        import ledger
+
+        sent = []
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, **f: sent.append((kind, f))):
+            for argv in (
+                ["task", "add", "t3", "b", "--profile", "frontend"],
+                ["task", "add", "t4", "c"],
+                ["task", "set", "t4", "profile=frontend"],
+            ):
+                ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
+        self.assertEqual([f.get("profile") for _, f in sent[:2]], ["frontend", None])
+        self.assertEqual(sent[2][1]["fields"], {"profile": "frontend"})
+
 
 class TaskBlockersOnThePage(unittest.TestCase):
     def blockers(self, tasks):

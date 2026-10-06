@@ -25,6 +25,7 @@ UPDATABLE = (
     "workspace",
     "awaiting",
     "artifact",
+    "profile",
 )
 BOOL_FIELDS = ("artifact",)
 LIST_FIELDS = ("depends_on", "territory")
@@ -59,6 +60,7 @@ def check(op):
             raise ValueError("phase, description and workspace must be strings")
         check_lists(op)
         check_bools(op)
+        check_profile(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -78,6 +80,7 @@ def check(op):
         raise ValueError(f"state must be one of {STATES}")
     check_lists(fields)
     check_bools(fields)
+    check_profile(fields)
     check_urls(fields)
     ledger_kinds.check(fields)
 
@@ -95,6 +98,12 @@ def check_bools(fields):
             raise ValueError(f"{key} must be true or false")
 
 
+def check_profile(fields):
+    profile = fields.get("profile", "")
+    if not isinstance(profile, str) or (profile and not ID_RE.match(profile)):
+        raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
+
+
 def check_urls(fields):
     for key in URL_FIELDS:
         if fields.get(key) and not URL_RE.match(fields[key]):
@@ -109,6 +118,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
     check_lists(task)
     check_urls(task)
+    check_profile(task)
     ledger_kinds.check(task)
     check_lane(task)
     if task.get("state") == "done" and ledger_kinds.unmet(task):
@@ -144,7 +154,7 @@ def _add(doc, op, ctx):
         "done": False,
         "comments": [],
     }
-    for key in ("gain", "contract", "workspace", "artifact"):
+    for key in ("gain", "contract", "workspace", "artifact", "profile"):
         if key in op:
             task[key] = op[key]
     tasks.append(task)

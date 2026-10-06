@@ -33,7 +33,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       AskUserQuestion answer this session recorded in the last hour
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
-  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N]
+  task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
            [--kind K] [--must M --check C --judge J] [--scaffold] [--artifact]
                                       add a swarm task; IDS and AREAS are comma separated; K is code (default), ci,
                                       ops, troubleshoot, tune or research; M, C, J form its proof contract;
@@ -372,6 +372,8 @@ def cmd_task(args):
             lists["kind"] = args.kind
         if args.artifact:
             lists["artifact"] = True
+        if args.profile:
+            lists["profile"] = args.profile
         if args.scaffold:
             task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
             doc = call(args.slug) if args.kind == "plan" else None
@@ -511,6 +513,7 @@ def build_parser():
         "--scaffold", action="store_true", help="create the task's work folder now and store it as its workspace"
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
+    task.add_argument("--profile", default="", help="profile the claimant runs, such as frontend; default the lane's")
     return parser
 
 
