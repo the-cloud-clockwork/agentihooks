@@ -146,9 +146,18 @@ class TestDecide:
         made(gate, watch=40)
         assert decide(gate, swarm="").allowed
 
-    @pytest.mark.parametrize("name", ["planner-1", "operator", "../sw-eng-1"])
+    @pytest.mark.parametrize("name", ["planner@323133-0001", "planner-1", "operator"])
     def test_names_outside_the_gated_lanes_pass(self, gate, name):
+        made(gate, name=name, watch=40)
         assert decide(gate, name=name).allowed
+
+    def test_an_unsafe_name_passes(self, gate):
+        assert decide(gate, name="../sw-eng-1").allowed
+
+    def test_an_unsafe_swarm_passes_even_where_its_path_resolves_to_real_rows(self, gate):
+        made(gate, watch=40)
+        (gate.root / "x").mkdir()
+        assert decide(gate, swarm="x/../sw").allowed
 
     def test_a_rearm_with_no_watcher_passes(self, gate):
         made(gate, watch=20)

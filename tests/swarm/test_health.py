@@ -284,6 +284,7 @@ def test_watch_limits_pick_the_master_pair_only_for_the_master(by, least, ratio)
         ({"watch": 20, "act": 0, "since": 20}, False),
         ({"watch": 30, "act": 6, "since": 21}, False),
         ({"watch": 31, "act": 6, "since": 21}, True),
+        ({"watch": 6, "act": 1, "since": 21}, True),
     ],
 )
 def test_over_watched_needs_both_the_since_count_and_the_ratio(counts, over):

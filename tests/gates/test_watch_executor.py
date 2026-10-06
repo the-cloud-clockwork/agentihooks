@@ -9,12 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm.health import activity
-
 ROOT = Path(__file__).resolve().parents[2]
 ME, SLUG, SID = "engineer@100001-0001", "demo", "sid-watch"
 MATCHER = "monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks"
-SHIM = "import sys\n\nfrom scripts.gates.entry import main\n\nraise SystemExit(main(['watch']))\n"
+PACKAGE = ".".join(("scripts", "gates"))
+SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'watch']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
 CHECKS = {"command": "gh pr checks 12", "description": "probe"}
 REARM = {"command": f"agentihooks ledger watch {SLUG} --as {ME}", "description": "ledger events"}
 ACT = {"command": "git commit -m probe", "description": "probe"}
@@ -67,10 +66,15 @@ def hook(tmp_path):
             timeout=60,
         )
 
+    recorded = home / "swarm-activity" / SLUG / f"{ME}.jsonl"
+
     def seed(count):
-        bound = {"AGENTIHOOKS_SWARM": SLUG, "AGENTIHOOKS_AGENT_NAME": ME}
-        for _ in range(count):
-            activity.record("Bash", CHECKS, bound, home / "swarm-activity")
+        recorded.parent.mkdir(parents=True, exist_ok=True)
+        with recorded.open("a") as out:
+            out.writelines(json.dumps({"kind": "watch", "at": 0}) + "\n" for _ in range(count))
+
+    def kinds():
+        return [json.loads(line)["kind"] for line in recorded.read_text().splitlines()]
 
     def rows():
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
@@ -81,23 +85,22 @@ def hook(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
 
-    run.seed, run.rows, run.beat = seed, rows, beat
-    run.counts = lambda: activity.counts(SLUG, home / "swarm-activity").get(ME)
+    run.seed, run.rows, run.beat, run.kinds = seed, rows, beat, kinds
     return run
 
 
 def test_the_twenty_first_watch_with_no_action_is_denied_and_an_action_frees_it(hook):
     hook.seed(19)
     assert hook().returncode == 0
-    assert hook.counts()["since"] == 20
+    assert hook.kinds() == ["watch"] * 20
     denied = hook()
     assert denied.returncode == 2, denied.stdout + denied.stderr
     assert "watch budget: 20 watch calls since your last action (limit 20)" in denied.stderr
     assert f"agentihooks swarm {SLUG} wait <minutes>" in denied.stderr
-    assert hook.counts()["since"] == 20, "a denied call is not counted"
+    assert hook.kinds() == ["watch"] * 20, "a denied call is not counted"
     assert [(r["gate"], r["kind"], r["agent"], r["task"]) for r in hook.rows()] == [("watch", "deny", ME, "t1")]
     assert hook(tool_input=ACT).returncode == 0
-    assert hook.counts()["since"] == 0
+    assert hook.kinds()[-1] == "act"
     assert hook().returncode == 0
 
 
