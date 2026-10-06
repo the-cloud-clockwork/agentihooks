@@ -155,18 +155,11 @@ def add_refusal(tasks, op):
         return f"{by} works in the {lane} lane and cannot add tasks: {PROPOSE}"
     if lane != "plan":
         return ""
-    planned = next(
-        (
-            t.get("phase", "")
-            for t in tasks
-            if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")
-        ),
-        None,
-    )
-    if planned is None:
+    plans = [t for t in tasks if (t.get("claimed_by"), t.get("lane"), t.get("state")) == (by, "plan", "claimed")]
+    if not plans:
         return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
-    if planned != op.get("phase", ""):
-        return f"{by} plans phase {planned} and cannot add a task to phase {op.get('phase', '')}: {PROPOSE}"
+    if plans[0].get("phase") != op.get("phase"):
+        return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
     return ""
 
 

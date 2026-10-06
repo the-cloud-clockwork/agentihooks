@@ -36,8 +36,8 @@ def make_ledger(claims=()):
 
 
 def add(by, phase="p1"):
-    op = {"op": "task_add", "id": "add-t9", "by": by, "task": "t9", "title": "x", "phase": phase, "lane": "eng"}
-    return core.sync(SLUG, ops=[op])
+    op = {"op": "task_add", "id": "add-t9", "by": by, "task": "t9", "title": "x", "lane": "eng"}
+    return core.sync(SLUG, ops=[{**op, "phase": phase} if phase else op])
 
 
 def plan_task(state="claimed", by=PLANNER):
@@ -85,9 +85,10 @@ def test_a_planner_adds_tasks_in_the_phase_it_plans():
     assert_added(PLANNER)
 
 
-def test_a_planner_cannot_add_a_task_outside_the_phase_it_plans():
+@pytest.mark.parametrize("phase", ["p2", None])
+def test_a_planner_cannot_add_a_task_outside_the_phase_it_plans(phase):
     make_ledger([plan_task()])
-    assert_refused(PLANNER, f"{PLANNER} plans phase p1 and cannot add a task to phase p2: {FOLLOWUP}", "p2")
+    assert_refused(PLANNER, f"{PLANNER} plans phase p1 and cannot add a task outside it: {FOLLOWUP}", phase)
 
 
 @pytest.mark.parametrize("claims", [[], [plan_task("blocked")], [plan_task(by="planner@abcdef-0004")]])
