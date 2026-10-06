@@ -13,7 +13,7 @@ from scripts.handoff import transfers
 from scripts.inbox import exits
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, lifetime, phase_state, session_model
+from scripts.swarm import control_notifications, lifetime, phase_state, priming_trace, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -327,7 +327,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
 def primed(store, slug, seat, task):
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = store.handoff_envelope(slug, task["id"])
-    return {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    task = {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    return priming_trace.withhold(slug, task)
 
 
 def _free_seat(slug, lane, taken, preferred):

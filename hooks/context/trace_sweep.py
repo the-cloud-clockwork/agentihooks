@@ -14,12 +14,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from hooks.context import broadcast, conditions, enforcement, injection_trace, profile_chain
+from hooks.context import broadcast, conditions, enforcement, injection_trace, profile_chain, quarantine
 
 _NEEDLE_MAX = 120
 _NEEDLE_MIN = 20
 _WALK_DEPTH = 3
 _SKIP_DIRS = {"node_modules", "__pycache__", "venv"}
+PRIMING_LAYERS = ("culture", "learned")
 
 
 @dataclass(frozen=True)
@@ -180,12 +181,55 @@ def find(correction: dict, root: str | Path) -> list[Hit]:
     hits = _enforcement_hits(correction, needle, stores)
     hits += _condition_hits(correction, needle, condition_dirs)
     hits += _broadcast_hits(correction, needle)
+    hits += _file_source_hits(correction)
+    hits += _priming_hits(correction, quarantine.needle(correction))
     return list(dict.fromkeys(hits))
 
 
-def _file_followup(ledger: str, text: str) -> None:
+def _file_source_hits(correction: dict) -> list[Hit]:
+    locator = correction.get("locator") or {}
+    if correction.get("layer") not in injection_trace.FILE_LAYERS or not locator.get("path"):
+        return []
+    path = Path(locator.get("repo", "")) / locator["path"]
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    quote = correction.get("quote")
+    if quote and _norm(quote) not in _norm(text):
+        return []
+    return [Hit(correction["source"], correction["layer"], str(path), correction["source"], "pr", *_home_of(path))]
+
+
+def _home_of(path: Path) -> tuple[str, str]:
+    return _git_home(path) or (str(path.parent), path.name)
+
+
+def _priming_texts(correction: dict) -> list[str]:
+    from scripts.swarm.store import connect
+
+    locator, store = correction.get("locator") or {}, connect()
+    if correction["layer"] == "culture":
+        return (store.culture.get(locator.get("swarm", "")) or "").splitlines()
+    return [note["text"] for note in store.memory.learned(locator.get("seat", ""))]
+
+
+def _priming_hits(correction: dict, needle: str) -> list[Hit]:
+    if correction.get("layer") not in PRIMING_LAYERS:
+        return []
+    hit = Hit(correction["source"], correction["layer"], correction["source"], correction["source"], "held")
+    try:
+        texts = _priming_texts(correction)
+    except Exception:  # an unreadable store keeps the correction open rather than closing it unseen
+        return [hit]
+    whole = _norm(correction.get("text", ""))
+    found = any((needle and needle in _norm(text)) or _norm(text) == whole for text in texts)
+    return [hit] if found else []
+
+
+def _file_followup(ledger: str, text: str, *flags: str) -> None:
     name = os.environ.get("AGENTIHOOKS_AGENT_NAME") or "trace-sweep"
-    cmd = ["agentihooks", "ledger", "--slug", ledger, "--as", name, "followup", "add", text]
+    cmd = ["agentihooks", "ledger", "--slug", ledger, "--as", name, "followup", "add", text, *flags]
     subprocess.run(cmd, check=True, capture_output=True, timeout=30)
 
 
@@ -212,19 +256,30 @@ def _clear(hit: Hit, session_id: str) -> str:
 def _apply_one(hit: Hit, correction: dict, session_id: str, ledger: str) -> str:
     if hit.action == "clear":
         return _clear(hit, session_id)
+    repo = Path(correction.get("repo", "")).name
     if hit.action == "pr":
-        return (
+        plan = (
             f"pull request in {hit.repo}: remove {hit.key} from {hit.relpath} on a worktree off dev, "
             f"then gh pr create --base dev; file left unchanged"
         )
+        text = (
+            f"One {hit.layer} directive in the {Path(hit.repo).name} repo is marked wrong for the {repo} repo: "
+            f"{correction.get('reason', '')}. Remove it by pull request into dev."
+        )
+        return f"{plan}; {_followup(ledger, text)}"
     if hit.action == "manual":
         return f"edit by hand: {hit.location} is outside git and has no clear function"
+    if hit.action == "held":
+        return "withheld from priming until its source is fixed"
     entry = re.sub(r"[-_]+", " ", hit.location)
-    repo = Path(correction.get("repo", "")).name
     text = (
         f"The {entry} brain entry still carries a directive marked wrong for the {repo} repo: "
         f"{correction.get('reason', '')}. Brain regenerates it, so fix it at its source."
     )
+    return _followup(ledger, text)
+
+
+def _followup(ledger: str, text: str) -> str:
     if not ledger:
         return f"follow up to file: {text}"
     try:
@@ -234,11 +289,17 @@ def _apply_one(hit: Hit, correction: dict, session_id: str, ledger: str) -> str:
     return f"follow up filed on {ledger}"
 
 
-def sweep(root: str | Path, apply: bool = False, session_id: str = "", ledger: str = "") -> dict:
-    report = {"plan": [], "applied": [], "closed": []}
+def sweep(root: str | Path, apply: bool = False, session_id: str = "", ledger: str = "", only: str = "") -> dict:
+    report = {"plan": [], "applied": [], "closed": [], "proposed": []}
+    keys = quarantine.confirmed_keys()
     for correction in open_corrections():
+        if only and correction["source"] != only:
+            continue
         hits = find(correction, root)
         report["plan"] += hits
+        if quarantine.is_proposed(correction, keys):
+            report["proposed"].append(correction)
+            continue
         if apply and hits:
             report["applied"] += [(hit, _apply_one(hit, correction, session_id, ledger)) for hit in hits]
             hits = find(correction, root)
@@ -252,4 +313,8 @@ def plan_rows(report: dict) -> list[str]:
     rows = ["\t".join((h.source, h.layer, h.action, h.location, h.key)) for h in report["plan"]]
     rows += ["\t".join(("applied", h.source, h.layer, h.location, outcome)) for h, outcome in report["applied"]]
     rows += ["\t".join(("closed", c["source"], c.get("repo", ""), c.get("reason", ""))) for c in report["closed"]]
+    rows += [
+        "\t".join(("proposed", c["source"], c.get("repo", ""), "waits for the operator to confirm"))
+        for c in report.get("proposed", [])
+    ]
     return rows

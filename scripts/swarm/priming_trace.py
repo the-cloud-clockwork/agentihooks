@@ -30,9 +30,36 @@ def rows(slug: str, task: dict) -> list[dict]:
         number = len(recaps) - shown
         found.append(_row("recap", f"recap:{seat}#{number}", {"seat": seat, "recap": number}, recap["text"]))
     for number, note in enumerate(task.get("learned") or [], 1):
-        if note["maturity"] != "data":
+        if note["maturity"] != "data" and not note.get("withheld"):
             found.append(_row("learned", f"learned:{seat}#{number}", {"seat": seat, "note": number}, note["text"]))
-    return found
+    return found + list(task.get("withheld") or [])
+
+
+def withhold(slug: str, task: dict, environ=None) -> dict:
+    """The task with culture lines and learned notes under a confirmed correction taken out, and a row for each."""
+    from hooks.context import quarantine
+
+    current = quarantine.mode(environ)
+    held = quarantine.index() if current != "off" else []
+    if not held:
+        return task
+    seat, logged = task.get("seat", ""), []
+
+    def hit(layer, source, text):
+        found = quarantine.match(held, [source], text)
+        if found is not None:
+            logged.append(quarantine.withheld_row(layer, source, found, current))
+        return found is not None and current == "enforce"
+
+    culture = "".join(
+        "\n" if line.strip() and hit("culture", f"culture:{slug}#{number}", line) else line
+        for number, line in enumerate((task.get("culture") or "").splitlines(keepends=True), 1)
+    )
+    learned = [
+        {**note, "withheld": True} if hit("learned", f"learned:{seat}#{number}", note["text"]) else note
+        for number, note in enumerate(task.get("learned") or [], 1)
+    ]
+    return {**task, "culture": culture, "learned": learned, "withheld": logged}
 
 
 def write(home: Path, slug: str, name: str, task: dict) -> None:

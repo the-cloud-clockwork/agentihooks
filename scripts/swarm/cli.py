@@ -40,7 +40,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hooks.context import injection_trace
+from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
 from scripts.gates import Who
 from scripts.gates.identity import refusal
@@ -644,6 +644,8 @@ def cmd_learned(store, args):
         raise SwarmError(ONLY_MASTER_CANON)
     if not re.fullmatch(r".*\w.*\bbecause\b.*\w.*", args.text, re.IGNORECASE | re.DOTALL):
         raise SwarmError("a learned note needs a because clause with a reason")
+    if refused := quarantine.patch_refusal(args.text):
+        raise SwarmError(refused)
     store.memory.learn(_seat(agent), agent.name, args.text, now_ms(), args.maturity)
     print(json.dumps({"seat": agent.seat, "learned": args.text, "maturity": args.maturity}))
 
@@ -677,7 +679,10 @@ def cmd_promote(store, args):
 def cmd_culture(store, args):
     store.config(args.slug)
     if args.action == "set":
-        store.culture.set(args.slug, _read(args.file, "culture file"))
+        text = _read(args.file, "culture file")
+        if refused := quarantine.patch_refusal(text):
+            raise SwarmError(refused)
+        store.culture.set(args.slug, text)
         print(json.dumps({"swarm": args.slug, "culture": "set"}))
         return
     text = store.culture.get(args.slug)

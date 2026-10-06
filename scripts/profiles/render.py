@@ -8,6 +8,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
@@ -52,7 +53,12 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         commit = head.stdout.strip()
     operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
     plugins = dict(sorted((operator.get("enabledPlugins") or {}).items()))
-    return {"bundle_commit": commit, "chain": [n for n, _ in dirs], "plugins": plugins}
+    return {
+        "bundle_commit": commit,
+        "chain": [n for n, _ in dirs],
+        "plugins": plugins,
+        "corrections": quarantine.digest(),
+    }
 
 
 def stamp(name: str) -> dict:
@@ -164,7 +170,7 @@ def _render_rules(dst: Path, items: dict[str, Path]) -> None:
         if old.is_file() or old.is_symlink():
             old.unlink()
     for name, src in items.items():
-        _atomic_write(dst / name, src.read_text())
+        _atomic_write(dst / name, quarantine.annotate(src.read_text(), sources.row("rule", src)["source"]))
 
 
 def _read_json(path: Path) -> dict | None:
@@ -195,7 +201,9 @@ def render_claude(name: str, force: bool = False) -> Path | None:
             sources.write(sources.path(name, "claude", rendered_root()), sources.rows(bundle, dirs, items))
         else:
             _relink(out / subdir, items)
-    _atomic_write(out / "CLAUDE.md", build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER))
+    _atomic_write(
+        out / "CLAUDE.md", quarantine.annotate(build_persona(dirs, current["chain"], bundle, [], HEADER, FOOTER))
+    )
     _claude_json(out, bundle, dirs)
     shared = claude_home(_global_env())
     for item in SHARED:
@@ -229,8 +237,12 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     doc: dict = {key: settings[key] for key in CODEX_KEYS if key in settings}
     items = _features("rules", _is_doc, bundle, dirs)
     sources.write(manifest, sources.rows(bundle, dirs, items))
-    rules = [("rule", n, p.read_text()) for n, p in items.items()]
-    doc["developer_instructions"] = build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
+    rules = [
+        ("rule", n, quarantine.annotate(p.read_text(), sources.row("rule", p)["source"])) for n, p in items.items()
+    ]
+    doc["developer_instructions"] = quarantine.annotate(
+        build_persona(dirs, current["chain"], bundle, rules, HEADER, FOOTER)
+    )
     global_config = codex_home() / "config.toml"
     installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}
     hidden_servers = sorted(set(installed) - set(_mcp_servers("codex", bundle, dirs)))

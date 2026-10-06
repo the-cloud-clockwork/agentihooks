@@ -481,8 +481,9 @@ def test_stamp_names_bundle_commit_and_chain(world):
     from scripts.profiles import render
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
-    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": ["rb-base", "rb-kit", "rb-role"], "plugins": {}}
-    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}}
+    chain = ["rb-base", "rb-kit", "rb-role"]
+    assert render.stamp("rb-role") == {"bundle_commit": head, "chain": chain, "plugins": {}, "corrections": ""}
+    assert render._stamp(None, []) == {"bundle_commit": "", "chain": [], "plugins": {}, "corrections": ""}
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
 
 
