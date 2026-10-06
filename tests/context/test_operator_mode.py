@@ -150,3 +150,48 @@ def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypat
     monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
     hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, True)
     assert logged == [("operator mode failed", {"error": "disk full"})]
+
+
+ASK = (
+    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
+    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
+    "and keep working; the master answers it or raises it to the operator."
+)
+
+
+def test_while_off_the_question_tool_is_refused_and_the_refusal_names_the_ledger_command():
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100) == ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+
+
+def test_a_ledger_bound_session_is_told_its_own_ledger_and_name(ledgers):
+    (ledgers / ".sessions" / "s2.json").write_text(json.dumps({"slug": "work", "name": "eng-2@work"}))
+    env = {**SWARM, "LEDGER_DIR": str(ledgers)}
+    assert operator_mode.question_block("AskUserQuestion", "s2", env, now=100) == ASK.format(
+        slug="work", name="eng-2@work"
+    )
+
+
+def test_the_question_tool_passes_while_on_or_unbound_and_other_tools_always_pass(ledgers):
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=101) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s3", {"LEDGER_DIR": str(ledgers)}, now=101) == ""
+    assert operator_mode.question_block("Bash", "s3", SWARM, now=101) == ""
+
+
+def test_the_pre_tool_hook_blocks_the_question_tool_with_the_refusal(monkeypatch):
+    for key, value in SWARM.items():
+        monkeypatch.setenv(key, value)
+    payload = {"session_id": "s9", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == ASK.format(slug="demo", name="master@a1-1")
+
+
+def test_a_failing_question_check_is_logged_and_lets_the_call_through(monkeypatch):
+    logged = []
+    monkeypatch.setattr(operator_mode, "question_block", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
+    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == ""
+    assert logged == [("operator question check failed", {"error": "disk full"})]

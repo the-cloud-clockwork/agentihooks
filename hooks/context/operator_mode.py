@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 
 from hooks.context.ledger_decision import _bound
 
@@ -14,6 +15,12 @@ WINDOW_SEC = 1800
 SWITCH = re.compile(r"operator (on|off)\b")
 ON_NOTICE = "Operator on: the operator is present in this pane until thirty minutes after his last typed message."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
+QUESTION_TOOL = "AskUserQuestion"
+ASK_REFUSAL = (
+    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
+    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
+    "and keep working; the master answers it or raises it to the operator."
+)
 
 
 def _path(session_id):
@@ -68,3 +75,23 @@ def present(session_id, environ=None, now=None):
     if not (env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id)):
         return True
     return _on(_load(session_id), time.time() if now is None else now)
+
+
+def _binding(env, session_id):
+    try:
+        ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+        bound = json.loads((ledgers / ".sessions" / f"{session_id}.json").read_text())
+    except (OSError, ValueError):
+        bound = {}
+    return bound.get("slug") or env.get("AGENTIHOOKS_SWARM", ""), bound.get("name") or env.get(
+        "AGENTIHOOKS_AGENT_NAME", ""
+    )
+
+
+def question_block(tool_name, session_id, environ=None, now=None):
+    """The refusal of the question tool while the operator is away, naming the ledger command to use instead."""
+    env = os.environ if environ is None else environ
+    if tool_name != QUESTION_TOOL or present(session_id, env, now):
+        return ""
+    slug, name = _binding(env, session_id)
+    return ASK_REFUSAL.format(slug=slug, name=name)
