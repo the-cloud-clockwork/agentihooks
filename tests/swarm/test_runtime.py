@@ -353,6 +353,16 @@ def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conve
     assert (placed.pane_id, placed.harness, placed.account) == ("w2:p9", "codex", "a1")
 
 
+@pytest.mark.parametrize(("recorded", "profile"), [("frontend", "frontend"), ("", "engineer")])
+def test_resume_relaunches_on_the_profile_the_agent_was_spawned_with(tmp_path, recorded, profile):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, replace(agent, profile=recorded), "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--profile") + 1] == profile
+
+
 def test_a_proof_swarm_agent_launches_into_the_space_named_by_its_slug(tmp_path):
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
     config.slug = "proof-a1b2c3-dn1-1"
