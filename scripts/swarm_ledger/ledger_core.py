@@ -534,13 +534,17 @@ def clear_chat(thread, op, target, ctx):
 def record_sync(doc, op, ctx):
     """An operator sync order; each kind rests SYNC_COOLDOWN_MS after it was last sent."""
     import ledger_gate
+    import ledger_stats
 
     kind = SYNC_KINDS[op["op"]]
     last = max((e.get("at", 0) for e in ctx.meta["events"] if e.get("kind") == kind), default=0)
     if ctx.at - last < SYNC_COOLDOWN_MS:
         return False
-    summary = ledger_gate.sync_summary if op["op"] == "sync" else ledger_gate.stats_summary
-    ctx.record("operator", kind, "", id=op["id"], text=summary(doc, ctx.meta))
+    if op["op"] == "sync":
+        text = ledger_gate.sync_summary(doc, ctx.meta)
+    else:
+        text = ledger_stats.review(doc, ctx.meta, ctx.at)
+    ctx.record("operator", kind, "", id=op["id"], text=text)
     return True
 
 
