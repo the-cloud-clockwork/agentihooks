@@ -32,6 +32,7 @@ def home_style():
 def rows():
     with (
         patch.object(server, "ledger_row", side_effect=lambda s, cells, control: f'<li class="row">{s["slug"]}</li>'),
+        patch.object(server, "home_row", side_effect=lambda s, state, now: f'<li class="row">{s["slug"]}</li>'),
         patch.object(server, "home_cells", return_value=""),
         patch.object(server, "bin_cells", return_value=""),
         patch.object(server, "swarm_state", return_value=None),
@@ -47,7 +48,7 @@ def summaries(*slugs):
 def test_home_reads_logo_agentihooks_home_without_a_ledger_count(rows):
     with patch.object(server, "ledger_summaries", return_value=summaries("a", "b")):
         page = server.index_page(now=0)
-    assert f'{WATERMARK}<main class="home">{BRAND}<h1>HOME</h1></header>' in page
+    assert f'{WATERMARK}<main class="home">{BRAND}<h1>HOME</h1>{server.FOLD_ALL}</header>' in page
     assert 'class="total"' not in page
     divider = rule("h1::before")
     assert "width:2px" in divider and "background:var(--signal)" in divider

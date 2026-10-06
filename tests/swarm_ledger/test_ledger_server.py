@@ -67,7 +67,7 @@ def states():
 
 
 def row(page, slug):
-    return re.search(rf'<li class="row">(?:(?!</li>).)*href="/{slug}"(?:(?!</li>).)*</li>', page, re.S).group(0)
+    return re.search(rf'<li class="row"[^>]*>(?:(?!</li>).)*href="/{slug}"(?:(?!</li>).)*</li>', page, re.S).group(0)
 
 
 def summary(slug):
@@ -139,17 +139,21 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(upd
     count = len(server.ledger_summaries())
     assert count > 1
     assert (
-        '<header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>HOME</h1></header>'
-        in page
+        '<header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>HOME</h1>'
+        f"{server.FOLD_ALL}</header>" in page
     )
     assert 'class="total"' not in page
-    head = re.search(r'<div class="row head" aria-hidden="true">(.*?)</div>', page).group(1)
+    head = re.search(r'<div class="row head">(.*?)</div>', page).group(1)
+    arrow = '<i aria-hidden="true">&#8597;</i></button>'
     assert head == (
-        '<span>Ledger</span><span>Kind</span><span>Overview</span><span class="r">Open</span>'
-        '<span class="r">Done</span><span>Swarm</span><span class="r">Activity</span><span></span>'
+        f'<span></span><span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{arrow}'
+        f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{arrow}'
+        f'<button class="sort r" type="button" data-sort="done">Done{arrow}'
+        f'<button class="sort" type="button" data-sort="swarm">Swarm{arrow}'
+        f'<button class="sort r" type="button" data-sort="at">Activity{arrow}<span></span>'
     )
     assert '<main class="home">' in page
-    assert '</li><li class="row">' in page
+    assert '</li><li class="row" data-slug=' in page
 
 
 def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
