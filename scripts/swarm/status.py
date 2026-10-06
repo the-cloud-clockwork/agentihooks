@@ -92,7 +92,7 @@ def doctor_report(store, slug):
 def handoff_rows(transfers_list, agents):
     latest = {row["seat"]: row for row in transfers_list}
     occupant = {a["seat"]: a for a in agents if a.get("seat")}
-    seats = sorted(set(latest) | set(occupant), key=lambda seat: not seat.startswith("master@"))
+    seats = sorted(set(latest) | set(occupant), key=lambda seat: (not seat.startswith("master@"), seat))
     rows = []
     for seat in seats:
         row, agent = latest.get(seat, {}), occupant.get(seat, {})

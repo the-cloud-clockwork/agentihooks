@@ -82,6 +82,14 @@ def test_a_seat_whose_agent_awaits_a_restore_decision_names_it():
     assert rows[0]["binding"] == "awaiting decision"
 
 
+def test_seats_after_the_master_come_in_name_order():
+    agents = [
+        {"name": n, "seat": s, "state": "working"} for n, s in (("c", "plan-1@sw"), ("a", "ci-1@sw"), ("b", "eng-1@sw"))
+    ]
+    rows = status.handoff_rows([transfer("master@sw", 1)], agents)
+    assert [r["seat"] for r in rows] == ["master@sw", "ci-1@sw", "eng-1@sw", "plan-1@sw"]
+
+
 def test_an_agent_without_a_seat_adds_no_row():
     assert status.handoff_rows([], [{"name": "x", "seat": "", "state": "working"}]) == []
 
