@@ -56,7 +56,7 @@ class Placed:
 
 class Ledger(Protocol):
     def state(self, slug: str) -> dict: ...
-    def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm") -> None: ...
+    def update_task(self, slug: str, task_id: str, fields: dict, by: str = "swarm", if_state: tuple = ()) -> dict: ...
     def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
@@ -136,9 +136,8 @@ def _woken(slug, config, store, ledger):
 def _drop(slug, store, ledger, rows, agent):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
-    reopen = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
-    if reopen:
-        _reopen(slug, ledger, rows, agent.task)
+    held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    reopen = held and _reopen(slug, ledger, rows, agent.task)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
 
@@ -154,9 +153,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             if runtime.retire(agent, agent.name in live):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
-                goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
-                if goes_on:
-                    _reopen(slug, ledger, rows, agent.task)
+                handed = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
+                goes_on = handed and _reopen(slug, ledger, rows, agent.task)
                 exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
                 actions.append(f"retired {agent.name}")
             else:
@@ -221,8 +219,8 @@ def _orphans(slug, store, ledger, rows):
     known = {a.name for a in store.agents(slug)}
     actions = []
     for task_id, row in rows.items():
-        if row.get("state") in ACTIVE and row.get("claimed_by") not in known and store.claimant(slug, task_id) is None:
-            _reopen(slug, ledger, rows, task_id)
+        orphaned = row.get("state") in ACTIVE and row.get("claimed_by") not in known
+        if orphaned and store.claimant(slug, task_id) is None and _reopen(slug, ledger, rows, task_id):
             actions.append(f"task {task_id} had no agent, reopened")
     return actions
 
@@ -248,8 +246,9 @@ def _session_models(slug, store):
 
 
 def _reopen(slug, ledger, rows, task_id):
-    ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
-    rows[task_id].update(state="open", claimed_by="")
+    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE)
+    rows[task_id].update(state=live["state"], claimed_by=live["claimed_by"])
+    return live["state"] == "open"
 
 
 def _claimable(slug, store, rows, doc, lane):
@@ -320,7 +319,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 kind = config.lanes.get(lane, {}).get("kind", "")
                 if kind not in ("", "auto") and not task.get("kind"):
                     fields["kind"] = kind
-                ledger.update_task(slug, task["id"], fields)
+                live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
+                task.update(state=live["state"], claimed_by=live["claimed_by"])
+                if live["claimed_by"] != name:
+                    store.release(slug, task["id"], name)
+                    store.drop_agent(slug, name)
+                    actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
+                    continue
                 task.update(fields)
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record, now_ms)
@@ -359,8 +364,8 @@ def _claim_cap(slug, store, ledger, rows, task):
     if kind == "observe":
         return ""
     ledger.comment(slug, task["id"], reason, by="swarm")
-    ledger.update_task(slug, task["id"], {"state": "blocked"})
-    rows[task["id"]].update(state="blocked")
+    live = ledger.update_task(slug, task["id"], {"state": "blocked"}, if_state=("open",))
+    rows[task["id"]].update(state=live["state"])
     store.reset_claims(slug, task["id"])
     return f"blocked {task['id']}: {reason}"
 
