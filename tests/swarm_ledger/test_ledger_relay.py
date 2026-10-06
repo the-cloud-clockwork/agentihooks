@@ -1,9 +1,17 @@
+import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
+from hooks.context import operator_words
+from tests.swarm_ledger.test_one_line_ids import FAKE_DOM, function_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
+import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
@@ -34,6 +42,7 @@ def relay(n, item, text="Use the queue.", quote="use the queue", by="master@a1-1
 
 class Relay(unittest.TestCase):
     def setUp(self):
+        operator_words.record("master@a1-1", "Use the queue, and approve it")
         state = make_ledger()
         self.phase = f"phases/{state['phases'][0]['id']}"
         self.question = f"questions/{state['questions'][0]['id']}"
@@ -49,7 +58,7 @@ class Relay(unittest.TestCase):
                 "text": "Use the queue.",
                 "relayed_by": "master@a1-1",
                 "relayed_from": "master pane",
-                "quote": "use the queue",
+                "quote": "Use the queue, and approve it",
             },
         )
         event = state["_meta"]["events"][-1]
@@ -73,6 +82,15 @@ class Relay(unittest.TestCase):
         _, rejected = core.sync(SLUG, ops=[relay(4, "questions/nope")])
         self.assertEqual(rejected, ["rl-4"])
 
+    def test_only_the_orchestrator_relays_and_only_words_the_operator_said(self):
+        core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": "eng-1@a1-1", "role": "member"}])
+        operator_words.record("eng-1@a1-1", "Use the queue")
+        state, rejected = core.sync(
+            SLUG, ops=[relay(10, self.question, by="eng-1@a1-1"), relay(11, self.question, quote="use redis")]
+        )
+        self.assertEqual(rejected, ["rl-10", "rl-11"])
+        self.assertEqual(state["questions"][0]["answers"], [])
+
     def test_malformed_relays_are_refused(self):
         for op in (
             relay(5, self.question, by="operator"),
@@ -85,50 +103,38 @@ class Relay(unittest.TestCase):
                 core.check_body({"ops": [op]})
 
 
-def _cli(monkeypatch, tmp_path, item, quote):
-    import ledger
-
+def _cli(monkeypatch, item, quote):
     def call(slug, ops):
         state, rejected = core.sync(slug, ops=ops)
         return {**state, "rejected": rejected}
 
-    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1-1")
     monkeypatch.setattr(ledger, "call", call)
     argv = ["--slug", SLUG, "--as", "master@a1-1", "relay", item, "Use the queue.", "--quote", quote]
     ledger.cmd_relay(ledger.build_parser().parse_args(argv))
 
 
-def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, tmp_path, capsys):
-    from hooks.context import operator_words
-
+def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
-    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     operator_words.record("master@a1-1", "Use the queue for the broker")
-    _cli(monkeypatch, tmp_path, question, "use the queue")
+    _cli(monkeypatch, question, "use the queue")
     assert '"relayed": true' in capsys.readouterr().out
     state, _ = core.sync(SLUG)
-    assert state["questions"][0]["answers"][-1]["relayed_by"] == "master@a1-1"
+    answer = state["questions"][0]["answers"][-1]
+    assert (answer["relayed_by"], answer["quote"]) == ("master@a1-1", "Use the queue for the broker")
 
 
-def test_cli_refuses_words_the_operator_never_said(monkeypatch, tmp_path):
-    import pytest
-
+def test_cli_refuses_words_the_operator_never_said(monkeypatch):
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
     with pytest.raises(SystemExit, match="operator"):
-        _cli(monkeypatch, tmp_path, question, "use the queue")
+        _cli(monkeypatch, question, "use the queue")
     state, _ = core.sync(SLUG)
     assert state["questions"][0]["answers"] == []
 
 
 def test_the_page_marks_a_relayed_entry():
-    import json
-    import subprocess
-
-    from tests.swarm_ledger.test_one_line_ids import FAKE_DOM, function_source
-
     script = (
         FAKE_DOM
         + function_source("h")

@@ -256,10 +256,9 @@ def cmd_priority(args):
 
 
 def cmd_relay(args):
-    from hooks.context import operator_words
+    import ledger_relay
 
-    name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
-    if not operator_words.contains(name, args.quote):
+    if not ledger_relay.verified(args.name, args.quote):
         sys.exit(
             "relay refused: the quote is not in an operator prompt or answer this session recorded in the last hour"
         )

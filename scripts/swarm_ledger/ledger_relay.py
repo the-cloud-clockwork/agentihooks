@@ -1,7 +1,7 @@
-"""Relay: an agent posts a decision the operator gave it in its own pane, as the operator's entry.
+"""Relay: the master posts a decision the operator gave it in its own pane, as the operator's entry.
 
-A question takes it as an answer, any other item as a comment; the entry names the relaying agent,
-the pane it came from and the operator's quoted words the relay was verified against.
+A question takes it as an answer, any other item as a comment. Only the ledger's orchestrator may relay,
+and only words the hooks recorded from the operator in its session; the entry carries those words.
 """
 
 import re
@@ -25,6 +25,14 @@ def check(op):
             raise ValueError(f"relay needs {field} up to {MAX_TEXT} characters")
 
 
+def verified(by, quote):
+    """The operator's recorded words holding the quote, under any address of the relaying agent."""
+    from hooks.context import operator_words
+    from scripts.swarm.naming import addresses
+
+    return next((w for name in addresses(by) if (w := operator_words.matching(name, quote))), "")
+
+
 def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
     item = next((i for i in doc.get(name, []) if i["id"] == item_id), None)
@@ -33,7 +41,11 @@ def apply(doc, op, ctx):
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item.setdefault(thread, [])):
         return True
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": op["quote"].strip()}
+    master = ctx.meta.get("members", {}).get(op["by"], {}).get("role") == "orchestrator"
+    words = verified(op["by"], op["quote"]) if master else ""
+    if not words:
+        return False
+    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     text = op["text"].strip()
     item[thread].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, **marks})
     noun = "answer" if thread == "answers" else "comment"
