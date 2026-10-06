@@ -252,6 +252,8 @@ def test_names_json_and_a_proof_swarm_space(store, proof_store, capsys):
     assert (listed["code"], listed["space"], listed["names"]) == ("a1b2c3", "agentihooks-a1b2c3", [])
     cli.cmd_names(proof_store, Namespace(slug=PROOF, json=False))
     assert capsys.readouterr().out.splitlines()[0].endswith(f"\tspace {PROOF}")
+    cli.cmd_names(proof_store, Namespace(slug=PROOF, json=True))
+    assert json.loads(capsys.readouterr().out)["space"] == PROOF
 
 
 def test_a_proof_swarm_space_is_closed_and_renamed_by_its_slug(proof_store):

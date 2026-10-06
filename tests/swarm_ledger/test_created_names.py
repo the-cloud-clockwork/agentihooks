@@ -104,6 +104,21 @@ def test_the_repo_name_from_a_subfolder_and_a_folder_with_no_usable_name(repo, t
     assert naming.repo_name(tmp_path / "---") == "repo"
 
 
+def test_the_repo_name_falls_back_to_the_folder_when_git_cannot_run(monkeypatch, tmp_path):
+    def missing(*args, **kwargs):
+        raise OSError("no git")
+
+    monkeypatch.setattr(naming.subprocess, "run", missing)
+    assert naming.repo_name(tmp_path / "Tools") == "tools"
+
+
+def test_scratch_new_without_a_session_or_a_name_is_refused(monkeypatch, capsys):
+    for key in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "CLAUDE_CODE_SESSION_ID"):
+        monkeypatch.delenv(key, raising=False)
+    assert gc_cli.main(["scratch", "new"]) == 1
+    assert "name must be <repo>/<task>" in capsys.readouterr().err
+
+
 def test_the_session_id_is_lowered_and_stripped_to_eight_hex_characters():
     assert naming.session_base({"CLAUDE_CODE_SESSION_ID": "D540C6-86-0D5B"}) == "session-d540c686"
     assert naming.session_base({"CLAUDE_CODE_SESSION_ID": "ABCDEF12"}) == "session-abcdef12"
