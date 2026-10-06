@@ -491,6 +491,16 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
+def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
+    folder = tmp_path / "t1"
+    write_plan(folder, "- a light | a | b\n")
+    fake = ask(0.9)
+    who = Who(name="engineer@1-1", swarm="sw", task="my_task")
+    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
+        trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
+    assert fake.calls == []
+
+
 def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder)
