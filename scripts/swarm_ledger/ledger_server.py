@@ -325,6 +325,22 @@ def swarm_state(slug):
         return None
 
 
+def bin_closed_without_swarm(now=None):
+    from scripts.swarm.store import SwarmError
+
+    try:
+        store = swarm_store()
+        for s in ledger_summaries():
+            if not s["closed_at"]:
+                continue
+            try:
+                store.config(s["slug"])
+            except SwarmError:
+                ledger_bin.bin_closed(s["slug"], s["closed_at"], now)
+    except Exception as exc:  # the tick bins these once the swarm store answers again
+        sys.stderr.write(f"bin closed ledgers: {exc}\n")
+
+
 CONTROLS = {
     "start": ["start"],
     "pause": ["pause"],
@@ -554,6 +570,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_media(*route.removeprefix("/artifacts/").partition("/")[::2], store=ledger_artifacts)
         if route == "/":
             ledger_bin.tidy()
+            bin_closed_without_swarm()
             view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
             return self.send(200, index_page(view), "text/html; charset=utf-8")
         if route.startswith("/api/swarm/"):

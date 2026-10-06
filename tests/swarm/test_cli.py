@@ -554,8 +554,10 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 
-def test_agent_prompt_starts_by_reading_the_ledger_json():
+def test_agent_prompt_starts_by_reading_the_ledger_json(monkeypatch):
     from scripts.swarm import prompt
+
+    monkeypatch.delenv("LEDGER_DIR")
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert text.index("~/development-ledger/sw.json") < text.index("Work it end to end")

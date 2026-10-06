@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests import installer_isolation
+from tests import installer_isolation, ledger_guard
 from tests.shards import (
     assign_files,
     discover_test_files,
@@ -289,6 +289,13 @@ def _isolate_real_user_paths(tmp_path, monkeypatch):
             f"{label}() still resolves under the real home ({value}) — refusing to run"
         )
     yield
+
+
+@pytest.fixture(autouse=True)
+def _real_ledger_folder_guard():
+    before = len(ledger_guard.touched)
+    yield
+    assert ledger_guard.touched[before:] == [], "this test reached the operator's real ledger folder"
 
 
 @pytest.fixture(autouse=True)

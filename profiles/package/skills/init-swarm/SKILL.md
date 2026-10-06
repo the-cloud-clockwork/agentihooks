@@ -87,6 +87,10 @@ agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
 
+Create refuses unless this session is a master seat or the operator's own, and
+refuses fewer than three tasks (each automatic phase still waiting counts as one)
+unless `--operator-asked "<his words>"` quotes the operator asking for it.
+
 After create, show the status report before start: automatic phases show
 Needs a plan, or Waits for phase while dependencies remain open. Show the longest dependency chain,
 parallel width and engineer width. These are dependency limits for the whole
