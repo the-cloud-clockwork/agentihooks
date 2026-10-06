@@ -1710,6 +1710,50 @@ class TestInitLinkProfileFlag:
                 install.cmd_init_unified(args)
 
 
+class TestInitInsideRenderedHome:
+    def _args(self):
+        return TestInitLinkProfileFlag()._make_args(profile=None)
+
+    def test_refuses_and_names_the_rendered_home(self, tmp_path, monkeypatch, capsys):
+        home = tmp_path / "profiles" / "engineer" / "claude"
+        home.mkdir(parents=True)
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+        monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+        with (
+            patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "anton"}}}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.object(install, "_rerender_profile_homes") as mock_rerender,
+            patch.object(install, "_update_bashrc_block") as mock_bashrc,
+        ):
+            with pytest.raises(SystemExit) as exc:
+                install.cmd_init_unified(self._args())
+        assert exc.value.code == 1
+        assert capsys.readouterr().err == (
+            f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
+            f"profile home {home} instead of the operator home.\n"
+            "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
+            "AGENTIHOOKS_PROFILE are unset.\n"
+        )
+        assert not mock_install.called
+        assert not mock_rerender.called
+        assert not mock_bashrc.called
+
+    def test_config_dir_outside_rendered_root_still_installs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(install, "AGENTIHOOKS_STATE_DIR", tmp_path / "state")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "profiles" / "engineer" / "claude"))
+        with (
+            patch.object(install, "_load_state", return_value={"targets": {"global": {"profile": "anton"}}}),
+            patch.object(install, "_get_bundle_path", return_value=None),
+            patch.object(install, "install_global") as mock_install,
+            patch.object(install, "_rerender_profile_homes"),
+            patch.object(install, "_update_bashrc_block"),
+        ):
+            install.cmd_init_unified(self._args())
+        assert mock_install.call_args.args[0].profile == "anton"
+
+
 # ---------------------------------------------------------------------------
 # B2 — bundle auto-discover hint
 # ---------------------------------------------------------------------------

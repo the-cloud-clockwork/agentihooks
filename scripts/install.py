@@ -2031,6 +2031,22 @@ def _keep_chained_linked_profiles(profile_name: str, previous_record: dict, stat
     return ",".join(chain)
 
 
+def _refuse_inside_rendered_home() -> None:
+    from scripts.profiles import render
+
+    home = claude_home()
+    if not home.resolve().is_relative_to(render.rendered_root().resolve()):
+        return
+    print(
+        f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
+        f"profile home {home} instead of the operator home.\n"
+        "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
+        "AGENTIHOOKS_PROFILE are unset.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def cmd_init_unified(args: argparse.Namespace) -> None:
     """Unified init command — global install only.
 
@@ -2038,6 +2054,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     agentihooks init                    → re-run global install (bundle must be linked)
     agentihooks init --force            → clean reinstall; keeps the bundle link, linked profiles and profile chain
     """
+    _refuse_inside_rendered_home()
     if getattr(args, "dry_run", False):
         # The flag was accepted by argparse and read nowhere, so `init --dry-run`
         # performed a full destructive install — rewriting CLAUDE.md, MCP config,
