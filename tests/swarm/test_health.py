@@ -53,7 +53,7 @@ def test_a_healthy_event_set_produces_no_finding():
 
 def test_ceremony_names_the_agent_its_transitions_and_its_outcomes():
     events = [ev("comment edited", "phases/p1") for _ in range(25)] + [ev("task done", "tasks/t1")]
-    ledger = {"tasks": [task("t1")], "_meta": {"events": events}}
+    ledger = {"tasks": [task("t1", claimed_by="sw-eng-2")], "_meta": {"events": events}}
     assert run(ledger) == [
         {
             "kind": "ceremony",
@@ -112,6 +112,18 @@ def test_a_green_pull_request_credits_only_the_agent_that_claimed_it():
     ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
     found = health.findings(ledger, [], {}, NOW, LIMITS, green={"t1"})
     assert [(f.subject, f.evidence) for f in found] == [("sw-eng-2", ("25 ledger transitions", "0 outcomes"))]
+
+
+def test_an_agent_whose_claimed_task_closed_with_its_outcome_raises_no_ceremony_finding():
+    events = [ev("comment edited", "phases/p1") for _ in range(25)] + [ev("task done", "tasks/t1")]
+    ledger = {"tasks": [task("t1")], "_meta": {"events": events}}
+    assert run(ledger) == []
+
+
+def test_a_claimed_task_closed_without_its_outcome_is_still_ceremony():
+    events = [ev("comment edited", "phases/p1") for _ in range(25)] + [ev("task done", "tasks/t1")]
+    ledger = {"tasks": [task("t1", pr_url="")], "_meta": {"events": events}}
+    assert [f["evidence"] for f in run(ledger)] == [["26 ledger transitions", "0 outcomes"]]
 
 
 def test_an_open_pull_request_without_green_checks_is_still_ceremony():

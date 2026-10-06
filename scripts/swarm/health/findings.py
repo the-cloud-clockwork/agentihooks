@@ -118,7 +118,7 @@ def ceremony(events, tasks, limits, green=frozenset()):
     finished = {tid for tid, t in tasks.items() if _outcome(t)}
     moves = Counter(e["by"] for e in events if e.get("kind") not in NOT_TRANSITIONS)
     closed = Counter(e["by"] for e in events if e.get("kind") == "task done" and _task_id(e["target"]) in finished)
-    delivering = {tasks[tid].get("claimed_by") for tid in green if tid in tasks}
+    delivering = {tasks[tid].get("claimed_by") for tid in (*green, *finished) if tid in tasks}
     found = []
     for by, count in sorted(moves.items()):
         if not naming.lane_of(by) or by in delivering:
