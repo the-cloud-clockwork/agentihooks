@@ -34,7 +34,7 @@ def _master_block(ledger: dict, cap: int) -> str:
     phases = "; ".join(
         f"{phase.get('title', '')}: {phase.get('description', '')}"
         for phase in ledger.get("phases", [])
-        if not phase.get("done") and phase.get("state") not in {"done", "cancelled"}
+        if not phase.get("done")
     )
     priorities = "; ".join(item.get("text", "") for item in ledger.get("priorities", []))
     return _clip(

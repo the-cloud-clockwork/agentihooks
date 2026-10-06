@@ -215,19 +215,44 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
         "phases": [
             {"id": "p1", "title": "Finished", "done": True},
             {"id": "p2", "title": "Active", "description": "Restore intent", "done": False},
+            {"id": "p3", "title": "Next", "description": "Keep worker intent"},
         ],
-        "priorities": [{"text": "Compaction first"}],
+        "priorities": [{"text": "Compaction first"}, {"text": "Worker control"}],
         "tasks": [],
     }
-    block = refocus.build_block(ledger, "master", 1500)
-    for text in ["Continuity", "Preserve current mission", "Active", "Restore intent", "Compaction first"]:
-        assert text in block
-    assert "Master obligations:" in block
-    assert "never claim tasks" in block
-    assert "Finished" not in block
-    assert "Your task" not in block
+    assert refocus.build_block(ledger, "master", 1500) == (
+        "=== SWARM REFOCUS: Continuity ===\n"
+        "Master obligations: Coordinate the swarm, handle operator inbox items, "
+        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        "Plan: Preserve current mission\n"
+        "Active phases: Active: Restore intent; Next: Keep worker intent\n"
+        "Priorities: Compaction first; Worker control"
+    )
+    ledger["title"] = "t" * 10000
     ledger["overview"] = "x" * 10000
     ledger["phases"][1]["description"] = "y" * 10000
+    ledger["priorities"][0]["text"] = "z" * 10000
     block = refocus.build_block(ledger, "master", 1500)
-    assert len(block) <= 1500
+    assert len(block) == 1500
     assert "Master obligations:" in block
+    assert f"Plan: {'x' * 299}…" in block
+    assert f"Active phases: Active: {'y' * 591}…" in block
+    assert "=== SWARM REFOCUS: " + "t" * 299 + "… ===" in block
+    assert "Priorities: " + "z" * 50 in block
+    ledger["title"] = "Continuity"
+    ledger["overview"] = "Preserve current mission"
+    ledger["phases"] = []
+    assert refocus.build_block(ledger, "master", 1500).endswith("Priorities: " + "z" * 299 + "…")
+
+
+@pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
+def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
+    phases = ": " if ledger else ""
+    assert refocus.build_block(ledger, "master", 1500) == (
+        "=== SWARM REFOCUS:  ===\n"
+        "Master obligations: Coordinate the swarm, handle operator inbox items, "
+        "keep the ledger current and judge progress; never claim tasks, edit code, commit or merge.\n"
+        "Plan: \n"
+        f"Active phases: {phases}\n"
+        "Priorities: "
+    )
