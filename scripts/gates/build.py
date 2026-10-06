@@ -35,8 +35,9 @@ SERENA_EDITS = frozenset(
 PATCH_START = "*** Begin Patch"
 PATCH_TARGET = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$", re.MULTILINE)
 ALL_SHORT = re.compile(r"^-[A-Za-z]*a[A-Za-z]*$")
-GIT_TIMEOUT_SEC = 5
 SHOWN = 5
+NO_VALUE = ""
+WHOLE_PROJECT = ""
 
 
 def _area(entry):
@@ -64,74 +65,74 @@ def task_territory(ledger_dir, slug, task):
 
 
 def _git_commits(command, cwd):
-    where = Path(cwd or ".")
+    """(directory, all tracked changes) for each git commit in command, following cd and git -C."""
+    where = Path(cwd)
     for words in simple_commands(command):
         index = program_index(words)
         if index is None:
             continue
         program, rest = PurePosixPath(words[index]).name, iter(words[index + 1 :])
         if program == "cd":
-            where = where / next(rest, str(Path.home()))
-            continue
-        if program != "git":
-            continue
-        directory = where
-        for word in rest:
-            if word == "-C":
-                directory = directory / next(rest, "")
-            elif word == "-c":
-                next(rest, "")
-            elif not word.startswith("-"):
-                if word == "commit":
-                    args = list(rest)
-                    yield directory, any(a == "--all" or ALL_SHORT.match(a) for a in args)
-                break
+            where = where / os.path.expanduser(next(rest, "~"))
+        elif program == "git":
+            yield from _commit_in(rest, where)
 
 
-def _git_names(directory, *args):
+def _commit_in(rest, directory):
+    for word in rest:
+        if word == "-C":
+            directory = directory / next(rest, NO_VALUE)
+        elif word == "-c":
+            next(rest, NO_VALUE)
+        elif not word.startswith("-"):
+            if word == "commit":
+                yield directory, any(arg == "--all" or ALL_SHORT.match(arg) for arg in rest)
+            return
+
+
+def _git_names(directory, everything):
     out = subprocess.run(
-        ["git", "-C", str(directory), "diff", "--name-only", "-z", *args],
+        ["git", "-C", str(directory), "diff", "--name-only", "-z", "HEAD" if everything else "--cached"],
         capture_output=True,
         text=True,
-        timeout=GIT_TIMEOUT_SEC,
     )
     return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else []
 
 
 def _patch_targets(call, key):
-    body = str(call.tool_input.get("content") or "")
-    found = [target.strip() for target in PATCH_TARGET.findall(body)] if PATCH_START in body else []
-    return found or [str(call.tool_input.get(key) or "")]
+    body = str(call.tool_input.get("content"))
+    found = PATCH_TARGET.findall(body) if PATCH_START in body else []
+    return [target.strip() for target in found] or [call.tool_input.get(key)]
 
 
 def plan_areas(folder, who):
-    """('deny', reason), ('unchecked', []) or ('pass', the kept pieces' areas)."""
+    """(pass, the kept pieces' areas), (unchecked, []) or (fail, the refusal)."""
     trace = f"agentihooks swarm {who.swarm} trace-plan"
     try:
         pieces = trace_plan.parse((folder / trace_plan.PLAN).read_text(), who.task)
     except OSError:
         return (
-            "deny",
+            trace_plan.FAIL,
             f"build gate: no traced plan yet. Write {folder / trace_plan.PLAN}, {trace_plan.FORMAT}, then run {trace}",
         )
     except ValueError as exc:
-        return "deny", f"build gate: {exc}, then run {trace}"
+        return trace_plan.FAIL, f"build gate: {exc}, then run {trace}"
     record = trace_plan.load(folder)
     if record.get("plan_hash") != trace_plan.plan_hash(pieces):
-        return "deny", f"build gate: plan.md has no verdict for its current text. Run {trace}"
-    if record.get("verdict") == trace_plan.UNCHECKED:
-        return "unchecked", []
-    if record.get("verdict") != trace_plan.PASS:
-        reasons = " and ".join(record.get("reasons") or []) or "no passing verdict"
-        return "deny", f"build gate: the plan failed its trace: {reasons}. Revise plan.md and run {trace}"
-    return "pass", [area for row in record.get("pieces", []) if row.get("kept") for area in row.get("areas", [])]
+        return trace_plan.FAIL, f"build gate: plan.md has no verdict for its current text. Run {trace}"
+    if record["verdict"] == trace_plan.UNCHECKED:
+        return trace_plan.UNCHECKED, []
+    if record["verdict"] != trace_plan.PASS:
+        reasons = " and ".join(record["reasons"])
+        return trace_plan.FAIL, f"build gate: the plan failed its trace: {reasons}. Revise plan.md and run {trace}"
+    return trace_plan.PASS, [area for row in record["pieces"] if row["kept"] for area in row["areas"]]
 
 
 def refusal(who, outside, areas, plan):
     shown = ", ".join(outside[:SHOWN]) + (f" and {len(outside) - SHOWN} more" if len(outside) > SHOWN else "")
     return (
         f"build gate: outside your traced plan: {shown}. Kept areas and territory: {', '.join(areas) or 'none'}. "
-        f"If the task needs it, append a piece `{trace_plan.FORMAT.split(': ', 1)[1]}` to {plan} and run "
+        f"If the task needs it, append a piece to {plan}, {trace_plan.FORMAT}, and run "
         f"agentihooks swarm {who.swarm} trace-plan; otherwise propose it: agentihooks ledger --slug {who.swarm} "
         f'--as {who.name} followup add "<text>"'
     )
@@ -153,18 +154,17 @@ class BuildGate:
 
     def touched(self, call, folder):
         if call.tool.startswith(SERENA):
-            return [] if call.tool_input.get("dry_run") else [_area(call.tool_input.get("relative_path") or "")]
+            scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
+            return [] if call.tool_input.get("dry_run") else [_area(scope)]
         if call.tool == "Bash":
-            names = []
-            for directory, everything in _git_commits(call.command, call.cwd):
-                names += _git_names(directory, "--cached") + (_git_names(directory, "HEAD") if everything else [])
-            return sorted(set(names))
+            commits = _git_commits(call.command, call.cwd)
+            return sorted({name for directory, everything in commits for name in _git_names(directory, everything)})
         exempt = [folder.resolve(), (Path.home() / "scratchpad").resolve()]
         found = []
         for named in filter(None, _patch_targets(call, EDIT_TOOLS[call.tool])):
-            path = (Path(call.cwd or ".") / named).resolve()
+            path = (Path(call.cwd) / named).resolve()
             root = git_root(path)
-            if root is None or any(path == ex or ex in path.parents for ex in exempt):
+            if root is None or any(path.is_relative_to(ex) for ex in exempt):
                 continue
             found.append(path.relative_to(root).as_posix())
         return found
@@ -177,12 +177,12 @@ class BuildGate:
         if not paths:
             return Decision()
         status, value = plan_areas(folder, who)
-        if status == "deny":
-            return Decision.deny(value)
-        if status == "unchecked":
+        if status == trace_plan.UNCHECKED:
             reason = f"unchecked plan, edit allowed: {', '.join(paths[:SHOWN])}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
             return Decision()
+        if status != trace_plan.PASS:
+            return Decision.deny(value)
         outside = [path for path in paths if not within(path, value)]
         if outside:
             ledger_dir = Path(self.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()

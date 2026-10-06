@@ -261,6 +261,8 @@ class TestTerritory:
         assert task_territory(tmp_path, SLUG, TASK) == []
         (tmp_path / f"{SLUG}.json").write_text("{not json")
         assert task_territory(tmp_path, SLUG, TASK) == []
+        (tmp_path / f"{SLUG}.json").write_text("{}")
+        assert task_territory(tmp_path, SLUG, TASK) == []
         (tmp_path / f"{SLUG}.json").write_text(json.dumps({"tasks": [{"id": "t2", "territory": ["a"]}]}))
         assert task_territory(tmp_path, SLUG, TASK) == []
 
@@ -272,3 +274,112 @@ def test_the_refusal_names_the_files_the_areas_and_both_ways_forward():
     assert "Kept areas and territory: a, b" in text
     assert f"agentihooks swarm {SLUG} trace-plan" in text
     assert f"agentihooks ledger --slug {SLUG} --as {ME} followup add" in text
+
+
+def test_the_refusal_lists_up_to_five_files_whole_and_says_none_for_no_areas():
+    who = Who(name=ME, swarm=SLUG, task=TASK)
+    text = refusal(who, [f"f{i}.py" for i in range(5)], [], "/w/plan.md")
+    assert "outside your traced plan: f0.py, f1.py, f2.py, f3.py, f4.py. Kept areas and territory: none. " in text
+    assert "append a piece to /w/plan.md, one piece per line: - what | area, area | why, and run" in text
+
+
+@pytest.mark.parametrize(
+    ("command", "found"),
+    [("git -C", False), ("git -c", False), ("A=1; git commit -m x", True), ("git -c a=b commit", True)],
+)
+def test_trailing_options_and_assignments_parse(command, found):
+    assert BuildGate().matches(Call(tool="Bash", tool_input={"command": command})) == found
+
+
+class TestMore:
+    def test_failed_reasons_are_joined_with_and(self, world):
+        world.plan(verdict="fail", reasons=["one reason", "another reason"])
+        assert "the plan failed its trace: one reason and another reason. Revise plan.md" in edit(world, "a.py").reason
+
+    def test_the_plan_parses_with_the_task_id_like_trace_plan(self, world):
+        task = "abc123def456abcd"
+        folder = ledger_workspace.folder(SLUG, task)
+        folder.mkdir(parents=True)
+        (folder / "plan.md").write_text(DOGHOUSE)
+        assert "commit hash" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
+
+    def test_the_unchecked_count_names_the_tool_and_the_paths(self, world):
+        world.plan(verdict="unchecked", kept=(True, True, True))
+        assert edit(world, "anywhere/else.py").allowed
+        row = world.rows()[0]
+        assert (row["tool"], row["reason"]) == ("Edit", "unchecked plan, edit allowed: anywhere/else.py")
+
+    def test_the_generator_refusal_names_the_plan_file(self, world):
+        world.plan()
+        assert str(world.folder / "plan.md") in edit(world, "power/generator/diesel.py").reason
+
+    def test_an_area_keeps_its_letters_when_its_slash_is_trimmed(self, world):
+        world.plan()
+        world.territory("tools/MAX/")
+        assert edit(world, "tools/MAX/a.py").allowed
+
+    def test_the_territory_defaults_to_the_development_ledger_folder(self, world):
+        world.plan()
+        ledgers = Path.home() / "development-ledger"
+        ledgers.mkdir()
+        (ledgers / f"{SLUG}.json").write_text(json.dumps({"tasks": [{"id": TASK, "territory": ["power"]}]}))
+        call = Call(tool="Edit", tool_input={"file_path": str(world.repo / "power/x.py")}, cwd=str(world.repo))
+        decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), None)
+        assert decision.allowed
+
+    def test_the_work_folder_and_scratchpad_are_exempt_inside_a_git_tree(self, world):
+        (world.home / ".git").mkdir()
+        assert world.decide(file_path=str(world.folder / "notes.md")).allowed
+        assert world.decide(file_path=str(world.home / "scratchpad" / "me" / "notes.md")).allowed
+        assert not world.decide(file_path=str(world.home / "elsewhere" / "notes.md")).allowed
+
+    def test_a_patch_checks_files_after_an_exempt_one(self, world):
+        world.plan()
+        patch = (
+            f"*** Begin Patch\n*** Add File: {world.home / 'scratchpad' / 'x.md'}\n+x\n"
+            "*** Add File: power/generator/diesel.py\n+x\n*** End Patch\n"
+        )
+        assert not world.decide(content=patch).allowed
+
+    def test_an_edit_naming_no_file_passes(self, world):
+        assert world.decide(content="x").allowed
+
+
+class TestCommitParsing:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -c user.name=x commit -m y",
+            "git --no-pager commit -m y",
+            "echo hi && git commit -m y",
+            "A=1; git commit -m y",
+            "git add doghouse/light/lamp.py && git commit -m y",
+        ],
+    )
+    def test_the_commit_is_found_past_options_and_other_commands(self, staged, command):
+        (staged.repo / "power/generator/diesel.py").write_text("b\n")
+        git(staged.repo, "add", "power/generator/diesel.py")
+        assert not staged.decide(tool="Bash", command=command).allowed
+
+    def test_a_later_commit_in_the_same_command_is_checked(self, staged):
+        (staged.repo / "power/generator/diesel.py").write_text("b\n")
+        git(staged.repo, "add", "power/generator/diesel.py")
+        command = f"git -C {staged.home} commit -m a; git commit -m b"
+        assert not staged.decide(tool="Bash", command=command).allowed
+
+    def test_every_staged_name_is_listed_whole(self, staged):
+        for rel in ("power/generator/big tank.py", "power/x.py"):
+            (staged.repo / rel).write_text("b\n")
+            git(staged.repo, "add", rel)
+        reason = staged.decide(tool="Bash", command="git commit -m y").reason
+        assert "outside your traced plan: power/generator/big tank.py, power/x.py." in reason
+
+    def test_a_bare_cd_and_a_tilde_go_home(self, staged):
+        home = staged.home
+        git(home, "init", "-q")
+        (home / "power").mkdir()
+        (home / "power" / "a.py").write_text("a\n")
+        git(home, "add", "power/a.py")
+        assert not staged.decide(tool="Bash", command="cd && git commit -m y").allowed
+        assert not staged.decide(tool="Bash", command="cd ~ && git commit -m y").allowed
+        assert staged.decide(tool="Bash", command="git commit -m y").allowed
