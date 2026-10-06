@@ -65,6 +65,8 @@ def test_the_button_and_the_stats_card_render_the_check():
     assert '<span class="sync-state end" id="stats-state"></span>' in page
     render = function_source("renderSync")
     assert "statsCheck(meta.events || [], doc.chat, statsSent)" in render
+    assert 'const checked = check ? `Stats check ${statsCheckText(check)}` : "";' in render
+    assert '$("stats-sync").ariaLabel = [checked, ' in render
     stats = function_source("renderStats")
     assert 'row("Stats check"' in stats
     assert "showReply(ev, check.reply)" in stats

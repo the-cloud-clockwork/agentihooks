@@ -1588,8 +1588,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
     const statsWait = cooldown("stats_sync", "stats sync requested");
     $("stats-sync").disabled = !!statsWait;
-    $("stats-sync").ariaLabel = statsWait ? `Stats check ${statsWait}` : "Ask master to recheck";
     const check = statsCheck(meta.events || [], doc.chat, statsSent);
+    const checked = check ? `Stats check ${statsCheckText(check)}` : "";
+    $("stats-sync").ariaLabel = [checked, statsWait ? `Stats check ${statsWait}` : "Ask master to recheck"].filter(Boolean).join(" · ");
     $("stats-state").textContent = check ? statsCheckText(check) : "";
   }
 
