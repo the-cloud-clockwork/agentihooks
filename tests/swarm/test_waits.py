@@ -88,14 +88,18 @@ def test_a_bare_wait_is_capped_at_sixty_minutes(started, capsys):
     assert "a wait lasts a whole number of minutes above zero" in capsys.readouterr().err
 
 
-def test_the_tick_ends_a_checked_wait_whose_checks_resolved(started):
+@pytest.mark.parametrize(
+    "on, outcome", [(("checks", URL), f"pull request {URL}, now merged"), (("task", "t2"), "task t2, now done")]
+)
+def test_the_tick_ends_a_checked_wait_whose_thing_resolved(started, on, outcome):
     from tests.swarm.test_delivery import FakeHerdr
     from tests.swarm.test_tick import FakeRuntime
 
     store, ledger = started
-    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", *on) == 0
+    ledger.rows["t2"].update(state="done")
     actions = cli.run_tick(store, "sw", ledger, FakeRuntime(), FakeHerdr({}))
-    assert f"ended the wait of {ME}: pull request {URL}, now merged" in actions
+    assert f"ended the wait of {ME}: {outcome}" in actions
     assert held(store) is None
 
 

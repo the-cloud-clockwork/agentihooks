@@ -161,7 +161,7 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
         "Blocked by the stop gate: the agent stopped 3 times while it held the task with no pull request and no wait."
     )
     assert rig.store.claimant(SLUG, "t1") is None
-    assert [a.state for a in rig.store.agents(SLUG)] == ["finished"]
+    assert [(a.state, a.pane_id) for a in rig.store.agents(SLUG)] == [("finished", "p1")]
     assert [(r["gate"], r["kind"], r["agent"], r["tool"]) for r in rig.rows()] == [("claim-stop", "blocked", ME, "")]
     assert rig.store.redis.get(f"agentihooks:swarm:{SLUG}:stop-blocks:{ME}") is None
 
@@ -213,6 +213,10 @@ def test_a_stop_that_passes_starts_the_count_again(rig):
     ],
 )
 def test_only_a_pinned_worker_with_a_task_is_gated(rig, who):
+    def unread(slug):
+        raise AssertionError(f"read the ledger of {slug!r} for an agent the gate skips")
+
+    rig.ledger.tasks = unread
     assert rig.stop(who).allowed
 
 
