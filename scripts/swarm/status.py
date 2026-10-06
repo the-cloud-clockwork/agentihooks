@@ -53,6 +53,7 @@ def findings(store, slug, config, tasks, events):
                 limits,
                 checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
             ),
+            checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
         ),
         now_ms(),
         limits.cooldown_minutes * 60_000,

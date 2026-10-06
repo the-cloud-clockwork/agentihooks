@@ -100,6 +100,26 @@ def test_transitions_with_neither_merges_nor_proofs_are_still_ceremony():
     ]
 
 
+def test_an_agent_whose_open_pull_request_is_green_raises_no_ceremony_finding():
+    events = [ev("comment edited", "phases/p1") for _ in range(25)]
+    ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
+    found = health.findings(ledger, [], {}, NOW, LIMITS, green={"t1", "gone"})
+    assert [f.as_dict() for f in found] == []
+
+
+def test_a_green_pull_request_credits_only_the_agent_that_claimed_it():
+    events = [ev("comment edited", "phases/p1", by="sw-eng-2") for _ in range(25)]
+    ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
+    found = health.findings(ledger, [], {}, NOW, LIMITS, green={"t1"})
+    assert [(f.subject, f.evidence) for f in found] == [("sw-eng-2", ("25 ledger transitions", "0 outcomes"))]
+
+
+def test_an_open_pull_request_without_green_checks_is_still_ceremony():
+    events = [ev("comment edited", "phases/p1") for _ in range(25)]
+    ledger = {"tasks": [task("t1", state="pr")], "_meta": {"events": events}}
+    assert [f["evidence"] for f in run(ledger)] == [["25 ledger transitions", "0 outcomes"]]
+
+
 def test_scope_inflation_lists_each_task_by_title_with_its_gain():
     events = [ev("added", f"tasks/q{n}") for n in range(3)]
     tasks = [
