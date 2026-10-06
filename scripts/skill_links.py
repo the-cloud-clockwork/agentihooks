@@ -22,7 +22,7 @@ def repair() -> None:
         if not links:
             return
         state = install._load_state()
-        installed = state.get("targets", {}).get("global", {}).get("claude", {}).get("profile", "default")
+        installed = install._global_record(state, "claude").get("profile", "default")
         bundle = install._get_bundle_path()
         records = []
         removed = []
