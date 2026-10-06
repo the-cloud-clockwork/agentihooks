@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -114,3 +115,49 @@ def test_task_add_prints_the_server_refusal(monkeypatch):
     with pytest.raises(SystemExit) as raised:
         ledger.send(args, "task_add", task="t9")
     assert raised.value.code == "refused because"
+
+
+TAKEN = 'task c0 already exists as "c" (done): pick another id, or pass - as the id to mint one'
+
+
+def served(slug, ops=None):
+    state, rejected = core.sync(slug, ops=ops)
+    return {**state, "rejected": rejected}
+
+
+def cli(monkeypatch, *argv):
+    monkeypatch.setattr(ledger, "call", served)
+    ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "master@abcdef-0001", "task", *argv]))
+
+
+def test_task_add_refuses_an_id_a_finished_task_holds_and_keeps_the_ledger():
+    make_ledger([("eng", "done", "engineer@abcdef-0001")])
+    before = core.sync(SLUG)[0]["tasks"]
+    op = {"op": "task_add", "id": "add-c0", "by": "swarm", "task": "c0", "title": "new", "lane": "eng", "phase": "p1"}
+    state, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == ["add-c0"]
+    assert state["_meta"]["warnings"] == [TAKEN]
+    assert state["tasks"] == before
+
+
+def test_task_add_cli_exits_with_the_refusal_for_a_taken_id(monkeypatch, capsys):
+    make_ledger([("eng", "done", "engineer@abcdef-0001")])
+    with pytest.raises(SystemExit) as raised:
+        cli(monkeypatch, "add", "c0", "new", "work")
+    assert raised.value.code == TAKEN
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("ids", "minted"), [([], "t1"), (["t1", "t3", "plan-p1", "t7x", "c9"], "t4"), (["t09", "t2"], "t10")]
+)
+def test_next_id_is_one_past_the_highest_t_number(ids, minted):
+    assert ledger_tasks.next_id([{"id": task} for task in ids]) == minted
+
+
+def test_task_add_with_a_dash_mints_the_next_id_and_prints_it(monkeypatch, capsys):
+    make_ledger()
+    core.sync(SLUG, ops=[{"op": "task_add", "id": "seed", "by": "swarm", "task": "t4", "title": "a", "lane": "eng"}])
+    cli(monkeypatch, "add", "-", "build", "it", "--phase", "p1")
+    assert json.loads(capsys.readouterr().out) == {"task": "t5", "added": "build it"}
+    assert [(t["id"], t["title"]) for t in core.sync(SLUG)[0]["tasks"]] == [("t4", "a"), ("t5", "build it")]
