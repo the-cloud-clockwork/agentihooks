@@ -37,6 +37,14 @@ def test_take_master_seats_this_session_and_names_it(taker, capsys):
     assert rt.masters == []
 
 
+def test_take_master_records_the_model_and_effort_the_session_launched_with(taker, monkeypatch):
+    store, _, _, _ = taker
+    argv = ("codex", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"')
+    monkeypatch.setattr(take_master, "argv_of", lambda pid: argv if pid == 4242 else ())
+    assert run("sw", "take-master") == 0
+    assert [(a.model, a.effort) for a in store.agents("sw") if a.lane == "master"] == [("gpt-6.1-sol", "high")]
+
+
 def test_a_named_session_keeps_its_name(taker, monkeypatch):
     store, _, _, named = taker
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ops-desk")
