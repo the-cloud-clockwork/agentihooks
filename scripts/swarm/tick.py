@@ -4,7 +4,6 @@ Scaling up is immediate; scaling down happens only as agents finish, so a lowere
 Each swarm keeps at most one master: an agent the operator talks to, which works no task.
 """
 
-import os
 from dataclasses import dataclass, replace
 from itertools import count
 from typing import Protocol
@@ -345,7 +344,7 @@ def _lives_spent(slug, store, ledger, rows, task):
 
 
 def _claim_cap(slug, store, ledger, rows, task):
-    lives, mode = store.claims(slug, task["id"]), modes.mode(claim_cap.GATE, os.environ)
+    lives, mode = store.claims(slug, task["id"]), modes.configured(claim_cap.GATE, store.config(slug).gates)
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
