@@ -28,13 +28,20 @@ def _commit(bundle: Path, message: str) -> None:
 
 
 @pytest.fixture
-def world(tmp_path):
+def world(tmp_path, monkeypatch):
     from scripts.targets._common import _install_module
 
     install = _install_module()
-
+    python = tmp_path / "venv" / "bin" / "python"
+    monkeypatch.setattr(install, "_detect_venv", lambda: python)
     home = Path.home()
     bundle = tmp_path / "bundle"
+    _write(bundle / ".claude" / "CLAUDE.md", "BUNDLE DIRECTIVE MARKER\n")
+    _write(bundle / ".claude" / "skills" / "bundle-skill" / "SKILL.md", "---\nname: bundle-skill\n---\n")
+    _write(bundle / ".claude" / "rules" / "bundle-rule.md", "BUNDLE RULE MARKER\n")
+    _write(bundle / ".claude" / "settings.overrides.json", json.dumps({"env": {"BUNDLE_FLAG": "1"}}))
+    _write(bundle / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"bundle-srv": {"command": "bundle-server"}}}))
+    _write(bundle / ".codex" / "config.overrides.toml", 'approval_policy = "never"\n')
     profiles = bundle / "profiles"
     _write(profiles / "rb-base" / "profile.yml", "name: rb-base\n")
     _write(profiles / "rb-base" / "CLAUDE.md", "BASE PERSONA MARKER\n")
@@ -42,10 +49,19 @@ def world(tmp_path):
     _write(profiles / "rb-kit" / "profile.yml", "name: rb-kit\n")
     _write(profiles / "rb-kit" / ".claude" / "skills" / "role-skill" / "SKILL.md", "---\nname: role-skill\n---\n")
     _write(profiles / "rb-kit" / ".claude" / "rules" / "role-rule.md", "ROLE RULE MARKER\n")
+    _write(profiles / "rb-kit" / ".claude" / "rules" / "README.md", "KIT README\n")
+    _write(profiles / "rb-kit" / ".claude" / "rules" / "notes.txt", "KIT NOTES\n")
     _write(profiles / "rb-role" / "profile.yml", "name: rb-role\nextends: [rb-base, rb-kit]\n")
     _write(profiles / "rb-role" / "CLAUDE.md", "ROLE PERSONA MARKER\n")
-    servers = {"mcpServers": {"role-srv": {"command": "role-server"}}}
-    _write(profiles / "rb-role" / ".claude" / ".mcp.json", json.dumps(servers))
+    _write(profiles / "rb-role" / "hooks" / "role.sh", "true\n")
+    hooks = {"Stop": [{"hooks": [{"type": "command", "command": "bash hooks/role.sh"}]}]}
+    _write(profiles / "rb-role" / ".claude" / "settings.overrides.json", json.dumps({"hooks": hooks}))
+    servers = {
+        "role-srv": {"command": "role-server"},
+        "leaky-arg": {"command": "srv", "args": ["--token", "ghp_" + "a" * 36]},
+        "leaky-env": {"command": "srv", "env": {"GH_TOKEN": "ghp_" + "b" * 36, "SAFE": "${REF}"}},
+    }
+    _write(profiles / "rb-role" / ".claude" / ".mcp.json", json.dumps({"mcpServers": servers}))
     _write(profiles / "rb-other" / "profile.yml", "name: rb-other\n")
     _write(profiles / "rb-other" / ".claude" / "skills" / "other-skill" / "SKILL.md", "---\nname: other-skill\n---\n")
     _git(bundle, "init", "-q")
@@ -59,11 +75,13 @@ def world(tmp_path):
     claude_json = {"hasCompletedOnboarding": True, "mcpServers": {"google-gmail": gmail}, "projects": {"/w": {}}}
     _write(home / ".claude.json", json.dumps(claude_json))
     codex_mcp = "[mcp_servers.google-gmail]\nurl = 'https://gmail.example'\n\n[mcp_servers.role-srv]\ncommand = 'r'\n"
+    codex_mcp += "\n[mcp_servers.bundle-srv]\ncommand = 'b'\n"
     _write(home / ".codex" / "config.toml", codex_mcp)
     skills = home / ".agents" / "skills"
-    for name in ("role-skill", "other-skill"):
+    for name in ("role-skill", "other-skill", "bundle-skill"):
         (skills / name).mkdir()
-    return {"home": home, "bundle": bundle}
+    _write(skills / "stray.md", "not a skill\n")
+    return {"home": home, "bundle": bundle, "install": install, "python": python, "role": profiles / "rb-role"}
 
 
 def _tree_hashes(root: Path, skip: Path) -> dict[str, str]:
@@ -75,31 +93,86 @@ def _tree_hashes(root: Path, skip: Path) -> dict[str, str]:
     return out
 
 
-def test_claude_render_tree(world):
+def test_claude_render_tree(world, capsys):
     from scripts.profiles import render
 
-    home = world["home"]
+    home, install = world["home"], world["install"]
     out = render.render_claude("rb-role")
 
     assert out == home / ".agentihooks" / "profiles" / "rb-role" / "claude"
-    assert (out / "skills" / "role-skill").is_symlink()
-    assert not (out / "skills" / "other-skill").exists()
+    package_skills = {p.name for p in (install.PACKAGE_FEATURES_DIR / "skills").iterdir() if p.is_dir()}
+    skills = {p.name for p in (out / "skills").iterdir()}
+    assert skills == package_skills | {"role-skill", "bundle-skill"}
+    assert all((out / "skills" / name).is_symlink() for name in skills)
+    rules = {p.name for p in (out / "rules").iterdir()}
+    assert {"role-rule.md", "bundle-rule.md"} <= rules
+    assert not {"README.md", "notes.txt"} & rules
     assert (out / "rules" / "role-rule.md").read_text() == "ROLE RULE MARKER\n"
     persona = (out / "CLAUDE.md").read_text()
-    assert "BASE PERSONA MARKER" in persona
-    assert "ROLE PERSONA MARKER" in persona
-    settings = json.loads((out / "settings.json").read_text())
-    assert settings["hooks"]
+    for marker in ("BUNDLE DIRECTIVE MARKER", "BASE PERSONA MARKER", "ROLE PERSONA MARKER"):
+        assert marker in persona
+    assert "ROLE RULE MARKER" not in persona
+    assert persona.startswith(render.HEADER)
+    assert persona.endswith(f"\n\n{render.FOOTER}\n")
+
+
+def test_claude_render_settings(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+
+    text = (out / "settings.json").read_text()
+    assert "__PYTHON__" not in text
+    assert str(world["python"]) in text
+    settings = json.loads(text)
     assert settings["model"] == "opus"
     assert "theme" not in settings
+    assert settings["env"]["BUNDLE_FLAG"] == "1"
+    resolved = str((world["role"] / "hooks" / "role.sh").resolve())
+    assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
+
+
+def test_claude_render_mcp_and_shared_data(world, capsys):
+    from scripts.profiles import render
+
+    home, install = world["home"], world["install"]
+    out = render.render_claude("rb-role")
+
     claude_json = json.loads((out / ".claude.json").read_text())
-    assert set(claude_json["mcpServers"]) == {"agentihooks", "role-srv"}
+    agentihooks = install._build_mcp_config("all")["mcpServers"]["agentihooks"]
+    assert claude_json["mcpServers"] == {
+        "agentihooks": agentihooks,
+        "bundle-srv": {"command": "bundle-server"},
+        "role-srv": {"command": "role-server"},
+        "leaky-env": {"command": "srv", "env": {"SAFE": "${REF}"}},
+    }
+    printed = capsys.readouterr().out
+    assert "MCP 'leaky-arg' carries credential-shaped literals in args[1]" in printed
+    assert "MCP 'leaky-env' env var 'GH_TOKEN' looks like a credential" in printed
+    assert printed.count(f"from {out / '.claude.json'}") == 1
+    assert printed.count(f"written to {out / '.claude.json'}") == 1
     assert claude_json["hasCompletedOnboarding"] is True
     assert claude_json["projects"] == {"/w": {}}
     links = {p.name for p in out.iterdir() if p.is_symlink()}
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_from_inside_a_rendered_home(world, monkeypatch):
+    from scripts.profiles import render
+
+    home = world["home"]
+    elsewhere = home / "elsewhere"
+    _write(elsewhere / "settings.json", json.dumps({"model": "haiku"}))
+    _write(elsewhere / ".claude.json", json.dumps({"hasCompletedOnboarding": False}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(elsewhere))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["model"] == "opus"
+    assert json.loads((out / ".claude.json").read_text())["hasCompletedOnboarding"] is True
+    assert os.readlink(out / "projects") == str(home / ".claude" / "projects")
 
 
 def test_claude_render_keeps_runtime_state_of_previous_render(world):
@@ -110,12 +183,15 @@ def test_claude_render_keeps_runtime_state_of_previous_render(world):
     claude_json["numStartups"] = 7
     claude_json["mcpServers"]["stale"] = {"command": "x"}
     (out / ".claude.json").write_text(json.dumps(claude_json))
+    (out / "skills" / "gone").symlink_to(out)
 
-    render.render_claude("rb-role", force=True)
+    assert render.render_claude("rb-role") is None
+    assert render.render_claude("rb-role", force=True) == out
 
     claude_json = json.loads((out / ".claude.json").read_text())
     assert claude_json["numStartups"] == 7
-    assert set(claude_json["mcpServers"]) == {"agentihooks", "role-srv"}
+    assert "stale" not in claude_json["mcpServers"]
+    assert not (out / "skills" / "gone").is_symlink()
 
 
 def test_codex_render_writes_one_layered_profile(world):
@@ -131,12 +207,42 @@ def test_codex_render_writes_one_layered_profile(world):
     assert set(after) - set(before) == {".codex/rb-role.config.toml"}
     assert {k: v for k, v in after.items() if k in before} == before
     doc = tomllib.loads(path.read_text())
-    assert "BASE PERSONA MARKER" in doc["developer_instructions"]
-    assert "ROLE RULE MARKER" in doc["developer_instructions"]
+    instructions = doc["developer_instructions"]
+    for marker in ("BUNDLE DIRECTIVE MARKER", "BASE PERSONA MARKER", "ROLE RULE MARKER", "BUNDLE RULE MARKER"):
+        assert marker in instructions
+    assert "<!-- rule: role-rule.md (rule) -->" in instructions
+    assert "KIT README" not in instructions
     assert doc["sandbox_mode"] == "workspace-write"
+    assert doc["approval_policy"] == "never"
+    assert "model_context_window" not in doc
     assert doc["mcp_servers"] == {"google-gmail": {"enabled": False}}
     other = str(home / ".agents" / "skills" / "other-skill" / "SKILL.md")
     assert doc["skills"]["config"] == [{"path": other, "enabled": False}]
+    assert doc["agentihooks"]["render"] == render.stamp("rb-role")
+    assert render.render_codex("rb-role") is None
+
+
+def test_codex_render_without_global_config_or_skills(world):
+    from scripts.profiles import render
+
+    home = world["home"]
+    (home / ".codex" / "config.toml").unlink()
+    for skill in (home / ".agents" / "skills").iterdir():
+        skill.unlink() if skill.is_file() else skill.rmdir()
+
+    doc = tomllib.loads(render.render_codex("rb-role").read_text())
+
+    assert "mcp_servers" not in doc
+    assert "skills" not in doc
+
+
+def test_codex_render_replaces_an_unstamped_profile_file(world):
+    from scripts.profiles import render
+
+    path = _write(world["home"] / ".codex" / "rb-role.config.toml", 'model = "hand-written"\n')
+
+    assert render.render_codex("rb-role") == path
+    assert "hand-written" not in path.read_text()
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -177,26 +283,61 @@ def test_stamp_names_bundle_commit_and_chain(world):
 
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
     assert render.stamp("rb-role") == {"bundle_commit": head, "chain": ["rb-base", "rb-kit", "rb-role"]}
+    assert render._stamp(None, []) == {"bundle_commit": "", "chain": []}
+    assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
+
+
+def test_render_refuses_other_targets(world):
+    from scripts.profiles import render
+
+    with pytest.raises(ValueError, match="^copilot per-run profiles are not supported$"):
+        render.render("copilot", "rb-role")
 
 
 def test_cli_renders_and_refuses(world, capsys):
     from scripts.profiles import render
 
+    out = Path.home() / ".agentihooks" / "profiles" / "rb-role" / "claude"
+    assert render.main(["render", "rb-role"]) == 0
+    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out}\n")
     assert render.main(["render", "rb-role", "--target", "claude"]) == 0
-    assert str(Path.home() / ".agentihooks" / "profiles" / "rb-role" / "claude") in capsys.readouterr().out
-    assert render.main(["render", "rb-role", "--target", "claude"]) == 0
-    assert "up to date" in capsys.readouterr().out
+    assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
+    assert render.main(["render", "rb-role", "--force"]) == 0
+    assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out}\n")
     assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
-    assert "copilot per-run profiles are not supported" in capsys.readouterr().err
+    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
-    assert "rb-missing" in capsys.readouterr().err
+    assert capsys.readouterr().err == "ERROR: Profile 'rb-missing' not found\n"
 
 
-def test_agentihooks_profile_dispatches_to_render(world, monkeypatch, capsys):
-    from scripts.targets._common import _install_module
+def test_cli_usage(world, capsys):
+    from scripts.profiles import render
+
+    with pytest.raises(SystemExit):
+        render.main(["render", "rb-role", "--target", "bogus"])
+    assert "invalid choice: 'bogus' (choose from claude, codex, copilot)" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        render.main([])
+    assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render}")
+    with pytest.raises(SystemExit):
+        render.main(["--help"])
+    assert "render    Render a profile into its own home for one harness" in capsys.readouterr().out
+
+
+def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
+    from scripts import install
 
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
-        _install_module().main()
+        install.main()
     assert exc.value.code == 2
-    assert "copilot per-run profiles are not supported" in capsys.readouterr().err
+    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
+
+
+def test_agentihooks_help_lists_profile(monkeypatch, capsys):
+    from scripts import install
+
+    monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
+    with pytest.raises(SystemExit):
+        install.main()
+    assert "Render a profile into its own home: render NAME --target claude|codex [--force]" in capsys.readouterr().out

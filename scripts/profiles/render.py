@@ -87,11 +87,6 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
 
     _i = _install_module()
     doc = _settings("claude", bundle, dirs)
-    conn_env, conn_deny, conn_disabled = _i._load_connectors(dirs[-1][0])
-    doc.setdefault("env", {}).update(conn_env)
-    doc.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
-    if conn_disabled:
-        doc["disabledMcpjsonServers"] = list(dict.fromkeys(doc.get("disabledMcpjsonServers", []) + conn_disabled))
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
     global_settings = claude_home(_global_env()) / "settings.json"
@@ -131,7 +126,7 @@ def _relink(dst: Path, items: dict[str, Path]) -> None:
         for old in dst.iterdir():
             if old.is_symlink():
                 old.unlink()
-    dst.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(exist_ok=True)
     for name, src in items.items():
         (dst / name).symlink_to(src)
 
