@@ -105,12 +105,17 @@ def now_ms():
 
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     ledger = ledger or LedgerClient()
-    if ledger.binned(slug):
-        return ["the ledger is in the bin, skipped"]
     lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
+        if ledger.binned(slug):
+            _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
+            return [
+                f"the ledger is in the bin, still retiring {', '.join(left)}"
+                if left
+                else "the ledger is in the bin, stopped"
+            ]
         inbox = InboxStore(store.redis)
         doc = ledger.state(slug)
         actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
@@ -227,23 +232,27 @@ def cmd_stop(store, args):
     if not args.now:
         _state(store, args, "stopping")
         return
-    store.update(args.slug, state="stopping")
-    runtime, ledger = HerdrRuntime(), LedgerClient()
-    rows = {t["id"]: t for t in ledger.tasks(args.slug)}
+    config, left = stop_now(store, args.slug, HerdrRuntime(), LedgerClient())
+    print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
+
+
+def stop_now(store, slug, runtime, ledger):
+    store.update(slug, state="stopping")
+    rows = {t["id"]: t for t in ledger.tasks(slug)}
     live, left = runtime.live_names(), []
-    for agent in store.agents(args.slug):
+    for agent in store.agents(slug):
         if not runtime.retire(agent, agent.name in live):
             left.append(agent.name)
             continue
-        store.release(args.slug, agent.task, agent.name)
-        store.drop_agent(args.slug, agent.name)
+        store.release(slug, agent.task, agent.name)
+        store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
-            ledger.update_task(args.slug, agent.task, {"state": "open", "claimed_by": ""})
-    config = store.update(args.slug, state="stopping" if left else "stopped")
+            ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
+    config = store.update(slug, state="stopping" if left else "stopped")
     if not left:
         runtime.close_space(config)
-    print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
+    return config, left
 
 
 def _live_master(store, slug, live):

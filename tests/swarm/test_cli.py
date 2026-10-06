@@ -198,8 +198,50 @@ def test_a_binned_ledger_stops_its_swarm_and_the_tick_leaves_it_alone(env):
     assert store.agents("sw") == [] and sorted(rt.closed) == panes and rt.live == set()
     assert rt.closed_spaces == ["sw"]
     store.update("sw", state="running")
-    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, skipped"]
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert store.agents("sw") == [] and len(rt.spawned) == 2 and len(rt.masters) == 1
+
+
+@pytest.mark.parametrize("state", ["running", "stopping"])
+def test_one_tick_after_binning_leaves_no_agent_and_no_space(env, state):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    assert {a.lane for a in store.agents("sw")} == {"master", "eng", "ci"}
+    store.update("sw", state=state)
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.live == set() and rt.closed_spaces == ["sw"]
+    assert store.config("sw").state == "stopped"
+    assert (ledger.rows["t1"]["state"], ledger.rows["t2"]["state"]) == ("open", "open")
+
+
+def test_a_binned_ledger_keeps_retiring_until_no_agent_is_left(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    stuck = next(a.name for a in store.agents("sw") if a.lane == "master")
+    rt.stuck = {stuck}
+    ledger.bin = {"sw"}
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [f"the ledger is in the bin, still retiring {stuck}"]
+    assert [a.name for a in store.agents("sw")] == [stuck] and rt.closed_spaces == []
+    assert store.config("sw").state == "stopping"
+    rt.stuck = set()
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.agents("sw") == [] and rt.closed_spaces == ["sw"]
+
+
+@pytest.mark.parametrize("state", ["running", "paused", "stopped"])
+def test_a_binned_ledger_never_gets_a_new_spawn(env, state):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", state=state)
+    ledger.bin = {"sw"}
+    InboxStore(store.redis).send("operator", "master@sw", "wake up")
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert rt.spawned == [] and rt.masters == [] and store.agents("sw") == []
+    assert store.config("sw").state == "stopped"
 
 
 def test_restoring_from_the_bin_leaves_the_swarm_stopped(env):

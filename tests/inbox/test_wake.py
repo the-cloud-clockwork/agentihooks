@@ -111,7 +111,7 @@ ORIGINAL_AGE = 540_000
 def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
     from types import SimpleNamespace
 
-    item = SimpleNamespace(state="pending", sender="sw-eng-2")
+    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False)
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
     assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
 
@@ -159,6 +159,24 @@ def test_the_operator_notification_is_text_the_ledger_accepts_whatever_the_messa
         run(inbox, herdr, ledger, t + n * W)
     [(_, text)] = ledger.followups
     assert ledger_comments.problems(text, "item") == [] and "sw-eng-1" in text
+
+
+@pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
+def test_an_unread_fyi_is_never_escalated(inbox, address):
+    item = inbox.send("operator", address, "noted, nothing to do", fyi=True)
+    herdr, ledger = FakeHerdr({"p1": "idle", "pm": "idle"}), FakeLedger()
+    for n in range(12):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    assert ledger.followups == [] and [i.id for i in inbox.inbox(MASTER_NAME) if i.id != item.id] == []
+    assert "escalated_master" not in events(inbox, item.id)
+
+
+def test_an_unread_fyi_for_a_stopped_swarm_master_never_becomes_a_followup(inbox):
+    item = inbox.send("operator", "master@sw", "the swarm stopped", fyi=True)
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(12):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, agents=[])
+    assert ledger.followups == [] and events(inbox, item.id) == []
 
 
 def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(inbox):
