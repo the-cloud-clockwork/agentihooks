@@ -94,7 +94,9 @@ class TestRequestGate:
         for bad in (7, ""):
             with pytest.raises(ValueError, match="^request must be the id of the operator message that asked"):
                 core.check_op({**good, "request": bad})
-        with pytest.raises(ValueError, match="^artifact_add takes id, by, task, title, file and an optional request$"):
+        with pytest.raises(
+            ValueError, match="^artifact_add takes id, by, task, title, file and an optional request or plan$"
+        ):
             core.check_op({**good, "extra": 1})
         task = {"op": "task_add", "id": "t", "by": "eng", "task": "w", "title": "Work", "lane": "eng"}
         core.check_op({**task, "artifact": True})

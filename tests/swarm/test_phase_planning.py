@@ -67,6 +67,7 @@ def slice_done(ledger, *build):
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     for tid, description in build:
         fields = {"task": tid, "title": f"Task {tid}", "lane": "eng", "phase": "p1", "territory": ["scripts/swarm"]}
+        fields["plan_url"] = "https://github.com/acme/app/issues/1"
         ledger.add_task(SLUG, {**fields, "description": description}, "planner@a1b2c3-0001")
     ids = ",".join(tid for tid, _ in build)
     ledger.update_task(SLUG, "plan-p1", {"state": "done", "proof": {"slice": ids}})
@@ -406,6 +407,7 @@ def test_two_phases_are_queued_and_reviewed_in_the_same_pass(env):
     assert actions == ["queued plan-p1 for phase p1", "queued plan-p2 for phase p2"]
     slice_done(ledger, ("t1", DONE_WHEN))
     fields = {"task": "t2", "title": "Task t2", "lane": "eng", "phase": "p2", "territory": ["scripts/swarm"]}
+    fields["plan_url"] = "https://github.com/acme/app/issues/2"
     ledger.update_task(SLUG, "plan-p2", {"state": "claimed", "claimed_by": "planner@a1b2c3-0002"})
     ledger.add_task(SLUG, {**fields, "description": DONE_WHEN}, "planner@a1b2c3-0002")
     ledger.update_task(SLUG, "plan-p2", {"state": "done", "proof": {"slice": "t2"}})
@@ -418,6 +420,7 @@ def test_a_task_id_the_ledger_would_refuse_in_a_comment_is_left_to_the_review_it
     set_phase("p1", planning="auto")
     run(store, ledger)
     fields = {"task": "fix_parser", "title": "Fix the parser", "lane": "eng", "phase": "p1", "territory": ["scripts"]}
+    fields["plan_url"] = "https://github.com/acme/app/issues/1"
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     ledger.add_task(SLUG, {**fields, "description": "Short."}, "planner@a1b2c3-0001")
     slice_done(ledger, ("t2", "Short."))
