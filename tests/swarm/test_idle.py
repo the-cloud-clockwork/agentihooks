@@ -65,6 +65,8 @@ def test_the_hook_records_operator_prompts_but_not_the_ones_the_swarm_types(redi
     swarm = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "sw-master-1"}
     assert swarm_heartbeat.heard(WAKE_TEXT, environ=swarm, redis=redis, now_ms=NOW) is False
     assert swarm_heartbeat.heard(NUDGE.format(slug="sw"), environ=swarm, redis=redis, now_ms=NOW) is False
+    notice = "<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event</summary>\n</task-notification>"
+    assert swarm_heartbeat.heard(notice, environ=swarm, redis=redis, now_ms=NOW) is False
     assert idle.last_prompt(redis, "sw", "sw-master-1") is None
     assert swarm_heartbeat.heard("hold on", environ=swarm, redis=redis, now_ms=NOW) is True
     assert idle.last_prompt(redis, "sw", "sw-master-1") == NOW
