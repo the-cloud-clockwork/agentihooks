@@ -723,6 +723,70 @@ def test_a_task_without_territory_is_claimed_alongside_anything(store):
     assert spawned_ids(runtime) == ["t1", "t2", "t3"]
 
 
+def test_an_urgent_ready_task_is_claimed_ahead_of_an_older_normal_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "rank": "urgent"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+
+
+def test_a_blocked_urgent_task_is_skipped_for_a_ready_normal_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [{"id": "t0", "state": "blocked"}, {"id": "t1", "rank": "urgent", "depends_on": ["t0"]}, {"id": "t2"}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"] and ledger.rows["t1"]["state"] == "open"
+
+
+def test_an_urgent_task_never_takes_a_territory_an_active_claim_holds(store):
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t1"]["state"] == "claimed"
+
+
+def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store):
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "rank": "urgent", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+
+
+def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
+    store.update("sw", max_eng=6)
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "rank": "low"},
+            {"id": "t2"},
+            {"id": "t3", "rank": "high"},
+            {"id": "t4", "rank": "normal"},
+            {"id": "t5", "rank": "high"},
+            {"id": "t6", "rank": "urgent"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t6", "t3", "t5", "t2", "t4", "t1"]
+
+
+def test_a_rank_change_applies_on_the_next_tick(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1"]
+    ledger.rows["t1"]["state"] = "done"
+    store.put_agent("sw", replace(workers(store)[0], state="finished"))
+    ledger.rows["t3"]["rank"] = "high"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime)[1:] == ["t3"]
+
+
 def test_a_swarm_whose_only_open_task_waits_on_a_blocked_one_drains(store):
     ledger = FakeLedger([{"id": "t1", "state": "blocked"}, {"id": "t2", "depends_on": ["t1"]}])
     runtime = FakeRuntime()

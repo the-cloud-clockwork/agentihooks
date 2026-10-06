@@ -82,6 +82,12 @@ h1, p, .item-title, .text, .desc, textarea { overflow-wrap: anywhere; }
 .task-meta .claimed { color: var(--accent); }
 .task-meta a { color: inherit; }
 .task-meta a:hover, .task-meta a:focus-visible { color: var(--accent); }
+.task-meta .rank-pick { padding: 0; background: transparent; border: 0; border-bottom: 1px solid transparent; color: var(--muted); font: inherit; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; field-sizing: content; cursor: pointer; }
+.task-meta .rank-pick option { background: var(--panel); color: var(--text); text-transform: none; }
+.task-meta .rank-pick:hover, .task-meta .rank-pick:focus { outline: none; border-bottom-color: var(--accent); }
+.task-meta .rank-pick:disabled { cursor: default; border-bottom-color: transparent; }
+.task-meta .rank-urgent { color: var(--signal); }
+.task-meta .rank-high { color: var(--warn); }
 .task-meta .kind { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 details.phase-fold { margin: 0; }
 details.phase-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; text-transform: none; letter-spacing: normal; color: var(--text); }
@@ -751,7 +757,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
       questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
       followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
-      tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "plan_url", "done", "out_of_scope"], ["comments"]),
+      tasks: list("tasks", ["title", "description", "phase", "lane", "state", "claimed_by", "issue_url", "pr_url", "plan_url", "done", "out_of_scope", "rank"], ["comments"]),
     };
   }
 
@@ -780,6 +786,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     if (op.op === "phase_review") {
       const phase = itemOf(d, "phases", op.item.split("/")[1]);
       if (phase) phase.review = { ...(phase.review || {}), state: op.state, note: op.note || "", escalated: false };
+      return;
+    }
+    if (op.op === "task_rank") {
+      const task = itemOf(d, "tasks", op.item.split("/")[1]);
+      if (task) task.rank = op.rank === "next" ? "urgent" : op.rank;
       return;
     }
     if (op.op === "title_set") {
@@ -1350,11 +1361,27 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     return out;
   }
 
+  function taskRanks() {
+    return ["urgent", "high", "normal", "low"];
+  }
+
+  function taskRank(item) {
+    return taskRanks().includes(item.rank) ? item.rank : "normal";
+  }
+
+  function rankPick(key, item) {
+    const pick = h("select", { class: `rank-pick rank-${taskRank(item)}`, "aria-label": `Queue rank of ${item.title}`, "data-focus": `rank:${key}`,
+      disabled: item.state === "done" ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
+      ...taskRanks().map((r) => h("option", { value: r, text: r })));
+    pick.value = taskRank(item);
+    return pick;
+  }
+
   function taskRow(item, tasks) {
     const key = `tasks/${item.id}`;
     const waits = taskBlockers(item, tasks || []);
     const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
-    const meta = h("div", { class: "task-meta" }, h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
+    const meta = h("div", { class: "task-meta" }, rankPick(key, item), h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
       h("span", { text: item.state }),
       item.phase ? h("span", { text: item.phase }) : null,
       item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
@@ -1441,7 +1468,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const live = items.filter((i) => !i.deleted && !i.done && i.state !== "done");
     const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
     const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
-    live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4));
+    live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
     $(name).replaceChildren(...live.map(row));
     if (!done.length) return;
     const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }), h("ol", {}, ...done.map(row)));

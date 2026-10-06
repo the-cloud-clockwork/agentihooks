@@ -5,6 +5,8 @@ import re
 import ledger_comments
 import ledger_kinds
 
+from scripts.swarm_ledger import ledger_rank
+
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
@@ -27,6 +29,7 @@ UPDATABLE = (
     "artifact",
     "profile",
     "plan_url",
+    "rank",
 )
 BOOL_FIELDS = ("artifact",)
 LIST_FIELDS = ("depends_on", "territory")
@@ -67,6 +70,7 @@ def check(op):
         check_bools(op)
         check_profile(op)
         check_urls(op)
+        check_rank(op)
         ledger_kinds.check(op)
         check_lane(op)
         gain = op.get("gain", 0)
@@ -91,7 +95,13 @@ def check(op):
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
+    check_rank(fields)
     ledger_kinds.check(fields)
+
+
+def check_rank(fields):
+    if "rank" in fields:
+        ledger_rank.canonical(fields["rank"])
 
 
 def check_lists(fields):
@@ -129,6 +139,7 @@ def check_task(task):
     check_lists(task)
     check_urls(task)
     check_profile(task)
+    check_rank(task)
     ledger_kinds.check(task)
     check_lane(task)
     if task.get("state") == "done" and ledger_kinds.unmet(task):
@@ -167,6 +178,8 @@ def _add(doc, op, ctx):
     for key in ("gain", "contract", "workspace", "artifact", "profile"):
         if key in op:
             task[key] = op[key]
+    if "rank" in op:
+        task["rank"] = ledger_rank.canonical(op["rank"])
     phase = next((p for p in doc.get("phases", []) if p["id"] == task["phase"]), {})
     if plan_url := op.get("plan_url") or phase.get("plan_url"):
         task["plan_url"] = plan_url
@@ -188,6 +201,15 @@ def add_refusal(tasks, op):
         return f"{by} holds no plan task and cannot add tasks: {PROPOSE}"
     if plans[0].get("phase") != op.get("phase"):
         return f"{by} plans phase {plans[0].get('phase')} and cannot add a task outside it: {PROPOSE}"
+    return ""
+
+
+def rank_refusal(by):
+    from scripts.swarm.naming import lane_of
+
+    lane = lane_of(by)
+    if lane in WORKER_LANES:
+        return f"{by} works in the {lane} lane and cannot set a task rank: {PROPOSE}"
     return ""
 
 
@@ -229,6 +251,11 @@ def _update(doc, op, ctx):
         return False
     if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
         return True
+    if "rank" in op["fields"]:
+        if refusal := rank_refusal(op["by"]):
+            ctx.refused.append(refusal)
+            return False
+        op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
     after = {**task, **op["fields"]}
     check_lane(after)
     if after.get("state") == "done" and ledger_kinds.unmet(after):
