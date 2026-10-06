@@ -14,10 +14,11 @@ from scripts.inbox import links
 from scripts.swarm.store import AUTONOMY, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
-LANES = ("eng", "ci")
-DEFAULT_CAPS = {"eng": 2, "ci": 1}
+LANES = ("eng", "ci", "master")
+DEFAULT_CAPS = {"eng": 2, "ci": 1, "master": 1}
+DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "master": "master"}
 AUTO = "auto"
-LANE_FIELDS = ("role", "agent", "model", "effort", "kind")
+LANE_FIELDS = ("role", "agent", "model", "effort", "kind", "profile")
 LINK_FIELDS = {"from", "to", "kind"}
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 BUILT_IN = Path(__file__).resolve().parents[2] / "profiles" / "package" / "swarm-templates"
@@ -31,6 +32,7 @@ class Lane:
     model: str = AUTO
     effort: str = AUTO
     kind: str = AUTO
+    profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,13 +52,15 @@ def lane(name, data):
     unknown = set(data) - {f.name for f in fields(Lane)}
     if unknown:
         raise SwarmError(f"lane {name} has unknown fields {sorted(unknown)}")
-    found = Lane(**{"cap": DEFAULT_CAPS[name], **data})
+    found = Lane(**{"cap": DEFAULT_CAPS[name], "profile": DEFAULT_PROFILES[name], **data})
     if not isinstance(found.cap, int) or isinstance(found.cap, bool) or found.cap < 0:
         raise SwarmError(f"lane {name} cap must be a whole number")
     if found.agent not in (AUTO, *agent_choice.AGENTS):
         raise SwarmError(f"lane {name} agent must be one of {(AUTO, *agent_choice.AGENTS)}")
     if found.kind not in (AUTO, *ledger_kinds.KINDS):
         raise SwarmError(f"lane {name} kind must be one of {(AUTO, *ledger_kinds.KINDS)}")
+    if not isinstance(found.profile, str) or not NAME_RE.fullmatch(found.profile):
+        raise SwarmError(f"lane {name} profile must be a profile name")
     if not all(isinstance(getattr(found, key), str) for key in LANE_FIELDS):
         raise SwarmError(f"lane {name} role, agent, model, effort and kind are text")
     return found
@@ -83,7 +87,7 @@ def parse(data):
     lanes = data.get("lanes") or {}
     custom = set(lanes) - set(LANES)
     if custom:
-        raise SwarmError(f"template {name} names lanes {sorted(custom)}; a swarm has only the eng and ci lanes")
+        raise SwarmError(f"template {name} names lanes {sorted(custom)}; a swarm has only the eng, ci and master lanes")
     if data.get("autonomy", "") not in ("", *AUTONOMY):
         raise SwarmError(f"template {name} autonomy must be one of {AUTONOMY}")
     return Template(
@@ -129,7 +133,7 @@ def lane_map(template):
 
 
 def from_config(name, config):
-    caps = {"eng": config.max_eng, "ci": config.max_ci}
+    caps = {"eng": config.max_eng, "ci": config.max_ci, "master": 1}
     return parse(
         {
             "name": name,

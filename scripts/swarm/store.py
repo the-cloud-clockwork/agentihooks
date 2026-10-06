@@ -55,6 +55,7 @@ class AgentRecord:
     seat: str = ""
     conversation_id: str = ""
     placement: str = ""
+    profile: str = ""
 
 
 class RedisStore:

@@ -1,8 +1,27 @@
 {
   "name": "codex-ci",
   "lanes": {
-    "eng": {"role": "", "cap": 2, "agent": "claude", "model": "opus", "effort": "high", "kind": "code"},
-    "ci": {"role": "", "cap": 1, "agent": "codex", "model": "auto", "effort": "auto", "kind": "auto"}
+    "eng": {
+      "role": "",
+      "cap": 2,
+      "agent": "claude",
+      "model": "opus",
+      "effort": "high",
+      "kind": "code",
+      "profile": "engineer"
+    },
+    "ci": {
+      "role": "",
+      "cap": 1,
+      "agent": "codex",
+      "model": "auto",
+      "effort": "auto",
+      "kind": "auto",
+      "profile": "cicd"
+    },
+    "master": {
+      "profile": "master"
+    }
   },
   "compact_limit": 0,
   "links": [],
