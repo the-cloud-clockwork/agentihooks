@@ -1,0 +1,9 @@
+{
+  "files": [
+    "scripts/swarm_ledger/template.html",
+    "scripts/swarm_ledger/home.html"
+  ],
+  "insertBefore": "</body>",
+  "commentSyntax": "html",
+  "cspChecked": true
+}
