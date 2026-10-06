@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -61,7 +62,7 @@ def run_selected(selection: Path) -> None:
     runner.write_all_mutants_to_file = write_selected
     for name in ("scripts.ci_mutation", "scripts"):
         sys.modules.pop(name)
-    runner.cli(["run", "--max-children", "1"])
+    runner.cli(["run", "--max-children", str(os.cpu_count() or 1)])
 
 
 if __name__ == "__main__":

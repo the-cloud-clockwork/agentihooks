@@ -67,6 +67,7 @@ def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, mo
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setattr("os.cpu_count", lambda: 6)
     selection = tmp_path / "lines.json"
     selection.write_text(json.dumps({"scripts/sample.py": [2, 5], "hooks/other.py": []}))
     test_runner = object()
@@ -97,7 +98,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     mutmut = SimpleNamespace(__main__=runner)
 
     def cli(args):
-        assert args == ["run", "--max-children", "1"]
+        assert args == ["run", "--max-children", "6"]
         stream = __import__("io").StringIO()
         names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
         assert names == ["selected"]
