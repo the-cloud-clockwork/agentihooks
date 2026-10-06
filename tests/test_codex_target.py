@@ -376,7 +376,7 @@ class TestMcp:
         assert 'bearer_token_env_var = "MCP_GATEWAY_KEY"' in text
         assert "${MCP_GATEWAY_KEY}" not in text, "placeholder must never land literally"
         assert "${OTHER}" not in text
-        assert "reference" in capsys.readouterr().out
+        assert 'X-Env = "OTHER"' in text
 
     def test_unbraced_bearer_maps_to_env_var(self, adapter):
         adapter.register_mcp(
@@ -385,12 +385,35 @@ class TestMcp:
         text = (codex_home() / "config.toml").read_text()
         assert 'bearer_token_env_var = "GW_TOKEN"' in text
 
-    def test_unbraced_non_bearer_reference_dropped(self, adapter, capsys):
-        adapter.register_mcp(
-            {"gw": {"type": "http", "url": "https://gw.example/mcp", "headers": {"X-Tok": "$MY_TOKEN"}}}
-        )
-        assert "$MY_TOKEN" not in (codex_home() / "config.toml").read_text()
-        assert "reference" in capsys.readouterr().out
+    def test_whole_header_reference_maps_to_env_http_headers(self, adapter, capsys):
+        import tomllib
+
+        headers = {"X-Env": "${OTHER}", "X-Tok": "$MY_TOKEN", "X-Mix": "pre-${MIX}", "X-Def": "${D:-x}"}
+        adapter.register_mcp({"gw": {"type": "http", "url": "https://gw.example/mcp", "headers": headers}})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["gw"]
+        assert entry == {"url": "https://gw.example/mcp", "env_http_headers": {"X-Env": "OTHER", "X-Tok": "MY_TOKEN"}}
+        printed = " ".join(capsys.readouterr().out.split())
+        for header in ("X-Mix", "X-Def"):
+            assert f"MCP 'gw' header '{header}' uses a ${{VAR}}/$VAR reference" in printed
+
+    def test_tool_allowlist_and_denylist_survive(self, adapter):
+        import tomllib
+
+        tools = ["lf-swarm_traces_by_tag", "lf-swarm_session_timeline"]
+        spec = {"type": "http", "url": "https://gw.example/mcp", "enabled_tools": tools, "disabled_tools": ["lf-x"]}
+        adapter.register_mcp({"gw": spec})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["gw"]
+        assert entry == {"url": "https://gw.example/mcp", "enabled_tools": tools, "disabled_tools": ["lf-x"]}
+
+    def test_entry_names_why_a_server_cannot_mount(self):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        tok = "ghp_" + "h" * 36
+        assert codex_mcp_entry("s", {"type": "sse", "url": "http://x/sse"}) == (None, "codex has no SSE transport")
+        assert codex_mcp_entry("n", {"type": "http"}) == (None, "no command or url")
+        credentialed = codex_mcp_entry("c", {"type": "http", "url": f"https://u:{tok}@g.example/mcp"})
+        assert credentialed == (None, "credential-shaped literal in url, command or args")
+        assert codex_mcp_entry("ok", {"command": "/bin/a"}) == ({"command": "/bin/a"}, "")
 
     def test_credential_in_url_drops_the_whole_server(self, adapter, capsys):
         tok = "ghp_" + "h" * 36
@@ -471,6 +494,96 @@ class TestMcp:
         from scripts.targets.codex_target import agents_skills_home
 
         assert (agents_skills_home() / "my-skill").exists()
+
+
+@pytest.fixture
+def said(monkeypatch):
+    from scripts.targets._common import _install_module
+
+    lines: list[str] = []
+    monkeypatch.setattr(_install_module(), "_cprint", lambda msg, **kwargs: lines.append(msg))
+    return lines
+
+
+class TestCodexEntry:
+    def test_stdio_keeps_command_args_and_forwards_references(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        dummy = "AKIA" + "TESTDUMMY0000000"
+        spec = {"command": "/py", "args": ["-m", "s"], "env": {"KEY": dummy, "REF": "${SRC}", "LIT": "1"}}
+        assert codex_mcp_entry("loc", spec) == (
+            {
+                "command": "bash",
+                "args": ["-c", 'REF="${SRC}" exec "$0" "$@"', "/py", "-m", "s"],
+                "env": {"LIT": "1"},
+                "env_vars": ["SRC"],
+            },
+            "",
+        )
+        assert said == [
+            "  [!!] MCP 'loc' env var 'KEY' looks like a credential (aws_access_key) — dropped from config.toml. "
+            "Export it in the shell environment instead of writing it to disk."
+        ]
+
+    def test_stdio_without_args_or_env_is_only_its_command(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        assert codex_mcp_entry("a", {"command": "/a", "args": [], "env": {}}) == ({"command": "/a"}, "")
+        assert said == []
+
+    def test_http_headers_split_by_how_codex_can_send_them(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        dummy = "AKIA" + "TESTDUMMY0000000"
+        headers = {
+            "authorization": "Bearer ${GW}",
+            "Host": "h.example",
+            "X-Env": "${E}",
+            "X-Bare": "$B",
+            "X-Mix": "a-${M}",
+            "X-Key": dummy,
+        }
+        entry, reason = codex_mcp_entry("gw", {"url": "https://g.example/mcp", "headers": headers})
+        assert reason == ""
+        assert entry == {
+            "url": "https://g.example/mcp",
+            "bearer_token_env_var": "GW",
+            "http_headers": {"Host": "h.example"},
+            "env_http_headers": {"X-Env": "E", "X-Bare": "B"},
+        }
+        assert said == [
+            "  [!!] MCP 'gw' header 'X-Mix' uses a ${VAR}/$VAR reference inside a longer value — codex does not "
+            "expand these; header dropped. Make the whole value one ${VAR} (mapped to env_http_headers) or an "
+            "Authorization Bearer ${VAR} (mapped to bearer_token_env_var).",
+            "  [!!] MCP 'gw' header 'X-Key' looks like a credential (aws_access_key) — dropped from config.toml. "
+            "Reference it via Authorization Bearer ${VAR} (mapped to bearer_token_env_var) instead of a literal value.",
+        ]
+
+    def test_a_non_authorization_bearer_header_is_an_env_header_only_when_whole(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        entry, _ = codex_mcp_entry("gw", {"url": "https://g.example/mcp", "headers": {"X-Proxy": "Bearer ${P}"}})
+        assert entry == {"url": "https://g.example/mcp"}
+
+    def test_filters_copy_and_empty_filters_stay_out(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"url": "https://g.example/mcp", "enabled_tools": ("a", "b"), "disabled_tools": []}
+        assert codex_mcp_entry("gw", spec) == ({"url": "https://g.example/mcp", "enabled_tools": ["a", "b"]}, "")
+
+    def test_unmountable_servers_say_why(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        assert codex_mcp_entry("old", {"type": "sse", "url": "http://x/sse"}) == (None, "codex has no SSE transport")
+        assert codex_mcp_entry("cmd-sse", {"type": "sse", "command": "/a"}) == (None, "codex has no SSE transport")
+        assert codex_mcp_entry("typed", {"type": "http", "command": "/a"}) == ({"command": "/a"}, "")
+        assert codex_mcp_entry("none", {}) == (None, "no command or url")
+        assert said == [
+            "  [!!] MCP 'old' uses SSE — codex has no SSE transport; skipped. "
+            "Expose a streamable-HTTP endpoint and re-run init.",
+            "  [!!] MCP 'cmd-sse' uses SSE — codex has no SSE transport; skipped. "
+            "Expose a streamable-HTTP endpoint and re-run init.",
+        ]
 
 
 class TestPersonaIdentityNaming:
