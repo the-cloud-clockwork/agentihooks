@@ -1,0 +1,17 @@
+[
+  {
+    "query": "Open a Claude agent in my project with this opening prompt",
+    "files": [],
+    "expected_behavior": ["Writes the prompt to a file", "Runs agentihooks init-agent with prompt-file", "Checks the launch result"]
+  },
+  {
+    "query": "QUOTA HANDOFF REQUIRED: write the document and transfer using the supplied launch command",
+    "files": [],
+    "expected_behavior": ["Reads the handoff skill", "Writes the six ordered Handoff v2 headings and final marker", "Passes only the handoff document because the seat recap is derived"]
+  },
+  {
+    "query": "The quota handoff launch returned handoff=failed and exit three",
+    "files": [],
+    "expected_behavior": ["Reports route_error", "Stops without retrying on this account"]
+  }
+]
