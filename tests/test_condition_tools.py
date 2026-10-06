@@ -284,6 +284,205 @@ class TestWriteGuard:
         assert conditions.write_guard("mcp__agentihooks__condition_set", {}, SID) == conditions.GATE_MESSAGE
 
 
+def _git(path: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+
+
+@pytest.fixture
+def checkouts(tmp_path, bundle):
+    primary = _git_repo(tmp_path / "repo")
+    _git(primary, "checkout", "-q", "-b", "dev")
+    _git(primary, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    worktree = tmp_path / "wt"
+    _git(primary, "worktree", "add", "-q", "-b", "feat", str(worktree))
+    on_dev = tmp_path / "wt-dev"
+    _git(primary, "worktree", "add", "-q", "-b", "main", str(on_dev))
+    _git(bundle, "checkout", "-q", "-b", "bundle-feat")
+    return {"primary": primary, "worktree": worktree, "on_dev": on_dev, "bundle": bundle, "tmp": tmp_path}
+
+
+class TestLiveFolders:
+    @pytest.mark.parametrize(
+        "tool, make_input, cwd",
+        [
+            ("Write", lambda c: {"file_path": f"{c['worktree']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Edit", lambda c: {"file_path": f"{c['worktree']}/profiles/a/.claude/conditions/pre-any-x.py"}, None),
+            ("Bash", lambda c: {"command": f"cp /tmp/x {c['worktree']}/.claude/conditions/pre-bash-x.sh"}, "primary"),
+            ("Bash", lambda c: {"command": f"{c['worktree']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Edit", lambda c: {"file_path": ".claude/conditions/pre-any-x.py"}, "worktree"),
+            ("Bash", lambda c: {"command": "cd profiles && touch a/.claude/conditions/pre-a-b.sh"}, "worktree"),
+            ("Bash", lambda c: {"command": "cat > .claude/conditions/pre-bash-x.sh <<'EOF'\nexit 0\nEOF"}, "worktree"),
+            ("Bash", lambda c: {"command": "python3 -c \"open('.claude/conditions/pre-a-b.sh','w')\""}, "worktree"),
+            (
+                "Bash",
+                lambda c: {"command": f"cd {c['worktree']} && chmod +x .claude/conditions/pre-a-b.sh"},
+                "worktree",
+            ),
+            ("Bash", lambda c: {"command": "rm .agentihooks/conditions/pre-bash-x.sh"}, "worktree"),
+        ],
+    )
+    def test_a_write_into_a_worktree_conditions_folder_passes(self, checkouts, tool, make_input, cwd):
+        base = str(checkouts[cwd]) if cwd else None
+        assert conditions.write_guard(tool, make_input(checkouts), SID, base) is None
+
+    @pytest.mark.parametrize(
+        "tool, make_input, cwd",
+        [
+            ("Write", lambda c: {"file_path": f"{c['bundle']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"file_path": f"{c['bundle']}/profiles/alpha/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"file_path": f"{conditions.runtime_dir()}/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"file_path": f"{c['primary']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"file_path": f"{c['on_dev']}/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"file_path": f"{c['tmp']}/plain/.claude/conditions/pre-bash-x.sh"}, None),
+            ("Edit", lambda c: {"file_path": ".claude/conditions/pre-bash-x.sh"}, "primary"),
+            ("Bash", lambda c: {"command": "touch .claude/conditions/pre-bash-x.sh"}, "primary"),
+            ("Bash", lambda c: {"command": "touch .claude/conditions/pre-bash-x.sh"}, None),
+            ("Write", lambda c: {"content": "x", "target": f"{c['worktree']}/.claude/conditions/a.sh"}, "worktree"),
+            (
+                "Bash",
+                lambda c: {"command": f"cp {c['bundle']}/.claude/conditions/x {c['worktree']}/.claude/conditions/"},
+                "worktree",
+            ),
+            ("Bash", lambda c: {"command": f"cp {c['worktree']}/.claude/conditions/x $D/.claude/conditions/"}, None),
+            (
+                "Bash",
+                lambda c: {"command": f"rsync -a {c['worktree']}/.claude/conditions {c['bundle']}/.claude/"},
+                None,
+            ),
+            (
+                "Bash",
+                lambda c: {"command": f"cp {c['worktree']}/.claude/conditions/x {conditions.runtime_dir()}"},
+                None,
+            ),
+            ("Bash", lambda c: {"command": f"cd {c['bundle']} && touch .claude/conditions/x"}, "worktree"),
+            ("Bash", lambda c: {"command": "cd - && touch .claude/conditions/x"}, "worktree"),
+            ("Bash", lambda c: {"command": f"cp x --target-directory={c['bundle']}/.claude/conditions"}, "worktree"),
+        ],
+    )
+    def test_a_write_into_a_live_conditions_folder_needs_the_operators_words(self, checkouts, tool, make_input, cwd):
+        base = str(checkouts[cwd]) if cwd else None
+        tool_input = make_input(checkouts)
+        assert conditions.write_guard(tool, tool_input, SID, base) == conditions.GATE_MESSAGE
+        conditions.arm_gate(SID)
+        assert conditions.write_guard(tool, tool_input, SID, base) is None
+
+    @pytest.mark.parametrize("tool", ["mcp__agentihooks__condition_set", "mcp__agentihooks__condition_clear"])
+    def test_condition_set_and_clear_need_the_operators_words_in_a_worktree(self, checkouts, tool):
+        cwd = str(checkouts["worktree"])
+        assert conditions.write_guard(tool, {"step": "pre"}, SID, cwd) == conditions.GATE_MESSAGE
+
+    @pytest.mark.parametrize(
+        "make_command",
+        [
+            lambda c: f"grep -n exit {conditions.runtime_dir()}/pre-any-x.sh >> {c['tmp']}/proof.md",
+            lambda c: f"cat {c['bundle']}/.claude/conditions/pre-bash-x.sh > {c['tmp']}/notes.txt 2>&1",
+            lambda c: f"ls {c['bundle']}/.claude/conditions | head >> ~/scratchpad/proof.md",
+            lambda c: f"cat {c['bundle']}/.claude/conditions/pre-bash-x.sh > notes.txt",
+            lambda c: f"echo checked .claude/conditions >> {c['worktree']}/.claude/conditions/notes.md",
+        ],
+    )
+    def test_a_redirect_into_an_ordinary_file_passes(self, checkouts, make_command):
+        assert (
+            conditions.write_guard("Bash", {"command": make_command(checkouts)}, SID, str(checkouts["primary"])) is None
+        )
+
+    @pytest.mark.parametrize(
+        "make_command",
+        [
+            lambda c: f"echo exit >> {c['bundle']}/.claude/conditions/pre-bash-x.sh",
+            lambda c: f"cd {c['bundle']}/.claude/conditions && echo exit > pre-bash-x.sh",
+            lambda c: f"cd {c['bundle']}/.claude && echo exit > conditions/pre-bash-x.sh",
+            lambda c: f'cat {c["bundle"]}/.claude/conditions/a.sh > "$OUT"',
+            lambda c: "echo exit > .claude/conditions/pre-bash-x.sh",
+            lambda c: f'echo exit > "{c["bundle"]}/.claude/conditions/pre-bash-x.sh"',
+            lambda c: f'echo exit > {c["bundle"]}/".claude"/conditions/pre-bash-x.sh',
+            lambda c: f"echo exit > {c['bundle']}/.cla\\ude/conditions/pre-bash-x.sh",
+            lambda c: f'cp /tmp/x "{str(c["bundle"])[:-2]}"le/.claude/conditions/pre-bash-x.sh',
+            lambda c: f"echo exit > `echo {c['bundle']}`/.claude/conditions/pre-bash-x.sh",
+        ],
+    )
+    def test_a_redirect_into_a_live_conditions_folder_needs_the_operators_words(self, checkouts, make_command):
+        command = make_command(checkouts)
+        assert conditions.write_guard("Bash", {"command": command}, SID, str(checkouts["primary"])) == (
+            conditions.GATE_MESSAGE
+        )
+
+    def test_the_base_branch_setting_and_origins_head_are_live(self, checkouts, monkeypatch):
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        monkeypatch.setenv("WT_BASE_BRANCH", "feat")
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+        monkeypatch.setenv("WT_BASE_BRANCH", "dev")
+        assert conditions.write_guard("Write", write, SID) is None
+        primary = checkouts["primary"]
+        _git(primary, "update-ref", "refs/remotes/origin/feat", "HEAD")
+        _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/feat")
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_a_detached_head_is_live(self, checkouts):
+        primary = checkouts["primary"]
+        _git(primary, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        _git(checkouts["worktree"], "checkout", "-q", "--detach")
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_a_branch_lookup_that_times_out_is_live(self, checkouts, monkeypatch):
+        real_run = subprocess.run
+
+        def slow_head(argv, **kwargs):
+            if argv[-1] == "HEAD":
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            return real_run(argv, **kwargs)
+
+        monkeypatch.setattr(conditions.subprocess, "run", slow_head)
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    def test_every_branch_lookup_is_bounded_in_time(self, checkouts, monkeypatch):
+        real_run, timeouts = subprocess.run, []
+
+        def timed(argv, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return real_run(argv, **kwargs)
+
+        monkeypatch.setattr(conditions.subprocess, "run", timed)
+        conditions.write_guard("Write", {"file_path": f"{checkouts['worktree']}/.claude/conditions/a.sh"}, SID)
+        assert timeouts and all(t is not None and 0 < t <= 5 for t in timeouts)
+
+    def test_a_chained_profile_folder_not_created_yet_is_live(self, checkouts):
+        _state(checkouts["bundle"], "alpha,gamma")
+        write = {"file_path": f"{checkouts['bundle']}/profiles/gamma/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+        write = {"file_path": f"{checkouts['bundle']}/profiles/delta/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) is None
+
+    def test_without_git_every_conditions_path_is_live(self, checkouts, monkeypatch):
+        def missing(*args, **kwargs):
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(conditions.subprocess, "run", missing)
+        write = {"file_path": f"{checkouts['worktree']}/.claude/conditions/pre-bash-x.sh"}
+        assert conditions.write_guard("Write", write, SID) == conditions.GATE_MESSAGE
+
+    @pytest.mark.parametrize("home", ["$HOME", "${HOME}", "~"])
+    def test_the_home_variable_resolves_to_the_home_folder(self, checkouts, monkeypatch, home):
+        monkeypatch.setenv("HOME", str(checkouts["tmp"]))
+        command = f"cp /tmp/x {home}/wt/.claude/conditions/pre-bash-x.sh"
+        assert conditions.write_guard("Bash", {"command": command}, SID, str(checkouts["primary"])) is None
+
+    def test_pre_tool_use_passes_the_session_cwd(self, checkouts, monkeypatch):
+        monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+        seen = {}
+        monkeypatch.setattr(conditions, "write_guard", lambda *args: seen.setdefault("args", args) and None)
+        monkeypatch.setattr(conditions, "pre_effect", lambda payload: None)
+        payload = {"session_id": SID, "tool_name": "Read", "tool_input": {"file_path": "/x"}, "cwd": "/w"}
+        try:
+            hm.on_pre_tool_use({"hook_event_name": "PreToolUse", **payload})
+        except BlockAction:
+            pass
+        assert seen["args"] == ("Read", {"file_path": "/x"}, SID, "/w")
+
+
 def _create(**overrides):
     args = {"step": "pre", "matcher": "bash.git", "name": "guard", "script": "exit 0", "session_id": SID}
     return conditions.create_condition(**{**args, **overrides})

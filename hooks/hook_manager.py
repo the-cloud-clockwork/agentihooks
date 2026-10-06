@@ -1111,7 +1111,7 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from hooks.context.conditions import write_guard
 
-        _gate_block = write_guard(tool_name, tool_input, payload.get("session_id", ""))
+        _gate_block = write_guard(tool_name, tool_input, payload.get("session_id", ""), payload.get("cwd"))
     except Exception as e:
         log("conditions write guard failed", {"error": str(e)})
     if _gate_block:

@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
+WAKER = "agentihooks-inbox-waker"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
 
@@ -21,7 +22,16 @@ def units(binary):
         "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=60s\nAccuracySec=5s\n\n"
         "[Install]\nWantedBy=timers.target\n"
     )
-    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
+    waker = (
+        "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm waker\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer, f"{WAKER}.service": waker}
 
 
 def ensure(binary, unit_dir=UNIT_DIR, run=subprocess.run):
@@ -34,5 +44,6 @@ def ensure(binary, unit_dir=UNIT_DIR, run=subprocess.run):
             changed = True
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
+    run(["systemctl", "--user", "enable", "--now", f"{WAKER}.service"], capture_output=True, text=True, timeout=30)
     proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
     return proc.returncode == 0

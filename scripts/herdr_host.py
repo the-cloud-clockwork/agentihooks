@@ -159,3 +159,13 @@ def rename_agent(pane_id: str, name: str, environ: dict[str, str], timeout: floa
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.5)
+
+
+def answer(pane_id: str, text: str, environ: dict[str, str], timeout_ms: int) -> bool:
+    """Press Enter on a startup prompt once the pane shows its text; False when it never shows."""
+    try:
+        _cli(["pane", "wait-output", pane_id, "--match", text, "--timeout", str(timeout_ms)], environ)
+        _cli(["pane", "send-keys", pane_id, "Enter"], environ)
+    except (HerdrError, subprocess.TimeoutExpired):
+        return False
+    return True

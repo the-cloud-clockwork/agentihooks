@@ -12,6 +12,7 @@ from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:inbox"
+NOTIFY = f"{PREFIX}:notify"
 MOVE_ATTEMPTS = 3
 STATES = ("pending", "delivered", "read", "done", "blocked", "handed_off", "cancelled")
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
@@ -91,6 +92,7 @@ class InboxStore:
             pipe.zadd(self.key("pending", address), {item.id: at})
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
+            pipe.publish(NOTIFY, address)
             pipe.execute()
         return item
 
@@ -212,6 +214,7 @@ class InboxStore:
                 pipe.zadd(self.key("address", address), {item_id: item.created_at})
                 pipe.zadd(self.key("pending", address), {item_id: item.created_at})
                 pipe.sadd(self.key("waiting"), address)
+                pipe.publish(NOTIFY, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
             pipe.execute()
             return moved

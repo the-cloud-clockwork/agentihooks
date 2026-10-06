@@ -27,6 +27,11 @@ def css_of(page):
     return "\n".join(re.findall(r"<style>(.*?)</style>", page, re.S))
 
 
+def home_style():
+    page = server.HOME_PAGE.read_text(encoding="utf-8")
+    return re.search(r"<style>__HOME_PALETTE__(.*?)</style>", page, re.S).group(1).replace("\n", "")
+
+
 class Palette(unittest.TestCase):
     def test_palette_has_a_ramp_layer_and_a_role_layer_pointing_at_it(self):
         tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
@@ -42,7 +47,7 @@ class Palette(unittest.TestCase):
         def value(role):
             return tokens[tokens[role][len("var(") : -1]]
 
-        expected = {"--canvas": "#03050b", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        expected = {"--canvas": "#010104", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
         for role, colour in expected.items():
             self.assertEqual(value(role), colour, role)
         self.assertEqual(value("--warn"), "#facc15")
@@ -51,7 +56,7 @@ class Palette(unittest.TestCase):
     def test_the_palette_is_the_only_place_a_colour_value_appears(self):
         template = (SCRIPTS / "template.html").read_text(encoding="utf-8")
         self.assertIsNone(LITERAL.search(template), LITERAL.search(template))
-        self.assertIsNone(LITERAL.search(server.HOME_STYLE))
+        self.assertIsNone(LITERAL.search(home_style()))
 
     def test_palette_is_packaged_with_the_template(self):
         data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -81,7 +86,7 @@ class SurfaceLadder(unittest.TestCase):
     def setUp(self):
         self.pages = {
             "ledger": css_of((SCRIPTS / "template.html").read_text(encoding="utf-8")),
-            "home": server.HOME_STYLE,
+            "home": home_style(),
         }
 
     def test_panels_sit_on_the_surface_tokens_over_one_canvas(self):
@@ -98,6 +103,19 @@ class SurfaceLadder(unittest.TestCase):
                         continue
                     offsets = re.findall(r"-?[\d.]+(?:px)?", layer)[:2]
                     self.assertTrue(layer.strip().startswith("inset") or offsets == ["0", "0"], (name, layer))
+
+    def test_nothing_glows(self):
+        for name, css in self.pages.items():
+            self.assertNotIn("text-shadow", css, name)
+            self.assertNotIn("drop-shadow(", css, name)
+            self.assertNotIn("--glow", css, name)
+            for value in re.findall(r"box-shadow:\s*([^;}]+)", css):
+                for layer in value.split(","):
+                    self.assertFalse(re.match(r"\s*0\s+0\s+[\d.]+px", layer), (name, layer))
+
+    def test_the_canvas_has_no_wash_behind_it(self):
+        tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
+        self.assertEqual(tokens["--backdrop"].strip(), "none")
 
     def test_no_capsule_badges(self):
         ledger = self.pages["ledger"]

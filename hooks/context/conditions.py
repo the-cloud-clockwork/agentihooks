@@ -680,6 +680,16 @@ _READ_ONLY_GIT = frozenset(
 )
 _SED_WRITE = re.compile(r"\bsed\b[^|;&\n]*?(?:\s-[a-zA-Z]*i|\s--in-place|[\s'\"/;}0-9$][wW]\s)")
 _HARMLESS_REDIRECT = re.compile(r"\d*>&\d+|&?\d*>\s*/dev/null")
+_WORD = r"""(?:[^\s;&|<>()'"`\\]|\\.|"[^"]*"|'[^']*')+"""
+_REDIRECT = re.compile(rf">>?\|?\s*({_WORD})")
+_PATH_TOKEN = re.compile(_WORD)
+_UNQUOTE = re.compile(r"""\\(.)|["']""")
+_CD_TARGET = re.compile(rf"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+({_WORD})")
+_CAT_HEREDOC = re.compile(
+    r"((?:^|[;&|(])[ \t]*(?:cat|tee)\b[^\n;&|]*?)<<-?[ \t]*(['\"]?)(\w+)\2([^\n]*)\n.*?^[ \t]*\3[ \t]*$",
+    re.DOTALL | re.MULTILINE,
+)
+_DEFAULT_BRANCHES = frozenset({"main", "master", "dev"})
 _GATE_TTL_SEC = 3600
 GATE_MESSAGE = (
     "BLOCKED: conditions are created, changed or removed only when the operator asks: the operator's own prompt "
@@ -747,8 +757,94 @@ def _touches_conditions(text: str) -> bool:
     return any(fragment in text for fragment in (".claude/conditions", ".agentihooks/conditions", str(runtime_dir())))
 
 
-def _read_only_shell(command: str) -> bool:
-    if ">" in _HARMLESS_REDIRECT.sub("", command):
+def _git_out(directory: Path, *args: str) -> str:
+    try:
+        out = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout.strip()
+
+
+def _feature_branch(path: Path) -> bool:
+    """Whether *path* sits in a git checkout on a branch other than main, master, dev or origin's HEAD."""
+    directory = next(p for p in (path, *path.parents) if p.is_dir())
+    branch = _git_out(directory, "symbolic-ref", "--short", "HEAD")
+    origin_head = _git_out(directory, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    defaults = _DEFAULT_BRANCHES | {os.environ.get("WT_BASE_BRANCH"), origin_head.removeprefix("origin/")}
+    return bool(branch) and branch not in defaults
+
+
+def _live_dirs() -> list[Path]:
+    """Condition folders hooks read now: bundle, profile and runtime layers, plus unresolved profile candidates."""
+    layers, probed = layer_dirs(profile_chain.read_state())
+    return [d.resolve() for d in (*(d for _, d in layers), *(p / ".claude" / "conditions" for p in probed))]
+
+
+def _staged(paths: list[Path]) -> bool:
+    """No path overlaps a live layer, and each condition path sits in a checkout on a feature branch."""
+    live = _live_dirs()
+    real = [p.resolve() for p in paths]
+    if any(p.is_relative_to(d) or d.is_relative_to(p) for p in real for d in live):
+        return False
+    return all(_feature_branch(p) for p in real if "conditions" in p.parts)
+
+
+def _expand(token: str, base: str | None) -> Path | None:
+    """*token* as an absolute path, or None when a variable or an unknown directory hides it."""
+    token = re.sub(r"^\$\{?HOME\}?(?=/|$)", "~", _UNQUOTE.sub(lambda m: m.group(1) or "", token))
+    if "$" in token:
+        return None
+    token = os.path.expanduser(token)
+    if not os.path.isabs(token):
+        if base is None:
+            return None
+        token = os.path.join(base, token)
+    return Path(os.path.normpath(token))
+
+
+def _bases(command: str, cwd: str | None) -> list[str | None]:
+    """Every directory a relative path in *command* may resolve against: the session cwd and each cd target."""
+    bases = [cwd]
+    for target in _CD_TARGET.findall(command):
+        path = None if target == "-" else _expand(target, cwd)
+        bases.append(str(path) if path else None)
+    return bases
+
+
+def _resolve(token: str, bases: list[str | None]) -> list[Path] | None:
+    paths = [_expand(token, base) for base in bases]
+    return None if None in paths else paths
+
+
+def _ordinary_target(token: str, bases: list[str | None]) -> bool:
+    """A redirect target outside every conditions folder, or one a pull request review covers."""
+    paths = _resolve(token, bases)
+    if paths is None:
+        return False
+    conditional = [p for p in paths if "conditions" in p.resolve().parts]
+    return not conditional or _staged(conditional)
+
+
+def _staged_command(command: str, cwd: str | None) -> bool:
+    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged."""
+    bases = _bases(command, cwd)
+    paths: list[Path] = []
+    for word in _PATH_TOKEN.findall(command):
+        for token in filter(None, word.split("=")):
+            resolved = _resolve(token, bases)
+            if resolved is None:
+                return False
+            paths += resolved
+    return any("conditions" in p.resolve().parts for p in paths) and _staged(paths)
+
+
+def _read_only_shell(command: str, cwd: str | None = None) -> bool:
+    stripped = _HARMLESS_REDIRECT.sub("", command)
+    targets = _REDIRECT.findall(stripped)
+    if stripped.count(">") - stripped.count(">>") != len(targets):
+        return False
+    bases = _bases(command, cwd)
+    if not all(_ordinary_target(target, bases) for target in targets):
         return False
     if re.search(r"\s-(?:delete|exec)\b", command) or _SED_WRITE.search(command):
         return False
@@ -774,20 +870,32 @@ def _requested_on_task(session_id: str) -> bool:
     return bool(opened)
 
 
-def write_guard(tool_name: str, tool_input: dict | None, session_id: str) -> str | None:
-    """Block an agent touching condition files or tools unless the operator asked: this turn or on its task."""
-    name = tool_name or ""
-    tool_input = tool_input or {}
-    touches = bool(_CONDITION_TOOL.search(name))
+def _touches_live(name: str, tool_input: dict, cwd: str | None) -> bool:
+    """Whether a tool call reaches the condition tools or writes a condition folder hooks read now."""
+    if _CONDITION_TOOL.search(name):
+        return True
     if name in _EDIT_TOOLS:
         paths = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path") if tool_input.get(key)]
-        touches = _touches_conditions(" ".join(paths) if paths else json.dumps(tool_input))
-    elif name == "Bash":
-        command = str(tool_input.get("command") or "")
-        touches = bool(_NEAR_CONDITIONS.search(command) or _touches_conditions(command))
-        touches = touches and not _read_only_shell(command)
-    if touches and not is_armed(session_id) and not _requested_on_task(session_id):
-        return GATE_MESSAGE
+        if not paths:
+            return _touches_conditions(json.dumps(tool_input))
+        if not any(_touches_conditions(path) for path in paths):
+            return False
+        resolved = [_expand(path, cwd) for path in paths]
+        return None in resolved or not _staged(resolved)
+    if name == "Bash":
+        command = _CAT_HEREDOC.sub(lambda m: m.group(1) + m.group(4), str(tool_input.get("command")))
+        plain = _UNQUOTE.sub(lambda m: m.group(1) or "", command)
+        if not any(_NEAR_CONDITIONS.search(text) or _touches_conditions(text) for text in (command, plain)):
+            return False
+        return not _read_only_shell(command, cwd) and not _staged_command(command, cwd)
+    return False
+
+
+def write_guard(tool_name: str, tool_input: dict | None, session_id: str, cwd: str | None = None) -> str | None:
+    """Block an agent touching live condition files or the condition tools unless the operator asked."""
+    if _touches_live(tool_name, tool_input or {}, cwd or None) and not is_armed(session_id):
+        if not _requested_on_task(session_id):
+            return GATE_MESSAGE
     return None
 
 

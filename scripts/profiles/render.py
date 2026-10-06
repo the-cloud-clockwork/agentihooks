@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import plugins, sources
+from scripts.profiles import browser, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
@@ -78,6 +78,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "bundle_commit": commit,
         "chain": chain,
         "plugins": plugins.role_defaults(chain),
+        **({"browser": browser.spec()} if browser.enabled(chain) else {}),
         "corrections": quarantine.digest(),
     }
 
@@ -129,10 +130,14 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     # Claude reads the default home as an ancestor project folder when the working folder sits under it.
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
     settings = settings_document(doc)
+    chain = [n for n, _ in dirs]
+    enabled_plugins = plugins.allowed(chain, settings.get("enabledPlugins") or {})
+    if browser.enabled(chain):
+        enabled_plugins.pop(plugins.PLAYWRIGHT, None)
     return {
         **{k: personal[k] for k in _i.PERSONAL_KEYS if k in personal},
         **settings,
-        "enabledPlugins": plugins.allowed([n for n, _ in dirs], settings.get("enabledPlugins") or {}),
+        "enabledPlugins": enabled_plugins,
         "claudeMdExcludes": excludes,
     }
 
@@ -156,7 +161,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         )
         if path:
             servers.update(_i._load_native_layer(path).get("mcpServers") or {})
-    return servers
+    return browser.configure(servers, [name for name, _ in dirs])
 
 
 def _seed(src: Path) -> dict:
@@ -334,6 +339,8 @@ def render_codex(name: str, force: bool = False) -> Path | None:
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))
     servers = _mcp_servers("codex", bundle, dirs)
     allowed = {server: spec for server, spec in installed.get("mcp_servers", {}).items() if server in servers}
+    if browser.enabled([name for name, _ in dirs]):
+        allowed = browser.configure(allowed, [name for name, _ in dirs])
     if allowed:
         doc["mcp_servers"] = allowed
     root = agents_skills_home()

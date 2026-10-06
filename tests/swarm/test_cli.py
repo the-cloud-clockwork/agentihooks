@@ -343,6 +343,44 @@ def test_timer_units_and_enable(tmp_path):
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
 
 
+def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
+    calls = []
+    timer.ensure(
+        "/bin/agentihooks",
+        tmp_path,
+        run=lambda argv, **kw: calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0),
+    )
+    assert (tmp_path / "agentihooks-inbox-waker.service").read_text() == (
+        "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        'ExecStart="/bin/agentihooks" swarm waker\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    enable = ["systemctl", "--user", "enable", "--now", "agentihooks-inbox-waker.service"]
+    assert (enable, {"capture_output": True, "text": True, "timeout": 30}) in calls
+
+
+def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
+    ran = []
+    monkeypatch.setattr(cli, "connect", lambda: "store")
+    for name in ("waker", "rename"):
+        monkeypatch.setattr(cli, f"cmd_{name}", lambda store, args, name=name: ran.append((name, store, vars(args))))
+        assert cli.main([name]) == 0
+    assert ran == [("waker", "store", {}), ("rename", "store", {})]
+
+
+def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
+    from scripts.inbox import waker
+
+    ran = []
+    monkeypatch.setattr(waker, "run", lambda store, herdr, clock: ran.append((store, type(herdr), clock)))
+    cli.cmd_waker("store", None)
+    assert ran == [("store", cli.delivery.HerdrMessenger, cli.now_ms)]
+
+
 def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path):
     seen = []
 

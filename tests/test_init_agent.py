@@ -1,9 +1,12 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from scripts import herdr_host, init_agent
+from scripts.claude_config import claude_json
 
 
 @pytest.fixture(autouse=True)
@@ -575,6 +578,59 @@ def test_when_trust_cannot_be_set_the_caller_is_told(monkeypatch, tmp_path, caps
     assert config.read_text() == config_text
 
 
+@pytest.mark.parametrize(
+    ("caller_home", "pane_home"),
+    [("profile", None), (None, "herdr")],
+    ids=["caller-profile-home", "pane-foreign-home"],
+)
+def test_the_launched_claude_reads_the_config_holding_the_recorded_trust(monkeypatch, tmp_path, caller_home, pane_home):
+    project = tmp_path / "fresh"
+    project.mkdir()
+    seen = tmp_path / "seen"
+    stub = tmp_path / "agentihooks"
+    stub.write_text(f'#!/bin/sh\nprintf %s "${{CLAUDE_CONFIG_DIR:-}}" > {seen}\n')
+    stub.chmod(0o755)
+    real_popen = subprocess.Popen
+
+    def popen(command, **kwargs):
+        if command[0] != "/usr/bin/terminal":
+            return real_popen(command, **kwargs)
+        pane = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
+        if pane_home:
+            pane["CLAUDE_CONFIG_DIR"] = str(tmp_path / pane_home)
+        real_popen(["bash", command[-1]], env=pane).wait()
+
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: str(stub) if name == "agentihooks" else None)
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    caller = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "SHELL": "/bin/true"}
+    if caller_home:
+        (tmp_path / caller_home).mkdir()
+        caller["CLAUDE_CONFIG_DIR"] = str(tmp_path / caller_home)
+
+    rc = init_agent.main(
+        ["--dir", str(project), "--name", "trust", "--agent", "claude", "--start-timeout", "5", "--route-timeout", "0"],
+        caller,
+    )
+
+    assert rc == 0
+    launched = {"HOME": str(tmp_path), **({"CLAUDE_CONFIG_DIR": seen.read_text()} if seen.read_text() else {})}
+    config = json.loads(claude_json(launched).read_text())
+    assert config["projects"][str(project)]["hasTrustDialogAccepted"] is True
+
+
+def test_a_codex_launcher_leaves_the_claude_config_home_alone(tmp_path):
+    text = _launcher_text(tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "profile")}, "codex")
+    assert "CLAUDE_CONFIG_DIR" not in text
+    lines = text.splitlines()
+    after_name = lines[lines.index("export AGENTIHOOKS_AGENT_NAME=swarm-buildout-eng-4") + 1]
+    assert after_name.startswith("/") and " codex " in after_name
+
+
 def test_codex_trusts_exactly_its_launch_folder_for_that_session(tmp_path):
     project = tmp_path / "repo.with.dots"
     project.mkdir()
@@ -598,3 +654,53 @@ def test_a_claude_launch_gets_no_codex_trust_override(tmp_path):
         tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent="claude")
     )
     assert "trust_level" not in launcher.read_text()
+
+
+@pytest.mark.parametrize(("agent", "named"), [("claude", True), ("codex", False)])
+def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch, tmp_path, capsys, agent, named):
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (agent, "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--agent", agent, "--inbox-channel", "--dry-run", "--", "--model", "opus"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("claude_args="))
+    assert line.startswith("claude_args='--mcp-config=") is named and (channel.FLAG in line) is named
+    assert line.endswith("--model opus")
+
+
+@pytest.mark.parametrize("channel", [True, False])
+def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    spec = init_agent.AgentSpec(channel=channel)
+    launcher, _ = init_agent._write_launcher(tmp_path, "eng", "", [], env, spec)
+    text = launcher.read_text()
+    assert ("export MCP_PROTOCOL_NEGOTIATION=legacy" in text.splitlines()) is channel
+    assert not channel or text.index("MCP_PROTOCOL_NEGOTIATION") < text.index(" claude ")
+
+
+def test_the_inbox_channel_flag_explains_itself():
+    found = next(a for a in init_agent._parser()._actions if a.dest == "inbox_channel")
+    assert (
+        found.help == "Claude: load the agentihooks inbox channel and answer its development channels warning in herdr"
+    )
+
+
+@pytest.mark.parametrize(("seen", "said"), [(True, "answered"), (False, "unseen")])
+def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, said):
+    from scripts.inbox import channel
+
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args) or seen)
+    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}) == said
+    assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
+
+
+def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    launcher = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("launcher="))
+    lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
+    assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines

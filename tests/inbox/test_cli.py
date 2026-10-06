@@ -145,6 +145,16 @@ def test_reply_answers_the_sender_and_closes_the_item(store, monkeypatch, capsys
     assert store.get(item.id).state == "done"
 
 
+def test_a_reply_to_a_swarm_notice_closes_it_and_says_notices_take_no_reply(store, capsys):
+    notice = store.send("swarm", "alice", "checks passed on your pull request")
+    assert run("reply", notice.id, "thanks") == 0
+    out = capsys.readouterr()
+    assert json.loads(out.out) == {"id": notice.id, "state": "done", "reason": "done: swarm notices take no reply"}
+    assert out.err == ""
+    assert store.get(notice.id).state == "done"
+    assert store.inbox("swarm") == []
+
+
 def test_send_and_reply_with_fyi_mark_the_item_as_needing_no_work(store, capsys):
     assert run("send", "bob", "--fyi", "thanks,", "merged") == 0
     [thanks] = store.inbox("bob")
