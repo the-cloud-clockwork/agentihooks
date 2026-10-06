@@ -104,6 +104,9 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "addopts=",
         "-p",
         "pytest_asyncio.plugin",
+        "-p",
+        "scripts.ci_mutation.identity",
+        "--mutated-path=hooks/sample.py",
     ]
     for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github"):
         assert (work / name / "asset.txt").read_text() == name

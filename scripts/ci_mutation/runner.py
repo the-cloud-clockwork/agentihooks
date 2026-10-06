@@ -37,7 +37,17 @@ def prepare_workspace(root: Path, work: Path, path: str, tests: list[str]) -> No
         "only_mutate": [path],
         "also_copy": ["profiles/", "docs/", ".github/"],
         "pytest_add_cli_args_test_selection": tests,
-        "pytest_add_cli_args": ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"],
+        "pytest_add_cli_args": [
+            "-q",
+            "-x",
+            "-o",
+            "addopts=",
+            "-p",
+            "pytest_asyncio.plugin",
+            "-p",
+            "scripts.ci_mutation.identity",
+            f"--mutated-path={path}",
+        ],
     }
     (work / "pyproject.toml").write_text(tomlkit.dumps(project))
 
