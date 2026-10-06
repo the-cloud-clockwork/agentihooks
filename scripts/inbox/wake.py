@@ -46,7 +46,7 @@ def decide(item, pane, history, now_ms, window):
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
     # The swarm only sends escalations; the item each one raises keeps its own ladder to the operator.
-    return TO_MASTER if due and item.sender != BY else None
+    return TO_MASTER if due and item.sender != BY and not item.fyi else None
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
