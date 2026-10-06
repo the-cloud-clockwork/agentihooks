@@ -936,7 +936,7 @@ def test_remove_clears_the_swarm_and_its_counts_so_a_recreated_swarm_starts_at_z
     assert run("sw", "remove") == 0
     assert store.slugs() == ["other"]
     assert cli.activity.counts("sw") == {}
-    assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0}}
+    assert cli.activity.counts("other") == {"other-eng-1": {"watch": 1, "act": 0, "since": 1}}
     run("sw", "create", "--repo", "/repo")
     assert cli.activity.counts("sw") == {}
     assert store.next_name("sw", "eng") == "engineer@a1b2c5-0001"
