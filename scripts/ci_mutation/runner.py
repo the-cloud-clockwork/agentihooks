@@ -31,22 +31,30 @@ def prepare_workspace(root: Path, work: Path, path: str, tests: list[str]) -> No
         source = root / name
         if source.is_dir():
             shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
+    # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
+    if path != "scripts/ci_mutation/identity.py":
+        pytest_args += ["-p", "scripts.ci_mutation.identity", f"--mutated-path={path}"]
     project = tomlkit.parse((root / "pyproject.toml").read_text())
     project["tool"]["mutmut"] = {
         "source_paths": ["hooks/", "scripts/"],
         "only_mutate": [path],
         "also_copy": ["profiles/", "docs/", ".github/"],
         "pytest_add_cli_args_test_selection": tests,
-        "pytest_add_cli_args": ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"],
+        "pytest_add_cli_args": pytest_args,
     }
     (work / "pyproject.toml").write_text(tomlkit.dumps(project))
 
 
-def mutate_file(root: Path, path: str, work: Path, tests: list[str], deadline: float) -> tuple[list[dict], str]:
+def mutate_file(
+    root: Path, path: str, work: Path, tests: list[str], deadline: float, lines: set[int]
+) -> tuple[list[dict], str]:
     prepare_workspace(root, work, path, tests)
+    selection = work / "changed-lines.json"
+    selection.write_text(json.dumps({path: sorted(lines)}))
     log = work / "run.log"
     status = run_process(
-        [sys.executable, "-m", "mutmut", "run", "--max-children", "1"], work, deadline - time.monotonic(), log
+        [sys.executable, "-m", "scripts.ci_mutation.selection", str(selection)], work, deadline - time.monotonic(), log
     )
     if status is None:
         return [], "over budget"
@@ -89,7 +97,7 @@ def run_gate(root: Path, changes: dict[str, set[int]], output: Path, budget: flo
                 reason = "no matching or importing test modules"
             else:
                 work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
-                rows, reason = mutate_file(root, path, work, tests, deadline)
+                rows, reason = mutate_file(root, path, work, tests, deadline, lines)
         if reason:
             report["not_mutated"].append({"path": path, "reason": reason})
             print(f"{path}: not mutated, {reason}", flush=True)

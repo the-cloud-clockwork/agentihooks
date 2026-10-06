@@ -140,4 +140,15 @@ def test_learned_keeps_the_reason_and_maturity(env, maturity):  # noqa: F811
 def test_the_prompt_requests_one_handoff_document_and_a_learned_reason(lane):
     rendered = prompt.build("sw", "/repo", lane, "successor", {"id": "t1", "title": "task", "description": "task"})
     assert "--recap" not in rendered
+    assert "Handoff v2" in rendered
+    assert "handoff skill" in rendered
+    assert "recap is derived" in rendered
+    instruction = next(line for line in rendered.splitlines() if line.startswith("If your context nears its limit"))
+    assert instruction.startswith(
+        "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
+    )
+    if lane == MASTER:
+        assert "Handoff v2 headings, run agentihooks swarm sw --as successor handoff <doc> and stop." in instruction
+    else:
+        assert "then run agentihooks swarm sw handoff <doc> and stop;" in instruction
     assert "<lesson because reason>" in rendered

@@ -74,7 +74,17 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short -p no:anyio -p no:pytest-split -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+        run: python -m pytest tests/ -v -n auto --dist loadgroup --shard ${{ matrix.shard }}/4 --tb=short --store-durations --durations-path durations.json -p no:anyio -p no:pytest_cov -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+
+      # Shards balance on these: per-test times here differ from a local run.
+      - name: Upload durations
+        if: steps.lookup.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: durations.json
+          retention-days: 14
+          overwrite: true
 
   lint:
     runs-on: ubuntu-latest

@@ -103,8 +103,8 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"- Keep the swarm culture current: {me} culture show prints it, {me} culture set <file> replaces it. Every "
         "new occupant of every seat reads it.",
         "",
-        f"If your context nears its limit a hook tells you to write a handoff document: write what the operator "
-        f"asked for, what is pending and what you promised under the Handoff v2 headings, "
+        "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
+        "to write what the operator asked for, what is pending and what you promised under the Handoff v2 headings, "
         f"run {me} handoff <doc> and stop. The next master continues from it; its recap is derived from the document.",
         "Write chat and comments in plain words for the operator: no ids, paths, hashes or dashes.",
     ]
@@ -178,8 +178,8 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "",
         *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy),
         "",
-        "If your context nears its limit a hook tells you to write a handoff document: use the Handoff v2 headings "
-        f"for what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
+        "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
+        f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
         "successor continues the task from it and the seat recap is derived from the same document.",
         "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
         f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.',
