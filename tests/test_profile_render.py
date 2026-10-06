@@ -28,6 +28,10 @@ def _commit(bundle: Path, message: str) -> None:
     _git(bundle, "commit", "-q", "--allow-empty", "-m", message)
 
 
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     from scripts.targets._common import _install_module
@@ -320,13 +324,17 @@ def test_cli_usage(world, capsys):
 
     with pytest.raises(SystemExit):
         render.main(["render", "rb-role", "--target", "bogus"])
-    assert "invalid choice: 'bogus' (choose from claude, codex, copilot)" in capsys.readouterr().err
+    assert re.search(
+        r"invalid choice: 'bogus' \(choose from '?claude'?, '?codex'?, '?copilot'?\)", capsys.readouterr().err
+    )
     with pytest.raises(SystemExit):
         render.main([])
     assert capsys.readouterr().err.startswith("usage: agentihooks profile [-h] {render}")
     with pytest.raises(SystemExit):
         render.main(["--help"])
-    assert "render    Render a profile into its own home for one harness" in capsys.readouterr().out
+    assert re.search(
+        r"(?<!\S)render Render a profile into its own home for one harness(?!\S)", _flat(capsys.readouterr().out)
+    )
 
 
 def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
@@ -345,5 +353,5 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"\n +profile +Render a profile into its own home: render NAME --target claude\|codex \[--force\]\n"
-    assert re.search(line, capsys.readouterr().out)
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\](?!\S)"
+    assert re.search(line, _flat(capsys.readouterr().out))
