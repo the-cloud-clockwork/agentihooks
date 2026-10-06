@@ -120,6 +120,15 @@ def test_the_cursor_is_kept_per_swarm(store):
     assert len(texts(store, MASTER_SEAT)) == 1
 
 
+def test_the_event_cursor_is_stored_under_its_own_name(store):
+    ledger_events.event_pass(
+        InboxStore(store.redis), store, "sw", recorded(rev=7), FakeLedger(), 0, github=lambda u: None
+    )
+    assert store.redis.get(store.key("sw", "events-cursor")) == "7"
+    assert ledger_events.new_events(store, "sw", recorded(rev=7), "other-cursor") == []
+    assert store.redis.get(store.key("sw", "other-cursor")) == "7"
+
+
 def test_items_go_to_the_master_seat_when_no_master_is_live(store):
     store.drop_agent("sw", "sw-master-1")
     run(store, recorded())

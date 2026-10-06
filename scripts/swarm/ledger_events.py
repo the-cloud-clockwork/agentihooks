@@ -89,7 +89,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     return (
-        _events(mail, _new(store, slug, doc), tasks)
+        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
     )
@@ -107,8 +107,8 @@ def findings_pass(inbox, store, slug, shown):
     return sent
 
 
-def _new(store, slug, doc):
-    key, rev = store.key(slug, "events-cursor"), doc.get("_meta", {}).get("rev", 0)
+def new_events(store, slug, doc, cursor_name):
+    key, rev = store.key(slug, cursor_name), doc["_meta"]["rev"]
     cursor = store.redis.get(key)
     store.redis.set(key, rev)
     if cursor is None:

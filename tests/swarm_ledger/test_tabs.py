@@ -105,7 +105,7 @@ def test_swarm_contains_the_operational_blocks_and_nothing_overflows(tab, width)
         "() => [...document.querySelectorAll('body *')].filter(el => el.getClientRects().length && el.getBoundingClientRect().right > innerWidth).map(el => [el.id, el.className, el.getBoundingClientRect().right])"
     )
     if width == 390:
-        assert tab.locator("#chat-fab").evaluate("el => !!el.closest('#icon-strip')")
+        assert tab.locator("#chat-fab").evaluate("el => !el.closest('#icon-strip')")
         assert tab.locator("#bell").evaluate("el => !!el.closest('#icon-strip')")
 
 

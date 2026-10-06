@@ -21,6 +21,7 @@ WRITE_COMMANDS = (
     "scope",
     "retext",
     "task",
+    "relay",
 )
 WATCH_STALE_SECONDS = 20
 

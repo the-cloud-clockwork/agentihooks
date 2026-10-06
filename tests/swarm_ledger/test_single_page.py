@@ -94,10 +94,45 @@ def test_columns_scroll_independently(page):
 
 
 def test_icon_strip_keeps_home_first_and_all_counts(page):
-    ids = ["home", "art-fab", "bell", "to-top", "sync", "chat-fab"]
+    ids = ["home", "art-fab", "bell", "to-top", "sync"]
     assert page.locator("#icon-strip > *").evaluate_all("els => els.map(el => el.id)") == ids
     boxes = [page.locator(f"#{item}").bounding_box() for item in ids]
     assert all(box and box["x"] == 16 for box in boxes)
     assert all(a["y"] + a["height"] < b["y"] for a, b in zip(boxes, boxes[1:]))
     assert all(page.locator(f"#{item} svg").count() == 1 for item in ids)
-    assert all(page.locator(f"#{item}-badge").count() == 1 for item in ["art", "bell", "sync", "chat"])
+    assert all(page.locator(f"#{item}-badge").count() == 1 for item in ["art", "bell", "sync"])
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_chat_bubble_floats_bottom_right_and_opens_chat_with_its_unread_count(browser, width):
+    doc = {**DOC, "chat": [{"id": f"m{i}", "by": "boss", "at": 10 + i, "text": f"note {i}"} for i in range(3)]}
+    context = browser.new_context(viewport={"width": width, "height": 844})
+    context.add_init_script('localStorage.setItem("plan-ledger:__LEDGER_SLUG__:chat-seen", "10")')
+    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(doc))
+    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    context.route(
+        "**/*",
+        lambda route: (
+            route.fulfill(json={})
+            if "/api/" in route.request.url
+            else route.fulfill(body=html, content_type="text/html")
+        ),
+    )
+    tab = context.new_page()
+    tab.goto(URL)
+    tab.set_default_timeout(1500)
+    bubble = tab.locator("#chat-fab")
+    assert tab.locator("#icon-strip #chat-fab").count() == 0
+    assert bubble.evaluate("el => getComputedStyle(el).position") == "fixed"
+    box = bubble.bounding_box()
+    assert box["x"] + box["width"] == width - 16
+    assert box["y"] + box["height"] == 844 - 16
+    assert tab.locator("#chat-badge").inner_text() == "2"
+    bubble.click()
+    assert tab.locator("#chat-panel").is_visible()
+    assert bubble.get_attribute("aria-expanded") == "true"
+    panel = tab.locator("#chat-panel").bounding_box()
+    assert panel["x"] + panel["width"] == width - 16
+    assert panel["y"] + panel["height"] <= box["y"]
+    assert tab.locator("#chat-badge").is_hidden()
+    context.close()

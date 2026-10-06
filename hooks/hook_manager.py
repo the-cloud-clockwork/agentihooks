@@ -685,6 +685,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
     _swarm_heartbeat("working", payload.get("prompt", ""))
+    _operator_words(payload)
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -1000,6 +1001,15 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
             report(payload.get("model", ""))
     except Exception as e:
         log("swarm heartbeat failed", {"error": str(e)})
+
+
+def _operator_words(payload: dict) -> None:
+    try:
+        from hooks.context.operator_words import heard
+
+        heard(payload)
+    except Exception as e:
+        log("operator words record failed", {"error": str(e)})
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:
@@ -1646,6 +1656,7 @@ def on_post_tool_use(payload: dict) -> None:
     tool_name = payload.get("tool_name", "unknown")
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
+    _operator_words(payload)
 
     _conditions = None
     try:

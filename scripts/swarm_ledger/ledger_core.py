@@ -25,6 +25,7 @@ import ledger_comments
 import ledger_names
 import ledger_notifications
 import ledger_priorities
+import ledger_relay
 import ledger_size
 import ledger_sources
 import ledger_tasks
@@ -98,6 +99,7 @@ EXTENSION_OPS = {
         ledger_size,
         ledger_sources,
         ledger_phases,
+        ledger_relay,
     )
     for name in module.OPS
 }
