@@ -129,6 +129,6 @@ def test_the_operators_typed_lift_lets_the_next_deny_through(hook):
 
 def test_a_lift_of_an_unknown_gate_arms_nothing(hook):
     hook("UserPromptSubmit", prompt="opening")
-    hook("UserPromptSubmit", prompt="lift the talk gate")
+    hook("UserPromptSubmit", prompt="lift the bogus gate")
     assert hook("PreToolUse").returncode == 2
     assert [r["kind"] for r in hook.rows()] == ["deny"]

@@ -38,6 +38,7 @@ class SwarmConfig:
     snapshot_minutes: int | None = None
     code: str = ""
     max_plan: int = 1
+    gates: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,7 @@ class RedisStore:
             _whole(raw.get("snapshot_minutes")),
             raw.get("code", ""),
             int(raw.get("max_plan", 1)),
+            json.loads(raw.get("gates") or "{}"),
         )
 
     def update(self, slug, **changes):
@@ -239,6 +241,8 @@ class RedisStore:
         self.redis.delete(self.key(slug, "peer"))
 
     def remove(self, slug):
+        if not slug or set(slug) & set("*?[]\\"):
+            raise SwarmError(f"refusing to remove swarm {slug!r}: an empty or pattern name would match other swarms")
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
