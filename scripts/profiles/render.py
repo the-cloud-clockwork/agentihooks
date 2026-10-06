@@ -10,9 +10,9 @@ from pathlib import Path
 
 from hooks.context import quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import sources
+from scripts.profiles import plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
-from scripts.targets.claude_target import enabled_plugins, settings_document
+from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
 
 SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
@@ -21,6 +21,8 @@ STAMP = ".agentihooks-render.json"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
 FOOTER = "<!-- end agentihooks rendered profile -->"
+SEED_KEYS = ("hasCompletedOnboarding", "lastOnboardingVersion", "hasTrustDialogAccepted", "oauthAccount", "userID")
+PROJECT_SEED_KEYS = ("hasTrustDialogAccepted", "hasClaudeMdExternalIncludesApproved")
 
 
 def _is_doc(path: Path) -> bool:
@@ -51,12 +53,11 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     if bundle is not None:
         head = subprocess.run(["git", "-C", str(bundle), "rev-parse", "HEAD"], capture_output=True, text=True)
         commit = head.stdout.strip()
-    operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
-    plugins = dict(sorted((operator.get("enabledPlugins") or {}).items()))
+    chain = [n for n, _ in dirs]
     return {
         "bundle_commit": commit,
-        "chain": [n for n, _ in dirs],
-        "plugins": plugins,
+        "chain": chain,
+        "plugins": plugins.role_defaults(chain),
         "corrections": quarantine.digest(),
     }
 
@@ -110,9 +111,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     return {
         **{k: personal[k] for k in _i.PERSONAL_KEYS if k in personal},
         **settings,
-        "enabledPlugins": enabled_plugins(
-            personal.get("enabledPlugins") or {}, settings.get("enabledPlugins") or {}, bundle
-        ),
+        "enabledPlugins": plugins.allowed([n for n, _ in dirs], settings.get("enabledPlugins") or {}),
         "claudeMdExcludes": excludes,
     }
 
@@ -139,13 +138,23 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
     return servers
 
 
+def _seed(src: Path) -> dict:
+    operator = _read_json(src) or {}
+    doc = {key: operator[key] for key in SEED_KEYS if key in operator}
+    if isinstance(operator.get("projects"), dict):
+        doc["projects"] = {
+            path: {key: project[key] for key in PROJECT_SEED_KEYS if key in project}
+            for path, project in operator["projects"].items()
+        }
+    return doc
+
+
 def _claude_json(out: Path, bundle: Path | None, dirs: list[tuple[str, Path]]) -> None:
     from scripts.targets._common import drop_if_credentialed, sanitize_env_and_headers
 
     _i = _install_module()
     dst = out / ".claude.json"
-    src = dst if dst.exists() else claude_json(_global_env())
-    doc = _i.load_json(src) if src.exists() else {}
+    doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
     servers = {}
     for name, spec in _mcp_servers("claude", bundle, dirs).items():
         if not drop_if_credentialed(name, spec, str(dst)):
