@@ -289,6 +289,32 @@ def test_publish_plan_needs_a_phase(plan_ledger, monkeypatch):
     assert raised.value.code == "publish-plan needs --phase with the ids of the phases the plan fills"
 
 
+def test_publish_plan_reads_the_plan_as_utf8(monkeypatch):
+    reads = []
+
+    class PlanFile:
+        def __init__(self, path):
+            self.path = path
+
+        def read_text(self, encoding):
+            reads.append((self.path, encoding))
+            return "# Café plan\n"
+
+    titles = []
+    monkeypatch.setattr(ledger, "Path", PlanFile)
+    monkeypatch.setattr(
+        ledger.ledger_publish, "publish", lambda path, title, *a: titles.append(title) or (PLAN, "issue")
+    )
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": ["x"]})
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--phase", "p1"]
+    )
+    with pytest.raises(SystemExit):
+        ledger.cmd_publish_plan(args)
+    assert reads == [("plan.md", "utf-8")]
+    assert titles == ["Café plan"]
+
+
 def test_publish_plan_exits_with_the_gh_failure(plan_ledger, tmp_path, monkeypatch):
     plan = tmp_path / "plan.md"
     plan.write_text("# Plan\n", encoding="utf-8")
