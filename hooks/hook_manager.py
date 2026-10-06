@@ -311,6 +311,8 @@ def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
     log("Session started", {"session_id": session_id})
+    if payload.get("source") == "compact":
+        _inject_refocus(session_id, "compact")
     from hooks.lifecycle.guard import session_event
 
     session_event()
