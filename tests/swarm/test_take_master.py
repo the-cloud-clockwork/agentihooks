@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from scripts.swarm import cli, take_master
@@ -49,8 +51,6 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
 
 
 def test_argv_of_reads_a_process_command_line():
-    import subprocess
-
     child = subprocess.Popen(["sleep", "30"])
     try:
         assert take_master.argv_of(child.pid) == ("sleep", "30")

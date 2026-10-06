@@ -40,7 +40,7 @@ def _load(path, parse, error):
         return {}
 
 
-def read(harness, argv):
+def read(harness: str, argv: tuple[str, ...]) -> tuple[str, str]:
     if harness == "codex":
         config = _renamed(_load(codex_home() / "config.toml", tomllib.loads, tomllib.TOMLDecodeError), CODEX_KEYS)
         flags = {**_renamed(_codex_overrides(argv), CODEX_KEYS), **_named(argv, CODEX_FLAGS)}
