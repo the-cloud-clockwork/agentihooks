@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hooks.context import broadcast
+from hooks.context import broadcast, project_identity, project_sessions
 
 
 @pytest.mark.parametrize("reader", ["get_pending_broadcasts", "get_unseen_broadcasts", "get_pretool_broadcasts"])
@@ -37,3 +37,7 @@ def test_strict_session_filters_only_fleet_memory(monkeypatch, tmp_path, reader)
     assert "hot-arcs-today" in {m["message"] for m in get("owned")}
     monkeypatch.setenv("BRAIN_PROJECT_SCOPE", "off")
     assert "lessons" in {m["message"] for m in get("owned")}
+
+
+def test_project_sessions_keeps_the_real_resolver():
+    assert project_sessions.resolve_project is project_identity.resolve_project
