@@ -162,3 +162,23 @@ def test_evidence_at_exact_limit_is_complete(monkeypatch):
         ledger_workspace.steering(task, doc)
         == "# plan: Slice\n\nPlan evidence\n\nProject intent\nIntent\n\nMission intent\nNow\nGo\n"
     )
+
+
+def test_planner_steering_uses_utf8_in_an_ascii_locale(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path; from scripts.swarm_ledger import ledger_workspace; "
+        f"ledger_workspace.folder = lambda slug, task: Path({str(tmp_path)!r}); "
+        'ledger_workspace.scaffold("demo", {"id": "plan", "kind": "plan", "phase": "p"}, '
+        '{"overview": "\\u00f1", "phases": [{"id": "p", "title": "Build"}], "tasks": []})'
+    )
+    subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"},
+        check=True,
+        capture_output=True,
+    )
+    assert b"\xc3\xb1" in (tmp_path / "steering.md").read_bytes()
