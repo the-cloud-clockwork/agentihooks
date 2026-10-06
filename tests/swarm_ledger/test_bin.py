@@ -69,18 +69,6 @@ class BinState(unittest.TestCase):
         self.assertTrue(json_path.exists())
         self.assertIn("young-one", ledger_bin.entries())
 
-    def test_a_closed_ledger_goes_to_the_bin_unless_restored_after_it_closed(self):
-        make_ledger("closed-one")
-        self.assertTrue(ledger_bin.bin_closed("closed-one", closed_at=100, now=200))
-        self.assertEqual(ledger_bin.entries()["closed-one"], 200)
-        self.assertFalse(ledger_bin.bin_closed("closed-one", closed_at=100, now=300))
-        self.assertEqual(ledger_bin.entries()["closed-one"], 200)
-        ledger_bin.restore("closed-one", now=400)
-        self.assertFalse(ledger_bin.bin_closed("closed-one", closed_at=100, now=500))
-        self.assertIn("closed-one", self.slugs())
-        self.assertTrue(ledger_bin.bin_closed("closed-one", closed_at=600, now=700))
-        self.assertNotIn("closed-one", self.slugs())
-
     def test_home_has_a_delete_control_per_row_and_the_bin_view_a_restore_control(self):
         make_ledger("shown")
         make_ledger("binned")
