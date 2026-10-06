@@ -1954,6 +1954,16 @@ def on_post_tool_use(payload: dict) -> None:
 
 def on_stop(payload: dict) -> None:
     """Handle Stop event."""
+    _stop_block = None
+    try:
+        from hooks.context import conditions
+
+        _stop_block = conditions.stop_block(payload)
+    except Exception as e:
+        log("conditions stop failed", {"error": str(e)})
+    if _stop_block:
+        raise BlockAction(_stop_block)
+
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
 

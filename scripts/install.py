@@ -47,7 +47,7 @@ Commands:
     agentihooks balance --dry-run [--fable] [--refresh]
         Show ranked OAuth account capacity without launching Claude.
 
-    agentihooks conditions list [--step pre|post] [--tool NAME] [--command CMD]
+    agentihooks conditions list [--step pre|post|stop] [--tool NAME] [--command CMD]
         Show bundle and profile conditions, invalid files, and what fires for a call.
 
     agentihooks --list-profiles     # show available profiles
@@ -6777,7 +6777,7 @@ examples:
         help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
     )
     cond_p.add_argument("action", choices=["list"], help="Conditions action")
-    cond_p.add_argument("--step", choices=["pre", "post"], default=None, help="Only this step")
+    cond_p.add_argument("--step", choices=["pre", "post", "stop"], default=None, help="Only this step")
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
