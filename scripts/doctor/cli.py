@@ -132,7 +132,10 @@ def cmd_start(store, args):
     if doctor not in store.slugs():
         repo = args.repo or str(ROOT if (ROOT / ".git").exists() else bundle)
         swarm.cmd_create(
-            store, Namespace(slug=doctor, repo=repo, template=TEMPLATE, max_eng_agents=None, max_ci_agents=None)
+            store,
+            Namespace(
+                slug=doctor, repo=repo, template=TEMPLATE, max_eng_agents=None, max_ci_agents=None, max_plan_agents=None
+            ),
         )
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
