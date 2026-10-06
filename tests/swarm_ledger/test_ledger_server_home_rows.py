@@ -80,8 +80,19 @@ def test_exactly_kind_open_done_swarm_and_activity_headers_sort():
     assert 'id="fold-all"' in page
 
 
+def test_a_ledger_without_activity_sorts_as_oldest():
+    s = {**summaries()[0], "updated_at": None}
+    assert ' data-at="0">' in server.home_row(s, "running", 0)
+
+
+def test_the_fold_arrow_names_its_ledger_escaped():
+    s = {**summaries()[0], "title": "Beta <plan>"}
+    assert 'aria-label="Show all of Beta &lt;plan&gt;"' in server.home_row(s, None, 0)
+
+
 def test_bin_has_no_fold_or_sort_controls():
     page = home_html("bin")
+    assert '<li class="row"><a class="title" href="/a"' in page
     assert "data-sort=" not in page
     assert 'class="fold"' not in page
     assert 'id="fold-all"' not in page

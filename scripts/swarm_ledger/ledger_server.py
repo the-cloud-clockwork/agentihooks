@@ -203,7 +203,7 @@ FOLD_ALL = '<button class="act toggle-all" id="fold-all" type="button">Expand al
 def head_cell(label):
     label, _, key = label.partition(":")
     css = ' class="r"' if label.startswith(">") else ""
-    label = label.lstrip(">")
+    label = label.removeprefix(">")
     if not key:
         return f"<span{css}>{label}</span>"
     css = ' class="sort r"' if css else ' class="sort"'
