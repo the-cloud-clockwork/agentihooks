@@ -90,20 +90,28 @@ def test_clear_accepts_a_reason_in_words():
     assert ledger_priorities.check({"op": "priority_clear", "id": "c", "target": "all", "reason": "done"}) is None
 
 
-@pytest.mark.parametrize("extra, recorded", [({"reason": "its item is done"}, "its item is done"), ({}, None)])
-def test_clear_applies_with_or_without_a_reason(extra, recorded):
+@pytest.mark.parametrize(
+    "extra, by, recorded",
+    [({"by": "swarm", "reason": "its item is done"}, "swarm", "its item is done"), ({}, "operator", None)],
+)
+def test_clear_applies_with_or_without_a_reason(extra, by, recorded):
     from scripts.swarm_ledger import ledger_priorities
 
     row = {"id": "pr-1", "item": "followups/f1", "text": "Pick one.", "by": "boss", "at": 1}
     doc = {"phases": [], "priorities": [row], "followups": [{"id": "f1", "text": "x", "done": True}]}
     ctx = core.Context({"rev": 0, "stamps": {}, "events": []}, 5)
-    op = {"op": "priority_clear", "id": "c", "by": "swarm", "target": "pr-1", **extra}
+    op = {"op": "priority_clear", "id": "c", "target": "pr-1", **extra}
     assert ledger_priorities.apply(doc, op, ctx) is True
     assert doc["priorities"] == []
-    (event,) = ctx.events
-    assert (event["by"], event["kind"], event["target"], event.get("reason")) == (
-        "swarm",
-        "priority cleared",
-        "followups/f1",
-        recorded,
-    )
+    assert ctx.events == [
+        {
+            "rev": 1,
+            "at": 5,
+            "by": by,
+            "kind": "priority cleared",
+            "target": "followups/f1",
+            "id": "pr-1",
+            "text": "Pick one.",
+            **({"reason": recorded} if recorded else {}),
+        }
+    ]
