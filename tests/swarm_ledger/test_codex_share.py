@@ -7,10 +7,10 @@ __all__ = ["browser", "tab"]
 
 def test_page_shows_the_current_share(tab):
     tab.get_by_role("tab", name="Swarm").click()
-    assert tab.locator("#cap-codex").inner_text() == "30%"
+    assert tab.locator("#cap-codex").input_value() == "30"
 
 
-def test_a_codex_step_sends_the_share_five_points_away_at_once(tab):
+def test_codex_and_eng_steps_wait_for_one_apply(tab):
     sent = []
 
     def receive(route):
@@ -21,10 +21,11 @@ def test_a_codex_step_sends_the_share_five_points_away_at_once(tab):
     tab.route("**/api/swarm/**", receive)
     tab.get_by_role("tab", name="Swarm").click()
     tab.locator('[data-swarm="codex_up"]').click()
-    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
     tab.locator('[data-swarm="eng_up"]').click()
-    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Raise eng cap: done')")
-    assert sent == [{"action": "set", "codex_share": 35}, {"action": "set", "max_eng": 4}]
+    assert sent == []
+    tab.locator('[data-swarm="apply"]').click()
+    tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Apply capacity: done')")
+    assert sent == [{"action": "set", "max_eng": 4, "codex_share": 35}]
 
 
 @pytest.mark.parametrize(
@@ -51,5 +52,7 @@ def test_codex_step_bounds(tab, share, action, disabled, expected):
     if share in (0, 100):
         assert tab.locator(f'[data-swarm="{disabled}"]').is_disabled()
     tab.locator(f'[data-swarm="{action}"]').click()
+    assert tab.locator("#cap-codex").input_value() == str(expected)
+    tab.locator('[data-swarm="apply"]').click()
     tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('done')")
     assert sent == [{"action": "set", "codex_share": expected}]

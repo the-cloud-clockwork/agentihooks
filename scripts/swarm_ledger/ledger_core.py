@@ -30,6 +30,7 @@ import ledger_size
 import ledger_sources
 import ledger_tasks
 import ledger_title
+import ledger_verdict
 
 from scripts.swarm_ledger import ledger_phases
 
@@ -101,6 +102,7 @@ EXTENSION_OPS = {
         ledger_sources,
         ledger_phases,
         ledger_relay,
+        ledger_verdict,
     )
     for name in module.OPS
 }

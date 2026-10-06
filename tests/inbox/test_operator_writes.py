@@ -126,6 +126,18 @@ def test_a_chat_line_goes_to_its_addressee_and_an_unaddressed_one_to_the_master(
     assert len(pending(inbox, MASTER_SEAT)) == 1
 
 
+def test_a_chat_line_to_the_swarm_is_one_item_for_every_live_agent_with_its_images(swarm):
+    store, inbox = swarm
+    store.put_agent(SLUG, AgentRecord("sw-eng-2", "eng", "t3", state="finished", seat=f"eng-2@{SLUG}"))
+    to_all = write(5, "chat", kind="message added", text="@swarm stop and sync", image_paths=["/media/shot.png"])
+    relay(swarm, to_all)
+    items = [pending(inbox, a.seat) for a in (ENG, CI, BOSS)]
+    assert [len(got) for got in items] == [1, 1, 1]
+    assert {got[0][1] for got in items} == {f"On ledger {SLUG}: " + line(to_all)}
+    assert "/media/shot.png" in items[0][0][1]
+    assert pending(inbox, f"eng-2@{SLUG}") == []
+
+
 def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "tasks/t9"), write(6, "chat", kind="message added", text="@sw-eng-7 hello"))

@@ -373,6 +373,7 @@ class SwarmPanel(unittest.TestCase):
             "codex_up",
             "compact_down",
             "compact_up",
+            "apply",
         ):
             self.assertIn(f'data-swarm="{control}"', page)
         for mode in ("manual", "assist", "delegate", "full"):
@@ -432,13 +433,13 @@ class SwarmPanel(unittest.TestCase):
     def test_each_op_reports_pending_then_done_or_error(self):
         out = self.run_js(
             ["opNote"],
-            '[opNote("pending", "autonomy"), opNote("done", "compact_up"), opNote("error", "start", "no swarm x")]',
+            '[opNote("pending", "autonomy"), opNote("done", "apply"), opNote("error", "start", "no swarm x")]',
         )
         self.assertEqual(
             out,
             [
                 {"cls": "pending", "text": "Set autonomy: sending"},
-                {"cls": "ok", "text": "Raise compact limit: done"},
+                {"cls": "ok", "text": "Apply capacity: done"},
                 {"cls": "bad", "text": "Could not start the swarm: no swarm x. Try again or ask the master."},
             ],
         )
@@ -461,13 +462,38 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(
             out,
             [
-                {"action": "set", "max_eng": 3},
-                {"action": "set", "max_eng": 1},
-                {"action": "set", "max_ci": 0},
-                {"action": "set", "max_plan": 50},
-                {"action": "set", "codex_share": 100},
-                {"action": "set", "compact_limit": 650},
-                {"action": "set", "compact_limit": 550},
+                {"max_eng": 3},
+                {"max_eng": 1},
+                {"max_ci": 0},
+                {"max_plan": 50},
+                {"codex_share": 100},
+                {"compact_limit": 650},
+                {"compact_limit": 550},
+            ],
+        )
+
+    def test_apply_sends_only_changed_values_and_refuses_invalid_ones(self):
+        values = {"max_eng": 2, "max_ci": 1, "max_plan": 1, "codex_share": 30, "compact_limit": 600}
+        drafts = [
+            {"max_eng": "4", "max_ci": " 1 ", "codex_share": 35, "compact_limit": "1000"},
+            {"max_eng": "-1", "max_plan": "", "codex_share": "101", "compact_limit": "650.5"},
+            {},
+        ]
+        out = self.run_js(["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d))")
+        self.assertEqual(
+            out,
+            [
+                {"body": {"action": "set", "max_eng": 4, "codex_share": 35, "compact_limit": 1000}, "bad": []},
+                {
+                    "body": {"action": "set"},
+                    "bad": [
+                        "eng must be a whole number from 0 to 50",
+                        "plan must be a whole number from 0 to 50",
+                        "codex share must be a whole number from 0 to 100",
+                        "compact limit must be a whole number from 100 to 1000",
+                    ],
+                },
+                {"body": {"action": "set"}, "bad": []},
             ],
         )
 

@@ -1,5 +1,5 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
-addressee, everything else to the master's seat. An addressee that is gone falls back to the master."""
+addressee (every live agent for @swarm), everything else to the master's seat. An addressee that is gone falls back to the master."""
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.seen import write_ref
@@ -8,6 +8,7 @@ from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
 
 OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
+EVERYONE = "swarm"
 SENT_TTL_S = 30 * 24 * 3600
 
 
@@ -20,6 +21,8 @@ def addresses(slug, event, doc, agents):
     if target == "chat" or target.startswith("notes/"):
         mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
         to = mention.group(1) if mention else ""
+        if to == EVERYONE:
+            return [a.seat or a.name for a in live]
         found = [a for a in live if to in (a.name, a.lane)]
     elif target.startswith("tasks/"):
         task_id = target.split("/")[1]

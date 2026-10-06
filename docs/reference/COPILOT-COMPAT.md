@@ -268,7 +268,7 @@ raised.
 | | codex | copilot | why |
 |---|---|---|---|
 | Agents | skipped | installed | Copilot has a real custom-agent registry |
-| Commands | `~/.codex/prompts/` | skills in `~/.agents/skills/` | Copilot has no prompt-file mechanism |
+| Commands | profile homes only, as hardlinked skills | skills in `~/.agents/skills/` | Copilot has no prompt-file mechanism |
 | SSE MCP | dropped with a warning | supported | Copilot ships an SSE client |
 | Header `${VAR}` | mapped to `bearer_token_env_var` | dropped with a warning | Copilot has no env-indirection field and sends header values literally |
 | Status line | static `tui.status_line` items | command-backed | Copilot supports a command status line |

@@ -89,7 +89,10 @@ The question tool arrives as `request_user_input` with a Claude-shaped
 operator-away refusal covers Codex. 0.160.0 offers it in Plan mode, and in
 Default mode only with the `default_mode_request_user_input` feature on; the
 hook sees it and an exit 2 block refuses it in both (verified live, 2026-10-06).
-Its `tool_response` is a JSON string, so answer-reading code sees no answers.
+Its `tool_response` is a JSON string, `{"answers": {<id>: {"answers": [...]}}}`;
+`normalize_payload` turns it into Claude's `{"answers": {<id>: "a, b"}}`, so the
+operator words recorder and the release, branch and PR signal detection read a
+Codex answer like a Claude one.
 
 0.154.0 also sends `transcript_path`, so `codex_rollout_path()` is now a
 fallback rather than the only source.
@@ -105,7 +108,7 @@ for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 | row | Bundle kind | Codex behaviour |
 |---|---|---|
 | 14 | `skills` | global: symlinked into `~/.agents/skills` (open agent-skills standard dir, not under `.codex`). Repo scope is `<repo>/.agents/skills`, which the project bridge points at `.claude/skills` |
-| 15 | `commands` | translated into `~/.codex/prompts/*.md`, invoked as `/prompts:<name>` |
+| 15 | `commands` | global: not installed; codex-cli 0.160.0 no longer reads `~/.codex/prompts` (live probe: `Unrecognized command '/prompts:<name>'`), and prompts an earlier install wrote are removed. Profile homes: hardlinked as skills (below) |
 | 16 | `agents` | **skipped** — codex has no custom-subagent registry |
 | 17 | `rules` (global) | no auto-loaded rules dir; compiled into `AGENTS.md` |
 | 18 | `rules` (repo) | no loader at all; `hooks/context/project_bridge.py` injects every `<repo>/.claude/rules/*.md` body plus the project `MEMORY.md` at SessionStart |
@@ -135,7 +138,6 @@ between targets.
 | Persona | `~/.codex/AGENTS.md` |
 | Skills | `~/.agents/skills/` (repo scope: `<repo>/.agents/skills`) |
 | Project doc | `<repo>/AGENTS.md`, or `<repo>/CLAUDE.md` via `project_doc_fallback_filenames` |
-| Commands | `~/.codex/prompts/` |
 | MCP | `[mcp_servers.*]` tables in `config.toml` |
 | Transcript | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 
@@ -150,12 +152,14 @@ operator home:
 |---|---|
 | `AGENTS.md` | `../claude/CLAUDE.md` (persona and rules) |
 | `skills/<name>` | `../claude/skills/<name>` |
+| `skills/<command>/SKILL.md` | hardlink to each Claude command with frontmatter, invoked as `$<command>`; a skill of the same name wins |
 | `auth.json`, `sessions`, `history.jsonl`, `session_index.jsonl`, `hooks.json` | the operator `~/.codex` |
 | `config.toml` | generated: the profile's native settings, `sqlite_home` = operator home, the operator's hook trust rekeyed to this home's `hooks.json`, the operator's `[mcp_servers]` limited to the profile's servers, and `~/.agents/skills` switched off |
 
 Codex keys hook trust by the hooks file path and a content hash; the hash does
 not depend on the path (codex-cli 0.160.0, live probe), so rekeyed trust holds.
-Commands are not linked as prompts. The old `~/.codex/NAME.config.toml` files
+A command reaches Codex as a hardlinked `SKILL.md`: codex-cli 0.160.0 skips a
+symlinked `SKILL.md` and refuses one without `---` frontmatter (live probe). The old `~/.codex/NAME.config.toml` files
 are removed when their profile renders.
 
 `config.toml` is written through a **tomlkit round-trip** so operator hand-edits

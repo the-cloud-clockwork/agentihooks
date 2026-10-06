@@ -1,6 +1,9 @@
+import time
+
 import hooks.config
 from hooks import hook_manager
 from hooks.context import operator_words
+from hooks.targets.normalizer import normalize_payload
 from scripts.inbox.wake import WAKE_TEXT
 from scripts.swarm.tick import NUDGE
 
@@ -128,6 +131,40 @@ def test_the_hooks_record_a_typed_prompt_and_an_answer(monkeypatch):
     )
     assert operator_words.matching("master@a1-1", "close the disk follow up")
     assert operator_words.matching("master@a1-1", "reject")
+
+
+CODEX_ANSWER = {
+    "session_id": "cx1",
+    "cwd": "/",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "request_user_input",
+    "tool_input": {"questions": [{"id": "plan_color", "header": "Plan color", "question": "Red or blue?"}]},
+    "tool_response": '{"answers":{"plan_color":{"answers":["Red","ship it, then cut a new branch"]}}}',
+}
+
+
+def _codex_post_tool_use(monkeypatch, payload):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args: None)
+    hook_manager.on_post_tool_use(normalize_payload(dict(payload)))
+
+
+def test_a_codex_answer_is_recorded_as_the_operators_words(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1-1")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    assert operator_words.matching("master@a1-1", "red", now=time.time()) == "Red, ship it, then cut a new branch"
+
+
+def test_a_codex_answer_carries_release_and_branch_signals(monkeypatch):
+    import hooks.context.branch_guard as branch_guard
+    import hooks.context.prod_lockdown as prod_lockdown
+
+    seen = []
+    monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session_id: seen.append(("release", session_id)))
+    monkeypatch.setattr(branch_guard, "set_branch_signal", lambda session_id: seen.append(("branch", session_id)))
+    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    assert seen == [("release", "cx1"), ("branch", "cx1")]
 
 
 def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):

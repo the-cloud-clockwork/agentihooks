@@ -114,7 +114,12 @@ details.phase-fold > summary::before { align-self: center; }
 .task-id { color: var(--destructive); font-weight: 700; text-decoration: none; text-shadow: var(--glow); }
 .item-title > .task-id { margin-right: .5em; }
 .task-id:hover, .task-id:focus-visible { text-decoration: underline; }
-.prio-text { flex: 1; min-width: 0; }
+.prio-body { flex: 1; min-width: 0; }
+.prio-head-line { display: flex; gap: .5em; align-items: baseline; }
+.prio-title { min-width: 0; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.prio-title:hover, .prio-title:focus-visible { text-decoration: underline; }
+.prio-title.gone { color: var(--muted); font-style: italic; }
+.prio-text { margin-top: 2px; color: var(--text-2); }
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { from { background: var(--hover); } to { background: transparent; } }
 .mini-sync { background: none; border: 0; padding: 0; color: var(--signal); cursor: pointer; display: grid; place-content: center; transition: color .15s; }
@@ -170,12 +175,16 @@ details.phase-fold > summary::before { align-self: center; }
 .chat-panel { z-index: 12; left: auto; right: 16px; bottom: 72px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100vh - 100px)); max-height: none; }
 .chat-panel.big { width: min(760px, calc(100vw - 32px)); height: calc(100vh - 100px); }
 .chat-panel .chat-log { padding: 0 14px; }
-.chat-compose { padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
+.chat-compose { position: relative; padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
 .chat-to { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
-.chat-to select { background: transparent; border: 0; color: var(--accent); text-shadow: var(--glow); font: inherit; letter-spacing: normal; text-transform: none; cursor: pointer; }
-.chat-to select:hover { background: var(--hover); }
-.chat-to select:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.chat-to option { background: var(--surface-2); color: var(--text); }
+.chat-to button { background: transparent; border: 0; padding: 2px 6px; color: var(--accent); text-shadow: var(--glow); font: inherit; letter-spacing: normal; text-transform: none; text-align: left; cursor: pointer; }
+.chat-to button:hover, .chat-to button:focus-visible { background: var(--hover); }
+.chat-to button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.chat-to-menu { position: absolute; left: 14px; bottom: calc(100% - 4px); z-index: 2; display: flex; flex-direction: column; min-width: 180px; max-height: min(320px, 50vh); padding: 6px; overflow-y: auto; scrollbar-width: none; background: var(--menu); }
+.chat-to-menu::-webkit-scrollbar { display: none; }
+.chat-to-menu[hidden] { display: none; }
+.chat-to-menu button { padding: 6px 10px; }
+.chat-to-menu button[aria-selected="true"] { color: var(--accent-2); }
 .notif-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px 10px; border-bottom: 1px solid var(--rule); }
 .notif-list { list-style: none; margin: 0; padding: 0 14px 12px; overflow-y: auto; }
 .notif-row { padding: 8px 0; border-top: 1px solid var(--rule); }
@@ -244,6 +253,11 @@ details.panel-fold[open]::details-content { display: flex; flex-direction: colum
 .link { background: none; border: 0; padding: 0; font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; transition: color .15s; }
 .link:hover, .link:focus-visible { color: var(--accent); text-shadow: var(--glow); outline: none; }
 .link.danger:hover, .link.danger:focus-visible { color: var(--destructive); }
+.link.approve { color: var(--positive); }
+.link.deny { color: var(--destructive); }
+.link.approve:hover, .link.approve:focus-visible, .link.deny:hover, .link.deny:focus-visible { color: currentColor; text-shadow: var(--glow); }
+.row > .item-actions { margin-left: auto; }
+.item-actions { flex: none; display: inline-flex; align-items: center; gap: 14px; }
 .link:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 .add { margin-top: 6px; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: var(--fs-meta); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; transition: color .15s; }
 .add:hover, .add:focus-visible { color: var(--accent); text-shadow: var(--glow); outline: none; }
@@ -345,7 +359,7 @@ a.sw-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px;
 :root { --space-tight: 8px; --space-row: 16px; --space-group: 32px; --gutter: 72px; }
 html, body { height: 100%; overflow: hidden; }
 body { padding-left: 0; }
-main { height: 100dvh; max-width: none; padding: 0 0 0 var(--gutter); display: flex; flex-direction: column; }
+main { position: fixed; inset: 0; max-width: none; padding: 0 0 0 var(--gutter); display: flex; flex-direction: column; }
 header { flex: none; margin: 0; padding: var(--space-row) var(--space-group); flex-wrap: wrap; align-items: center; }
 .tabs { display: flex; flex: none; gap: var(--space-row); padding: 0 var(--space-group); border-bottom: 1px solid var(--rule); }
 .tab { padding: var(--space-row); background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
@@ -425,13 +439,20 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-alert-count::before { content: ""; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid currentColor; }
 .sw-alert-kinds { letter-spacing: .06em; color: var(--warn); text-shadow: var(--glow); }
 .sw-live { display: flex; gap: var(--space-row); margin-left: auto; color: var(--text); }
-.sw-capacity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-group); }
+.sw-capacity { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-tight); }
+.sw-caps, .sw-gates { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); }
+.sw-caps { column-gap: var(--space-tight); }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
-.sw-cap { display: inline-flex; align-items: center; gap: 6px; }
-.sw-cap-name { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
-.sw-gates { display: contents; }
-.sw-num { min-width: 4ch; text-align: right; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
-.sw-btn.sw-step { min-width: 32px; min-height: 32px; padding: 0; background: transparent; font-size: var(--fs-item); }
+.sw-cap { display: inline-flex; align-items: center; gap: 2px; }
+.sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
+.sw-field { display: inline-flex; align-items: baseline; gap: 2px; }
+.sw-num { field-sizing: content; min-width: 2ch; padding: 2px 4px; border: 0; border-radius: 4px; background: var(--surface-1); text-align: right; font: inherit; font-size: var(--fs-item); font-weight: 700; color: var(--text); }
+@supports not (field-sizing: content) { .sw-num { width: 4ch; } }
+.sw-num:hover { background: var(--hover); }
+.sw-num:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sw-num[aria-invalid="true"] { color: var(--destructive); text-shadow: var(--glow); }
+.sw-unit { font-size: var(--fs-meta); color: var(--muted); }
+.sw-btn.sw-step { min-width: 24px; min-height: 28px; padding: 0; background: transparent; font-size: var(--fs-item); }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 1fr) 0 minmax(0, 1fr); padding: 0; }
 .sw-pair > .sw-block { min-width: 0; padding: var(--space-row); }
 .sw-pair > .sw-block ~ .sw-block { border-left: 1px solid var(--rule); }
@@ -513,8 +534,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   .sw-grip { display: none; }
   .sw-modes, .sw-layout { padding-left: 0; border-left: 0; }
   .sw-live { margin-left: 0; }
-  .sw-capacity { gap: var(--space-tight) var(--space-row); }
-  .sw-capacity .sw-label { flex-basis: 100%; }
   .sw-actions { margin-left: 0; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -569,11 +588,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <p class="sw-note" id="swarm-note" role="status" aria-live="polite"></p>
 <div class="sw-row sw-alert" id="swarm-alert" hidden><span class="sw-alert-count" id="alert-count"></span><span class="sw-alert-kinds" id="alert-kinds"></span><span class="sw-live" id="alert-live"></span></div>
 <div class="sw-row sw-capacity" id="capacity-box"><span class="sw-label">Capacity</span>
-<div class="sw-cap"><span class="sw-cap-name">eng</span><span class="sw-num" id="cap-eng"></span><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">ci</span><span class="sw-num" id="cap-ci"></span><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">plan</span><span class="sw-num" id="cap-plan"></span><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">codex share</span><span class="sw-num" id="cap-codex"></span><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
-<div class="sw-cap"><span class="sw-cap-name">compact limit</span><span class="sw-num" id="cap-compact"></span><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<div class="sw-caps"><div class="sw-cap"><span class="sw-cap-name">eng</span><label class="sw-field"><input class="sw-num" id="cap-eng" type="text" inputmode="numeric" autocomplete="off" data-cap="max_eng" aria-label="Engineer cap"></label><button class="sw-btn sw-step" type="button" data-swarm="eng_down" aria-label="Lower engineer cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="eng_up" aria-label="Raise engineer cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">ci</span><label class="sw-field"><input class="sw-num" id="cap-ci" type="text" inputmode="numeric" autocomplete="off" data-cap="max_ci" aria-label="CI cap"></label><button class="sw-btn sw-step" type="button" data-swarm="ci_down" aria-label="Lower CI cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="ci_up" aria-label="Raise CI cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">plan</span><label class="sw-field"><input class="sw-num" id="cap-plan" type="text" inputmode="numeric" autocomplete="off" data-cap="max_plan" aria-label="Planner cap"></label><button class="sw-btn sw-step" type="button" data-swarm="plan_down" aria-label="Lower planner cap">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="plan_up" aria-label="Raise planner cap">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">codex share</span><label class="sw-field"><input class="sw-num" id="cap-codex" type="text" inputmode="numeric" autocomplete="off" data-cap="codex_share" aria-label="Codex share"><span class="sw-unit">%</span></label><button class="sw-btn sw-step" type="button" data-swarm="codex_down" aria-label="Lower Codex share">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="codex_up" aria-label="Raise Codex share">+</button></div>
+<div class="sw-cap"><span class="sw-cap-name">compact limit</span><label class="sw-field"><input class="sw-num" id="cap-compact" type="text" inputmode="numeric" autocomplete="off" data-cap="compact_limit" aria-label="Compact limit"><span class="sw-unit">k</span></label><button class="sw-btn sw-step" type="button" data-swarm="compact_down" aria-label="Lower compact limit">&minus;</button><button class="sw-btn sw-step" type="button" data-swarm="compact_up" aria-label="Raise compact limit">+</button></div>
+<button class="sw-btn sw-apply" type="button" data-swarm="apply" aria-label="Apply capacity">apply</button></div>
 <span class="sw-label" id="gates-label" hidden>Gates</span><div class="sw-gates" id="swarm-gates" aria-labelledby="gates-label"></div></div>
 <div class="sw-grip sw-grip-y" data-grip="height" data-row="capacity-box" role="separator" aria-orientation="horizontal" aria-label="Resize the Capacity height" tabindex="0"></div>
 <div class="sw-row sw-pair" id="swarm-row-work"><div class="sw-block" id="agents-box"><div class="sw-blockhead"><h3>Agents</h3><span class="sw-count" id="agents-count"></span></div><div class="sw-scroll"><table class="sw-table" id="agents-table"><thead><tr><th>agent</th><th>lane</th><th>profile</th><th>model</th><th>task</th><th>state</th><th class="r">age</th><th><span class="sr-only">actions</span></th></tr></thead><tbody id="swarm-agents"></tbody></table></div></div>
@@ -624,7 +644,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 <section class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Chat" hidden><details class="sources-box fold panel-fold" id="chat-fold" open>
   <summary class="notif-head"><span id="chat-title">Chat</span><span class="end"><button class="link danger" id="chat-clear" type="button" hidden>Clear</button><button class="link" id="chat-size" type="button">Expand</button><button class="link" id="chat-close" type="button">Close</button></span></summary>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
-  <div class="chat-compose"><div class="chat-to"><label for="chat-to">To</label><select id="chat-to"><option value="">master</option></select></div><textarea class="line" id="chat-input" rows="1" placeholder="Message…" aria-label="Chat message"></textarea>
+  <div class="chat-compose"><div class="chat-to"><span id="chat-to-label">To</span><input type="hidden" id="chat-to" value=""><button type="button" id="chat-to-pick" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="chat-to-label chat-to-pick">master</button><div class="chat-to-menu" id="chat-to-menu" role="listbox" aria-labelledby="chat-to-label" hidden></div></div><textarea class="line" id="chat-input" rows="1" placeholder="Message…" aria-label="Chat message"></textarea>
     <div class="hint">Enter to send · Ctrl+Enter for a new line</div></div>
 </details></section>
 <section class="notif" id="notif" role="dialog" aria-modal="false" aria-label="Notifications" hidden><details class="sources-box fold panel-fold" id="notif-fold" open>
@@ -640,6 +660,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   const API = location.protocol.startsWith("http") ? `/api/${SLUG}` : `http://127.0.0.1:${PORT}/api/${SLUG}`;
   const LS_KEY = `plan-ledger:${SLUG}:v2`;
   const CHAT_SEEN = `plan-ledger:${SLUG}:chat-seen`;
+  const SWARM = "swarm";
   const FOLD_KEY = `plan-ledger:${SLUG}:fold`;
   const COMMENTS_KEY = `plan-ledger:${SLUG}:comments`;
   const TOGGLES_KEY = `plan-ledger:${SLUG}:toggles-v2`;
@@ -736,6 +757,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     if (op.op === "sync" || op.op === "stats_sync") return;
     if (op.op === "priority_clear") {
       d.priorities = op.target === "all" ? [] : d.priorities.filter((p) => p.id !== op.target);
+      return;
+    }
+    if (op.op === "verdict") {
+      const [list, id] = op.item.split("/");
+      const item = itemOf(d, list, id);
+      if (item && !item.comments.some((e) => e.id === op.id)) item.comments.push({ id: op.id, by: "operator", at: Date.now(), text: op.verdict, sending: true });
+      d.priorities = d.priorities.filter((p) => p.item !== op.item);
       return;
     }
     if (op.op === "phase_review") {
@@ -1187,6 +1215,14 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       } } });
   }
 
+  function verdictButton(item, verdict, cls, text) {
+    return h("button", { class: `link ${cls}`, type: "button", text, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
+  }
+
+  function itemActions(key, item) {
+    return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
+  }
+
   function itemClass(item) {
     return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "");
   }
@@ -1198,7 +1234,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     box.addEventListener("change", () => toggle(key, box.checked, "done"));
     const body = h("div", {}, h("div", { class: "text", text: titleText }),
       descText ? h("p", { class: "desc", text: descText }) : null);
-    const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, scopeDot(key, item));
+    const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-${list}-${item.id}` }, row, commentsView(key, item.comments));
   }
 
@@ -1249,14 +1285,14 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       item.description ? h("p", { class: "desc", text: item.description }) : null, phaseReview(item));
     fold.open = !closedComments.has(`${key}/row`);
     fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
-    const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), scopeDot(key, item));
+    const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-phases-${item.id}` }, row, commentsView(key, item.comments));
   }
 
   function questionRow(item, n) {
     const key = `questions/${item.id}`;
     const row = h("div", { class: "row" }, h("span", { class: "num", text: `${n}.` }), h("div", { class: "item-title", text: item.text }),
-      scopeDot(key, item));
+      itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-questions-${item.id}` }, row, threadView(`${key}/answers`, item.answers, "thread"),
       commentsView(key, item.comments));
   }
@@ -1315,7 +1351,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const body = h("div", {}, h("div", { class: "item-title" }, taskLink(item.id), h("span", { text: item.title })),
       item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
       waits ? h("p", { class: "desc", text: waits }) : null);
-    const row = h("div", { class: "row" }, body, scopeDot(key, item));
+    const row = h("div", { class: "row" }, body, itemActions(key, item));
     return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
   }
 
@@ -1468,16 +1504,32 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     queue({ op: "priority_clear", id: newId("clear"), target });
   }
 
+  const PRIORITY_KINDS = { tasks: ["title", "task"], phases: ["title", "phase"], questions: ["text", "question"], followups: ["text", "follow up"] };
+
+  function prioritySubject(item) {
+    const [list, id] = item.split("/");
+    const [field, noun] = PRIORITY_KINDS[list];
+    const found = doc[list].find((i) => i.id === id && !i.deleted);
+    const label = field === "title" ? id : noun;
+    return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  }
+
   function renderPriorities() {
     const list = doc.priorities;
     $("prio-count").textContent = headCount([[list.length]]);
     $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
     if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
     document.querySelector(".prio-head").hidden = !list.length;
-    $("priorities").replaceChildren(...list.map((p) => h("li", { class: "prio", id: `item-priorities-${p.id}` },
-      h("a", { class: "prio-link", href: `#item-${p.item.replace("/", "-")}`, text: `#${p.item.split("/")[1]}`, on: { click: (ev) => jumpTo(ev, p.item) } }),
-      h("span", { class: "prio-text", text: p.text }),
-      h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }))));
+    $("priorities").replaceChildren(...list.map((p) => {
+      const { label, title, gone } = prioritySubject(p.item);
+      const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
+      return h("li", { class: "prio", id: `item-priorities-${p.id}` },
+        h("div", { class: "prio-body" },
+          h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
+          h("div", { class: "prio-text", text: p.text })),
+        verdictButton(p.item, "approved", "approve", "Approve"),
+        h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
+    }));
     if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
   }
 
@@ -1601,7 +1653,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
   const GATE_MODES = ["enforce", "observe", "off"];
-  const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100], compact: ["compact_limit", 50, 100, 1000] };
+  const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], codex: ["codex_share", 5, 0, 100, "codex share"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
   const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
   const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
   const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -1609,6 +1661,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   let swarmReadError = false;
   let pending = "";
   let noteTimer = 0;
+  let capDraft = {};
 
   async function pollSwarm() {
     try {
@@ -1642,7 +1695,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 
   function capStep(values, lane, up) {
     const [key, step, low, high] = STEPS[lane];
-    return { action: "set", [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
+    return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
+  }
+
+  function capChanges(values, draft) {
+    const body = { action: "set" }, bad = [];
+    for (const [lane, [key, , low, high, name]] of Object.entries(STEPS)) {
+      if (!(key in draft)) continue;
+      const text = String(draft[key]).trim();
+      const value = /^\d+$/.test(text) ? Number(text) : NaN;
+      if (!(value >= low && value <= high)) bad.push(`${name || lane} must be a whole number from ${low} to ${high}`);
+      else if (value !== Number(values[key])) body[key] = value;
+    }
+    return { body, bad };
+  }
+
+  function capCurrent() {
+    return { ...capValues(swarm), ...capDraft };
   }
 
   function capBounds(values) {
@@ -1657,7 +1726,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function opNote(phase, action, error) {
     const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
       eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
-      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
+      codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
     if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
     if (phase === "done") return { cls: "ok", text: `${name}: done` };
     return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -1674,7 +1743,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 
   function renderControls() {
     const config = swarm ? swarm.config : {};
-    const off = swarm ? { ...swarmControls(config.state), ...capBounds(capValues(swarm)) } : swarmControls("");
+    const changes = swarm ? capChanges(capValues(swarm), capDraft) : { body: {}, bad: [] };
+    const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
     for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
       const action = btn.dataset.swarm;
       btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -1687,6 +1757,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       btn.disabled = !swarm || !!pending;
     }
     for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
+    for (const input of $("capacity-box").querySelectorAll("input[data-cap]")) {
+      if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
+      input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
+      input.disabled = !swarm || pending === "apply";
+    }
   }
 
   function renderGates(sw) {
@@ -1705,6 +1780,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       const resp = await fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
       if (resp.ok) {
         swarm = await resp.json();
+        if (op === "apply") capDraft = {};
         showNote("done", op);
       } else {
         showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
@@ -1747,7 +1823,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const message = event.target.closest("button[data-message]");
     if (message) {
       showChat(true);
-      $("chat-to").value = message.dataset.message;
+      setChatTo(message.dataset.message);
       return;
     }
     const terminate = event.target.closest("button[data-terminate]");
@@ -1764,7 +1840,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
     const step = action.match(/^(eng|ci|plan|codex|compact)_(up|down)$/);
-    if (step) return swarmControl(capStep(capValues(swarm), step[1], step[2] === "up"), action);
+    if (step) {
+      const change = capStep(capCurrent(), step[1], step[2] === "up");
+      Object.assign(capDraft, change);
+      $("cap-" + step[1]).value = Object.values(change)[0];
+      return renderControls();
+    }
+    if (action === "apply") return applyCaps();
     const consequence = {
       stop_now: "Retire every agent now. Work in progress stays in its worktree.",
       close: "Write the summary, retire every agent and close this ledger. Reopen brings it back.",
@@ -1772,6 +1854,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     }[action];
     if (consequence && !confirm(consequence)) return;
     swarmControl({ action });
+  });
+
+  function applyCaps() {
+    const { body, bad } = capChanges(capValues(swarm), capDraft);
+    if (bad.length) return showNote("error", "apply", bad.join("; "));
+    if (Object.keys(body).length > 1) swarmControl(body, "apply");
+  }
+
+  $("capacity-box").addEventListener("input", (event) => {
+    const input = event.target.closest("input[data-cap]");
+    if (!input) return;
+    capDraft[input.dataset.cap] = input.value;
+    renderControls();
+  });
+
+  $("capacity-box").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.closest("input[data-cap]") && swarm && !pending) applyCaps();
   });
 
   $("health").addEventListener("change", (event) => {
@@ -1804,10 +1903,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   function liveCaps(sw) {
     const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
     return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
-  }
-
-  function capText(values) {
-    return { eng: values.max_eng, ci: values.max_ci, plan: values.max_plan, codex: `${values.codex_share ?? 0}%`, compact: values.compact_limit ? `${values.compact_limit}k` : "—" };
   }
 
   function modelText(a) {
@@ -1894,12 +1989,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
       $("swarm-agents").replaceChildren(emptyRow(8, "No agents running. Start the swarm to work the open tasks."));
       return;
     }
-    const now = Date.now(), open = openFindings(sw), values = capValues(sw);
+    const now = Date.now(), open = openFindings(sw);
     $("swarm-alert").hidden = !open.length;
     $("alert-count").textContent = `${open.length} ${open.length === 1 ? "finding" : "findings"} open`;
     $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
     $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
-    for (const [lane, text] of Object.entries(capText(values))) $("cap-" + lane).textContent = String(text);
     const agents = agentRows(sw, now);
     $("agents-count").textContent = `${agents.length} live`;
     $("swarm-agents").replaceChildren(...(agents.length ? agents.map((a) => cells(idCell(a.name), a.lane, a.profile, a.model,
@@ -2172,7 +2266,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     const stick = log.dataset.sig === undefined || log.scrollHeight - log.scrollTop - log.clientHeight < 48;
     log.dataset.sig = sig;
     log.replaceChildren(...list.map((e) => h("div", { class: "entry" + (e.by === "operator" ? " mine" : "") + (e.sending ? " sending" : "") },
-      h("div", { class: "entry-head" }, h("span", { class: "who", text: e.by === "operator" ? "You" : e.by }), h("span", { text: when(e.at) })),
+      h("div", { class: "entry-head" }, h("span", { class: "who", text: chatWho(e) }), h("span", { text: when(e.at) })),
       entryBody(e.text, new Set(doc.tasks.map((t) => t.id))), attachmentsView(e.attachments))));
     if (!list.length) log.append(h("div", { class: "empty", text: "No messages yet." }));
     if (stick) {
@@ -2210,12 +2304,31 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   }
 
   function renderChatTo(sw) {
-    const pick = $("chat-to");
-    if (document.activeElement === pick) return;
+    const menu = $("chat-to-menu");
+    if (!menu.hidden) return;
     const live = ((sw && sw.agents) || []).filter((a) => a.lane !== "master" && a.state !== "finished").map((a) => a.name);
-    const keep = live.includes(pick.value) ? pick.value : "";
-    pick.replaceChildren(h("option", { value: "", text: "master" }), ...live.map((name) => h("option", { value: name, text: name })));
-    pick.value = keep;
+    const names = ["", SWARM, ...live];
+    const keep = names.includes($("chat-to").value) ? $("chat-to").value : "";
+    menu.replaceChildren(...names.map((name) => h("button", { type: "button", role: "option", "data-to": name, text: name || "master" })));
+    setChatTo(keep);
+  }
+
+  function setChatTo(name) {
+    $("chat-to").value = name;
+    $("chat-to-pick").textContent = name || "master";
+    for (const row of $("chat-to-menu").children) row.setAttribute("aria-selected", String(row.dataset.to === name));
+  }
+
+  function showChatTo(open) {
+    const menu = $("chat-to-menu");
+    menu.hidden = !open;
+    $("chat-to-pick").setAttribute("aria-expanded", String(open));
+    if (open) (menu.querySelector('[aria-selected="true"]') || menu.firstElementChild).focus();
+  }
+
+  function chatWho(e) {
+    if (e.by !== "operator") return e.by;
+    return e.text.startsWith(`@${SWARM} `) ? "You to the whole swarm" : "You";
   }
 
   function chatText(text, to) {
@@ -2436,6 +2549,29 @@ body.resizing-x { cursor: col-resize; user-select: none; }
     } catch (e) { chatSeen = lastChatAt(); }
     $("chat-fab").addEventListener("click", () => showChat($("chat-panel").hidden));
     $("chat-close").addEventListener("click", () => showChat(false));
+    $("chat-to-pick").addEventListener("click", () => showChatTo($("chat-to-menu").hidden));
+    $("chat-to-menu").addEventListener("click", (ev) => {
+      const row = ev.target.closest("button[data-to]");
+      if (!row) return;
+      setChatTo(row.dataset.to);
+      showChatTo(false);
+      $("chat-input").focus();
+    });
+    $("chat-to-menu").addEventListener("keydown", (ev) => {
+      const rows = [...$("chat-to-menu").children];
+      const at = rows.indexOf(document.activeElement);
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        rows[(at + (ev.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length].focus();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        showChatTo(false);
+        $("chat-to-pick").focus();
+      }
+    });
+    document.addEventListener("click", (ev) => {
+      if (!$("chat-to-menu").hidden && !ev.target.closest(".chat-to")) showChatTo(false);
+    });
     $("chat-size").addEventListener("click", () => {
       const big = $("chat-panel").classList.toggle("big");
       $("chat-size").textContent = big ? "Shrink" : "Expand";
