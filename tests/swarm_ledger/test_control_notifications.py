@@ -37,7 +37,7 @@ def page(controls, monkeypatch):
     monkeypatch.setattr(doctor.swarm, "connect", lambda: store)
     monkeypatch.setattr(cli, "cmd_close", lambda store, args: store.update(args.slug, state="stopped"))
     monkeypatch.setattr(cli, "cmd_reopen", lambda store, args: store.update(args.slug, state="running"))
-    cli._verdicts(store, "demo").visible(
+    cli.verdict_store(store, "demo").visible(
         [Finding("idle", "worker", "Idle worker", ("Idle",), "One minute", 1)], 1, 60_000
     )
     store.create(cli.SwarmConfig("demo-doctor", "/repo", state="running", max_eng=0, max_ci=0))
@@ -45,14 +45,13 @@ def page(controls, monkeypatch):
     monkeypatch.setitem(doctor.COMMANDS, "stop", lambda store, args: store.update("demo-doctor", state="stopped"))
 
     def run(argv, **kwargs):
-        if argv[3] == "status":
-            return subprocess.CompletedProcess(argv, 0, json.dumps({"config": {"state": store.config("demo").state}}))
         with monkeypatch.context() as env:
             env.setattr(os, "environ", kwargs.get("env", os.environ).copy())
             code = (cli if argv[1] == "swarm" else doctor).main(argv[2:])
         return subprocess.CompletedProcess(argv, code, "", "refused" if code else "")
 
     monkeypatch.setattr(server.subprocess, "run", run)
+    monkeypatch.setattr(server, "swarm_status", lambda slug: {"config": {"state": store.config(slug).state}})
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
