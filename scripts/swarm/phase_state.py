@@ -33,7 +33,7 @@ def report(doc):
     for phase in doc.get("phases", []):
         held = [
             t["id"]
-            for t in doc.get("tasks", [])
+            for t in doc["tasks"]
             if t.get("phase") == phase["id"]
             and t.get("state") == "open"
             and not t.get("out_of_scope")
@@ -44,4 +44,4 @@ def report(doc):
 
 
 def _plan_task(phase, doc):
-    return next((t for t in doc.get("tasks", []) if t.get("phase") == phase["id"] and t.get("kind") == "plan"), None)
+    return next((t for t in doc["tasks"] if t.get("phase") == phase["id"] and t.get("kind") == "plan"), None)

@@ -65,6 +65,13 @@ def test_admits_only_building_tasks_and_the_planning_plan_task(task, admitted):
     assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
 
 
+def test_a_ledger_without_a_phases_list_holds_nothing():
+    old = {"tasks": [{"id": "t", "phase": "p1", "state": "open"}]}
+    assert phase_state.lifecycle({"id": "p1", "depends_on": ["p0"]}, old) == "waiting"
+    assert phase_state.admits(old["tasks"][0], old) is True
+    assert phase_state.report(old) == []
+
+
 @pytest.fixture
 def store():
     import fakeredis
@@ -111,11 +118,24 @@ def test_the_plan_task_is_claimed_only_while_its_phase_is_planning(store):
     assert spawned(runtime) == ["plan-p1"]
 
 
+class OwnLedger(FakeLedger):
+    def state(self, slug):
+        return super().state(slug) if slug == "sw" else {"tasks": [], "phases": []}
+
+
 def test_tasks_with_no_phase_or_an_unknown_phase_claim_as_today(store):
-    ledger = FakeLedger([{"id": "a"}, {"id": "b", "phase": "missing"}])
+    ledger = OwnLedger([{"id": "a"}, {"id": "b", "phase": "missing"}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert spawned(runtime) == ["a", "b"]
+
+
+def test_a_swarm_with_no_free_slot_but_a_building_task_stays_running(store):
+    store.update("sw", max_eng=0)
+    ledger = FakeLedger([{"id": "a", "phase": "p1"}])
+    ledger.phases = [{"id": "p1"}]
+    tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
+    assert store.config("sw").state == "running"
 
 
 def test_held_lists_each_open_task_a_phase_holds_with_its_state():

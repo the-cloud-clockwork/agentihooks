@@ -591,12 +591,13 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
 def test_status_text_lists_each_phase_lifecycle_and_the_tasks_it_holds(env, capsys):
     _, ledger, _ = env
     ledger.rows["t1"]["phase"], ledger.rows["t2"]["phase"] = "p1", "p2"
+    ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3"}
     ledger.phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]
     run("sw", "create", "--repo", "/repo")
     capsys.readouterr()
     run("sw", "status")
     lines = capsys.readouterr().out.splitlines()
-    assert "phase p1  building" in lines and "phase p2  waiting  holds t2" in lines
+    assert "phase p1  building" in lines and "phase p2  waiting  holds t2, t3" in lines
 
 
 def test_agent_prompt_joins_the_ledger_watches_it_and_leaves_before_done():

@@ -73,7 +73,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions = _recover_master(slug, config, store, runtime, now_ms)
     doc = ledger.state(slug)
-    rows, phases = {t["id"]: t for t in doc.get("tasks", [])}, doc.get("phases", [])
+    rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, rows)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
@@ -84,21 +84,17 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="paused")
         actions.append("the operator wrote on the ledger, paused to start the master")
     sleeping = lifetime.sleeping(slug, store, rows)
-    if (
-        not sleeping
-        and config.state == "drained"
-        and any(_claimable(slug, store, rows, phases, lane) for lane in LANES)
-    ):
+    if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
     if not sleeping:
         actions += _master(slug, config, store, runtime, now_ms)
         if config.state == "running":
-            actions += _spawn(slug, config, store, ledger, runtime, rows, phases, now_ms)
+            actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
     transfers.observe(store, slug, runtime.live_names(), now_ms)
-    return actions + _settle(slug, config, store, ledger, rows, phases) + _close_space(slug, config, store, runtime)
+    return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
 
 
 def _close_space(slug, config, store, runtime):
@@ -209,10 +205,9 @@ def _reopen(slug, ledger, rows, task_id):
     rows[task_id].update(state="open", claimed_by="")
 
 
-def _claimable(slug, store, rows, phases, lane):
+def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
-    doc = {"phases": phases, "tasks": list(rows.values())}
     picked = []
     for t in rows.values():
         if (
@@ -247,12 +242,12 @@ def _nested(outer, inner):
     return inner == outer or inner.startswith(outer + "/")
 
 
-def _spawn(slug, config, store, ledger, runtime, rows, phases, now_ms):
+def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci)):
         busy = sum(1 for a in agents if a.lane == lane)
-        for task in _claimable(slug, store, rows, phases, lane)[: max(cap - busy, 0)]:
+        for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
             if not runtime.has_capacity():
                 return actions + ["every agent is at its session cap, waiting"]
             name = store.next_name(slug, lane, now_ms)
@@ -384,7 +379,7 @@ def _retire_master(slug, store, runtime, master):
     return f"retired {master.name}"
 
 
-def _settle(slug, config, store, ledger, rows, phases):
+def _settle(slug, config, store, ledger, rows, doc):
     agents = store.agents(slug)
     if config.state == "stopping":
         if agents:
@@ -393,7 +388,7 @@ def _settle(slug, config, store, ledger, rows, phases):
         return ["stopped"]
     if any(a.lane != MASTER for a in agents):
         return []
-    if config.state != "running" or any(_claimable(slug, store, rows, phases, lane) for lane in LANES):
+    if config.state != "running" or any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         return []
     store.update(slug, state="drained")
     blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))

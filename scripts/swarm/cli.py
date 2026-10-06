@@ -403,7 +403,7 @@ def cmd_status(store, args):
     agents = store.agents(args.slug)
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
-    tasks = doc.get("tasks", [])
+    tasks = doc["tasks"]
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
