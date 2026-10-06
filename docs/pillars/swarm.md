@@ -186,7 +186,7 @@ picks its prompt and the proof `done` must carry, and the ledger refuses `done` 
 |---|---|---|
 | `code`, `ci` | a merged pull request | `--pr URL` |
 | `ops`, `tune` | a verified system state | `--command C --output O` |
-| `troubleshoot` | the root cause shown by evidence, and a fix or a filed task | `--root-cause R --evidence E`, `--fix URL` or `--filed TASK` |
+| `troubleshoot` | the root cause shown by evidence, and a fix or a proposed follow-up | `--root-cause R --evidence E`, `--fix URL` or `--filed FOLLOWUP` |
 | `research` | a written finding | `--finding URL` |
 
 For `code` and `ci`, `done` reads the pull request (`--pr`, else the task's recorded one) with `gh pr view`
