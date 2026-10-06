@@ -64,6 +64,16 @@ def test_the_operator_typing_the_keywords_still_toggles_both(toggles, monkeypatc
     assert not is_controls_disabled("s1")
 
 
+def test_a_swarm_prompt_quoting_the_off_keywords_leaves_voice_and_bypass_on(toggles, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1-1")
+    submit("You are master@a1-1, the master of swarm demo.")
+    submit("enable voice and disable controls")
+    submit(f'{delivery.MARK} the culture says "disable voice" and "enable controls" because gates matter')
+    assert toggles.is_voice_enabled("s1")
+    assert is_controls_disabled("s1")
+
+
 def test_an_operator_session_outside_a_swarm_toggles_on_its_first_prompt(toggles):
     submit("enable voice, then disable controls")
     assert toggles.is_voice_enabled("s1")
