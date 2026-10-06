@@ -74,6 +74,7 @@ class AgentSpec:
     fallback_bare: bool = True
     resume: str = ""
     profile: str = ""
+    channel: bool = False
 
 
 def _collector(environ: dict[str, str]) -> str:
@@ -208,7 +209,9 @@ def _agent_command(
         *_model_args("claude", agent_args, environ),
         *agent_args,
     ]
-    return _profile_command(command, spec), ""
+    # A server on MCP revision 2026-07-28 never registers as a channel.
+    before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
+    return _profile_command(command, spec), before
 
 
 def _write_launcher(
@@ -380,6 +383,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
+    parser.add_argument(
+        "--inbox-channel",
+        action="store_true",
+        help="Claude: load the agentihooks inbox channel and answer its development channels warning in herdr",
+    )
     parser.add_argument("claude_args", nargs=argparse.REMAINDER, help="Arguments after -- pass through to Claude")
     return parser
 
@@ -415,6 +423,21 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
     ]
 
 
+CHANNEL_WARNING_MS = 60_000
+
+
+def _inbox_channel_args() -> list[str]:
+    from scripts.inbox import channel
+
+    return channel.launch_args()
+
+
+def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
+    from scripts.inbox import channel
+
+    return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     active_env = dict(os.environ if environ is None else environ)
@@ -439,6 +462,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
 
             profile_env, claude_args = prepare(args.profile, agent, "", "", claude_args, active_env)
             active_env.update(profile_env)
+        channel = args.inbox_channel and agent == "claude"
+        claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
@@ -447,7 +472,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             claude_args,
             active_env,
             AgentSpec(
-                agent=agent, exclude=exclude, fallback_bare=not args.handoff, resume=args.resume, profile=args.profile
+                agent=agent,
+                exclude=exclude,
+                fallback_bare=not args.handoff,
+                resume=args.resume,
+                profile=args.profile,
+                channel=channel,
             ),
         )
         host, explicit = _select_host(args.host, active_env)
@@ -543,6 +573,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     if pane and route.get("status") in ("routed", "bare", "direct"):
         renamed = herdr_host.rename_agent(pane, name, active_env)
         report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
+        if channel:
+            report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if not args.handoff:
         print("\n".join(report))
         return 0

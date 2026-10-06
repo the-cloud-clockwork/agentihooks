@@ -654,3 +654,53 @@ def test_a_claude_launch_gets_no_codex_trust_override(tmp_path):
         tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent="claude")
     )
     assert "trust_level" not in launcher.read_text()
+
+
+@pytest.mark.parametrize(("agent", "named"), [("claude", True), ("codex", False)])
+def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch, tmp_path, capsys, agent, named):
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (agent, "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--agent", agent, "--inbox-channel", "--dry-run", "--", "--model", "opus"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("claude_args="))
+    assert line.startswith("claude_args='--mcp-config=") is named and (channel.FLAG in line) is named
+    assert line.endswith("--model opus")
+
+
+@pytest.mark.parametrize("channel", [True, False])
+def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
+    env = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    spec = init_agent.AgentSpec(channel=channel)
+    launcher, _ = init_agent._write_launcher(tmp_path, "eng", "", [], env, spec)
+    text = launcher.read_text()
+    assert ("export MCP_PROTOCOL_NEGOTIATION=legacy" in text.splitlines()) is channel
+    assert not channel or text.index("MCP_PROTOCOL_NEGOTIATION") < text.index(" claude ")
+
+
+def test_the_inbox_channel_flag_explains_itself():
+    found = next(a for a in init_agent._parser()._actions if a.dest == "inbox_channel")
+    assert (
+        found.help == "Claude: load the agentihooks inbox channel and answer its development channels warning in herdr"
+    )
+
+
+@pytest.mark.parametrize(("seen", "said"), [(True, "answered"), (False, "unseen")])
+def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, said):
+    from scripts.inbox import channel
+
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "answer", lambda *args: calls.append(args) or seen)
+    assert init_agent._answer_channel_warning("w1:p2", {"K": "v"}) == said
+    assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
+
+
+def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    launcher = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("launcher="))
+    lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
+    assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines

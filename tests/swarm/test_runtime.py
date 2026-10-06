@@ -631,3 +631,17 @@ def test_every_swarm_launch_runs_its_profile_with_brain_on(tmp_path, monkeypatch
     monkeypatch.setattr(select_profile.profiles, "render", lambda *a: None)
     env, _ = select_profile.prepare(profile, argv[argv.index("--agent") + 1], "", "", [], {})
     assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
+
+
+@pytest.mark.parametrize(("agent", "named"), [("claude", True), ("codex", False)])
+def test_a_claude_spawn_asks_init_agent_for_the_inbox_channel(tmp_path, agent, named):
+    argv = _spawn_seen(tmp_path, {"eng": {"agent": agent}})["argv"]
+    assert ("--inbox-channel" in argv[: argv.index("--")]) is named
+
+
+@pytest.mark.parametrize(("harness", "named"), [("claude", True), ("codex", False)])
+def test_a_claude_resume_asks_init_agent_for_the_inbox_channel(tmp_path, harness, named):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert ("--inbox-channel" in argv[: argv.index("--")]) is named
