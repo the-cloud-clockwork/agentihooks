@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def bundle_path(state: dict) -> Path | None:
 def active_profile(state: dict) -> str | None:
     from hooks.targets import global_record
 
-    return global_record(state).get("profile") or None
+    return os.environ.get("AGENTIHOOKS_PROFILE") or global_record(state).get("profile") or None
 
 
 def linked_profiles(state: dict) -> dict[str, Path]:
@@ -52,6 +53,16 @@ def linked_profiles(state: dict) -> dict[str, Path]:
         if path.is_dir():
             linked[str(entry["name"])] = path
     return linked
+
+
+def parents(path: Path) -> list[str]:
+    manifest = path / "profile.yml"
+    data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+    return data.get("extends", [])
+
+
+def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:
+    return {parent for _, path in profile_dirs for parent in parents(path)}
 
 
 def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> list[str]:
@@ -67,10 +78,8 @@ def expand_profiles(names: list[str], resolve: Callable[[str], Path | None]) -> 
         path = resolve(name)
         if path is None:
             raise ValueError(f"Profile '{name}' not found in inheritance chain: {' -> '.join(visiting + [name])}")
-        manifest = path / "profile.yml"
-        data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
         visiting.append(name)
-        for parent in data.get("extends", []):
+        for parent in parents(path):
             visit(parent)
         visiting.pop()
         seen.add(name)

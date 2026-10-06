@@ -22,6 +22,7 @@ import subprocess
 from pathlib import Path
 
 from hooks.common import inject_context, log
+from scripts.claude_config import claude_home
 
 _BANNER_HEADER = "RULES IMPORTANT!! (HARD FLOOR) !!"
 _TRAILER = "\n[TRUNCATED — read the remaining rule files directly from .claude/rules/]\n"
@@ -124,7 +125,7 @@ def ensure_skills_root(root: Path) -> None:
 def _memory_file(root: Path) -> Path | None:
     from hooks.context.broadcast import encode_cwd
 
-    path = Path.home() / ".claude" / "projects" / encode_cwd(str(root)) / "memory" / "MEMORY.md"
+    path = claude_home() / "projects" / encode_cwd(str(root)) / "memory" / "MEMORY.md"
     return path if path.is_file() else None
 
 

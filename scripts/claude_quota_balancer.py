@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 
+from scripts.claude_config import claude_home
+
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
@@ -714,7 +716,7 @@ def requested_model(extra_args: list[str], settings_path: Path | None = None) ->
             return extra_args[index + 1]
         if value.startswith("--model="):
             return value.split("=", 1)[1]
-    path = settings_path or Path.home() / ".claude" / "settings.json"
+    path = settings_path or claude_home() / "settings.json"
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
         return str(settings.get("model") or "") if isinstance(settings, dict) else ""

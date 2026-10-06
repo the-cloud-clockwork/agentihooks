@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context.project_identity import ProjectIdentity, resolve_project
+from scripts.claude_config import claude_home
 
 
 def _index_path() -> Path:
@@ -47,7 +48,7 @@ def _legacy_identity(session_id: str) -> ProjectIdentity | None:
         return None
     from hooks.context.broadcast import encode_cwd
 
-    projects = Path.home() / ".claude" / "projects"
+    projects = claude_home() / "projects"
     if not projects.is_dir():
         return None
     for folder in projects.iterdir():

@@ -87,6 +87,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts.claude_config import claude_home
+from scripts.claude_config import claude_json as claude_json_path
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
 
@@ -135,23 +137,7 @@ PACKAGE_FEATURES_DIR = PROFILES_DIR / "package"
 
 
 def _resolve_claude_home() -> Path:
-    """Resolve the Claude config directory.
-
-    Priority: CLAUDE_CODE_HOME_DIR > AGENTIHOOKS_CLAUDE_HOME > ~/.claude
-
-    CLAUDE_CODE_HOME_DIR points at the home-dir root (like $HOME);
-    we append .claude automatically.
-    AGENTIHOOKS_CLAUDE_HOME points directly at the .claude directory (legacy).
-    """
-    home_dir = os.environ.get("CLAUDE_CODE_HOME_DIR")
-    if home_dir:
-        return Path(home_dir) / ".claude"
-
-    claude_home = os.environ.get("AGENTIHOOKS_CLAUDE_HOME")
-    if claude_home:
-        return Path(claude_home)
-
-    return Path.home() / ".claude"
+    return claude_home()
 
 
 CLAUDE_HOME = _resolve_claude_home()
@@ -521,7 +507,7 @@ def _migrate_profile_rename(state: dict, old_name: str, new_name: str) -> None:
         print(f"  {_GREEN}[OK] Migrated profile '{old_name}' → '{new_name}' in state.json{_RESET}")
 
     # Also migrate ~/.claude.json project entries that reference the old profile
-    claude_json = Path.home() / ".claude.json"
+    claude_json = claude_json_path()
     if claude_json.exists():
         try:
             cj = json.loads(claude_json.read_text())
@@ -2195,7 +2181,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
         and not os.environ.get("AGENTIHOOKS_PROFILE", "")
         and not _is_force
     ):
-        _md_path = Path(_prev_state.get("managed_claude_md") or (Path.home() / ".claude" / "CLAUDE.md"))
+        _md_path = Path(_prev_state.get("managed_claude_md") or (claude_home() / "CLAUDE.md"))
         _marker_profile = ""
         try:
             _text = _md_path.read_text() if _md_path.exists() else ""
@@ -3247,11 +3233,7 @@ def _install_claude_persona(
 
 
 def _resolve_claude_json() -> Path:
-    """Resolve ~/.claude.json, respecting CLAUDE_CODE_HOME_DIR."""
-    home_dir = os.environ.get("CLAUDE_CODE_HOME_DIR")
-    if home_dir:
-        return Path(home_dir) / ".claude.json"
-    return Path.home() / ".claude.json"
+    return claude_json_path()
 
 
 _CLAUDE_JSON = _resolve_claude_json()
@@ -5837,7 +5819,7 @@ def _cmd_brain(args: argparse.Namespace) -> None:
 
 def _detect_active_profile() -> str:
     """Find the active profile from ~/.claude/CLAUDE.md symlink target."""
-    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    claude_md = claude_home() / "CLAUDE.md"
     try:
         if claude_md.is_symlink():
             target = os.readlink(str(claude_md))
@@ -5863,9 +5845,9 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     )
 
     profile = args.profile or _detect_active_profile()
-    rules_dir = Path.home() / ".claude" / "rules"
-    claude_md = Path.home() / ".claude" / "CLAUDE.md"
-    claude_local_md = Path.home() / ".claude" / "CLAUDE.local.md"
+    rules_dir = claude_home() / "rules"
+    claude_md = claude_home() / "CLAUDE.md"
+    claude_local_md = claude_home() / "CLAUDE.local.md"
 
     if args.clear:
         existing = _load_marker(profile)
@@ -6868,9 +6850,7 @@ notes:
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import format_report, lint_report
 
-        lint_path = (
-            Path(args.lint_path).expanduser().resolve() if args.lint_path else Path.home() / ".claude" / "CLAUDE.md"
-        )
+        lint_path = Path(args.lint_path).expanduser().resolve() if args.lint_path else claude_home() / "CLAUDE.md"
         if not lint_path.exists():
             print(f"Error: {lint_path} not found", file=sys.stderr)
             sys.exit(1)
@@ -6880,7 +6860,7 @@ notes:
         sys.path.insert(0, str(AGENTIHOOKS_ROOT))
         from scripts.claude_linter import extract_to_skill
 
-        source = Path(args.source).expanduser().resolve() if args.source else Path.home() / ".claude" / "CLAUDE.md"
+        source = Path(args.source).expanduser().resolve() if args.source else claude_home() / "CLAUDE.md"
         if not source.exists():
             print(f"Error: {source} not found", file=sys.stderr)
             sys.exit(1)
