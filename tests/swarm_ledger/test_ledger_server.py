@@ -244,6 +244,16 @@ def test_a_closed_ledger_whose_swarm_is_still_stopping_stays_for_the_tick():
     assert "still-stopping" not in ledger_bin.entries()
 
 
+def test_a_ledger_restored_then_closed_again_goes_back_to_the_bin():
+    make("closed-twice")
+    ledger_bin.delete("closed-twice", now=1)
+    ledger_bin.restore("closed-twice", now=2)
+    closed_at = closed("closed-twice")
+    with patch.object(server, "swarm_store", return_value=Swarms()):
+        server.bin_closed_without_swarm(now=closed_at + 1)
+    assert ledger_bin.entries()["closed-twice"] == closed_at + 1
+
+
 def test_an_unreachable_swarm_store_bins_nothing():
     closed("unreachable")
     with patch.object(server, "swarm_store", side_effect=SwarmError("Redis is unreachable")):
