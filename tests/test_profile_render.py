@@ -453,33 +453,129 @@ def test_claude_render_keeps_runtime_state_of_previous_render(world):
     assert not (out / "skills" / "gone").is_symlink()
 
 
-def test_codex_render_writes_one_layered_profile(world):
+CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
+
+
+def _operator_codex(home: Path) -> None:
+    hooks = home / ".codex" / "hooks.json"
+    text = (home / ".codex" / "config.toml").read_text()
+    text = 'model = "gpt-op"\nservice_tier = "fast"\nnotify = ["py", "-m", "shim"]\n' + text
+    text += f'\n[hooks.state."{hooks}:pre_tool_use:0:0"]\ntrusted_hash = "sha256:aa"\n'
+    text += '\n[hooks.state."/elsewhere/config.toml:stop:0:0"]\ntrusted_hash = "sha256:bb"\n'
+    text += '\n[projects."/w"]\ntrust_level = "trusted"\n'
+    _write(home / ".codex" / "config.toml", text)
+
+
+def test_codex_render_links_into_the_claude_profile(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("rb-role")
+
+    claude = render.rendered_root() / "rb-role" / "claude"
+    assert out == render.rendered_root() / "rb-role" / "codex"
+    assert os.readlink(out / "AGENTS.md") == str(claude / "CLAUDE.md")
+    linked = {p.name: os.readlink(p) for p in (out / "skills").iterdir()}
+    assert linked == {p.name: str(p) for p in (claude / "skills").iterdir()}
+    assert {"bundle-skill", "role-skill"} <= set(linked)
+    assert sorted(p.name for p in out.iterdir() if not p.is_symlink()) == ["config.toml", "skills"]
+    sources = render.sources.path("rb-role", "codex", render.rendered_root())
+    assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
+
+
+def test_codex_render_config_has_no_persona_and_only_profile_servers(world):
     from scripts.profiles import render
 
     home = world["home"]
-    before = _tree_hashes(home, home / ".agentihooks" / "profiles")
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
 
-    path = render.render_codex("rb-role")
-
-    assert path == home / ".codex" / "rb-role.config.toml"
-    after = _tree_hashes(home, home / ".agentihooks" / "profiles")
-    assert set(after) - set(before) == {".codex/rb-role.config.toml"}
-    assert {k: v for k, v in after.items() if k in before} == before
-    doc = tomllib.loads(path.read_text())
-    instructions = doc["developer_instructions"]
-    for marker in ("BUNDLE DIRECTIVE MARKER", "BASE PERSONA MARKER", "ROLE RULE MARKER", "BUNDLE RULE MARKER"):
-        assert marker in instructions
-    assert "<!-- rule: role-rule.md (rule) -->" in instructions
-    assert instructions.endswith(f"\n\n{render.FOOTER}\n")
-    assert "KIT README" not in instructions
+    assert "developer_instructions" not in doc
     assert doc["sandbox_mode"] == "workspace-write"
     assert doc["approval_policy"] == "never"
-    assert "model_context_window" not in doc
-    assert doc["mcp_servers"] == {"google-gmail": {"enabled": False}}
-    other = str(home / ".agents" / "skills" / "other-skill" / "SKILL.md")
-    assert doc["skills"]["config"] == [{"path": other, "enabled": False}]
+    assert doc["features"]["hooks"] is True
+    assert doc["mcp_servers"] == {"role-srv": {"command": "r"}, "bundle-srv": {"command": "b"}}
+    skills = home / ".agents" / "skills"
+    assert doc["skills"]["config"] == [
+        {"path": str(skills / name / "SKILL.md"), "enabled": False}
+        for name in ("bundle-skill", "other-skill", "role-skill")
+    ]
+    assert doc["project_doc_max_bytes"] == 65536
     assert doc["agentihooks"]["render"] == render.stamp("rb-role")
+    operator = (home / ".codex" / "config.toml").read_bytes()
+    assert doc["agentihooks"]["operator"] == hashlib.sha256(operator).hexdigest()
     assert render.render_codex("rb-role") is None
+
+
+def test_codex_render_keeps_hooks_on_and_layer_servers_out(world):
+    from scripts.profiles import render
+
+    layer = "[features]\nhooks = false\n\n[mcp_servers.layer-srv]\ncommand = 'x'\n"
+    _write(world["role"] / ".codex" / "config.overrides.toml", layer)
+
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
+
+    assert doc["features"]["hooks"] is True
+    assert set(doc["mcp_servers"]) == {"role-srv", "bundle-srv"}
+
+
+def test_codex_render_sizes_the_doc_cap_to_a_large_persona(world):
+    from scripts.profiles import render
+
+    _write(world["role"] / ".claude" / "rules" / "big.md", "x" * 100_000 + "\n")
+
+    out = render.render_codex("rb-role")
+
+    persona = len((render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md").read_bytes())
+    assert tomllib.loads((out / "config.toml").read_text())["project_doc_max_bytes"] == int(persona * 1.25)
+
+
+def test_codex_render_force_rerenders_the_claude_profile(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("rb-role")
+    persona = render.rendered_root() / "rb-role" / "claude" / "CLAUDE.md"
+    persona.write_text("stale\n")
+
+    assert render.render_codex("rb-role", force=True) == out
+    assert "ROLE PERSONA MARKER" in (out / "AGENTS.md").read_text()
+
+
+def test_codex_render_links_state_back_to_the_operator_home(world):
+    from scripts.profiles import render
+
+    home = world["home"]
+    _operator_codex(home)
+
+    out = render.render_codex("rb-role")
+
+    for item in CODEX_STATE:
+        assert os.readlink(out / item) == str(home / ".codex" / item)
+    doc = tomllib.loads((out / "config.toml").read_text())
+    assert doc["sqlite_home"] == str(home / ".codex")
+    assert doc["hooks"]["state"] == {f"{out / 'hooks.json'}:pre_tool_use:0:0": {"trusted_hash": "sha256:aa"}}
+    assert doc["projects"] == {"/w": {"trust_level": "trusted"}}
+    assert (doc["model"], doc["service_tier"], doc["notify"]) == ("gpt-op", "fast", ["py", "-m", "shim"])
+
+
+def test_codex_render_follows_operator_changes(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("rb-role")
+    _operator_codex(world["home"])
+
+    assert render.render_codex("rb-role") == out
+    assert tomllib.loads((out / "config.toml").read_text())["model"] == "gpt-op"
+
+
+def test_codex_render_from_inside_a_profile_codex_home(world, monkeypatch):
+    from scripts.profiles import render
+
+    home = world["home"]
+    monkeypatch.setenv("CODEX_HOME", str(render.rendered_root() / "rb-other" / "codex"))
+
+    out = render.render_codex("rb-role")
+
+    assert os.readlink(out / "auth.json") == str(home / ".codex" / "auth.json")
+    assert "role-srv" in tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
 
 
 @pytest.mark.parametrize("config", [None, 'model = "gpt"\n'])
@@ -492,20 +588,27 @@ def test_codex_render_without_global_servers_or_skills(world, config):
         _write(home / ".codex" / "config.toml", config)
     for skill in (home / ".agents" / "skills").iterdir():
         skill.unlink() if skill.is_file() else skill.rmdir()
+    _write(world["role"] / ".codex" / "config.overrides.toml", "[mcp_servers.layer-srv]\ncommand = 'x'\n")
 
-    doc = tomllib.loads(render.render_codex("rb-role").read_text())
+    doc = tomllib.loads((render.render_codex("rb-role") / "config.toml").read_text())
 
     assert "mcp_servers" not in doc
     assert "skills" not in doc
+    assert "hooks" not in doc
 
 
-def test_codex_render_replaces_an_unstamped_profile_file(world):
+def test_codex_render_retires_the_old_profile_config(world):
     from scripts.profiles import render
 
-    path = _write(world["home"] / ".codex" / "rb-role.config.toml", 'model = "hand-written"\n')
+    codex = world["home"] / ".codex"
+    old = _write(codex / "rb-role.config.toml", '[agentihooks.render]\nchain = ["rb-role"]\n')
+    hand = _write(codex / "rb-other.config.toml", 'model = "hand-written"\n')
 
-    assert render.render_codex("rb-role") == path
-    assert "hand-written" not in path.read_text()
+    render.render_codex("rb-role")
+    render.render_codex("rb-other")
+
+    assert not old.exists()
+    assert hand.read_text() == 'model = "hand-written"\n'
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -518,10 +621,7 @@ def test_render_leaves_global_install_untouched(world, target):
 
     render.render(target, "rb-role")
 
-    after = _tree_hashes(home, skip)
-    if target == "codex":
-        after.pop(".codex/rb-role.config.toml")
-    assert after == before
+    assert _tree_hashes(home, skip) == before
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -574,9 +674,10 @@ def test_rendered_profiles_lists_the_homes_each_target_has(world):
     render.render_claude("rb-other")
     render.render_codex("rb-other")
     _write(world["home"] / ".codex" / "hand.config.toml", 'model = "x"\n')
+    _write(world["home"] / ".codex" / "rb-old.config.toml", '[agentihooks.render]\nchain = ["rb-old"]\n')
 
     assert render.rendered_profiles("claude") == ["rb-other", "rb-role"]
-    assert render.rendered_profiles("codex") == ["rb-other"]
+    assert render.rendered_profiles("codex") == ["rb-old", "rb-other"]
     assert render.rendered_profiles("copilot") == []
 
 

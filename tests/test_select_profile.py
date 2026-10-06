@@ -34,9 +34,15 @@ def test_dry_run_parses_run_flags_and_preserves_harness_arguments(profile, capsy
 
 
 def test_profile_defaults_and_native_codex_layer(profile):
+    root, renderer = profile
     env, argv = select_profile.prepare("qa", "codex", "", "", ["exec", "reply OK"], {})
-    assert env == {"AGENTIHOOKS_PROFILE": "qa", "AGENTIHOOKS_BASE_CHANNELS": "amygdala,brain"}
-    assert argv == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", "reply OK"]
+    assert env == {
+        "AGENTIHOOKS_PROFILE": "qa",
+        "AGENTIHOOKS_BASE_CHANNELS": "amygdala,brain",
+        "CODEX_HOME": f"{root}/rendered/qa/codex",
+    }
+    assert argv == ["-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", "reply OK"]
+    renderer.assert_called_once_with("codex", "qa")
 
 
 @pytest.mark.parametrize("agent,effort,mapped", [("claude", "minimal", "low"), ("codex", "max", "xhigh")])
@@ -100,7 +106,7 @@ def test_native_flags_override_manifest_and_other_config_is_kept(profile, agent)
     args += ["-c", "other=true", "--verbose"]
     env, result = select_profile.prepare("engineer", agent, "", "", args, {})
     expected = init_agent.model_flags(agent, "native", "high") + ["-c", "other=true", "--verbose"]
-    assert result == (["-p", "engineer"] if agent == "codex" else []) + expected
+    assert result == expected
     assert env["AGENTIHOOKS_PROFILE"] == "engineer"
 
 
@@ -136,7 +142,7 @@ def test_launch_environment_defaults_apply_without_manifest_values(profile):
     _, result = select_profile.prepare(
         "engineer", "codex", "", "", [], {"AGENTIHOOKS_CODEX_MODEL": "env-model", "AGENTIHOOKS_CODEX_EFFORT": "minimal"}
     )
-    assert result == ["-p", "engineer", "-m", "env-model", "-c", 'model_reasoning_effort="minimal"']
+    assert result == ["-m", "env-model", "-c", 'model_reasoning_effort="minimal"']
 
 
 @pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
@@ -172,7 +178,8 @@ def test_codex_dry_run_from_sys_argv_has_only_run_environment(profile, monkeypat
     assert select_profile.main() == 0
     assert (
         capsys.readouterr().out == "AGENTIHOOKS_PROFILE=qa\nAGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
-        "argv=agentihooks codex -p qa -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
+        f"CODEX_HOME={profile[0]}/rendered/qa/codex\n"
+        "argv=agentihooks codex -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
     )
 
 
@@ -226,12 +233,12 @@ def test_claude_continue_is_forwarded(profile, args):
 @pytest.mark.parametrize("flag", ['-cmodel_reasoning_effort="low"', '--config=model_reasoning_effort="low"'])
 def test_attached_codex_effort_wins_over_manifest(profile, flag):
     _, result = select_profile.prepare("qa", "codex", "", "", [flag, "exec", "OK"], {})
-    assert result == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="low"', "exec", "OK"]
+    assert result == ["-m", "sonnet", "-c", 'model_reasoning_effort="low"', "exec", "OK"]
 
 
 def test_attached_codex_model_cannot_override_selector(profile):
     _, result = select_profile.prepare("qa", "codex", "chosen", "", ["-mnative", "exec", "OK"], {})
-    assert result == ["-p", "qa", "-m", "chosen", "-c", 'model_reasoning_effort="medium"', "exec", "OK"]
+    assert result == ["-m", "chosen", "-c", 'model_reasoning_effort="medium"', "exec", "OK"]
 
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])
@@ -291,7 +298,7 @@ def test_terminal_profile_prepares_model_and_environment_once(profile, monkeypat
     prepare = Mock(
         return_value=(
             {"AGENTIHOOKS_PROFILE": "qa"},
-            ["-p", "qa", "-m", "selected", "-c", 'model_reasoning_effort="low"'],
+            ["-m", "selected", "-c", 'model_reasoning_effort="low"'],
         )
     )
     launch = Mock(return_value=(tmp_path / "launcher", None))
@@ -331,7 +338,7 @@ def test_native_help_and_abbreviations_are_forwarded(profile, args):
 @pytest.mark.parametrize("flag", ["-cother=true", "--config=other=true"])
 def test_other_attached_codex_config_preserves_order(profile, flag):
     _, result = select_profile.prepare("qa", "codex", "", "", ["exec", flag, "OK"], {})
-    assert result == ["-p", "qa", "-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", flag, "OK"]
+    assert result == ["-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", flag, "OK"]
 
 
 def test_profile_render_dispatch_forwards_arguments_and_exit(monkeypatch):

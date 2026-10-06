@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -17,7 +18,8 @@ from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
 
 SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
-CODEX_KEYS = ("model", "model_reasoning_effort", "sandbox_mode", "approval_policy")
+CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
+CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 STAMP = ".agentihooks-render.json"
 CHANNELS, BRAIN = "AGENTIHOOKS_BASE_CHANNELS", "brain"
 HEADER = "<!-- agentihooks rendered profile -->"
@@ -231,32 +233,81 @@ def _codex_stamp(path: Path) -> dict | None:
         return None
 
 
+def _read_toml(path: Path) -> dict:
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _operator_codex_home() -> Path:
+    home = codex_home()
+    # A session running in a rendered Codex home renders too; links must still reach the operator's home.
+    return Path.home() / ".codex" if home.resolve().is_relative_to(rendered_root().resolve()) else home
+
+
+def _link(link: Path, target: Path) -> None:
+    if link.is_symlink():
+        link.unlink()
+    link.symlink_to(target)
+
+
+def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) -> dict:
+    doc = {k: v for k, v in settings.items() if k != "mcp_servers"}
+    doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
+    doc["sqlite_home"] = str(operator)
+    doc["features"]["hooks"] = True
+    source = f"{operator / 'hooks.json'}:"
+    state = (installed.get("hooks") or {}).get("state") or {}
+    trusted = {f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)}
+    if trusted:
+        doc["hooks"] = {"state": trusted}
+    return doc
+
+
 def render_codex(name: str, force: bool = False) -> Path | None:
     import tomlkit
 
     _i = _install_module()
     bundle, dirs = _i._get_bundle_path(), _chain(name)
-    current = _stamp(bundle, dirs)
-    path = codex_home() / f"{name}.config.toml"
+    claude_fresh = render_claude(name, force=force) is None
+    operator = _operator_codex_home()
+    config = operator / "config.toml"
+    text = config.read_text() if config.exists() else ""
+    installed = tomllib.loads(text)
+    current = {"render": _stamp(bundle, dirs), "operator": hashlib.sha256(text.encode()).hexdigest()}
+    out = rendered_root() / name / "codex"
     manifest = sources.path(name, "codex", rendered_root())
-    if not force and _codex_stamp(path) == current and manifest.is_file():
+    if (
+        not force
+        and claude_fresh
+        and manifest.is_file()
+        and _read_toml(out / "config.toml").get("agentihooks") == current
+    ):
         return None
-    settings = _settings("codex", bundle, dirs)
-    doc: dict = {key: settings[key] for key in CODEX_KEYS if key in settings}
-    doc["developer_instructions"] = _persona(name, "codex", bundle, dirs, current["chain"])
-    global_config = codex_home() / "config.toml"
-    installed = tomllib.loads(global_config.read_text()).get("mcp_servers", {}) if global_config.exists() else {}
-    hidden_servers = sorted(set(installed) - set(_mcp_servers("codex", bundle, dirs)))
-    if hidden_servers:
-        doc["mcp_servers"] = {server: {"enabled": False} for server in hidden_servers}
-    keep = _features("skills", Path.is_dir, bundle, dirs)
+    claude = rendered_root() / name / "claude"
+    out.mkdir(exist_ok=True)
+    _link(out / "AGENTS.md", claude / "CLAUDE.md")
+    _relink(out / "skills", {p.name: p for p in sorted((claude / "skills").iterdir())})
+    for item in CODEX_STATE:
+        _link(out / item, operator / item)
+    _link(manifest, sources.path(name, "claude", rendered_root()))
+    doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
+    doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))
+    servers = _mcp_servers("codex", bundle, dirs)
+    allowed = {server: spec for server, spec in installed.get("mcp_servers", {}).items() if server in servers}
+    if allowed:
+        doc["mcp_servers"] = allowed
     root = agents_skills_home()
-    hidden_skills = [p for p in sorted(root.iterdir()) if p.is_dir() and p.name not in keep] if root.is_dir() else []
+    hidden_skills = [p for p in sorted(root.iterdir()) if p.is_dir()] if root.is_dir() else []
     if hidden_skills:
         doc["skills"] = {"config": [{"path": str(p / "SKILL.md"), "enabled": False} for p in hidden_skills]}
-    doc["agentihooks"] = {"render": current}
-    _atomic_write(path, tomlkit.dumps(doc))
-    return path
+    doc["agentihooks"] = current
+    _atomic_write(out / "config.toml", tomlkit.dumps(doc))
+    legacy = operator / f"{name}.config.toml"
+    if _codex_stamp(legacy):
+        legacy.unlink()
+    return out
 
 
 def render(target: str, name: str, force: bool = False) -> Path | None:
@@ -270,9 +321,9 @@ def rendered_profiles(target: str) -> list[str]:
     if target == "claude":
         return sorted(home.parent.name for home in rendered_root().glob("*/claude"))
     if target == "codex":
-        return sorted(
-            p.name.removesuffix(".config.toml") for p in codex_home().glob("*.config.toml") if _codex_stamp(p)
-        )
+        homes = {config.parent.parent.name for config in rendered_root().glob("*/codex/config.toml")}
+        legacy = _operator_codex_home().glob("*.config.toml")
+        return sorted(homes | {p.name.removesuffix(".config.toml") for p in legacy if _codex_stamp(p)})
     return []
 
 
