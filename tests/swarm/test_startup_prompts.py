@@ -27,6 +27,10 @@ def test_saved_import_prompt_overrides_herdr_working_status(tmp_path):
     assert observed.state == "waiting"
     assert observed.prompt_title == TITLE
     assert all(call[:2] in (["agent", "get"], ["pane", "read"]) for call in calls)
+    assert [call for call in calls if call[:2] == ["pane", "read"]] == [
+        ["pane", "read", "w:p1", "--source", "visible", "--format", "text"],
+        ["pane", "read", "w:p1", "--source", "visible", "--format", "text"],
+    ]
 
 
 def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
@@ -162,3 +166,46 @@ def test_a_master_selection_prompt_is_visible_without_idle_nudges():
     assert master.input_prompt == ""
     assert master.idle_ticks == 0
     assert runtime.nudged == runtime.killed == []
+
+
+def test_input_finding_keeps_all_evidence_and_skips_other_agents():
+    from scripts.swarm.health.findings import Finding, waiting_on_input
+
+    agents = [
+        {"name": "ready", "task": "task", "input_prompt": TITLE, "input_ticks": 0},
+        {"name": "waiting", "task": "task", "input_prompt": TITLE, "input_ticks": 4},
+    ]
+    tasks = {"task": {"id": "task", "title": "Startup proof", "state": "claimed"}}
+    assert waiting_on_input(agents, tasks) == [
+        Finding(
+            "waiting on input",
+            "waiting",
+            "waiting on input for 4 ticks while holding a task",
+            (f"prompt: {TITLE}", "task Startup proof (claimed)"),
+            "more than 3 consecutive ticks waiting on input",
+            4,
+        )
+    ]
+
+
+def test_owned_pane_without_status_is_unknown(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: {"agent": {"name": "engineer", "pane_id": "w:p1"}})
+    assert runtime.observe(AgentRecord("engineer", "eng", "task", pane_id="w:p1")).state == "unknown"
+
+
+def test_master_prompt_observation_preserves_previous_retirement_actions():
+    import fakeredis
+
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm.tick import _reap
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.put_agent("sw", AgentRecord("finished", "eng", "task", state="finished"))
+    store.put_agent("sw", AgentRecord("master", "master", ""))
+    runtime = FakeRuntime()
+    runtime.live.update(("finished", "master"))
+    runtime.observe = lambda a: PaneObservation("waiting", TITLE)
+    actions = _reap("sw", store, FakeLedger([]), runtime, {}, 1)
+    assert actions == ["retired finished"]

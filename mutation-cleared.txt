@@ -63,19 +63,19 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
-  "hooks/classifier/api.py:hooks.classifier.api.xǁDecisionsApiBackendǁdecide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
     "reader": "Standards",
     "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
   },
@@ -103,19 +103,19 @@
     "reader": "Standards reviewer /root/standards",
     "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.xǁCodexCliBackendǁdecide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
     "reader": "Standards reviewer /root/standards",
     "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
   },
@@ -234,5 +234,37 @@
   "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
     "reader": "Standards",
     "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
+    "reader": "Standards /root/standards",
+    "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_9:621e1e54433d2b39917cb539813e8bf1440aa9e6142ff41ec747585be6765b94": {
+    "reader": "Standards /root/standards",
+    "reason": "Hex escape digit case denotes the same escape byte."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_21:6579613443d4e3d56e7997967a445eb4a9eb66234972d92237cc5913a1136686": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_33:472bb940820328ca7dce0df9d3140d760f71ec3973dcd2a0cb0024eb50627267": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_waiting_on_input__mutmut_17:df825097be97b85aa5ab7ad35adccc47e7215e4eca4ce205b5aa0f8d0da9038a": {
+    "reader": "Standards /root/standards",
+    "reason": "Missing tick counts zero and one both remain below the four tick finding threshold."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_5:16538ba358287064156593d27f28e92076b6df14247465396575de341381c291": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before ledger is used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_7:b352cc411cb90bb7cef57ba21a5944c592da8836b567de21e9c76ca6589d685c": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before task rows are used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_9:3a19000dfa0194f0917d772f84ef1ae2082dd6416e19320087b022e52e6045d5": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before time is used."
   }
 }
