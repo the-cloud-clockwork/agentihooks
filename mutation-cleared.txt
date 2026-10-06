@@ -302,5 +302,9 @@
   "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_5:bdc5ca81647e17a4b7402b00bc2fd3afd7eb5ab58a954af5a2a118110724599a": {
     "reader": "Standards",
     "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
+    "reader": "Standards",
+    "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."
   }
 }
