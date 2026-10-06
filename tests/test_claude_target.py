@@ -82,6 +82,18 @@ def test_installed_claude_rules_stay_inside_global_home(tmp_path):
     assert entry["kind"] == "rules"
 
 
+def test_empty_claude_rule_install_keeps_user_files(tmp_path):
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    rules = install.CLAUDE_HOME / "rules"
+    rules.mkdir(parents=True)
+    (rules / "user.md").write_text("USER RULE\n")
+    ClaudeAdapter().install_features("rules", [("rule", tmp_path / "absent")], lambda path: path.suffix == ".md")
+
+    assert (rules / "user.md").read_text() == "USER RULE\n"
+    assert install._state_links() == {}
+
+
 def test_installed_claude_rules_refresh_and_preserve_foreign_files(tmp_path, capsys):
     from scripts.targets.claude_target import ClaudeAdapter
 
@@ -159,7 +171,10 @@ def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypa
     (source / "rule.md").write_text("NEW RULE\n")
     rules = install.CLAUDE_HOME / "rules"
     (rules / "folder").mkdir()
-    (rules / "linked.md").symlink_to(source / "rule.md")
+    foreign = tmp_path / "foreign" / "rule.md"
+    foreign.parent.mkdir()
+    foreign.write_text("FOREIGN RULE\n")
+    (rules / "linked.md").symlink_to(foreign)
     outside = install.CLAUDE_HOME / "commands" / "copied.md"
     outside.parent.mkdir()
     outside.write_text("COMMAND\n")
@@ -187,3 +202,14 @@ def test_refresh_rules_rewrites_copied_source_before_delivery(tmp_path, monkeypa
     assert (rules / "folder").is_dir()
     assert (rules / "linked.md").is_symlink()
     assert outside.read_text() == "COMMAND\n"
+
+    (source / "rule.md").rename(source / "renamed.md")
+    (source / "added.md").write_text("ADDED RULE\n")
+    (source / "README.md").write_text("NOT A RULE\n")
+    install._cmd_refresh_rules(Namespace(profile="engineer", clear=False, dry_run=False))
+    assert not (rules / "rule.md").exists()
+    assert (rules / "renamed.md").read_text() == "NEW RULE\n"
+    assert (rules / "added.md").read_text() == "ADDED RULE\n"
+    assert not (rules / "README.md").exists()
+    assert "NEW RULE" in seen[1]
+    assert "ADDED RULE" in seen[1]
