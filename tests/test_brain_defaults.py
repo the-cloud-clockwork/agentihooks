@@ -53,10 +53,10 @@ def brain_env(tmp_path, monkeypatch):
         return importlib.reload(config)
 
     yield home, _load
-    monkeypatch.undo()
     # hooks.config writes .env values into os.environ, which monkeypatch never recorded.
     os.environ.clear()
     os.environ.update(saved)
+    monkeypatch.undo()
     import hooks.config as config
 
     importlib.reload(config)
@@ -74,9 +74,9 @@ def test_no_brain_setting_outlives_the_fixture(tmp_path, preset):
     )
     home = tmp_path / "home"
     home.mkdir()
-    dropped = {*_BRAIN_KEYS, "AGENTIHOOKS_HOME", "AGENTIBRAIN_HOME"}
+    dropped = {*_BRAIN_KEYS, "AGENTIHOOKS_HOME", "AGENTIBRAIN_HOME", "PYTEST_ADDOPTS"}
     env = {k: v for k, v in os.environ.items() if k not in dropped} | {"HOME": str(home)} | preset
-    leaker = f"{Path(__file__).resolve()}::test_brain_owned_client_policy_is_loaded_from_agentibrain"
+    leaker = f"{Path(__file__).resolve()}::{test_brain_owned_client_policy_is_loaded_from_agentibrain.__name__}"
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "-p", "no:cacheprovider"]
         + ["-c", str(root / "pyproject.toml"), "--rootdir", str(root), leaker, str(after)],
