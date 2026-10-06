@@ -103,6 +103,25 @@ def test_other_watches_count_every_call(tmp_path):
     assert activity.counts("sw", tmp_path) == {"sw-eng-1": {"watch": 4, "act": 0}}
 
 
+def test_entries_keep_each_agents_timed_rows_and_tally_counts_them_as_counts_does(tmp_path):
+    for minute in (0, 1, 31):
+        activity.record("Monitor", REARM, BOUND, tmp_path, now_ms=minute * 60_000)
+    activity.record("Edit", {"file_path": "a.py"}, BOUND, tmp_path, now_ms=32 * 60_000)
+    rows = activity.entries("sw", tmp_path)
+    assert [row["at"] for row in rows["sw-eng-1"]] == [0, 60_000, 31 * 60_000, 32 * 60_000]
+    assert activity.tally(rows["sw-eng-1"]) == {"watch": 2, "act": 1} == activity.counts("sw", tmp_path)["sw-eng-1"]
+    assert activity.tally(rows["sw-eng-1"][1:]) == {"watch": 2, "act": 1}
+    assert activity.entries("missing", tmp_path) == {}
+
+
+def test_an_agent_named_with_its_seat_code_is_recorded(tmp_path):
+    named = {**BOUND, "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0101"}
+    activity.record("Bash", {"command": "gh pr checks 3"}, named, tmp_path, now_ms=0)
+    assert activity.counts("sw", tmp_path) == {"engineer@323133-0101": {"watch": 1, "act": 0}}
+    activity.record("Bash", {"command": "gh pr checks 3"}, {**named, "AGENTIHOOKS_AGENT_NAME": "a/../b"}, tmp_path)
+    assert list(activity.counts("sw", tmp_path)) == ["engineer@323133-0101"]
+
+
 def test_a_master_doing_ledger_writes_and_watches_does_not_trip_over_monitoring(tmp_path):
     from scripts.swarm.health import findings as health
 
