@@ -176,5 +176,19 @@ def test_the_route_refuses_writes_from_another_origin_or_without_json(port):
     assert call(port) == (200, "{}")
 
 
+def test_a_write_without_a_content_length_resets_at_once(port):
+    call(port, "PUT", SAVED)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    conn.putrequest("PUT", "/api/layout", skip_host=True, skip_accept_encoding=True)
+    conn.putheader("Host", f"127.0.0.1:{server.PORT}")
+    conn.putheader("Origin", f"http://127.0.0.1:{server.PORT}")
+    conn.putheader("Content-Type", "application/json")
+    conn.endheaders()
+    reply = conn.getresponse()
+    assert (reply.status, reply.read().decode()) == (200, "{}")
+    conn.close()
+    assert call(port) == (200, "{}")
+
+
 def test_only_the_path_before_the_first_question_mark_names_the_route(port):
     assert call(port, "PUT", SAVED, query="?a?b") == (200, json.dumps(SAVED))
