@@ -4,7 +4,7 @@ import pytest
 
 from hooks.classifier import Answer, DecisionResult
 from scripts import init_agent
-from scripts.swarm import effort_range, model_pick
+from scripts.swarm import cli, effort_range, model_pick
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_runtime import _launched, _passed, _resuming
 
@@ -100,7 +100,10 @@ def test_a_resumed_agent_relaunches_inside_the_range(tmp_path):
         ("claude", ["--effort", "max"], {}, "max"),
     ],
 )
-def test_init_agent_clamps_a_swarm_lane_launch_into_the_range(tmp_path, capsys, agent, args, environ, expected):
+def test_init_agent_clamps_a_swarm_lane_launch_into_the_range(
+    tmp_path, capsys, monkeypatch, agent, args, environ, expected
+):
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *a: ("linux", ["/usr/bin/term", str(launcher)]))
     rc = init_agent.main(
         ["--dir", str(tmp_path), "--agent", agent, "--host", "native", "--dry-run", "--", *args],
         {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", **environ},
@@ -149,6 +152,7 @@ def test_set_refuses_an_unordered_or_unknown_range(env, pairs):  # noqa: F811
 
 def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     store, _, _ = env
+    assert cli.EFFORT_KEYS == {"effort-min": "effort_min", "effort-max": "effort_max"}
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "effort-max=xhigh") == 0
     assert store.config("sw").effort_max == "max"
@@ -184,7 +188,9 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     run("sw", "create", "--repo", "/repo")
     capsys.readouterr()
     assert run("sw", "set", "colour=red") == 1
-    assert "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E or eng-role, " in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "set takes max-eng-agents, max-ci-agents, " in err
+    assert "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E or eng-role, " in err
     assert run("sw", "set", "effort-min=huge") == 1
     assert "one of low, medium, high, max, Codex xhigh standing for max" in capsys.readouterr().err
 

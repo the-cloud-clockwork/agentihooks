@@ -569,8 +569,9 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(run.call_args_list[0].args[0][1:], ["swarm", SLUG, "set", "effort-min=low", "effort-max=max"])
         for level in ("xhigh", "", 3, None):
-            code, _, run = self.control({"action": "set", "effort_max": level})
+            code, text, run = self.control({"action": "set", "effort_max": level})
             self.assertEqual(code, 400, level)
+            self.assertIn("effort_max must be one of low, medium, high, max", text)
             run.assert_not_called()
 
     def test_a_one_lane_set_runs_only_that_lane(self):
