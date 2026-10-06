@@ -10,9 +10,10 @@ class PaneObservation:
 
 def selection_prompt(text: str) -> str:
     plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
-    lines = [line.strip() for line in plain.splitlines() if line.strip()]
+    raw = [line.strip() for line in plain.splitlines()]
+    lines = [line for line in raw if line]
     confirmations = [
-        i for i, line in enumerate(lines) if re.search(r"enter\s+to\s+(?:confirm|select|continue)", line, re.I)
+        i for i, line in enumerate(lines) if re.search(r"enter\s+(?:to\s+)?(?:confirm|select|continue)", line, re.I)
     ]
     if not confirmations:
         return ""
@@ -20,11 +21,23 @@ def selection_prompt(text: str) -> str:
         not re.match(r"(?:esc(?:ape)?\b|[↑↓←→]|use .*arrow)", line, re.I) for line in lines[confirmations[-1] + 1 :]
     ):
         return ""
-    choices = [i for i, line in enumerate(lines) if re.match(r"[❯›→>]\s+\S", line)]
+    choices = [i for i, line in enumerate(lines) if CHOICE.match(line)]
     if not choices:
         return ""
-    titles = [line for line in lines[: choices[-1]] if line.endswith("?")]
-    return titles[-1] if titles else ""
+    questions = [line[: line.rindex("?") + 1] for line in lines[: choices[-1]] if "?" in line]
+    return questions[-1] if questions else _heading(raw)
+
+
+CHOICE = re.compile(r"[❯›→>]\s+\S")
+
+
+def _heading(raw):
+    """A prompt without a question is titled by the first line of the paragraph just above its choices."""
+    above = raw[: next((i for i, line in enumerate(raw) if CHOICE.match(line)), 0)]
+    while above and not above[-1]:
+        above.pop()
+    start = max((i + 1 for i, line in enumerate(above) if not line), default=0)
+    return above[start] if above else ""
 
 
 INPUT_MARK = re.compile(r"\s*[❯›]\s?")

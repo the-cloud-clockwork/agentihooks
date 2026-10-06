@@ -37,6 +37,42 @@ def test_non_dialog_content_is_not_waiting(text):
     assert selection_prompt(text) == ""
 
 
+@pytest.mark.parametrize(
+    ("capture", "title"),
+    [
+        ("claude-trust-prompt.txt", "Quick safety check: Is this a project you created or one you trust?"),
+        ("codex-update-prompt.txt", "Update available · 0.160.0 → 0.160.1"),
+        ("codex-idle-composer.txt", ""),
+    ],
+)
+def test_real_startup_captures(capture, title):
+    assert selection_prompt((Path(__file__).parents[1] / "fixtures/swarm" / capture).read_text()) == title
+
+
+@pytest.mark.parametrize(
+    ("text", "title"),
+    [
+        ("Update ready\nnotes here\n› 1. Update\n  2. Skip\nenter continue · esc skip", "Update ready"),
+        ("banner\n\nUpdate ready\nnotes\n\n\n› 1. Update\nPress enter to continue", "Update ready"),
+        ("Trust it? (see the guide)\n❯ Yes\nEnter to confirm", "Trust it?"),
+    ],
+)
+def test_prompt_without_a_question_line_is_titled_by_its_paragraph(text, title):
+    assert selection_prompt(text) == title
+
+
+def test_a_question_line_keeps_every_question_up_to_the_last_mark():
+    assert selection_prompt("Is it yours? Do you trust it? (guide)\n❯ Yes\nEnter to confirm") == (
+        "Is it yours? Do you trust it?"
+    )
+
+
+def test_heading_without_a_choice_line_is_empty():
+    from scripts.swarm.pane import _heading
+
+    assert _heading(["Update ready", "notes", "", "plain text"]) == ""
+
+
 RULE = "\x1b[0m\x1b[38;2;136;136;136m" + "─" * 40
 ECHO = (
     "\x1b[38;2;153;153;153m\x1b[48;2;55;55;55m❯ \x1b[0m\x1b[38;2;255;255;255m\x1b[48;2;55;55;55mhow is the swarm\x1b[0m"

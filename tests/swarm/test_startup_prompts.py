@@ -209,3 +209,69 @@ def test_master_prompt_observation_preserves_previous_retirement_actions():
     runtime.observe = lambda a: PaneObservation("waiting", TITLE)
     actions = _reap("sw", store, FakeLedger([]), runtime, {}, 1)
     assert actions == ["retired finished"]
+
+
+FIXTURES = Path(__file__).parents[1] / "fixtures/swarm"
+TRUST = "Quick safety check: Is this a project you created or one you trust?"
+
+
+def _herdr_showing(capture, status="working"):
+    def herdr(args):
+        if args[:2] == ["pane", "read"]:
+            return {"text": (FIXTURES / capture).read_text()}
+        return {"agent": {"name": "engineer-one", "pane_id": "w:p1", "agent_status": status}}
+
+    return herdr
+
+
+@pytest.mark.parametrize(
+    ("capture", "title"),
+    [
+        ("claude-trust-prompt.txt", TRUST),
+        ("codex-update-prompt.txt", "Update available · 0.160.0 → 0.160.1"),
+    ],
+)
+def test_real_claude_and_codex_startup_captures_read_as_waiting(tmp_path, capture, title):
+    runtime = HerdrRuntime(home=tmp_path, herdr=_herdr_showing(capture))
+    observed = runtime.observe(AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    assert (observed.state, observed.prompt_title) == ("waiting", title)
+
+
+def test_real_codex_idle_composer_is_not_waiting(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("codex-idle-composer.txt", "idle"))
+    observed = runtime.observe(AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    assert (observed.state, observed.prompt_title) == ("idle", "")
+
+
+def test_a_pane_herdr_reports_blocked_is_waiting_even_without_a_known_dialog(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("codex-idle-composer.txt", "blocked"))
+    observed = runtime.observe(AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    assert (observed.state, observed.prompt_title) == ("waiting", "")
+
+
+def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_names_it(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import _watch_idle
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("prompt-proof", "/repo", max_eng=1, max_ci=0))
+    store.put_agent("prompt-proof", AgentRecord("engineer-one", "eng", "task", pane_id="w:p1"))
+    ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    runtime = FakeRuntime()
+    runtime.observe = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("claude-trust-prompt.txt")).observe
+    for tick in range(1, 5):
+        agent = store.agents("prompt-proof")[0]
+        _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, tick)
+        cli.cmd_status(store, SimpleNamespace(slug="prompt-proof", json=False))
+        out = capsys.readouterr().out
+        row = next(line.split("\t") for line in out.splitlines() if line.startswith("engineer-one\t"))
+        assert row[8] == "waiting"
+    assert f"prompt: {TRUST}" in out
+    assert "finding  waiting on input  engineer-one" in out
