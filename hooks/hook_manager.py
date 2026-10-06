@@ -694,6 +694,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     log("User prompt submitted", {"session_id": session_id})
     _swarm_heartbeat("working", payload.get("prompt", ""))
     typed = _operator_words(payload)
+    _operator_mode(payload, typed)
 
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
@@ -1023,6 +1024,28 @@ def _operator_words(payload: dict) -> bool:
         return False
 
 
+def _operator_mode(payload: dict, typed: bool) -> None:
+    try:
+        from hooks.common import inject_context
+        from hooks.context.operator_mode import notice
+
+        text = notice(payload, typed)
+        if text:
+            inject_context(text, also_log=False, skip_compression=True)
+    except Exception as e:
+        log("operator mode failed", {"error": str(e)})
+
+
+def _operator_question(payload: dict) -> str:
+    try:
+        from hooks.context import operator_mode
+
+        return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
+    except Exception as e:
+        log("operator question check failed", {"error": str(e)})
+        return ""
+
+
 def _arm_gate_lifts(payload: dict) -> None:
     try:
         from scripts.gates.base import Who
@@ -1106,6 +1129,10 @@ def on_pre_tool_use(payload: dict) -> None:
         log("quota policy pre-tool failed", {"error": str(e)})
     if _quota_policy_block:
         raise BlockAction(_quota_policy_block)
+
+    _question_block = _operator_question(payload)
+    if _question_block:
+        raise BlockAction(_question_block)
 
     try:
         from scripts.swarm.health.activity import record as _record_swarm_activity

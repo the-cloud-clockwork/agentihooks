@@ -22,12 +22,13 @@ def beat(state, environ=None, redis=None, now_ms=None):
 
 
 def is_operator_prompt(prompt, slug):
-    """False for the prompts the swarm itself types into a pane: inbox wakes, idle nudges, task notifications."""
+    """False for the prompts the swarm itself types into a pane: marked deliveries, inbox wakes, idle nudges, task notifications."""
     from scripts.inbox.wake import WAKE_TEXT
+    from scripts.swarm.delivery import MARK
     from scripts.swarm.tick import NUDGE
 
     text = prompt.strip()
-    return bool(text) and text not in (WAKE_TEXT, NUDGE.format(slug=slug)) and not text.startswith(NOTIFICATION)
+    return bool(text) and text not in (WAKE_TEXT, NUDGE.format(slug=slug)) and not text.startswith((NOTIFICATION, MARK))
 
 
 def heard(prompt, environ=None, redis=None, now_ms=None):

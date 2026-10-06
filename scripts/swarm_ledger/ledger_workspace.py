@@ -35,6 +35,8 @@ def steering(task: dict, doc: dict | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]
+    if task.get("plan_url"):
+        lines += [f"Plan: {task['plan_url']}", ""]
     contract = task.get("contract") or {}
     rows = [f"- {label}: {contract[key]}" for key, label in CONTRACT_LABELS if contract.get(key)]
     if rows:

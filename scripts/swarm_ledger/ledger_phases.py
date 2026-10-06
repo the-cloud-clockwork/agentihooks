@@ -1,7 +1,8 @@
 import re
 
 OPS = ("phase_add", "phase_update", "phase_review")
-FIELDS = ("title", "description", "depends_on", "planning", "release")
+FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url")
+URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ITEM_RE = re.compile(r"^phases/[A-Za-z][\w.-]{0,63}$")
@@ -22,6 +23,8 @@ def check_fields(fields: dict) -> None:
         raise ValueError("planning must be manual or auto")
     if "release" in fields and type(fields["release"]) is not bool:
         raise ValueError("release must be a boolean")
+    if "plan_url" in fields and not (isinstance(fields["plan_url"], str) and URL_RE.match(fields["plan_url"])):
+        raise ValueError("plan_url must be an http or https link")
 
 
 def validate(phases: list[dict]) -> None:

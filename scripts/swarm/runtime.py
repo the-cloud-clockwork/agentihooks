@@ -295,7 +295,9 @@ class HerdrRuntime:
         return {row["pane_id"]: _conversation_id(row.get("agent_session")) for row in listed if row.get("pane_id")}
 
     def nudge(self, agent, text):
+        from scripts.swarm.delivery import marked
+
         try:
-            self.herdr(["agent", "prompt", pane_target(agent), text])
+            self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception:
             pass
