@@ -94,7 +94,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # and target-specific subdirectories at any depth.
 # One entry per discovered profiles package; the bare "profiles" key also
 # captures files under non-package subdirs like profiles/package/rules/.
-"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh"]
+"profiles" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md", "**/*.sh", "**/*.py"]
 "profiles._base" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
 "profiles.default" = ["**/*.json", "**/*.toml", "**/*.yml", "**/*.yaml", "**/*.md"]
 
