@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
+from scripts.swarm import effort_range
 from scripts.swarm.naming import NameRegistry
 
 PREFIX = "agentihooks:swarm"
@@ -39,6 +40,8 @@ class SwarmConfig:
     code: str = ""
     max_plan: int = 1
     gates: dict = field(default_factory=dict)
+    effort_min: str = effort_range.DEFAULT[0]
+    effort_max: str = effort_range.DEFAULT[1]
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,9 @@ class RedisStore:
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
+        refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+        if refused:
+            raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
         config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
@@ -108,6 +114,8 @@ class RedisStore:
             raw.get("code", ""),
             int(raw.get("max_plan", 1)),
             json.loads(raw.get("gates") or "{}"),
+            raw.get("effort_min") or effort_range.DEFAULT[0],
+            raw.get("effort_max") or effort_range.DEFAULT[1],
         )
 
     def update(self, slug, **changes):
@@ -118,6 +126,12 @@ class RedisStore:
         if not 0 <= changes.get("codex_share", 0) <= 100:
             raise SwarmError("codex share is a percent from 0 to 100")
         config = replace(self.config(slug), **changes)
+        if {"lanes", "effort_min", "effort_max"} & set(changes):
+            refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
+            if refused:
+                raise SwarmError(refused)
+            low, high = (effort_range.level(edge) for edge in (config.effort_min, config.effort_max))
+            config = replace(config, effort_min=low, effort_max=high)
         self.redis.hset(self.key(slug, "config"), mapping=_fields(config))
         return config
 

@@ -27,7 +27,7 @@ def caps_boxes(browser, width):
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;
-              for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20"], ["cap-compact", "600"]]) document.getElementById(id).value = v;
+              for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-codex", "20"], ["cap-compact", "600"], ["cap-effort_min", "medium"], ["cap-effort_max", "high"]]) document.getElementById(id).value = v;
               const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
                 caps: [...document.querySelectorAll("#capacity-box .sw-cap")].map((cap) => [...cap.children].map(box)),
@@ -42,7 +42,7 @@ def caps_boxes(browser, width):
 @pytest.mark.parametrize("width", [1300, 390])
 def test_each_cap_keeps_its_name_value_minus_and_plus_on_one_line_inside_the_strip(browser, width):
     boxes = caps_boxes(browser, width)
-    assert len(boxes["caps"]) == 5
+    assert len(boxes["caps"]) == 7
     for name, value, minus, plus in boxes["caps"]:
         middle = (value["top"] + value["bottom"]) / 2
         for part in (name, minus, plus):
