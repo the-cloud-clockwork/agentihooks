@@ -1,4 +1,6 @@
+import hashlib
 import json
+import time
 
 import pytest
 
@@ -112,6 +114,17 @@ def test_parse_refuses_a_piece_the_ledger_would_refuse_as_a_follow_up():
     assert "file name or path" in str(refused.value)
 
 
+def test_parse_refuses_a_task_id_the_ledger_would_refuse_in_a_follow_up():
+    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
+        trace_plan.parse("- a light | a | b", "my_task")
+
+
+def test_parse_names_every_problem_of_a_piece():
+    with pytest.raises(ValueError) as refused:
+        trace_plan.parse("- fix plan_hash in cli.py | a | b", "t1")
+    assert str(refused.value).endswith(": file name or path 'cli.py'; code identifier 'plan_hash'")
+
+
 def test_parse_caps_the_number_of_pieces():
     allowed = "".join(f"- piece {i} | a | b\n" for i in range(trace_plan.MAX_PIECES))
     assert len(trace_plan.parse(allowed, "t1")) == trace_plan.MAX_PIECES
@@ -126,7 +139,9 @@ def test_followup_text_names_the_task_and_the_piece():
 def test_plan_hash_changes_with_any_field_and_ignores_nothing():
     base = [piece("a", "x", why="w")]
     digest = trace_plan.plan_hash(base)
-    assert len(digest) == 64 and digest == trace_plan.plan_hash([piece("a", "x", why="w")])
+    assert digest == hashlib.sha256(b"a | x | w").hexdigest()
+    pair = trace_plan.plan_hash([piece("a", "x", why="w"), piece("b", "y", "z", why="v")])
+    assert pair == hashlib.sha256(b"a | x | w\nb | y, z | v").hexdigest()
     for other in ([piece("b", "x", why="w")], [piece("a", "y", why="w")], [piece("a", "x", why="v")], base * 2):
         assert trace_plan.plan_hash(other) != digest
 
@@ -136,17 +151,20 @@ def test_intent_reads_project_phase_and_task():
         "overview": "Keep the dog warm.",
         "phases": [{"id": "p0", "title": "Other"}, {"id": "p1", "title": "Build", "description": "Build it."}],
     }
-    task = {"id": "t1", "phase": "p1", "title": "Doghouse", "description": "A house for the dog."}
-    assert trace_plan.intent(doc, task) == {
+    doc["tasks"] = [
+        {"id": "t0", "phase": "p0", "title": "Other"},
+        {"id": "t1", "phase": "p1", "title": "Doghouse", "description": "A house for the dog."},
+    ]
+    assert trace_plan.intent(doc, "t1") == {
         "project intent": "Keep the dog warm.",
         "phase": "Build",
         "phase intent": "Build it.",
         "task": "Doghouse",
         "task intent": "A house for the dog.",
     }
-    assert trace_plan.intent({}, {}) == dict.fromkeys(
-        ("project intent", "phase", "phase intent", "task", "task intent"), ""
-    )
+    blank = dict.fromkeys(("project intent", "phase", "phase intent", "task", "task intent"), "")
+    assert trace_plan.intent({}, "t1") == blank
+    assert trace_plan.intent(doc, "t9") == {**blank, "project intent": "Keep the dog warm."}
 
 
 # trace
@@ -308,7 +326,9 @@ def test_a_piece_appended_to_a_passing_plan_is_traced_alone(ask):
     passed = trace_plan.trace(first, INTENT, None)
     passed["filed"] = ["k"]
     fake = ask(0.2, score=None, start=2)
+    fake.source, fake.calibrated = "claude-haiku", False
     later = trace_plan.trace([*first, piece("a generator")], INTENT, passed, now_ms=9)
+    assert (later["source"], later["calibrated"], later["at"]) == ("claude-haiku", False, 9)
     [(state, questions, _)] = fake.calls
     assert state["pieces"] == [{"piece": 3, "what": "a generator", "areas": ["src"], "why": "the task needs it"}]
     assert list(questions) == ["piece_2"]
@@ -329,8 +349,15 @@ def test_an_appended_piece_with_no_answer_leaves_the_plan_unchecked(ask):
     passed = trace_plan.trace([piece("walls")], INTENT, None)
     ask(error=ClassifierUnavailable("down"))
     later = trace_plan.trace([piece("walls"), piece("light")], INTENT, passed)
-    assert later["verdict"] == "unchecked"
+    assert (later["verdict"], later["size"]) == ("unchecked", passed["size"])
     assert later["pieces"] == [passed["pieces"][0], {**passed["pieces"][0], "what": "light", "probability": None}]
+
+
+def test_a_trace_without_a_clock_stamps_the_time_in_milliseconds(ask):
+    ask(0.9)
+    before = int(time.time() * 1000)
+    record = trace_plan.trace([piece("a")], INTENT, None)
+    assert before <= record["at"] <= int(time.time() * 1000)
 
 
 @pytest.mark.parametrize(
@@ -341,6 +368,13 @@ def test_an_appended_piece_with_no_answer_leaves_the_plan_unchecked(ask):
         {"verdict": "pass", "pieces": [{"what": "roof", "areas": ["src"], "why": "the task needs it"}]},
         {"verdict": "pass", "pieces": [{"what": "walls", "areas": ["src"], "why": "the task needs it"}] * 2},
         {"verdict": "pass", "pieces": [{"what": "walls", "areas": ["src"], "why": "the task needs it"}] * 3},
+        {
+            "verdict": "pass",
+            "pieces": [
+                {"what": "walls", "areas": ["src"], "why": "the task needs it"},
+                {"what": "light", "areas": ["src"], "why": "the task needs it"},
+            ],
+        },
     ],
 )
 def test_a_changed_failed_or_unchecked_plan_is_traced_whole(ask, previous):
@@ -380,7 +414,7 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     write_plan(folder)
     ask(0.9, 0.8, 0.1)
     record, block = run(folder, ledger, home)
-    assert block is False
+    assert (block, record["at"]) == (False, 11)
     assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
     assert record["filed"] == ["a diesel generator | power/generator | it powers the light"]
     assert json.loads((folder / "plan-verdict.json").read_text()) == record
@@ -414,11 +448,16 @@ def test_run_on_an_unchanged_plan_asks_nothing_and_writes_nothing(ask, tmp_path)
 def test_run_files_nothing_for_a_failed_plan_and_logs_the_would_be_refusal(ask, tmp_path):
     folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
     write_plan(folder)
-    ask(0.1, 0.1, 0.9)
+    ask(0.1, 0.1, 0.9, score=3.0, confidence=0.8)
     record, block = run(folder, ledger, home)
     assert (record["verdict"], block, ledger.followups) == ("fail", False, [])
     [row] = rows(home)
-    assert (row["kind"], row["reason"]) == ("observe", "2 of 3 pieces are off the task intent, more than half")
+    assert (row["gate"], row["kind"], row["reason"]) == (
+        "trace-plan",
+        "observe",
+        "2 of 3 pieces are off the task intent, more than half and "
+        "the plan is sized a whole phase at confidence 0.80, above one pull request",
+    )
 
 
 @pytest.mark.parametrize(
@@ -443,7 +482,7 @@ def test_run_logs_an_unchecked_plan_as_fail_open(ask, tmp_path):
     record, block = run(folder, ledger, home, "enforce")
     assert (record["verdict"], block, ledger.followups) == ("unchecked", False, [])
     [row] = rows(home)
-    assert (row["kind"], row["reason"]) == ("fail-open", "the classifier did not answer")
+    assert (row["gate"], row["kind"], row["reason"]) == ("trace-plan", "fail-open", "the classifier did not answer")
 
 
 def test_run_needs_a_plan_file(tmp_path):

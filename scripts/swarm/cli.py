@@ -585,13 +585,12 @@ def _block(store, slug, agent, note, ledger):
 def cmd_trace_plan(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
-    doc = ledger.state(args.slug)
-    task = next((t for t in doc.get("tasks", []) if t.get("id") == agent.task), {})
-    who = Who(name=agent.name, swarm=args.slug, lane=agent.lane, task=agent.task)
+    state = trace_plan.intent(ledger.state(args.slug), agent.task)
+    who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     folder = ledger_workspace.folder(args.slug, agent.task)
     mode = modes.mode(trace_plan.GATE, os.environ)
     try:
-        record, block = trace_plan.run(folder, trace_plan.intent(doc, task), ledger, who, mode)
+        record, block = trace_plan.run(folder, state, ledger, who, mode)
     except ValueError as exc:
         raise SwarmError(str(exc)) from exc
     if block:

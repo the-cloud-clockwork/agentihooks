@@ -82,7 +82,8 @@ def plan_hash(pieces):
     return hashlib.sha256("\n".join(piece.key for piece in pieces).encode()).hexdigest()
 
 
-def intent(doc, task):
+def intent(doc, task_id):
+    task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), {})
     phase = next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
     return {
         "project intent": doc.get("overview", ""),
@@ -192,7 +193,7 @@ def load(folder):
 def save(folder, record):
     path = folder / VERDICT
     staged = path.with_name(f".{path.name}.{os.getpid()}")
-    staged.write_text(json.dumps(record, indent=1))
+    staged.write_text(json.dumps(record))
     os.replace(staged, path)
 
 
@@ -209,7 +210,7 @@ def _file_cuts(record, ledger, who, home):
 def run(folder, state, ledger, who, mode, home=None, now_ms=None):
     """Trace the plan in folder; returns the verdict record and whether the task must be blocked."""
     try:
-        text = (folder / PLAN).read_text(encoding="utf-8")
+        text = (folder / PLAN).read_text()
     except OSError:
         raise ValueError(f"write the plan first: {folder / PLAN}, {FORMAT}") from None
     pieces = parse(text, who.task)

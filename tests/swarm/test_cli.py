@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, runtime, timer
 from scripts.swarm.health import checks
@@ -1268,6 +1269,12 @@ def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env,
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_GATE_TRACE_PLAN", "enforce")
     folder, _ = _traced(env, monkeypatch, tmp_path, "- a generator | power | it powers a light\n", 0.1)
+    writes = []
+    update, comment = ledger.update_task, ledger.comment
+    ledger.update_task = lambda slug, task, fields, by="swarm": writes.append((slug, by)) or update(slug, task, fields)
+    ledger.comment = lambda slug, task, text, by: writes.append((slug, by)) or comment(slug, task, text, by)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("ci@a1b2c3-0001", "engineer@a1b2c3-0001", "contract confirmed")
     assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
     assert ledger.rows["t1"]["state"] != "blocked"
     (folder / "plan.md").write_text("- a petrol generator | power | it powers a light\n")
@@ -1278,6 +1285,25 @@ def test_trace_plan_blocks_the_task_on_the_second_failed_plan_when_enforced(env,
     note = "Blocked by the plan trace after 2 failed plans: 1 of 1 pieces are off the task intent, more than half"
     assert ledger.comments[-1] == ("t1", note, "engineer@a1b2c3-0001")
     assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["finished"]
+    assert writes == [("sw", "engineer@a1b2c3-0001")] * 2
+    assert inbox.get(item.id).reason == "cancelled: engineer@a1b2c3-0001 blocked its task and exited before closing it"
+    rows = gate_log.recent("sw")
+    assert [(r["gate"], r["kind"], r["agent"], r["task"]) for r in rows] == [
+        ("trace-plan", "deny", "engineer@a1b2c3-0001", "t1")
+    ] * 2
+
+
+def test_trace_plan_reads_the_ledger_of_its_swarm_and_runs_without_a_task_row(env, capsys, monkeypatch, tmp_path):
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _, seen = _traced(env, monkeypatch, tmp_path, "- walls | doghouse | it shelters the dog\n", 0.9)
+    slugs, state = [], ledger.state
+    ledger.state = lambda slug: slugs.append(slug) or state(slug)
+    del ledger.rows["t1"]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
+    assert slugs == ["sw"]
+    assert (seen[0]["task"], seen[0]["phase"], seen[0]["project intent"]) == ("", "", "Project intent")
 
 
 def test_trace_plan_without_a_plan_names_the_file_and_format(env, capsys, monkeypatch, tmp_path):
