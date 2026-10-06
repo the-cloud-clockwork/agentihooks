@@ -3,14 +3,17 @@ import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-import ledger
-import ledger_core as core
-import ledger_server
-import ledger_workspace
-import new_ledger
 import pytest
 
+from scripts.swarm_ledger import ledger, ledger_server, ledger_workspace, new_ledger
+from scripts.swarm_ledger import ledger_core as core
+
 SLUG = "lean-reads-2026-01-01"
+
+
+@pytest.fixture(autouse=True)
+def lean_ledger_dir(ledger_dir, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", ledger_dir)
 
 
 def make_ledger():
@@ -48,7 +51,8 @@ def test_storage_keeps_only_the_last_few_seeds_and_every_entry():
     for n in range(core.SEEDS_KEPT + 10):
         say(n)
     stored = json.loads(core.paths(SLUG)[1].read_text(encoding="utf-8"))
-    assert len(stored["_meta"]["seeds"]) <= 5
+    assert core.SEEDS_KEPT <= 5
+    assert len(stored["_meta"]["seeds"]) == core.SEEDS_KEPT
     assert [m["text"] for m in stored["chat"]] == [f"note {n}" for n in range(core.SEEDS_KEPT + 10)]
 
 
@@ -65,6 +69,20 @@ def test_an_html_seed_older_than_the_kept_seeds_reverts_nothing():
     assert state["followups"][0]["done"] is True
     assert len(state["chat"]) == core.SEEDS_KEPT + 2
     assert any("too old" in w for w in state["_meta"]["warnings"])
+
+
+def test_an_html_seed_without_a_revision_merges_against_the_current_ledger():
+    make_ledger()
+    say(1)
+    html_path = core.paths(SLUG)[0]
+    html = html_path.read_text(encoding="utf-8")
+    seed = core.parse_seed(html)
+    seed.pop("_rev")
+    seed["chat"].append({"id": "m2", "by": "eng", "text": "from the page copy"})
+    html_path.write_text(core.SEED_RE.sub(lambda m: m[1] + json.dumps(seed) + m[3], html), encoding="utf-8")
+    state, _ = core.sync(SLUG)
+    assert [m["text"] for m in state["chat"]] == ["note 1", "from the page copy"]
+    assert not any("too old" in w for w in state["_meta"]["warnings"])
 
 
 @pytest.fixture

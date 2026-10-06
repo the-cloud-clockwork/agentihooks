@@ -321,7 +321,7 @@ def atomic_write(path, text):
 
 def write_if_changed(path, text):
     try:
-        if path.read_text(encoding="utf-8") == text:
+        if path.read_bytes() == text.encode():
             return
     except FileNotFoundError:
         pass
