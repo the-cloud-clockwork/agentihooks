@@ -48,6 +48,7 @@ def _observation(row):
     attributes = (row.get("metadata") or {}).get("attributes") or {}
     turn = attributes.get("agent.turn")
     error = attributes.get("error")
+    usage = row.get("usageDetails") or {}
     return {
         "type": row["type"],
         "name": row.get("name") or "",
@@ -55,7 +56,7 @@ def _observation(row):
         "end": _ms(row.get("endTime") or row.get("startTime")),
         "turn": int(turn) if turn is not None else None,
         "error": str(error).lower() == "true" if error is not None else None,
-        "tokens": int(row.get("totalTokens") or 0),
+        "tokens": int(row.get("totalTokens") or 0) - int(usage.get("cache_read_input_tokens") or 0),
     }
 
 

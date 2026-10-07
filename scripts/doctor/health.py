@@ -6,8 +6,9 @@ from scripts.swarm.health.findings import MINUTE_MS, Finding
 UNJUDGED_MINUTES = 30
 
 
-def findings(records, now_ms, unjudged_minutes=UNJUDGED_MINUTES):
-    return [*unjudged(records, now_ms, unjudged_minutes), *returned(records)]
+def findings(records, now_ms, unjudged_minutes=UNJUDGED_MINUTES, *, reported):
+    current = {finding_id: record for finding_id, record in records.items() if finding_id in reported}
+    return [*unjudged(current, now_ms, unjudged_minutes), *returned(current)]
 
 
 def unjudged(records, now_ms, minutes=UNJUDGED_MINUTES):

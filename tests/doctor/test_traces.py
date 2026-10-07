@@ -57,6 +57,25 @@ def test_recorded_merged_tasks_report_turns_and_tokens_and_a_planted_heavy_task_
     assert "traced sessions 1" in found.evidence
 
 
+def test_a_task_cost_finding_says_it_counts_uncached_tokens():
+    record = {
+        "merged": ["a", "b", "c"],
+        "traces": [
+            {"tags": [f"task:{t}"], "observations": [{"type": "GENERATION", "turn": None, "tokens": n}]}
+            for t, n in (("a", 100), ("b", 120), ("c", 1000))
+        ],
+    }
+    [found] = traces.task_cost(record, traces.Limits(task_cost_ratio=3))
+    assert found.summary == "1000 uncached tokens, over 3 times the other merged tasks"
+    assert found.evidence == (
+        "turns 0",
+        "traced sessions 1",
+        "uncached tokens 1000, median of the other merged tasks 110",
+        "uncached tokens are input, cache writes and output; cache reads are left out",
+    )
+    assert found.threshold == "over 3 times the median uncached tokens of the other merged tasks"
+
+
 def test_unmerged_tasks_never_count_as_merged():
     record = load("traces")
     assert "lf1" not in {c["task"] for c in traces.measures(record)["tasks"]}
