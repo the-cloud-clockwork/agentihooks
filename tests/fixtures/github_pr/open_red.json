@@ -12,25 +12,42 @@
    "__typename": "CheckRun",
    "name": "unit (3.11, 1, base)",
    "status": "COMPLETED",
-   "conclusion": "CANCELLED"
+   "conclusion": "CANCELLED",
+   "completedAt": "2026-10-05T01:40:36Z"
   },
   {
    "__typename": "CheckRun",
    "name": "unit (3.11, 1, early)",
    "status": "COMPLETED",
-   "conclusion": "FAILURE"
+   "conclusion": "FAILURE",
+   "completedAt": "2026-10-05T01:40:36Z"
   },
   {
    "__typename": "CheckRun",
    "name": "unit (3.11, 2, base)",
    "status": "COMPLETED",
-   "conclusion": "CANCELLED"
+   "conclusion": "CANCELLED",
+   "completedAt": "2026-10-05T01:40:39Z"
   },
   {
    "__typename": "CheckRun",
    "name": "unit (3.11, 2, early)",
    "status": "COMPLETED",
-   "conclusion": "CANCELLED"
+   "conclusion": "CANCELLED",
+   "completedAt": "2026-10-05T01:40:37Z"
+  }
+ ],
+ "checkSuites": [
+  {
+   "status": "COMPLETED",
+   "workflowRun": {
+    "databaseId": 37252337525,
+    "createdAt": "2026-10-05T01:40:19Z"
+   }
+  },
+  {
+   "status": "QUEUED",
+   "workflowRun": null
   }
  ]
 }

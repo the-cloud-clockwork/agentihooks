@@ -37,8 +37,8 @@ PULL_QUERY = (
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
-    "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId}} "
+    "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
+    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
     "pageInfo{hasNextPage}}}}}}}}"
 )
 
@@ -52,6 +52,7 @@ class PullRequest:
     resolved: bool = False
     failed: tuple = ()
     head: str = ""
+    red_at: int | None = None
 
 
 def iso_ms(text):
@@ -60,14 +61,25 @@ def iso_ms(text):
 
 def pull_request(raw):
     commits, checks = raw.get("commits") or [], raw.get("statusCheckRollup") or []
+    suites = raw.get("checkSuites") or []
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    running = any(
-        suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in raw.get("checkSuites") or []
-    )
+    running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
+    pushes = [
+        iso_ms(suite["workflowRun"]["createdAt"])
+        for suite in suites
+        if (suite.get("workflowRun") or {}).get("createdAt")
+    ]
+    reds = [
+        iso_ms(check.get("completedAt") or check["createdAt"])
+        for check, result in zip(checks, results)
+        if result in RED and (check.get("completedAt") or check.get("createdAt"))
+    ]
+    if not pushes and commits:
+        pushes = [iso_ms(commits[-1]["committedDate"])]
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
-        iso_ms(commits[-1]["committedDate"]) if commits else None,
+        min(pushes, default=None),
         any(result in RED for result in results),
         _resolved(raw.get("gated"), checks, results, running),
         tuple(
@@ -76,7 +88,13 @@ def pull_request(raw):
             if result in RED
         ),
         raw.get("headRefOid") or "",
+        min(reds, default=None),
     )
+
+
+def red_window(pushed_at, red_at, now_ms):
+    start = max((mark for mark in (pushed_at, red_at) if mark is not None), default=None)
+    return start if start is not None and now_ms - start >= RED_QUIET_MS else None
 
 
 def _resolved(gated, checks, results, running):
@@ -269,9 +287,9 @@ def _pull_requests(mail, tasks, now_ms, github):
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)
-        elif found.red and found.pushed_at and now_ms - found.pushed_at >= RED_QUIET_MS:
+        elif found.red and red_window(found.pushed_at, found.red_at, now_ms) is not None:
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            sent += mail.send(f"{url}:red:{found.pushed_at}", mail.engineer(task), text)
+            sent += mail.send(f"{url}:red:{found.head}", mail.engineer(task), text)
     return sent

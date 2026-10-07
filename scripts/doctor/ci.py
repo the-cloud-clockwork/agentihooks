@@ -20,13 +20,15 @@ def reruns(record: dict) -> list[Finding]:
 
 
 def red_checks(record: dict, now_ms: int) -> list[Finding]:
+    sha = record["pr"]["head"]["sha"]
     checks = [
         c
         for c in record["checks"]
-        if c["head_sha"] == record["pr"]["head"]["sha"]
-        and c["conclusion"] in {"failure", "timed_out", "action_required", "startup_failure"}
+        if c["head_sha"] == sha and c["conclusion"] in {"failure", "timed_out", "action_required", "startup_failure"}
     ]
-    if not checks or now_ms - record["committed_at"] < ledger_events.RED_QUIET_MS:
+    pushes = [ledger_events.iso_ms(r["created_at"]) for r in record["runs"] if r["head_sha"] == sha]
+    reds = [ledger_events.iso_ms(c["completed_at"]) for c in checks]
+    if not checks or ledger_events.red_window(min(pushes, default=None), min(reds), now_ms) is None:
         return []
     return [
         Finding(
