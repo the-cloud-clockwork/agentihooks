@@ -7,6 +7,8 @@ import pytest
 
 from scripts.profiles import connectors
 
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
+
 READS = ["lf-a", "lf-b"]
 NO_ALLOWLIST = "Claude has no native tool allowlist; only an http server's tools can be listed"
 
