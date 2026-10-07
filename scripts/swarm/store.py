@@ -43,6 +43,7 @@ class SwarmConfig:
     gates: dict = field(default_factory=dict)
     effort_min: str = effort_range.DEFAULT[0]
     effort_max: str = effort_range.DEFAULT[1]
+    codex_share_changed_at: int = 0
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,11 @@ class RedisStore:
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
-        config = replace(config, code=self.names.mint_code(config.slug, config.slug, config.repo))
+        config = replace(
+            config,
+            code=self.names.mint_code(config.slug, config.slug, config.repo),
+            codex_share_changed_at=int(time.time() * 1000) if config.codex_share is not None else 0,
+        )
         self.redis.hset(self.key(config.slug, "config"), mapping=_fields(config))
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
@@ -119,6 +124,7 @@ class RedisStore:
             json.loads(raw.get("gates") or "{}"),
             raw.get("effort_min") or effort_range.DEFAULT[0],
             raw.get("effort_max") or effort_range.DEFAULT[1],
+            int(raw.get("codex_share_changed_at", 0)),
         )
 
     def update(self, slug, **changes):
@@ -128,7 +134,12 @@ class RedisStore:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
         if not 0 <= changes.get("codex_share", 0) <= 100:
             raise SwarmError("codex share is a percent from 0 to 100")
-        config = replace(self.config(slug), **changes)
+        previous = self.config(slug)
+        config = replace(previous, **changes)
+        if "codex_share" in changes and (
+            config.codex_share != previous.codex_share or not previous.codex_share_changed_at
+        ):
+            config = replace(config, codex_share_changed_at=int(time.time() * 1000))
         if {"lanes", "effort_min", "effort_max"} & set(changes):
             refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
             if refused:
