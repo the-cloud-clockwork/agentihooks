@@ -119,12 +119,14 @@ class TestTokenMonitor:
         assert level == "warning"
 
 
-def test_native_statusline_emits_context_gauge(monkeypatch, capsys):
+def test_native_statusline_emits_context_gauge(monkeypatch, capsys, tmp_path):
     import io
     import json
 
     from hooks import config, statusline
+    from hooks.context import context_usage
 
+    monkeypatch.setattr(context_usage, "AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", True)
     payload = {
         "session_id": "native-claude",
@@ -144,14 +146,16 @@ def test_native_statusline_emits_context_gauge(monkeypatch, capsys):
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
 @pytest.mark.parametrize("enabled,window", [(False, 200000), (True, 0), (True, None)])
-def test_native_context_without_measurement_emits_no_gauge(monkeypatch, target, enabled, window):
+def test_native_context_without_measurement_emits_no_gauge(monkeypatch, tmp_path, target, enabled, window):
     import io
     import json
 
     from hooks import config, statusline
+    from hooks.context import context_usage
     from hooks.observability.token_monitor import record_lifecycle_context
     from scripts.codex_context import CodexContext
 
+    monkeypatch.setattr(context_usage, "AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr(config, "TOKEN_MONITOR_ENABLED", enabled)
     monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
     payload = {"session_id": "empty", "hook_event_name": "PostToolUse"}
