@@ -159,6 +159,7 @@ def test_the_tick_ends_a_checks_wait_once_and_tells_the_agent(tick, pull, outcom
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert idle.waited(tick.store.redis, "sw", ME) == 5_000
+    assert idle.BEAT_TTL_S - 5 < tick.store.redis.ttl(idle.key("sw", "waited", ME)) <= idle.BEAT_TTL_S
     assert tick.told() == [
         f"Your wait on {outcome} has ended. Pick task t1 back up: agentihooks swarm sw done, block, "
         "or wait on the next thing."
@@ -283,6 +284,16 @@ def test_bare_waits_and_finished_agents_are_left_alone(tick):
     tick.hold("task", "t2")
     tick.store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw", state="finished"))
     assert tick.end({}) == []
+
+
+def test_a_wait_end_is_kept_a_day_past_the_wait(tick):
+    redis, day = tick.store.redis, idle.BEAT_TTL_S * 1000
+    idle.declare_wait(redis, "sw", ME, 61_000, "deploy", 1_000)
+    assert idle.waited(redis, "sw", ME) == 61_000
+    assert day + 55_000 < redis.pttl(idle.key("sw", "waited", ME)) <= day + 60_000
+    idle.end_wait(redis, "sw", ME, 2_000)
+    assert (idle.wait(redis, "sw", ME), idle.waited(redis, "sw", ME)) == (None, 2_000)
+    assert day - 5_000 < redis.pttl(idle.key("sw", "waited", ME)) <= day
 
 
 def test_a_skipped_agent_never_stops_the_pass_for_the_next(tick):
