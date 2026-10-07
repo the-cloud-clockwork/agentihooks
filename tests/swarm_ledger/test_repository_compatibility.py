@@ -33,6 +33,8 @@ def test_bin_facades_keep_timestamps_and_retention(stored):
     assert ledger_bin.entries() == {"compatibility": 100}
     assert ledger_bin.restore("compatibility", now=101)
     assert ledger_bin.restored()["compatibility"] == 101
+    assert ledger_bin.bin_closed("compatibility", closed_at=100, now=102) is False
+    assert ledger_bin.entries() == {}
     ledger_bin.delete("compatibility", now=200)
     assert ledger_bin.entries()["compatibility"] == 200
     assert ledger_bin.auto_bin(now=201) == []
@@ -83,12 +85,23 @@ def test_page_read_and_upload_membership_use_the_repository(stored):
         "Content-Length": "4",
     }
     handler.rfile = io.BytesIO(b"data")
-    replies = []
-    handler.send = lambda code, body, ctype: replies.append((code, body))
+    replies, types = [], []
+
+    def send(code, body, ctype):
+        replies.append((code, body))
+        types.append(ctype)
+
+    handler.send = send
     ledger_server.Handler.receive(handler, slug, 100, lambda data: {"size": len(data)})
     assert replies == [(200, json.dumps({"size": 4}))]
     assert stored.read_snapshot(slug)["overview"] == "o"
     handler.headers["X-Ledger-Agent"] = "unjoined"
+    ledger_server.Handler.receive(handler, slug, 100, lambda data: {})
+    assert replies[-1] == (403, "agent must join this ledger before uploading")
+    assert types[-1] == "text/plain"
+    state = stored.read_snapshot(slug)
+    del state["_meta"]["members"]
+    legacy_core.paths(slug)[1].write_text(json.dumps(state))
     ledger_server.Handler.receive(handler, slug, 100, lambda data: {})
     assert replies[-1] == (403, "agent must join this ledger before uploading")
 
@@ -116,3 +129,20 @@ def test_creator_joins_the_small_ledger_with_its_original_event(stored):
     [event] = [e for e in doc["_meta"]["events"] if e["kind"] == "joined"]
     assert event["by"] == "worker"
     assert bin_storage.entries() == ledger_bin.entries()
+
+
+def test_current_page_preserves_markup_and_reconciles_seed_edits(stored):
+    slug = "compatibility"
+    page = stored.read_page(slug).replace('"overview": "o"', '"overview": "agent edit"')
+    page = page.replace("</body>", "<div>agent page marker</div></body>")
+    stored.write_page(slug, page)
+    served = ledger_server.page_for(slug)
+    assert "agent page marker" in served
+    assert stored.read_snapshot(slug)["overview"] == "agent edit"
+
+
+def test_page_with_unreadable_json_falls_back_to_its_html(stored):
+    slug = "compatibility"
+    page = stored.read_page(slug)
+    legacy_core.paths(slug)[1].write_text("broken JSON")
+    assert ledger_server.page_for(slug) == page
