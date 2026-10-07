@@ -2,7 +2,6 @@ import json
 import subprocess
 
 import pytest
-import yaml
 
 from hooks.context import profile_chain
 from scripts import install
@@ -25,15 +24,15 @@ def _bundle(tmp_path, capsys):
 
 
 def test_bundle_new_lays_out_the_documented_bundle(tmp_path):
-    target = tmp_path / "my-bundle"
+    target = tmp_path / "nested" / "deeper" / "my-bundle"
 
     assert scaffold.main(["bundle", "new", str(target)]) == 0
 
-    assert json.loads((target / "enforcements.json").read_text()) == {"enforcements": []}
-    assert json.loads((target / ".claude" / ".mcp.json").read_text()) == {"mcpServers": {}}
+    assert (target / "enforcements.json").read_text() == '{\n  "enforcements": []\n}\n'
+    assert (target / ".claude" / ".mcp.json").read_text() == '{\n  "mcpServers": {}\n}\n'
     for folder in ("skills", "agents", "commands", "rules", "conditions"):
-        assert (target / ".claude" / folder / ".gitkeep").is_file()
-    assert (target / "profiles" / ".gitkeep").is_file()
+        assert (target / ".claude" / folder / ".gitkeep").read_text() == ""
+    assert (target / "profiles" / ".gitkeep").read_text() == ""
     assert (target / "README.md").is_file()
 
 
@@ -77,10 +76,12 @@ def test_bundle_new_refuses_a_file(tmp_path, capsys):
 def test_bundle_new_runs_git_init_before_writing_so_a_failed_init_can_be_retried(tmp_path, monkeypatch):
     target = tmp_path / "my-bundle"
 
-    def refuse(*args, **kwargs):
-        raise subprocess.CalledProcessError(1, args[0])
+    def fails(cmd, check=False, **kwargs):
+        if check:
+            raise subprocess.CalledProcessError(128, cmd)
+        return subprocess.CompletedProcess(cmd, 128)
 
-    monkeypatch.setattr(scaffold.subprocess, "run", refuse)
+    monkeypatch.setattr(scaffold.subprocess, "run", fails)
 
     with pytest.raises(subprocess.CalledProcessError):
         scaffold.main(["bundle", "new", str(target)])
@@ -107,19 +108,25 @@ def test_overlay_new_writes_a_skeleton_into_the_linked_bundle(tmp_path, capsys):
     assert capsys.readouterr().out == (
         f"[OK] Overlay backtest-tuner at {overlay}, worn by engineer, qa; commit it before a swarm wears it\n"
     )
-    manifest = yaml.safe_load((overlay / "profile.yml").read_text())
-    assert manifest == {
-        "name": "backtest-tuner",
-        "description": "backtest-tuner overlay",
-        "kind": "overlay",
-        "wears": ["engineer", "qa"],
-    }
+    assert (overlay / "profile.yml").read_text() == (
+        "name: backtest-tuner\ndescription: backtest-tuner overlay\nkind: overlay\nwears:\n- engineer\n- qa\n"
+    )
     assert profile_chain.wears(overlay) == ["engineer", "qa"]
     assert (overlay / "CLAUDE.md").read_text().startswith("# backtest-tuner\n")
     assert json.loads((overlay / ".claude" / ".mcp.json").read_text()) == {"mcpServers": {}}
     for folder in ("skills", "rules"):
-        assert (overlay / ".claude" / folder / ".gitkeep").is_file()
+        assert (overlay / ".claude" / folder / ".gitkeep").read_text() == ""
     assert scaffold.main(["overlay", "check", "backtest-tuner"]) == 0
+
+
+def test_overlay_new_makes_a_missing_profiles_folder(tmp_path, capsys):
+    bundle = _bundle(tmp_path, capsys)
+    (bundle / "profiles" / ".gitkeep").unlink()
+    (bundle / "profiles").rmdir()
+
+    assert scaffold.main(["overlay", "new", "tuner", "--wears", "engineer"]) == 0
+
+    assert (bundle / "profiles" / "tuner" / "profile.yml").is_file()
 
 
 def test_overlay_new_without_a_linked_bundle_names_the_fix(capsys):
@@ -260,6 +267,86 @@ def test_install_routes_the_scaffold_commands(monkeypatch):
         assert stop.value.code == 0
 
     assert seen == [["bundle", "new", "x"], ["overlay", "check", "y"]]
+
+
+def _flat(text):
+    return " ".join(text.split()).replace("'", "")
+
+
+def _exit(argv, capsys):
+    with pytest.raises(SystemExit) as stop:
+        scaffold.main(argv)
+    out, err = capsys.readouterr()
+    return stop.value.code, _flat(out), _flat(err.strip().splitlines()[-1]) if err.strip() else ""
+
+
+@pytest.mark.parametrize(
+    ("argv", "usage", "lines"),
+    [
+        (
+            ["bundle", "--help"],
+            "usage: agentihooks bundle [-h] {new}",
+            ["new Lay out an empty bundle, git init it and link it"],
+        ),
+        (
+            ["overlay", "--help"],
+            "usage: agentihooks overlay [-h] {new,check}",
+            [
+                "new Write an overlay profile skeleton into the linked bundle",
+                "check Validate an overlay in the linked bundle",
+            ],
+        ),
+        (
+            ["overlay", "new", "--help"],
+            "usage: agentihooks overlay new [-h] --wears WEARS name",
+            ["--wears WEARS Comma separated base roles the overlay sits on"],
+        ),
+    ],
+)
+def test_scaffold_help_names_each_command(capsys, argv, usage, lines):
+    code, out, _ = _exit(argv, capsys)
+
+    assert code == 0
+    assert out.startswith(usage)
+    for line in lines:
+        assert line in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        ([], "agentihooks: error: the following arguments are required: command"),
+        (["bundle"], "agentihooks bundle: error: the following arguments are required: action"),
+        (["overlay"], "agentihooks overlay: error: the following arguments are required: action"),
+        (
+            ["overlay", "new", "tuner"],
+            "agentihooks overlay new: error: the following arguments are required: --wears",
+        ),
+    ],
+)
+def test_scaffold_refuses_a_missing_argument(capsys, argv, error):
+    code, _, err = _exit(argv, capsys)
+
+    assert code == 2
+    assert err == error
+
+
+@pytest.mark.parametrize(
+    ("argv", "line"),
+    [
+        (["--help"], "bundle Manage the linked bundle (new, link, unlink, list, pull)"),
+        (["--help"], "overlay Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME"),
+        (["bundle", "--help"], "{new,link,unlink,list,pull} new <path> | link <path> | unlink | list | pull"),
+    ],
+)
+def test_install_help_lists_the_scaffold_commands(monkeypatch, capsys, argv, line):
+    monkeypatch.setattr("sys.argv", ["agentihooks", *argv])
+
+    with pytest.raises(SystemExit) as stop:
+        install.main()
+
+    assert stop.value.code == 0
+    assert line in _flat(capsys.readouterr().out)
 
 
 def test_install_refuses_an_unknown_bundle_action(monkeypatch, capsys):

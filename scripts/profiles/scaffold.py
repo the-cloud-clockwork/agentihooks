@@ -28,12 +28,12 @@ def base_roles() -> list[str]:
 
 
 def _keep(folder: Path) -> None:
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir()
     (folder / ".gitkeep").write_text("")
 
 
 def _write_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -69,7 +69,7 @@ def _role_problems(roles: object) -> list[str]:
 
 
 def _plain(name: str) -> bool:
-    return name not in ("", ".", "..") and Path(name).name == name
+    return name not in ("", "..") and Path(name).name == name
 
 
 def _name_problems(name: str) -> list[str]:
