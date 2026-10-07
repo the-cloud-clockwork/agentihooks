@@ -45,7 +45,7 @@ export async function swarmControl(body, op = body.action) {
     if (resp.ok) {
       swarm = await resp.json();
       if (op === "apply") capDraft = {};
-      showNote("done", op);
+      showNote("queued", op);
     } else {
       showNote("error", op, (await resp.text()) || `server answered ${resp.status}`);
     }

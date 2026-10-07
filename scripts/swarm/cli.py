@@ -131,6 +131,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
     if not store.redis.set(lock, token, nx=True, px=TICK_LOCK_MS):
         return ["another tick is running"]
     try:
+        from scripts.swarm import command_runner, commands
+
+        if not commands.bind(store, slug, commands.hive_id()):
+            return ["the swarm belongs to another hive"]
+        controls = command_runner.consume(store, slug)
         if ledger.binned(slug):
             _, left = stop_now(store, slug, runtime or HerdrRuntime(), ledger)
             return [
@@ -176,7 +181,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += wake.wake_pass(inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ))
         taken = snapshot.auto(store, slug, now_ms(), os.environ)
         store.redis.set(store.key(slug, "last-tick"), now_ms())
-        return actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+        command_runner.publish(store, slug, ledger.state(slug))
+        return controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
@@ -245,6 +251,9 @@ def cmd_create(store, args):
         autonomy=template.autonomy or DELEGATE,
     )
     store.create(config)
+    from scripts.swarm import commands
+
+    commands.bind(store, args.slug, commands.hive_id())
     print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
     print(ledger_link.page_line(args.slug))
 

@@ -1,0 +1,90 @@
+import hashlib
+import json
+import os
+import socket
+import time
+import uuid
+from collections.abc import Callable
+
+from scripts.swarm.store import RedisStore
+
+
+def hive_id() -> str:
+    return os.environ.get("SWARM_HIVE_ID") or socket.gethostname()
+
+
+def bind(store: RedisStore, slug: str, owner: str) -> bool:
+    key = store.key(slug, "control-owner")
+    store.redis.set(key, owner, nx=True)
+    return store.redis.get(key) == owner
+
+
+def submit(store: RedisStore, slug: str, command: str, argv: list[str]) -> dict:
+    store.config(slug)
+    payload = json.dumps([command, argv], separators=(",", ":"))
+    row = {
+        "id": uuid.uuid4().hex,
+        "command": command,
+        "argv": argv,
+        "digest": hashlib.sha256(payload.encode()).hexdigest(),
+        "owner": store.redis.get(store.key(slug, "control-owner")) or "",
+        "state": "pending",
+        "created_at": time.time_ns() // 1_000_000,
+    }
+    with store.redis.pipeline() as pipe:
+        pipe.hset(store.key(slug, "commands"), row["id"], json.dumps(row))
+        pipe.rpush(store.key(slug, "command-pending"), row["id"])
+        pipe.rpush(store.key(slug, "command-order"), row["id"])
+        pipe.execute()
+    return row
+
+
+def rows(store: RedisStore, slug: str) -> list[dict]:
+    found = store.redis.hgetall(store.key(slug, "commands"))
+    return [json.loads(found[key]) for key in store.redis.lrange(store.key(slug, "command-order"), -20, -1)]
+
+
+def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], str]) -> list[str]:
+    if not bind(store, slug, owner):
+        return []
+    pending, records = store.key(slug, "command-pending"), store.key(slug, "commands")
+    actions = []
+    for key in store.redis.lrange(pending, 0, -1):
+        row = json.loads(store.redis.hgetall(records)[key])
+        if row["state"] != "pending":
+            store.redis.lrem(pending, 1, key)
+            continue
+        if row["owner"] and row["owner"] != owner:
+            continue
+        row.update(owner=owner, state="accepted", accepted_at=time.time_ns() // 1_000_000)
+        store.redis.hset(records, key, json.dumps(row))
+        error = execute(row)
+        row.update(
+            state="failed" if error else "acknowledged", error=error, acknowledged_at=time.time_ns() // 1_000_000
+        )
+        with store.redis.pipeline() as pipe:
+            pipe.hset(records, key, json.dumps(row))
+            pipe.lrem(pending, 1, key)
+            pipe.execute()
+        actions.append(f"control {row['command']} {row['state']}")
+    return actions
+
+
+def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
+    store.redis.set(store.key(slug, "published"), json.dumps({"status": status, "workspaces": tails}))
+
+
+def view(store: RedisStore, slug: str) -> dict:
+    config = store.config(slug)
+    data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
+    status = data.get("status", {"agents": [], "tasks": {}})
+    return {
+        **status,
+        "config": {**status.get("config", config.__dict__), "state": config.state},
+        "commands": rows(store, slug),
+    }
+
+
+def workspaces(store: RedisStore, slug: str) -> dict:
+    data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
+    return data.get("workspaces", {})

@@ -87,7 +87,9 @@ function opNote(phase, action, error) {
     codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit",
     effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
   if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
-  if (phase === "done") return { cls: "ok", text: `${name}: done` };
+  if (phase === "queued") return { cls: "pending", text: `${name}: pending, waiting for the hive tick` };
+  if (phase === "accepted") return { cls: "pending", text: `${name}: accepted by the hive tick` };
+  if (phase === "done") return { cls: "ok", text: `${name}: acknowledged` };
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
 
@@ -120,6 +122,12 @@ export function renderControls() {
     if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
     input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
     input.disabled = !swarm || pending === "apply";
+  }
+  const command = swarm && (swarm.commands || []).at(-1);
+  if (!pending && command) {
+    const phase = { pending: "queued", accepted: "accepted", acknowledged: "done", failed: "error" }[command.state];
+    const action = command.command === "quota" ? "quota_refresh" : command.command === "doctor" ? `doctor_${command.argv[0]}` : command.argv[0];
+    showNote(phase, action, command.error);
   }
   const note = affinityNote(swarm);
   $("affinity-state").textContent = note.text;

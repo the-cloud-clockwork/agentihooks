@@ -17,7 +17,6 @@ import html
 import json
 import os
 import re
-import shutil
 import signal
 import socket
 import subprocess
@@ -40,7 +39,6 @@ import ledger_gate  # noqa: E402
 import ledger_layout  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
-import ledger_workspace  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
@@ -275,15 +273,14 @@ def swarm_store():
 
 
 def swarm_status(slug, state=None):
-    from scripts.swarm.status import status_report
+    from scripts.swarm import commands
     from scripts.swarm.store import SwarmError
 
     try:
-        state = repository.read_snapshot(slug) if state is None else state
-        return status_report(swarm_store(), slug, state)
+        return commands.view(swarm_store(), slug)
     except SwarmError:
         return None
-    except Exception as exc:  # the page keeps its last observed state; the log keeps why this read failed
+    except Exception as exc:
         sys.stderr.write(f"swarm status {slug}: {exc}\n")
         return None
 
@@ -448,56 +445,30 @@ def bin_request(body):
 
 
 def terminate_control(slug, name):
-    status = swarm_status(slug)
-    if not status or not any(agent["name"] == name for agent in status.get("agents", [])):
+    from scripts.swarm import commands
+
+    store = swarm_store()
+    if not any(agent.name == name for agent in store.agents(slug)):
         return None, "agent is not in this swarm"
-    exe = shutil.which("agentihooks")
-    argv = [exe, "terminate-agent", name, "--type", "any"]
-    for command in ([*argv, "--dry-run"], argv):
-        done = subprocess.run(command, capture_output=True, text=True, timeout=60)
-        if done.returncode:
-            return None, (done.stderr or done.stdout).strip() or "agent termination failed"
+    commands.submit(store, slug, "swarm", ["terminate", name])
     return swarm_status(slug), ""
 
 
 def swarm_control(slug, argv, command="swarm"):
-    exe = shutil.which("agentihooks")
-    if not exe:
-        return None, "agentihooks is not on PATH"
+    from scripts.swarm import commands
+    from scripts.swarm.store import SwarmError
+
     try:
         if command == "swarm" and argv[0] == "terminate":
             return terminate_control(slug, argv[1])
-        env = {**os.environ, "AGENTIHOOKS_AGENT_NAME": "operator", "AGENTIHOOKS_CONTROL_SOURCE": "page"}
-        done = subprocess.run([exe, command, slug, *argv], capture_output=True, text=True, timeout=60, env=env)
-    except (OSError, subprocess.SubprocessError) as exc:
+        commands.submit(swarm_store(), slug, command, argv)
+        return swarm_status(slug), ""
+    except SwarmError as exc:
         return None, str(exc)
-    if done.returncode != 0:
-        return None, (done.stderr or done.stdout).strip() or "swarm command failed"
-    status = swarm_status(slug)
-    return status, "" if status else "swarm status unreadable after the command"
-
-
-def probe_quota() -> str:
-    exe = shutil.which("agentihooks")
-    if not exe:
-        return "agentihooks is not on PATH"
-    try:
-        done = subprocess.run(
-            [exe, "quota", "--refresh", "--json"], capture_output=True, text=True, timeout=QUOTA_PROBE_TIMEOUT_S
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return str(exc)
-    return "" if done.returncode == 0 else (done.stderr or done.stdout).strip() or "quota probe failed"
 
 
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
-    from scripts import agents_quota
-
-    error = agents_quota.refresh_page_quota(probe_quota)
-    if error:
-        return None, error
-    status = swarm_status(slug)
-    return status, "" if status else "swarm status unreadable after the quota probe"
+    return swarm_control(slug, [], "quota")
 
 
 def relay_to_inbox(slug, state):
@@ -540,23 +511,21 @@ def deliver_alerts(slug, state):
 
 
 def doctor_phrase(slug, state):
-    """The operator's chat line rig doctor stop stops the Doctor of this ledger, in the background."""
     meta = state["_meta"]
     said = [
         e
         for e in meta.get("events", [])
         if e.get("rev") == meta["rev"] and e.get("by") == "operator" and e.get("target") == "chat"
     ]
-    exe = shutil.which("agentihooks")
-    if exe and any(e.get("text", "").strip().lower() == DOCTOR_PHRASE for e in said):
-        subprocess.Popen([exe, "doctor", slug, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if any(e.get("text", "").strip().lower() == DOCTOR_PHRASE for e in said):
+        swarm_control(slug, ["stop"], "doctor")
 
 
 def with_workspaces(slug, state):
-    """The latest progress and proof lines of each task's work folder, read at reply time and never stored."""
+    tails = workspace_tails(slug, state)
     tasks = [
-        {**t, "workspace_tail": ledger_workspace.tails(slug, t["id"])} if t.get("workspace") else t
-        for t in state.get("tasks", [])
+        {**task, "workspace_tail": tails.get(task["id"], {})} if task.get("workspace") else task
+        for task in state.get("tasks", [])
     ]
     return {**state, "tasks": tasks}
 
@@ -569,22 +538,17 @@ def tail_stamp(path):
 
 
 def workspace_tails(slug, ledger):
-    """Each task's work folder tails, read again only when one of its files changed."""
-    marks, kept, found = TAIL_MARKS.get(slug, {}), {}, {}
-    for task in ledger.get("tasks", []):
-        if not task.get("workspace"):
-            continue
-        try:
-            folder = ledger_workspace.folder(slug, task["id"])
-        except ValueError:
-            continue
-        stamp = tuple(tail_stamp(folder / name) for _, name in ledger_workspace.TAILS)
-        kept[task["id"]] = marks.get(task["id"])
-        if kept[task["id"]] is None or kept[task["id"]][0] != stamp:
-            kept[task["id"]] = (stamp, ledger_workspace.tails(slug, task["id"]))
-        found[task["id"]] = kept[task["id"]][1]
-    TAIL_MARKS[slug] = kept
-    return found
+    from scripts.swarm import commands
+    from scripts.swarm.store import SwarmError
+
+    tasks = [task for task in ledger.get("tasks", []) if task.get("workspace")]
+    if not tasks:
+        return {}
+    try:
+        tails = commands.workspaces(swarm_store(), slug)
+    except SwarmError:
+        return {}
+    return {task["id"]: tails.get(task["id"], {}) for task in tasks if re.fullmatch(r"[A-Za-z0-9_-]+", task["id"])}
 
 
 def stream_resources(slug):
