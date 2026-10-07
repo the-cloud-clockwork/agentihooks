@@ -26,7 +26,7 @@ def luna_model() -> str:
 
 
 def _claude_token(env: dict[str, str]) -> str:
-    route = env.get("AGENTIHOOKS_ROUTE_ACCOUNT", "")
+    route = env.get("AGENTIHOOKS_ROUTE_ACCOUNT")
     if route and env.get(f"AH_CC_TOKEN_{route}"):
         return env[f"AH_CC_TOKEN_{route}"]
     try:
