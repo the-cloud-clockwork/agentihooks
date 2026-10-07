@@ -313,3 +313,91 @@ def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", {"id": "t3", "title": "Build it", "overlaps": []})
     assert prompt.OVERLAP_LINE not in text and "shares" not in text
+
+
+ENGINEER = "engineer@a1b2c3-0003"
+CUT = "wt.sh new engineer-a1b2c3-0003"
+
+
+def _steps(task, lane="eng"):
+    from scripts.swarm import prompt
+
+    return prompt.build("sw", "/repo", lane, ENGINEER, {"id": "t3", "title": "Build it", **task}).splitlines()
+
+
+def _step(lines, number):
+    return [line for line in lines if line.startswith(f"{number}. ")][-1]
+
+
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_the_code_steps_push_and_record_the_branch_at_the_first_commit(kind):
+    step = _step(_steps({"kind": kind}), 4)
+    assert (
+        "at your first commit push the branch (git push -u origin HEAD) and record it: agentihooks swarm sw branch"
+        in step
+    )
+
+
+def test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks():
+    lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "engineer-a1b2c3-0001"}]})
+    text = "\n".join(lines)
+    assert "Dependency t1 is still open on branch engineer-a1b2c3-0001." in lines
+    assert _step(lines, 1).startswith("1. If the repo has GitHub issues")
+    assert f"{CUT} --from origin/engineer-a1b2c3-0001" in _step(lines, 2)
+    assert "Build what you can" in _step(lines, 3)
+    push = _step(lines, 4)
+    assert "Refs #<n>" in push and "git push -u origin HEAD" in push and "agentihooks swarm sw branch" in push
+    park = _step(lines, 5)
+    assert "handoff skill" in park and "agentihooks swarm sw park <doc>" in park
+    assert park.index("ledger --slug sw --as engineer@a1b2c3-0003 leave") < park.index("park <doc>")
+    assert "pr <pr url>" not in text and "done --pr" not in text
+
+
+def test_a_stacked_claim_reuses_the_recorded_issue_and_merges_every_other_open_dependency():
+    lines = _steps(
+        {
+            "kind": "code",
+            "issue_url": "https://github.com/o/r/issues/7",
+            "stack_base": [{"task": "t1", "branch": "eng-one"}, {"task": "t2", "branch": "eng-two"}],
+        }
+    )
+    assert _step(lines, 1) == "1. Reuse the task's issue https://github.com/o/r/issues/7; open no new one."
+    assert f"{CUT} --from origin/eng-one" in _step(lines, 2)
+    assert "git merge origin/eng-two" in _step(lines, 2)
+
+
+def test_a_stacked_claim_continues_its_predecessors_branch_over_the_dependency_branch():
+    envelope = {"continue_from": "origin/eng-mine", "remote_head": "abc"}
+    lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "eng-one"}], "handoff_envelope": envelope})
+    assert f"{CUT} --from origin/eng-mine," in _step(lines, 2)
+    assert "--from origin/eng-one" not in "\n".join(lines)
+
+
+def test_a_parked_task_finishes_from_its_branch_after_a_restack():
+    envelope = {"continue_from": "origin/eng-parked", "remote_head": "abc"}
+    lines = _steps(
+        {
+            "kind": "code",
+            "branch": "eng-parked",
+            "parked_on": ["t1"],
+            "stacked_base": "abc",
+            "issue_url": "https://github.com/o/r/issues/7",
+            "stack_base": [],
+            "handoff": "## Intent\nx",
+            "handoff_envelope": envelope,
+        }
+    )
+    text = "\n".join(lines)
+    assert "Your task was parked on branch eng-parked until its dependency finished." in lines
+    assert _step(lines, 1) == "1. Reuse the task's issue https://github.com/o/r/issues/7; open no new one."
+    worktree = _step(lines, 2)
+    assert f"{CUT} --from origin/eng-parked " in worktree
+    assert "agentihooks swarm sw restack" in worktree and "git rebase --continue" in worktree
+    assert "agentihooks swarm sw pr <pr url>" in _step(lines, 5)
+    assert "done --pr <pr url>" in _step(lines, 7)
+    assert "HEAD:eng-parked" not in text
+
+
+def test_stacked_steps_apply_only_to_code_work():
+    lines = _steps({"kind": "research", "stack_base": [{"task": "t1", "branch": "eng-one"}]})
+    assert "park <doc>" not in "\n".join(lines)
