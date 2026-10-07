@@ -79,7 +79,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     state = ledger.state(slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
-    _pushed(row.get("branch", ""))
+    _pushed(row.get("branch"))
     _issue_ready(row)
     open_ = _open_dependencies(row, rows)
     found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
