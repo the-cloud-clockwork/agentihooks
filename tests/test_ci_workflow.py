@@ -177,6 +177,8 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 2
+    job = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]
+    assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
