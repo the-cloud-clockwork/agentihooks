@@ -159,7 +159,10 @@ def refused(state, ops=(), fallback=""):
 
 def unexplained(sent):
     where = next((sent[key] for key in ("item", "target", "path", "thread", "list") if sent.get(key)), "the ledger")
-    return f"{sent['op']} on {where} refused: it names an entry that does not exist or that you may not change"
+    return (
+        f"{sent['op']} on {where} refused without a reason from the server: "
+        "check that the entry exists, that you may change it and that its text is not empty"
+    )
 
 
 def posted(state, ops):

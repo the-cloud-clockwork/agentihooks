@@ -115,7 +115,10 @@ def test_every_write_command_prints_an_applied_write_and_exits_zero(cli, capsys,
 def test_a_refusal_without_a_reason_names_each_refused_operation(cli, argv, message):
     with pytest.raises(SystemExit) as stop:
         cli(argv, lambda ids: {"rejected": ids, "_meta": {"warnings": []}})
-    assert stop.value.code == f"{message} refused: it names an entry that does not exist or that you may not change"
+    assert stop.value.code == (
+        f"{message} refused without a reason from the server: "
+        "check that the entry exists, that you may change it and that its text is not empty"
+    )
 
 
 def test_a_refusal_of_unsent_operations_names_their_ids():
