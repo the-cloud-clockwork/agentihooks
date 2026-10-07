@@ -114,16 +114,24 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     return {"verdict": PENDING, "body": body}
 
 
-def pr_head(url: str, run=subprocess.run) -> str | None:
+def _pr_field(url, field, run):
     found = PULL.search(url)
     if not found:
         return None
     owner, repo, number = found.groups()
     try:
-        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", ".head.sha"], run)
+        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", f".{field}"], run)
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def pr_merged(url: str, run=subprocess.run) -> bool:
+    return _pr_field(url, "merged", run) == "true"
+
+
+def pr_head(url: str, run=subprocess.run) -> str | None:
+    return _pr_field(url, "head.sha", run)
 
 
 def pr_view(url, run=subprocess.run):
@@ -131,6 +139,9 @@ def pr_view(url, run=subprocess.run):
     if not found:
         return None
     owner, repo, number = found.groups()
+    before = pr_head(url, run)
+    if not before:
+        return None
     try:
         done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,reviews,comments"], run)
         raw = json.loads(done.stdout) if done.returncode == 0 else None
@@ -142,7 +153,7 @@ def pr_view(url, run=subprocess.run):
         if comments.returncode:
             return None
         head = pr_head(url, run)
-        if not head:
+        if not head or head != before:
             return None
         return {
             "head": head,
@@ -183,6 +194,21 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
     }
 
 
+def remediation(state: dict, answers: dict) -> str:
+    if not state.get("task_text"):
+        return ""
+    task = f"{state['task']}: {state['task_text']}"
+    phase = f"{state['phase']}: {state['phase_intent']}"
+    steps = [f"Deliver {task}. The phase must be able to use it for {phase}."]
+    if answers["delivers"].noul < REASON_LINE:
+        steps.append(f"Implement the missing acceptance behavior described by {task}.")
+    if answers["reachable"].noul < REASON_LINE:
+        steps.append(f"Wire the production entrypoint for {state['task']} and prove an invocation delivers {phase}.")
+    if answers["weakens"].noul >= WEAKEN_LINE:
+        steps.append(f"Preserve {phase} while implementing {task}.")
+    return "What would meet intent: " + " ".join(steps)
+
+
 def judge(state, decide=decide):
     try:
         answers = decide(state, QUESTIONS, purpose=PURPOSE).answers
@@ -195,6 +221,9 @@ def judge(state, decide=decide):
     reasons = [text for key, text in REASONS.items() if answers[key].noul < REASON_LINE]
     if weakens >= WEAKEN_LINE:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
+    guidance = remediation(state, answers)
+    if guidance:
+        reasons.append(guidance)
     return FAIL, "; ".join([f"{lead}, under {FAIL_LINE}" if usable < FAIL_LINE else lead, *reasons])
 
 
@@ -332,7 +361,8 @@ class IntentGate:
                 return Decision.deny("Intent must be checked on the new head. Wait for the tick to rerun the check.")
         if verdict == FAIL:
             if mode == "coach" and record.get("coach_rounds", 0) >= 2:
-                reason = f"merged with intent unmet after two fix rounds: {record['reason']}"
+                outcome = "merged" if pr_merged(record["url"]) else "merge permitted"
+                reason = f"{outcome} with intent unmet after two fix rounds: {record['reason']}"
                 log.append(state.slug, log.Row.of(NAME, "count", who, call.tool, reason), state.home)
                 return Decision()
             text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"

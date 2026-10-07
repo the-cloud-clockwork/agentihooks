@@ -28,7 +28,10 @@ def run_check(tmp_path, head, verdict="fail", reason="missing behavior"):
 def gate(tmp_path, command="gh pr merge 9 --squash"):
     who = Who(name=ME, swarm=SLUG, task=TASK)
     state = Verdicts(SLUG, "intent", tmp_path)
-    with patch.object(intent, "pr_head", return_value=state.read(TASK).get("head")):
+    with (
+        patch.object(intent, "pr_head", return_value=state.read(TASK).get("head")),
+        patch.object(intent, "pr_merged", return_value="done" in command),
+    ):
         return intent.IntentGate().decide(Call("Bash", {"command": command}), who, state, mode="coach")
 
 
@@ -65,7 +68,8 @@ def test_two_failed_fix_rounds_allow_merge_and_done_and_record_shortfall(tmp_pat
             "swarm",
         )
     ]
-    assert "merged with intent unmet" in rows(tmp_path)[-1]["reason"]
+    outcome = "merged" if "done" in command else "merge permitted"
+    assert rows(tmp_path)[-1]["reason"] == f"{outcome} with intent unmet after two fix rounds: missing behavior"
 
 
 def test_same_head_and_rearming_cannot_consume_a_fix_round(tmp_path, monkeypatch):
@@ -122,6 +126,53 @@ def test_a_new_head_cannot_merge_on_an_old_pass(tmp_path, monkeypatch):
     assert state.read(TASK) == {"verdict": "pending", "reason": "intent check running", "at": NOW}
 
 
+def test_push_during_snapshot_discards_old_proof():
+    import json
+
+    from tests.gates.test_intent import Ran
+
+    raw = {"title": "Old", "body": "old proof", "files": [{"path": "old.py"}]}
+    ran = Ran((0, "old"), (0, json.dumps(raw)), (0, ""), (0, "new"))
+    assert intent.pr_view("https://github.com/o/r/pull/9", run=ran) is None
+    assert ran.calls[0][0][-1] == ".head.sha"
+    assert ran.calls[-1][0][-1] == ".head.sha"
+
+
+def test_remediation_names_the_task_seam_and_reaches_every_feedback_channel(tmp_path):
+    from tests.gates.test_intent import classifier
+
+    state = {
+        "task": "Publish status command",
+        "task_text": "The swarm status command shows the active controller.",
+        "phase": "Remote control",
+        "phase_intent": "Workers report their controller.",
+    }
+    verdict, reason = intent.judge(state, decide=classifier(0.1, delivers=0.1, reachable=0.1, weakens=0.8))
+    assert verdict == "fail"
+    assert (
+        "Implement the missing acceptance behavior described by Publish status command: The swarm status command shows the active controller."
+        in reason
+    )
+    assert (
+        "Wire the production entrypoint for Publish status command and prove an invocation delivers Remote control: Workers report their controller."
+        in reason
+    )
+    assert "Preserve Remote control: Workers report their controller." in reason
+    ledger, mail = run_check(tmp_path, "original", reason=reason)
+    assert reason in mail.sent[0][2]
+    assert reason in gate(tmp_path).reason
+    run_check(tmp_path, "fix-one", reason=reason)
+    ledger, mail = run_check(tmp_path, "fix-two", reason=reason)
+    assert ledger.comments == [
+        (
+            SLUG,
+            TASK,
+            f"Intent remains unmet after two fix rounds: {reason}. The master must review this shortfall.",
+            "swarm",
+        )
+    ]
+
+
 @pytest.mark.parametrize("command", ["gh pr merge 9 --squash", f"agentihooks swarm {SLUG} done --pr x"])
 def test_coach_mode_runs_through_the_real_gate_entry(tmp_path, monkeypatch, capsys, command):
     import io
@@ -131,6 +182,7 @@ def test_coach_mode_runs_through_the_real_gate_entry(tmp_path, monkeypatch, caps
 
     monkeypatch.setattr(modes, "swarm_gates", lambda *args: {"intent": "coach"})
     monkeypatch.setattr(intent, "pr_head", lambda url: "original")
+    monkeypatch.setattr(intent, "pr_merged", lambda url: "done" in command)
     run_check(tmp_path, "original")
     env = {"AGENTIHOOKS_AGENT_NAME": ME, "AGENTIHOOKS_SWARM": SLUG, "AGENTIHOOKS_SWARM_TASK": TASK}
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
