@@ -1,3 +1,4 @@
+from tests.swarm_ledger.ledger_page import fulfill_events
 from tests.swarm_ledger.test_tabs import SWARM, browser, tab
 
 __all__ = ["browser", "tab"]
@@ -20,7 +21,7 @@ def test_handoff_outcomes_survive_initial_layout_and_resizes(tab):
             }
         ],
     }
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=status))
+    tab.route("**/api/v1/**", lambda route: fulfill_events(route, swarm=status))
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
     for width in (1440, 390, 1440):
@@ -40,7 +41,7 @@ def test_the_binding_cell_shows_when_the_successor_bound_after_the_handoff(tab):
         **SWARM,
         "handoffs": [{**row, "binding": "live", "bound_at": bound, "successor": "master", "awaiting": ""}],
     }
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=status))
+    tab.route("**/api/v1/**", lambda route: fulfill_events(route, swarm=status))
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
     tab.locator("#handoff-box").wait_for(state="visible", timeout=1500)

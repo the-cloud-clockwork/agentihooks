@@ -1,6 +1,6 @@
 import { OFFLINE, PAGE, SYNC_COOLDOWN_MS } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
-import { readLedger, writeLedger } from "./api.js";
+import { writeLedger } from "./api.js";
 import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
 import { attaching } from "./media.js";
 import { composing, editing } from "./threads.js";
@@ -16,6 +16,8 @@ export let ops = [];
 export let checks = {};
 let inflight = false;
 let seedBroken = false;
+let streamed = null;
+let tails = {};
 
 function lastSync(kind) {
   return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
@@ -129,6 +131,7 @@ export async function flush(unloading) {
   } finally {
     inflight = false;
   }
+  if (streamed && streamed._meta.rev >= rev) applyServer(withTails(streamed));
   if (!unloading && (ops.length || Object.keys(checks).length) && $("status").className === "status") flush(false);
 }
 
@@ -143,20 +146,30 @@ function staleAndIdle(version) {
   return true;
 }
 
-export async function poll() {
+function withTails(state) {
+  return { ...state, tasks: (state.tasks || []).map((t) => (t.workspace ? { ...t, workspace_tail: tails[t.id] || {} } : t)) };
+}
+
+export function resume() {
+  if (ops.length || Object.keys(checks).length) flush(false);
+  else if ($("status").classList.contains("offline") || $("status").textContent === "loading") status("saved");
+}
+
+export function disconnected() {
+  status(OFFLINE, "offline");
+}
+
+export function receiveLedger(state) {
+  streamed = state;
   if (inflight) return;
-  try {
-    const resp = await readLedger();
-    if (!resp.ok) throw new Error(String(resp.status));
-    const server = await resp.json();
-    if (inflight) return;
-    if (staleAndIdle(server._meta.page_version)) return location.reload();
-    if (server._meta.rev > rev) applyServer(server);
-    if (ops.length || Object.keys(checks).length) flush(false);
-    else if ($("status").classList.contains("offline") || $("status").textContent === "loading") status("saved");
-  } catch (e) {
-    status(OFFLINE, "offline");
-  }
+  if (staleAndIdle(state._meta.page_version)) return location.reload();
+  applyServer(withTails(state));
+  resume();
+}
+
+export function receiveTails(next) {
+  tails = next || {};
+  if (streamed && !inflight && streamed._meta.rev >= rev) applyServer(withTails(streamed));
 }
 
 export function loadSeed() {

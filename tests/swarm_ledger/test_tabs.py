@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -32,7 +32,9 @@ def tab(browser):
     html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
 
     def route(request):
-        if "/api/swarm/" in request.request.url:
+        if is_events(request.request.url):
+            fulfill_events(request, swarm=SWARM)
+        elif "/api/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):
             request.fulfill(body=html, content_type="text/html")
@@ -125,7 +127,7 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
         ],
         "_meta": {"rev": 10},
     }
-    tab.route("**/api/**", lambda route: route.fulfill(json=SWARM if "/swarm/" in route.request.url else doc))
+    tab.route("**/api/**", lambda route: fulfill_events(route, doc, SWARM))
     tab.reload()
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
@@ -139,7 +141,7 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
 def test_failed_status_read_keeps_the_observed_state_and_reports_the_failure(tab):
     tab.get_by_role("tab", name="Swarm").click()
     assert tab.locator("#swarm-state").text_content() == "running"
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
+    tab.route("**/api/v1/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
     tab.wait_for_function(
         "document.querySelector('#swarm-note').textContent.includes('Could not read swarm status')", timeout=6000
     )
@@ -147,10 +149,10 @@ def test_failed_status_read_keeps_the_observed_state_and_reports_the_failure(tab
     assert tab.locator('[data-swarm="pause"]').is_visible()
     assert "null" not in tab.locator("#tab-swarm").text_content()
     recovered = {**SWARM, "config": {**SWARM["config"], "state": "paused"}}
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(json=recovered))
+    tab.route("**/api/v1/**", lambda route: fulfill_events(route, swarm=recovered))
     tab.wait_for_function("document.querySelector('#swarm-state').textContent === 'paused'", timeout=6000)
     assert tab.locator("#swarm-note").text_content() == ""
-    tab.route("**/api/swarm/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
+    tab.route("**/api/v1/**", lambda route: route.fulfill(status=503, body="temporarily unavailable"))
     tab.reload()
     tab.get_by_role("tab", name="Swarm").click()
     tab.wait_for_function("document.querySelector('#swarm-note').textContent.includes('Could not read swarm status')")

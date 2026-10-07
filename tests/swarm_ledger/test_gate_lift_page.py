@@ -2,6 +2,7 @@
 
 import json
 
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events
 from tests.swarm_ledger.test_tabs import SWARM, browser, tab
 
 __all__ = ["browser", "tab"]
@@ -24,9 +25,11 @@ def open_swarm(tab, puts):
     def route(request):
         if request.request.method == "PUT":
             puts.append(json.loads(request.request.post_data))
+        if is_events(request.request.url):
+            return fulfill_events(request, swarm=GATED)
         request.fulfill(json=GATED)
 
-    tab.route("**/api/swarm/**", route)
+    tab.route("**/api/**", route)
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
 

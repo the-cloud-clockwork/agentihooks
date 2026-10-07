@@ -1838,5 +1838,21 @@
   "scripts/gates/intent_calibration.py:scripts.gates.intent_calibration.x_verdicts__mutmut_10:fbb1829653dd6a5afd03395028b86d6066fa174c44f8559ebed783e722acd9bf": {
     "reader": "Standards",
     "reason": "recorded() ignores its state argument and returns the recorded answers, so passing None instead of the case state to intent.judge gives identical output in verdicts, side_of, measure and main."
+  },
+  "scripts/ci_mutation/browser.py:scripts.ci_mutation.browser.x_imported_paths__mutmut_12:aa3a7c994194b1b451b26b3a68dbc4b15a0285bd1ce4cfd948dc0ba942fd6cf4": {
+    "reader": "Standards reader",
+    "reason": "Parsed import modules have no whitespace. Relative imports without a module only add edge dots; splitting those dots yields empty components ignored by Path.joinpath, so both candidate paths, suffix conversion and file checks are identical. Standards checked four valid import forms against CI run 37668310093."
+  },
+  "scripts/ci_mutation/browser.py:scripts.ci_mutation.browser.x_needs_browser__mutmut_35:69166c705fd68d3214ac9c9da8663da51230d5b15fec66cd1a600c0f71f8c6c1": {
+    "reader": "Standards reader",
+    "reason": "Nonempty import modules are unchanged. None or empty modules substitute either an empty string or XXXX, and neither root equals playwright; all remaining traversal is unchanged. Standards confirmed exact CI artifact mutant from run 37668310093."
+  },
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_request__mutmut_15:4c51434e1cf1ea236155bb856c0224f31fab4c18b599023e82ad9d2edd2cb4be": {
+    "reader": "Standards reader",
+    "reason": "urllib.parse.quote never escapes ASCII letters, digits or underscore dot dash tilde, so adding X to the safe set changes no output; quote with safe empty and safe XXXX agree on every byte value 0 to 255 and sampled non ASCII input. Exact CI artifact mutant from run 37679023255."
+  },
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_main__mutmut_31:2906636fbc3ae6cca316060ed198a0323d682fc297646a8d190ae2c5ee50ad02": {
+    "reader": "Standards reader",
+    "reason": "headers is read only by headers or credentials(args.slug) at the top of the next try and reassigned there before reaching stream; None and empty string are both falsy, so both fetch fresh credentials and nothing else reads headers. Exact CI artifact mutant from run 37679023255."
   }
 }

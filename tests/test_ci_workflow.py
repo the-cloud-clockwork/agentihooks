@@ -149,21 +149,110 @@ def test_ruff_runs_in_the_tests_workflow_only():
     assert [w.name for w in workflows if "ruff" in w.read_text()] == ["test.yml"]
 
 
+def _browser_install(steps):
+    return next(
+        step
+        for step in steps
+        if "playwright install --with-deps chromium" in step.get("run", "")
+        or step.get("uses", "").endswith("/.github/actions/browser-cache")
+    )
+
+
+def _browser_setup_steps(steps):
+    install = _browser_install(steps)
+    if "uses" in install:
+        action = yaml.safe_load((_ROOT / ".github/actions/browser-cache/action.yml").read_text())
+        return action["runs"]["steps"]
+    return steps
+
+
 def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    runs = [s.get("run", "") for s in steps]
-    install = next(i for i, run in enumerate(runs) if "playwright install --with-deps chromium" in run)
-    check = next(i for i, run in enumerate(runs) if run.endswith(".artifact_sanity tests/fixtures/artifacts/*"))
-    assert install < check
+    install = _browser_install(steps)
+    check = next(s for s in steps if s.get("run", "").endswith(".artifact_sanity tests/fixtures/artifacts/*"))
+    assert steps.index(install) < steps.index(check)
     assert {p.suffix for p in (_ROOT / "tests/fixtures/artifacts").iterdir()} == {".md", ".json", ".svg"}
 
 
+def _mutation_workflow():
+    separate = _ROOT / ".github/workflows/mutation.yml"
+    path = separate if separate.is_file() else _ROOT / ".github/workflows/test.yml"
+    return yaml.safe_load(path.read_text())
+
+
 def test_mutation_job_installs_chromium_before_mutating():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())["jobs"]["mutation"]["steps"]
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [s.get("name") for s in steps]
+    install = _browser_install(steps)
+    assert install["name"] == "Install the browser that page tests drive"
+    if "run" in install:
+        assert install["run"] == "python -m playwright install --with-deps chromium"
+    assert names.index("Install dependencies") < steps.index(install) < names.index("Mutate changed Python files")
+
+
+def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
+    names = [step.get("name") for step in steps]
+    select = names.index("Select mutation tests before browser setup")
     install = names.index("Install the browser that page tests drive")
-    assert steps[install]["run"] == "python -m playwright install --with-deps chromium"
-    assert names.index("Install dependencies") < install < names.index("Mutate changed Python files")
+    assert select < install
+    assert steps[select]["id"] == "selection"
+    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
+    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["id"] == "browser"
+    assert steps[install]["timeout-minutes"] == 2
+    job = _mutation_workflow()["jobs"]["mutation"]
+    assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
+    assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
+    assert "::error::" in failure["run"]
+    assert "two minute" in failure["run"]
+    assert "exit 1" in failure["run"]
+
+
+def test_mutation_browser_dependencies_use_the_responsive_mirror():
+    steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
+    setup = _browser_setup_steps(steps)
+    mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+    install = _browser_install(setup)
+    assert setup.index(mirror) < setup.index(install)
+    assert mirror["if"] in ("steps.selection.outputs.browser == 'true'", "steps.launch.outputs.ready != 'true'")
+    assert mirror["run"] in (
+        r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+        r"timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+    )
+    assert mirror.get("timeout-minutes") == 1 or mirror["run"].startswith("timeout 60s ")
+
+
+def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        assert _browser_install(steps)["timeout-minutes"] == 2
+
+
+def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        setup = _browser_setup_steps(steps)
+        mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        assert setup.index(mirror) < setup.index(_browser_install(setup))
+        assert mirror["run"] in (
+            r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+            r"timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
+        )
+        assert mirror.get("timeout-minutes") == 1 or mirror["run"].startswith("timeout 60s ")
+    install = _browser_install(lint)
+    if "run" in install:
+        mirror = next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        assert mirror["if"] == "steps.lookup.outputs.skip != 'true'"
+    else:
+        assert install["if"] == "steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'"
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
@@ -308,6 +397,13 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
     workflow = _workflow()
+    if "refresh-durations" not in workflow["jobs"]:
+        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
+        assert len(scheduled[True]["schedule"]) == 1
+        command = next(step["run"] for step in scheduled["jobs"]["refresh"]["steps"] if "run" in step)
+        assert "python -m tests.refresh_durations --ci 5" in command
+        assert "scripts/ci_bot_pr.sh" in command
+        return
     job = workflow["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint"]
     assert job["if"] == "github.event_name == 'push'"
@@ -325,6 +421,17 @@ def test_dev_push_refreshes_stored_durations_after_tests_pass():
 
 @pytest.mark.parametrize("moved,source", [("before", "42"), ("during", "42"), ("never", "42"), ("never", "")])
 def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, moved, source):
+    if "refresh-durations" not in _workflow()["jobs"]:
+        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
+        checkout = next(
+            step for step in scheduled["jobs"]["refresh"]["steps"] if step.get("uses") == "actions/checkout@v4"
+        )
+        assert checkout["with"]["ref"] == "dev"
+        helper = (_ROOT / "scripts/ci_bot_pr.sh").read_text()
+        assert 'git push origin "HEAD:refs/heads/$branch"' in helper
+        assert "HEAD:dev" not in helper
+        assert "pull --rebase" not in helper
+        return
     command = next(
         step["run"]
         for step in _workflow()["jobs"]["refresh-durations"]["steps"]
@@ -461,7 +568,7 @@ def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, mon
 
 
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
-    spec = yaml.safe_load((_ROOT / ".github/workflows/mutation.yml").read_text())
+    spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
     assert "needs" not in job
     assert job["timeout-minutes"] == 20

@@ -1,0 +1,32 @@
+{
+  "schema": "swarm-v2-baseline/1",
+  "observed_at": "2026-10-07",
+  "note": "Swarm-v2.md section 0.3 plan preparation snapshot",
+  "repositories": [
+    {
+      "repo": "agentihooks",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "e440d3fb7bdd0491c8896ca528440041a43c36c4"
+      }
+    },
+    {
+      "repo": "agentibrain-kernel",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "80174260fee601659b94b029b9a5a58ee8e1ef04"
+      }
+    },
+    {
+      "repo": "antoncore",
+      "source": {
+        "branch": "dev",
+        "status": "resolved",
+        "commit": "94b2a670daf11eeed02b853b08b3b29c451a6b13"
+      }
+    }
+  ],
+  "drift": []
+}

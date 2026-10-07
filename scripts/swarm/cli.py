@@ -167,7 +167,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
         actions += intent.Check(slug, mode, now_ms(), ledger, mail, intent.pr_view, intent.judge).run(doc)
         actions += progress.checks_pass(store.redis, slug, doc["tasks"], ledger_events.view, now_ms())
         rows = {t["id"]: t for t in doc["tasks"]}
-        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view)
+        actions += waits.end_pass(store, slug, rows, inbox, ledger_events.view, now_ms())
         actions += quiet.quiet_pass(store, slug, rows, now_ms())
         actions += priority_sweep.priority_pass(store, slug, doc, ledger)
         found = findings(store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []))
@@ -790,7 +790,7 @@ def cmd_wait_inbox(store, args, agent):
         items = receive(InboxStore(store.redis), agent.name, minutes * 60)
         print(json.dumps({"items": [asdict(item) for item in items], "timed_out": not items}))
     finally:
-        idle.end_wait(store.redis, args.slug, agent.name)
+        idle.end_wait(store.redis, args.slug, agent.name, now_ms())
 
 
 def cmd_wait(store, args):
@@ -879,11 +879,23 @@ def _hand_off(store, slug, agent, text, reason, ledger):
 
 def cmd_park(store, args):
     agent = _worker(store, args)
+    if agent.state == "finished":
+        raise SwarmError(f"{agent.name} already handed off its seat; remove a leftover worktree with wt.sh done")
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    fields = stack.park(store, args.slug, agent, text, ledger)
+    fields, top = stack.park(store, args.slug, agent, text, ledger)
     _hand_off(store, args.slug, agent, text, "exit", ledger)
-    print(json.dumps({"task": agent.task, **fields, "next": "stop now; the task waits on its branch"}))
+    removed = stack.remove_worktree(top)
+    print(
+        json.dumps(
+            {
+                "task": agent.task,
+                **fields,
+                "worktree_removed": removed,
+                "next": "stop now; the task waits on its branch",
+            }
+        )
+    )
 
 
 def cmd_restack(store, args):
