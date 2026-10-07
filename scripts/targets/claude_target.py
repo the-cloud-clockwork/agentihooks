@@ -119,20 +119,29 @@ def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
     from scripts.targets._common import _atomic_write
 
     _i = _install_module()
-    _i._remove_agentihooks_symlinks(dst, "rule")
     items = {}
     for src in sources:
         if src.is_dir():
             items.update(
                 {item.name: item for item in src.iterdir() if filter_fn(item) and not item.name.startswith(".")}
             )
+    ledger = _i._state_links()
+    kept = frozenset(
+        name for name in items if str(dst / name) in ledger and (dst / name).is_file() and not (dst / name).is_symlink()
+    )
+    _i._remove_agentihooks_symlinks(dst, "rule", keep=kept)
     dst.mkdir(exist_ok=True)
     records = []
     for name, src in sorted(items.items()):
         path = dst / name
-        if path.exists() or path.is_symlink():
+        text = src.read_text()
+        if name in kept:
+            if path.read_text() != text:
+                _atomic_write(path, text)
+        elif path.exists() or path.is_symlink():
             continue
-        _atomic_write(path, src.read_text())
+        else:
+            _atomic_write(path, text)
         records.append((path, src, "rules"))
     if not records:
         return
@@ -237,7 +246,8 @@ class ClaudeAdapter:
         # run — a transiently-missing profile source would otherwise shrink the
         # managed set and falsely delete that profile's servers.
         intended_chain = [p.strip() for p in persisted_profile.split(",") if p.strip()]
-        if len(profile_chain) == len(intended_chain):
+        missing = [name for name in intended_chain if name not in profile_chain]
+        if not missing:
             current_managed = set(_i._collect_all_managed_mcp_servers().keys())
             removed_mcp = _i._reconcile_managed_mcp_ledger(current_managed)
             if removed_mcp:
@@ -247,8 +257,8 @@ class ClaudeAdapter:
                 )
         else:
             _i._cprint(
-                "  [--] Skipping MCP ledger reconcile — not every profile in the chain "
-                "resolved this run (transient source loss); ledger left unchanged."
+                f"  [--] Skipping MCP ledger reconcile — profile(s) {', '.join(missing)} did not "
+                "resolve this run (transient source loss); ledger left unchanged."
             )
 
         _i._snapshot_claude_json()

@@ -4204,7 +4204,9 @@ def _uninstall_cli_tool() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _remove_agentihooks_symlinks(dst_dir: Path, label: str, *, ledger_only: bool = False) -> int:
+def _remove_agentihooks_symlinks(
+    dst_dir: Path, label: str, *, ledger_only: bool = False, keep: frozenset[str] = frozenset()
+) -> int:
     """Remove the links and copied rules in *dst_dir* that agentihooks installed.
 
     Ownership comes from ``state.json['managed_links']``. Links the operator or
@@ -4222,7 +4224,9 @@ def _remove_agentihooks_symlinks(dst_dir: Path, label: str, *, ledger_only: bool
     ledger = _state_links()
     removed: list[Path] = []
     for link in sorted(dst_dir.iterdir()):
-        if not link.is_symlink() and not (dst_dir.name == "rules" and link.is_file() and str(link) in ledger):
+        if not link.is_symlink() and (
+            link.name in keep or not (dst_dir.name == "rules" and link.is_file() and str(link) in ledger)
+        ):
             continue
         if ledger_only:
             entry = ledger.get(str(link))
