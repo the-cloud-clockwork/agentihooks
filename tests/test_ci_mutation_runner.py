@@ -166,6 +166,19 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert (work / ".test_durations").read_text() == '{"tests/test_sample.py::t": 1.5}'
 
 
+def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "evidence").mkdir(parents=True)
+    (root / "evidence" / "result.json").write_text("{}")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    work = root / "evidence" / "0-work"
+    work.mkdir()
+    prepare_workspace(root, work, ["scripts/other.py"], ["tests/test_sample.py"])
+    assert sorted(p.name for p in (work / "evidence").iterdir()) == ["result.json"]
+
+
 def test_workspace_mutating_the_identity_plugin_does_not_load_its_mutated_copy(tmp_path):
     import tomllib
 

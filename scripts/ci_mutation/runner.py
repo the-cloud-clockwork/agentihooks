@@ -39,7 +39,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     for name in ("hooks", "scripts", "tests", "profiles", "docs", ".github", "evidence"):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
     for name in (".test_durations", "Swarm-v2.md"):
         if (root / name).is_file():
             shutil.copy(root / name, work / name)
