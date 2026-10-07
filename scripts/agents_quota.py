@@ -147,10 +147,15 @@ def _page_quota(now: float) -> dict:
 
 
 def page_quota(now: float | None = None) -> dict:
+    from scripts import session_caps
+
     now = time.time() if now is None else now
     if not _page_cache or now - _page_cache["at"] >= PAGE_TTL_S:
         _page_cache.update(at=now, quota=_page_quota(now))
-    return _page_cache["quota"]
+    quota = _page_cache["quota"]
+    caps = {harness: session_caps.stored(harness) for harness in session_caps.HARNESSES}
+    rows = [{**row, "cap": caps.get(row["agent"], {}).get(row["account"], quota["cap"])} for row in quota["rows"]]
+    return {**quota, "rows": rows}
 
 
 def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> str:

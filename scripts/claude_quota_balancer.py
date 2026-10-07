@@ -648,6 +648,7 @@ def select_credential(
     sessions: Mapping[str, int] | None = None,
     max_sessions: int = 3,
     exclude: Iterable[str] = (),
+    caps: Mapping[str, int] | None = None,
 ) -> RouteDecision:
     """Pick the account with the most routing left among those below the per-account session cap.
 
@@ -672,8 +673,12 @@ def select_credential(
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
         raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
     reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
-    counts = sessions or {}
-    below_cap = [result for result in eligible if sessions is None or counts.get(result.account, 0) < max_sessions]
+    counts, limits = sessions or {}, caps or {}
+    below_cap = [
+        result
+        for result in eligible
+        if sessions is None or counts.get(result.account, 0) < limits.get(result.account, max_sessions)
+    ]
     pool = below_cap or eligible
     pool = [result for result in pool if result.account not in reserve] or pool
     if below_cap:
@@ -687,7 +692,7 @@ def select_credential(
         winner,
         source,
         sessions=None if sessions is None else counts.get(winner.account, 0),
-        max_sessions=None if sessions is None else max_sessions,
+        max_sessions=None if sessions is None else limits.get(winner.account, max_sessions),
         placement=placement,
     )
 
@@ -758,6 +763,7 @@ def render_table(
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
     max_sessions: int | None = None,
+    caps: Mapping[str, int] | None = None,
 ) -> str:
     timestamp = int(time.time()) if now is None else now
     headers = [
@@ -781,7 +787,11 @@ def render_table(
             str(rank),
             f"{result.account} (current)" if current and result.account == current else result.account,
             result.state,
-            *([f"{sessions.get(result.account, 0)}/{max_sessions}"] if sessions is not None else []),
+            *(
+                [f"{sessions.get(result.account, 0)}/{(caps or {}).get(result.account, max_sessions)}"]
+                if sessions is not None
+                else []
+            ),
             _percent(result.margin),
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),

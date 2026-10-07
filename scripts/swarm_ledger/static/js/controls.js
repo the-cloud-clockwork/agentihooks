@@ -85,7 +85,7 @@ function opNote(phase, action, error) {
   const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
     eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
     codex_down: "Lower codex share", codex_up: "Raise codex share", compact_down: "Lower compact limit", compact_up: "Raise compact limit",
-    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota" }[action] || action;
+    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", session_cap: "Set session cap" }[action] || action;
   if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
   if (phase === "done") return { cls: "ok", text: `${name}: done` };
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
@@ -184,6 +184,8 @@ export function wireSwarm() {
       if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
       return;
     }
+    const session = event.target.closest("button[data-session-cap]");
+    if (session && !session.disabled) return swarmControl({ action: "session_cap", account: session.dataset.account, harness: session.dataset.harness, cap: Number(session.dataset.sessionCap) });
     const lift = event.target.closest("button[data-lift]");
     if (lift && !lift.disabled) return swarmControl({ action: "lift", agent: lift.dataset.agent, gate: lift.dataset.lift });
     const restore = event.target.closest("button[data-restore-choice]");

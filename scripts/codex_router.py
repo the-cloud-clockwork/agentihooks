@@ -20,7 +20,7 @@ from hooks.context.account_sessions import (
     codex_sessions_by_account,
     max_sessions,
 )
-from scripts import codex_quota
+from scripts import codex_quota, session_caps
 from scripts.codex_quota import CodexQuota
 
 TOKEN_ENV = "CODEX_ACCESS_TOKEN"
@@ -120,6 +120,7 @@ def select(
     sessions: Mapping[str, int],
     cap: int,
     route: str = "",
+    caps: Mapping[str, int] | None = None,
 ) -> tuple[CodexAccount, str]:
     """(account, placement): the most routing left below the cap, the least loaded when all are full."""
     if route:
@@ -135,7 +136,7 @@ def select(
     ]
     if not eligible:
         raise RoutingError("no Codex account is signed in with routing left")
-    below = [account for account in eligible if sessions.get(account.name, 0) < cap]
+    below = [account for account in eligible if sessions.get(account.name, 0) < (caps or {}).get(account.name, cap)]
     if below:
         return _rank(below, quotas)[0], "open"
     return min(_rank(eligible, quotas), key=lambda account: sessions.get(account.name, 0)), "overflow"
@@ -180,8 +181,9 @@ def _route(environ: Mapping[str, str], route: str, run: Callable) -> tuple[Codex
     if not token_accounts(environ) and not route:
         return CodexAccount(CODEX_DEFAULT), "open", sessions.get(CODEX_DEFAULT, 0), cap
     pool = routing_pool(environ, run)
-    account, placement = select(pool, quotas(pool, environ), sessions, cap, route)
-    return account, placement, sessions.get(account.name, 0), cap
+    caps = session_caps.stored("codex")
+    account, placement = select(pool, quotas(pool, environ), sessions, cap, route, caps)
+    return account, placement, sessions.get(account.name, 0), caps.get(account.name, cap)
 
 
 def main(

@@ -339,6 +339,17 @@ MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
+def session_cap_argv(body):
+    account, cap, harness = body.get("account"), body.get("cap"), body.get("harness", "claude")
+    if not isinstance(account, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", account) or account.startswith("-"):
+        raise ValueError("session_cap needs an exact account name")
+    if type(cap) is not int or not 1 <= cap <= MAX_CAP:
+        raise ValueError(f"cap must be a whole number from 1 to {MAX_CAP}")
+    if harness not in MASTER_AGENTS:
+        raise ValueError(f"harness must be one of {', '.join(MASTER_AGENTS)}")
+    return ["session-cap", account, str(cap), "--harness", harness]
+
+
 def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
@@ -354,6 +365,8 @@ def control_argv(body):
         return restore_decision_argv(body)
     if action == "lift":
         return lift_argv(body)
+    if action == "session_cap":
+        return session_cap_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
