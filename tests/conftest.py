@@ -322,7 +322,6 @@ def _swarm_codes_in_order(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _swarm_runs_as_installed(monkeypatch):
-    """A test run from a worktree counts as the installed agentihooks, so the tick and swarm start behave as in CI."""
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
