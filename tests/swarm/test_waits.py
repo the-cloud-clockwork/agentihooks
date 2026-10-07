@@ -530,14 +530,8 @@ def test_a_legacy_checks_wait_binds_before_resolving(tick, monkeypatch):
 
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "tests", 1, on={"kind": "checks", "target": URL})
     tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=True, red=False)
-    writes = []
-    original = tick.store.redis.set
-
-    def set_wait(*args, **kwargs):
-        writes.append(kwargs)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(tick.store.redis, "set", set_wait)
+    key = idle.key("sw", "wait", ME)
+    ttl = tick.store.redis.pttl(key)
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME) == {
         "until": 10_000_000,
@@ -545,7 +539,7 @@ def test_a_legacy_checks_wait_binds_before_resolving(tick, monkeypatch):
         "at": 1,
         "on": {"kind": "checks", "target": URL, "head": "first"},
     }
-    assert writes == [{"keepttl": True}]
+    assert 0 < tick.store.redis.pttl(key) <= ttl
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
@@ -562,3 +556,27 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
     assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies)) == [
         f"ended the wait of {ME}: checks on {URL}, now red"
     ]
+
+
+@pytest.mark.parametrize("head, resolved", [("second", True), ("first", True)])
+def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resolved):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    calls = []
+
+    def github(url):
+        calls.append(url)
+        idle.declare_wait(
+            tick.store.redis, "sw", ME, 20_000_000, "new wait", 2, on={"kind": "checks", "target": URL, "head": "third"}
+        )
+        return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False)
+
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == {
+        "until": 20_000_000,
+        "reason": "new wait",
+        "at": 2,
+        "on": {"kind": "checks", "target": URL, "head": "third"},
+    }
+    assert tick.told() == []

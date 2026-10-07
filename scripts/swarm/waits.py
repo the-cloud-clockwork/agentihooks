@@ -48,6 +48,22 @@ def checks_resolution(held, github):
     return f"checks on {target}, now {'red' if current.red else 'green'}" if current.resolved else ""
 
 
+def _save_wait(redis, slug, name, previous, held, outcome):
+    key = idle.key(slug, "wait", name)
+
+    def update(pipe):
+        if pipe.get(key) != previous:
+            return False
+        pipe.multi()
+        if outcome:
+            pipe.delete(key)
+        else:
+            pipe.set(key, json.dumps(held), keepttl=True)
+        return True
+
+    return redis.transaction(update, key, value_from_callable=True)
+
+
 def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
     if kind == "checks":
@@ -89,13 +105,15 @@ def end_pass(store, slug, rows, inbox, github):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
+        previous = json.dumps(held)
         head = held["on"].get("head")
         outcome = resolution(held["on"], rows, inbox, github)
-        if held["on"].get("head") != head:
-            store.redis.set(idle.key(slug, "wait", agent.name), json.dumps(held), keepttl=True)
+        if (outcome or held["on"].get("head") != head) and not _save_wait(
+            store.redis, slug, agent.name, previous, held, outcome
+        ):
+            continue
         if not outcome:
             continue
-        idle.end_wait(store.redis, slug, agent.name)
         text = (
             f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
             "or wait on the next thing."
