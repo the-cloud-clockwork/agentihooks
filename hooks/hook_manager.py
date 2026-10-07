@@ -500,6 +500,7 @@ def on_session_start(payload: dict) -> None:
                 cwd=payload.get("cwd", ""),
                 model=payload.get("model", ""),
                 account=session_account(_agent_pid),
+                name=os.environ.get("AGENTIHOOKS_AGENT_NAME", ""),
             )
             check_and_inject_broadcasts(session_id)
         except Exception as e:
