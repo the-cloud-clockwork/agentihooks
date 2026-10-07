@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import time
 from dataclasses import replace
@@ -70,11 +71,30 @@ def test_records_load_only_on_the_herdr_server_they_were_opened_on(tmp_path):
 
 
 def test_a_record_without_a_herdr_server_belongs_to_the_default_server(tmp_path):
-    env = {herdr_panes.ROOT_ENV: str(tmp_path)}
+    folder = tmp_path / "panes"
+    env = {herdr_panes.ROOT_ENV: str(folder)}
     legacy = replace(herdr_panes.record(PLACED, "init-agent", "a", env, 1), herdr_server="")
+    for path in folder.iterdir():
+        path.unlink()
     herdr_panes.update(legacy, env)
+    assert [path.name for path in folder.iterdir()] == ["term_a.json"]
     assert herdr_panes.load(env) == [legacy]
     assert herdr_panes.load({**env, "HERDR_SOCKET_PATH": "/s/a.sock"}) == []
+    herdr_panes.forget(legacy, env)
+    assert list(folder.iterdir()) == []
+
+
+def test_two_servers_recording_the_same_pane_keep_both_records(tmp_path):
+    first = {herdr_panes.ROOT_ENV: str(tmp_path), "HERDR_SOCKET_PATH": "/s/a.sock"}
+    second = {herdr_panes.ROOT_ENV: str(tmp_path), "HERDR_SOCKET_PATH": "/s/b.sock"}
+    bare = Placement("w1", "w1:t2", "w1:p3")
+    made = herdr_panes.record(bare, "init-agent", "a", first, 1)
+    other = herdr_panes.record(bare, "init-agent", "b", second, 2)
+    assert herdr_panes.load(first) == [made]
+    assert herdr_panes.load(second) == [other]
+    herdr_panes.forget(other, second)
+    assert herdr_panes.load(first) == [made]
+    assert herdr_panes.load(second) == []
 
 
 def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
@@ -164,10 +184,12 @@ def test_a_plain_shell_tab_is_the_operators_and_is_not_recorded(monkeypatch, tmp
 
 
 def test_a_record_lands_in_the_configured_folder_named_for_its_terminal(tmp_path):
-    env = {herdr_panes.ROOT_ENV: str(tmp_path / "a" / "b")}
+    env = {herdr_panes.ROOT_ENV: str(tmp_path / "a" / "b"), "HERDR_SOCKET_PATH": "/s/a.sock"}
     herdr_panes.record(Placement("w1", "w1:t2", "w1:p3", "term:A/b"), "init-agent", "a", env, 1)
     herdr_panes.record(Placement("w1", "w1:t2", "w1:p4"), "init-agent", "b", env, 1)
-    assert sorted(path.name for path in (tmp_path / "a" / "b").iterdir()) == ["term_A_b.json", "w1_p4.json"]
+    server = hashlib.sha256(b"/s/a.sock").hexdigest()[:12]
+    names = sorted(path.name for path in (tmp_path / "a" / "b").iterdir())
+    assert names == [f"{server}_term_A_b.json", f"{server}_w1_p4.json"]
 
 
 def test_a_store_url_outside_a_swarm_is_not_kept(tmp_path):
