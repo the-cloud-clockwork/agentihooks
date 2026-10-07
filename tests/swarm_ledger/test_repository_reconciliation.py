@@ -137,7 +137,8 @@ def test_package_core_clock_is_preserved_when_json_is_missing(stored, monkeypatc
 
     monkeypatch.setattr(package_core, "LEDGER_DIR", core.LEDGER_DIR)
     monkeypatch.setattr(package_core, "now_ms", lambda: 1000)
-    monkeypatch.setattr(core, "now_ms", lambda: 500)
+    if package_core is not core:
+        monkeypatch.setattr(core, "now_ms", lambda: 500)
     seed = core.parse_seed(stored.read_page("reconcile"))
     core.paths("reconcile")[1].unlink()
     _, meta, created = package_core.load_state(package_core.paths("reconcile")[1], seed)

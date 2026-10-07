@@ -688,10 +688,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused(slug):
             return None
         if agent or agents_only:
-            with core.LOCK:
-                meta = repository.get_document(slug, reconcile=False)["_meta"]
-                if agent not in meta.get("members", {}):
-                    return self.send(403, "agent must join this ledger before uploading", "text/plain")
+            meta = repository.get_document(slug, reconcile=False)["_meta"]
+            if agent not in meta.get("members", {}):
+                return self.send(403, "agent must join this ledger before uploading", "text/plain")
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:

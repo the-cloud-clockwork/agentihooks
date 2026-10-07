@@ -122,8 +122,9 @@ def test_restore_mark_order_and_missing_files_survive_purge(files):
     assert files.restore("a-first", now=4)
     assert (core.LEDGER_DIR / ".bin-restored.json").read_bytes() == b'{\n "a-first": 4,\n "z-last": 3\n}'
     files.delete("absent", now=1)
+    files.delete("young", now=31 * 86400000)
     assert bin_storage.purge_expired(now=1 + 31 * 86400000) == ["absent"]
-    assert bin_storage.entries() == {}
+    assert bin_storage.entries() == {"young": 31 * 86400000}
 
 
 def test_auto_bin_continues_after_an_unreadable_ledger(files):
@@ -150,6 +151,8 @@ def test_file_reads_keep_utf8_when_the_locale_is_ascii(files):
         pytest.skip("UTF8 mode overrides the locale encoding")
     files.create("utf8", content())
     files.apply_ops("utf8", changes=[{"path": "phases/p1/done", "value": True}])
+    files.create("seed-only", content())
+    core.paths("seed-only")[1].unlink()
     (core.LEDGER_DIR / ".bin.json").write_text('{"Café": 1}', encoding="utf-8")
     (core.LEDGER_DIR / ".bin-restored.json").write_text('{"Café": 1}', encoding="utf-8")
     before = locale.setlocale(locale.LC_CTYPE)
@@ -158,7 +161,9 @@ def test_file_reads_keep_utf8_when_the_locale_is_ascii(files):
         assert files.get_document("utf8")["title"] == "Café"
         assert files.read_snapshot("utf8")["overview"] == "Résumé"
         assert "Café" in files.read_page("utf8")
-        assert files.list_summaries()[0]["title"] == "Café"
+        summaries = files.list_summaries()
+        assert summaries[0]["title"] == "Café"
+        assert {row["slug"] for row in summaries} == {"seed-only", "utf8"}
         assert bin_storage.entries() == {"Café": 1}
         assert bin_storage.restored() == {"Café": 1}
         assert bin_storage.auto_bin(now=1) == ["utf8"]

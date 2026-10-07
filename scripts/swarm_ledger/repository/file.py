@@ -133,7 +133,8 @@ class FileLedgerRepository:
     def get_document(self, slug: str, reconcile: bool = True) -> dict:
         if reconcile:
             return sync(slug, core=self.domain)[0]
-        doc, meta, _ = load_state(self.domain.paths(slug)[1], None, self.domain)
+        with self.domain.LOCK:
+            doc, meta, _ = load_state(self.domain.paths(slug)[1], None, self.domain)
         return {**doc, "_meta": meta}
 
     def apply_ops(
