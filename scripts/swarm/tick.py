@@ -17,8 +17,8 @@ from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications, lifetime, live_binding, phase_state, session_model
+from scripts.swarm import control_notifications, lifetime, live_binding, operator_mail, phase_state, session_model
+from scripts.swarm import idle as idle_state
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -28,6 +28,12 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+DOWN_TOLD = "master down told"
+REDELIVERED = "the master went down before closing it; kept for the next master"
+MASTER_DOWN = (
+    "The master is down and is being relaunched. Your message waits for the new master, which receives it as soon "
+    "as it starts."
+)
 IDLE_NUDGE_TICKS = 3
 IDLE_KILL_TICKS = 10
 IDLE_TICKS = "idle-ticks"
@@ -109,6 +115,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
     if not sleeping:
+        actions += _master_down(slug, config, store, ledger, runtime, now_ms)
         actions += _master(slug, config, store, runtime, now_ms)
         if config.state == "running":
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
@@ -138,10 +145,32 @@ def _woken(slug, config, store, ledger):
     if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
         priming.cancel_master_items(inbox, slug)
         return False
-    return any(
-        item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
-        for item in waiting
-    )
+    return any(_operator_line(item) for item in waiting)
+
+
+def _operator_line(item):
+    return item.sender == "operator" and not (item.fyi and item.ref.startswith(control_notifications.CONTROL_REF))
+
+
+def _master_down(slug, config, store, ledger, runtime, now_ms):
+    """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
+    master took but never closed to pending so the next master receives it."""
+    live = runtime.live_names()
+    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
+        return []
+    inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
+    waiting = [item for item in inbox.inbox(seat) if item.state not in CLOSED and _operator_line(item)]
+    for item in waiting:
+        if item.state != "pending":
+            inbox.redirect(item.id, "swarm", seat, REDELIVERED)
+    told = [item for item in waiting if DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
+    for item in told:
+        inbox.note(item.id, DOWN_TOLD, "swarm", MASTER_DOWN, now_ms)
+    if not told:
+        return []
+    ledger.notify(slug, MASTER_DOWN)
+    return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
 def _drop(slug, store, ledger, rows, agent):

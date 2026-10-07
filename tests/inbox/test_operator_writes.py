@@ -116,13 +116,16 @@ def test_a_check_on_a_task_goes_to_its_agent(swarm):
 
 def test_a_chat_line_goes_to_its_addressee_and_an_unaddressed_one_to_the_master(swarm):
     _, inbox = swarm
-    relay(
+    sent = relay(
         swarm,
         write(5, "chat", kind="message added", text="@sw-ci-1 the slow job"),
         write(6, "chat", kind="message added", text="how far along"),
     )
+    assert len(sent) == 2
     [(_, text, _)] = pending(inbox, CI.seat)
-    assert text == f"On ledger {SLUG}: " + line(write(5, "chat", kind="message added", text="@sw-ci-1 the slow job"))
+    assert text.startswith(
+        f"On ledger {SLUG}: " + line(write(5, "chat", kind="message added", text="@sw-ci-1 the slow job"))
+    )
     assert len(pending(inbox, MASTER_SEAT)) == 1
 
 
@@ -133,9 +136,35 @@ def test_a_chat_line_to_the_swarm_is_one_item_for_every_live_agent_with_its_imag
     relay(swarm, to_all)
     items = [pending(inbox, a.seat) for a in (ENG, CI, BOSS)]
     assert [len(got) for got in items] == [1, 1, 1]
-    assert {got[0][1] for got in items} == {f"On ledger {SLUG}: " + line(to_all)}
+    assert all(got[0][1].startswith(f"On ledger {SLUG}: " + line(to_all)) for got in items)
     assert "/media/shot.png" in items[0][0][1]
     assert pending(inbox, f"eng-2@{SLUG}") == []
+
+
+def test_an_engineers_item_for_an_operator_chat_line_carries_the_answer_rule(swarm):
+    _, inbox = swarm
+    relay(swarm, write(5, "chat", kind="message added", text="@swarm can anyone reply"))
+    [(_, text, _)] = pending(inbox, ENG.seat)
+    assert text.endswith(operator_mail.ANSWER_RULE.format(master=MASTER_SEAT))
+    [(_, boss_text, _)] = pending(inbox, MASTER_SEAT)
+    assert boss_text.endswith(operator_mail.MASTER_RULE)
+    assert MASTER_SEAT not in boss_text
+
+
+def test_an_operator_write_that_is_not_chat_carries_no_answer_rule(swarm):
+    _, inbox = swarm
+    relay(swarm, write(5, "tasks/t1"))
+    [(_, text, _)] = pending(inbox, ENG.seat)
+    assert text == f"On ledger {SLUG}: " + line(write(5, "tasks/t1"))
+
+
+def test_a_swarm_chat_line_reaches_the_master_seat_while_no_master_is_recorded(swarm):
+    store, inbox = swarm
+    store.drop_agent(SLUG, BOSS.name)
+    relay(swarm, write(5, "chat", kind="message added", text="@swarm the master launch failed"))
+    [(_, text, _)] = pending(inbox, MASTER_SEAT)
+    assert text.endswith(operator_mail.MASTER_RULE)
+    assert len(pending(inbox, ENG.seat)) == 1
 
 
 def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):

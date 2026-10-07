@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.handoff import transfers
 from scripts.swarm import cli, take_master
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import tick
@@ -10,6 +11,7 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 
 @pytest.fixture
@@ -57,12 +59,46 @@ def test_argv_of_reads_a_process_command_line():
     assert take_master.argv_of(2**22 + 1) == ()
 
 
-def test_a_named_session_keeps_its_name(taker, monkeypatch):
+@pytest.mark.parametrize("carried", ["s-261007-104655", "master@d44a5a-0001", "engineer@a1b2c3-0004"])
+def test_a_session_carrying_another_name_is_seated_under_a_minted_master_name(taker, monkeypatch, carried):
     store, _, _, named = taker
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "ops-desk")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", carried)
     assert run("sw", "take-master") == 0
-    assert _masters(store) == [("ops-desk", "master@sw", "codex")]
+    assert _masters(store) == [("master@a1b2c3-0001", "master@sw", "codex")]
+    assert named == [(4242, "master@a1b2c3-0001")]
+    assert store.names.resolve(carried) == "master@a1b2c3-0001"
+
+
+def test_a_session_already_named_as_this_swarms_master_keeps_its_name(taker, monkeypatch):
+    store, _, _, named = taker
+    name = store.next_name("sw", "master")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    assert run("sw", "take-master") == 0
+    assert _masters(store) == [(name, "master@sw", "codex")]
     assert named == []
+
+
+def test_a_master_retaking_its_own_seat_keeps_its_record_and_name(taker, monkeypatch):
+    store, _, rt, named = taker
+    name = store.next_name("sw", "master")
+    store.put_agent("sw", AgentRecord(name, "master", "master", seat="master@sw"))
+    rt.live.add(name)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    assert run("sw", "take-master") == 0
+    assert rt.killed == [] and named == []
+    assert _masters(store) == [(name, "master@sw", "codex")]
+    assert store.redis.lrange(store.key("sw", "history"), 0, -1) == []
+
+
+def test_a_hand_taken_master_under_its_session_name_is_renamed_without_killing_itself(taker, monkeypatch):
+    store, _, rt, named = taker
+    store.put_agent("sw", AgentRecord("s-261007-104655", "master", "master", seat="master@sw"))
+    rt.live.add("s-261007-104655")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "s-261007-104655")
+    assert run("sw", "take-master") == 0
+    assert rt.killed == []
+    assert _masters(store) == [("master@a1b2c3-0001", "master@sw", "codex")]
+    assert store.seats.occupant("master@sw").occupant == "master@a1b2c3-0001"
 
 
 def test_take_master_refuses_while_another_master_is_live(taker, capsys):
@@ -194,6 +230,26 @@ def test_an_unregistered_session_without_a_name_is_refused(taker, monkeypatch, c
     assert run("sw", "take-master") == 1
     assert "not registered" in capsys.readouterr().err
     assert _masters(store) == []
+
+
+def test_the_open_master_transfer_moves_to_the_new_occupant(taker, monkeypatch, capsys):
+    store, _, rt, _ = taker
+    dead = AgentRecord(store.next_name("sw", "master"), "master", "master", seat="master@sw")
+    store.seats.occupy(dead.seat, dead.name, 1)
+    store.put_handoff("sw", "master", DOC, "master@sw")
+    row = transfers.record(store, "sw", dead, "recycle", DOC, 1)
+    transfers.attach(store, "sw", dead)
+    transfers.failed(store, "sw", dead)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "s-261007-104655")
+    capsys.readouterr()
+    assert run("sw", "take-master") == 0
+    [open_row] = [r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == row["id"]]
+    assert open_row["successor"] == "master@a1b2c3-0002"
+    assert f"confirm-handoff {open_row['id']} --next" in capsys.readouterr().out
+    rt.live.add("master@a1b2c3-0002")
+    [master] = [a for a in store.agents("sw") if a.lane == "master"]
+    confirmed = transfers.confirm(store, "sw", open_row["id"], master, "Read the saved proof.", 2)
+    assert confirmed["continuity"]["by"] == "master@a1b2c3-0002"
 
 
 def test_cli_parses_take_master():
