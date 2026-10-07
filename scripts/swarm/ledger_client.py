@@ -60,8 +60,10 @@ class LedgerClient:
     def comment_phase(self, slug, phase_id, text, by):
         self._call(slug, [_op("add", by, thread=f"phases/{phase_id}/comments", text=text)])
 
-    def review_phase(self, slug, phase_id, state, by="swarm", note=""):
+    def review_phase(self, slug, phase_id, state, by="swarm", note="", override=None):
         fields = {"item": f"phases/{phase_id}", "state": state, **({"note": note} if note else {})}
+        if override:
+            fields["override"] = override
         self._call(slug, [_op("phase_review", by, **fields)])
 
     def say(self, slug, text, by=None):

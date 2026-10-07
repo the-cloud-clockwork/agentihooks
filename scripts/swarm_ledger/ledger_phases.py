@@ -92,7 +92,7 @@ def check(op: dict) -> None:
 
 
 def check_review(op: dict) -> None:
-    if set(op) - {"op", "id", "by", "item", "state", "rounds", "note", "escalated"}:
+    if set(op) - {"op", "id", "by", "item", "state", "rounds", "note", "escalated", "override"}:
         raise ValueError("phase_review writes only the review record")
     if op.get("state") not in REVIEW_STATES:
         raise ValueError(f"review state must be one of {REVIEW_STATES}")
@@ -106,6 +106,20 @@ def check_review(op: dict) -> None:
         raise ValueError("a send back needs a note")
     if op["state"] == "sent_back" and ("rounds" in op or "escalated" in op):
         raise ValueError("a send back counts its own rounds")
+    if "override" in op:
+        check_override(op)
+
+
+def check_override(op: dict) -> None:
+    if op["state"] != "approved":
+        raise ValueError("only an approval carries an override")
+    override = op["override"]
+    shaped = isinstance(override, dict) and set(override) == {"reason", "problems"}
+    reason, problems = (override["reason"], override["problems"]) if shaped else ("", [])
+    if not isinstance(reason, str) or not reason.strip() or not isinstance(problems, list) or not problems:
+        raise ValueError("an override needs a reason and the problems it overrode")
+    if not all(isinstance(problem, str) for problem in problems):
+        raise ValueError("an override needs a reason and the problems it overrode")
 
 
 def check_append(op: dict) -> None:
@@ -196,6 +210,8 @@ def review_record(phase: dict, op: dict, at: int) -> dict:
         record["notes"] = prev["notes"]
     if "escalated" in op:
         record["escalated"] = op["escalated"]
+    if "override" in op:
+        record["override"] = op["override"]
     if op["state"] == "sent_back":
         record["rounds"] = prev.get("rounds", 0) + 1
         record["notes"] = [*prev.get("notes", []), op["note"]]

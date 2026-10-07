@@ -704,7 +704,10 @@ def cmd_progress(store, args):
 
 def cmd_plan(store, args):
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
-    result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, args.action, args.note)
+    override = getattr(args, "override", "")
+    result = plan_review.decide(
+        LedgerClient(), args.slug, agent, autonomy, args.phase, args.action, args.note, override
+    )
     print(json.dumps(result))
 
 
@@ -914,6 +917,8 @@ def build_parser():
         decision = plan.add_parser(action)
         decision.add_argument("phase")
         decision.add_argument("--note", required=action == "send-back")
+        if action == "approve":
+            decision.add_argument("--override", default="")
     wait = sub.add_parser("wait")
     wait.add_argument("minutes", type=int, nargs="?")
     wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
