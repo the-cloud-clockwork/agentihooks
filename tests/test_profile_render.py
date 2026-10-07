@@ -1249,16 +1249,21 @@ def test_init_rerenders_every_existing_profile_home(world, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_running_profile_validates_its_launched_persona_after_other_profile_render(world, monkeypatch, target):
+@pytest.mark.parametrize("validated", [False, True])
+def test_running_profile_validates_its_launched_persona_after_other_profile_render(
+    world, monkeypatch, target, validated
+):
+    from scripts import init_agent
     from scripts.profiles import binding, render
 
     home = render.render(target, "rb-role")
     launched = binding.inspect(home, "rb-role", target)
-    report = world["home"] / "running-profile.json"
-    binding.request(report, "rb-role", target)
-    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), binding.REPORT: str(report)}
+    env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
+    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    report = Path(env[binding.REPORT])
     monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
-    assert binding.validate(launched["canary"])["persona"] == launched["persona"]
+    if validated:
+        assert binding.validate(launched["canary"])["persona"] == launched["persona"]
 
     _write(world["bundle"] / "profiles" / "rb-other" / "CLAUDE.md", "OTHER PERSONA UPDATED\n")
     _commit(world["bundle"], "change other profile")

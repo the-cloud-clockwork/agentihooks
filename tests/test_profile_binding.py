@@ -69,7 +69,7 @@ def test_revalidation_refuses_a_different_live_binding(tmp_path, monkeypatch, ta
     requested["validation"][field] = value
     report.write_text(json.dumps(requested))
 
-    with pytest.raises(ValueError, match="live process binding changed"):
+    with pytest.raises(ValueError, match="^live process binding changed since validation$"):
         binding.validate(canary)
     assert json.loads(report.read_text())["state"] == "failed"
 

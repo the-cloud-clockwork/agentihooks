@@ -38,8 +38,11 @@ def _report(report: Path, data: dict) -> None:
     report.chmod(0o600)
 
 
-def request(report: Path, profile: str, target: str) -> None:
-    _report(report, {"profile": profile, "harness": target, "state": "pending"})
+def request(report: Path, profile: str, target: str, home: Path | None = None) -> None:
+    data = {"profile": profile, "harness": target, "state": "pending"}
+    if home is not None:
+        data["rendered"] = inspect(home, profile, target)
+    _report(report, data)
 
 
 def refuse(report: Path, reason: str) -> None:
@@ -98,11 +101,12 @@ def validate(canary: str) -> dict:
         home = Path(env[HOMES[target]])
         if not home.is_dir():
             raise ValueError(f"missing profile home: {home}")
-        data = requested.get("validation")
+        validated = requested.get("validation")
+        data = validated or requested.get("rendered")
         if data:
-            actual = (pid, requested["profile"], target, str(home.resolve()))
-            recorded = (data.get("pid"), data.get("profile"), data.get("harness"), data.get("home"))
-            if data.get("state") != "validated" or recorded != actual:
+            actual = (requested["profile"], target, str(home.resolve()))
+            recorded = (data.get("profile"), data.get("harness"), data.get("home"))
+            if recorded != actual or (validated and (data.get("state") != "validated" or data.get("pid") != pid)):
                 raise ValueError("live process binding changed since validation")
         else:
             data = inspect(home, requested["profile"], target)
