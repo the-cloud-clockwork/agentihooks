@@ -58,7 +58,12 @@ def test_render_and_init_agent_load_connector_environment_before_publication(
     if entrypoint == "render":
         assert render.main(["render", role]) == 0
     else:
-        assert init_agent.main(["--profile", role, "--agent", "claude", "--dir", str(world["home"]), "--dry-run"]) == 0
+        assert (
+            init_agent.main(
+                ["--profile", role, "--agent", "claude", "--host", "herdr", "--dir", str(world["home"]), "--dry-run"]
+            )
+            == 0
+        )
     home = render.rendered_root() / role / "claude"
     servers = json.loads((home / ".claude.json").read_text())["mcpServers"]
     assert servers["gw"]["headers"]["Authorization"] == "Bearer ${GW_KEY}"
