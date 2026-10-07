@@ -216,7 +216,7 @@ def test_a_delivered_or_closed_item_is_never_woken(inbox):
     delivered = inbox.send(MASTER_NAME, "sw-eng-1", "one")
     closed = inbox.send(MASTER_NAME, "sw-eng-1", "two")
     inbox.deliver(delivered.id, "sw-eng-1")
-    inbox.close(closed.id, "sw-eng-1", "done")
+    inbox.close(closed.id, "sw-eng-1", "done", "handled the request")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     for n in range(8):
         run(inbox, herdr, ledger, sent_at(delivered) + n * W)

@@ -59,7 +59,7 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
     inbox = InboxStore(store.redis)
     open_item = inbox.send("ci@a1b2c3-0001", agent.name, "contract confirmed")
     closed = inbox.send("ci@a1b2c3-0001", agent.name, "old")
-    inbox.close(closed.id, agent.name, "done")
+    inbox.close(closed.id, agent.name, "done", "handled the request")
     rows = [{"id": "t1", "phase": "p7", "pr_url": PR}, {"id": "t2", "phase": "p7"}]
     calls = []
     envelope = build(store, "sw", agent, "recycle", rows, 1_791_300_000_000, run=_run(calls))
