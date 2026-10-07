@@ -203,7 +203,7 @@ class TestReview:
             "Close rate: 2 tasks in the last hour. "
             "Time left: the page shows 3h 0m, computed 1h 0m from 2 remaining at 2 an hour and a chain of 2 "
             "at 20m a task, stale. "
-            "Judge each line against the real work, fix what is stale, then ack."
+            "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
     def test_a_clean_ledger_says_none_and_keeps_a_matching_time_left(self):
@@ -218,7 +218,7 @@ class TestReview:
             "Close rate: 2 tasks in the last hour. "
             "Time left: the page shows 1h 0m, computed 1h 0m from 2 remaining at 2 an hour and a chain of 2 "
             "at 20m a task, current. "
-            "Judge each line against the real work, fix what is stale, then ack."
+            "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
     def test_no_close_in_the_last_hour_leaves_time_left_to_the_master(self):
@@ -276,7 +276,7 @@ class TestReviewBounds:
             "Tasks: 0 open, 0 claimed, 0 pr. "
             "Close rate: 0 tasks in the last hour. "
             "Time left: the page shows not set, computed 0h 0m from 0 remaining at 0 an hour and a chain of 0, stale. "
-            "Judge each line against the real work, fix what is stale, then ack."
+            "Judge stale phases and undecided follow-ups against the real work, then ack."
         )
 
 
@@ -287,9 +287,10 @@ class TestStatsSyncEvent:
     def test_the_stats_sync_event_carries_the_computed_review(self):
         d = doc(phases=[{"id": "p1", "title": "One", "done": False}], tasks=[task("a", "done"), task("b", "open")])
         ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
-        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "s1"}, ctx) is True
         text = ledger_stats.review(d, ctx.meta, NOW)
-        assert [{k: e[k] for k in ("by", "kind", "target", "id", "text")} for e in ctx.events] == [
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "s1"}, ctx) is True
+        sent = [e for e in ctx.events if e["kind"] == "stats sync requested"]
+        assert [{k: e[k] for k in ("by", "kind", "target", "id", "text")} for e in sent] == [
             {"by": "operator", "kind": "stats sync requested", "target": "", "id": "s1", "text": text}
         ]
         assert "Stale phases: p1 One is open with every task done. " not in text
@@ -300,3 +301,70 @@ class TestStatsSyncEvent:
         assert ledger_core.record_sync(doc(), {"op": "sync", "id": "s2"}, ctx) is True
         assert ctx.events[0]["kind"] == "sync requested"
         assert ctx.events[0]["text"].startswith("Operator sync. ")
+
+    def test_busy_master_refresh_persists_calculated_stats_without_ack(self):
+        d = doc(
+            phases=[{"id": "p1", "title": "One", "done": False}],
+            tasks=[task("a", "done"), task("b", "open")],
+            followups=[{"id": "f1", "text": "Judge this", "done": False}],
+            time_left_minutes=400,
+        )
+        ctx = self.ctx([event("task claimed", "a", NOW - 30 * MINUTE), event("task done", "a", NOW - 10 * MINUTE)])
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "busy"}, ctx)
+        assert d["time_left_minutes"] == 60
+        refresh = ctx.meta["stats_refresh"]
+        assert refresh["state"] == "refreshed"
+        assert refresh["rev"] == ctx.rev
+        assert refresh["completed_at"] == NOW
+        assert refresh["counts"] == {
+            "phases": {"done": 0, "total": 1},
+            "tasks": {"done": 1, "total": 2},
+            "followups": {"done": 0, "total": 1},
+        }
+        assert refresh["calculation"]["stale"] is True
+        assert d["followups"][0]["done"] is False
+        assert not any(e["kind"] == "stats check answered" for e in ctx.events)
+
+    def test_failed_refresh_keeps_prior_value_and_allows_immediate_retry(self, monkeypatch):
+        d = doc(time_left_minutes=400)
+        ctx = self.ctx()
+        with monkeypatch.context() as control:
+
+            def fail(*args):
+                raise ValueError("synthetic calculation failure")
+
+            control.setattr("ledger_stats.calculate", fail)
+            assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "failed"}, ctx)
+        assert d["time_left_minutes"] == 400
+        assert ctx.meta["stats_refresh"]["state"] == "failed"
+        assert ctx.meta["stats_refresh"]["error"] == "Stats calculation failed: ValueError"
+        assert ctx.meta["stats_refresh"]["completed_at"] == NOW
+        ctx.meta["events"] += ctx.events
+        ctx.events = []
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "retry"}, ctx)
+        assert ctx.meta["stats_refresh"]["state"] == "refreshed"
+        assert d["time_left_minutes"] == 0
+
+    def test_unknown_estimate_retains_prior_value_and_names_evidence_gap(self):
+        d = doc(tasks=[task("a", "open")], time_left_minutes=400)
+        ctx = self.ctx()
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "unknown"}, ctx)
+        assert d["time_left_minutes"] == 400
+        assert ctx.meta["stats_refresh"]["calculation"]["minutes"] is None
+        assert ctx.meta["stats_refresh"]["calculation"]["gap"] == "No task closed in the last hour"
+        assert ctx.meta["stats_refresh"]["state"] == "refreshed"
+
+    def test_refresh_counts_scope_completed_phases_and_followups(self):
+        d = doc(
+            phases=[{"id": "p", "done": True}, {"id": "ignored", "out_of_scope": True}],
+            followups=[{"id": "f", "done": True}, {"id": "ignored", "out_of_scope": True}],
+            tasks=[task("a", "done"), task("b", "open", out_of_scope=True)],
+        )
+        ctx = self.ctx()
+        assert ledger_core.record_sync(d, {"op": "stats_sync", "id": "counts"}, ctx)
+        assert ctx.meta["stats_refresh"]["counts"] == {
+            "phases": {"done": 1, "total": 1},
+            "tasks": {"done": 1, "total": 1},
+            "followups": {"done": 1, "total": 1},
+        }
+        assert d["time_left_minutes"] == 0
