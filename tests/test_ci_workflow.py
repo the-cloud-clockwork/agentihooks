@@ -255,7 +255,7 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         assert install["if"] == "steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'"
 
 
-def test_equivalence_runs_every_replay_at_once_after_one_browser_setup():
+def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
     steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
         "steps"
     ]
@@ -266,7 +266,7 @@ def test_equivalence_runs_every_replay_at_once_after_one_browser_setup():
         run = step["run"]
         assert run.count(" &\n") == 3
         assert "|| failed=1" in run and 'exit "$failed"' in run
-        assert 'cat "$RUNNER_TEMP/$name.log"' in run
+        assert 'cat "$RUNNER_TEMP/$name.log"' in run and "return 1" in run
     assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
     assert all("Path('head/" not in step.get("run", "") for step in steps)
 

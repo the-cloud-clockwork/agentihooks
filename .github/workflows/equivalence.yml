@@ -69,10 +69,10 @@ jobs:
               return 1
             fi
           }
-          replay=head/tests/swarm_ledger
-          replay base python $replay/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
-          replay head python $replay/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
-          replay fault python $replay/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
+          scripts=head/tests/swarm_ledger
+          replay base python $scripts/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
+          replay head python $scripts/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
+          replay fault python $scripts/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
           failed=0
           for job in $(jobs -p); do
             wait "$job" || failed=1
@@ -102,10 +102,10 @@ jobs:
               return 1
             fi
           }
-          replay=head/tests/swarm_ledger
-          replay base-page python -I $replay/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
-          replay head-page python -I $replay/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
-          replay fault-page python -I $replay/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
+          scripts=head/tests/swarm_ledger
+          replay base-page python -I $scripts/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
+          replay head-page python -I $scripts/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
+          replay fault-page python -I $scripts/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
           failed=0
           for job in $(jobs -p); do
             wait "$job" || failed=1
