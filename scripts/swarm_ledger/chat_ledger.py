@@ -12,14 +12,10 @@ import json
 import os
 import sys
 import urllib.error
-import urllib.request
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ledger_core as core  # noqa: E402
-import ledger_link  # noqa: E402
-
-BASE = ledger_link.base()
+import ledger  # noqa: E402
 
 
 def main():
@@ -29,21 +25,13 @@ def main():
     parser.add_argument("text")
     args = parser.parse_args()
     text = (sys.stdin.read() if args.text == "-" else args.text).strip()
-    token = core.read_token(core.paths(args.slug)[0].read_text(encoding="utf-8"))
     op = {"op": "add", "thread": "chat", "id": f"m-{uuid.uuid4().hex[:10]}", "text": text, "by": args.author}
-    request = urllib.request.Request(
-        f"{BASE}/api/{args.slug}",
-        method="PUT",
-        data=json.dumps({"ops": [op]}).encode(),
-        headers={"Content-Type": "application/json", "X-Ledger-Token": token or ""},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=10) as resp:
-            rejected = json.loads(resp.read()).get("rejected", [])
+        rejected = ledger.request(args.slug, [op], service=True)["rejected"]
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        sys.exit(f"ledger server not answering on {BASE}: {exc}")
+        sys.exit(f"ledger server not answering on {ledger.BASE}: {exc}")
     if rejected:
         sys.exit(f"message rejected: {rejected}")
     print(json.dumps({"posted": op["id"]}))
