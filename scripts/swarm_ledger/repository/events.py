@@ -1,0 +1,42 @@
+import hashlib
+import json
+
+from .rows import changes, encode
+
+
+def read_events(connection, slug: str, revision: int | None = None) -> list:
+    query = "SELECT value FROM events WHERE slug=?"
+    parameters = (slug,)
+    if revision is not None:
+        if connection.execute("SELECT 1 FROM events WHERE slug=? AND revision IS NULL LIMIT 1", (slug,)).fetchone():
+            raise KeyError("rev")
+        query += " AND revision>?"
+        parameters += (revision,)
+    return [json.loads(value) for (value,) in connection.execute(query + " ORDER BY position", parameters)]
+
+
+def write_events(connection, slug: str, events: list) -> None:
+    desired = {}
+    occurrences = {}
+    for position, event in enumerate(events):
+        value = encode(event)
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        occurrence = occurrences.get(digest, 0)
+        occurrences[digest] = occurrence + 1
+        desired[f"{digest}:{occurrence}"] = (event.get("rev"), position, value)
+    old = {
+        key: (revision, position, value)
+        for key, revision, position, value in connection.execute(
+            "SELECT key,revision,position,value FROM events WHERE slug=?", (slug,)
+        )
+    }
+    for key, row in changes(old, desired).items():
+        if row is None:
+            connection.execute("DELETE FROM events WHERE slug=? AND key=?", (slug, key))
+        elif key in old and old[key][2] == row[2]:
+            connection.execute("UPDATE events SET position=? WHERE slug=? AND key=?", (row[1], slug, key))
+        else:
+            connection.execute(
+                "INSERT INTO events VALUES (?, ?, ?, ?, ?)",
+                (slug, key, *row),
+            )
