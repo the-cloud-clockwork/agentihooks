@@ -232,3 +232,115 @@ def test_unavailable_head_is_not_judged(tmp_path, result):
     else:
         expected = "head" if result not in ("blank", "failed", "timeout", "error") else None
         assert (intent.pr_head("https://github.com/o/r/pull/9", run=run) or None) == expected
+
+
+@pytest.mark.parametrize("merged", [True, False])
+def test_merge_verification_uses_the_real_pull_request_field(merged):
+    import subprocess
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="true\n" if merged else "false\n")
+
+    assert intent.pr_merged("https://github.com/o/r/pull/9", run=run) is merged
+    assert calls == [
+        (
+            ["gh", "api", "repos/o/r/pulls/9", "--jq", ".merged"],
+            {"input": None, "capture_output": True, "text": True, "timeout": 20},
+        )
+    ]
+
+
+def test_head_lookup_uses_the_exact_command_and_strips_output():
+    import subprocess
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout=" head \n")
+
+    assert intent.pr_head("https://github.com/o/r/pull/9", run=run) == "head"
+    assert calls == [
+        (
+            ["gh", "api", "repos/o/r/pulls/9", "--jq", ".head.sha"],
+            {"input": None, "capture_output": True, "text": True, "timeout": 20},
+        )
+    ]
+
+
+def test_remediation_at_the_question_thresholds():
+    from tests.gates.test_intent import answer
+
+    state = {"task": "Status", "task_text": "Show controller", "phase": "Control", "phase_intent": "Workers see owners"}
+    answers = {"delivers": answer(0.5), "reachable": answer(0.5), "weakens": answer(0.5)}
+    assert intent.remediation(state, answers) == (
+        "What would meet intent: Deliver Status: Show controller. "
+        "The phase must be able to use it for Control: Workers see owners. "
+        "Preserve Control: Workers see owners while implementing Status: Show controller."
+    )
+    answers = {"delivers": answer(0.1), "reachable": answer(0.1), "weakens": answer(0.4)}
+    assert intent.remediation(state, answers) == (
+        "What would meet intent: Deliver Status: Show controller. "
+        "The phase must be able to use it for Control: Workers see owners. "
+        "Implement the missing acceptance behavior described by Status: Show controller. "
+        "Wire the production entrypoint for Status and prove an invocation delivers Control: Workers see owners."
+    )
+
+
+def test_gate_round_feedback_defaults_and_counts_second_round(tmp_path):
+    state = Verdicts(SLUG, "intent", tmp_path)
+    state.write(TASK, "fail", "missing behavior", NOW)
+    assert gate(tmp_path).reason.endswith(" Run fix round 1 of 2.")
+    run_check(tmp_path, "first")
+    run_check(tmp_path, "second")
+    assert gate(tmp_path).reason.endswith(" Run fix round 2 of 2.")
+
+
+def test_exhausted_log_preserves_the_owner_gate_and_command(tmp_path):
+    run_check(tmp_path, "first")
+    run_check(tmp_path, "second")
+    run_check(tmp_path, "third")
+    assert gate(tmp_path).allowed
+    row = rows(tmp_path)[-1]
+    assert {key: row[key] for key in ("gate", "kind", "agent", "task", "tool", "reason")} == {
+        "gate": "intent",
+        "kind": "count",
+        "agent": ME,
+        "task": TASK,
+        "tool": "Bash",
+        "reason": "merge permitted with intent unmet after two fix rounds: missing behavior",
+    }
+
+
+def test_gate_head_and_merge_reads_use_the_recorded_url(tmp_path, monkeypatch):
+    from tests.gates.test_intent import URL
+
+    run_check(tmp_path, "first")
+    run_check(tmp_path, "second")
+    run_check(tmp_path, "third")
+    seen = []
+    monkeypatch.setattr(intent, "pr_head", lambda url: seen.append(("head", url)) or "third")
+    monkeypatch.setattr(intent, "pr_merged", lambda url: seen.append(("merged", url)) or True)
+    decision = intent.IntentGate().decide(
+        Call("Bash", {"command": "gh pr merge 9"}),
+        Who(name=ME, swarm=SLUG, task=TASK),
+        Verdicts(SLUG, "intent", tmp_path),
+        mode="coach",
+    )
+    assert decision.allowed
+    assert seen == [("head", URL), ("merged", URL)]
+
+
+def test_environment_and_catalog_accept_intent_coach():
+    from scripts.gates import catalog
+    from scripts.swarm.cli import gate_mode
+    from scripts.swarm.store import SwarmError
+
+    assert modes.mode(intent.IntentGate(), {"AGENTIHOOKS_GATE_INTENT": "coach"}) == "coach"
+    assert catalog.current({"intent": "coach"})["intent"] == "coach"
+    with pytest.raises(SwarmError) as caught:
+        gate_mode("intent-gate", "bad", {"AGENTIHOOKS_AGENT_NAME": "operator"})
+    assert str(caught.value) == "intent-gate takes deny, log only, skip, coach"
