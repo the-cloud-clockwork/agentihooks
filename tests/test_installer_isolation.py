@@ -8,18 +8,29 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _run_probe(tmp_path, body, preload=""):
+def _run_probe(tmp_path, body, preload="", basetemp=None):
     suite = tmp_path / "suite"
     suite.mkdir()
     (suite / "conftest.py").write_text((REPO / "tests" / "conftest.py").read_text())
     (suite / "test_probe.py").write_text(preload + "\ndef test_probe():\n" + body)
     sentinel = tmp_path / "operator"
     sentinel.mkdir()
+    if basetemp is not None:
+        basetemp.parent.mkdir(parents=True)
     env = dict(os.environ, HOME=str(sentinel), PYTHONPATH=f"{REPO}:{REPO / 'scripts'}")
     for key in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME", "AGENTIHOOKS_HOME"):
         env.pop(key, None)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(suite), "-q", "--confcutdir", str(suite)],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(suite),
+            "-q",
+            "--confcutdir",
+            str(suite),
+            *([] if basetemp is None else ["--basetemp", str(basetemp)]),
+        ],
         env=env,
         cwd=REPO,
         capture_output=True,
@@ -136,3 +147,92 @@ def test_guard_refuses_mutation_through_an_open_descriptor(tmp_path, monkeypatch
     assert "refusing installer write outside the test directory" in result.stdout
     assert (sentinel / ".claude.json").read_text() == "sentinel"
     assert (sentinel / ".claude.json").stat().st_mode & 0o600 == 0o600
+
+
+def test_installer_fixture_allows_scratchpad_home(tmp_path):
+    scratchpad = tmp_path / "operator" / "scratchpad"
+    result, sentinel = _run_probe(
+        tmp_path,
+        "    from pathlib import Path\n"
+        "    import scripts.install as installer\n"
+        "    assert 'scratchpad' in [parent.name for parent in Path.home().parents]\n"
+        "    installer._save_state({'isolated': True})\n"
+        "    import json\n"
+        "    assert json.loads(installer.STATE_JSON.read_text()) == {'isolated': True}\n",
+        basetemp=scratchpad / "tests",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list(sentinel.iterdir()) == [scratchpad]
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ".claude",
+        ".claude.json",
+        ".codex",
+        ".copilot",
+        ".agentihooks",
+        ".agents",
+        ".bashrc",
+        ".local/bin",
+        ".config/systemd/user",
+    ],
+)
+@pytest.mark.parametrize("descendant", [False, True])
+def test_home_resolver_refuses_live_install_paths(tmp_path, monkeypatch, relative, descendant):
+    live = tmp_path / "operator" / relative
+    if descendant:
+        live /= "probe"
+    monkeypatch.setenv("LIVE_INSTALL", str(live))
+    preload = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "import scripts.claude_config\n"
+        "scripts.claude_config.claude_home = lambda: Path(os.environ['LIVE_INSTALL'])\n"
+    )
+    result, sentinel = _run_probe(tmp_path, "    raise AssertionError('test body must not run')\n", preload)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "still resolves to a live install path" in result.stdout
+    assert list(sentinel.iterdir()) == []
+
+
+def test_home_resolver_refuses_symlink_to_live_install(tmp_path, monkeypatch):
+    alias = tmp_path / "scratchpad" / "home"
+    alias.parent.mkdir()
+    alias.symlink_to(tmp_path / "operator" / ".claude", target_is_directory=True)
+    monkeypatch.setenv("LIVE_INSTALL", str(alias))
+    preload = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "import scripts.claude_config\n"
+        "scripts.claude_config.claude_home = lambda: Path(os.environ['LIVE_INSTALL'])\n"
+    )
+    result, sentinel = _run_probe(tmp_path, "    raise AssertionError('test body must not run')\n", preload)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "still resolves to a live install path" in result.stdout
+    assert list(sentinel.iterdir()) == []
+
+
+def test_installer_guard_preserves_live_state_and_backup(tmp_path, monkeypatch):
+    operator = tmp_path / "operator"
+    monkeypatch.setenv("OPERATOR_HOME", str(operator))
+    preload = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "state_dir = Path(os.environ['OPERATOR_HOME']) / '.agentihooks'\n"
+        "state_dir.mkdir()\n"
+        "(state_dir / 'state.json').write_text('{\"bundle\":\"operator\"}\\n')\n"
+        "(state_dir / 'state.json.bak').write_text('{\"previous\":\"operator\"}\\n')\n"
+    )
+    result, sentinel = _run_probe(
+        tmp_path,
+        "    import scripts.install as installer\n"
+        "    installer.STATE_JSON = state_dir / 'state.json'\n"
+        "    installer._save_state({'isolated': True})\n",
+        preload,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "refusing installer write outside the test directory" in result.stdout
+    assert (sentinel / ".agentihooks" / "state.json").read_text() == '{"bundle":"operator"}\n'
+    assert (sentinel / ".agentihooks" / "state.json.bak").read_text() == '{"previous":"operator"}\n'
