@@ -87,8 +87,7 @@ def test_the_server_serves_each_module_at_the_current_version(base):
     ],
 )
 def test_the_server_refuses_a_stale_version_or_an_unknown_file(base, route):
-    status, _, _ = get(base + route.format(v=core.page_version()))
-    assert status == 404
+    assert get(base + route.format(v=core.page_version())) == (404, "text/plain", "no such module")
 
 
 def test_a_module_edit_changes_the_page_version(tmp_path):

@@ -696,7 +696,7 @@ class Handler(BaseHTTPRequestHandler):
         path = match and core.MODULES / f"{match.group(2)}.js"
         if not path or match.group(1) != core.page_version() or not path.is_file():
             return self.send(404, "no such module", "text/plain")
-        return self.send(200, path.read_text(encoding="utf-8"), "text/javascript; charset=utf-8")
+        return self.send(200, path.read_bytes().decode(), "text/javascript; charset=utf-8")
 
     def send_media(self, slug, media_id, store=ledger_media):
         try:
