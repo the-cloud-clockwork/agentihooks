@@ -453,10 +453,11 @@ def rendered_profiles(target: str) -> list[str]:
 
 
 def _seed_linked_profiles(out: Path) -> None:
+    _i = _install_module()
     state_file = out / "state.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
-    state["linked_profiles"] = _install_module()._get_linked_profiles()
-    _atomic_write(state_file, json.dumps(state, indent=2) + "\n")
+    state = _i.load_json(state_file) if state_file.exists() else {}
+    state["linked_profiles"] = _i._get_linked_profiles()
+    _i.save_json(state_file, state)
 
 
 def _render_scratch(args: argparse.Namespace) -> int:
