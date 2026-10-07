@@ -90,7 +90,7 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
-def reclaim(repo, lives, recorded, run=subprocess.run):
+def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run) -> dict:
     """Where a claimant after retired lives cuts its worktree: the newest branch an earlier life pushed, else fresh and why.
 
     lives are the earlier agents on the task, newest first; recorded is the branch the ledger holds for it, if any.
