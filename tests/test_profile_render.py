@@ -1934,3 +1934,119 @@ def test_a_superseded_home_waits_out_the_launch_grace(world, monkeypatch):
     render.render_claude("rb-role", force=True)
 
     assert first.is_dir()
+
+
+@pytest.fixture
+def overlays(world, tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    roles = tmp_path / "package-roles"
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
+    _write(roles / "engineer" / "profile.yml", "name: engineer\n")
+    profiles = world["bundle"] / "profiles"
+    _write(profiles / "rb-eng" / "profile.yml", "name: rb-eng\nextends: [package:engineer]\n")
+    for name, wears in (("ov-a", "engineer"), ("ov-b", "engineer, qa"), ("ov-c", "engineer"), ("ov-d", "engineer")):
+        _write(profiles / name / "profile.yml", f"name: {name}\nkind: overlay\nwears: [{wears}]\n")
+        _write(profiles / name / ".claude" / "rules" / f"{name}.md", f"{name.upper()} RULE MARKER\n")
+    _write(profiles / "ov-plan" / "profile.yml", "name: ov-plan\nkind: overlay\nwears: [planner]\n")
+    _commit(world["bundle"], "overlays")
+    return profiles
+
+
+def test_overlays_follow_the_role_chain_and_the_always_on_overlays(world, overlays, named_brain):
+    from scripts.profiles import render
+
+    manifest = overlays / "rb-eng" / "profile.yml"
+    manifest.write_text(manifest.read_text() + "allowedOverlays: [brain]\n")
+
+    chain = [name for name, _ in render._chain("rb-eng", ["ov-b", "ov-a"])]
+
+    assert chain == ["package:engineer", "rb-eng", "brain", "ov-b", "ov-a"]
+    assert render.stamp("rb-eng", ["ov-b", "ov-a"])["overlays"] == ["brain", "ov-b", "ov-a"]
+    assert render.stamp("rb-eng")["overlays"] == ["brain"]
+
+
+def test_an_agent_wears_at_most_three_overlays(world, overlays):
+    from scripts.profiles import render
+
+    with pytest.raises(ValueError) as refused:
+        render.render_claude("rb-eng", overlays=["ov-a", "ov-b", "ov-c", "ov-d"])
+
+    assert str(refused.value) == "an agent wears at most 3 overlays; 4 were chosen: ov-a, ov-b, ov-c, ov-d"
+    assert render.rendered_profiles("claude") == []
+    assert render.render_claude("rb-eng", overlays=["ov-a", "ov-b", "ov-c", "ov-a"]).is_dir()
+
+
+def test_an_overlay_that_does_not_wear_the_role_is_refused(world, overlays):
+    from scripts.profiles import render
+
+    for overlay in ("ov-plan", "rb-other"):
+        with pytest.raises(ValueError) as refused:
+            render.render_codex("rb-eng", overlays=[overlay])
+        assert str(refused.value) == f"overlay {overlay} does not wear the engineer role"
+    assert render.rendered_profiles("claude") == []
+
+
+def test_each_overlay_set_renders_its_own_home(world, overlays):
+    from scripts.profiles import render
+
+    plain = render.render_claude("rb-eng")
+    one = render.render_claude("rb-eng", overlays=["ov-a"])
+    two = render.render_claude("rb-eng", overlays=["ov-b", "ov-a"])
+
+    assert len({plain.parent, one.parent, two.parent}) == 3
+    assert render.home_key("rb-eng", ["ov-b", "ov-a"]) == "rb-eng+ov-a+ov-b"
+    assert render.home_key("rb-eng", []) == "rb-eng"
+    assert render.split_key("rb-eng+ov-a+ov-b") == ("rb-eng", ["ov-a", "ov-b"])
+    assert render.split_key("rb-eng") == ("rb-eng", [])
+    assert render.profile_dir("rb-eng", ["ov-a", "ov-b"]) == two.parent
+    assert render.profile_dir("rb-eng") == plain.parent
+    assert render.render_claude("rb-eng", overlays=["ov-b", "ov-a"]) is None
+    assert json.loads((plain / render.STAMP).read_text())["overlays"] == []
+    assert json.loads((two / render.STAMP).read_text())["overlays"] == ["ov-b", "ov-a"]
+    assert "OV-A RULE MARKER" in (one / "CLAUDE.md").read_text()
+    assert "OV-A RULE MARKER" not in (plain / "CLAUDE.md").read_text()
+    assert "OV-B RULE MARKER" not in (one / "CLAUDE.md").read_text()
+    assert render.binding.inspect(one, "rb-eng", "claude")["profile"] == "rb-eng"
+    assert render.rendered_profiles("claude") == ["rb-eng", "rb-eng+ov-a", "rb-eng+ov-a+ov-b"]
+
+    codex = render.render_codex("rb-eng", overlays=["ov-a"])
+
+    assert codex.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert json.loads((codex / render.STAMP).read_text())["render"]["overlays"] == ["ov-a"]
+    assert render.render_codex("rb-eng", overlays=["ov-a"]) is None
+    assert render.render("codex", "rb-eng", overlays=["ov-a"]) is None
+    assert render.channels("rb-eng", ["ov-a"]) == ""
+
+
+def test_init_and_rule_refresh_rerender_an_overlay_home_with_its_overlays(world, overlays, monkeypatch, capsys):
+    from scripts.profiles import render
+    from scripts.targets.claude_target import refresh_rules
+
+    home = render.render_claude("rb-eng", overlays=["ov-a"])
+
+    world["install"]._rerender_profile_homes("claude")
+
+    rerendered = render.profile_dir("rb-eng", ["ov-a"]) / "claude"
+    assert rerendered != home
+    assert json.loads((rerendered / render.STAMP).read_text())["overlays"] == ["ov-a"]
+    install = world["install"]
+    assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-eng+ov-a profile home" in capsys.readouterr().out
+
+    _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "UPDATED OVERLAY RULE\n")
+    refresh_rules(rerendered / "rules", rerendered / "CLAUDE.md", rerendered / "CLAUDE.local.md", False)
+
+    fresh = render.profile_dir("rb-eng", ["ov-a"]) / "claude"
+    assert fresh != rerendered
+    assert "UPDATED OVERLAY RULE" in (fresh / "CLAUDE.md").read_text()
+
+
+def test_cli_renders_the_overlays_named(world, overlays, capsys):
+    from scripts.profiles import render
+
+    assert render.main(["render", "rb-eng", "--overlay", "ov-b", "--overlay", "ov-a"]) == 0
+    out = render.profile_dir("rb-eng", ["ov-a", "ov-b"]) / "claude"
+    assert capsys.readouterr().out == f"Rendered rb-eng (claude) → {out}\n"
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-b", "ov-a"]
+    assert render.main(["render", "rb-eng", "--overlay", "ov-plan"]) == 1
+    assert capsys.readouterr().err == "ERROR: overlay ov-plan does not wear the engineer role\n"

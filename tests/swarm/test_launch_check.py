@@ -172,6 +172,25 @@ def test_declared_reads_the_overlays_render_would_layer(monkeypatch):
     assert launch_check.declared("engineer") == ["engineer-overlay"]
 
 
+def test_declared_adds_the_overlays_the_agent_wears(monkeypatch):
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "declared", lambda profile: ["brain"])
+    assert launch_check.declared("engineer", ["tuner", "trader"]) == ["brain", "tuner", "trader"]
+    assert launch_check.declared("engineer", ["brain"]) == ["brain"]
+
+
+def test_a_launch_missing_a_worn_overlay_fails_the_check(store, launched):
+    agent, facts, doc = launched
+    chain = ["base", "package:engineer", "engineer", "brain"]
+    worn = {**facts, "chain": chain, "overlays": ["brain"]}
+    assert misses(store, agent, worn, doc, declared=["brain", "tuner"]) == {
+        "overlay": {"expected": ["brain", "tuner"], "actual": ["brain"]}
+    }
+    worn = {**facts, "chain": [*chain, "tuner"], "overlays": ["brain", "tuner"]}
+    assert misses(store, agent, worn, doc, declared=["brain", "tuner"]) == {}
+
+
 class JoiningLedger(FakeLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
