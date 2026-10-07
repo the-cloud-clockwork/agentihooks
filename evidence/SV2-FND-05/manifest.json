@@ -1,0 +1,17 @@
+{
+  "package": "SV2-FND-05",
+  "tested_commit": "379ca75db1e4b1adbc7934456171f5488194915e",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1468",
+  "inputs": {
+    "Swarm-v2.md": "901950210888681b37156ed3f990b4c9b6050cee78468293993b656999bd26d9",
+    "docs/swarm-v2/development.md": "ae67456311356ca3cdd19a5d6cea5777383536eb3b2600fc35f037043d53e293",
+    "tests/conftest.py": "f1020ad3a8782859d4bc7ff040baf92d879ba846ac3c356f0e0fd3f9aa6caebd",
+    "tests/installer_isolation.py": "64905ffcbcab8ebe5e3b34ec1d0b0231f9bbc2647b8737da006388fb9707bb13",
+    "tests/swarm_v2_isolation.py": "a47f06b6ebf9f583ecc30a9ff6d98da2a712afaba821d769062efb564f49e6e8",
+    "tests/test_swarm_v2_isolation.py": "22681917f6ed39f8a3c0be4ae1a40dedb797a12be90a85f6ae4d7dadb75fd3db"
+  },
+  "versions": {
+    "python": "3.12.13"
+  },
+  "generated_by": "pytest tests/test_swarm_v2_isolation.py -p no:xdist -p no:randomly --junitxml=<file>, then python evidence/SV2-FND-05/generate_case_results.py <file> <commit> <pull request>"
+}
