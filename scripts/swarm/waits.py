@@ -4,6 +4,7 @@
 through its inbox, which the wake ladder delivers. A bare minutes wait, checked by nothing, lasts at most an hour.
 """
 
+import json
 import re
 
 from scripts.inbox.store import CLOSED, InboxError
@@ -22,6 +23,45 @@ def on(kind, target):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
     return {"kind": kind, "target": target}
+
+
+def checks_resolution(held, github):
+    target = held["target"]
+    pull = github(target)
+    if pull is None:
+        return ""
+    if pull.state != "OPEN":
+        return f"pull request {target}, now {pull.state.lower()}"
+    if not pull.head:
+        return ""
+    if held.get("head") != pull.head:
+        held["head"] = pull.head
+        return ""
+    if not pull.resolved:
+        return ""
+    current = github(target)
+    if current is None or not current.head:
+        return ""
+    if current.head != pull.head:
+        held["head"] = current.head
+        return ""
+    return f"checks on {target}, now {'red' if current.red else 'green'}" if current.resolved else ""
+
+
+def _save_wait(redis, slug, name, previous, held, outcome):
+    key = idle.key(slug, "wait", name)
+
+    def update(pipe):
+        if pipe.get(key) != previous:
+            return False
+        pipe.multi()
+        if outcome:
+            pipe.delete(key)
+        else:
+            pipe.set(key, json.dumps(held), keepttl=True)
+        return True
+
+    return redis.transaction(update, key, value_from_callable=True)
 
 
 def target_problem(kind, target, mine, rows, get):
@@ -46,12 +86,7 @@ def resolution(held, rows, inbox, github):
     """What ended the wait, in plain words, or '' while it still holds."""
     kind, target = held["kind"], held["target"]
     if kind == "checks":
-        pull = github(target)
-        if pull is None:
-            return ""
-        if pull.state != "OPEN":
-            return f"pull request {target}, now {pull.state.lower()}"
-        return f"checks on {target}, now {'red' if pull.red else 'green'}" if pull.resolved else ""
+        return checks_resolution(held, github)
     if kind == "task":
         if target not in rows:
             return f"task {target}, gone from the ledger"
@@ -70,10 +105,15 @@ def end_pass(store, slug, rows, inbox, github):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
+        previous = json.dumps(held)
+        head = held["on"].get("head")
         outcome = resolution(held["on"], rows, inbox, github)
+        if (outcome or held["on"].get("head") != head) and not _save_wait(
+            store.redis, slug, agent.name, previous, held, outcome
+        ):
+            continue
         if not outcome:
             continue
-        idle.end_wait(store.redis, slug, agent.name)
         text = (
             f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
             "or wait on the next thing."

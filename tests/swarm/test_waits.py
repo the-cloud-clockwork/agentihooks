@@ -5,6 +5,7 @@ import pytest
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, waits
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -21,6 +22,7 @@ def started(env, monkeypatch):  # noqa: F811
     run("sw", "start")
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False, head="first"))
     return store, ledger
 
 
@@ -35,12 +37,12 @@ def test_a_wait_on_checks_lasts_until_the_tick_ends_it(started, capsys):
         "until": 1_000 + waits.CHECKED_MINUTES * 60_000,
         "reason": "tests",
         "at": 1_000,
-        "on": {"kind": "checks", "target": URL},
+        "on": {"kind": "checks", "target": URL, "head": "first"},
     }
     assert json.loads(capsys.readouterr().out) == {
         "agent": ME,
         "until": "1970-01-01T12:00:01+00:00",
-        "on": {"kind": "checks", "target": URL},
+        "on": {"kind": "checks", "target": URL, "head": "first"},
     }
 
 
@@ -128,7 +130,8 @@ def tick():
     pulls = {}
 
     def hold(kind, target):
-        idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": kind, "target": target})
+        held = {"kind": kind, "target": target, **({"head": "first"} if kind == "checks" else {})}
+        idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on=held)
 
     def end(rows=None):
         return waits.end_pass(store, "sw", rows or {}, inbox, pulls.get)
@@ -144,8 +147,8 @@ def tick():
 @pytest.mark.parametrize(
     "pull, outcome",
     [
-        (PullRequest("OPEN", None, 1, False, True), f"checks on {URL}, now green"),
-        (PullRequest("OPEN", None, 1, True, True), f"checks on {URL}, now red"),
+        (PullRequest("OPEN", None, 1, False, True, head="first"), f"checks on {URL}, now green"),
+        (PullRequest("OPEN", None, 1, True, True, head="first"), f"checks on {URL}, now red"),
         (PullRequest("MERGED", 2, 1, False, True), f"pull request {URL}, now merged"),
         (PullRequest("CLOSED", None, 1, False, False), f"pull request {URL}, now closed"),
     ],
@@ -163,7 +166,7 @@ def test_the_tick_ends_a_checks_wait_once_and_tells_the_agent(tick, pull, outcom
     assert len(tick.told()) == 1
 
 
-@pytest.mark.parametrize("pull", [None, PullRequest("OPEN", None, 1, False, False)])
+@pytest.mark.parametrize("pull", [None, PullRequest("OPEN", None, 1, False, False, head="first")])
 def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull):
     tick.hold("checks", URL)
     if pull:
@@ -200,10 +203,10 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
     tick.hold("checks", URL)
     checks = [{"name": "lint", "conclusion": "SUCCESS"}]
     checks.insert(position, {"name": "mutation", **check})
-    tick.pulls[URL] = pull_request({"state": "OPEN", "statusCheckRollup": checks})
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "statusCheckRollup": checks})
     if not outcome:
         assert tick.end() == []
-        assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL}
+        assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
         assert tick.told() == []
         return
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
@@ -218,9 +221,9 @@ def test_checks_wait_with_no_checks_stays_unresolved(tick):
     from scripts.swarm.ledger_events import pull_request
 
     tick.hold("checks", URL)
-    tick.pulls[URL] = pull_request({"state": "OPEN", "statusCheckRollup": []})
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "statusCheckRollup": []})
     assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL}
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
     assert tick.told() == []
 
 
@@ -233,6 +236,7 @@ def test_a_failure_ends_the_checks_wait_even_with_an_unresolved_check(tick, unre
     tick.pulls[URL] = pull_request(
         {
             "state": "OPEN",
+            "headRefOid": "first",
             "statusCheckRollup": [
                 {"name": "mutation", "conclusion": unresolved},
                 {"name": "lint", "conclusion": failure},
@@ -413,3 +417,275 @@ def test_a_wait_ended_notice_for_another_task_stays_open(tick):
     [agent] = tick.store.agents("sw")
     waits.settle_notices(tick.inbox, agent, "progress")
     assert tick.inbox.get(notice.id).state == "pending"
+
+
+def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    store, _ = started
+    calls = []
+
+    def view(url):
+        calls.append(url)
+        return SimpleNamespace(head="first")
+
+    monkeypatch.setattr(cli.ledger_events, "view", view)
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
+    assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    assert json.loads(capsys.readouterr().out)["on"] == held(store)["on"]
+    assert calls == [URL]
+
+
+@pytest.mark.parametrize("pull", [None, {"head": ""}])
+def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys, pull):
+    from types import SimpleNamespace
+
+    store, _ = started
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: SimpleNamespace(**pull) if pull else None)
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 1
+    assert held(store) is None
+    assert capsys.readouterr().err == "swarm: cannot read the pull request head; retry the checks wait\n"
+
+
+def test_pull_request_reads_the_head_commit():
+    from scripts.swarm.ledger_events import pull_request
+
+    assert pull_request({"state": "OPEN", "headRefOid": "first"}).head == "first"
+    assert pull_request({"state": "OPEN"}).head == ""
+
+
+@pytest.mark.parametrize("red", [False, True])
+def test_a_new_head_resets_checks_before_current_head_resolution(tick, red):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+    assert tick.end() == []
+    before = idle.wait(tick.store.redis, "sw", ME)
+    assert before["on"]["head"] == "first"
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red)
+    assert tick.end() == []
+    after = idle.wait(tick.store.redis, "sw", ME)
+    assert after == {**before, "on": {"kind": "checks", "target": URL, "head": "second"}}
+    assert tick.told() == []
+    outcome = "red" if red else "green"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("confirmation", [None, ("second", True), ("first", False), ("", True)])
+def test_a_push_or_missing_checks_during_resolution_keeps_the_wait(tick, confirmation):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    current = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+    tick.pulls[URL] = current
+    assert tick.end() == []
+    current.resolved = True
+    latest = (
+        SimpleNamespace(state="OPEN", head=confirmation[0], resolved=confirmation[1], red=False)
+        if confirmation
+        else None
+    )
+    replies = iter([current, latest])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies)) == []
+    assert tick.told() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == (
+        "second" if confirmation and confirmation[0] == "second" else "first"
+    )
+
+
+def test_the_probe_requests_the_head_with_its_check_rollup():
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "data": {
+                        "resource": {
+                            "state": "OPEN",
+                            "headRefOid": "first",
+                            "commits": {
+                                "nodes": [
+                                    {
+                                        "commit": {
+                                            "committedDate": "2026-10-07T17:00:00Z",
+                                            "statusCheckRollup": {
+                                                "contexts": {
+                                                    "nodes": [{"name": "lint", "conclusion": "SUCCESS"}],
+                                                    "pageInfo": {"hasNextPage": False},
+                                                }
+                                            },
+                                        }
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                }
+            ),
+        )
+
+    pull = github_view(URL, run)
+    assert pull.head == "first"
+    assert pull.resolved is True
+    assert pull.red is False
+    assert pull.pushed_at == 1791392400000
+    assert calls == [
+        (
+            [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
+                "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
+                "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
+                "pageInfo{hasNextPage}}}}}}}}}",
+                "-f",
+                f"url={URL}",
+            ],
+            {"capture_output": True, "text": True, "timeout": 20},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "commits", [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None}}]]
+)
+def test_the_probe_without_checks_is_unresolved(commits):
+    from types import SimpleNamespace
+
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "first", "commits": {"nodes": commits}}}}
+    pull = github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw)))
+    assert pull.head == "first"
+    assert pull.resolved is False
+
+
+@pytest.mark.parametrize(
+    "done",
+    [
+        (1, ""),
+        (0, "{}"),
+        (0, '{"data":{"resource":null}}'),
+        (0, '{"data":{"resource":{"commits":null}}}'),
+        (0, '{"data":{"resource":{"commits":{"nodes":null}}}}'),
+        (0, "invalid json"),
+        (
+            0,
+            '{"data":{"resource":{"state":"OPEN","headRefOid":"first","commits":{"nodes":[{"commit":{"committedDate":"2026-10-07T17:00:00Z","statusCheckRollup":{"contexts":{"nodes":[{"conclusion":"SUCCESS"}],"pageInfo":{"hasNextPage":true}}}}}]}}}}',
+        ),
+    ],
+)
+def test_the_probe_refuses_failed_or_incomplete_reads(done):
+    from types import SimpleNamespace
+
+    assert github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=done[0], stdout=done[1])) is None
+
+
+@pytest.mark.parametrize("head", ["", None])
+def test_a_tick_without_a_head_does_not_resolve_or_reset_the_wait(tick, head):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    before = idle.wait(tick.store.redis, "sw", ME)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head=head, resolved=True, red=False)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
+def test_a_legacy_checks_wait_binds_before_resolving(tick, monkeypatch):
+    from types import SimpleNamespace
+
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "tests", 1, on={"kind": "checks", "target": URL})
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=True, red=False)
+    key = idle.key("sw", "wait", ME)
+    ttl = tick.store.redis.pttl(key)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == {
+        "until": 10_000_000,
+        "reason": "tests",
+        "at": 1,
+        "on": {"kind": "checks", "target": URL, "head": "first"},
+    }
+    assert 0 < tick.store.redis.pttl(key) <= ttl
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    replies = iter(
+        [
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=False),
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True),
+        ]
+    )
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies)) == [
+        f"ended the wait of {ME}: checks on {URL}, now red"
+    ]
+
+
+@pytest.mark.parametrize("head, resolved", [("second", True), ("first", True)])
+def test_the_tick_preserves_a_wait_redeclared_during_its_probe(tick, head, resolved):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    calls = []
+
+    def github(url):
+        calls.append(url)
+        idle.declare_wait(
+            tick.store.redis, "sw", ME, 20_000_000, "new wait", 2, on={"kind": "checks", "target": URL, "head": "third"}
+        )
+        return SimpleNamespace(state="OPEN", head=head, resolved=resolved, red=False)
+
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, github) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == {
+        "until": 20_000_000,
+        "reason": "new wait",
+        "at": 2,
+        "on": {"kind": "checks", "target": URL, "head": "third"},
+    }
+    assert tick.told() == []
+
+
+def test_a_pending_current_head_does_not_rewrite_the_wait(tick, monkeypatch):
+    from types import SimpleNamespace
+
+    tick.hold("checks", URL)
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="first", resolved=False, red=False)
+
+    def unexpected_write(*args, **kwargs):
+        pytest.fail("an unresolved wait with the same head needs no Redis write")
+
+    monkeypatch.setattr(tick.store.redis, "transaction", unexpected_write)
+    assert tick.end() == []
+
+
+def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
+    from types import SimpleNamespace
+
+    following = "engineer@a1b2c3-0002"
+    tick.store.put_agent("sw", AgentRecord(name=following, lane="eng", task="t2", seat="eng-2@sw"))
+    tick.hold("checks", URL)
+    idle.declare_wait(tick.store.redis, "sw", following, 10_000_000, "", 1, on={"kind": "task", "target": "t3"})
+
+    def github(url):
+        idle.declare_wait(
+            tick.store.redis, "sw", ME, 20_000_000, "", 2, on={"kind": "checks", "target": URL, "head": "third"}
+        )
+        return SimpleNamespace(state="OPEN", head="second", resolved=True, red=False)
+
+    assert waits.end_pass(tick.store, "sw", {"t3": {"state": "done"}}, tick.inbox, github) == [
+        f"ended the wait of {following}: task t3, now done"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME)["on"]["head"] == "third"
+    assert idle.wait(tick.store.redis, "sw", following) is None

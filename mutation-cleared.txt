@@ -1823,6 +1823,18 @@
     "reader": "Standards /root/standards_reader",
     "reason": "The only changed expression is json.dumps ensure_ascii=False to ensure_ascii=None on the final wire serialization. Both select the same false branch of the JSON encoder and produce identical unescaped Unicode text for every serializable result. All other serialization options, status, content type and handler.send arguments remain unchanged; exceptions retain the same behavior."
   },
+  "scripts/swarm/waits.py:scripts.swarm.waits.x__save_wait__mutmut_25:17dcd6e6a2f70e91a923a6601a19478a63df834f69a923f89f4d52186df25220": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Standards reader cleared: the sole caller uses boolean negation only. A queued set or delete returns True or a truthy one-element execution list; a refused comparison returns False or an empty list. Redis writes, TTL and notices match. Isolated fakeredis probe verified set, delete and mismatch for True, None, omitted and False in CI run 37655884757."
+  },
+  "scripts/swarm/waits.py:scripts.swarm.waits.x__save_wait__mutmut_28:38a123334a5df7c36182c6dd5160b97d7a6be2f7d09ce590781b41b94ccf967a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Standards reader cleared: the sole caller uses boolean negation only. A queued set or delete returns True or a truthy one-element execution list; a refused comparison returns False or an empty list. Redis writes, TTL and notices match. Isolated fakeredis probe verified set, delete and mismatch for True, None, omitted and False in CI run 37655884757."
+  },
+  "scripts/swarm/waits.py:scripts.swarm.waits.x__save_wait__mutmut_29:9c3c7405fbbdc9efe92ec0681d5dc4294e278b42ae0ce7a090ce6d9c978c900c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Standards reader cleared: the sole caller uses boolean negation only. A queued set or delete returns True or a truthy one-element execution list; a refused comparison returns False or an empty list. Redis writes, TTL and notices match. Isolated fakeredis probe verified set, delete and mismatch for True, None, omitted and False in CI run 37655884757."
+  },
   "scripts/gates/intent_calibration.py:scripts.gates.intent_calibration.x_verdicts__mutmut_10:fbb1829653dd6a5afd03395028b86d6066fa174c44f8559ebed783e722acd9bf": {
     "reader": "Standards",
     "reason": "recorded() ignores its state argument and returns the recorded answers, so passing None instead of the case state to intent.judge gives identical output in verdicts, side_of, measure and main."
