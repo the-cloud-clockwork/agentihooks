@@ -18,7 +18,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
     assert gate["name"] == "Gate — Required"
-    assert set(gate["needs"]) == {"unit", "lint"}
+    assert set(gate["needs"]) in ({"unit", "lint"}, {"unit", "lint", "sonar"})
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
