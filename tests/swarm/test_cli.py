@@ -473,6 +473,8 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         "confidence": None,
         "calibrated": None,
         "anchors": [],
+        "overlays": [],
+        "bundle_revision": "",
     }
     assert placed == runtime.Placed(
         "w3:p1",
