@@ -31,12 +31,14 @@ def _proposal(**fields):
         "id": "p",
         "name": "New service",
         "kind": "service",
+        "carries": "none",
+        "launches_agents": False,
         "code_owner": "agentihooks",
         "state_owner": "agentihooks",
         "deployment_owner": "antoncore",
-        "authoritative_state": "state",
     }
-    return {**base, **fields}
+    proposal = {**base, **fields}
+    return {"authoritative_state": f"{proposal['name']} state", **proposal}
 
 
 def _single(*proposals, operation="op-1", base_revision=1):
@@ -62,7 +64,7 @@ def test_committed_record_gives_every_component_one_owner_per_role():
     assert architecture.check(record) == []
     assert architecture.authorities(record) == ["Swarm reconciliation controller"]
     assert all(architecture.missing_owner(record, c) is None for c in record["components"])
-    assert [d["id"] for d in record["decisions"]] == [f"AD-0{n}" for n in range(1, 8)]
+    assert [d["id"] for d in record["decisions"]] == [f"AD-0{n}" for n in range(1, 9)]
 
 
 def test_committed_decisions_markdown_matches_the_record():
@@ -114,7 +116,13 @@ def test_recording_the_fixture_adds_only_the_backlog_and_keeps_the_rejection(tmp
     ]
     assert after["unresolved"] == []
     assert after["operations"] == [
-        {"id": "fixture-inventory-1", "revision": 2, "sha256": architecture.digest(_inventory()), "result": result}
+        {
+            "id": "fixture-inventory-1",
+            "revision": 2,
+            "sha256": architecture.digest(_inventory()),
+            "result": result,
+            "components": after["components"],
+        }
     ]
     assert architecture.check(after) == []
     assert architecture.authorities(after) == ["Swarm reconciliation controller"]
@@ -158,10 +166,13 @@ def test_render_lists_components_decisions_and_open_items(tmp_path):
 
 def test_render_names_operator_changes_and_unresolved_entries():
     record = architecture.load_record(RECORD)
-    record["operator_changes"] = ["a", "b"]
+    record["operator_changes"] = [
+        {"proposal": "a", "sha256": "1", "reason": "first"},
+        {"proposal": "b", "sha256": "2", "reason": "second"},
+    ]
     record["unresolved"] = [{"id": "x", "name": "X", "reason": "why", "revision": 3}]
     text = architecture.render(record)
-    assert "\nOperator architecture changes: a, b.\n" in text
+    assert "\nOperator architecture changes: a (first), b (second).\n" in text
     assert "\n## Unresolved decisions\n\n- X (`x`, revision 3): why\n\n## Rejected proposals\n\nNone.\n" in text
 
 
@@ -217,7 +228,17 @@ def test_cli_check_passes_on_the_committed_record():
         ({"kind": "backlog", "carries": "transcripts", "bounded": False}, BACKLOG_REASON),
         ({"kind": "backlog", "carries": "transcripts", "bounded": 1}, BACKLOG_REASON),
         ({"kind": "backlog", "carries": "transcripts"}, BACKLOG_REASON),
-        ({"kind": "backlog", "carries": "pull_requests", "bounded": True}, BACKLOG_REASON),
+        ({"kind": "backlog", "carries": "none", "bounded": True}, BACKLOG_REASON),
+        ({"kind": "backlog", "carries": "pull_requests", "bounded": True}, architecture.DECLARE),
+        ({"carries": None}, architecture.DECLARE),
+        ({"launches_agents": "no"}, architecture.DECLARE),
+        ({"launches_agents": None}, architecture.DECLARE),
+        ({"authoritative_state": "  "}, architecture.DECLARE),
+        ({"authoritative_state": 3}, architecture.DECLARE),
+        (
+            {"kind": "worker_component", "name": "Brain Tick Stack"},
+            "the worker image excludes Brain Tick Stack (AD-06)",
+        ),
     ],
 )
 def test_review_rejects_proposals_outside_the_frozen_architecture(fields, reason):
@@ -234,6 +255,8 @@ def test_review_rejects_proposals_outside_the_frozen_architecture(fields, reason
         {},
         {"launches_agents": False},
         {"kind": "worker_component", "name": "Worker session exporter"},
+        {"kind": "service", "name": "brain database"},
+        {"carries": "transcripts"},
         {"kind": "backlog", "carries": "transcripts", "bounded": True},
         {"kind": "backlog", "carries": "changed_content", "bounded": True, "launches_agents": False},
     ],
@@ -281,8 +304,8 @@ def test_check_lists_repeated_names_in_order():
     record = architecture.load_record(RECORD)
     record["components"] += [_proposal(name="Personal brain"), _proposal(name="Cluster infrastructure")]
     assert architecture.check(record) == [
-        "Cluster infrastructure is recorded more than once",
         "Personal brain is recorded more than once",
+        "Cluster infrastructure is recorded more than once",
     ]
 
 
@@ -298,9 +321,11 @@ def test_cli_check_fails_on_a_broken_record(tmp_path):
 def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
     path = _record(tmp_path)
     data = architecture.load_record(path)
-    data["operator_changes"] = ["duplicate-dispatcher"]
-    path.write_text(json.dumps(data))
     inventory = _inventory()
+    dispatcher = inventory["proposals"][0]
+    change = {"proposal": "duplicate-dispatcher", "sha256": architecture.digest(dispatcher), "reason": "operator"}
+    data["operator_changes"] = [change]
+    path.write_text(json.dumps(data))
     inventory["proposals"].append(_proposal(id="other", name="Other dispatcher", kind="dispatcher"))
     result = architecture.apply_inventory(path, inventory)
     assert result["accepted"] == ["duplicate-dispatcher", "embedding-backlog"]
@@ -308,6 +333,20 @@ def test_an_operator_change_in_the_record_admits_that_dispatcher_only(tmp_path):
     after = architecture.load_record(path)
     assert architecture.authorities(after) == ["Swarm reconciliation controller"]
     assert architecture.check(after) == []
+
+
+def test_an_operator_change_covers_only_the_exact_approved_content():
+    record = architecture.load_record(RECORD)
+    dispatcher = _inventory()["proposals"][0]
+    record["operator_changes"] = [
+        {"proposal": dispatcher["id"], "sha256": architecture.digest(dispatcher), "reason": "x"}
+    ]
+    assert architecture.approved(record, dispatcher) is True
+    for change in ({"name": "Unrelated second dispatcher"}, {"deployment_owner": "personal installation"}):
+        swapped = {**dispatcher, **change}
+        assert architecture.approved(record, swapped) is False
+        assert architecture.review(record, _single(swapped))["rejected"][0]["reason"] == DISPATCHER_REASON
+    assert architecture.approved(record, {**dispatcher, "id": "other"}) is False
 
 
 def test_a_proposal_cannot_approve_itself():
@@ -377,6 +416,9 @@ def test_conflicting_proposals_become_unresolved_while_unrelated_ones_are_record
         _proposal(id="b", name="Shared catalog", deployment_owner="personal installation"),
         _proposal(id="c", name="Operator interface"),
         _proposal(id="d", name="Unrelated service"),
+        _proposal(id="e", name="Session catalog", authoritative_state="DURABLE TRANSCRIPT ARCHIVE AND CATALOG"),
+        _proposal(id="f", name="Index one", authoritative_state="Shared index"),
+        _proposal(id="g", name="Index two", authoritative_state="shared index"),
     )
     result = architecture.apply_inventory(path, inventory)
     assert result["accepted"] == ["d"]
@@ -388,9 +430,17 @@ def test_conflicting_proposals_become_unresolved_while_unrelated_ones_are_record
             "name": "Operator interface",
             "reason": "Operator interface is already recorded; changing it needs an operator architecture change",
         },
+        {
+            "id": "e",
+            "name": "Session catalog",
+            "reason": "Session archive and catalog service already owns this authoritative state;"
+            " sharing it needs an operator architecture change",
+        },
+        {"id": "f", "name": "Index one", "reason": "conflicting proposals for Index one"},
+        {"id": "g", "name": "Index two", "reason": "conflicting proposals for Index two"},
     ]
     after = architecture.load_record(path)
-    assert [u["id"] for u in after["unresolved"]] == ["a", "b", "c"]
+    assert [u["id"] for u in after["unresolved"]] == ["a", "b", "c", "e", "f", "g"]
     assert {u["operation"] for u in after["unresolved"]} == {"op-1"}
     assert {u["revision"] for u in after["unresolved"]} == {2}
     assert after["components"][-1]["name"] == "Unrelated service"
@@ -457,7 +507,12 @@ def test_rollback_restores_the_earlier_revision_and_keeps_every_rejection(tmp_pa
     base = architecture.load_record(RECORD)["components"]
     result = architecture.rollback(path, 1, "rollback-1")
     after = architecture.load_record(path)
-    assert result == {"operation": "rollback-1", "revision": 2, "rolled_back": ["Brain arc embedding backlog"]}
+    assert result == {
+        "operation": "rollback-1",
+        "revision": 2,
+        "rolled_back": ["Brain arc embedding backlog"],
+        "restored": [],
+    }
     assert after["revision"] == 3
     assert after["components"] == base
     assert after["rejected"] == [
@@ -481,6 +536,7 @@ def test_rollback_restores_the_earlier_revision_and_keeps_every_rejection(tmp_pa
         "revision": 3,
         "sha256": architecture.digest({"rollback_to": 1}),
         "result": result,
+        "components": base,
     }
     assert architecture.check(after) == []
 
@@ -492,6 +548,51 @@ def test_rollback_keeps_components_up_to_the_target_revision(tmp_path):
     result = architecture.rollback(path, 2, "rollback-2")
     assert result["rolled_back"] == ["Later service"]
     assert architecture.load_record(path)["components"][-1]["name"] == "Brain arc embedding backlog"
+
+
+def test_rollback_can_restore_a_later_accepted_revision(tmp_path):
+    path = _record(tmp_path)
+    architecture.apply_inventory(path, _inventory())
+    accepted = architecture.load_record(path)["components"]
+    architecture.rollback(path, 1, "back")
+    result = architecture.rollback(path, 2, "forward")
+    after = architecture.load_record(path)
+    assert result == {
+        "operation": "forward",
+        "revision": 3,
+        "rolled_back": [],
+        "restored": ["Brain arc embedding backlog"],
+    }
+    assert after["revision"] == 4
+    assert after["components"] == accepted
+    assert [r["reason"] for r in after["rejected"]] == [DISPATCHER_REASON, "rolled back to revision 1"]
+
+
+def test_rejection_reasons_never_echo_proposal_content():
+    private = "private operator note 7731"
+    proposals = [
+        _proposal(id="a", kind="dispatcher", authoritative_state=private),
+        _proposal(id="b", name="B", code_owner=private),
+        _proposal(id="c", name="C", carries=private),
+    ]
+    result = architecture.review(architecture.load_record(RECORD), _single(*proposals))
+    assert [r["id"] for r in result["rejected"]] == ["a", "b", "c"]
+    assert private not in json.dumps(result)
+
+
+def test_a_corrected_proposal_needs_a_new_operation_at_the_current_revision(tmp_path):
+    path = _record(tmp_path)
+    architecture.apply_inventory(path, _single(_proposal(kind="dispatcher")))
+    corrected = _single(_proposal(), base_revision=2)
+    with pytest.raises(
+        architecture.ArchitectureError, match="^operation op-1 was already recorded with different content$"
+    ):
+        architecture.apply_inventory(path, corrected)
+    corrected["operation"] = "op-2"
+    assert architecture.apply_inventory(path, corrected)["accepted"] == ["p"]
+    after = architecture.load_record(path)
+    assert [(r["id"], r["operation"]) for r in after["rejected"]] == [("p", "op-1")]
+    assert after["components"][-1]["proposal"] == "p"
 
 
 def test_rollback_replay_and_refusals(tmp_path):
@@ -520,7 +621,7 @@ def test_cli_rollback_writes_the_record_and_its_markdown(tmp_path, capsys):
     markdown = tmp_path / "decisions.md"
     argv = ["rollback", "--record", str(path), "--to", "1", "--operation", "r", "--markdown", str(markdown)]
     assert architecture.main(argv) == 0
-    expected = {"operation": "r", "revision": 2, "rolled_back": ["Brain arc embedding backlog"]}
+    expected = {"operation": "r", "revision": 2, "rolled_back": ["Brain arc embedding backlog"], "restored": []}
     assert capsys.readouterr().out == json.dumps(expected, indent=2) + "\n"
     assert markdown.read_text() == architecture.render(architecture.load_record(path))
 

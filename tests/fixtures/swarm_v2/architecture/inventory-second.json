@@ -19,6 +19,8 @@
       "id": "session-exporter",
       "name": "Worker session exporter",
       "kind": "worker_component",
+      "carries": "transcripts",
+      "launches_agents": false,
       "code_owner": "agentihooks",
       "state_owner": "agentihooks",
       "deployment_owner": "antoncore",

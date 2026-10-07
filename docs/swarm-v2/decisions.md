@@ -7,7 +7,7 @@ Package SV2-FND-02, record revision 1. Generated from `docs/swarm-v2/architectur
 | Component | Kind | Code owner | State owner | Deployment owner | Authoritative state |
 |---|---|---|---|---|---|
 | Swarm reconciliation controller | dispatcher | agentihooks | agentihooks | antoncore | Swarm state and ledger: task claims, generations and leases |
-| Local runtime adapter | service | agentihooks | agentihooks | personal installation | Execution identity plus the observed local herdr runtime |
+| Local runtime adapter | service | agentihooks | agentihooks | antoncore | Execution identity plus the observed herdr runtime on the controller host |
 | Kubernetes runtime adapter | service | agentihooks | agentihooks | antoncore | Execution identity plus observed execution Pods |
 | Worker image and entrypoint | service | agentihooks | agentihooks | antoncore | Immutable image and launch specification |
 | Session archive and catalog service | service | agentihooks | agentihooks | antoncore | Durable transcript archive and catalog |
@@ -15,7 +15,7 @@ Package SV2-FND-02, record revision 1. Generated from `docs/swarm-v2/architectur
 | Session chunk embedding backlog | backlog | agentihooks | agentihooks | antoncore | Changed transcript chunks awaiting embedding |
 | Swarm brain context selection and graph retrieval | service | agentibrain-kernel | agentibrain-kernel | antoncore | Swarm brain knowledge and provenance |
 | Personal brain | service | agentibrain-kernel | agentibrain-kernel | personal installation | Personal brain knowledge, separate from the swarm corpus |
-| Brain routing and consultation gates | service | agentihooks | agentihooks | antoncore | Session brain binding and verified context receipts |
+| Swarm brain routing and consultation gates | service | agentihooks | agentihooks | antoncore | Session brain binding and verified context receipts |
 | Cluster infrastructure | service | antoncore | antoncore | antoncore | Cluster, AMIs, autoscaling groups, taints, GitOps and secrets delivery |
 | Operator interface | service | agentihooks | agentihooks | antoncore | Ledger projections and runtime observations |
 
@@ -61,9 +61,9 @@ Rejected alternatives:
 
 Status: accepted.
 
-The swarm controller and the session archive and catalog service may run as separate processes supplied by the agentihooks package, each deployed by antoncore. Workers reach both over authenticated HTTP.
+The swarm controller and the session archive and catalog service may run as separate processes supplied by the agentihooks package, each deployed by antoncore. The archive uses the existing Postgres and pgvector infrastructure where its capacity and isolation have been verified. Workers reach both over authenticated HTTP.
 
-Why: Deployment and source-archive services scale and fail independently while sharing one codebase and one release (plan section 1.2).
+Why: The session service may run as a process supplied by the agentihooks package beside the controller, and must not run a complete database stack inside every worker image (plan section 1.2).
 
 Rejected alternatives:
 
@@ -73,7 +73,7 @@ Rejected alternatives:
 
 Status: accepted.
 
-The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless the operator records an architecture change for it in operator_changes.
+The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content and a reason; a field on the proposal never approves it.
 
 Why: Retain one swarm task model and one authority for task claims (plan section 1.2).
 
@@ -99,13 +99,26 @@ Rejected alternatives:
 
 Status: accepted.
 
-The swarm brain is deployed by antoncore. An optional personal brain is a separate installation with its own deployment owner; it is not a second owner of the swarm brain and never joins the execution control plane.
+The swarm brain and the swarm brain routing and consultation gates are deployed by antoncore. An optional personal brain, with the routing and gates its personal sessions use, is a separate installation with its own deployment owner; it is not a second owner of the swarm brain and never joins the execution control plane.
 
-Why: Plan section 1.1 names antoncore or a personal installation for brain components; splitting them gives each component one deployment owner (plan sections 0 and 12.1).
+Why: Plan section 1.1 names antoncore or a personal installation for brain components; splitting them gives each component one deployment owner. Section 0: personal development may use a separate personal brain without joining the execution control plane; section 12.3: a swarm launch cannot silently fall back to personal memory.
 
 Rejected alternatives:
 
 - One brain component deployed either by antoncore or by a personal installation: A component with two deployment owners has no single owner to answer for it.
+
+## AD-08: Transcript evidence and brain synthesis keep separate storage domains
+
+Status: accepted.
+
+Transcript evidence and brain synthesis keep separate logical storage domains even when they share a database server. Redis keeps coordination state where it already exists and is never the only durable transcript archive. The initial release uses a relational edge table with bounded traversal instead of a graph database.
+
+Why: Plan section 1.2 and INV-M01: canonical transcript storage must not be a truncated Redis preview.
+
+Rejected alternatives:
+
+- Redis as the only durable transcript archive: Redis previews are truncated and not a durable archive (INV-M01, plan section 1.2).
+- A graph database in the initial release: A relational edge table and bounded traversal cover the proposed graph contract (plan section 1.2).
 
 ## Worker image exclusions
 

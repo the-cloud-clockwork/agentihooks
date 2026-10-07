@@ -34,8 +34,8 @@
       "kind": "service",
       "code_owner": "agentihooks",
       "state_owner": "agentihooks",
-      "deployment_owner": "personal installation",
-      "authoritative_state": "Execution identity plus the observed local herdr runtime"
+      "deployment_owner": "antoncore",
+      "authoritative_state": "Execution identity plus the observed herdr runtime on the controller host"
     },
     {
       "name": "Kubernetes runtime adapter",
@@ -100,7 +100,7 @@
       "authoritative_state": "Personal brain knowledge, separate from the swarm corpus"
     },
     {
-      "name": "Brain routing and consultation gates",
+      "name": "Swarm brain routing and consultation gates",
       "kind": "service",
       "code_owner": "agentihooks",
       "state_owner": "agentihooks",
@@ -176,8 +176,8 @@
       "id": "AD-04",
       "title": "Controller and session archive are separate processes from one package",
       "status": "accepted",
-      "decision": "The swarm controller and the session archive and catalog service may run as separate processes supplied by the agentihooks package, each deployed by antoncore. Workers reach both over authenticated HTTP.",
-      "rationale": "Deployment and source-archive services scale and fail independently while sharing one codebase and one release (plan section 1.2).",
+      "decision": "The swarm controller and the session archive and catalog service may run as separate processes supplied by the agentihooks package, each deployed by antoncore. The archive uses the existing Postgres and pgvector infrastructure where its capacity and isolation have been verified. Workers reach both over authenticated HTTP.",
+      "rationale": "The session service may run as a process supplied by the agentihooks package beside the controller, and must not run a complete database stack inside every worker image (plan section 1.2).",
       "rejected_alternatives": [
         {
           "alternative": "A complete database stack inside every worker image",
@@ -189,7 +189,7 @@
       "id": "AD-05",
       "title": "One coding-task authority; backlogs never dispatch work",
       "status": "accepted",
-      "decision": "The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless the operator records an architecture change for it in operator_changes.",
+      "decision": "The swarm reconciliation controller and its ledger are the only authority that claims and dispatches coding tasks. Bounded backlogs are permitted for transcripts and changed content; a backlog never launches an agent. Any other component that carries coding tasks or launches agents is rejected unless operator_changes names that proposal id with the digest of its exact content and a reason; a field on the proposal never approves it.",
       "rationale": "Retain one swarm task model and one authority for task claims (plan section 1.2).",
       "rejected_alternatives": [
         {
@@ -223,12 +223,29 @@
       "id": "AD-07",
       "title": "Swarm and personal brains are separate deployments",
       "status": "accepted",
-      "decision": "The swarm brain is deployed by antoncore. An optional personal brain is a separate installation with its own deployment owner; it is not a second owner of the swarm brain and never joins the execution control plane.",
-      "rationale": "Plan section 1.1 names antoncore or a personal installation for brain components; splitting them gives each component one deployment owner (plan sections 0 and 12.1).",
+      "decision": "The swarm brain and the swarm brain routing and consultation gates are deployed by antoncore. An optional personal brain, with the routing and gates its personal sessions use, is a separate installation with its own deployment owner; it is not a second owner of the swarm brain and never joins the execution control plane.",
+      "rationale": "Plan section 1.1 names antoncore or a personal installation for brain components; splitting them gives each component one deployment owner. Section 0: personal development may use a separate personal brain without joining the execution control plane; section 12.3: a swarm launch cannot silently fall back to personal memory.",
       "rejected_alternatives": [
         {
           "alternative": "One brain component deployed either by antoncore or by a personal installation",
           "reason": "A component with two deployment owners has no single owner to answer for it."
+        }
+      ]
+    },
+    {
+      "id": "AD-08",
+      "title": "Transcript evidence and brain synthesis keep separate storage domains",
+      "status": "accepted",
+      "decision": "Transcript evidence and brain synthesis keep separate logical storage domains even when they share a database server. Redis keeps coordination state where it already exists and is never the only durable transcript archive. The initial release uses a relational edge table with bounded traversal instead of a graph database.",
+      "rationale": "Plan section 1.2 and INV-M01: canonical transcript storage must not be a truncated Redis preview.",
+      "rejected_alternatives": [
+        {
+          "alternative": "Redis as the only durable transcript archive",
+          "reason": "Redis previews are truncated and not a durable archive (INV-M01, plan section 1.2)."
+        },
+        {
+          "alternative": "A graph database in the initial release",
+          "reason": "A relational edge table and bounded traversal cover the proposed graph contract (plan section 1.2)."
         }
       ]
     }
