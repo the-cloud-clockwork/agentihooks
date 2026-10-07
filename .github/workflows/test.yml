@@ -17,8 +17,8 @@ on:
         default: origin/dev
 
 concurrency:
-  group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  group: tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -156,7 +156,7 @@ jobs:
 
   sonar:
     needs: [unit]
-    runs-on: anton
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
