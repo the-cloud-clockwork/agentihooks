@@ -321,3 +321,35 @@ def test_refresh_ignores_sources_of_a_foreign_retargeted_rule(tmp_path):
     assert (rules / "aaa.md").is_symlink()
     assert (rules / "rule.md").read_text() == "UPDATED PROFILE\n"
     assert "UPDATED PROFILE" in payload
+
+
+def _seed_managed_mcp(monkeypatch, current):
+    install._CLAUDE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    install._CLAUDE_JSON.write_text(json.dumps({"mcpServers": {"keep": {}, "stale": {}, "hand": {}}}))
+    install.STATE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    install.STATE_JSON.write_text(json.dumps({"managed_mcp_servers": ["keep", "stale"]}))
+    monkeypatch.setattr(fixture_install, "_collect_all_managed_mcp_servers", lambda: {name: {} for name in current})
+
+
+def test_inheriting_profile_still_prunes_stale_mcp_servers(monkeypatch):
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    _seed_managed_mcp(monkeypatch, {"keep"})
+
+    ClaudeAdapter().post_install_reconcile(["parent", "child"], "child")
+
+    assert set(json.loads(install._CLAUDE_JSON.read_text())["mcpServers"]) == {"keep", "hand"}
+
+
+def test_missing_profile_skips_reconcile_and_is_named(monkeypatch, capsys):
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    _seed_managed_mcp(monkeypatch, {"keep"})
+
+    ClaudeAdapter().post_install_reconcile(["parent", "child"], "child,gone,lost")
+
+    assert set(json.loads(install._CLAUDE_JSON.read_text())["mcpServers"]) == {"keep", "stale", "hand"}
+    assert (
+        "  [--] Skipping MCP ledger reconcile — profile(s) gone, lost did not resolve this run "
+        "(transient source loss); ledger left unchanged."
+    ) in capsys.readouterr().out
