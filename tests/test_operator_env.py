@@ -122,8 +122,8 @@ def test_a_name_only_in_a_secondary_file_reaches_the_render(tmp_path, monkeypatc
 def test_the_tick_fills_its_environment_before_any_spawn(tmp_path, monkeypatch):
     _home(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("SECONDARY_ONLY", raising=False)
-    monkeypatch.delenv("PERSONAL_ONLY", raising=False)
+    for name in ("MAIN_ONLY", "SECONDARY_ONLY", "PERSONAL_ONLY", "SHARED"):
+        monkeypatch.delenv(name, raising=False)
     seen = []
 
     class Store:
