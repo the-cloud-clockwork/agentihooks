@@ -13,7 +13,7 @@ from scripts.swarm import naming
 SCRATCH = Path.home() / "scratchpad"
 NAME_KEY = "AGENTIHOOKS_AGENT_NAME"
 HOME_KEYS = ("HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR")
-TERM_S = 3.0
+POLL_S, TRIES = 0.05, 60
 
 
 @dataclass(frozen=True)
@@ -34,29 +34,26 @@ def scratch_homes(slug: str, task: str, root: Path | None = None) -> list[Path]:
     return sorted(path.resolve() for path in root.glob(f"*/{naming.scratch_folder(slug, task)}") if path.is_dir())
 
 
-def _environ(pid: int, proc: Path) -> dict[str, str]:
+def _environ(pid: int) -> dict[str, str]:
     from scripts.terminate_agent import agent_environ
 
     keys = (NAME_KEY, *HOME_KEYS)
-    return dict(zip(keys, agent_environ(pid, keys, proc)))
+    return dict(zip(keys, agent_environ(pid, keys)))
 
 
-def _cwd(pid: int, proc: Path) -> str:
-    try:
-        return os.readlink(proc / str(pid) / "cwd")
-    except OSError:
-        return ""
-
-
-def carries(process: Process, name: str, proc: Path) -> bool:
+def carries(process: Process, name: str) -> bool:
     named = {process.argv[i + 1] for i, word in enumerate(process.argv[:-1]) if word == "--name"}
-    named.add(_environ(process.pid, proc)[NAME_KEY])
+    named.add(_environ(process.pid)[NAME_KEY])
     return name in {naming.resolve_name(found) for found in named if found}
 
 
-def _from(process: Process, homes: list[Path], proc: Path) -> bool:
-    env = _environ(process.pid, proc)
-    places = [_cwd(process.pid, proc), *(env[key] for key in HOME_KEYS)]
+def _from(process: Process, homes: list[Path]) -> bool:
+    env = _environ(process.pid)
+    places = [env[key] for key in HOME_KEYS]
+    try:
+        places.append(os.readlink(f"/proc/{process.pid}/cwd"))
+    except OSError:
+        pass
     return any(place and Path(place).is_relative_to(home) for place in places for home in homes)
 
 
@@ -79,31 +76,35 @@ def _split(found: list[Process], launch: Process | None, table: dict[int, Proces
     return Targets(frozenset(whole), frozenset(singles))
 
 
-def targets(name: str, pid: int, homes: list[Path], proc: Path = Path("/proc")) -> Targets:
-    table = processes(proc)
-    launch = table.get(pid) if pid else None
-    if launch is not None and not carries(launch, name, proc):
+def targets(name: str, pid: int | str | None, homes: list[Path]) -> Targets:
+    table = processes()
+    launch = table.get(int(pid)) if pid else None
+    if launch is not None and not carries(launch, name):
         launch = None
-    group = launch.pgid if launch is not None else None
-    loose = [p for p in table.values() if homes and p.pgid != group and _from(p, homes, proc)]
+    loose = [p for p in table.values() if homes and _from(p, homes)]
     return _split(loose, launch, table)
 
 
-def _members(found: Targets, proc: Path) -> dict[int, int]:
-    return {
-        p.pid: p.start_time
-        for p in processes(proc).values()
-        if p.state != "Z" and (p.pgid in found.groups or p.pid in found.singles)
-    }
+def _members(found: Targets) -> dict[int, int]:
+    return {p.pid: p.start_time for p in processes().values() if p.pgid in found.groups or p.pid in found.singles}
 
 
-def _alive(members: dict[int, int], proc: Path) -> list[int]:
-    table = processes(proc)
+def _alive(members: dict[int, int]) -> list[int]:
+    table = processes()
     return sorted(
         pid
         for pid, started in members.items()
         if pid in table and table[pid].start_time == started and table[pid].state != "Z"
     )
+
+
+def _wait(members: dict[int, int]) -> list[int]:
+    for _ in range(TRIES):
+        left = _alive(members)
+        if not left:
+            return []
+        time.sleep(POLL_S)
+    return _alive(members)
 
 
 def _signal(found: Targets, sig: int) -> str:
@@ -118,26 +119,22 @@ def _signal(found: Targets, sig: int) -> str:
     return ""
 
 
-def end(found: Targets, proc: Path = Path("/proc"), wait_s: float = TERM_S) -> Outcome:
-    members, refused, left = _members(found, proc), "", []
+def end(found: Targets) -> Outcome:
+    members, refused = _members(found), ""
     for sig in (signal.SIGTERM, signal.SIGKILL):
         refused = _signal(found, sig) or refused
-        deadline = time.monotonic() + wait_s
-        left = _alive(members, proc)
-        while left and time.monotonic() < deadline:
-            time.sleep(0.05)
-            left = _alive(members, proc)
+        left = _wait(members)
         if not left:
             return Outcome(tuple(sorted(members)))
     survivors = ", ".join(map(str, left))
     return Outcome(tuple(sorted(set(members) - set(left))), left[0], refused or f"survived SIGKILL: {survivors}")
 
 
-def retire(name: str, pid: int, homes: list[Path], proc: Path = Path("/proc"), wait_s: float = TERM_S) -> Outcome:
-    return end(targets(name, pid, homes, proc), proc, wait_s)
+def retire(name: str, pid: int | None, homes: list[Path]) -> Outcome:
+    return end(targets(name, pid, homes))
 
 
-def reap(pids: list[int], proc: Path = Path("/proc"), wait_s: float = TERM_S) -> Outcome:
+def reap(pids: list[int]) -> Outcome:
     """End agent processes holding a name the swarm no longer records, each with its group when it leads one."""
-    table = processes(proc)
-    return end(_split([table[pid] for pid in pids if pid in table], None, table), proc, wait_s)
+    table = processes()
+    return end(_split([table[pid] for pid in pids if pid in table], None, table))

@@ -33,7 +33,7 @@ def retire_idle_master(
             continue
         if inbox.pending_items(seat) or inbox.pending_items(agent.name):
             continue
-        if not runtime.retire(agent, agent.name in runtime.live_names(), homes=reaper.scratch_homes(slug, agent.task)):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             actions.append(f"could not retire {agent.name}, retrying next tick")
             continue
         store.memory.add_recap(

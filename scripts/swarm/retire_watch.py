@@ -19,10 +19,6 @@ def failed(store, slug, name, refused, now_ms):
     return row["ticks"]
 
 
-def cleared(store, slug, name):
-    store.redis.hdel(_key(store, slug), name)
-
-
 def rows(store, slug):
     return [json.loads(raw) for _, raw in sorted(store.redis.hgetall(_key(store, slug)).items())]
 

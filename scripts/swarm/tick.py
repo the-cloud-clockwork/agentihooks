@@ -92,7 +92,7 @@ class Runtime(Protocol):
     def reported(self, agent: AgentRecord) -> bool: ...
     def bindings(self, agents: list[AgentRecord]) -> dict: ...
     def recover(self, name: str) -> Placed: ...
-    def retire(self, agent: AgentRecord, live: bool, homes: list = ...) -> bool: ...
+    def retire(self, agent: AgentRecord, homes: list = ...) -> bool: ...
     def refusal(self, agent: AgentRecord) -> dict: ...
     def reap_name(self, name: str) -> bool: ...
     def status(self, agent: AgentRecord) -> str: ...
@@ -222,7 +222,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
             actions.append(f"kept {agent.name} after mismatched {fields}: its relaunch assignment is incomplete")
             continue
-        if not runtime.retire(agent, agent.name in facts, homes=reaper.scratch_homes(slug, agent.task)):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
@@ -246,7 +246,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         if agent.state == "retiring" and not ended:
             continue
         if ended:
-            if runtime.retire(agent, agent.name in live, homes=reaper.scratch_homes(slug, agent.task)):
+            if runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
                 goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
@@ -264,7 +264,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            runtime.retire(agent, False, homes=reaper.scratch_homes(slug, agent.task))
+            runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
 
@@ -325,7 +325,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudged {agent.name}"]
-    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, True, homes=reaper.scratch_homes(slug, idle.task)):
+    if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
     return []
 
@@ -626,7 +626,7 @@ def _master(slug, config, store, runtime, now_ms):
 
 
 def _retire_master(slug, store, runtime, master):
-    if not runtime.retire(master, master.name in runtime.live_names(), homes=reaper.scratch_homes(slug, master.task)):
+    if not runtime.retire(master, homes=reaper.scratch_homes(slug, master.task)):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"

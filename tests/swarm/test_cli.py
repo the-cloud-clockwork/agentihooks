@@ -255,7 +255,7 @@ def test_binning_releases_and_reopens_only_this_swarms_claims(env):
     ledger.tasks = lambda slug: tasks(slug) if slug == "sw" else []
     ledger.update_task = lambda slug, task_id, fields, by="swarm": slug == "sw" and update(slug, task_id, fields, by)
     states, retire = [], rt.retire
-    rt.retire = lambda agent, live, homes=(): states.append(store.config("sw").state) or retire(agent, live, homes)
+    rt.retire = lambda agent, homes=(): states.append(store.config("sw").state) or retire(agent, homes)
     ledger.bin = {"sw"}
     assert cli.run_tick(store, "sw", ledger, None, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
     assert states == ["stopping", "stopping", "stopping"]
@@ -548,10 +548,10 @@ def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
     rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
     rt.end = lambda name, pid, homes: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
-    assert rt.retire(agent, live=True) is False and closed == []
+    assert rt.retire(agent) is False and closed == []
     assert rt.refusal(agent) == {"process": 4242, "refusal": "survived SIGKILL: 4242"}
     rt.end = lambda name, pid, homes: Outcome()
-    assert rt.retire(agent, live=False) is True and closed == [["pane", "close", "w3:p1"]]
+    assert rt.retire(agent) is True and closed == [["pane", "close", "w3:p1"]]
     assert rt.refusal(agent) == {"process": 0, "refusal": "unknown"}
 
 
@@ -564,7 +564,7 @@ def test_runtime_retire_ends_the_recorded_launch_process_never_the_name(tmp_path
     )
     rt.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", profile_decision={"validation": {"pid": 321}})
-    assert rt.retire(agent, live=True, homes=[tmp_path])
+    assert rt.retire(agent, homes=[tmp_path])
     assert ended == [("engineer@a1b2c3-0001", 321, [tmp_path])]
 
 
@@ -579,8 +579,11 @@ def test_runtime_reports_a_pane_that_will_not_close(tmp_path):
     agent = AgentRecord(
         "engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1", profile_decision={"validation": {"pid": 9}}
     )
-    assert rt.retire(agent, live=True) is False
+    assert rt.retire(agent) is False
     assert rt.refusal(agent) == {"process": 9, "refusal": "pane w3:p1: herdr socket gone"}
+    unbound = AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w3:p2")
+    assert rt.retire(unbound) is False
+    assert rt.refusal(unbound) == {"process": 0, "refusal": "pane w3:p2: herdr socket gone"}
 
 
 def test_runtime_reaps_every_session_holding_a_stray_name(tmp_path, monkeypatch):

@@ -98,11 +98,11 @@ class FakeRuntime:
 
         return {a.name: {**assignment(a), "hooks": True} for a in agents if a.name in self.live}
 
-    def retire(self, agent, live, homes=()):
+    def retire(self, agent, homes=()):
         self.homes[agent.name] = list(homes)
         if agent.name in self.stuck:
             return False
-        if live:
+        if agent.name in self.live:
             self.killed.append(agent.name)
             if agent.name not in self.duplicates:
                 self.live.discard(agent.name)
@@ -594,6 +594,7 @@ def test_a_retire_failing_three_ticks_is_a_health_finding(store):
     tick("sw", store, ledger, runtime, now_ms=3_000)
     assert retire_watch.findings(store, "sw") == []
     tick("sw", store, ledger, runtime, now_ms=4_000)
+    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 4_000)]
     (found,) = retire_watch.findings(store, "sw")
     assert found.id == f"retire-failed/{first.name}"
     assert found.evidence == ("process 4242", "refusal: signal to 4242 refused: Operation not permitted")
@@ -607,6 +608,7 @@ def test_a_resumed_duplicate_is_reaped_on_the_tick_that_retires_its_agent(store)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = workers(store)[0]
     runtime.duplicates.add(first.name)
+    runtime.live.add("ci@d4e5f6-0001")
     ledger.rows["t1"]["state"] = "done"
     actions = tick("sw", store, ledger, runtime, now_ms=2_000)
     assert f"reaped stray {first.name}" in actions

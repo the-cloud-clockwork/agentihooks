@@ -270,9 +270,9 @@ def cmd_stop(store, args):
 def stop_now(store, slug, runtime, ledger):
     store.update(slug, state="stopping")
     rows = {t["id"]: t for t in ledger.tasks(slug)}
-    live, left = runtime.live_names(), []
+    left = []
     for agent in store.agents(slug):
-        if not runtime.retire(agent, agent.name in live, homes=reaper.scratch_homes(slug, agent.task)):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             left.append(agent.name)
             continue
         store.release(slug, agent.task, agent.name)
@@ -290,12 +290,12 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, live, agents):
+def _retire_each(store, slug, runtime, agents):
     left = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
-        if not runtime.retire(agent, agent.name in live, homes=reaper.scratch_homes(slug, agent.task)):
+        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, agent)
             left.append(agent.name)
     return left
@@ -316,14 +316,14 @@ def cmd_close(store, args):
     path = snapshot.take(store, args.slug, now_ms())
     store.update(args.slug, state="stopping")
     agents = store.agents(args.slug)
-    left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane != MASTER])
+    left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane != MASTER])
     for row in ledger.tasks(args.slug):
         if row.get("state") == "claimed":
             ledger.update_task(args.slug, row["id"], {"state": "open", "claimed_by": ""})
     ledger.mark_closed(args.slug, by)
     store.update(args.slug, state="stopping" if left else "stopped")
     print(json.dumps({"closed": args.slug, "snapshot": str(path), "still_running": left}), flush=True)
-    masters_left = _retire_each(store, args.slug, runtime, live, [a for a in agents if a.lane == MASTER])
+    masters_left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane == MASTER])
     if masters_left:
         store.update(args.slug, state="stopping")
     elif not left:

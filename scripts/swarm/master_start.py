@@ -50,9 +50,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         return []
     if pending.get("alerted") or at - pending["at"] < DEADLINE_MS:
         return []
-    if agent and not runtime.retire(
-        agent, agent.name in runtime.live_names(), homes=reaper.scratch_homes(slug, agent.task)
-    ):
+    if agent and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         if not pending.get("retire_told"):
             ledger.notify(
                 slug, "The master reported no hook and its launch could not be retired. Operator action is required."

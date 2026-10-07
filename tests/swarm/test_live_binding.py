@@ -284,11 +284,11 @@ def test_partial_retirement_failure_retains_ownership_until_pane_closes(ticking)
     }
     retire = runtime.retire
 
-    def partial(agent, live, homes=()):
+    def partial(agent, homes=()):
         if agent.name == old.name:
             runtime.live.discard(old.name)
             return False
-        return retire(agent, live, homes)
+        return retire(agent, homes)
 
     runtime.retire = partial
     tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 200)
@@ -775,8 +775,8 @@ def test_retirement_uses_the_same_process_the_verifier_checked(monkeypatch):
     runtime = HerdrRuntime(run=lambda argv, **kwargs: pytest.fail("retire never runs terminate-agent"))
     runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome((pid,))
     runtime.bindings([agent])
-    assert runtime.retire(agent, True) is True
-    assert ended == [("engineer", 11, [])]
+    assert runtime.retire(agent) is True
+    assert ended == [("engineer", "11", [])]
 
 
 def test_missing_validated_process_closes_without_terminating_foreign_session(monkeypatch):
@@ -791,7 +791,7 @@ def test_missing_validated_process_closes_without_terminating_foreign_session(mo
     runtime = HerdrRuntime(run=refuse)
     agent = AgentRecord("engineer", "eng", "one", profile_decision={"validation": {"pid": 99}})
     assert runtime.bindings([agent]) == {"engineer": {"process": False}}
-    assert runtime.retire(agent, True) is True
+    assert runtime.retire(agent) is True
 
 
 def test_unbound_absent_process_has_no_live_report(monkeypatch):

@@ -48,7 +48,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
     if not seated and carried and not store.names.entry(carried):
         store.names.alias(carried, name)
     for agent in others:
-        if not runtime.retire(agent, agent.name in live):
+        if not runtime.retire(agent):
             raise SwarmError(f"could not retire {agent.name}; try again")
         store.drop_agent(slug, agent.name)
     for agent in masters:

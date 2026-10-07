@@ -223,7 +223,6 @@ class HerdrRuntime:
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(
                 replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
-                True,
                 homes=reaper.scratch_homes(config.slug, agent.task),
             )
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
@@ -342,11 +341,11 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, live, homes=()):
+    def retire(self, agent, homes=()):
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
         then close the pane; the agent's name alone never selects a process."""
-        pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name) or 0
-        outcome = self.end(agent.name, int(pid), list(homes))
+        pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
+        outcome = self.end(agent.name, pid, list(homes))
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
@@ -355,7 +354,7 @@ class HerdrRuntime:
                 self.herdr(["pane", "close", agent.pane_id])
             except Exception as exc:
                 if "not found" not in str(exc):
-                    self.refusals[agent.name] = {"process": int(pid), "refusal": f"pane {agent.pane_id}: {exc}"}
+                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
                     return False
         self.refusals.pop(agent.name, None)
         return True
