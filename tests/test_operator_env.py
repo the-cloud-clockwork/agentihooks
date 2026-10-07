@@ -60,6 +60,34 @@ def test_values_follow_the_shell_where_a_later_file_wins(tmp_path):
     assert not operator_env.SHELL_NAMES & loaded.keys()
 
 
+def test_the_files_see_home_path_and_agentihooks_home_and_nothing_else(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    tools = tmp_path / "tools"
+    state.mkdir()
+    tools.mkdir()
+    (tools / "probe-tool").write_text("#!/bin/sh\necho found\n")
+    (tools / "probe-tool").chmod(0o755)
+    (state / ".env").write_text(
+        'REF="$HOME/x"\nTOOL="$(probe-tool)"\nAH="${AGENTIHOOKS_HOME:-unset}"\nLEAK="${OPERATOR_ENV_LEAK:-none}"\n'
+    )
+    monkeypatch.setenv("OPERATOR_ENV_LEAK", "caller")
+    environ = {"HOME": str(tmp_path), "PATH": f"{tools}:/usr/bin:/bin", "AGENTIHOOKS_HOME": str(state)}
+    loaded = operator_env.values({**environ, "OPERATOR_ENV_LEAK": "caller"})
+    assert loaded["REF"] == f"{tmp_path}/x"
+    assert loaded["TOOL"] == "found"
+    assert loaded["AH"] == str(state)
+    assert loaded["LEAK"] == "none"
+
+
+def test_values_keep_equals_signs_and_undecodable_bytes(tmp_path):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    (state / ".env").write_bytes(b"URL='a=b=c'\nRAW=caf\xff\n")
+    loaded = operator_env.values({"HOME": str(tmp_path), "PATH": os.environ["PATH"]})
+    assert loaded["URL"] == "a=b=c"
+    assert loaded["RAW"] == "caf\udcff"
+
+
 def test_fill_adds_only_names_the_caller_lacks(tmp_path):
     _home(tmp_path)
     environ = {"HOME": str(tmp_path), "PATH": os.environ["PATH"], "SHARED": "caller"}
@@ -188,13 +216,14 @@ def herdr(monkeypatch):
         "open_pane",
         lambda *a: calls.append("open") or herdr_host.Placement("w1", "w1:t2", "w1:p3"),
     )
-    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append(tuple(args)) or {})
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append((*args, environ.get("HOME"))) or {})
     return calls
 
 
-def test_run_in_terminal_waits_its_grace_in_a_herdr_pane(herdr, tmp_path):
+def test_run_in_terminal_waits_its_grace_in_a_herdr_pane(herdr, tmp_path, capsys):
     assert run_in_terminal.main(["--dir", str(tmp_path), "--", "npm", "test"], {"HOME": str(tmp_path)}) == 0
-    assert ("pane", "run", "w1:p3", f"sleep {init_agent.LAUNCH_GRACE_S} && npm test") in herdr
+    assert ("pane", "run", "w1:p3", f"sleep {init_agent.LAUNCH_GRACE_S} && npm test", str(tmp_path)) in herdr
+    assert capsys.readouterr().out.splitlines()[:2] == ["host=herdr", f"directory={tmp_path}"]
 
 
 def test_run_in_terminal_waits_its_grace_in_a_native_terminal(monkeypatch, tmp_path):

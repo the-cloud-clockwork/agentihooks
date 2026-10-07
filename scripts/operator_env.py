@@ -22,17 +22,11 @@ def files(environ: Mapping[str, str]) -> list[Path]:
 
 
 def values(environ: Mapping[str, str]) -> dict[str, str]:
-    paths = files(environ)
-    if not paths:
+    script = source_line(environ)
+    if not script:
         return {}
     base = {key: environ[key] for key in ("HOME", "PATH", "AGENTIHOOKS_HOME") if environ.get(key)}
-    done = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-c", f"{SOURCE}; env -0", "bash", *map(str, paths)],
-        env=base,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=10,
-    )
+    done = subprocess.run(["bash", "--noprofile", "--norc", "-c", f"{script}env -0"], env=base, capture_output=True)
     pairs = (item.decode(errors="surrogateescape").partition("=") for item in done.stdout.split(b"\0") if item)
     return {key: value for key, _, value in pairs if key not in SHELL_NAMES}
 
