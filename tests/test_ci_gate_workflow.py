@@ -18,11 +18,10 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
     assert gate["name"] == "Gate — Required"
-    assert set(gate["needs"]) in ({"unit", "lint"}, {"unit", "lint", "sonar"})
+    assert set(gate["needs"]) in ({"unit", "lint", "sonar"}, {"unit", "lint", "sonar", "mutation"})
     assert gate["if"] == "${{ always() }}"
     assert "needs" not in jobs["unit"]
     assert "needs" not in jobs["lint"]
-    assert "mutation" not in gate["needs"]
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
@@ -33,6 +32,25 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
     env = dict(os.environ, NEEDS=json.dumps({"unit": {"result": unit}, "lint": {"result": lint}}))
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (unit == lint == "success"), result.stdout + result.stderr
+    if result.returncode:
+        assert "::error::" in result.stdout
+
+
+@pytest.mark.parametrize("mutation", ["success", "failure", "skipped", "cancelled"])
+@pytest.mark.parametrize("expected", ["true", "false", ""])
+def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(mutation, expected):
+    jobs = _workflow()["jobs"]
+    gate = jobs["gate-required"]
+    if "mutation" not in gate["needs"]:
+        pytest.skip("Gate Required does not need mutation yet")
+    step = gate["steps"][0]
+    assert step["env"]["MUTATION"] == jobs["mutation"]["if"]
+    needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
+    needs["mutation"] = {"result": mutation}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION=expected)
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    passes = mutation == "success" or (mutation == "skipped" and expected == "false")
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
 
