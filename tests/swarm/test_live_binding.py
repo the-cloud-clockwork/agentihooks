@@ -903,3 +903,54 @@ def test_legacy_worker_relaunch_prefers_explicit_task_profile(ticking):
     }
     tick("sw", store, ledger, runtime, 200)
     assert runtime.tasks[-1]["launch_assignment"]["profile"] == "qa"
+
+
+def test_adopted_master_with_an_empty_record_takes_its_live_binding(ticking):
+    from pathlib import Path
+
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(master, harness="", profile="", model="", effort="", account=""))
+    live = {
+        "harness": "claude",
+        "home": str((Path.home() / ".agentihooks" / "profiles" / "master" / "claude").resolve()),
+        "profile": "master",
+        "model": "opus",
+        "effort": "high",
+        "account": "team",
+        "hooks": True,
+    }
+    runtime.bindings = lambda agents: {
+        a.name: live if a.name == master.name else {**live_binding.assignment(a), "hooks": True} for a in agents
+    }
+    tick("sw", store, ledger, runtime, 200)
+    kept = next(a for a in store.agents("sw") if a.name == master.name)
+    assert master.name not in runtime.killed
+    assert (kept.harness, kept.profile, kept.model, kept.effort, kept.account) == (
+        "claude",
+        "master",
+        "opus",
+        "high",
+        "team",
+    )
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["state"] == "matching"
+
+
+def test_master_without_a_complete_relaunch_assignment_is_kept(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(master, harness="", profile="", model="", effort="", account=""))
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": a.name != master.name} for a in agents
+    }
+    actions = tick("sw", store, ledger, runtime, 200)
+    assert master.name not in runtime.killed
+    assert any(a.name == master.name for a in store.agents("sw"))
+    assert f"kept {master.name} after mismatched hooks: its relaunch assignment is incomplete" in actions
+    assert store.redis.hget(store.key("sw", "launch-assignments"), "master") is None
