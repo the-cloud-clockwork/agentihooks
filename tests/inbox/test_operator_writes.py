@@ -154,6 +154,15 @@ def test_a_chat_line_to_the_swarm_is_one_work_item_for_the_master_and_informatio
         assert item.text.endswith(operator_mail.INFO_RULE.format(master=MASTER_SEAT))
 
 
+def test_a_note_to_the_swarm_is_read_from_its_note_text_and_is_the_masters_to_answer(swarm):
+    _, inbox = swarm
+    relay(swarm, write(5, "notes/n1", kind="note added", text="body only", note_text="@swarm read the note"))
+    [eng_item] = inbox.pending_items(ENG.seat)
+    [boss_item] = inbox.pending_items(MASTER_SEAT)
+    assert eng_item.fyi
+    assert not boss_item.fyi
+
+
 def test_an_engineers_item_for_an_operator_chat_line_to_it_carries_the_answer_rule(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "chat", kind="message added", text="@sw-eng-1 can you reply"))
