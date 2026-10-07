@@ -139,8 +139,14 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m ruff format --check hooks/ scripts/ tests/
 
+      - name: Use the Ubuntu archive for browser dependencies
+        if: steps.lookup.outputs.skip != 'true'
+        timeout-minutes: 1
+        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+
       - name: Install the artifact viewer browser
         if: steps.lookup.outputs.skip != 'true'
+        timeout-minutes: 2
         run: |
           python -m pip install "playwright>=1.44.0"
           python -m playwright install --with-deps chromium
