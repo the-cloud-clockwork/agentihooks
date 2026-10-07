@@ -11,11 +11,47 @@ def test_recorded_ci_and_planted_rerun():
     record = load("ci")
     assert ci.reruns(record) == []
     planted = copy.deepcopy(record)
-    planted["runs"][0]["run_attempt"] = 3
+    planted["runs"][0]["run_attempt"] = 4
     [found] = ci.reruns(planted)
     assert found.id == "ci-reruns/487"
-    assert found.measure == 2
-    assert "37323835080 attempts 3" in found.evidence
+    assert found.measure == 3
+    assert "37323835080 attempts 4" in found.evidence
+    assert found.threshold == "more than 2 reruns per pull request head"
+
+
+@pytest.mark.parametrize("attempts", [1, 2, 3])
+def test_reruns_at_or_under_the_gate_limit_are_quiet(attempts):
+    record = load("ci")
+    record["runs"][0]["run_attempt"] = attempts
+    assert ci.reruns(record) == []
+
+
+@pytest.mark.parametrize("cap", [0, 1, 4])
+def test_reruns_use_the_gate_setting(monkeypatch, cap):
+    gate = ci.RerunBudget(cap=cap)
+    monkeypatch.setattr(ci, "RerunBudget", lambda: gate)
+    record = load("ci")
+    record["runs"][0]["run_attempt"] = cap + 1
+    assert ci.reruns(record) == []
+    record["runs"][0]["run_attempt"] += 1
+    [found] = ci.reruns(record)
+    assert found.measure == cap + 1
+    assert found.threshold == f"more than {cap} reruns per pull request head"
+
+
+def test_reruns_count_all_workflows_on_only_the_current_head():
+    record = load("ci")
+    run = record["runs"][0]
+    run["run_attempt"] = 2
+    record["runs"].extend(
+        [
+            {**run, "id": 42, "run_attempt": 3},
+            {**run, "id": 43, "head_sha": "previous-head", "run_attempt": 20},
+        ]
+    )
+    [found] = ci.reruns(record)
+    assert found.measure == 3
+    assert found.evidence == ("37323835080 attempts 2", "42 attempts 3")
 
 
 def _red_at(record):

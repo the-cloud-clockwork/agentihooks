@@ -38,6 +38,13 @@ class Candidate:
     week_used: float
     sessions: int
     observed_at: float
+    cap: int | None = None
+
+    def limit(self, default: int) -> int:
+        return self.cap or default
+
+    def full(self, default: int) -> bool:
+        return self.sessions >= self.limit(default)
 
     @property
     def routing_left(self) -> float:
@@ -86,12 +93,12 @@ def decide(
         return None
 
     pool = [c for c in others if c.account != account and c.five_used < five_pct and c.week_used < week_pct]
-    open_slots = [c for c in pool if c.sessions < max_sessions and c.routing_left >= MIN_ROUTING_LEFT]
+    open_slots = [c for c in pool if not c.full(max_sessions) and c.routing_left >= MIN_ROUTING_LEFT]
     unreserved = [c for c in open_slots or pool if c.account not in reserve and c.routing_left >= MIN_ROUTING_LEFT]
     pool = unreserved or pool
     good = [c for c in pool if c.routing_left >= min_left]
     viable = [c for c in pool if c.routing_left >= MIN_ROUTING_LEFT]
-    best_good = min(good, key=lambda c: (c.sessions >= max_sessions, -c.routing_left, c.account)) if good else None
+    best_good = min(good, key=lambda c: (c.full(max_sessions), -c.routing_left, c.account)) if good else None
     least_bad = min(viable, key=lambda c: (-c.routing_left, c.sessions, c.account)) if viable else None
 
     def made(action: str, trigger: str, target: Candidate | None = None) -> Decision:
@@ -149,7 +156,7 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
     )
 
 
-def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
+def _other_accounts(sessions: dict[str, int], caps: dict[str, int] | None = None) -> list[Candidate]:
     from scripts.claude_quota_balancer import cached_observations
 
     now = time.time()
@@ -159,12 +166,14 @@ def _other_accounts(sessions: dict[str, int]) -> list[Candidate]:
         week = _effective(result.seven_day.used, result.seven_day.resets_at, now)
         if five is None or week is None or result.provider_status == "rejected":
             continue
-        candidates.append(Candidate(result.account, five, week, sessions.get(result.account, 0), observed_at))
+        cap = (caps or {}).get(result.account)
+        candidates.append(Candidate(result.account, five, week, sessions.get(result.account, 0), observed_at, cap))
     return candidates
 
 
 def evaluate(session_id: str) -> Decision | None:
     from hooks.context.account_sessions import agent_pid, max_sessions, session_account, sessions_by_account
+    from scripts import session_caps
 
     windows = _session_windows(session_id)
     if windows is None:
@@ -179,7 +188,7 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=_other_accounts(sessions),
+        others=_other_accounts(sessions, session_caps.stored()),
         max_sessions=max_sessions(),
         push=push_active(session_id),
     )
@@ -245,7 +254,7 @@ def _others_text(d: Decision) -> str:
         return "no other account is configured; handoffs need at least 2 accounts"
     return "; ".join(
         f"{c.account} {_pct(c.routing_left)} left (5h {_pct(c.five_used)}, 7d {_pct(c.week_used)} used, "
-        f"{c.sessions}/{d.max_sessions} sessions)"
+        f"{c.sessions}/{c.limit(d.max_sessions)} sessions)"
         for c in rows
     )
 
@@ -275,7 +284,7 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f"QUOTA HANDOFF REQUIRED — {head}\n"
             f"Policy decision (deterministic): move this task to another account now. "
             f"Router cache: {t.account} has {_pct(t.routing_left)} left (5h {_pct(t.five_used)}, "
-            f"7d {_pct(t.week_used)} used, {t.sessions}/{d.max_sessions} sessions, observed {age}m ago); "
+            f"7d {_pct(t.week_used)} used, {t.sessions}/{t.limit(d.max_sessions)} sessions, observed {age}m ago); "
             f"the new terminal re-probes and picks the final account.\n"
             f"1. Write the handoff document to {doc}: goal, done so far (commits, PRs, evidence), "
             f"in progress, exact next steps, repo/worktree/branch, open risks, the operator's standing "
