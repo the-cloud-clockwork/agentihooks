@@ -28,6 +28,7 @@ agentihooks swarm <id> culture set FILE | show                    the swarm's sh
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
+agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
@@ -79,6 +80,7 @@ from scripts.swarm import (
     prompt,
     reaper,
     snapshot,
+    stack,
     take_master,
     templates,
     tick_master,
@@ -834,19 +836,11 @@ def cmd_plan(store, args):
 def cmd_handoff(store, args):
     agent = _me(store, args)
     text = _read(args.doc, "handoff document")
-    recap = "\n\n".join(
-        f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
-    )
     ledger = LedgerClient()
     found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if found:
         raise SwarmError(handoff_check.refusal(found))
-    envelope = handoff_envelope.build(store, args.slug, agent, args.reason, _ledger_rows(ledger, args.slug), now_ms())
-    store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
-    store.put_handoff(args.slug, agent.task, text, seat=agent.seat, envelope=envelope)
-    transfer = transfers.record(store, args.slug, agent, args.reason, text, now_ms())
-    store.put_agent(args.slug, replace(agent, state="finished"))
-    exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
+    envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
     print(
         json.dumps(
             {
@@ -858,6 +852,28 @@ def cmd_handoff(store, args):
             }
         )
     )
+
+
+def _hand_off(store, slug, agent, text, reason, ledger):
+    recap = "\n\n".join(
+        f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
+    )
+    envelope = handoff_envelope.build(store, slug, agent, reason, _ledger_rows(ledger, slug), now_ms())
+    store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
+    store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
+    transfer = transfers.record(store, slug, agent, reason, text, now_ms())
+    store.put_agent(slug, replace(agent, state="finished"))
+    exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
+    return envelope, transfer
+
+
+def cmd_park(store, args):
+    agent = _worker(store, args)
+    text = _read(args.doc, "handoff document")
+    ledger = LedgerClient()
+    fields = stack.park(store, args.slug, agent, text, ledger)
+    _hand_off(store, args.slug, agent, text, "exit", ledger)
+    print(json.dumps({"task": agent.task, **fields, "next": "stop now; the task waits on its branch"}))
 
 
 def cmd_confirm_handoff(store, args):
@@ -1054,6 +1070,7 @@ def build_parser():
     reported = sub.add_parser("progress")
     reported.add_argument("--doing", required=True)
     reported.add_argument("--ends-when", required=True)
+    sub.add_parser("park").add_argument("doc")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
