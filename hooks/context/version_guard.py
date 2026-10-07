@@ -35,9 +35,18 @@ _VERSION_PATTERNS = [
     re.compile(r'"version"\s*:\s*"', re.IGNORECASE),
 ]
 
-_VERSION_LITERAL = re.compile(r'version"?\s*[=:]\s*["\']?[\w.+-]*', re.IGNORECASE)
+_VERSION_LITERAL = re.compile(r'version"?\s*[=:]\s*["\']?[\w.+!-]*', re.IGNORECASE)
 
 _PARSED_FILES = {"pyproject.toml", "Cargo.toml", "package.json"}
+
+_VERSION_KEYS = (
+    ("version",),
+    ("project", "version"),
+    ("tool", "poetry", "version"),
+    ("tool", "setuptools_scm", "fallback_version"),
+    ("package", "version"),
+    ("workspace", "package", "version"),
+)
 
 _PLAIN_FILES = {"VERSION", "version.txt"}
 
@@ -133,15 +142,8 @@ def _field(data: object, keys: tuple[str, ...]) -> object:
     return data
 
 
-def _version_fields(data: object, path: tuple[str, ...] = ()) -> dict[tuple[str, ...], object]:
-    found = {}
-    if isinstance(data, dict):
-        for key, value in data.items():
-            name = (*path, key)
-            if key.lower() == "version" or key.lower().endswith("_version"):
-                found[name] = value
-            found.update(_version_fields(value, name))
-    return found
+def _version_fields(data: object) -> dict[tuple[str, ...], object]:
+    return {keys: _field(data, keys) for keys in _VERSION_KEYS}
 
 
 def _parsed_verdict(filename: str, target: Path, tool_name: str, tool_input: dict) -> bool:
@@ -154,7 +156,7 @@ def _parsed_verdict(filename: str, target: Path, tool_name: str, tool_input: dic
         return False
     kept = _version_fields(before)
     if filename == "pyproject.toml" and _switches_to_tag_version(after):
-        kept.pop(("project", "version"), None)
+        kept["project", "version"] = None
     if _version_fields(after) != kept:
         _refuse(filename)
     return True

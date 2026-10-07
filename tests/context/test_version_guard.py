@@ -165,8 +165,25 @@ def test_switch_pinning_a_fallback_at_the_old_version_is_refused(tmp_path):
     _refused(_rewrite(_manifest(tmp_path), _TAGGED + 'fallback_version = "2.17.0"\n'))
 
 
-def test_switch_adding_a_capitalised_version_is_refused(tmp_path):
-    _refused(_rewrite(_manifest(tmp_path), _TAGGED + '\n[tool.other]\nVersion = "9.9.9"\n'))
+def test_switch_adding_a_poetry_version_is_refused(tmp_path):
+    _refused(_rewrite(_manifest(tmp_path), _TAGGED + '\n[tool.poetry]\nversion = "9.9.9"\n'))
+
+
+def test_mypy_python_version_change_is_allowed(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.mypy]\npython_version = "3.11"\n')
+    check_version_guard(_edit(target, 'python_version = "3.11"', 'python_version = "3.12"'))
+
+
+def test_cargo_dependency_pin_change_is_allowed(tmp_path):
+    target = _manifest(
+        tmp_path, '[package]\nversion = "1.0.0"\n\n[dependencies]\ntokio = { version = "1.38" }\n', "Cargo.toml"
+    )
+    check_version_guard(_edit(target, 'version = "1.38"', 'version = "1.40"'))
+
+
+def test_epoch_bump_in_an_unreadable_manifest_is_refused(tmp_path):
+    target = _manifest(tmp_path, '[project\nversion = "1!2.0"\n')
+    _refused(_edit(target, "1!2.0", "1!9.9"))
 
 
 def test_edit_around_a_version_setting_with_unchanged_values_is_allowed(tmp_path):
@@ -294,8 +311,8 @@ def test_prefixed_fallback_version_on_a_dynamic_manifest_is_refused(tmp_path):
 
 
 def test_switch_changing_another_version_key_is_refused(tmp_path):
-    target = _manifest(tmp_path, _STATIC + '\n[tool.other]\nversion = "1.0"\n')
-    _refused(_rewrite(target, _TAGGED + '\n[tool.other]\nversion = "1.1"\n'))
+    target = _manifest(tmp_path, _STATIC + '\n[tool.poetry]\nversion = "1.0"\n')
+    _refused(_rewrite(target, _TAGGED + '\n[tool.poetry]\nversion = "1.1"\n'))
 
 
 def test_unrelated_key_ending_in_version_is_not_a_version_key(tmp_path):
