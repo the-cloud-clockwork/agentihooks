@@ -20,6 +20,7 @@ QUESTION = (
     "  2) start a new master that reads the seat handoff, recap and learned notes"
 )
 CHOOSE = "Choose 1 or 2: "
+ASKS = 3
 OFFER = "Start a new master instead? [y/N] "
 NONE_RECORDED = "no earlier master is recorded"
 RESUMED = (
@@ -76,10 +77,11 @@ def _answer(ask, question):
 
 
 def _choose(ask):
-    while True:
+    for _ in range(ASKS):
         found = ANSWERS.get(_answer(ask, CHOOSE))
         if found:
             return found
+    raise SwarmError(f"no clear answer after {ASKS} tries; pass --last or --new")
 
 
 def _profile(config):

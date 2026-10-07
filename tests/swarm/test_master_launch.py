@@ -134,6 +134,21 @@ def test_an_unclear_answer_is_asked_again(up, monkeypatch):
     assert len(asked) == 2 and len(rt.masters) == 1 and rt.resumed == []
 
 
+def test_a_third_try_still_counts(up, monkeypatch):
+    _, _, rt = up
+    asked = answers(monkeypatch, "maybe", "x", "2")
+    assert run("sw", "master", "up") == 0
+    assert len(asked) == 3 and len(rt.masters) == 1
+
+
+def test_three_unclear_answers_start_nothing_and_name_the_flags(up, monkeypatch, capsys):
+    store, _, rt = up
+    asked = answers(monkeypatch, "maybe", "x", "y", "2")
+    assert run("sw", "master", "up") == 1
+    assert capsys.readouterr().err.strip() == "swarm: no clear answer after 3 tries; pass --last or --new"
+    assert len(asked) == 3 and rt.masters == [] and masters(store) == []
+
+
 def test_no_answer_on_standard_input_names_the_flags(up, monkeypatch, capsys):
     store, _, rt = up
     answers(monkeypatch)
