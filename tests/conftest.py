@@ -96,7 +96,7 @@ def pytest_ignore_collect(collection_path, config):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_real_user_paths(tmp_path, monkeypatch, record_property):
+def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     """Redirect every real-home path away from the developer's machine.
 
     `install.py` reaches the real home through more routes than the obvious
@@ -313,7 +313,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, record_property):
     yield
     delta = swarm_v2_isolation.REJECTIONS - before
     if delta:
-        record_property(swarm_v2_isolation.METRIC, json.dumps(dict(sorted(delta.items()))))
+        request.node.user_properties.append((swarm_v2_isolation.METRIC, json.dumps(dict(sorted(delta.items())))))
 
 
 @pytest.fixture(autouse=True)

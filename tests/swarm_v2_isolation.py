@@ -51,9 +51,9 @@ CONFIGURED = (
 LIVE_PROGRAMS = frozenset({"kubectl", "helm", "argocd", "herdr"})
 SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
 WRAPPERS = frozenset({"env", "timeout", "nohup", "nice", "sudo", "exec", "command", "xargs", "stdbuf", "setsid"})
-DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
 SHELL_COMMAND_FLAG = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
-SEGMENTS = re.compile(r"[;&|\n()`]+|\$\(")
+# Every word of a shell command is checked, so a live program named as an argument there is refused too.
+TOKENS = re.compile(r"[\s;&|()`{}!<>\"']+|\$\(")
 # os.spawn* raises no audit event, so a program started through it is not seen.
 SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.system"})
 
@@ -66,8 +66,11 @@ def refuse(dimension: str, message: str) -> NoReturn:
     pytest.fail(message)
 
 
-def measurement() -> dict[str, dict[str, int]]:
-    return {METRIC: dict(REJECTIONS)}
+def _expand(part: str) -> Path | None:
+    try:
+        return Path(part).expanduser()
+    except RuntimeError:
+        return None
 
 
 def live_roots(environ: Mapping[str, str], home: Path) -> tuple[Path, ...]:
@@ -76,7 +79,7 @@ def live_roots(environ: Mapping[str, str], home: Path) -> tuple[Path, ...]:
         roots.append(Path(environ["XDG_CONFIG_HOME"]) / "herdr")
     for name in CONFIGURED:
         parts = re.split(f"[,{os.pathsep}]", environ.get(name, ""))
-        roots += [Path(part).expanduser() for part in parts if Path(part).expanduser().is_absolute()]
+        roots += [path for path in map(_expand, parts) if path is not None and path.is_absolute()]
     return tuple(dict.fromkeys(root.resolve() for root in roots))
 
 
@@ -215,22 +218,15 @@ def remove(identities: Identities) -> None:
     shutil.rmtree(root)
 
 
-def _program(words: list[str]) -> str:
-    for word in words:
-        if word.startswith("-") or "=" in word or Path(word).name in WRAPPERS or DURATION.fullmatch(word):
-            continue
-        return word
-    return ""
-
-
 def _shell_command(argv: list[str]) -> str | None:
-    if Path(argv[0]).name not in SHELLS:
+    if Path(argv[0]).name not in SHELLS | WRAPPERS:
         return None
-    for index, arg in enumerate(argv[1:], 1):
-        if not arg.startswith("-"):
-            return None
-        if SHELL_COMMAND_FLAG.fullmatch(arg):
-            return argv[index + 1] if index + 1 < len(argv) else None
+    start = next((i for i, arg in enumerate(argv) if Path(arg).name in SHELLS), None)
+    if start is None:
+        return None
+    flags = argv[start + 1 :]
+    index = next((i for i, flag in enumerate(flags) if SHELL_COMMAND_FLAG.fullmatch(flag)), None)
+    return flags[index + 1] if index is not None and index + 1 < len(flags) else None
     return None
 
 
@@ -240,11 +236,11 @@ def _programs(argv) -> list[str]:
     argv = [os.fsdecode(arg) for arg in argv]
     if not argv:
         return []
-    programs = [_program(argv)]
+    words = argv if Path(argv[0]).name in WRAPPERS else argv[:1]
     command = _shell_command(argv)
     if command is not None:
-        programs += [_program(segment.split()) for segment in SEGMENTS.split(command)]
-    return [program for program in programs if program]
+        words = words + TOKENS.split(command)
+    return [word for word in words if word]
 
 
 def _resolve(program: str, env) -> Path | None:
