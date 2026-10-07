@@ -487,7 +487,11 @@ def cmd_task(args):
         if args.id == "-":
             args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
         title = " ".join(args.values)
-        lists = {k: comma_list(v) for k, v in (("depends_on", args.depends_on), ("territory", args.territory)) if v}
+        lists = {
+            k: comma_list(v)
+            for k, v in (("depends_on", args.depends_on), ("territory", args.territory), ("overlays", args.overlays))
+            if v
+        }
         if args.gain is not None:
             lists["gain"] = args.gain
         contract = {k: getattr(args, k) for k in ("must", "check", "judge") if getattr(args, k)}
@@ -522,7 +526,7 @@ def cmd_task(args):
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory"):
+    for key in ("depends_on", "territory", "overlays"):
         if key in fields:
             fields[key] = comma_list(fields[key])
     if "artifact" in fields:
@@ -655,6 +659,7 @@ def build_parser():
     )
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     task.add_argument("--profile")
+    task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan", default="", help="link to the published plan; default the phase's plan link")
     publish = sub.add_parser("publish-plan")

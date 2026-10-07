@@ -76,6 +76,7 @@ class AgentSpec:
     resume: str = ""
     profile: str = ""
     channel: bool = False
+    overlays: tuple = ()
 
 
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
@@ -213,7 +214,8 @@ def _model_args(agent: str, agent_args: list[str], environ: dict[str, str]) -> l
 def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     if not spec.profile:
         return command
-    return [command[0], "select-profile", spec.profile, "--agent", spec.agent, "--", *command[2:]]
+    worn = [f"--overlay={overlay}" for overlay in spec.overlays]
+    return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
 def _agent_command(
@@ -313,18 +315,19 @@ def _write_launcher(
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
-    from scripts.select_profile import prepare
+    from scripts.select_profile import OVERLAYS, prepare
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
         args.profile = environ.get("AGENTIHOOKS_PROFILE")
+        args.overlay = [o for o in environ.get(OVERLAYS, "").split(",") if o]
     if continuing and not args.profile:
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
     if args.handoff:
         flags = binding.continuation(flags, agent, environ)
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ)
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
     environ.update(profile_env)
     return flags
 
@@ -489,6 +492,9 @@ def _parser() -> argparse.ArgumentParser:
         help="Agent to open; default the first in $AGENTIHOOKS_AGENT_PRIORITY (claude,codex) with quota left",
     )
     parser.add_argument("--profile", default="", help="Role profile for this run")
+    parser.add_argument(
+        "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
+    )
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
     parser.add_argument(
         "--inbox-channel",
@@ -590,6 +596,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 resume=args.resume,
                 profile=args.profile,
                 channel=channel,
+                overlays=tuple(args.overlay),
             ),
         )
         host, explicit = _select_host(args.host, active_env)
@@ -604,6 +611,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         f"agent={agent}",
         f"agent_reason={reason}",
         *([f"profile={args.profile}"] if args.profile else []),
+        *([f"overlays={','.join(args.overlay)}"] if args.overlay else []),
         f"directory={directory}",
         f"name={name}",
         f"claude_args={shlex.join(claude_args)}",

@@ -220,7 +220,7 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
-    monkeypatch.setattr(launch_check, "declared", lambda profile: [])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
@@ -385,7 +385,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
-    monkeypatch.setattr(launch_check, "declared", lambda profile: ["brain"])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): ["brain"])
     tick("sw", store, ledger, runtime, LAUNCH)
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
@@ -393,6 +393,18 @@ def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, 
     assert any(a.startswith(f"retired {first} after its launch check failed on overlay") for a in actions)
     assert first in runtime.killed
     assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["brain"], "actual": []}
+
+
+def test_tick_expects_the_overlays_the_agent_was_launched_wearing(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): list(worn))
+    original = runtime.spawn
+    runtime.spawn = lambda *args, **kwargs: replace(original(*args, **kwargs), overlays=["tuner"])
+    tick("sw", store, ledger, runtime, LAUNCH)
+    joined(ledger, runtime, LAUNCH + 1)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["tuner"], "actual": []}
 
 
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
