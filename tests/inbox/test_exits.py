@@ -57,6 +57,7 @@ def test_the_exit_notice_to_a_sender_is_informational(redis):
 
 class ClosedAfterTheTickRead(FakeLedger):
     def state(self, slug):
+        assert slug == "sw"
         doc = super().state(slug)
         snapshot = {**doc, "tasks": [dict(row) for row in doc["tasks"]]}
         self.rows["t1"]["state"] = "done"
