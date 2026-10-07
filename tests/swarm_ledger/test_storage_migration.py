@@ -1,0 +1,65 @@
+import copy
+import json
+
+import pytest
+
+from scripts.swarm_ledger.repository import FileLedgerRepository
+from scripts.swarm_ledger.repository.file import core
+from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+from scripts.swarm_ledger.storage_migration import import_directory
+from tests.swarm_ledger.test_sqlite import document
+
+
+def test_directory_import_resumes_and_preserves_bin_registry(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    for slug in ("one", "two"):
+        state = document()
+        (tmp_path / f"{slug}.json").write_text(json.dumps(state), encoding="utf-8")
+        (tmp_path / f"{slug}.html").write_text("page", encoding="utf-8")
+    (tmp_path / ".bin.json").write_text('{"two":12,"extension":{"unknown":true}}', encoding="utf-8")
+    (tmp_path / ".bin-restored.json").write_text('{"one":9}', encoding="utf-8")
+    db = tmp_path / "ledger-shadow.sqlite3"
+    original = SQLiteLedgerRepository.import_document
+    with monkeypatch.context() as patch:
+
+        def interrupted(self, slug, *args, **kwargs):
+            if slug == "two":
+                raise RuntimeError("interrupted")
+            return original(self, slug, *args, **kwargs)
+
+        patch.setattr(SQLiteLedgerRepository, "import_document", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            import_directory(tmp_path, db)
+    assert SQLiteLedgerRepository(db).get_document("one") == FileLedgerRepository().get_document("one", reconcile=False)
+    assert import_directory(tmp_path, db) == ["one", "two"]
+    assert import_directory(tmp_path, db) == ["one", "two"]
+    repo = SQLiteLedgerRepository(db)
+    assert repo.get_document("two") == FileLedgerRepository().get_document("two", reconcile=False)
+    assert repo.lifecycle("two")["deleted_at"] == 12
+    assert repo.lifecycle("one")["restored_at"] == 9
+    assert repo.registry("bin") == {"two": 12, "extension": {"unknown": True}}
+    assert repo.registry("restored") == {"one": 9}
+
+
+def test_seed_replay_tracks_reorder_delete_and_unknown_fields(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    state = document()
+    state["tasks"].reverse()
+    state["tasks"][0].pop("unknown")
+    state["tasks"][0]["comments"][0]["text"] = "updated"
+    state["_meta"]["seeds"]["2"] = copy.deepcopy({k: v for k, v in state.items() if k != "_meta"})
+    state["_meta"]["rev"] = 2
+    repo.import_document("ledger", state)
+    assert repo.get_document("ledger") == state
+    assert repo.get_seed("ledger", "2") == state["_meta"]["seeds"]["2"]
+
+
+def test_migration_command_imports_the_requested_directory(tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger.storage_migration.__main__ import main
+
+    monkeypatch.setattr(
+        "sys.argv", ["storage_migration", "--directory", str(tmp_path), "--database", str(tmp_path / "custom.sqlite3")]
+    )
+    main()
+    assert json.loads(capsys.readouterr().out) == {"verified": []}
+    assert (tmp_path / "custom.sqlite3").exists()

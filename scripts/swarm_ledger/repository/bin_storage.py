@@ -27,14 +27,21 @@ def _save(found):
 
 
 def delete(slug, now=None):
-    with domain.LOCK:
+    from .shadow import persist, storage_lock
+
+    with domain.LOCK, storage_lock(core.LEDGER_DIR):
         found = entries()
         found.setdefault(slug, core.now_ms() if now is None else now)
         _save(found)
+        path = core.paths(slug)[1]
+        if path.exists():
+            persist(core.LEDGER_DIR, slug, core.loads(path.read_text(encoding="utf-8")))
 
 
 def restore(slug, now=None):
-    with domain.LOCK:
+    from .shadow import persist, storage_lock
+
+    with domain.LOCK, storage_lock(core.LEDGER_DIR):
         found = entries()
         if found.pop(slug, None) is None:
             return False
@@ -42,6 +49,9 @@ def restore(slug, now=None):
         marks = restored()
         marks[slug] = core.now_ms() if now is None else now
         core.atomic_write(domain.restored_path(), json.dumps(marks, indent=1, sort_keys=True))
+        path = core.paths(slug)[1]
+        if path.exists():
+            persist(core.LEDGER_DIR, slug, core.loads(path.read_text(encoding="utf-8")))
         return True
 
 
