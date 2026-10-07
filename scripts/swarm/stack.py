@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
@@ -92,4 +93,64 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
+    return fields
+
+
+def _restack_branch() -> str:
+    branch = _out(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], "restack needs a task worktree branch")
+    if branch in ("dev", "main", "master", "v1"):
+        raise SwarmError("restack needs a task worktree branch")
+    if _out(["git", "status", "--porcelain"], "cannot inspect the worktree"):
+        raise SwarmError("restack needs a clean worktree")
+    return branch
+
+
+def _restack_base(row, context):
+    base = _out(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{row['stacked_base']}^{{commit}}"],
+        "cannot resolve the stacked base",
+    )
+    path = Path(_out(["git", "rev-parse", "--git-path", "agentihooks-restack.json"], "cannot locate restack state"))
+    if (
+        shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
+        and row.get("branch")
+        and shell(["git", "merge-base", "--is-ancestor", f"origin/{row['branch']}", "HEAD"]).returncode == 0
+    ):
+        onto = _out(["git", "rev-parse", "origin/dev"], "cannot resolve origin/dev")
+        path.write_text(json.dumps({"context": context, "onto": onto}))
+        return base, path
+    if path.exists():
+        saved = json.loads(path.read_text())
+        if (
+            saved["context"] == context
+            and shell(["git", "merge-base", "--is-ancestor", saved["onto"], "HEAD"]).returncode == 0
+        ):
+            return saved["onto"], path
+    raise SwarmError("the stacked base is not in this branch; use a worktree cut from the parked branch")
+
+
+def _rebase(base: str) -> None:
+    done = shell(["git", "rebase", "--onto", "origin/dev", base])
+    if done.returncode != 0:
+        files = _out(["git", "diff", "--name-only", "--diff-filter=U"], "cannot list conflicted files")
+        raise SwarmError(
+            f"restack failed: {done.stderr.strip()}\nConflicted files:\n{files}\n"
+            "Resolve the files, run git rebase --continue, then run swarm restack again."
+        )
+
+
+def restack(slug: str, agent, ledger) -> dict:
+    rows = {t["id"]: t for t in ledger.state(slug)["tasks"]}
+    row = rows.get(agent.task) or {}
+    if not row.get("parked_on") or not row.get("stacked_base"):
+        raise SwarmError("this task has no parked work with a stacked base")
+    if any(rows.get(dep, {}).get("state") != "done" for dep in row["parked_on"]):
+        raise SwarmError("this task still has an unfinished parked dependency")
+    branch = _restack_branch()
+    _out(["git", "fetch", "origin"], "cannot fetch origin")
+    base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
+    _rebase(base)
+    fields = {"parked_on": []}
+    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    path.unlink()
     return fields

@@ -29,6 +29,7 @@ agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
 agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
+agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
@@ -876,6 +877,12 @@ def cmd_park(store, args):
     print(json.dumps({"task": agent.task, **fields, "next": "stop now; the task waits on its branch"}))
 
 
+def cmd_restack(store, args):
+    agent = _worker(store, args)
+    fields = stack.restack(args.slug, agent, LedgerClient())
+    print(json.dumps({"task": agent.task, **fields}))
+
+
 def cmd_confirm_handoff(store, args):
     agent = _me(store, args)
     if agent.name not in HerdrRuntime().live_names():
@@ -1071,6 +1078,7 @@ def build_parser():
     reported.add_argument("--doing", required=True)
     reported.add_argument("--ends-when", required=True)
     sub.add_parser("park").add_argument("doc")
+    sub.add_parser("restack")
     handoff = sub.add_parser("handoff")
     handoff.add_argument("doc")
     handoff.add_argument("--recap", default="")
