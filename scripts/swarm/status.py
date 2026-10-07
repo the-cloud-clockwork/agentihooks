@@ -45,6 +45,20 @@ def verdict_store(store, slug):
 
 def findings(store, slug, config, tasks, events):
     agents, limits = store.agents(slug), health.limits()
+    events = [
+        *events,
+        *(
+            {
+                "kind": "task started" if row["state"] == "started" else "launch failed",
+                "target": f"tasks/{row['task']}",
+                "by": "swarm",
+                "at": row["at"],
+                "error": row["error"],
+            }
+            for row in store.launches(slug)
+            if row["state"] in ("started", "failed")
+        ),
+    ]
     quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
     rows = [{**a.__dict__, "quiet_minutes": quiet.get(a.name)} for a in agents]
     return verdict_store(store, slug).visible(

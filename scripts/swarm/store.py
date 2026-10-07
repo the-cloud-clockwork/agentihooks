@@ -240,13 +240,13 @@ class RedisStore:
         return agent_choice.share_picks(rows, now_ms - agent_choice.SHARE_WINDOW_MS)
 
     def count_claim(self, slug, task):
-        return self.redis.hincrby(self.key(slug, "claims"), task)
+        return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
     def claims(self, slug, task):
-        return int(self.redis.hget(self.key(slug, "claims"), task) or 0)
+        return int(self.redis.hget(self.key(slug, "started-lives"), task) or 0)
 
     def reset_claims(self, slug, task):
-        self.redis.hdel(self.key(slug, "claims"), task)
+        self.redis.hdel(self.key(slug, "started-lives"), task)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
 
     def note_launch_failure(self, slug, task, reason):
@@ -254,6 +254,13 @@ class RedisStore:
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
+        row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": state, "error": error}
+        self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def launches(self, slug: str) -> list[dict]:
+        return [json.loads(raw) for raw in self.redis.hgetall(self.key(slug, "launches")).values()]
 
     def put_restored(self, slug, outcomes):
         self.redis.set(self.key(slug, "restored"), json.dumps(outcomes))

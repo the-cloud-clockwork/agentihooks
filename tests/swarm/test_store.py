@@ -61,6 +61,14 @@ def test_claims_count_agent_lives_per_task_until_reset(store):
     assert (store.launch_failure("smoke", "t1"), store.launch_failure("smoke", "t2")) == ("", "canary timeout")
 
 
+def test_legacy_claim_counts_do_not_prove_started_lives(store):
+    store.redis.hset(store.key("smoke", "claims"), "t1", 5)
+    assert store.claims("smoke", "t1") == 0
+    store.count_claim("smoke", "t1")
+    assert store.claims("smoke", "t1") == 1
+    assert store.redis.hget(store.key("smoke", "claims"), "t1") == "5"
+
+
 def test_a_lapsed_lease_frees_the_claim(store):
     store.create(config())
     store.claim("smoke", "t1", "engineer@a1b2c3-0001", lease_ms=60_000)

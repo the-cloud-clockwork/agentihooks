@@ -161,23 +161,45 @@ def test_rising_gain_or_master_queued_tasks_are_not_inflation():
 
 
 def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
-    events = [ev("task claimed", "tasks/t1", by="swarm") for _ in range(4)] + [ev("task pr", "tasks/t1")]
+    events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)] + [ev("task pr", "tasks/t1")]
     assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == [
         {
             "kind": "proof loop",
             "subject": "t1",
             "summary": "reruns or review rounds over the cap",
-            "evidence": ["task t1", "claimed 4 times (3 reruns)", "1 review round"],
+            "evidence": ["task t1", "started 4 times (3 reruns)", "1 review round"],
             "threshold": "more than 2 reruns or 3 review rounds",
         }
     ]
 
 
+def test_claims_without_started_lives_raise_no_proof_loop():
+    events = [ev("task claimed", "tasks/t1", by="swarm") for _ in range(5)]
+    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+
+
+def test_failed_launch_findings_require_repetition_and_keep_each_launch_error():
+    first = {**ev("launch failed", "tasks/t1", by="swarm"), "error": "profile canary timeout"}
+    second = {**ev("launch failed", "tasks/t1", by="swarm"), "error": "worktree timer"}
+    doc = {"tasks": [task("t1")], "_meta": {"events": [first]}}
+    assert run(doc) == []
+    doc["_meta"]["events"].append(second)
+    assert run(doc) == [
+        {
+            "kind": "failed launch",
+            "subject": "t1",
+            "summary": "repeated launches failed before an agent life started",
+            "evidence": ["task t1", "2 failed launches", "profile canary timeout", "worktree timer"],
+            "threshold": "at least 2 failed launches",
+        }
+    ]
+
+
 def test_review_rounds_over_the_cap_are_a_proof_loop():
-    events = [ev("task claimed", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
+    events = [ev("task started", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
     found = run({"tasks": [task("t1")], "_meta": {"events": events}})
     assert [(f["kind"], f["evidence"]) for f in found] == [
-        ("proof loop", ["task t1", "claimed 1 time (0 reruns)", "4 review rounds"])
+        ("proof loop", ["task t1", "started 1 time (0 reruns)", "4 review rounds"])
     ]
 
 

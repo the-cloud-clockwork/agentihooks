@@ -81,6 +81,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
         *proof_loops(events, tasks, limits),
+        *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
         *stale_claims(agents, tasks, limits),
@@ -191,7 +192,7 @@ def scope_inflation(events, tasks, limits):
 
 
 def proof_loops(events, tasks, limits):
-    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task claimed")
+    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
     rounds = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task pr")
     found = []
     for tid in tasks:
@@ -204,7 +205,7 @@ def proof_loops(events, tasks, limits):
                     "reruns or review rounds over the cap",
                     (
                         f"task {_title(tasks, tid)}",
-                        f"claimed {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
@@ -212,6 +213,27 @@ def proof_loops(events, tasks, limits):
                 )
             )
     return found
+
+
+def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:
+    failed = [e for e in events if e.get("kind") == "launch failed"]
+    counts = Counter(_task_id(e["target"]) for e in failed)
+    return [
+        Finding(
+            "failed launch",
+            tid,
+            "repeated launches failed before an agent life started",
+            (
+                f"task {_title(tasks, tid)}",
+                f"{count} failed launches",
+                *sorted({e["error"] for e in failed if _task_id(e["target"]) == tid}),
+            ),
+            "at least 2 failed launches",
+            count,
+        )
+        for tid, count in counts.items()
+        if tid in tasks and count >= 2
+    ]
 
 
 def idle_with_claim(agents, tasks, limits, waiting=frozenset()):
