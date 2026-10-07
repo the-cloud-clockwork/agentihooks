@@ -517,6 +517,29 @@ def test_an_agent_relaunching_itself_keeps_its_swarm_identity(monkeypatch, tmp_p
     assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
 
 
+def test_a_quota_handoff_names_this_session_as_the_predecessor(monkeypatch, tmp_path):
+    env = {"CLAUDE_CODE_SESSION_ID": "sess-old", "AGENTIHOOKS_PREDECESSOR_SESSION": "sess-older"}
+    assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=env) == 0
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert "export AGENTIHOOKS_PREDECESSOR_SESSION=sess-old\n" in launcher
+    assert launcher.index("AGENTIHOOKS_PREDECESSOR_SESSION") < launcher.index(" claude ")
+
+
+def test_a_tick_spawn_keeps_the_predecessor_the_tick_named(monkeypatch, tmp_path):
+    env = {**AGENT_ENV, "AGENTIHOOKS_SWARM_SPAWN": "1", "AGENTIHOOKS_PREDECESSOR_SESSION": "sess-old"}
+    text = _dry_launcher(monkeypatch, tmp_path, "engineer@abcdef-0002", {**env, "CLAUDE_CODE_SESSION_ID": "sess-x"})
+    assert "export AGENTIHOOKS_PREDECESSOR_SESSION=sess-old\n" in text
+
+
+@pytest.mark.parametrize("spawn", [{}, {"AGENTIHOOKS_SWARM_SPAWN": "1"}])
+def test_a_launch_that_is_no_transfer_clears_any_inherited_predecessor(monkeypatch, tmp_path, spawn):
+    env = {**AGENT_ENV, "CLAUDE_CODE_SESSION_ID": "sess-x", **spawn}
+    inherited = {} if spawn else {"AGENTIHOOKS_PREDECESSOR_SESSION": "sess-old"}
+    text = _dry_launcher(monkeypatch, tmp_path, "proof", {**env, **inherited})
+    assert "unset AGENTIHOOKS_PREDECESSOR_SESSION\n" in text
+    assert "export AGENTIHOOKS_PREDECESSOR_SESSION" not in text
+
+
 def test_the_launch_environment_drops_identity_and_keeps_swarm_settings():
     environ = {
         **AGENT_ENV,

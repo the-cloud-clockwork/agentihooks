@@ -168,3 +168,55 @@ def test_export_splits_spans_into_batches_under_the_text_budget(monkeypatch, tmp
     exported = [s.name for batch in exporter.batches for s in batch]
     assert sorted(exported) == sorted(s.name for s in _spans())
     assert (tmp_path / "cursor" / "sess-1.json").exists()
+
+
+def _persisted(tmp_path, text, folder="tool-results", size=None):
+    side = tmp_path / folder / "b1.txt"
+    side.parent.mkdir(parents=True, exist_ok=True)
+    if text is not None:
+        side.write_text(text)
+    preview = f"<persisted-output>\nOutput too large. Full output saved to: {side}\n\nPreview (first 2KB):\nhead"
+    entries = _entries(tool_output=preview)
+    entries[3]["toolUseResult"] = {
+        "stdout": "head",
+        "persistedOutputPath": str(side),
+        "persistedOutputSize": len(text) if size is None else size,
+    }
+    return entries, preview
+
+
+def test_a_persisted_claude_tool_output_exports_its_side_file_masked(tmp_path):
+    entries, _ = _persisted(tmp_path, "row\n" * 5_000 + f"token={FAKE_TOKEN}")
+    bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == "row\n" * 5_000 + "token=[REDACTED:github_token]"
+    assert not any(key.startswith("agentihooks.truncation.") for key in bash.attributes)
+
+
+def test_a_persisted_tool_output_over_the_cap_counts_its_truncation(tmp_path):
+    entries, _ = _persisted(tmp_path, "x" * 120)
+    with patch("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 50):
+        bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == "x" * 50 + "…[truncated 70 chars]"
+    assert bash.attributes["agentihooks.truncation.langfuse.observation.output.chars"] == 70
+
+
+@pytest.mark.parametrize("folder, text", [("tool-results", None), ("elsewhere", "secret file")])
+def test_an_unread_side_file_keeps_the_preview_and_counts_what_it_omits(tmp_path, folder, text):
+    entries, preview = _persisted(tmp_path, text, folder, size=40_000)
+    bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == preview
+    assert bash.attributes["agentihooks.truncation.langfuse.observation.output.chars"] == 40_000 - len(preview)
+
+
+def test_a_persisted_output_without_a_size_counts_nothing_it_cannot_measure(tmp_path):
+    entries, preview = _persisted(tmp_path, None, size="large")
+    bash = _tool(_spans(entries), "Bash")
+    assert bash.attributes["langfuse.observation.output"] == preview
+    assert not any(key.startswith("agentihooks.truncation.") for key in bash.attributes)
+
+
+def test_a_persisted_output_counts_toward_the_root_truncated_fields(tmp_path):
+    from hooks.observability import agent_trace
+
+    entries, _ = _persisted(tmp_path, None, size=40_000)
+    assert agent_trace._truncated_fields(_spans(entries)) == 1

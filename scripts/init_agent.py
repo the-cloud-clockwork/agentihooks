@@ -79,6 +79,7 @@ class AgentSpec:
 
 
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
+PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
 SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM",
     "AGENTIHOOKS_SWARM_LANE",
@@ -129,6 +130,21 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
     keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
     dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
     return {key: value for key, value in environ.items() if key not in dropped}
+
+
+def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
+    """Only a transfer names a predecessor: a quota handoff names this session, a tick spawn keeps what the tick named."""
+    if handoff:
+        session = environ.get("CLAUDE_CODE_SESSION_ID", "")
+    else:
+        session = environ.get(PREDECESSOR, "") if environ.get(SPAWN) == "1" else ""
+    rest = {key: value for key, value in environ.items() if key != PREDECESSOR}
+    return {**rest, PREDECESSOR: session} if session else rest
+
+
+def _predecessor_export(environ: dict[str, str]) -> str:
+    session = environ.get(PREDECESSOR)
+    return f"export {PREDECESSOR}={shlex.quote(session)}\n" if session else f"unset {PREDECESSOR}\n"
 
 
 def _config_home_export(environ: dict[str, str]) -> str:
@@ -273,6 +289,7 @@ def _write_launcher(
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
+        f"{_predecessor_export(environ)}"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
@@ -536,7 +553,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
-        active_env = _launch_environ(active_env, name, args.handoff)
+        active_env = _launch_environ(_with_predecessor(active_env, args.handoff), name, args.handoff)
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         if args.handoff and (args.agent == "codex" or active_env.get("AGENTIHOOKS_TARGET") == "codex"):

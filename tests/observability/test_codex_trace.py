@@ -170,6 +170,32 @@ def test_codex_export_uses_existing_exporter_and_cursor(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "cursors" / "codex-session.json").read_text())["turns"] == 1
 
 
+def test_a_codex_compaction_keeps_one_trace_without_replaying_its_retained_history():
+    from hooks.observability.codex_transcript import normalize_entries
+
+    def message(role, text):
+        kind = "output_text" if role == "assistant" else "input_text"
+        return {"type": "message", "role": role, "content": [{"type": kind, "text": text}]}
+
+    retained = [message("developer", "instructions"), message("user", "first ask"), {"type": "compaction"}]
+    records = [
+        {"type": "turn_context", "payload": {"model": "gpt-test"}},
+        {"type": "response_item", "payload": message("user", "first ask")},
+        {"type": "response_item", "payload": message("assistant", "first answer")},
+        {"type": "compacted", "payload": {"message": "", "replacement_history": retained}},
+        {"type": "turn_context", "payload": {"model": "gpt-test"}},
+        {"type": "response_item", "payload": message("user", "second ask")},
+        {"type": "response_item", "payload": message("assistant", "second answer")},
+    ]
+    records = [{"timestamp": f"2026-10-05T10:00:{i:02d}Z", **r} for i, r in enumerate(records)]
+    entries = normalize_entries(records)
+    spans = agent_trace.session_spans(entries, agent_trace.Identity("codex-session"))
+    turns = [s for s in spans if s.attributes.get("langfuse.observation.type") == "span"]
+    assert [t.attributes["langfuse.observation.input"] for t in turns] == ["first ask", "second ask"]
+    assert {s.attributes["langfuse.session.id"] for s in spans} == {"codex-session"}
+    assert agent_trace._unsupported_io(records, entries) == 0
+
+
 def test_custom_tools_and_repeated_usage_keep_one_call_and_one_charge():
     from hooks.observability.codex_transcript import normalize_entries
 
