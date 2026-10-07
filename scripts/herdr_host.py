@@ -52,6 +52,10 @@ def server_running(environ: dict[str, str]) -> bool:
     return True
 
 
+def server_socket(environ: dict[str, str]) -> str:
+    return environ.get("HERDR_SOCKET_PATH") or str(Path.home() / ".config" / "herdr" / "herdr.sock")
+
+
 def ensure_server(environ: dict[str, str], timeout: float = 10.0) -> bool:
     """Start a detached herdr server when none answers; True when one was started."""
     if server_running(environ):
