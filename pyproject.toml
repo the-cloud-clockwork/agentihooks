@@ -66,6 +66,7 @@ all = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 dev = [
+    "Pillow>=10.0",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-xdist>=3.5",
