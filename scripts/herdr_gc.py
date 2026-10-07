@@ -167,15 +167,16 @@ def _typed(screen: str, bare: bool) -> bool:
 
 
 def _gone(record: PaneRecord, bare: bool, state: str) -> str:
+    failed = bare and record.kind != "run-in-terminal" and record.route_status not in STARTED_ROUTES
+    if failed:
+        return "a failed launch left it at a bare shell"
     if state in GONE:
         return GONE[state]
     if not bare:
         return ""
     if record.kind == "run-in-terminal":
         return "its command exited and left a bare shell"
-    if record.route_status in STARTED_ROUTES:
-        return "its agent exited and left a bare shell"
-    return "a failed launch left it at a bare shell"
+    return "its agent exited and left a bare shell"
 
 
 def _forget(record: PaneRecord, ctx: Context, reason: str) -> Finding:

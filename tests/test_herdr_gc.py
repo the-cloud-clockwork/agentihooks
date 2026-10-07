@@ -154,6 +154,14 @@ def test_an_exited_terminal_command_closes_with_its_own_reason(env):
     assert actions(sweep(env, herdr))["w1:p2"] == (herdr_gc.CLOSE, "its command exited and left a bare shell")
 
 
+@pytest.mark.parametrize("state", [herdr_gc.RETIRED, herdr_gc.STOPPED, herdr_gc.REMOVED])
+def test_a_failed_swarm_launch_is_named_a_failed_launch_whatever_its_swarm_says(env, state):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p2", "term_a", owner=Owner(swarm="crew", route="pending"))
+    found = actions(sweep(env, herdr, FakeOwners({"eng-1": state})))
+    assert found["w1:p2"] == (herdr_gc.CLOSE, "a failed launch left it at a bare shell")
+
+
 def test_a_pane_inside_the_launch_grace_is_kept(env):
     herdr = FakeHerdr()
     launch(env, herdr, "w1:p2", "term_a", owner=Owner(at=NOW - 4 * MIN))
