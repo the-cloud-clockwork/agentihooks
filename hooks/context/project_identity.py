@@ -73,7 +73,7 @@ def _folder_identity(cwd: str) -> ProjectIdentity | None:
 
 
 def _same_checkout(working: ProjectIdentity, repo: str) -> bool:
-    common = _git(Path(repo), "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common = _git(Path(repo).expanduser().resolve(), "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common:
         return common == _git(Path(working.cwd), "rev-parse", "--path-format=absolute", "--git-common-dir")
     return Path(working.cwd).resolve().is_relative_to(Path(repo).resolve())
@@ -114,7 +114,7 @@ def _aliased_project(project_id: str, aliases: Mapping[str, str]) -> str:
 def _registered_project(cwd: str, env: Mapping[str, str]) -> ProjectIdentity | None:
     identity = _folder_identity(cwd) if cwd else None
     registered = env.get("AGENTIHOOKS_PROJECT_ID", "")
-    if registered and cwd and not _git(Path(cwd), "rev-parse", "--git-common-dir"):
+    if registered and cwd and not _git(Path(cwd).expanduser().resolve(), "rev-parse", "--git-common-dir"):
         if not re.fullmatch(r"local:[A-Za-z0-9][A-Za-z0-9._-]{0,127}", registered):
             raise ValueError("Invalid registered project ID")
         path = Path(cwd).expanduser().resolve()
