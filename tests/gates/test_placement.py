@@ -213,6 +213,21 @@ class TestHomes:
         )
         assert placement.answered(SID) == {PACKAGE}
 
+    def test_a_failing_answer_record_is_logged_and_the_handler_goes_on(self, monkeypatch):
+        from hooks import hook_manager
+
+        def boom(payload):
+            raise OSError("disk full")
+
+        logged = []
+        monkeypatch.setattr(placement, "heard", boom)
+        monkeypatch.setattr(hook_manager, "log", lambda *args, **kwargs: logged.append(args))
+        monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args: None)
+        hook_manager.on_post_tool_use(
+            {"session_id": SID, "cwd": "/", "tool_name": "AskUserQuestion", "tool_response": {"answers": {}}}
+        )
+        assert ("placement answer record failed", {"error": "disk full"}) in logged
+
     def test_serena_edit_resolves_against_the_session_cwd(self, world):
         gate, root = world
         call = Call(
