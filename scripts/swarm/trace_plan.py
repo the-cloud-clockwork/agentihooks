@@ -30,6 +30,7 @@ RETURNS = 1
 PASS, FAIL, UNCHECKED = "pass", "fail", "unchecked"
 NO_ANSWER = "the classifier did not answer"
 FAIL_KINDS = {"enforce": "deny", "observe": "observe"}
+CLEARANCE = PurePosixPath("mutation-cleared.txt")
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,8 @@ def intent(doc, task_id):
 
 
 def _row(piece, probability):
-    kept = probability is None or probability >= OFF_INTENT
+    ruling = all(PurePosixPath(area) == CLEARANCE for area in piece.areas)
+    kept = ruling or probability is None or probability >= OFF_INTENT
     return {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
 
 
@@ -150,11 +152,7 @@ def failures(rows, size):
 
 
 def _source_areas(areas: tuple) -> list[str]:
-    return [
-        area
-        for area in areas
-        if PurePosixPath(area).parts[:1] != ("tests",) and PurePosixPath(area) != PurePosixPath("mutation-cleared.txt")
-    ]
+    return [area for area in areas if PurePosixPath(area).parts[:1] != ("tests",) and PurePosixPath(area) != CLEARANCE]
 
 
 def trace(pieces, state, previous, now_ms=None):
