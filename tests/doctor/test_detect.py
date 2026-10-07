@@ -39,19 +39,21 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     record = {"seen_at": 0, "verdict": None, "returned": False, "evidence": ["task t1 (pr)"], "measure": 4}
     for agent in ("s-eng-1", "s-eng-2"):
         store.redis.hset(store.key("s", "findings"), f"idle-with-claim/{agent}", json.dumps(record))
-    state = {"tasks": [{"id": "t1"}], "_meta": {"events": [{"kind": "x"}]}}
-    ledger = type("Ledger", (), {"state": lambda self, slug: state})()
+    states = {"s": {"tasks": [{"id": "t1"}], "_meta": {"events": [{"kind": "x"}]}}, "bare": {}}
+    ledger = type("Ledger", (), {"state": lambda self, slug: states[slug]})()
     seen = []
 
     def current(store_, slug, config, tasks, events):
-        seen.append((slug, tasks, events))
+        seen.append((store_, slug, config, tasks, events))
         return [{"id": "idle-with-claim/s-eng-2"}]
 
     monkeypatch.setattr(detect.status, "findings", current)
-    monkeypatch.setattr(store, "config", lambda slug: None)
+    monkeypatch.setattr(store, "config", lambda slug: f"config of {slug}")
     found = detect.readers(store, ledger, "s", 10**12, environ={})["health"]()
     assert [f.id for f in found] == ["unjudged-finding/idle-with-claim/s-eng-2"]
-    assert seen == [("s", state["tasks"], state["_meta"]["events"])]
+    assert seen == [(store, "s", "config of s", states["s"]["tasks"], states["s"]["_meta"]["events"])]
+    assert detect.reported(store, ledger, "bare") == {"idle-with-claim/s-eng-2"}
+    assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
 def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch):

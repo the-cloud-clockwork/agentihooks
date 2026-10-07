@@ -58,3 +58,10 @@ def test_only_findings_the_current_health_pass_reports_are_judged():
         "returned-finding/over-monitoring/rig-grade-swarm-master-1",
         "unjudged-finding/idle-with-claim/rig-grade-swarm-eng-52",
     ]
+
+
+def test_the_unjudged_limit_reaches_the_scoped_detector():
+    rec = recorded()
+    record = rec["records"]["idle-with-claim/rig-grade-swarm-eng-52"]
+    found = health.findings({"x": record}, record["seen_at"] + 5 * MIN, 5, reported={"x"})
+    assert ids(found) == ["unjudged-finding/x"]
