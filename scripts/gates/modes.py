@@ -7,8 +7,12 @@ only outside a swarm.
 import re
 
 MODES = ("enforce", "observe", "off")
-LABELS = {"enforce": "deny", "observe": "log only", "off": "skip"}
+LABELS = {"enforce": "deny", "observe": "log only", "off": "skip", "coach": "coach"}
 ALIASES = {label: mode for mode, label in LABELS.items()}
+
+
+def supported(name: str) -> tuple[str, ...]:
+    return (*MODES, "coach") if name == "intent" else MODES
 
 
 def normalize(value: str) -> str:
@@ -27,12 +31,12 @@ def mode(gate, environ, gates=None):
     if gates is not None:
         return configured(gate, gates)
     chosen = str(environ.get(env_name(gate.name))).strip().lower()
-    return chosen if chosen in MODES else gate.default_mode
+    return chosen if chosen in supported(gate.name) else gate.default_mode
 
 
 def configured(gate, gates):
     chosen = str(gates.get(gate.name)).strip().lower()
-    return chosen if chosen in MODES else gate.default_mode
+    return chosen if chosen in supported(gate.name) else gate.default_mode
 
 
 def swarm_gates(swarm, environ):
