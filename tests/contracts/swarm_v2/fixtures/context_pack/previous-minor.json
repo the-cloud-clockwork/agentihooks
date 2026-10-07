@@ -1,0 +1,38 @@
+{
+  "schema_version": "2.0",
+  "operation_id": "context-synthetic-0001",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "task_generation": 3,
+    "brain_id": "swarm",
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "context_id": "context-synthetic-0001",
+  "context_revision": "knowledge-revision-0048",
+  "policy_version": "consultation-policy-01",
+  "retrieved_at": "2026-10-08T08:02:00Z",
+  "expires_at": "2026-10-08T08:12:00Z",
+  "items": [
+    {
+      "knowledge_id": "lesson-synthetic-archive-ack",
+      "kind": "lesson",
+      "reason": "Applies to the task's durable-ingestion boundary.",
+      "body": "Synthetic example: advance the durable cursor only after verified archive commit.",
+      "evidence_refs": [
+        "session://session-synthetic-0002/events/event-8..event-12"
+      ],
+      "relationship_path": [
+        "arc-synthetic-ingestion",
+        "lesson-synthetic-archive-ack"
+      ],
+      "status": "active"
+    }
+  ],
+  "omitted": {
+    "budget": 2,
+    "superseded": 1
+  },
+  "warnings": [],
+  "receipt": "opaque-receipt-synthetic-0001"
+}

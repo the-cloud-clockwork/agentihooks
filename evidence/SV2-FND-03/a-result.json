@@ -1,0 +1,188 @@
+{
+  "case": "T-SV2-FND-03-A",
+  "tested_commit": "987e447f16527107998a4f2864aeae4e84574f69",
+  "passed": 45,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[current-error]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[previous-minor-error]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_supported_families_pass_the_check[newer-minor-error]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[heartbeat]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_admitting_current_and_previous_minor_records_writes_them[receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_a_second_independent_store_accepts_without_state_from_the_first",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_the_stored_record_is_canonical_json",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_writers_use_the_write_minor_and_rollback_lowers_it",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_load_reads_the_named_schema_folder",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_admission.py::test_the_admission_module_imports_no_other_repository_package",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_a_consumer_validates_every_shared_fixture_without_the_producer_package",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_a_second_independent_consumer_run_reaches_the_same_verdicts",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_every_family_is_published_for_every_contract",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_committed_fixtures_match_their_generator",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_the_generator_writes_into_the_named_folder",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_manifest_authority_lists_match_each_schema",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_manifest_names_one_owner_and_supported_minors_per_contract",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_schemas_reference_only_identifiers_in_their_own_folder",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_consumer.py::test_authority_names_are_reserved_outside_the_authority_object",
+      "outcome": "passed"
+    }
+  ]
+}

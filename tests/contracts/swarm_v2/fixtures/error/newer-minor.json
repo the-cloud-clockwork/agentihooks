@@ -1,0 +1,10 @@
+{
+  "schema_version": "2.2",
+  "operation_id": "operation-synthetic-0009",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "error": "stale_generation",
+  "reason": "older_generation",
+  "retry": "never",
+  "detail": "task generation is older than the accepted generation",
+  "handoff_hint": "synthetic optional field from a newer producer"
+}

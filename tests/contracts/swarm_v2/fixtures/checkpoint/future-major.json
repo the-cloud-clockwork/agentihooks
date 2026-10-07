@@ -1,0 +1,42 @@
+{
+  "schema_version": "3.0",
+  "operation_id": "checkpoint-synthetic-0002",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "authority": {
+    "execution_id": "exe-synthetic-0007",
+    "task_id": "implement-session-ingestion",
+    "task_generation": 3,
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "checkpoint_id": "checkpoint-synthetic-0002",
+  "checkpoint_sequence": 2,
+  "status": "complete",
+  "created_at": "2026-10-08T08:07:00Z",
+  "committed_at": "2026-10-08T08:07:30Z",
+  "native_resume_capability": "unverified",
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "head_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "branch_name": "engineer-a1b2c3-0007",
+  "transcript_durable_cursor": {
+    "sequence": 125,
+    "byte_offset": 25800
+  },
+  "artifact_hashes": {
+    "git_bundle": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "exclusions": [
+    "environment variables",
+    "account authentication stores"
+  ],
+  "quiescence_method": "consistent_export",
+  "native_harness_version": "codex-synthetic-1",
+  "native_session_id": "native-session-synthetic-0007",
+  "dependencies_manifest": {
+    "lockfiles": [
+      "uv.lock"
+    ]
+  },
+  "restore_constraints": [
+    "same harness major version"
+  ]
+}
