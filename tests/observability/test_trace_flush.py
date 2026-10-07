@@ -515,7 +515,10 @@ def test_spawn_detaches_the_exporter(monkeypatch):
     calls = []
     monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *a, **k: calls.append((fn, a, k)))
     trace_flush._spawn("s")
-    assert calls == [(trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"})]
+    assert calls == [
+        (trace_flush.run, ("s",), {"timeout_sec": 7 * 24 * 3600, "task_name": "trace_flush"}),
+        (trace_flush.recover, (), {"timeout_sec": 60, "task_name": "trace_recovery"}),
+    ]
 
 
 def test_run_clears_the_alarm_lowers_priority_and_logs_the_outcome(monkeypatch, capsys):
@@ -541,6 +544,84 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
     pending = []
     assert trace_flush.flush_once("s", "/t") == 0
     assert calls == [("s", "/t"), ("s", "/t")]
+
+
+def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
+    from tests.observability.test_trace_paging import Receiver, _codex, _line
+
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    receiver = Receiver()
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: {})
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
+    monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
+    trace_flush._write(
+        agent_trace._cursor_path("session"),
+        {
+            "version": 2,
+            "records": {},
+            "accepted": {},
+            "pending": [],
+            "source": {},
+            "overflow": {"bytes": transcript.stat().st_size, "limit": 6000},
+        },
+    )
+
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    state = agent_trace._cursor("session")
+    assert state["source"]["accepted_bytes"] == transcript.stat().st_size
+    tools = [span for span in receiver.observations.values() if span.attributes["langfuse.observation.type"] == "tool"]
+    assert len(tools) == 12
+    before = dict(receiver.observations)
+    calls = receiver.calls
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    assert trace_flush.flush_once("session", str(transcript)) == 0
+    assert receiver.calls == calls
+    assert receiver.observations == before
+
+
+def test_new_exporter_recovers_stopped_codex_gaps_and_skips_completed_sessions(home, enabled, monkeypatch):
+    from tests.observability.test_trace_paging import Receiver, _codex, _line
+
+    transcript = home / "rollout.jsonl"
+    transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    receiver = Receiver()
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: {})
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
+    monkeypatch.setattr("hooks.context.context_usage.session_cost", lambda session: None)
+    record = {"target": "codex", "transcript": str(transcript), "owner_pid": 0}
+    trace_flush._write(trace_flush.request_path("session"), record)
+    trace_flush._write(
+        agent_trace._cursor_path("session"),
+        {
+            "version": 2,
+            "records": {},
+            "accepted": {},
+            "pending": [],
+            "source": {},
+            "overflow": {"bytes": transcript.stat().st_size, "limit": 6000},
+        },
+    )
+    calls = []
+    monkeypatch.setattr("hooks._async.fork_and_call", lambda fn, *args, **kwargs: calls.append((fn, args)))
+    trace_flush._spawn("new-session")
+    assert (trace_flush.recover, ()) in calls
+
+    def send(session, path, timeout, trigger):
+        assert trigger == "recovery"
+        return trace_flush.flush_once(session, path) == 0
+
+    assert trace_flush.recover(send=send) == 1
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == transcript.stat().st_size
+    before = receiver.calls
+    monkeypatch.setattr(trace_flush.time, "time", lambda: 10**20)
+    assert trace_flush.recover(send=send) == 0
+    assert trace_flush.recover(send=send) == 0
+    assert receiver.calls == before
 
 
 def test_size_of_a_missing_transcript(tmp_path):
