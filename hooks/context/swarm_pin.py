@@ -4,7 +4,7 @@ import os
 from collections.abc import MutableMapping
 from pathlib import Path
 
-from hooks.context.account_sessions import _PROC, _comm, _ppid, agent_pid
+from hooks.context.account_sessions import _PROC, _comm, _ppid
 
 LAUNCHER = "AGENTIHOOKS_SWARM_LAUNCHER"
 IDENTITY = (
@@ -18,17 +18,16 @@ AGENTS = frozenset({"claude", "codex"})
 
 
 def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
-    launcher = environ.get(LAUNCHER, "")
+    launcher = str(environ.get(LAUNCHER))
     if not launcher.isdigit():
         return False
-    sessions, inside, pid = 0, False, agent_pid(start, proc)
+    sessions, previous, pid = 0, None, os.getppid() if start is None else start
     while pid > 1 and pid != int(launcher):
         comm = _comm(pid, proc)
         if comm is None:
             return False
-        agent = comm in AGENTS
-        sessions += agent and not inside
-        inside, pid = agent, _ppid(pid, proc)
+        sessions += comm in AGENTS and comm != previous
+        previous, pid = comm, _ppid(pid, proc)
     return sessions > 1 or pid != int(launcher)
 
 

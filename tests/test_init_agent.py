@@ -405,8 +405,10 @@ def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
 
 
 def test_a_swarm_launcher_pins_its_own_pid(tmp_path):
-    text = _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw"})
-    assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n" in text
+    lines = _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_SWARM_TASK": "t1"}).splitlines()
+    assert {"export AGENTIHOOKS_SWARM=sw", "export AGENTIHOOKS_SWARM_TASK=t1"} <= set(lines)
+    assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$" in lines
+    text = "\n".join(lines)
     assert text.index("AGENTIHOOKS_SWARM_LAUNCHER") < text.index(" claude ")
 
 
@@ -443,6 +445,11 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
     assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
     assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n" in text
     assert "AGENTIHOOKS_SWARM_SPAWN" not in text
+
+
+def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(monkeypatch, tmp_path, "successor", AGENT_ENV, "--handoff", "--prompt", "doc")
+    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
 
 
 def test_an_agent_relaunching_itself_keeps_its_swarm_identity(monkeypatch, tmp_path):

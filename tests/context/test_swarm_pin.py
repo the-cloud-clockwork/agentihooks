@@ -34,6 +34,8 @@ def _tree(tmp_path):
     _proc(root, 32, "codex", 31)
     _proc(root, 33, "sh", 32)
     _proc(root, 34, "python3", 33)
+    _proc(root, 40, "codex", 12)
+    _proc(root, 41, "sh", 40)
     return root
 
 
@@ -42,7 +44,9 @@ def test_the_launched_session_keeps_its_identity(tmp_path):
 
 
 def test_a_session_started_inside_the_agent_is_nested(tmp_path):
-    assert swarm_pin.nested(IDENTITY, 23, _tree(tmp_path))
+    proc = _tree(tmp_path)
+    assert swarm_pin.nested(IDENTITY, 23, proc)
+    assert swarm_pin.nested(IDENTITY, 41, proc)
 
 
 def test_a_session_outside_the_launcher_is_nested(tmp_path):
@@ -64,3 +68,9 @@ def test_unpin_drops_the_identity_of_a_nested_session_only(tmp_path):
     assert environ["AGENTIHOOKS_SWARM"] == "sw"
     assert swarm_pin.unpin(environ, 23, proc)
     assert environ == {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://r"}
+
+
+def test_unpin_tolerates_an_identity_already_partial(tmp_path):
+    environ = {k: v for k, v in IDENTITY.items() if k != "AGENTIHOOKS_SWARM_LANE"}
+    assert swarm_pin.unpin(environ, 23, _tree(tmp_path))
+    assert environ == {}
