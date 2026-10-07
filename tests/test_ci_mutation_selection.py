@@ -526,6 +526,18 @@ def test_gate_runs_one_collection_per_change(tmp_path, monkeypatch):
     assert len([path for path in (tmp_path / "evidence").iterdir() if path.is_dir()]) == 1
 
 
+def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n\nLOADED = value(1)\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "from scripts.sample import LOADED, value\n\ndef test_value():\n    assert LOADED == 2\n    assert value(1) == 2\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/first.py").write_text("def one(value):\n    return value + 1\n")

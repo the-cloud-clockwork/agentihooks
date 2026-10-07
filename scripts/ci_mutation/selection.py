@@ -197,6 +197,11 @@ def run_selected(selection: Path) -> None:
             if not os.environ.get("MUTANT_UNDER_TEST"):
                 return 0
             tests = sorted(related, key=lambda test: runner.mutmut.duration_by_test[test])
+            try:
+                return run_tests(self, mutant_name=None, tests=tests)
+            except runner.BadTestExecutionCommandsException:
+                # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
+                return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
     runner.collect_or_load_stats = collect_selected_stats

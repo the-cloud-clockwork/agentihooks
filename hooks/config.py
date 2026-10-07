@@ -108,8 +108,14 @@ def _parse_env_file(
     return multiline
 
 
+# Shared with the bashrc agentienv check, so the shell and every process it starts name a value once.
+_MULTILINE_REPORTED = "AGENTIHOOKS_MULTILINE_REPORTED"
+
+
 def _report_multiline_values(from_files: set[str]) -> None:
     names = from_files | {k for k, v in os.environ.items() if "\n" in v and _VALID_NAME.fullmatch(k)}
+    reported = os.environ.get(_MULTILINE_REPORTED, "").split()
+    names -= set(reported)
     # Hook processes write stderr into block messages, so only a person at a terminal is told.
     if names and sys.stderr.isatty():
         print(
@@ -117,6 +123,7 @@ def _report_multiline_values(from_files: set[str]) -> None:
             "print their later lines as if they were names: " + ", ".join(sorted(names)),
             file=sys.stderr,
         )
+        os.environ[_MULTILINE_REPORTED] = " ".join([*reported, *sorted(names)])
 
 
 # Connection and client settings adopted from the brain's own directory, where
