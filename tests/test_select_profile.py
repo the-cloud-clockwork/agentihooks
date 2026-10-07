@@ -34,6 +34,7 @@ def test_dry_run_parses_run_flags_and_preserves_harness_arguments(profile, capsy
     assert capsys.readouterr().out == (
         "AGENTIHOOKS_PROFILE=engineer\n"
         "AGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
+        "AGENTIHOOKS_OVERLAYS=\n"
         f"CLAUDE_CONFIG_DIR={root}/rendered/engineer/claude\n"
         "argv=agentihooks claude --model opus --effort low -p 'reply OK'\n"
     )
@@ -46,6 +47,7 @@ def test_profile_defaults_and_native_codex_layer(profile):
     assert env == {
         "AGENTIHOOKS_PROFILE": "qa",
         "AGENTIHOOKS_BASE_CHANNELS": "amygdala,brain",
+        "AGENTIHOOKS_OVERLAYS": "",
         "CODEX_HOME": f"{root}/rendered/qa/codex",
     }
     assert argv == ["-m", "sonnet", "-c", 'model_reasoning_effort="medium"', "exec", "reply OK"]
@@ -206,6 +208,7 @@ def test_codex_dry_run_from_sys_argv_has_only_run_environment(profile, monkeypat
     assert select_profile.main() == 0
     assert (
         capsys.readouterr().out == "AGENTIHOOKS_PROFILE=qa\nAGENTIHOOKS_BASE_CHANNELS=amygdala,brain\n"
+        "AGENTIHOOKS_OVERLAYS=\n"
         f"CODEX_HOME={profile[0]}/rendered/qa/codex\n"
         "argv=agentihooks codex -m sonnet -c 'model_reasoning_effort=\"medium\"' exec OK\n"
     )
@@ -460,6 +463,7 @@ def test_init_agent_passes_each_overlay_to_the_selector(profile, monkeypatch, tm
     assert _dry_launch(tmp_path, ["--profile", "engineer", "--overlay", "tuner", "--overlay", "trader"]) == 0
     text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
     assert "select-profile engineer --overlay=tuner --overlay=trader --agent claude -- " in text
+    assert "export AGENTIHOOKS_OVERLAYS=tuner,trader\n" in text
     assert "overlays=tuner,trader\n" in capsys.readouterr().out
     renderer.assert_called_once_with("claude", "engineer", overlays=["tuner", "trader"])
 

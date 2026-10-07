@@ -28,6 +28,7 @@ def bundle(tmp_path, monkeypatch):
         "extra": "kind: overlay\nwears: [engineer]\n",
         "planning": "kind: overlay\nwears: [planner]\n",
         "broken": "kind: overlay\nwears: engineer\n",
+        "garbled": "kind: overlay\nwears: [engineer\n",
         "engineer": "extends: package:engineer\n",
     }
     for name, text in manifests.items():
@@ -43,10 +44,15 @@ def bundle(tmp_path, monkeypatch):
     return root
 
 
+OFFERED = [{"name": "tuner", "wears": ["engineer"]}, {"name": "trader", "wears": ["engineer", "qa"]}]
+
+
 def test_setting_stores_a_role_default_and_an_empty_value_clears_it():
-    assert overlays.setting("overlays-engineer", "tuner, trader,tuner", {}) == {"engineer": ["tuner", "trader"]}
+    assert overlays.setting("overlays-engineer", "tuner, trader,tuner", {}, OFFERED) == {
+        "engineer": ["tuner", "trader"]
+    }
     current = {"engineer": ["tuner"], "qa": ["trader"]}
-    assert overlays.setting("overlays-engineer", "", current) == {"qa": ["trader"]}
+    assert overlays.setting("overlays-engineer", "", current, OFFERED) == {"qa": ["trader"]}
     assert current == {"engineer": ["tuner"], "qa": ["trader"]}
 
 
@@ -60,11 +66,13 @@ def test_setting_stores_a_role_default_and_an_empty_value_clears_it():
             "overlays-cicd",
         ),
         ("overlays-engineer", "a,b,c,d", "a role wears at most 3 overlays; 4 were set: a, b, c, d"),
+        ("overlays-engineer", "tuner,nope", "overlay nope not found"),
+        ("overlays-qa", "trader,tuner", "overlay tuner does not wear the qa role"),
     ],
 )
-def test_setting_refuses_an_unknown_role_and_more_than_three(key, value, message):
+def test_setting_refuses_an_unknown_role_overlay_or_more_than_three(key, value, message):
     with pytest.raises(ValueError) as refused:
-        overlays.setting(key, value, {})
+        overlays.setting(key, value, {}, OFFERED)
     assert str(refused.value) == message
 
 
@@ -152,7 +160,7 @@ def swarm(env):  # noqa: F811
     return saved
 
 
-def test_swarm_set_stores_overlays_per_base_role(swarm, capsys):
+def test_swarm_set_stores_overlays_per_base_role(bundle, swarm, capsys):
     assert cli.main(["sw", "set", "overlays-engineer=tuner,trader", "overlays-qa=trader"]) == 0
     assert swarm.config("sw").overlays == {"engineer": ["tuner", "trader"], "qa": ["trader"]}
     assert json.loads(capsys.readouterr().out)["overlays"] == {"engineer": ["tuner", "trader"], "qa": ["trader"]}
@@ -160,12 +168,18 @@ def test_swarm_set_stores_overlays_per_base_role(swarm, capsys):
     assert swarm.config("sw").overlays == {"qa": ["trader"]}
 
 
-def test_swarm_set_refuses_a_fourth_overlay_and_keeps_the_config(swarm, capsys):
+def test_swarm_set_refuses_a_fourth_overlay_and_keeps_the_config(bundle, swarm, capsys):
     cli.main(["sw", "set", "overlays-engineer=tuner"])
     capsys.readouterr()
     assert cli.main(["sw", "set", "overlays-engineer=a,b,c,d"]) == 1
     assert swarm.config("sw").overlays == {"engineer": ["tuner"]}
     assert capsys.readouterr().err.strip().endswith("a role wears at most 3 overlays; 4 were set: a, b, c, d")
+
+
+def test_swarm_set_refuses_an_overlay_the_bundle_does_not_offer_the_role(bundle, swarm, capsys):
+    assert cli.main(["sw", "set", "overlays-engineer=planning"]) == 1
+    assert swarm.config("sw").overlays == {}
+    assert capsys.readouterr().err.strip().endswith("overlay planning does not wear the engineer role")
 
 
 def test_a_swarm_without_overlays_reads_an_empty_map(swarm):

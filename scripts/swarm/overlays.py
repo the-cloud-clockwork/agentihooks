@@ -2,6 +2,8 @@
 
 import subprocess
 
+import yaml
+
 from hooks.context import profile_chain
 
 ROLES = ("master", "engineer", "planner", "qa", "cicd")
@@ -14,16 +16,22 @@ def _install():
     return _install_module()
 
 
-def setting(key: str, value: str, current: dict) -> dict:
+def setting(key: str, value: str, current: dict, offered: list[dict]) -> dict:
     role = key.removeprefix(KEY)
-    if not key.startswith(KEY) or role not in ROLES:
+    if role not in ROLES:
         raise ValueError(f"overlays are set per base role: {', '.join(KEY + r for r in ROLES)}")
     names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
     if len(names) > profile_chain.OVERLAY_CAP:
         raise ValueError(
             f"a role wears at most {profile_chain.OVERLAY_CAP} overlays; {len(names)} were set: {', '.join(names)}"
         )
-    return {r: chosen for r, chosen in {**current, role: names}.items() if chosen}
+    wears = {overlay["name"]: overlay["wears"] for overlay in offered}
+    for name in names:
+        if name not in wears:
+            raise ValueError(f"overlay {name} not found")
+        if role not in wears[name]:
+            raise ValueError(f"overlay {name} does not wear the {role} role")
+    return {r: worn for r, worn in {**current, role: names}.items() if worn}
 
 
 def chosen(profile: str, task: dict, defaults: dict) -> tuple[str, ...]:
@@ -41,7 +49,7 @@ def available() -> list[dict]:
     for manifest in sorted((bundle / "profiles").glob("*/profile.yml")) if bundle else []:
         try:
             roles = profile_chain.wears(manifest.parent)
-        except ValueError:
+        except (ValueError, yaml.YAMLError):
             continue
         if roles:
             found.append({"name": manifest.parent.name, "wears": roles})

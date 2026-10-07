@@ -127,7 +127,7 @@ def check_lists(fields):
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
-    if len(fields.get("overlays", [])) > OVERLAY_CAP:
+    if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
 

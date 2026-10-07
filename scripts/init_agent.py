@@ -371,6 +371,7 @@ def _binding_export(environ: dict[str, str]) -> str:
         "AGENTIHOOKS_PROFILE_REPORT",
         "AGENTIHOOKS_HOME",
         "AGENTIHOOKS_PROFILE",
+        "AGENTIHOOKS_OVERLAYS",
         "CODEX_HOME",
         "AGENTIHOOKS_RUN_MODEL",
         "AGENTIHOOKS_RUN_EFFORT",

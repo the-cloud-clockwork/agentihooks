@@ -56,6 +56,10 @@ def test_more_than_three_overlays_or_a_bare_name_is_refused(bad, message):
     assert str(refused.value) == message
 
 
+def test_a_repeated_overlay_counts_once():
+    core.check_op(op("task_update", 6, item="tasks/t1", fields={"overlays": ["a", "a", "b", "b", "c"]}))
+
+
 def test_task_cli_sends_the_overlays_as_a_list(monkeypatch):
     sent = []
     monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((kind, f)))

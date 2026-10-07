@@ -40,9 +40,7 @@ def prepare(
         agent, model or native_model or default_model, _effort(agent, effort or native_effort or default_effort)
     )
     profiles.render(agent, name, overlays=overlays)
-    env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name)}
-    if overlays:
-        env[OVERLAYS] = ",".join(overlays)
+    env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     home = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
     env[home] = str(profiles.profile_dir(name, overlays) / agent)
     return env, [*flags, *remaining]

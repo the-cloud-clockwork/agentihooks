@@ -484,7 +484,7 @@ def cmd_set(store, args):
         if key.startswith(overlays.KEY):
             try:
                 changes["overlays"] = overlays.setting(
-                    key, value, changes.get("overlays", store.config(args.slug).overlays)
+                    key, value, changes.get("overlays", store.config(args.slug).overlays), overlays.available()
                 )
             except ValueError as exc:
                 raise SwarmError(str(exc)) from exc
