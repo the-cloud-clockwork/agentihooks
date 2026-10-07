@@ -90,12 +90,12 @@ def view(url, run=subprocess.run):
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
         rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
         contexts = rollup.get("contexts") or {}
-        suites = (commits[-1]["checkSuites"] or {}) if commits else {}
-        if contexts.get("pageInfo", {}).get("hasNextPage") or suites.get("pageInfo", {}).get("hasNextPage"):
+        suites = commits[-1]["checkSuites"] if commits else {"nodes": [], "pageInfo": {}}
+        if contexts.get("pageInfo", {}).get("hasNextPage") or suites["pageInfo"].get("hasNextPage"):
             return None
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
-        raw["checkSuites"] = suites.get("nodes")
+        raw["checkSuites"] = list(suites["nodes"])
         return pull_request(raw)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None

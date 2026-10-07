@@ -14,6 +14,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
+NO_SUITES = {"nodes": [], "pageInfo": {"hasNextPage": False}}
 
 
 @pytest.fixture
@@ -588,7 +589,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
 
 @pytest.mark.parametrize(
     "commits",
-    [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None, "checkSuites": None}}]],
+    [[], [{"commit": {"committedDate": "2026-10-07T17:00:00Z", "statusCheckRollup": None, "checkSuites": NO_SUITES}}]],
 )
 def test_the_probe_without_checks_is_unresolved(commits):
     from types import SimpleNamespace
@@ -614,6 +615,19 @@ def probe(rollup, suites, suites_more=False):
 def test_the_probe_keeps_a_head_with_only_skipped_checks_and_a_queued_run_unresolved():
     pull = probe(SKIPPED_ONLY, [QUEUED_TESTS, APP_SUITE])
     assert pull.resolved is False
+
+
+@pytest.mark.parametrize("suites", [None, {"nodes": None, "pageInfo": {"hasNextPage": False}}, {"nodes": []}])
+def test_the_probe_refuses_unreadable_check_suites(suites):
+    from types import SimpleNamespace
+
+    commit = {
+        "committedDate": "2026-10-07T17:00:00Z",
+        "statusCheckRollup": {"contexts": {"nodes": SKIPPED_ONLY, "pageInfo": {"hasNextPage": False}}},
+        "checkSuites": suites,
+    }
+    raw = {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": [{"commit": commit}]}}}}
+    assert github_view(URL, lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(raw))) is None
 
 
 def test_the_probe_ignores_a_queued_suite_without_a_workflow_run():
