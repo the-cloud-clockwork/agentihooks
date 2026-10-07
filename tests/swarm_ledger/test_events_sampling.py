@@ -134,8 +134,56 @@ def test_a_published_view_is_a_copy_the_caller_cannot_change(monkeypatch):
     assert not server.HUB.has("unwatched")
 
 
-def test_the_code_stamp_follows_page_assets(tmp_path):
+@pytest.mark.parametrize("newest", ["a.py", "b.html", "c.js", "d.css"])
+def test_the_code_stamp_follows_every_page_asset_kind(tmp_path, newest):
     for name in ("a.py", "b.html", "c.js", "d.css", "e.md"):
         (tmp_path / name).write_text("x")
-        os.utime(tmp_path / name, ns=(1, {"a.py": 10, "b.html": 20, "c.js": 30, "d.css": 40, "e.md": 50}[name]))
-    assert server.code_stamp([tmp_path]) == 40
+        os.utime(tmp_path / name, ns=(1, 90 if name == "e.md" else 50 if name == newest else 10))
+    assert server.code_stamp([tmp_path]) == 50
+
+
+def test_the_code_stamp_of_a_folder_without_code_is_zero(tmp_path):
+    (tmp_path / "notes.md").write_text("x")
+    assert server.code_stamp([tmp_path]) == 0
+
+
+def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch):
+    calls = []
+    state = {"tasks": [], "_meta": {"rev": 7}}
+
+    def get_document(slug, reconcile=True):
+        calls.append(("document", slug, reconcile))
+        return state
+
+    monkeypatch.setattr(server.repository, "get_document", get_document)
+    monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or "S")
+    monkeypatch.setattr(server, "workspace_tails", lambda slug, ledger: calls.append(("tails", slug, ledger)) or "W")
+    view = {**state, "view": True}
+    assert server.stream_resources("s") == {"ledger": view, "swarm": "S", "workspaces": "W"}
+    assert calls == [("document", "s", False), ("swarm", "s", view), ("tails", "s", view)]
+
+
+def test_sampling_publishes_work_folder_changes_after_a_ledger_without_a_copy(folders, monkeypatch):
+    monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: None)
+    server.HUB.open("empty", lambda: {"swarm": None})
+    server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None, "workspaces": {"t1": {}}})
+    (folders / "t1" / "progress.md").write_text("step one\n")
+    server.sample_streams()
+    assert server.HUB.resource("s", "workspaces") == {"t1": {"latest_progress": "step one"}}
+    assert [(name, data) for _, _, name, data in server.HUB.channels["s"].log] == [
+        ("workspaces", {"patch": {"o": {"t1": {"o": {"latest_progress": {"v": "step one"}}}}}})
+    ]
+
+
+def test_swarm_status_reads_the_snapshot_only_without_a_given_state(monkeypatch):
+    from scripts.swarm import status
+
+    reads = []
+    monkeypatch.setattr(server, "swarm_store", lambda: "store")
+    monkeypatch.setattr(status, "status_report", lambda store, slug, state: (store, slug, state))
+    monkeypatch.setattr(server.repository, "read_snapshot", lambda slug: reads.append(slug) or "stored")
+    assert server.swarm_status("s", {"given": 1}) == ("store", "s", {"given": 1})
+    assert reads == []
+    assert server.swarm_status("s") == ("store", "s", "stored")
+    assert reads == ["s"]

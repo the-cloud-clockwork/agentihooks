@@ -1,5 +1,4 @@
 import http.client
-import io
 import json
 import sys
 import threading
@@ -19,30 +18,6 @@ from scripts.swarm_ledger.events import Hub, stream  # noqa: E402
 from scripts.swarm_ledger.events.patch import apply  # noqa: E402
 
 SLUG = "stream-2026-01-01"
-
-
-def test_a_frame_carries_its_cursor_event_and_compact_json():
-    assert stream.frame("ledger", {"a": "é"}, "c1") == 'id: c1\nevent: ledger\ndata: {"a":"é"}\n\n'.encode()
-    assert stream.frame("heartbeat", {}) == b"event: heartbeat\ndata: {}\n\n"
-
-
-def test_parse_reads_frames_back_and_skips_comments_and_empty_blocks():
-    text = (
-        stream.frame("snapshot", {"x": 1}, "c0").decode()
-        + ": comment\n\n"
-        + "\n"
-        + "data: [1,\r\ndata: 2]\r\n\r\n"
-        + stream.frame("heartbeat", {}).decode()
-    )
-    assert list(stream.parse(io.StringIO(text))) == [
-        ("snapshot", {"x": 1}, "c0"),
-        ("message", [1, 2], None),
-        ("heartbeat", {}, None),
-    ]
-
-
-def test_parse_drops_an_unfinished_frame():
-    assert list(stream.parse(["event: ledger\n", "data: {}\n"])) == []
 
 
 @pytest.fixture

@@ -10,8 +10,7 @@ WRITE_TIMEOUT_S = 30.0
 
 def frame(name, data, cursor=None):
     head = f"id: {cursor}\n" if cursor else ""
-    body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    return f"{head}event: {name}\ndata: {body}\n\n".encode()
+    return f"{head}event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode()
 
 
 def parse(lines):

@@ -1,7 +1,5 @@
 """Per ledger event channels: the latest value of each resource, and a bounded log of the patches between them."""
 
-import base64
-import binascii
 import collections
 import secrets
 import threading
@@ -19,42 +17,39 @@ class Expired(Exception):
 
 class Channel:
     def __init__(self, retained):
-        self.epoch = secrets.token_hex(4)
+        self.epoch = secrets.token_hex()
         self.seq = 0
         self.log = collections.deque(maxlen=retained)
         self.resources = {}
         self.subscribers = 0
-        self.idle_since = time.monotonic()
 
 
 def revision(value):
-    return ((value or {}).get("_meta") or {}).get("rev", -1)
+    return value["_meta"]["rev"]
 
 
 class Hub:
-    def __init__(self, retained=RETAINED, boot=None):
-        self.boot = boot or secrets.token_hex(8)
+    def __init__(self, retained=RETAINED):
         self.retained = retained
         self.changed = threading.Condition()
         self.channels = {}
 
-    def cursor(self, slug, channel, seq):
-        mark = f"{self.boot}:{channel.epoch}:{slug}:{seq}"
-        return base64.urlsafe_b64encode(mark.encode()).decode().rstrip("=")
+    @staticmethod
+    def cursor(channel, seq):
+        return f"{channel.epoch}.{seq}"
 
     def position(self, slug, cursor):
-        try:
-            mark = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
-            boot, epoch, owner, seq = mark.split(":")
-            seq = int(seq)
-        except (binascii.Error, UnicodeDecodeError, ValueError):
-            raise Expired(cursor) from None
+        """The seq a cursor names; Expired unless it came from this channel's life and its events are still kept."""
         channel = self.channels.get(slug)
-        if boot != self.boot or owner != slug or channel is None or epoch != channel.epoch:
-            raise Expired(cursor)
-        oldest = channel.log[0][0] if channel.log else channel.seq + 1
-        if not oldest - 1 <= seq <= channel.seq:
-            raise Expired(cursor)
+        if channel is None or not cursor.startswith(f"{channel.epoch}."):
+            raise Expired
+        seq = cursor[len(channel.epoch) + 1 :]
+        if not seq.isdigit():
+            raise Expired
+        seq = int(seq)
+        oldest = channel.log[0][0] - 1 if channel.log else channel.seq
+        if not oldest <= seq <= channel.seq:
+            raise Expired
         return seq
 
     def has(self, slug):
@@ -90,9 +85,7 @@ class Hub:
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
-            return channel.seq, [
-                (channel.seq, self.cursor(slug, channel, channel.seq), "snapshot", dict(channel.resources))
-            ]
+            return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
 
     def close(self, slug):
         with self.changed:
@@ -102,44 +95,34 @@ class Hub:
                 channel.idle_since = time.monotonic()
 
     def publish(self, slug, name, value):
-        """Record value as the latest copy of a resource; the patch is built outside the lock and kept only if
-        no other publish replaced the copy it was built against."""
-        while True:
-            with self.changed:
-                channel = self.channels.get(slug)
-                if channel is None:
-                    return False
-                if name not in channel.resources:
-                    channel.resources[name] = value
-                    return False
-                old = channel.resources[name]
-                if name == "ledger" and revision(value) < revision(old):
-                    return False
-            change = patch.diff(old, value)
-            with self.changed:
-                if self.channels.get(slug) is not channel or channel.resources.get(name) is not old:
-                    continue
-                if change is None:
-                    return False
+        """Record value as the latest copy of a resource and log the patch from the previous copy."""
+        with self.changed:
+            channel = self.channels.get(slug)
+            if channel is None:
+                return False
+            if name not in channel.resources:
                 channel.resources[name] = value
-                channel.seq += 1
-                data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
-                channel.log.append((channel.seq, self.cursor(slug, channel, channel.seq), name, data))
-                self.changed.notify_all()
-                return True
+                return False
+            old = channel.resources[name]
+            if name == "ledger" and revision(value) < revision(old):
+                return False
+            change = patch.diff(old, value)
+            if change is None:
+                return False
+            channel.resources[name] = value
+            channel.seq += 1
+            data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
+            channel.log.append((channel.seq, self.cursor(channel, channel.seq), name, data))
+            self.changed.notify_all()
+            return True
 
     def wait(self, slug, seq, timeout):
         """The events after seq, waiting up to timeout for one; Expired once they fell out of retention."""
-        deadline = time.monotonic() + timeout
         with self.changed:
             channel = self.channels[slug]
-            while channel.seq == seq:
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    return []
-                self.changed.wait(left)
-            if channel.log[0][0] > seq + 1:
-                raise Expired(self.cursor(slug, channel, seq))
+            self.changed.wait_for(lambda: channel.seq != seq, timeout)
+            if channel.log and channel.log[0][0] > seq + 1:
+                raise Expired
             return [entry for entry in channel.log if entry[0] > seq]
 
     def evict(self, now=None, idle=IDLE_EVICT_S):

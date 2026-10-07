@@ -2,6 +2,8 @@ import argparse
 import json
 import sys
 import threading
+import time
+import types
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -129,7 +131,15 @@ def run_watch(monkeypatch, capsys, take, *flags):
         calls.append(cursor)
         return real_stream(slug, cursor, headers)
 
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        assert len(sleeps) <= 20, "the watcher kept retrying"
+        time.sleep(seconds)
+
     monkeypatch.setattr(watch_ledger, "stream", recorded)
+    monkeypatch.setattr(watch_ledger, "time", types.SimpleNamespace(sleep=sleep))
     monkeypatch.setattr(watch_ledger.Watch, "take", take)
     monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--interval", "0.05", *flags])
     with pytest.raises(SystemExit):
@@ -172,7 +182,7 @@ def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(live,
         original(self, name, data)
         seen_names.append(name)
         if seen_names == ["snapshot", "heartbeat"]:
-            server.HUB.boot = "restarted"
+            server.HUB.channels[SLUG].epoch = "restarted"
             raise OSError("server restarted")
         if seen_names.count("snapshot") == 2:
             raise SystemExit

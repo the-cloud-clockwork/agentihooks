@@ -51,18 +51,27 @@ def credentials(slug):
 
 def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
-    headers = {**(credentials(slug) if headers is None else headers), "Accept": "text/event-stream"}
-    if cursor:
-        headers["Last-Event-ID"] = cursor
-    url = f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events"
+    url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
         response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
-            raise Expired(cursor) from None
+            raise Expired from None
         raise
     with response:
-        yield from events_stream.parse(line.decode("utf-8") for line in response)
+        yield from events_stream.parse(line.decode() for line in response)
+
+
+def request(slug, cursor, headers):
+    """The events URL and headers: the credential headers, the stream Accept, and the cursor to resume after."""
+    headers = {**headers, "Accept": "text/event-stream"}
+    if cursor:
+        headers["Last-Event-ID"] = cursor
+    return f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug)}/events", headers
+
+
+def say(text):
+    print(text, flush=True)
 
 
 class Watch:
@@ -75,7 +84,7 @@ class Watch:
 
     def show(self, state):
         if self.state is None:
-            print(f"WATCHING {self.json_path} rev {state['_meta']['rev']}", flush=True)
+            say(f"WATCHING {self.json_path} rev {state['_meta']['rev']}")
             if self.since is None:
                 self.since = state["_meta"]["rev"]
         self.state = state
@@ -88,13 +97,13 @@ class Watch:
             and (args.all or (e.get("by") == "operator" and (not args.name or gate.owes(e, members, args.name, tasks))))
         ]
         for event in seen.first_showing(self.marks, args.name, args.slug, fresh):
-            print(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS), flush=True)
+            say(line(event, state.get("chat_instructions") or core.DEFAULT_CHAT_INSTRUCTIONS))
         self.since = max(self.since, meta["rev"])
         if meta.get("seed_error") != self.seed_error:
             self.seed_error = meta.get("seed_error")
-            print(f"SEED_ERROR {self.seed_error}" if self.seed_error else "SEED_OK", flush=True)
+            say(f"SEED_ERROR {self.seed_error}" if self.seed_error else "SEED_OK")
         for message in set(meta.get("warnings") or []) - set(self.warned):
-            print(f"WARNING {message}", flush=True)
+            say(f"WARNING {message}")
         self.warned = meta.get("warnings") or []
 
     def take(self, name, data):
@@ -170,7 +179,7 @@ def main():
             headers = None
             if str(exc) != failure:
                 failure = str(exc)
-                print(f"WARNING ledger stream: {failure}", flush=True)
+                say(f"WARNING ledger stream: {failure}")
         time.sleep(args.interval)
 
 
