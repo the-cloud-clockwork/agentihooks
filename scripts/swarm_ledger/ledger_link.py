@@ -25,20 +25,28 @@ def address(environ=os.environ) -> tuple[str, int]:
     return environ.get("LEDGER_HOST", "127.0.0.1"), port
 
 
+def public_url(environ=os.environ) -> urllib.parse.SplitResult | None:
+    url = environ.get("SWARM_PUBLIC_URL")
+    return urllib.parse.urlsplit(url) if url else None
+
+
 def listed_hosts(environ=os.environ) -> set[str]:
-    public = urllib.parse.urlsplit(environ.get("SWARM_PUBLIC_URL", "")).netloc
-    return ({name.strip() for name in environ.get("SWARM_ALLOWED_HOSTS", "").split(",")} | {public}) - {""}
+    return {name.strip() for name in environ.get("SWARM_ALLOWED_HOSTS", "").split(",")} - {""}
 
 
 def allowed_hosts(environ=os.environ) -> set[str]:
     host, port = address(environ)
-    return {f"{name}:{port}" for name in (host, *LOOPBACK)} | listed_hosts(environ)
+    public = public_url(environ)
+    hosts = {f"{name}:{port}" for name in (host, *LOOPBACK)} | listed_hosts(environ)
+    return hosts | ({public.netloc} if public else set())
 
 
 def allowed_origins(environ=os.environ) -> set[str]:
     host, port = address(environ)
-    loopback = {f"http://{name}:{port}" for name in (host, *LOOPBACK)}
-    return loopback | {f"{scheme}://{name}" for name in listed_hosts(environ) for scheme in ("http", "https")}
+    public = public_url(environ)
+    origins = {f"http://{name}:{port}" for name in (host, *LOOPBACK)}
+    origins |= {f"{scheme}://{name}" for name in listed_hosts(environ) for scheme in ("http", "https")}
+    return origins | ({f"{public.scheme}://{public.netloc}"} if public else set())
 
 
 def page_url(slug):

@@ -20,6 +20,11 @@ class Stop(Exception):
     pass
 
 
+def clean_environment(**values):
+    base = {key: value for key, value in os.environ.items() if not key.startswith(("SWARM_", "LEDGER_"))}
+    return {**base, "PYTHONPATH": str(ROOT), **values}
+
+
 def spare_port():
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -33,6 +38,18 @@ def test_the_bind_host_and_port_come_from_the_environment():
 
 def test_a_data_folder_may_serve_on_the_default_port():
     assert ledger_link.address({"LEDGER_DIR": "/data"}) == ("127.0.0.1", 8765)
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_the_shared_folder_keeps_its_fixed_port(named):
+    folder = {"LEDGER_DIR": str(Path.home() / "development-ledger")} if named else {}
+    env = {"LEDGER_PORT": "9100", **folder}
+    assert ledger_link.address(env) == ("127.0.0.1", 8765)
+
+
+def test_an_unset_public_url_adds_nothing():
+    assert ledger_link.public_url({}) is None
+    assert ledger_link.public_url({"SWARM_PUBLIC_URL": ""}) is None
 
 
 def test_loopback_and_the_bind_host_are_always_allowed():
@@ -62,7 +79,6 @@ def test_the_public_url_and_listed_hosts_join_the_allowed_sets():
     assert ledger_link.allowed_origins(env) == {
         "http://127.0.0.1:9100",
         "http://localhost:9100",
-        "http://swarm.example.com",
         "https://swarm.example.com",
         "http://swarm:8765",
         "https://swarm:8765",
@@ -76,12 +92,13 @@ def test_code_reload_runs_only_when_swarm_reload_is_one(value, expected):
     assert server.reloading({} if value is None else {"SWARM_RELOAD": value}) is expected
 
 
-@pytest.mark.parametrize(("value", "calls"), [(None, 0), ("1", 1)])
+@pytest.mark.parametrize(("value", "calls"), [(None, []), ("0", []), ("1", [((42,),)])])
 def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls):
     if value is None:
         monkeypatch.delenv("SWARM_RELOAD", raising=False)
     else:
         monkeypatch.setenv("SWARM_RELOAD", value)
+    monkeypatch.setattr(server, "code_stamp", lambda: 42)
     monkeypatch.setattr(server, "reload_if_changed", Mock())
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
     monkeypatch.setattr(server.repository, "pages", lambda: [])
@@ -89,7 +106,7 @@ def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls
     monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
     with pytest.raises(Stop):
         server.watch_seeds()
-    assert server.reload_if_changed.call_count == calls
+    assert server.reload_if_changed.call_args_list == calls
 
 
 @pytest.mark.parametrize(("value", "child"), [(None, "1"), ("0", "0")])
@@ -108,7 +125,7 @@ def test_the_workstation_server_reloads_code_unless_told_not_to(monkeypatch, tmp
     assert server.subprocess.Popen.call_args.kwargs["env"]["SWARM_RELOAD"] == child
 
 
-def test_a_folder_outside_the_home_may_serve_on_8765(monkeypatch, tmp_path):
+def test_a_folder_other_than_the_shared_one_may_serve_on_8765(monkeypatch, tmp_path):
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PORT", 8765)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
@@ -118,19 +135,17 @@ def test_a_folder_outside_the_home_may_serve_on_8765(monkeypatch, tmp_path):
     server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler)
 
 
-def test_the_environment_beats_a_file_under_the_agentihooks_home(tmp_path):
+def test_files_under_the_agentihooks_home_never_configure_the_server(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
-    (home / "swarm.env").write_text("LEDGER_HOST=10.9.9.9\nSWARM_ALLOWED_HOSTS=file.example\n")
-    env = {
-        **os.environ,
-        "AGENTIHOOKS_HOME": str(home),
-        "LEDGER_DIR": str(tmp_path / "ledgers"),
-        "LEDGER_PORT": "9100",
-        "LEDGER_HOST": "127.0.0.1",
-        "SWARM_ALLOWED_HOSTS": "env.example",
-        "PYTHONPATH": str(ROOT),
-    }
+    (home / ".env").write_text("LEDGER_HOST=10.9.9.9\nSWARM_ALLOWED_HOSTS=file.example\n")
+    (home / "swarm.env").write_text("LEDGER_HOST=10.9.9.8\nSWARM_PUBLIC_URL=https://file.example\n")
+    env = clean_environment(
+        AGENTIHOOKS_HOME=str(home),
+        LEDGER_DIR=str(tmp_path / "ledgers"),
+        LEDGER_PORT="9100",
+        SWARM_ALLOWED_HOSTS="env.example",
+    )
     probe = "import json; from scripts.swarm_ledger import ledger_server as s; print(json.dumps([s.HOST, sorted(s.ALLOWED_HOSTS)]))"
     out = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=True).stdout
     assert json.loads(out.splitlines()[-1]) == ["127.0.0.1", ["127.0.0.1:9100", "env.example", "localhost:9100"]]
@@ -141,17 +156,14 @@ def hosted(tmp_path):
     port = spare_port()
     home = tmp_path / "home"
     home.mkdir()
-    env = {
-        **os.environ,
-        "AGENTIHOOKS_HOME": str(home),
-        "LEDGER_DIR": str(tmp_path / "ledgers"),
-        "LEDGER_HOST": "127.0.0.1",
-        "LEDGER_PORT": str(port),
-        "SWARM_PUBLIC_URL": "https://swarm.example.com",
-        "SWARM_ALLOWED_HOSTS": "swarm.lan",
-        "PYTHONPATH": str(ROOT),
-    }
-    env.pop("SWARM_RELOAD", None)
+    env = clean_environment(
+        AGENTIHOOKS_HOME=str(home),
+        LEDGER_DIR=str(tmp_path / "ledgers"),
+        LEDGER_HOST="127.0.0.1",
+        LEDGER_PORT=str(port),
+        SWARM_PUBLIC_URL="https://swarm.example.com",
+        SWARM_ALLOWED_HOSTS="swarm.lan",
+    )
     log = (tmp_path / "server.log").open("w")
     child = subprocess.Popen(
         [sys.executable, str(ROOT / "scripts" / "swarm_ledger" / "ledger_server.py"), "--serve"],
@@ -206,5 +218,19 @@ def test_an_unlisted_host_or_origin_is_refused(hosted, host, origin, message):
     assert json.loads(body)["error"]["message"] == message
 
 
-def test_an_unlisted_host_cannot_read_the_page_routes(hosted):
-    assert request(hosted, "/healthz", "evil.example") == (403, b"host not allowed")
+@pytest.mark.parametrize(
+    ("host", "origin", "reply"),
+    [
+        ("evil.example", None, (403, b"host not allowed")),
+        ("swarm.example.com", "https://evil.example", (403, b"origin not allowed")),
+        ("swarm.example.com", "http://swarm.example.com", (403, b"origin not allowed")),
+    ],
+)
+def test_the_page_routes_refuse_an_unlisted_host_or_origin(hosted, host, origin, reply):
+    assert request(hosted, "/healthz", host, origin) == reply
+
+
+@pytest.mark.parametrize("origin", [None, "null", "https://swarm.example.com"])
+def test_the_page_routes_serve_a_listed_host_and_origin(hosted, tmp_path, origin):
+    status, body = request(hosted, "/healthz", "swarm.example.com", origin)
+    assert (status, json.loads(body)) == (200, {"dir": str(tmp_path / "ledgers")})

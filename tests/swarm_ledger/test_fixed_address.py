@@ -2,9 +2,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_link
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
-sys.path.insert(0, str(SCRIPTS))
-import ledger_link
 
 
 def test_shared_link_ignores_an_inherited_proof_port(monkeypatch):

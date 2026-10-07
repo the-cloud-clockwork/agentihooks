@@ -640,6 +640,8 @@ class Handler(BaseHTTPRequestHandler):
     def refused(self, slug=None):
         if self.headers.get("Host") not in ALLOWED_HOSTS:
             return self.send(403, "host not allowed", "text/plain") or True
+        if self.headers.get("Origin") not in (None, FILE_ORIGIN, *ALLOWED_ORIGINS):
+            return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
             self.principal = authority.principal(
                 core.read_token(repository.read_page(slug)),
