@@ -41,7 +41,6 @@ def test_binding_command_prints_the_session_record_fields(tmp_path, home, monkey
     assert json.loads(capsys.readouterr().out) == {
         "profile": "engineer",
         "harness": "claude",
-        "home": str(home.resolve()),
         "persona": binding.digest(home / "CLAUDE.md"),
         "sources": binding.digest(home.parent / "claude.sources.json"),
         "state": "validated",
@@ -70,7 +69,7 @@ def test_binding_command_prints_no_environment_value(tmp_path, home, monkeypatch
     assert render.main(["binding"]) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)["account"] == "fixture"
-    for value in (*secrets, "sk-secret-env-three"):
+    for value in (*secrets, "sk-secret-env-three", str(home), str(tmp_path / "report.json")):
         assert value not in captured.out + captured.err
 
 

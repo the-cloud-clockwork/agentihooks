@@ -249,5 +249,5 @@ def record(home: Path | None = None) -> dict:
             state = "rendered"
         except ValueError as exc:
             state = f"invalid: {exc}"
-    shown = {key: data.get(key) for key in ("profile", "harness", "home", "persona", "sources")}
+    shown = {key: data.get(key) for key in ("profile", "harness", "persona", "sources")}
     return {**shown, "state": state, "account": account}
