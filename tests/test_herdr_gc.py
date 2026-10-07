@@ -133,6 +133,33 @@ def test_an_operator_pane_is_never_touched(env):
     assert ("pane", "w1:p1") not in herdr.closed
 
 
+def test_a_sweep_on_one_herdr_server_leaves_another_servers_records(env, tmp_path):
+    shared, isolated = FakeHerdr(), FakeHerdr()
+    live = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "shared.sock")}
+    scratch = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "scratch.sock")}
+    kept = launch(live, shared, "w1:p2", "term_a", owner=Owner(at=NOW))
+    launch(scratch, isolated, "w1:p2", "term_z")
+    isolated.panes.clear()
+    found = actions(sweep(scratch, isolated))
+    assert found == {"w1:p2": (herdr_gc.FORGET, "herdr no longer lists it")}
+    assert herdr_panes.load(live) == [kept]
+    assert herdr_panes.load(scratch) == []
+
+
+def test_a_sweep_closes_only_its_own_servers_pane_when_both_hold_the_same_ids(env, tmp_path):
+    isolated = FakeHerdr()
+    live = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "shared.sock")}
+    scratch = {**env, "HERDR_SOCKET_PATH": str(tmp_path / "scratch.sock")}
+    kept = launch(live, FakeHerdr(), "w1:p2", "term_a", owner=Owner(at=NOW))
+    before = {path: path.read_bytes() for path in (tmp_path / "panes").glob("*.json")}
+    launch(scratch, isolated, "w1:p2", "term_a")
+    found = sweep(scratch, isolated)
+    assert [(f.record.herdr_server, f.action) for f in found] == [(str(tmp_path / "scratch.sock"), herdr_gc.CLOSE)]
+    assert isolated.closed == [("pane", "w1:p2")]
+    assert {path: path.read_bytes() for path in before} == before
+    assert herdr_panes.load(live) == [kept]
+
+
 def test_a_failed_launch_left_at_a_bare_shell_closes_after_the_grace(env):
     herdr = FakeHerdr()
     launch(env, herdr, "w1:p2", "term_a")
