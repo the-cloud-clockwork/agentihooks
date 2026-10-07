@@ -274,6 +274,7 @@ def test_a_shell_c_script_running_a_variable_command_is_denied(command):
         'bash deploy.sh -c "$TARGET"',
         "sh -e build.sh -c $ENV",
         "dash -c '$X'",
+        "bash -c 'cat <<EOF > /home/op/x/out.txt\n$HOME/x\nEOF'",
     ],
 )
 def test_a_variable_outside_command_position_or_outside_a_shell_c_script_passes(command):

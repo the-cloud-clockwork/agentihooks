@@ -116,7 +116,8 @@ class PromptGuard:
             for target in targets(args):
                 if why := self.hazard(target, call.cwd, moved):
                     return Decision.deny(refusal(why))
-        if program := next((name for script in inline_scripts(text) for name in variable_programs(script)), None):
+        scripts = (strip_heredocs(script) for script in inline_scripts(text))
+        if program := next((name for script in scripts for name in variable_programs(script)), None):
             return Decision.deny(script_refusal(program))
         return Decision()
 
