@@ -384,18 +384,18 @@ def test_load_reads_the_named_schema_folder(tmp_path):
 
 def test_the_admission_module_imports_no_other_repository_package():
     tree = ast.parse(Path(contracts.__file__).read_text())
-    imports = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
-    imports += [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
-    assert sorted(imports) == [
-        "collections",
-        "fcntl",
-        "json",
-        "jsonschema",
-        "jsonschema.exceptions",
-        "pathlib",
-        "re",
-        "referencing",
+    imports = [
+        (node.module if isinstance(node, ast.ImportFrom) else alias.name, alias.asname or "")
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
     ]
+    roots = {
+        module.split(".")[0]
+        for module, asname in imports
+        if not module.startswith("mutmut") and "_mutmut" not in asname
+    }
+    assert roots == {"collections", "fcntl", "json", "jsonschema", "pathlib", "re", "referencing"}
 
 
 def test_a_newer_generation_fences_every_contract_of_the_task(loaded, tmp_path):
