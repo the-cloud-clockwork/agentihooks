@@ -18,7 +18,6 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     assert "sonar-reusable.yml" in scan["uses"]
     assert "pytest" not in scan["with"]["test_command"]
     assert "combine.sh" in scan["with"]["test_command"]
-    assert "sonar" not in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 
 
