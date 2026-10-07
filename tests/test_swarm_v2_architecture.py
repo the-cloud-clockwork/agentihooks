@@ -580,6 +580,24 @@ def test_rejection_reasons_never_echo_proposal_content():
     assert private not in json.dumps(result)
 
 
+def test_an_undeclared_proposal_never_makes_a_declared_one_conflict():
+    inventory = _single(
+        _proposal(id="valid", name="Valid one", authoritative_state="None"),
+        _proposal(id="missing", name="Valid one", authoritative_state=None),
+    )
+    result = architecture.review(architecture.load_record(RECORD), inventory)
+    assert result["accepted"] == ["valid"]
+    assert result["rejected"] == [{"id": "missing", "name": "Valid one", "reason": architecture.DECLARE}]
+    assert result["unresolved"] == []
+
+
+def test_the_declaration_refusal_names_every_required_field():
+    assert architecture.DECLARE == (
+        "a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts,"
+        " launches_agents as true or false, and a non-empty authoritative_state"
+    )
+
+
 def test_a_corrected_proposal_needs_a_new_operation_at_the_current_revision(tmp_path):
     path = _record(tmp_path)
     architecture.apply_inventory(path, _single(_proposal(kind="dispatcher")))

@@ -114,12 +114,11 @@ def _verdict(record: dict, proposal: dict, repeated: set[str]) -> tuple[str, str
 
 
 def _repeated(proposals: list[dict]) -> set[str]:
-    names = Counter(p["name"].casefold() for p in proposals)
-    states = Counter(str(p.get("authoritative_state")).casefold() for p in proposals)
+    declared = [p for p in proposals if _declared(p)]
+    names = Counter(p["name"].casefold() for p in declared)
+    states = Counter(p["authoritative_state"].casefold() for p in declared)
     return {
-        p["id"]
-        for p in proposals
-        if names[p["name"].casefold()] > 1 or states[str(p.get("authoritative_state")).casefold()] > 1
+        p["id"] for p in declared if names[p["name"].casefold()] > 1 or states[p["authoritative_state"].casefold()] > 1
     }
 
 

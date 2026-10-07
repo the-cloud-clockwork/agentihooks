@@ -30,6 +30,8 @@ CASES = {
             "test_check_lists",
             "test_rejection_reasons",
             "test_a_corrected",
+            "test_an_undeclared",
+            "test_the_declaration",
             "test_cli_check_fails",
             "test_an_operator_change",
             "test_a_proposal_cannot",
