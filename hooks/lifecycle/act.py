@@ -134,12 +134,16 @@ def finish_pending(journal: Journal) -> list[str]:
     finished = []
     for path, category in journal.pending().items():
         target = Path(path)
-        if category == "worktree" and admin_dir(target) is not None:
-            remove_worktree(target)
-        elif target.exists():
-            remove_path(target)
+        try:
+            if category == "worktree" and admin_dir(target) is not None:
+                remove_worktree(target)
+            elif target.exists():
+                remove_path(target)
+        except (ActionError, OSError, subprocess.TimeoutExpired):
+            pass
+        else:
+            finished.append(path)
         journal.end(path)
-        finished.append(path)
     return finished
 
 
