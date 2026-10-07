@@ -500,7 +500,7 @@ def _stack_base(task, rows):
 
 def _refund_parked(slug, store, rows, task_id):
     if _parked(rows.get(task_id, {}), rows):
-        store.redis.hincrby(store.key(slug, "claims"), task_id, -1)
+        store.refund_claim(slug, task_id)
 
 
 def _overlaps(mine, theirs):

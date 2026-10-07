@@ -108,6 +108,15 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
+def test_a_refunded_claim_gives_back_one_started_life(store):
+    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
+    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
+    assert store.refund_claim("smoke", "t1") == 1
+    assert store.claims("smoke", "t1") == 1
+    store.count_claim("smoke", "t2")
+    assert (store.refund_claim("smoke", "t2"), store.claims("smoke", "t2")) == (0, 0)
+
+
 def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     history, validated = store.key("smoke", "history"), {"validation": {"state": "validated"}}
     store.redis.rpush(

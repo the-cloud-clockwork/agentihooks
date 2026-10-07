@@ -254,6 +254,10 @@ class RedisStore:
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
+    def refund_claim(self, slug, task):
+        self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
+        return self.redis.hincrby(self.key(slug, "started-lives"), task, -1)
+
     def claims(self, slug, task):
         counted = self.redis.hget(self.key(slug, "started-lives"), task)
         if counted is not None:
