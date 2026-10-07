@@ -628,7 +628,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
 
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout
-    while not route_path.exists() and not _selection_refused(active_env) and time.monotonic() < deadline:
+    while not route_path.exists() and time.monotonic() < deadline:
+        if _selection_refused(active_env):
+            break
         time.sleep(0.25)
     route = _read_route_report(route_path) if route_path.exists() else {}
     route_path.unlink(missing_ok=True)
