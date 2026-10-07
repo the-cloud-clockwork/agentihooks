@@ -47,6 +47,7 @@ def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatc
     assert rt.live_names() == {name}
     assert os.environ["AGENTIHOOKS_AGENT_NAME"] == carried
     assert Who.from_env().name == name
+    assert Who.from_env(os.environ).name == name
     assert refusal(name, Who.from_env()) == ""
     assert refusal("engineer@a1b2c3-0099", Who.from_env())
     [transfer] = [r for r in transfers.list_transfers(store, "sw") if r.get("retry_of") == row["id"]]

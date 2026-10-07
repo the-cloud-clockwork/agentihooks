@@ -38,7 +38,7 @@ class Who:
         from hooks.context.broadcast import session_name
 
         env = os.environ if environ is None else environ
-        name = session_name(agent_pid()) if environ is None else ""
+        name = session_name(agent_pid()) if env is os.environ else ""
         return cls(
             name=name or env.get("AGENTIHOOKS_AGENT_NAME", ""),
             swarm=env.get("AGENTIHOOKS_SWARM", ""),
