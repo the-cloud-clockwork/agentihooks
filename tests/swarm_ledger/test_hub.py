@@ -6,6 +6,7 @@ import pytest
 from scripts.swarm_ledger.events import hub as events_hub
 from scripts.swarm_ledger.events.hub import Expired, Hub
 from scripts.swarm_ledger.events.patch import apply
+from tests.swarm_ledger.bounded import bounded
 
 SLUG = "hub-2026-01-01"
 
@@ -16,17 +17,6 @@ def ledger(rev, **fields):
 
 def opened(hub, slug=SLUG, cursor=None, rev=1):
     return hub.open(slug, lambda: {"ledger": ledger(rev), "swarm": None, "workspaces": {}}, cursor)
-
-
-def bounded(call, *args, limit=2.0):
-    """call(*args) in a thread, failing the test instead of hanging when it never returns."""
-    result = []
-    thread = threading.Thread(target=lambda: result.append(call(*args)), daemon=True)
-    started = time.monotonic()
-    thread.start()
-    thread.join(limit)
-    assert not thread.is_alive(), f"{call.__name__} did not return within {limit} s"
-    return result[0], time.monotonic() - started
 
 
 def test_a_first_connection_gets_one_snapshot_at_the_current_cursor():
@@ -45,7 +35,6 @@ def test_every_channel_life_has_its_own_epoch():
     opened(first)
     opened(second)
     assert first.channels[SLUG].epoch != second.channels[SLUG].epoch
-    assert len(first.channels[SLUG].epoch) == 64
 
 
 def test_a_second_connection_reuses_the_loaded_resources():

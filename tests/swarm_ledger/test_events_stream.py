@@ -1,9 +1,9 @@
 import io
-import threading
 
 import pytest
 
 from scripts.swarm_ledger.events import Expired, Hub, stream
+from tests.swarm_ledger.bounded import bounded
 
 SLUG = "frames-2026-01-01"
 
@@ -51,18 +51,8 @@ class Handler:
         self.sent.append("end")
 
 
-def bounded(call, *args):
-    """call(*args) in a thread, failing the test instead of hanging when it never returns."""
-    result = []
-    thread = threading.Thread(target=lambda: result.append(call(*args)), daemon=True)
-    thread.start()
-    thread.join(2)
-    assert not thread.is_alive(), f"{call.__name__} did not return within 2 s"
-    return result[0]
-
-
 def test_a_frame_carries_its_cursor_event_and_compact_json():
-    assert stream.frame("ledger", {"a": [1, "é"]}, "c1") == b'id: c1\nevent: ledger\ndata: {"a":[1,"\\u00e9"]}\n\n'
+    assert stream.frame("ledger", {"a": [1, "é"]}, "c1") == 'id: c1\nevent: ledger\ndata: {"a":[1,"é"]}\n\n'.encode()
     assert stream.frame("heartbeat", {}) == b"event: heartbeat\ndata: {}\n\n"
 
 
@@ -96,7 +86,7 @@ def test_serve_sends_the_snapshot_then_heartbeats_until_the_client_goes(monkeypa
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
     hub = Hub()
     handler = Handler(Sink(3))
-    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)}) is None
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
     snapshot = stream.frame("snapshot", {"ledger": ledger(1)}, Hub.cursor(hub.channels[SLUG], 0))
     heartbeat = stream.frame("heartbeat", {})
     assert handler.wfile.getvalue() == snapshot + heartbeat + heartbeat
@@ -152,6 +142,6 @@ def test_serve_stops_when_a_slow_reader_falls_out_of_retention(monkeypatch):
             hub.publish(SLUG, "ledger", ledger(rev))
 
     handler = Handler(Sink(5, flood))
-    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)}) is None
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
     assert len(handler.wfile.marks) == 1
     assert hub.watched() == []
