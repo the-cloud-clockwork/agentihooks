@@ -1,8 +1,16 @@
 /* The only file in the ledger front end that holds colour values. */
 :root {
+  --ink-000: transparent;
   --ink-950: #010104;
   --navy-900: #0d1424;
+  --steel-060: #0e131b;
+  --steel-100: #151c29;
+  --steel-160: #1b2636;
+  --steel-200: #222f44;
+  --indigo-300: #9188dd;
+  --indigo-600: #3a3dee;
   --blue-700: #1d4ed8;
+  --blue-600: #155dfc;
   --blue-500: #3b82f6;
   --blue-400: #60a5fa;
   --blue-300: #93c5fd;
@@ -14,18 +22,22 @@
   --slate-050: #f8fafc;
   --slate-300: #cbd5e1;
   --slate-400: #9aa8bd;
-  --lift-020: rgba(255, 255, 255, .02);
-  --lift-045: rgba(255, 255, 255, .045);
-  --lift-060: rgba(255, 255, 255, .06);
-  --lift-080: rgba(255, 255, 255, .08);
-  --lift-140: rgba(255, 255, 255, .14);
+  --indigo-300-055: rgba(145, 136, 221, .55);
+  --indigo-600-030: rgba(58, 61, 238, .30);
+  --indigo-600-012: rgba(58, 61, 238, .12);
+  --indigo-600-004: rgba(58, 61, 238, .04);
+  --blue-500-035: rgba(59, 130, 246, .35);
+  --blue-500-018: rgba(59, 130, 246, .18);
+  --blue-500-006: rgba(59, 130, 246, .06);
+  --blue-300-010: rgba(147, 197, 253, .10);
 
   --canvas: var(--ink-950);
-  --backdrop: none;
-  --veil: var(--lift-020);
-  --surface-1: var(--lift-045);
-  --surface-2: var(--lift-060);
-  --hover: var(--lift-080);
+  --backdrop: radial-gradient(ellipse 70% 45% at 50% -8%, var(--indigo-600-012), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 100% 0%, var(--blue-500-006), transparent 75%);
+  --veil: var(--steel-060);
+  --surface-1: var(--ink-000);
+  --surface-2: var(--steel-160);
+  --hover: var(--steel-100);
   --panel: var(--navy-900);
   --overlay: var(--navy-900);
   --menu: var(--ink-950);
@@ -34,8 +46,16 @@
   --logo: var(--slate-050);
   --muted: var(--slate-400);
   --dim: var(--slate-400);
-  --rule: var(--lift-060);
-  --edge: var(--lift-140);
+  --rule: var(--steel-100);
+  --edge: var(--steel-200);
+  --panel-edge: var(--blue-300-010);
+  --panel-lift: inset 0 1px 0 var(--blue-300-010), 0 10px 30px -14px var(--blue-500-035), 0 0 0 1px var(--blue-500-018);
+  --tab-active: var(--indigo-300);
+  --tab-spill: 0 6px 12px -8px var(--indigo-300-055);
+  --ring: var(--blue-600);
+  --data-line: var(--indigo-600);
+  --data-fill-start: var(--indigo-600-030);
+  --data-fill-end: var(--indigo-600-004);
   --accent: var(--blue-500);
   --accent-2: var(--blue-300);
   --link: var(--blue-400);
