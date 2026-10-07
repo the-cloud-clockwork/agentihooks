@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -14,238 +15,134 @@ def _workflow(name):
     return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
 
 
-def test_tests_upload_durations_without_pushing_to_dev():
-    workflow = _workflow("test.yml")
-    assert "refresh-durations" not in workflow["jobs"]
-    assert all("git push" not in step.get("run", "") for job in workflow["jobs"].values() for step in job["steps"])
-    assert any(step.get("name") == "Upload durations" for step in workflow["jobs"]["unit"]["steps"])
+def test_ci_creates_no_commits_or_bot_pull_requests():
+    for name in ["test.yml", "release.yml"]:
+        workflow = _workflow(name)
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                command = step.get("run", "")
+                assert "git commit" not in command
+                assert "HEAD:dev" not in command
+                assert "ci_bot_pr" not in command
+        assert "ORG_GITHUB_TOKEN" not in json.dumps(workflow)
+    assert not (_ROOT / ".github/workflows/refresh-durations.yml").exists()
+    assert not (_ROOT / "scripts/ci_bot_pr.sh").exists()
 
 
-def test_duration_refresh_batches_ci_samples_once_daily():
-    workflow = _workflow("refresh-durations.yml")
-    assert len(workflow[True]["schedule"]) == 1
-    assert workflow["concurrency"]["cancel-in-progress"] is False
-    job = workflow["jobs"]["refresh"]
-    assert job["env"]["GH_TOKEN"] == "${{ secrets.ORG_GITHUB_TOKEN }}"
-    command = next(step["run"] for step in job["steps"] if "run" in step)
-    assert "python -m tests.refresh_durations --ci 5" in command
-    assert "automation/durations-$(date -u +%F)" in command
-    assert "scripts/ci_bot_pr.sh" in command
+def test_dev_push_publishes_merged_durations_with_read_permissions():
+    job = _workflow("test.yml")["jobs"]["refresh-durations"]
+    assert job["needs"] == ["unit", "lint"]
+    assert job["if"] == "github.event_name == 'push'"
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    assert upload["with"]["name"] == "durations-merged"
+    assert upload["with"]["path"] == ".test_durations"
+    assert upload["with"]["include-hidden-files"] is True
 
 
-def test_release_bump_uses_a_pull_request_before_tagging():
-    workflow = _workflow("release.yml")
-    assert workflow[True]["workflow_dispatch"]["inputs"]["dry_run"]["default"] is False
-    job = workflow["jobs"]["release"]
-    steps = job["steps"]
-    bump = next(i for i, step in enumerate(steps) if step.get("id") == "bump")
-    assert "scripts/ci_bot_pr.sh" in steps[bump]["run"]
-    assert "pyproject.toml" in steps[bump]["run"]
-    tag = next(i for i, step in enumerate(steps) if step.get("name") == "Tag the merged version")
-    assert bump < tag
-    assert steps[tag]["env"]["MERGED"] == "${{ steps.bump.outputs.merged }}"
-    assert steps[tag]["if"] == "${{ !inputs.dry_run }}"
-    for step in steps[tag:]:
-        assert "!inputs.dry_run" in step.get("if", "")
-    assert all("git push origin dev" not in step.get("run", "") for step in steps)
-    assert job["env"]["GH_TOKEN"] == "${{ secrets.ORG_GITHUB_TOKEN }}"
-
-
-def _checks():
-    names = ["lint", "mutation"] + [
-        f"unit ({version}, {shard})" for version in ["3.11", "3.12"] for shard in range(1, 5)
-    ]
-    return [dict(__typename="CheckRun", name=name, status="COMPLETED", conclusion="SUCCESS") for name in names]
-
-
-def _snapshot(checks=None, head="tested", state="OPEN", merge_state="CLEAN", ahead=0):
-    return dict(
-        state=state,
-        headRefOid=head,
-        baseRefOid="base",
-        mergeStateStatus=merge_state,
-        devAhead=ahead,
-        statusCheckRollup=_checks() if checks is None else checks,
-        mergeCommit=dict(oid="merged"),
-    )
-
-
-def _run(tmp_path, snapshots, *, dry=False, existing=False, unchanged=False, token=True, reject_merge=False):
+@pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
+def test_pr_shards_use_last_green_dev_durations_or_the_committed_fallback(tmp_path, mode):
+    steps = _workflow("test.yml")["jobs"]["unit"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Download latest dev durations")
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert _workflow("test.yml")["jobs"]["unit"]["permissions"]["actions"] == "read"
+    assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
     tools = tmp_path / "bin"
     tools.mkdir()
-    (tmp_path / "snapshots.json").write_text(json.dumps(snapshots))
     gh = tools / "gh"
     gh.write_text(
         f"#!{sys.executable}\n"
-        + """import json
+        + """
+import json
 import os
 import sys
 from pathlib import Path
 args = sys.argv[1:]
-with Path('calls').open('a') as log:
-    log.write('gh ' + ' '.join(args) + '\\n')
-if args[:2] == ['pr', 'list']:
-    print(os.environ.get('EXISTING_PR', ''))
-elif args[:2] == ['pr', 'create']:
-    print('https://github.com/owner/repo/pull/7')
-elif args[:2] == ['pr', 'view']:
-    data = json.loads(Path('snapshots.json').read_text())
-    print(json.dumps(data[0]))
-    Path('snapshot.json').write_text(json.dumps(data[0]))
-    if len(data) > 1:
-        Path('snapshots.json').write_text(json.dumps(data[1:]))
-elif args[0] == 'api' and '/compare/' in args[1]:
-    print(json.loads(Path('snapshot.json').read_text())['devAhead'])
-elif args[:2] == ['pr', 'merge'] and os.environ.get('REJECT_MERGE') == '1':
+with Path("calls").open("a") as f:
+    f.write(json.dumps(args) + "\\n")
+if args[0] == "api":
+    print("" if os.environ["MODE"] == "no_run" else "42")
+elif os.environ["MODE"] == "missing":
     sys.exit(1)
+else:
+    folder = Path(args[args.index("--dir") + 1])
+    folder.mkdir(parents=True, exist_ok=True)
+    value = {"tests/a.py::test_a": 90.0, "tests/b.py::test_b": 1.0}
+    if os.environ["MODE"] == "invalid":
+        value = {"bad": "seconds"}
+    (folder / ".test_durations").write_text(json.dumps(value))
 """
     )
     gh.chmod(0o755)
-    git = tools / "git"
-    git.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-printf 'git %s\\n' "$*" >> calls
-if [[ "$1 $2" == 'diff --cached' ]]; then exit "${DIFF_EXIT:-1}"; fi
-""")
-    git.chmod(0o755)
-    sleep = tools / "sleep"
-    sleep.write_text('#!/usr/bin/env bash\nset -euo pipefail\nprintf "wait\\n" >> calls\n')
-    sleep.chmod(0o755)
-    env = {
-        **os.environ,
-        "PATH": f"{tools}:{os.environ['PATH']}",
-        "GITHUB_REPOSITORY": "owner/repo",
-        "GITHUB_RUN_ID": "42",
-        "GITHUB_OUTPUT": str(tmp_path / "output"),
-        "DIFF_EXIT": "0" if unchanged else "1",
-        "EXISTING_PR": "https://github.com/owner/repo/pull/7" if existing else "",
-        "REJECT_MERGE": "1" if reject_merge else "0",
-    }
-    env.pop("GH_TOKEN", None)
-    if token:
-        env["GH_TOKEN"] = "fixture"
+    committed = '{"committed": 0.1}'
+    (tmp_path / ".test_durations").write_text(committed)
     result = subprocess.run(
-        [
-            "bash",
-            str(_ROOT / "scripts/ci_bot_pr.sh"),
-            "automation/durations-day",
-            "Refresh durations",
-            ".test_durations",
-            str(dry).lower(),
-        ],
+        ["bash", "-euo", "pipefail", "-c", step["run"]],
         cwd=tmp_path,
-        env=env,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "MODE": mode,
+            "GITHUB_REPOSITORY": "owner/repo",
+            "RUNNER_TEMP": str(tmp_path),
+        },
         capture_output=True,
         text=True,
     )
-    log = (tmp_path / "calls").read_text() if (tmp_path / "calls").exists() else ""
-    return result, log
-
-
-def test_bot_update_opens_then_merges_at_the_successful_head(tmp_path):
-    result, log = _run(tmp_path, [_snapshot(), _snapshot(state="MERGED")])
     assert result.returncode == 0, result.stderr
-    assert "git push origin HEAD:refs/heads/automation/durations-day" in log
-    assert "gh pr create --repo owner/repo --base dev --head automation/durations-day" in log
-    assert (
-        "gh pr merge https://github.com/owner/repo/pull/7 --repo owner/repo --squash --match-head-commit tested" in log
-    )
-    assert "merged=merged" in (tmp_path / "output").read_text()
-    assert "HEAD:dev" not in log
-
-
-@pytest.mark.parametrize("mode", ["missing", "pending", "empty"])
-def test_bot_update_waits_for_all_tests_before_merging(tmp_path, mode):
-    checks = _checks()
-    if mode == "missing":
-        checks.pop()
-    elif mode == "pending":
-        checks[0]["status"] = "IN_PROGRESS"
-        checks[0]["conclusion"] = None
+    calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
+    assert "workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" in calls[0][1]
+    if mode == "download":
+        assert json.loads((tmp_path / ".test_durations").read_text()) == {
+            "tests/a.py::test_a": 90.0,
+            "tests/b.py::test_b": 1.0,
+        }
+        assert "42" in result.stdout
+        assert "--name" in calls[1] and "durations-merged" in calls[1]
     else:
-        checks = []
-    result, log = _run(tmp_path, [_snapshot(checks), _snapshot(), _snapshot(state="MERGED")])
-    assert result.returncode == 0, result.stderr
-    assert log.index("wait") < log.index("gh pr merge")
-    assert log.count("gh pr merge") == 1
+        assert (tmp_path / ".test_durations").read_text() == committed
 
 
-@pytest.mark.parametrize("conclusion", ["FAILURE", "CANCELLED", "SKIPPED", "TIMED_OUT"])
-def test_bot_update_refuses_unsuccessful_checks(tmp_path, conclusion):
-    checks = _checks()
-    checks[0]["conclusion"] = conclusion
-    result, log = _run(tmp_path, [_snapshot(checks)])
-    assert result.returncode != 0
-    assert "gh pr merge" not in log
-
-
-def test_dry_update_opens_its_pull_request_without_merging(tmp_path):
-    result, log = _run(tmp_path, [], dry=True)
-    assert result.returncode == 0, result.stderr
-    assert "gh pr create" in log
-    assert "gh pr view" not in log
-    assert "gh pr merge" not in log
-
-
-def test_daily_refresh_reuses_its_existing_pull_request(tmp_path):
-    result, log = _run(tmp_path, [_snapshot(), _snapshot(state="MERGED")], existing=True)
-    assert result.returncode == 0, result.stderr
-    assert "git push" not in log
-    assert "gh pr create" not in log
-    assert "gh pr merge" in log
-
-
-def test_unchanged_durations_do_not_create_a_pull_request(tmp_path):
-    result, log = _run(tmp_path, [], unchanged=True)
-    assert result.returncode == 0, result.stderr
-    assert "git push" not in log
-    assert "gh pr create" not in log
-
-
-def test_update_without_an_automation_token_fails_before_push(tmp_path):
-    result, log = _run(tmp_path, [], token=False)
-    assert result.returncode != 0
-    assert log == ""
-
-
-def test_changed_head_is_refused_by_the_pinned_merge(tmp_path):
-    result, log = _run(tmp_path, [_snapshot()], reject_merge=True)
-    assert result.returncode != 0
-    assert "--match-head-commit tested" in log
-    assert log.count("gh pr merge") == 1
-
-
-@pytest.mark.parametrize("merge_state", ["BEHIND", "CLEAN", "UNKNOWN"])
-def test_bot_update_refreshes_a_branch_that_fell_behind_dev(tmp_path, merge_state):
-    result, log = _run(
-        tmp_path, [_snapshot(merge_state=merge_state, ahead=1), _snapshot(head="updated"), _snapshot(state="MERGED")]
-    )
-    assert result.returncode == 0, result.stderr
-    assert "compare/tested...base" in log
-    assert "pulls/7/update-branch -f expected_head_sha=tested" in log
-    assert "--match-head-commit updated" in log
-    assert "--match-head-commit tested" not in log
-
-
-@pytest.mark.parametrize("ahead", [None, "unreadable"])
-def test_bot_update_refuses_an_unreadable_dev_comparison(tmp_path, ahead):
-    result, log = _run(tmp_path, [_snapshot(ahead=ahead)])
-    assert result.returncode != 0
-    assert "gh pr merge" not in log
-    assert "update-branch" not in log
-
-
-@pytest.mark.parametrize("bump,expected", [("patch", "1.2.4"), ("minor", "1.3.0"), ("major", "2.0.0")])
-def test_release_computes_the_requested_version(tmp_path, bump, expected):
-    step = next(step for step in _workflow("release.yml")["jobs"]["release"]["steps"] if step.get("id") == "version")
-    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
+@pytest.mark.parametrize("bump,expected", [("patch", "2.17.1"), ("minor", "2.18.0"), ("major", "3.0.0")])
+def test_release_computes_the_requested_version_from_tags(tmp_path, bump, expected):
+    step = next(s for s in _workflow("release.yml")["jobs"]["release"]["steps"] if s.get("id") == "version")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    git = tools / "git"
+    git.write_text('#!/usr/bin/env bash\nset -euo pipefail\nprintf "v2.17.0\\n"\n')
+    git.chmod(0o755)
     output = tmp_path / "output"
     result = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", step["run"]],
         cwd=tmp_path,
-        env={**os.environ, "BUMP": bump, "GITHUB_OUTPUT": str(output)},
+        env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "BUMP": bump, "GITHUB_OUTPUT": str(output)},
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
     assert f"next={expected}\n" in output.read_text()
+
+
+def test_release_tags_without_committing_and_dry_run_never_pushes():
+    job = _workflow("release.yml")["jobs"]["release"]
+    assert job["permissions"] == {"contents": "write"}
+    assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
+    tag = next(s for s in job["steps"] if s.get("name") == "Tag the release")
+    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"]
+    assert "git rev-parse HEAD" in tag["run"]
+    for step in job["steps"]:
+        if "git push" in step.get("run", "") or "gh release create" in step.get("run", ""):
+            assert step["if"] == "${{ !inputs.dry_run }}"
+    assert any(s.get("name") == "Verify the tagged package version" for s in job["steps"])
+
+
+def test_package_version_is_derived_from_git():
+    project = tomllib.loads((_ROOT / "pyproject.toml").read_text())
+    assert "version" not in project["project"]
+    assert project["project"]["dynamic"] == ["version"]
+    assert any(dep.startswith("setuptools-scm") for dep in project["build-system"]["requires"])
+    assert "setuptools_scm" in project["tool"]
+    checkout = next(
+        s for s in _workflow("publish-pypi.yml")["jobs"]["publish"]["steps"] if s.get("uses") == "actions/checkout@v4"
+    )
+    assert checkout["with"]["fetch-depth"] == 0
