@@ -176,7 +176,8 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
     assert 'class="fold sw-command-log" id="command-log"' in box
-    box = re.sub(r'<details[^>]*id="command-log".*?</details>', "", box, flags=re.S)
+    assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
+    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold)".*?</details>', "", box, flags=re.S)
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -184,7 +185,7 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
 def test_column_pairs_sit_side_by_side_on_desktop_and_stack_on_a_phone(open_page):
     for width, side_by_side in ((1440, True), (390, False)):
         page = open_page(status(), width)
-        for left, right in (("agents-box", "swarm-tasks-box"), ("quota-box", "doctor-box")):
+        for left, right in (("agents-box", "overlays-box"), ("quota-box", "doctor-box")):
             a, b = page.box(left), page.box(right)
             if side_by_side:
                 assert abs(a["y"] - b["y"]) < 1 and a["x"] + a["width"] <= b["x"] + 1, (left, right)
@@ -361,27 +362,122 @@ def test_compact_limit_steps_stop_at_100_and_1000(open_page, limit, down, up):
     assert page.tab.eval_on_selector_all("[data-swarm^=compact_]", "bs => bs.map(b => b.disabled)") == [False, True]
 
 
-def test_agents_table_lists_the_master_first_and_tasks_block_counts(open_page):
-    page = open_page()
+def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_task_figures(open_page):
+    payload = status()
+    payload["agents"][1]["overlays"] = ["qitp-tuner", "trader"]
+    page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
-        ["eng-58", "eng", "—", "opus high", "pb10", "IDLE", "1m", "message\nterminate"],
+        ["master-1", "—", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["eng-58", "eng", "—", "qitp-tuner · trader", "opus high", "pb10", "IDLE", "1m", "message\nterminate"],
     ]
     assert page.text("#agents-count").lower() == "2 live"
-    assert page.text("#tasks-open").lower() == "9 open"
+    for gone in ("swarm-tasks-box", "swarm-tasks", "tasks-open"):
+        assert page.tab.locator(f"#{gone}").count() == 0, gone
     pairs = page.tab.eval_on_selector_all(
-        "#swarm-tasks .kv", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
+        "#stats .stat", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    assert pairs == [
-        ["open", "9"],
+    figures = [[label.lower(), value] for label, value in pairs[4:11]]
+    assert figures == [
+        ["tasks", "0 / 1"],
         ["claimed", "3"],
         ["in pr", "1"],
         ["blocked", "1"],
         ["done today", "4"],
-        ["phases", "2 / 5"],
         ["next phase", "p3"],
         ["inbox pending", "1"],
     ]
+
+
+def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
+    page = open_page(status(agents=[]))
+    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+
+
+OFFERED = [
+    {"name": "qitp-tuner", "wears": ["engineer", "qa"]},
+    {"name": "trader", "wears": ["engineer"]},
+    {"name": "reviewer", "wears": ["engineer", "planner"]},
+    {"name": "sre", "wears": ["engineer", "cicd"]},
+]
+
+
+def overlay_rows(page):
+    return page.tab.eval_on_selector_all(
+        "#swarm-overlays .sw-ovl-row",
+        """rows => rows.map(r => [r.querySelector('.sw-cap-name').innerText,
+          [...r.querySelectorAll('button[data-overlay]')].map(b => [b.innerText, b.getAttribute('aria-pressed'), b.disabled]),
+          (r.querySelector('.sw-ovl-none') || {}).innerText || ''])""",
+    )
+
+
+def test_overlays_box_lists_every_base_role_with_the_overlays_that_wear_it(open_page):
+    payload = status(overlays_available=OFFERED)
+    payload["config"]["overlays"] = {"engineer": ["trader"], "master": ["gone"]}
+    page = open_page(payload)
+    assert page.text("#overlays-count").lower() == "4 offered · 3 max"
+    none = "no overlay in the bundle wears this role"
+    assert overlay_rows(page) == [
+        ["master", [["gone", "true", False]], ""],
+        [
+            "engineer",
+            [
+                ["qitp-tuner", "false", False],
+                ["trader", "true", False],
+                ["reviewer", "false", False],
+                ["sre", "false", False],
+            ],
+            "",
+        ],
+        ["planner", [["reviewer", "false", False]], ""],
+        ["qa", [["qitp-tuner", "false", False]], ""],
+        ["cicd", [["sre", "false", False]], ""],
+    ]
+    assert page.tab.locator("#overlays-apply").is_disabled()
+    payload = status(overlays_available=[])
+    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 5
+
+
+def test_a_role_takes_at_most_three_overlays_and_apply_sends_only_changed_roles(open_page):
+    payload = status(overlays_available=OFFERED)
+    payload["config"]["overlays"] = {"planner": ["reviewer"]}
+    page = open_page(payload)
+    row = page.tab.locator(".sw-ovl-row", has_text="engineer")
+    for name in ("qitp-tuner", "trader", "reviewer"):
+        row.locator(f'button[data-overlay="{name}"]').click()
+    assert overlay_rows(page)[1][1] == [
+        ["qitp-tuner", "true", False],
+        ["trader", "true", False],
+        ["reviewer", "true", False],
+        ["sre", "false", True],
+    ]
+    row.locator('button[data-overlay="trader"]').click()
+    row.locator('button[data-overlay="sre"]').click()
+    page.tab.locator(
+        '.sw-ovl-row[aria-label="Overlays the planner role wears"] button[data-overlay="reviewer"]'
+    ).click()
+    page.tab.locator("#overlays-apply").click()
+    page.tab.wait_for_function("() => document.querySelector('#overlays-apply').disabled")
+    assert page.puts == [{"action": "set", "overlays": {"engineer": ["qitp-tuner", "reviewer", "sre"], "planner": []}}]
+
+
+def test_toggling_an_overlay_back_leaves_nothing_to_apply(open_page):
+    page = open_page(status(overlays_available=OFFERED))
+    button = page.tab.locator('.sw-ovl-row[aria-label="Overlays the qa role wears"] button[data-overlay="qitp-tuner"]')
+    button.click()
+    assert not page.tab.locator("#overlays-apply").is_disabled()
+    button.click()
+    assert page.tab.locator("#overlays-apply").is_disabled()
+
+
+def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
+    page = open_page(status(overlays_available=OFFERED))
+    assert page.tab.locator("#swarm-overlays").is_visible()
+    page.tab.locator("#overlays-fold > summary").click()
+    assert not page.tab.locator("#swarm-overlays").is_visible()
+    page.tab.reload()
+    page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
+    assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
 
 
 @pytest.mark.parametrize("width", [1440, 390])
