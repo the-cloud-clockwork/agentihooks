@@ -24,6 +24,7 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
         raise ValueError(f"handoff reason {reason!r} is not one of {', '.join(REASONS)}")
     row = next((r for r in rows or [] if r.get("id") == agent.task), None)
     worktree = _worktree(store, slug, agent, run)
+    branch = _branch(worktree, run) if worktree else UNKNOWN
     return {
         "seat": agent.seat or UNKNOWN,
         "agent": agent.name,
@@ -33,7 +34,8 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
         "ledger": slug,
         "time": datetime.fromtimestamp(at / 1000, timezone.utc).isoformat(),
         "worktree": worktree or UNKNOWN,
-        "branch": _branch(worktree, run) if worktree else UNKNOWN,
+        "branch": branch,
+        **continuation(worktree, branch, run),
         "pull_request": _pull_request(row, run),
         "inbox": _open_items(store, agent),
         "claims": UNKNOWN if rows is None else [r["id"] for r in rows if store.claimant(slug, r["id"]) == agent.name],
@@ -70,6 +72,41 @@ def _branch(worktree, run):
     except FAILED:
         return UNKNOWN
     return (done.returncode == 0 and done.stdout.strip()) or UNKNOWN
+
+
+def continuation(worktree, branch, run):
+    """Where a successor on the same task cuts its worktree: the predecessor's branch on the remote, else fresh and why."""
+    remote = _remote_branch(worktree, branch, run) if branch != UNKNOWN else UNKNOWN
+    head = _remote_head(worktree, remote, run) if remote != UNKNOWN else UNKNOWN
+    if head not in (UNKNOWN, NONE):
+        return {"remote_branch": remote, "remote_head": head, "continue_from": f"origin/{remote}", "fresh_reason": NONE}
+    if remote == UNKNOWN:
+        why = "the predecessor's branch is unknown"
+    elif head == NONE:
+        why = f"branch {remote} is not on the remote"
+    else:
+        why = f"the remote head of branch {remote} could not be read"
+    return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
+
+
+def _remote_branch(worktree, branch, run):
+    argv = ["git", "-C", worktree, "rev-parse", "--abbrev-ref", "@{upstream}"]
+    try:
+        upstream = run(argv, capture_output=True, text=True, timeout=10).stdout.strip()
+    except FAILED:
+        return branch
+    return upstream.removeprefix("origin/") if upstream.startswith("origin/") else branch
+
+
+def _remote_head(worktree, remote, run):
+    argv = ["git", "-C", worktree, "ls-remote", "--exit-code", "origin", f"refs/heads/{remote}"]
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=20)
+    except FAILED:
+        return UNKNOWN
+    if done.returncode == 2:
+        return NONE
+    return done.stdout.split()[0] if done.returncode == 0 else UNKNOWN
 
 
 def _pull_request(row, run):

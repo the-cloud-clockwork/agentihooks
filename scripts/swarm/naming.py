@@ -155,9 +155,13 @@ def is_worktree(name, environ, tmp=False):
 
 def scratch(environ, cwd):
     """`<repo>/<swarm>-<task>` for a swarm task, else `<repo>/<session base>`."""
-    swarm, task = environ.get("AGENTIHOOKS_SWARM"), _clean(environ.get("AGENTIHOOKS_SWARM_TASK") or "")
-    folder = f"{swarm}-{task}" if swarm and task else session_base(environ)
+    swarm, task = environ.get("AGENTIHOOKS_SWARM"), environ.get("AGENTIHOOKS_SWARM_TASK") or ""
+    folder = scratch_folder(swarm, task) if swarm and _clean(task) else session_base(environ)
     return f"{repo_name(cwd)}/{folder}"
+
+
+def scratch_folder(swarm, task):
+    return f"{swarm}-{_clean(task)}"
 
 
 def plan_slug(plan, date):

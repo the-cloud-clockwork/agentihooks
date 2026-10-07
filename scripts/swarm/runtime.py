@@ -1,4 +1,5 @@
-"""Swarm agents as herdr panes: spawn through init-agent, find live ones by name, close through terminate-agent."""
+"""Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
+spawn."""
 
 import os
 import shutil
@@ -20,6 +21,7 @@ from scripts.swarm import (
     priming_trace,
     profile_choice,
     prompt,
+    reaper,
 )
 from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, codex_split
@@ -128,6 +130,8 @@ class HerdrRuntime:
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
         self._binding_pids = {}
+        self.refusals = {}
+        self.end, self.reap = reaper.retire, reaper.reap
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -231,7 +235,10 @@ class HerdrRuntime:
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
         placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
-            self.retire(replace(agent, pane_id=placed.pane_id), True)
+            self.retire(
+                replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
+                homes=reaper.scratch_homes(config.slug, agent.task),
+            )
             raise SpawnError(f"herdr never showed conversation {agent.conversation_id} on pane {placed.pane_id}")
         return replace(
             placed, model_source=picked.source, profile_decision={**agent.profile_decision, **placed.profile_decision}
@@ -265,6 +272,7 @@ class HerdrRuntime:
 
     def _launch(self, config, lane, task_id, name, argv):
         agent = argv[argv.index("--agent") + 1]
+        launched_at = int(time.time() * 1000)
         try:
             proc = self.run(
                 argv,
@@ -304,6 +312,7 @@ class HerdrRuntime:
             fields.get("placement", ""),
             validated["profile"],
             profile_decision={"validation": validated},
+            launched_at=launched_at,
         )
 
     def recover(self, name: str) -> Placed:
@@ -336,10 +345,6 @@ class HerdrRuntime:
                 self._binding_pids[agent.name] = None
         return facts
 
-    def pane_open(self, agent: AgentRecord) -> bool:
-        found = self._get(pane_target(agent))
-        return found is not None and _owns(found, agent)
-
     def _terminate(self, name):
         selector = self._binding_pids.get(name, name)
         if selector is None:
@@ -352,15 +357,32 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, live):
-        if live and not self._terminate(agent.name):
+    def retire(self, agent, homes=()):
+        """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
+        then close the pane; the agent's name alone never selects a process."""
+        pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
+        outcome = self.end(agent.name, pid, list(homes))
+        if outcome.refusal:
+            self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
             return False
         if agent.pane_id:
             try:
                 self.herdr(["pane", "close", agent.pane_id])
             except Exception as exc:
-                return "not found" in str(exc)
+                if "not found" not in str(exc):
+                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
+                    return False
+        self.refusals.pop(agent.name, None)
         return True
+
+    def refusal(self, agent):
+        return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
+
+    def reap_name(self, name):
+        from scripts.terminate_agent import sessions
+
+        pids = [s.process.pid for s in sessions() if s.name == name]
+        return not self.reap(pids).refusal
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:

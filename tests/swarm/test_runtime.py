@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm.reaper import Outcome
 from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
 from scripts.swarm.store import AgentRecord
 from tests.swarm.profile_fixture import validated
@@ -31,6 +32,28 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM"] == "swarm-buildout"
     assert seen["env"]["AGENTIHOOKS_SWARM_LANE"] == "eng"
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
+
+
+def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
+    clock = iter([5_000.0, 9_000.0])
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+
+    def run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        codex_share=None,
+        codex_min_week_left=0,
+        lanes={},
+        autonomy="delegate",
+    )
+    placed = runtime.spawn(config, "eng", "sw-eng-1", {"id": "t1", "title": "x"})
+    assert placed.launched_at == 5_000_000
 
 
 @pytest.mark.parametrize(
@@ -620,13 +643,17 @@ def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
     assert "--route" not in _passed(seen["runs"][0])
 
 
-def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path):
+def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path, scratch):
     from scripts.swarm.tick import SpawnError
 
+    homes = scratch("t1")
     runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
+    ended = []
+    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome()
     with pytest.raises(SpawnError, match="conversation c0ffee"):
         runtime.resume(config, agent, "you were restored")
-    assert any("terminate-agent" in argv for argv in seen["runs"])
+    assert ended == [("engineer@a1b2c3-0001", 123, homes)]
+    assert not any("terminate-agent" in argv for argv in seen["runs"])
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 

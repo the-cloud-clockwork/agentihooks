@@ -191,6 +191,21 @@ def test_tick_passes_a_launch_that_joined(store, monkeypatch):
     assert launch_check.report(store, "sw", "t1")["state"] == "passed"
 
 
+def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    spawn = runtime.spawn
+
+    def late(config, lane, name, task, spawns=None):
+        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+
+    runtime.spawn = late
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 100_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 105_000)
+    assert f"{name} passed its launch check in 50 seconds" in actions
+
+
 def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -204,7 +219,8 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
-def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
+def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
+    homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
     runtime.profile = "anton"
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -213,6 +229,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert any(a.startswith(f"retired {first} after its launch check failed on profile") for a in actions)
     assert first in runtime.killed
+    assert runtime.homes[first] == homes
     failed = launch_check.report(store, "sw", "t1")
     assert (failed["at"], failed["elapsed_ms"], failed["held"]) == (LAUNCH + 60_000, 60_000, False)
     assert runtime.tasks[1]["launch_assignment"]["profile"] == "engineer"

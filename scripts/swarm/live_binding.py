@@ -145,18 +145,22 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
     return min(registered or named.values(), key=lambda s: s.process.start_time, default=None)
 
 
-def unknown(agent: AgentRecord) -> list[str]:
+def _unheld(agent: AgentRecord) -> list[str]:
     held = assignment(agent)
     if not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness):
         held["home"] = ""
     return [field for field, value in held.items() if not value]
 
 
+def unknown(agent: AgentRecord, facts: dict) -> list[str]:
+    return [field for field in _unheld(agent) if facts.get(field)]
+
+
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
     expected = {**assignment(agent), "hooks": True}
-    missing = unknown(agent)
+    missing = _unheld(agent)
     return {
         field: {"expected": value, "actual": facts.get(field)}
         for field, value in expected.items()
@@ -175,7 +179,7 @@ def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms
         "differences": differences,
     }
     if "pane" not in facts and facts.get("process") is not False:
-        report["unknown"] = unknown(agent)
+        report["unknown"] = unknown(agent, facts)
     store.redis.hset(store.key(slug, "live-bindings"), agent.name, json.dumps(report))
     return differences
 

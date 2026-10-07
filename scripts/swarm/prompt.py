@@ -185,6 +185,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     lines += workspace_lines(task)
     if task.get("pr_url"):
         lines.append(f"An earlier agent already opened {task['pr_url']}: continue it instead of starting over.")
+    lines += continuation_lines(task)
     lines += priming_lines(task)
     if lane == "ci":
         lines.append(
@@ -193,11 +194,11 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         )
     lines += [
         "",
-        f"Before anything else, read the ledger {ledger_path(slug)} in full: every task and its state, "
-        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
+        f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
+        f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"You are a member of the ledger crew. Run once: {led} join. {INBOX_LINE} Act on every OPERATOR line about "
-        f"your work, then run {led} ack.",
+        f"Then read the ledger {ledger_path(slug)} in full: every task and its state, "
+        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
@@ -207,7 +208,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
         "",
-        *kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy, task["id"]),
+        *continued(kind_steps(ledger_kinds.kind(task), me, led, name, phase, autonomy, task["id"]), name, task),
         "",
         "If your context nears its limit a hook tells you to write a handoff document: use the handoff skill "
         f"for the Handoff v2 body with what you did, where you stopped and what you promised, then run {me} handoff <doc> and stop; a "
@@ -299,6 +300,34 @@ def handoff_lines(task):
     else:
         lines.append("Read first: missing from the handoff document.")
     return lines
+
+
+def _continue_from(task):
+    ref = (task.get("handoff_envelope") or {}).get("continue_from")
+    return ref if ref and ref.startswith("origin/") else ""
+
+
+def continuation_lines(task):
+    envelope = task.get("handoff_envelope") or {}
+    ref = _continue_from(task)
+    if ref:
+        branch = ref.removeprefix("origin/")
+        return [
+            f"Your predecessor's branch {branch} is on the remote at {envelope['remote_head']}: continue it. The "
+            f"worktree step below cuts your worktree from it; push with git push -u origin HEAD:{branch} so its "
+            "commits and its pull request carry on."
+        ]
+    if envelope.get("continue_from") == "fresh":
+        return [f"Start your worktree fresh from dev: {envelope['fresh_reason']}."]
+    return []
+
+
+def continued(steps, name, task):
+    ref = _continue_from(task)
+    if not ref:
+        return steps
+    cut = f"wt.sh new {naming.plain(name)}"
+    return [step.replace(cut, f"{cut} --from {ref}") for step in steps]
 
 
 def learned_lines(learned):

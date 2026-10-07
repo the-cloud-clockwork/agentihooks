@@ -22,6 +22,13 @@ def closing(env, monkeypatch, tmp_path):  # noqa: F811
     return store, ledger, rt, tmp_path
 
 
+def test_close_retires_each_agent_with_its_task_scratch_homes(closing, scratch):
+    store, ledger, rt, tmp_path = closing
+    homes = {a.name: scratch(a.task) for a in store.agents("sw")}
+    assert run("sw", "close", "--now", "--note", "Done.") == 0
+    assert rt.homes == homes
+
+
 def test_close_writes_the_summary_snapshots_retires_everyone_and_marks_the_ledger_closed(closing, capsys):
     store, ledger, rt, tmp_path = closing
     store.culture.set("sw", "be kind")

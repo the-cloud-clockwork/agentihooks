@@ -57,6 +57,7 @@ class FakeRuntime:
         self.fail, self.full, self.crash, self.statuses, self.stuck = fail, full, crash, {}, set()
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
+        self.homes, self.duplicates, self.refusals, self.reaped = {}, set(), {}, []
 
     def has_capacity(self, config):
         self.capacity_for.append(config.slug)
@@ -97,16 +98,25 @@ class FakeRuntime:
 
         return {a.name: {**assignment(a), "hooks": True} for a in agents if a.name in self.live}
 
-    def pane_open(self, agent):
-        return bool(agent.pane_id) and agent.pane_id not in self.closed
-
-    def retire(self, agent, live):
+    def retire(self, agent, homes=()):
+        self.homes[agent.name] = list(homes)
         if agent.name in self.stuck:
             return False
-        if live:
+        if agent.name in self.live:
             self.killed.append(agent.name)
-            self.live.discard(agent.name)
+            if agent.name not in self.duplicates:
+                self.live.discard(agent.name)
         self.closed.append(agent.pane_id)
+        return True
+
+    def refusal(self, agent):
+        return self.refusals.get(agent.name, {"process": 0, "refusal": "stuck"})
+
+    def reap_name(self, name):
+        self.reaped.append(name)
+        if name in self.stuck:
+            return False
+        self.live.discard(name)
         return True
 
     def status(self, agent):
@@ -525,6 +535,145 @@ def test_a_finished_agent_that_will_not_die_stays_registered(store):
     assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0001"]
 
 
+def test_a_finished_agent_frees_its_slot_on_the_same_tick(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["state"] = "done"
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert actions.index("retired engineer@a1b2c3-0001") < actions.index("spawned engineer@a1b2c3-0002 for t2")
+    assert [a.name for a in workers(store)] == ["engineer@a1b2c3-0002"]
+
+
+def test_a_finished_agent_whose_retire_fails_holds_no_lane_slot(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = workers(store)[0]
+    store.put_agent("sw", replace(first, state="finished"))
+    runtime.stuck.add(first.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t2")
+
+
+def test_an_agent_whose_task_ended_holds_no_lane_slot(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["state"] = "blocked"
+    runtime.stuck.add("engineer@a1b2c3-0001")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.spawned[-1] == ("eng", "engineer@a1b2c3-0002", "t2")
+
+
+def test_a_working_agent_still_holds_its_lane_slot(store):
+    store.update("sw", max_eng=1)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [s[2] for s in runtime.spawned] == ["t1"]
+
+
+def test_the_reap_retires_with_the_task_scratch_homes(store, scratch):
+    homes, (ledger, runtime) = scratch("t1"), (tasks(("t1", "eng")), FakeRuntime())
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["state"] = "done"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_retire_failing_three_ticks_is_a_health_finding(store):
+    from scripts.swarm import retire_watch
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = workers(store)[0]
+    store.put_agent("sw", replace(first, state="finished"))
+    runtime.stuck.add(first.name)
+    runtime.refusals[first.name] = {"process": 4242, "refusal": "signal to 4242 refused: Operation not permitted"}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert retire_watch.findings(store, "sw") == []
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    assert [(r["since"], r["at"]) for r in retire_watch.rows(store, "sw")] == [(2_000, 4_000)]
+    (found,) = retire_watch.findings(store, "sw")
+    assert found.id == f"retire-failed/{first.name}"
+    assert found.evidence == ("process 4242", "refusal: signal to 4242 refused: Operation not permitted")
+    runtime.stuck.clear()
+    tick("sw", store, ledger, runtime, now_ms=5_000)
+    assert retire_watch.findings(store, "sw") == []
+
+
+def test_a_resumed_duplicate_is_reaped_on_the_tick_that_retires_its_agent(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = workers(store)[0]
+    runtime.duplicates.add(first.name)
+    runtime.live.add("ci@d4e5f6-0001")
+    ledger.rows["t1"]["state"] = "done"
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert f"reaped stray {first.name}" in actions
+    assert runtime.reaped == [first.name] and first.name not in runtime.live
+
+
+def test_the_stray_sweep_spares_every_name_the_swarm_still_records_or_never_issued(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.live |= {"engineer@d4e5f6-0001", "engineer@a1b2c3-0099", "operator-shell", ""}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.reaped == []
+
+
+def test_a_stray_that_will_not_die_is_retried_next_tick(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    first = workers(store)[0]
+    runtime.duplicates.add(first.name)
+    runtime.stuck.add(f"{first.name}")
+    store.drop_agent("sw", first.name, at=1_500)
+    actions = tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert f"could not reap stray {first.name}, retrying next tick" in actions
+
+
+def test_a_lost_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.live.discard("engineer@a1b2c3-0001")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STARTUP_GRACE_MS)
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_stalled_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
+    idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
+    assert runtime.killed == ["engineer@a1b2c3-0001"]
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_mismatched_agent_is_retired_with_its_task_scratch_homes(store, scratch):
+    homes = scratch("t1")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.bindings = lambda agents: {a.name: {"process": False} for a in agents if a.lane != MASTER}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.homes["engineer@a1b2c3-0001"] == homes
+
+
+def test_a_stopping_master_is_retired_with_the_master_scratch_homes(store, scratch, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    homes, runtime = scratch(MASTER), FakeRuntime()
+    tick("sw", store, tasks(), runtime, now_ms=1_000)
+    store.update("sw", state="stopping")
+    tick("sw", store, tasks(), runtime, now_ms=2_000)
+    assert runtime.homes["master@a1b2c3-0001"] == homes
+
+
 def test_a_drained_swarm_wakes_up_for_new_tasks(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     ledger.rows["t1"]["state"] = "done"
@@ -580,6 +729,7 @@ def test_a_paused_or_drained_swarm_keeps_its_master_and_a_stopped_one_has_none(s
     assert store.config("sw").state == "drained" and [a.name for a in masters(store)] == ["master@a1b2c3-0001"]
     store.update("sw", state="stopped")
     store.drop_agent("sw", "master@a1b2c3-0001")
+    runtime.live.discard("master@a1b2c3-0001")
     assert tick("sw", store, tasks(), runtime, 3) == [] and len(runtime.masters) == 1
 
 

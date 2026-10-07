@@ -6,7 +6,7 @@ import pytest
 
 from scripts.inbox import exits
 from scripts.inbox.store import InboxStore
-from scripts.swarm import launch_check, live_binding, master_retire
+from scripts.swarm import launch_check, lifetime, live_binding, master_retire
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -207,15 +207,90 @@ def test_a_worker_record_with_an_empty_field_is_flagged_and_never_retired():
     assert (report["differences"], report["unknown"]) == ({}, ["account"])
 
 
-def test_unknown_names_each_field_the_record_never_held():
+def test_unknown_names_each_empty_field_the_live_process_holds():
     from scripts.swarm.store import AgentRecord
 
+    live = {"harness": "claude", "home": "/h", "profile": "master", "model": "opus", "effort": "high", "account": "t"}
     bare = AgentRecord("master@zz", MASTER, MASTER)
-    assert live_binding.unknown(bare) == ["harness", "home", "profile", "model", "effort", "account"]
+    assert live_binding.unknown(bare, live) == ["harness", "home", "profile", "model", "effort", "account"]
+    assert live_binding.unknown(bare, {**live, "account": "", "model": ""}) == ["harness", "home", "profile", "effort"]
     held = replace(bare, harness="claude", profile="master", model="opus", effort="high", account="team")
-    assert live_binding.unknown(held) == []
+    assert live_binding.unknown(held, live) == []
     validated = replace(bare, profile_decision={"validation": {"home": "/h", "model": "opus", "effort": "high"}})
-    assert live_binding.unknown(validated) == ["harness", "profile", "account"]
-    assert live_binding.unknown(replace(held, harness="")) == ["harness", "home"]
-    assert live_binding.unknown(replace(held, profile="")) == ["home", "profile"]
-    assert live_binding.compare(bare, {"harness": "codex", "model": "x", "hooks": True}) == {}
+    assert live_binding.unknown(validated, live) == ["harness", "profile", "account"]
+    assert live_binding.unknown(replace(held, harness=""), live) == ["harness", "home"]
+    assert live_binding.unknown(replace(held, profile=""), live) == ["home", "profile"]
+    assert live_binding.compare(bare, {**live, "hooks": True}) == {}
+    assert live_binding.compare(bare, {**live, "hooks": False}) == {"hooks": {"expected": True, "actual": False}}
+
+
+def test_only_a_compared_report_carries_unknown_fields(swarm):
+    store, _, _, master = swarm
+    bare = replace(master, account="")
+    live_binding.record(store, "sw", bare, {"pane": "open"}, 1)
+    assert "unknown" not in json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))
+    live_binding.record(store, "sw", bare, {"process": False}, 2)
+    assert "unknown" not in json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))
+    facts = {**live_binding.assignment(master), "hooks": True}
+    live_binding.record(store, "sw", bare, facts, 3)
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["unknown"] == ["account"]
+    (finding,) = live_binding.findings(store, "sw")
+    assert finding.summary == f"{master.name} has no recorded account"
+    assert finding.evidence == ("the record never held account, so it is not compared and never retires the agent",)
+    assert (finding.threshold, finding.measure) == ("assigned launch must be recorded", 1)
+
+
+def test_a_request_is_kept_under_its_own_key_with_its_time_reason_and_item(swarm):
+    store, _, _, master = swarm
+    assert master_retire.hold(store, "sw", master, "a test", True, 200).startswith("asked")
+    record = json.loads(store.redis.hget(store.key("sw", "master-retire-requests"), master.name))
+    (ask,) = asks(store, master.name)
+    assert record == {"at": 200, "reason": "a test", "item": ask.id}
+    assert ask.sender == "swarm"
+    assert master_retire.reason(store, "sw", master.name) == "a test"
+
+
+def test_a_finished_master_is_never_asked(swarm):
+    store, _, _, master = swarm
+    assert master_retire.hold(store, "sw", replace(master, state="finished"), "test", True, 200) == ""
+    assert asks(store, master.name) == []
+
+
+def test_a_fractional_wait_still_asks_and_holds(swarm, monkeypatch):
+    store, _, _, master = swarm
+    monkeypatch.setenv(master_retire.MINUTES, "0.5")
+    assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
+    assert "0.5 minutes" in asks(store, master.name)[0].text
+    assert master_retire.hold(store, "sw", master, "test", True, 200 + 29_999).startswith("waiting")
+    assert master_retire.hold(store, "sw", master, "test", True, 200 + 30_000) == ""
+
+
+def test_forget_closes_an_open_request_once_and_reports_whether_one_existed(swarm):
+    store, _, _, master = swarm
+    inbox = InboxStore(store.redis)
+    assert master_retire.forget(store, "sw", master.name) is False
+    master_retire.hold(store, "sw", master, "test", True, 200)
+    (ask,) = asks(store, master.name)
+    inbox.close(ask.id, master.name, "done", "handed off")
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert inbox.get(ask.id).state == "done"
+    assert master_retire.reason(store, "sw", master.name) == ""
+    master_retire.hold(store, "sw", master, "again", True, 300)
+    second = next(i for i in asks(store, master.name) if i.id != ask.id)
+    master_retire.forget(store, "sw", master.name)
+    assert inbox.get(second.id).state == "done"
+
+
+def test_the_idle_limit_leaves_a_master_held_for_another_reason_alone(swarm):
+    store, runtime, ledger, master = swarm
+    hours = 6 * 60 * 60 * 1000
+    runtime.statuses[master.name] = "idle"
+    mismatch(runtime, master.name, model="sonnet")
+    tick("sw", store, ledger, runtime, hours + 200)
+    assert master_retire.reason(store, "sw", master.name) == "mismatched model"
+    assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
+    actions = tick("sw", store, ledger, runtime, hours + 200 + WAIT)
+    assert any(a.startswith(f"retired {master.name} after mismatched model") for a in actions)
+    assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
+    assert runtime.masters[-1][0] != master.name
+    assert lifetime.IDLE_LIMIT == "the swarm idle limit"

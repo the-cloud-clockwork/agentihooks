@@ -25,6 +25,22 @@ def isolate_classifier(monkeypatch):
     monkeypatch.setattr(intent, "pr_view", lambda url, run=None: None)
 
 
+@pytest.fixture
+def scratch(tmp_path, monkeypatch):
+    """Task scratch folders for swarm sw under a stand-in scratchpad: each task id maps to its resolved folder."""
+    from scripts.swarm import reaper
+
+    root = tmp_path / "scratchpad"
+    monkeypatch.setattr(reaper, "SCRATCH", root)
+
+    def home(task):
+        path = root / "repo" / f"sw-{task}"
+        path.mkdir(parents=True, exist_ok=True)
+        return [path.resolve()]
+
+    return home
+
+
 @pytest.fixture(autouse=True)
 def unchecked_launches(request, monkeypatch):
     from scripts.swarm import launch_check
