@@ -100,6 +100,8 @@ def _blocks(entry: dict) -> list:
 def _is_prompt(entry: dict) -> bool:
     if entry.get("type") != "user" or entry.get("isMeta"):
         return False
+    if entry.get("uuid", "").startswith("codex-") and _text(_blocks(entry)).startswith("# AGENTS.md instructions for "):
+        return False
     message = entry.get("message")
     if isinstance(message, dict) and isinstance(message.get("content"), str):
         return True

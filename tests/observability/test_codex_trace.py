@@ -1,6 +1,8 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from hooks.observability import agent_trace
 
 RECORDS = [
@@ -81,6 +83,74 @@ def test_codex_native_records_reach_shared_span_builder(tmp_path):
     assert sum(span.attributes["gen_ai.usage.input_tokens"] for span in generations) == 20
     assert sum(span.attributes["gen_ai.usage.cache_read_input_tokens"] for span in generations) == 10
     assert sum(span.attributes["gen_ai.usage.output_tokens"] for span in generations) == 5
+
+
+@pytest.mark.parametrize("instructions", [True, False])
+def test_codex_trace_input_is_opening_prompt(tmp_path, instructions):
+    records = [
+        {"type": "session_meta", "payload": {"id": "codex-opening"}},
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "# AGENTS.md instructions for /workspace\n<INSTRUCTIONS>Rules</INSTRUCTIONS>",
+                    },
+                    {"type": "input_text", "text": "<environment_context>Workspace</environment_context>"},
+                ],
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Read the file"}],
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Explain # AGENTS.md instructions for /workspace"}],
+            },
+        },
+    ]
+    if not instructions:
+        records.pop(1)
+    path = tmp_path / "opening.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps({"timestamp": f"2026-10-05T10:00:{index:02d}Z", **record})
+            for index, record in enumerate(records)
+        )
+        + "\n"
+    )
+    entries = agent_trace.read_entries(str(path))
+    spans = agent_trace.session_spans(entries, agent_trace.Identity("codex-opening", "manual", "", "", "", ""))
+    assert spans[0].attributes["langfuse.trace.input"] == "Read the file"
+    assert spans[0].attributes["agent.turns"] == 2
+    assert [span.name for span in spans] == ["manual", "turn 1", "turn 2"]
+
+
+@pytest.mark.parametrize("uuid", ["claude-prompt", ""])
+def test_non_codex_instruction_prompt_remains_trace_input(uuid):
+    prompt = "# AGENTS.md instructions for /workspace\nPlease explain these rules"
+    entries = [
+        {
+            "type": "user",
+            "uuid": uuid,
+            "timestamp": "2026-10-05T10:00:00Z",
+            "message": {"content": [{"type": "text", "text": prompt}]},
+        }
+    ]
+    spans = agent_trace.session_spans(entries, agent_trace.Identity("claude-opening", "manual", "", "", "", ""))
+    assert spans[0].attributes["langfuse.trace.input"] == prompt
+    assert spans[0].attributes["agent.turns"] == 1
 
 
 def test_codex_export_uses_existing_exporter_and_cursor(tmp_path, monkeypatch):
