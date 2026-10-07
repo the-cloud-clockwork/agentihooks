@@ -15,7 +15,15 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from tests.swarm_ledger.ledger_page import chromium, ledger_state, shell_html, show  # noqa: E402
+from tests.swarm_ledger.ledger_page import (  # noqa: E402
+    PAGE_URL,
+    chromium,
+    ledger_state,
+    loaded,
+    serve_modules,
+    shell_html,
+    show,
+)
 
 SLUG = "static-shell"
 CONTENT = {
@@ -234,5 +242,23 @@ def test_the_rendered_page_stays_bounded_as_history_doubles(chromium_browser):
         page.click("#tasks-box > summary")
         page.wait_for_selector("#tasks .page-more button")
         assert page.locator("#tasks li[id^='item-tasks-']").count() == 50
+    finally:
+        page.close()
+
+
+def test_a_deep_link_past_the_first_page_of_a_closed_fold_reveals_its_target(chromium_browser):
+    page = chromium_browser.new_page(viewport={"width": 1920, "height": 1080})
+    try:
+        page.route(PAGE_URL, lambda route: route.fulfill(body=shell_html(), content_type="text/html; charset=utf-8"))
+        serve_modules(page, ledger_state(history(2)), None)
+        page.goto(PAGE_URL + "#item-tasks-t299")
+        loaded(page)
+        target = page.locator("#item-tasks-t299")
+        target.wait_for()
+        assert target.evaluate("el => el.closest('details#tasks-done').open")
+        assert target.is_visible()
+        assert target.evaluate(
+            "el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }"
+        )
     finally:
         page.close()
