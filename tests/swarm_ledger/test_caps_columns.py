@@ -41,12 +41,12 @@ def caps_boxes(browser, width):
 
 
 @pytest.mark.parametrize("width", [1300, 390])
-def test_each_cap_keeps_its_name_value_minus_and_plus_on_one_line_inside_the_strip(browser, width):
+def test_each_cap_keeps_its_name_minus_value_and_plus_on_one_line_inside_the_strip(browser, width):
     boxes = caps_boxes(browser, width)
     assert len(boxes["caps"]) == 7
-    for name, value, minus, plus in boxes["caps"]:
+    for name, minus, value, plus in boxes["caps"]:
         middle = (value["top"] + value["bottom"]) / 2
         for part in (name, minus, plus):
             assert part["top"] <= middle <= part["bottom"]
-        assert name["right"] <= value["left"] <= value["right"] <= minus["left"] <= minus["right"] <= plus["left"]
+        assert name["right"] <= minus["left"] <= minus["right"] <= value["left"] <= value["right"] <= plus["left"]
         assert plus["right"] <= boxes["strip"]["right"]

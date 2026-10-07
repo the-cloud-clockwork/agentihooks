@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from scripts import agents_quota, codex_quota
 from scripts.claude_quota_balancer import ProbeResult, QuotaWindow
 from scripts.codex_router import CodexAccount
@@ -221,14 +223,23 @@ def test_page_quota_reads_the_balance_cache_and_codex_logs_without_probing(monke
     assert quota["probed_at"] == 1.0
 
 
+@pytest.fixture(autouse=True)
+def no_stored_caps(monkeypatch):
+    from scripts import session_caps
+
+    monkeypatch.setattr(session_caps, "stored", lambda harness="claude": {})
+
+
 def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkeypatch):
     agents_quota._page_cache.clear()
     agents_quota._last_refresh.clear()
     probes = []
-    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [now]})
+    monkeypatch.setattr(
+        agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [{"agent": "claude", "account": "a", "at": now}]}
+    )
     agents_quota.page_quota(now=1000.0)
     assert agents_quota.refresh_page_quota(lambda: probes.append(1) or "", now=1010.0) == ""
-    assert agents_quota.page_quota(now=1011.0)["rows"] == [1011.0]
+    assert agents_quota.page_quota(now=1011.0)["rows"][0]["at"] == 1011.0
     assert agents_quota.refresh_page_quota(lambda: probes.append(2) or "", now=1069.0) == ""
     assert probes == [1]
     assert agents_quota.refresh_page_quota(lambda: probes.append(3) or "", now=1070.0) == ""
@@ -238,10 +249,12 @@ def test_page_quota_refresh_probes_once_a_minute_and_drops_the_page_cache(monkey
 def test_a_failed_refresh_keeps_the_cache_and_retries_on_the_next_call(monkeypatch):
     agents_quota._page_cache.clear()
     agents_quota._last_refresh.clear()
-    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [now]})
+    monkeypatch.setattr(
+        agents_quota, "_page_quota", lambda now: {"cap": 3, "rows": [{"agent": "claude", "account": "a", "at": now}]}
+    )
     agents_quota.page_quota(now=1000.0)
     assert agents_quota.refresh_page_quota(lambda: "probe timed out", now=1010.0) == "probe timed out"
-    assert agents_quota.page_quota(now=1011.0)["rows"] == [1000.0]
+    assert agents_quota.page_quota(now=1011.0)["rows"][0]["at"] == 1000.0
     assert agents_quota.refresh_page_quota(lambda: "", now=1011.0) == ""
 
 
@@ -269,8 +282,12 @@ def test_page_quota_routes_the_environment_and_names_each_source(monkeypatch):
 def test_page_quota_is_reused_for_a_minute(monkeypatch):
     calls = []
     agents_quota._page_cache.clear()
-    monkeypatch.setattr(agents_quota, "_page_quota", lambda now: calls.append(now) or {"cap": 3, "rows": [now]})
-    assert agents_quota.page_quota(now=1000.0)["rows"] == [1000.0]
-    assert agents_quota.page_quota(now=1059.0)["rows"] == [1000.0]
-    assert agents_quota.page_quota(now=1060.0)["rows"] == [1060.0]
+    monkeypatch.setattr(
+        agents_quota,
+        "_page_quota",
+        lambda now: calls.append(now) or {"cap": 3, "rows": [{"agent": "claude", "account": "a", "at": now}]},
+    )
+    assert agents_quota.page_quota(now=1000.0)["rows"][0]["at"] == 1000.0
+    assert agents_quota.page_quota(now=1059.0)["rows"][0]["at"] == 1000.0
+    assert agents_quota.page_quota(now=1060.0)["rows"][0]["at"] == 1060.0
     assert calls == [1000.0, 1060.0]
