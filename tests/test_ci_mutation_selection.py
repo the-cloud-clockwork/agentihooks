@@ -215,11 +215,19 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert namespace.get("__doc__") == ("sample contract" if header else None)
         assert Path.cwd() == cwd
         assert engine_config.Config.get().source_paths == [project / "hooks"]
+        (tmp_path / "copy").mkdir()
         copy = {"__file__": str(tmp_path / "copy/scripts/sample.py"), "observe": observe}
         engine_config.Config.reset()
         exec(stream.getvalue(), copy)
         assert observations == [cwd, cwd]
         assert engine_config.Config.get().source_paths == [project / "hooks"]
+        (tmp_path / "inner").mkdir()
+        (tmp_path / "inner/pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+        inner = {"__file__": str(tmp_path / "inner/scripts/sample.py"), "observe": lambda: None}
+        engine_config.Config.reset()
+        exec(stream.getvalue(), inner)
+        assert engine_config.Config.get().source_paths == [Path("scripts/")]
+        assert Path.cwd() == cwd
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 0
         assert runner.collect_or_load_stats(test_runner) == "collected"
