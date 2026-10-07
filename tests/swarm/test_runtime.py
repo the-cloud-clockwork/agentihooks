@@ -327,14 +327,15 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
     assert "--route" not in argv
 
 
-def test_a_codex_lane_pin_refuses_a_claude_only_profile(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("lane", "label"), [("eng", "lane harness"), ("master", "master affinity")])
+def test_a_codex_lane_pin_refuses_a_claude_only_profile(tmp_path, monkeypatch, lane, label):
     from scripts.swarm.runtime import plugins
     from scripts.swarm.tick import SpawnError
 
     monkeypatch.setattr(plugins, "claude_only", lambda profile: True)
     with pytest.raises(SpawnError) as error:
-        _spawn_seen(tmp_path, {"eng": {"agent": "codex", "profile": "engineer"}})
-    assert str(error.value) == "lane harness codex cannot mount the claude only profile engineer"
+        _spawn_seen(tmp_path, {lane: {"agent": "codex", "profile": "engineer"}}, lane=lane)
+    assert str(error.value) == f"{label} codex cannot mount the claude only profile engineer"
 
 
 def _passed(argv):
