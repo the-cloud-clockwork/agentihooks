@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, live_binding, master_start, model_pick
+from scripts.swarm import affinity, effort_range, master_start, model_pick
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_path
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
@@ -54,7 +54,7 @@ def _previous(store, slug):
     names = {p.agent.name for p in current}
     history = [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)]
     ended = [
-        Previous(AgentRecord(**{k: v for k, v in row.items() if k in RECORD_FIELDS}), row.get("ended_at") or 0)
+        Previous(AgentRecord(**{k: v for k, v in row.items() if k in RECORD_FIELDS}), row["ended_at"])
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
@@ -99,9 +99,7 @@ def _why(previous, config, live):
 def _resume(store, slug, runtime, at, previous):
     config = store.ensure_code(slug)
     seat = seat_address(slug, MASTER)
-    agent = replace(
-        previous.agent, lane=MASTER, task=MASTER, seat=seat, profile=previous.agent.profile or _profile(config)
-    )
+    agent = replace(previous.agent, task=MASTER, seat=seat, profile=previous.agent.profile or _profile(config))
     text = RESUMED.format(slug=slug, name=agent.name, ledger=ledger_path(slug))
     placed = runtime.resume(config, agent, text)
     store.seats.occupy(seat, agent.name, at)
@@ -133,13 +131,11 @@ def fill(saved, config):
 
 
 def _filled(task, config):
-    saved = task.get("launch_assignment")
-    if saved is not None and not live_binding.complete(saved):
-        task = {**task, "launch_assignment": fill(saved, config)}
+    if "launch_assignment" in task:
+        task = {**task, "launch_assignment": fill(task["launch_assignment"], config)}
     envelope = task.get("handoff_envelope") or {}
-    launch = envelope.get("launch")
-    if (task.get("handoff") or launch) and not live_binding.complete(launch):
-        task = {**task, "handoff_envelope": {**envelope, "launch": fill(launch or {}, config)}}
+    if task.get("handoff") or envelope.get("launch"):
+        task = {**task, "handoff_envelope": {**envelope, "launch": fill(envelope.get("launch") or {}, config)}}
     return task
 
 

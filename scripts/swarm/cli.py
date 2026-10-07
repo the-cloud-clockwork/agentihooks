@@ -378,7 +378,7 @@ def cmd_master(store, args):
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
     launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
-    ledger = LedgerClient()
+    ledger = LedgerClient(service=True)
     if ledger.closed(args.slug):
         ledger.reopen(args.slug, launched.master)
     if store.config(args.slug).state in ("stopped", "stopping"):
