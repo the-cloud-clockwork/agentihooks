@@ -173,10 +173,9 @@ def test_the_caller_group_is_never_signalled_whole(plant):
 
 
 def test_the_caller_chain_reaches_the_ancestors():
-    probe = "import os; from hooks.proc import processes; from scripts.swarm import reaper; print(os.getppid() in reaper._caller(processes()))"
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    done = subprocess.run([sys.executable, "-c", probe], cwd=root, capture_output=True, text=True, check=True)
-    assert done.stdout.strip() == "True"
+    me = os.getpid()
+    table = {me: _fake(me, 7, ppid=70), 70: _fake(70, 7, ppid=71), 71: _fake(71, 71, ppid=1)}
+    assert reaper._caller(table) == {me, 70, 71}
 
 
 def test_a_launch_that_does_not_lead_its_group_ends_with_the_whole_group():
