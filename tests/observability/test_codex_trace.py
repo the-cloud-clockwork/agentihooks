@@ -137,7 +137,7 @@ def test_codex_trace_input_is_opening_prompt(tmp_path, instructions):
     assert [span.name for span in spans] == ["manual", "turn 1", "turn 2"]
 
 
-@pytest.mark.parametrize("uuid", ["claude-prompt", ""])
+@pytest.mark.parametrize("uuid", ["claude-prompt", "", "codex-prompt"])
 def test_non_codex_instruction_prompt_remains_trace_input(uuid):
     prompt = "# AGENTS.md instructions for /workspace\nPlease explain these rules"
     entries = [
