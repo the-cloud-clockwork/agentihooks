@@ -405,6 +405,37 @@ def test_codex_patch_bumping_the_manifest_after_another_file_is_refused(tmp_path
     _refused(_codex_patch(readme, "@@", "-hello", "+hi", tail=bump))
 
 
+def test_codex_patch_with_two_sections_for_the_manifest_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    bump = (f"*** Update File: {target}", "@@", '-version = "2.17.0"', '+version = "2.18.0"')
+    _refused(_codex_patch(target, "@@", '-description = "old"', '+description = "new"', tail=bump))
+
+
+def test_codex_patch_anchor_selects_the_table_it_names(tmp_path):
+    bump = ('-version = "2.17.0"', '+version = "2.18.0"')
+    before = _manifest(tmp_path, '[tool.other]\nversion = "2.17.0"\n\n' + _STATIC)
+    _refused(_codex_patch(before, "@@ [project]", *bump))
+    after = _manifest(tmp_path, _STATIC + '\n[tool.other]\nversion = "2.17.0"\n')
+    check_version_guard(_codex_patch(after, "@@ [tool.other]", *bump))
+
+
+def test_codex_patch_with_a_missing_anchor_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
+    _refused(_codex_patch(target, "@@ [tool.absent]", *_SWITCH[1:]))
+
+
+def test_codex_patch_moving_a_file_over_the_manifest_is_refused(tmp_path):
+    notes = tmp_path / "notes.txt"
+    notes.write_text("a\n")
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(notes, f"*** Move to: {target}", "@@", "-a", "+b"))
+
+
+def test_codex_patch_moving_the_manifest_away_is_refused(tmp_path):
+    target = _manifest(tmp_path)
+    _refused(_codex_patch(target, f"*** Move to: {tmp_path / 'old.toml'}", "@@", ' name = "x"'))
+
+
 def test_codex_patch_deleting_the_manifest_is_refused(tmp_path):
     _refused(_codex_patch(_manifest(tmp_path), action="Delete"))
 

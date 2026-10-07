@@ -4,7 +4,10 @@ Version bumping should be handled by CI/CD workflows (release.yml),
 not by the AI editing pyproject.toml, package.json, Cargo.toml, etc.
 
 Raises BlockAction when Edit or Write targets a project manifest file
-and the content contains a version field change. pyproject.toml, Cargo.toml
+and the content contains a version field change. A Codex patch arrives as an
+Edit carrying the patch body and is judged per file section by the text it
+would leave; a section that cannot be applied falls back to the text check.
+pyproject.toml, Cargo.toml
 and package.json are judged by their parsed version keys and VERSION files by
 their content. The one allowed change is
 switching pyproject.toml from a static version to a setuptools-scm tag derived
@@ -55,7 +58,9 @@ _UNREADABLE = object()
 
 _PATCH_START = "*** Begin Patch"
 _PATCH_END = "*** End Patch"
-_PATCH_FILE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
+_PATCH_FILE = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$")
+_MOVE = "Move to"
+_MOVED_AWAY = ("Delete File", ())
 
 _TAG_SWITCH_HINT = (
     " Switching to a setuptools-scm tag derived version is allowed once [tool.setuptools_scm] exists:"
@@ -114,6 +119,10 @@ def _check_file(payload: dict, tool_name: str, tool_input: dict) -> None:
     if filename in _PARSED_FILES and _parsed_verdict(filename, target, tool_name, tool_input):
         return
 
+    _text_verdict(filename, tool_name, tool_input)
+
+
+def _text_verdict(filename: str, tool_name: str, tool_input: dict) -> None:
     # Check if the change touches a version field
     content = ""
     if tool_name == "Edit":
@@ -146,25 +155,31 @@ def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
 
 
 def _patch_section(patch: str, file_path: str) -> tuple[str, list[str]] | None:
-    action, lines = "", []
+    action, lines, collecting = "", [], False
     for line in patch.splitlines():
         header = _PATCH_FILE.match(line)
-        if action and (header or line == _PATCH_END):
-            break
-        if header and header.group(2).strip() == file_path:
-            action = header.group(1)
-        elif action:
-            lines.append(line)
+        if header is None:
+            if collecting and line != _PATCH_END:
+                lines.append(line)
+            continue
+        kind, path = header.group(1), header.group(2).strip()
+        if kind == _MOVE and (collecting or path == file_path):
+            return _MOVED_AWAY
+        if path == file_path and action:
+            return None
+        if kind != _MOVE:
+            collecting = path == file_path
+            action = kind if collecting else action
     return (action, lines) if action else None
 
 
 def _hunks(lines: list[str]):
-    hunk: list[str] = []
+    anchor, hunk = "", []
     for line in [*lines, "@@"]:
         if line.startswith("@@"):
             if hunk:
-                yield _side(hunk, "-"), _side(hunk, "+")
-            hunk = []
+                yield anchor, _side(hunk, "-"), _side(hunk, "+")
+            anchor, hunk = line[2:].strip(), []
         elif not line.startswith("*** "):
             hunk.append(line)
 
@@ -178,12 +193,21 @@ def _patched_text(patch: str, file_path: str, before: str) -> str | None:
     if section is None:
         return None
     action, lines = section
-    if action == "Delete":
+    if action == "Delete File":
         return ""
-    if action == "Add":
+    if action == "Add File":
         return _side(lines, "+")
-    text, start = before, 0
-    for old, new in _hunks(lines):
+    return _apply_hunks(before, lines)
+
+
+def _apply_hunks(text: str, lines: list[str]) -> str | None:
+    start = 0
+    for anchor, old, new in _hunks(lines):
+        if anchor:
+            found = re.compile(rf"^[ \t]*{re.escape(anchor)}[ \t]*$", re.MULTILINE).search(text, start)
+            if found is None:
+                return None
+            start = found.end()
         at = text.find(old, start) if old else len(text)
         if at < 0:
             return None
