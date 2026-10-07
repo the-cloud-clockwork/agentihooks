@@ -136,6 +136,43 @@ def test_terminating_an_agent_in_herdr_closes_its_pane(monkeypatch, capsys):
     assert "pane_id=w1:p7" in out and "pane=closed" in out
 
 
+@pytest.mark.parametrize("recorded_socket", [None, "", "/s/target.sock"])
+def test_termination_does_not_close_a_matching_pane_on_the_caller_server(
+    monkeypatch, tmp_path, capsys, recorded_socket
+):
+    from scripts import herdr_host, terminate_agent
+
+    item = session()
+    pane = "w1:p7"
+    default_socket = str(Path.home() / ".config" / "herdr" / "herdr.sock")
+    caller_socket = "/s/caller.sock"
+    target_socket = recorded_socket or default_socket
+    panes = {target_socket: {pane}, caller_socket: {pane}}
+    target_env = {"HERDR_PANE_ID": pane}
+    if recorded_socket is not None:
+        target_env["HERDR_SOCKET_PATH"] = recorded_socket
+    proc = _herdr_env(tmp_path, item.process.pid, **target_env)
+    read_pane = terminate_agent.herdr_pane
+    monkeypatch.setenv("HERDR_SOCKET_PATH", caller_socket)
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [item])
+    monkeypatch.setattr(terminate_agent, "validate", lambda selected, items, force_shared=False: [selected.process])
+    monkeypatch.setattr(terminate_agent, "terminate", lambda selected, members, timeout: False)
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: read_pane(pid, proc))
+    monkeypatch.setattr(herdr_host, "binary", lambda: "herdr-test")
+
+    def run(args, *, capture_output, text, env, timeout):
+        assert args == ["herdr-test", "pane", "close", pane]
+        endpoint = env.get("HERDR_SOCKET_PATH") or default_socket
+        panes[endpoint].remove(pane)
+        return subprocess.CompletedProcess(args, 0, stdout='{"result": {}}', stderr="")
+
+    monkeypatch.setattr(herdr_host.subprocess, "run", run)
+    assert main([item.session_id, "--type", "claude"]) == 0
+    assert panes[target_socket] == set()
+    assert panes[caller_socket] == {pane}
+    assert capsys.readouterr().out.endswith("result=terminated escalation=none\npane_id=w1:p7 pane=closed\n")
+
+
 def test_keep_pane_leaves_the_herdr_pane_open(monkeypatch, capsys):
     rc, closed = _terminate_in_herdr(monkeypatch, "--keep-pane")
     assert rc == 0 and closed == []
