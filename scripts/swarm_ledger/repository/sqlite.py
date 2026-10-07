@@ -169,7 +169,7 @@ class SQLiteLedgerRepository:
             row = connection.execute("SELECT deleted_at,restored_at FROM ledgers WHERE slug=?", (slug,)).fetchone()
         if row is None:
             raise KeyError(slug)
-        return dict(zip(("deleted_at", "restored_at"), row, strict=True))
+        return dict(zip(("deleted_at", "restored_at"), row))
 
     def _files(self):
         if self.files is None:

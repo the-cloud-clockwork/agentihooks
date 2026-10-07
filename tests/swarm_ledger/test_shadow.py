@@ -149,3 +149,23 @@ def test_interrupted_purge_reconciles_absent_shadow_on_restart(files, monkeypatc
     with pytest.raises(KeyError):
         repo.get_document("shadow")
     assert repo.registry("bin") == bin_storage.registries()["bin"]
+
+
+def test_sqlite_changes_operations_and_gate_keep_file_semantics(files):
+    from types import SimpleNamespace
+
+    shadow = SQLiteLedgerRepository(core.LEDGER_DIR / "ledger-shadow.sqlite3", files)
+    op = {"op": "add", "thread": "phases/p1/comments", "text": "New comment", "id": "new"}
+    state, rejected = shadow.apply_ops(
+        "shadow",
+        changes=[{"path": "phases/p1/done", "value": True}],
+        ops=[op],
+        gate=SimpleNamespace(apply=lambda *args: False),
+    )
+    assert state["phases"][0]["done"] is True
+    assert state["phases"][0]["comments"] == []
+    assert rejected == ["new"]
+    state, rejected = shadow.apply_ops("shadow", ops=[op])
+    assert rejected == []
+    assert state["phases"][0]["comments"][0]["text"] == "New comment"
+    assert shadow.get_document("shadow", reconcile=False) == state

@@ -135,3 +135,23 @@ def test_legacy_metadata_without_events_is_preserved(tmp_path):
     with pytest.raises(KeyError) as error:
         repo.lifecycle("missing")
     assert error.value.args == ("missing",)
+
+
+def test_nested_database_and_verification_failures(tmp_path, monkeypatch):
+    repo = SQLiteLedgerRepository(tmp_path / "nested" / "storage" / "shadow.sqlite3")
+    state = document()
+    with monkeypatch.context() as patch:
+        patch.setattr(repo, "_document", lambda *args: {})
+        with pytest.raises(ValueError) as error:
+            repo.import_document("ledger", state)
+        assert str(error.value) == "SQLite shadow document differs for ledger"
+    with pytest.raises(KeyError):
+        repo.get_document("ledger")
+    import scripts.swarm_ledger.repository.sqlite as storage
+
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, "sync_values", lambda *args: None)
+        with pytest.raises(ValueError) as error:
+            repo.import_document("ledger", state, registries={"bin": {"ledger": 12}})
+        assert str(error.value) == "SQLite shadow registry differs for bin"
+    assert repo.registry("bin") == {}

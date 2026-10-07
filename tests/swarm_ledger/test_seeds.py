@@ -24,3 +24,20 @@ def test_retained_seeds_replay_after_checkpoint_advances(tmp_path):
     state["_meta"]["seeds"] = {}
     repo.import_document("seeds", state)
     assert repo.get_document("seeds") == state
+
+
+def test_seed_delta_removes_fields_and_threads(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    state = document()
+    current = copy.deepcopy(state["_meta"]["seeds"]["1"])
+    current["tasks"][1].pop("unknown")
+    current["questions"] = []
+    current["extension"] = None
+    state["_meta"]["seeds"]["2"] = current
+    state["_meta"]["rev"] = 2
+    repo.import_document("seeds", state)
+    assert repo.get_document("seeds") == state
+    assert repo.get_seed("seeds", "2") == current
+    state["_meta"]["seeds"]["2"]["tasks"] = []
+    repo.import_document("seeds", state)
+    assert repo.get_document("seeds") == state

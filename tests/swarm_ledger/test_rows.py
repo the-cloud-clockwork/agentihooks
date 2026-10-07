@@ -36,3 +36,26 @@ def test_reorder_move_and_field_removal_preserve_other_items(tmp_path):
     after["tasks"][0]["comments"] = []
     repo.import_document("rows", after)
     assert repo.get_document("rows") == after
+
+
+def test_storage_rows_are_normalized_and_idempotent(tmp_path):
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    state = document()
+    repo.import_document("rows", state)
+    with repo.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM resources WHERE slug=?", ("rows",)).fetchone()[0] > 0
+        assert connection.execute("SELECT COUNT(*) FROM threads WHERE slug=?", ("rows",)).fetchone()[0] > 0
+        assert connection.execute("SELECT COUNT(*) FROM fields WHERE slug=?", ("rows",)).fetchone()[0] > 0
+    trace = []
+    repo.trace = trace.append
+    repo.import_document("rows", state)
+    assert not [sql for sql in trace if sql.startswith(("INSERT", "DELETE", "UPDATE"))]
+
+
+def test_missing_and_null_delta_markers_are_distinct():
+    from scripts.swarm_ledger.repository.rows import changes
+
+    assert changes({}, {"gone": None}) == {"gone": None}
+    assert changes({"gone": None}, {}) == {"gone": None}
+    assert changes({"same": None}, {"same": None}) == {}
+    assert changes({"same": 1}, {"same": 1}) == {}

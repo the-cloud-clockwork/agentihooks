@@ -87,3 +87,18 @@ def test_html_only_seed_is_imported_without_creating_a_file_snapshot(tmp_path, m
     monkeypatch.setattr(core, "now_ms", lambda: 456)
     assert import_storage(tmp_path, database) == ["legacy"]
     assert SQLiteLedgerRepository(database).get_document("legacy") == {**document, "_meta": meta}
+
+
+def test_migration_command_defaults_and_help(tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger.storage_migration.__main__ import main
+
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["storage_migration"])
+    main()
+    assert json.loads(capsys.readouterr().out) == {"verified": []}
+    assert (tmp_path / "ledger-shadow.sqlite3").exists()
+    monkeypatch.setattr("sys.argv", ["storage_migration", "--help"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 0
+    assert "Import and verify authoritative ledgers in SQLite shadow storage" in capsys.readouterr().out
