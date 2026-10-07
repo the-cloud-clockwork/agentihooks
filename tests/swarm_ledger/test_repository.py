@@ -1,17 +1,16 @@
 import pytest
 
+from scripts.swarm_ledger.repository.__init__ import LedgerRepository
+from scripts.swarm_ledger.repository.file import FileLedgerRepository
+
 
 def test_file_repository_exposes_storage_contract():
-    from scripts.swarm_ledger.repository import FileLedgerRepository, LedgerRepository
-
     assert isinstance(FileLedgerRepository(), LedgerRepository)
     for method in ("get_document", "apply_ops", "events_since", "list_summaries", "create", "delete", "restore"):
         assert callable(getattr(FileLedgerRepository(), method))
 
 
 def test_repository_operations_and_bin_round_trip():
-    from scripts.swarm_ledger.repository import FileLedgerRepository
-
     repo = FileLedgerRepository()
     content = {"title": "Repository", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
     assert repo.create("repository", content)
@@ -29,7 +28,5 @@ def test_repository_operations_and_bin_round_trip():
 
 
 def test_missing_document_preserves_error():
-    from scripts.swarm_ledger.repository import FileLedgerRepository
-
     with pytest.raises(FileNotFoundError):
         FileLedgerRepository().get_document("missing")

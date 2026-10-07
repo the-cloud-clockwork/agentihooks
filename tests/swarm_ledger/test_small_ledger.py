@@ -9,10 +9,11 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
-import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_bin, new_ledger  # noqa: E402
+from scripts.swarm_ledger.repository import file as storage
 
 DAY_MS = 24 * 60 * 60 * 1000
 T0 = 1_800_000_000_000
@@ -46,7 +47,7 @@ def create(slug, *argv, env=None):
 
 
 def state(slug):
-    return json.loads(core.paths(slug)[1].read_text(encoding="utf-8"))
+    return storage.FileLedgerRepository().read_snapshot(slug)
 
 
 def finish(slug):
