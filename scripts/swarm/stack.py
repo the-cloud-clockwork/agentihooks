@@ -8,7 +8,7 @@ from scripts.handoff.resolve import Resolver
 from scripts.swarm.store import SwarmError
 
 
-def shell(argv):
+def shell(argv: list[str]) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -75,7 +75,7 @@ def _ledger_note(open_):
     return f"Parked on its branch until {names} is done. The next engineer restacks it onto dev and finishes it."
 
 
-def park(store, slug, agent, text, ledger):
+def park(store, slug: str, agent, text: str, ledger) -> dict:
     state = ledger.state(slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
