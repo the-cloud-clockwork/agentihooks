@@ -16,6 +16,7 @@ from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
 from scripts.gates.placement import PlacementGate
+from scripts.gates.prompts import PromptGuard
 from scripts.gates.push_stop import PushStop
 from scripts.gates.quiet import QuietClaim
 from scripts.gates.reruns import RerunBudget
@@ -39,7 +40,7 @@ GATES = {
         QuietClaim(),
     )
 }
-HOST_GATES = {gate.name: gate for gate in (PlacementGate(),)}
+HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard())}
 
 
 def main(argv=None, stdin=None, environ=None, home=None):
