@@ -672,9 +672,8 @@ def test_replay_source_counts_a_missing_cursor_offset_as_zero(home):
 def test_flush_once_stops_when_a_page_makes_no_progress(monkeypatch):
     calls = []
     monkeypatch.setattr(agent_trace, "export_session", lambda *args: calls.append(args))
-    monkeypatch.setattr(
-        agent_trace, "_cursor", lambda session: {"overflow": {"bytes": 9}, "source": {"accepted_bytes": 0}}
-    )
+    stuck = {"overflow": {"bytes": 9}, "source": {"accepted_bytes": 0}}
+    monkeypatch.setattr(agent_trace, "_cursor", lambda session: stuck if len(calls) < 4 else {})
     assert trace_flush.flush_once("s", "/t") == 1
     assert calls == [("s", "/t"), ("s", "/t")]
 
