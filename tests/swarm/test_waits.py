@@ -4,7 +4,8 @@ import pytest
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, waits
-from scripts.swarm.ledger_events import PullRequest, view as github_view
+from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
