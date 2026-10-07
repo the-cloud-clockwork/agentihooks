@@ -31,7 +31,8 @@ PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid "
     "commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){"
     "nodes{...on CheckRun{name conclusion} ...on StatusContext{context state}} "
-    "pageInfo{hasNextPage}}}}}}}}}"
+    "pageInfo{hasNextPage}}} checkSuites(first:50){nodes{status workflowRun{databaseId}} "
+    "pageInfo{hasNextPage}}}}}}}}"
 )
 
 
@@ -53,13 +54,16 @@ def iso_ms(text):
 def pull_request(raw):
     commits, checks = raw.get("commits") or [], raw.get("statusCheckRollup") or []
     results = [check.get("conclusion") or check.get("state") for check in checks]
+    running = any(
+        suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in raw.get("checkSuites") or []
+    )
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         iso_ms(commits[-1]["committedDate"]) if commits else None,
         any(result in RED for result in results),
         any(result in RED - {"TIMED_OUT"} for result in results)
-        or (bool(results) and all(result in PASSED for result in results)),
+        or (bool(results) and not running and all(result in PASSED for result in results)),
         tuple(
             check.get("name") or check.get("context") or "a check"
             for check, result in zip(checks, results)
@@ -83,10 +87,12 @@ def view(url, run=subprocess.run):
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
         rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
         contexts = rollup.get("contexts") or {}
-        if contexts.get("pageInfo", {}).get("hasNextPage"):
+        suites = (commits[-1].get("checkSuites") or {}) if commits else {}
+        if contexts.get("pageInfo", {}).get("hasNextPage") or suites.get("pageInfo", {}).get("hasNextPage"):
             return None
         raw["commits"] = commits
         raw["statusCheckRollup"] = contexts.get("nodes") or []
+        raw["checkSuites"] = suites.get("nodes") or []
         return pull_request(raw)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
