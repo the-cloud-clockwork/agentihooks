@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
@@ -40,7 +42,7 @@ STATUS = {
 
 
 def function_source(name):
-    page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    page = page_source()
     return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
@@ -356,7 +358,7 @@ class SwarmPanel(unittest.TestCase):
         self.assertEqual(code, 502)
 
     def test_page_has_controls_wired_to_the_endpoint(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         for control in (
             "start",
             "pause",
@@ -382,7 +384,7 @@ class SwarmPanel(unittest.TestCase):
         self.assertIn("/api/swarm/", page)
 
     def test_operational_blocks_render_inside_the_swarm_tab(self):
-        page = (SCRIPTS / "template.html").read_text()
+        page = page_source()
         swarm = page.split('id="swarm" role="tabpanel"', 1)[1].split('<aside id="stats-column"', 1)[0]
         for marker in (
             "swarm-box",
@@ -402,12 +404,12 @@ class SwarmPanel(unittest.TestCase):
         self.assertNotIn('id="stats"', swarm)
 
     def test_the_tab_body_owns_page_scroll(self):
-        page = (SCRIPTS / "template.html").read_text()
+        page = page_source()
         self.assertRegex(page, r"\.tab-body \{[^}]*overflow-y: auto")
         self.assertIn("html, body { height: 100%; overflow: hidden; }", page)
 
     def run_js(self, names, expr):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         consts = "".join(
             m + "\n" for m in re.findall(r"^  const (?:STEPS|LIVE_LANES|EFFORTS|EFFORT_CAPS) = .*;$", page, re.M)
         )
@@ -629,7 +631,7 @@ if __name__ == "__main__":
 
 class HealthPanel(unittest.TestCase):
     def test_a_verdict_pick_sends_the_picked_verdict_and_the_row_note(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         self.assertIn('$("health").addEventListener("change"', page)
         self.assertIn('swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note:', page)
 
@@ -637,12 +639,12 @@ class HealthPanel(unittest.TestCase):
         source = function_source("renderSwarm")
         self.assertIn("renderHealth(sw.findings, now)", source)
         self.assertNotIn("renderNeedsYou", source)
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         self.assertNotIn("needs-you", page)
         self.assertNotIn("Needs you", page)
 
     def test_health_styles_use_only_palette_tokens(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         rules = re.findall(r"^\.hl-[^{]*\{[^}]*\}", page, re.M)
         self.assertGreaterEqual(len(rules), 3)
         for rule in rules:

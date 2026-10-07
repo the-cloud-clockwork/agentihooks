@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import show
 from tests.swarm_ledger.test_artifacts import JSON_DOC, MARKDOWN, SVG
 from tests.swarm_ledger.test_bin import DAY_MS
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
@@ -58,7 +59,7 @@ def page(browser, request):
     html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
     html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
-    tab.set_content(html)
+    show(tab, html)
     yield tab
     tab.close()
 
@@ -159,7 +160,7 @@ def trash_page(browser):
     html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
     html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
-    tab.set_content(html)
+    show(tab, html)
     tab.get_by_role("button", name="Artifacts").click()
     yield tab, sent
     tab.close()

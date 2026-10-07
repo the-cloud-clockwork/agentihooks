@@ -1,0 +1,106 @@
+{
+  "content": {
+    "title": "Replay ledger",
+    "overview": "Recorded page inputs",
+    "phases": [{"title": "Seed phase", "description": "Seeded"}]
+  },
+  "doc": {
+    "title": "Replay ledger",
+    "overview": "Recorded page inputs for the equivalence replay",
+    "orchestrator": "master@replay-1",
+    "time_left_minutes": 95,
+    "sources": ["/repo/plan.md", "/repo/notes.md"],
+    "phases": [
+      {"id": "p1", "title": "Storage", "description": "Move storage behind the interface", "done": true, "comments": [{"id": "c-p1", "by": "engineer@replay-2", "at": 1791290000000, "text": "Merged with **all** checks green, see https://example.test/pr/1."}]},
+      {"id": "p2", "title": "Interface", "description": "Plan the interface", "done": false, "planning": "auto", "review": {"state": "pending"}, "comments": []},
+      {"id": "p3", "title": "Rollout", "description": "Roll it out", "done": false, "depends_on": ["p2"], "comments": []},
+      {"id": "p4", "title": "Dropped", "description": "", "done": false, "out_of_scope": true, "comments": []}
+    ],
+    "questions": [
+      {"id": "q1", "text": "Which port?", "answers": [{"id": "a-q1", "by": "operator", "at": 1791291000000, "text": "Use 8765"}], "comments": [{"id": "c-q1", "by": "master@replay-1", "at": 1791291500000, "text": "Noted"}]},
+      {"id": "q2", "text": "Who reviews?", "answers": [], "comments": []}
+    ],
+    "followups": [
+      {"id": "f1", "text": "Rotate the key", "done": false, "comments": [{"id": "c-f1", "by": "operator", "at": 1791292000000, "text": "Soon"}]},
+      {"id": "f2", "text": "Old cleanup", "done": true, "comments": []}
+    ],
+    "tasks": [
+      {"id": "t1", "title": "Build the store", "description": "Write the store", "phase": "p2", "lane": "eng", "kind": "code", "state": "claimed", "rank": "high", "claimed_by": "engineer@replay-2", "issue_url": "https://example.test/issues/1", "pr_url": "", "plan_url": "https://example.test/issues/9", "territory": ["scripts/store"], "contract": {"must": "Store works", "check": "Tests"}, "proof": {"pr": "https://example.test/pr/2"}, "comments": [{"id": "c-t1", "by": "engineer@replay-2", "at": 1791293000000, "text": "Working on t2 next"}]},
+      {"id": "t2", "title": "Wire the store", "description": "", "phase": "p2", "lane": "eng", "state": "open", "depends_on": ["t1"], "territory": ["scripts/store/api"], "comments": []},
+      {"id": "t3", "title": "Old task", "description": "", "phase": "p1", "lane": "ci", "state": "done", "done": true, "comments": []},
+      {"id": "t4", "title": "Slice phase Interface", "description": "", "phase": "p2", "lane": "plan", "kind": "plan", "state": "done", "comments": []},
+      {"id": "t5", "title": "Review the store", "description": "", "phase": "p2", "lane": "eng", "state": "pr", "rank": "urgent", "pr_url": "https://example.test/pr/3", "comments": []}
+    ],
+    "notes": [
+      {"id": "n1", "by": "operator", "at": 1791294000000, "text": "Keep replies short", "comments": [{"id": "c-n1", "by": "master@replay-1", "at": 1791294500000, "text": "Will do"}]},
+      {"id": "n2", "by": "master@replay-1", "at": 1791295000000, "text": "Relayed decision", "relayed_by": "master@replay-1", "relayed_from": "pane", "comments": []}
+    ],
+    "chat": [
+      {"id": "m1", "by": "master@replay-1", "at": 1791296000000, "text": "Started t1 and t5"},
+      {"id": "m2", "by": "operator", "at": 1791296500000, "text": "@swarm keep going", "attachments": [{"id": "img1.png", "width": 640, "height": 360}]}
+    ],
+    "priorities": [
+      {"id": "pr1", "item": "tasks/t1", "text": "Approve the merge"},
+      {"id": "pr2", "item": "phases/p9", "text": "Removed item"}
+    ],
+    "notifications": [
+      {"id": "no1", "item": "tasks/t1", "label": "Reply", "by": "engineer@replay-2", "at": 1791297000000, "text": "Answered your question"},
+      {"id": "no2", "item": "chat", "label": "Chat", "by": "master@replay-1", "at": 1791297500000, "text": "New chat line"}
+    ],
+    "alerts": [
+      {"id": "al1", "source": "size", "target": "master", "state": "open", "at": 1791298000000, "text": "Ledger near its size limit"},
+      {"id": "al2", "source": "sync", "target": "engineer@replay-2", "state": "claimed", "claimed_by": "operator", "at": 1791298500000, "text": "Refused write"}
+    ],
+    "artifacts": [
+      {"id": "art1", "title": "Plan summary", "by": "planner@replay-3", "task": "t4", "at": 1791299000000, "file": {"id": "plan.md", "type": "text/markdown"}},
+      {"id": "art2", "title": "Data dump", "by": "master@replay-1", "at": 1791299100000, "file": {"id": "data.json", "type": "application/json"}}
+    ],
+    "artifact_trash": [
+      {"id": "art3", "title": "Old sketch", "by": "operator", "at": 1791100000000, "deleted_at": 1791200000000, "file": {"id": "old.md", "type": "text/markdown"}}
+    ],
+    "_meta": {
+      "rev": 7,
+      "created_at": 1791200000000,
+      "events": [
+        {"kind": "sync requested", "at": 1791299500000, "rev": 6, "by": "operator"},
+        {"kind": "comment", "at": 1791299600000, "by": "engineer@replay-2"}
+      ],
+      "crew": [
+        {"name": "engineer@replay-2", "last_seen": 1791299700000, "handled_rev": 5},
+        {"name": "master@replay-1", "last_seen": 1791299800000, "handled_rev": 7}
+      ]
+    }
+  },
+  "swarm": {
+    "config": {"state": "running", "name": "swarm-replay", "slug": "replay", "autonomy": "delegate", "max_eng": 3, "max_ci": 1, "max_plan": 1, "codex_share": 30, "effort_min": "medium", "effort_max": "high"},
+    "compact_limit": 600,
+    "master_affinity": {"desired": "claude", "live": "claude"},
+    "last_tick": 1791299900000,
+    "agents": [
+      {"name": "master@replay-1", "lane": "master", "harness": "claude", "account": "acct-a", "model": "claude-opus-5-5", "effort": "high", "started_at": 1791290000000, "status": "working"},
+      {"name": "engineer@replay-2", "lane": "eng", "profile": "frontend", "harness": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "task": "t1", "started_at": 1791295000000, "status": "working", "gates": [{"gate": "talk", "lifted": false}, {"gate": "watch", "lifted": true}], "inbox": [{"id": "i1"}]},
+      {"name": "ci@replay-4", "lane": "ci", "harness": "codex", "model": "gpt-sol", "task": "t5", "started_at": 1791298000000, "status": "idle"}
+    ],
+    "tasks": {"open": 1, "claimed": 1, "pr": 1, "blocked": 0},
+    "done_today": 2,
+    "quota": {"cap": 3, "probed_at": 1791299800, "rows": [
+      {"account": "acct-a", "agent": "claude", "five_hour_left": 81.4, "five_hour_resets_at": 1791310000, "seven_day_left": 45, "seven_day_resets_at": 1791600000, "sessions": 2},
+      {"account": "cx-main", "agent": "codex", "five_hour_left": null, "five_hour_resets_at": null, "seven_day_left": 90, "seven_day_resets_at": 1791400000, "sessions": 1}
+    ]},
+    "doctor": {"slug": "doctor-replay", "state": "watching", "last_check": 1791299000000, "findings": 1},
+    "findings": [
+      {"id": "watch/engineer@replay-2", "kind": "watch", "subject": "engineer@replay-2", "evidence": ["22 watch calls", "3 actions"], "threshold": "20 and 5", "seen_at": 1791299000000},
+      {"id": "stale/t2", "kind": "stale", "subject": "t2", "summary": "No change in 40 minutes", "threshold": "30 minutes", "seen_at": 1791298000000, "verdict": {"value": "early-real", "note": "watching"}}
+    ],
+    "handoffs": [
+      {"seat": "eng-1@replay", "at": 1791297000000, "reason": "compact limit", "continuity": "confirmed", "binding": "bound", "bound_at": 1791297100000, "successor": "engineer@replay-2"},
+      {"seat": "master@replay", "at": 1791296000000, "reason": "reboot", "awaiting": "master@replay-1"}
+    ],
+    "gate_modes": {"talk": "enforce", "watch": "log only"}
+  },
+  "artifacts": {
+    "plan.md": "# Plan\n\nA **bold** step with `code` and a [link](https://example.test).\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- one\n- two\n\n> quoted\n\n```\nblock\n```\n",
+    "data.json": "{\"name\": \"replay\", \"items\": [1, true, null, {\"deep\": \"x\"}]}"
+  },
+  "upload": {"id": "up1.png", "width": 32, "height": 16}
+}

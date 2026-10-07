@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_media import png
 
@@ -23,7 +24,7 @@ def image_page(browser):
     tab.route("**/media/**", lambda route: route.fulfill(body=png(1280, 720), content_type="image/png"))
     html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
     html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
-    tab.set_content(html)
+    show(tab, html)
     for image in tab.locator(".attach-row img").all():
         image.evaluate(
             "el => el.src = 'data:image/png;base64,' + "

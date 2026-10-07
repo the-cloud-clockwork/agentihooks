@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -39,6 +40,7 @@ def tab(browser):
             request.abort()
 
     context.route("**/*", route)
+    serve_modules(context)
     page = context.new_page()
     page.on("pageerror", lambda error: print(str(error)))
     page.goto(URL)

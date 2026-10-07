@@ -1,11 +1,13 @@
 import subprocess
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def function_source(name):
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
 
 
@@ -98,7 +100,7 @@ def test_refresh_age_uses_completion_time_and_failure_keeps_retry_available():
 
 
 def test_the_header_shows_the_check_beside_the_refresh_button():
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     assert '<span class="sync-state end" id="stats-state"></span><button class="mini-sync" id="stats-sync"' in page
     render = function_source("renderSync")
     assert "statsCheck(meta.events || [], statsSent, meta.stats_refresh)" in render
@@ -125,4 +127,4 @@ def test_the_stats_card_has_no_stats_check_row():
         "assert.doesNotMatch(nodes.stats.textContent, /Stats check|answered|reply/);\n"
     )
     subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-    assert "showReply" not in TEMPLATE.read_text(encoding="utf-8")
+    assert "showReply" not in page_source()
