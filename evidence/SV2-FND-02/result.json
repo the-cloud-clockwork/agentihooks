@@ -1,0 +1,169 @@
+{
+  "package": "SV2-FND-02",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1395",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1397",
+  "tested_commit": "51cfd7cbe2ee0d9ad4391b82b070ec2b5aa0f13d",
+  "evidence_class": "local fixture runs against the committed record; mocked, no live infrastructure read or mutated",
+  "states": {
+    "observed": "the committed record passes check with one coding-task authority and no unowned component",
+    "accepted": "fixture 1: embedding backlog accepted, duplicate dispatcher rejected; fixture 2: session exporter accepted, dispatching backlog rejected",
+    "committed": "record revision 1 with decisions AD-01 to AD-08 at the tested commit",
+    "externally_verified": "CI Tests and Mutation runs on the pull request head are the judge"
+  },
+  "interfaces": [
+    "docs/swarm-v2/architecture.json (schema swarm-v2-architecture/1)",
+    "docs/swarm-v2/decisions.md (rendered from the record)",
+    "design inventory (schema swarm-v2-design-inventory/1)",
+    "python -m scripts.swarm_v2.architecture review|record|rollback|render|check"
+  ],
+  "supported_versions": {
+    "record_schema": "swarm-v2-architecture/1",
+    "inventory_schema": "swarm-v2-design-inventory/1",
+    "python": ">=3.11"
+  },
+  "measurements": {
+    "architecture_unowned_components": 0,
+    "architecture_unowned_components_second_fixture": 0,
+    "committed_record_check_errors": 0,
+    "coding_task_authorities": 1
+  },
+  "fixture_reviews": {
+    "inventory.json": {
+      "operation": "fixture-inventory-1",
+      "revision": 1,
+      "accepted": [
+        "embedding-backlog"
+      ],
+      "rejected": [
+        {
+          "id": "duplicate-dispatcher",
+          "name": "Kubernetes task dispatcher",
+          "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+        }
+      ],
+      "unresolved": [],
+      "unowned": [],
+      "measurements": {
+        "architecture_unowned_components": 0
+      }
+    },
+    "inventory-second.json": {
+      "operation": "fixture-inventory-2",
+      "revision": 1,
+      "accepted": [
+        "session-exporter"
+      ],
+      "rejected": [
+        {
+          "id": "backlog-that-dispatches",
+          "name": "Review retry backlog",
+          "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+        }
+      ],
+      "unresolved": [],
+      "unowned": [],
+      "measurements": {
+        "architecture_unowned_components": 0
+      }
+    }
+  },
+  "test_results": {
+    "a": "evidence/SV2-FND-02/a-result.json",
+    "b": "evidence/SV2-FND-02/b-result.json",
+    "c": "evidence/SV2-FND-02/c-result.json",
+    "manifest": "evidence/SV2-FND-02/manifest.json",
+    "pytest_output": "72 passed in 0.65s",
+    "judge": "CI Tests and Mutation runs on the pull request head"
+  },
+  "cli_run": [
+    "$ python -m scripts.swarm_v2.architecture check --record <scratch>/architecture.json",
+    "ok",
+    "exit=0",
+    "$ python -m scripts.swarm_v2.architecture record --record <scratch>/architecture.json --inventory tests/fixtures/swarm_v2/architecture/inventory.json --markdown <scratch>/decisions.md",
+    "{",
+    "  \"operation\": \"fixture-inventory-1\",",
+    "  \"revision\": 1,",
+    "  \"accepted\": [",
+    "    \"embedding-backlog\"",
+    "  ],",
+    "  \"rejected\": [",
+    "    {",
+    "      \"id\": \"duplicate-dispatcher\",",
+    "      \"name\": \"Kubernetes task dispatcher\",",
+    "      \"reason\": \"inserts another coding-task queue beside Swarm reconciliation controller (AD-05)\"",
+    "    }",
+    "  ],",
+    "  \"unresolved\": [],",
+    "  \"unowned\": [],",
+    "  \"measurements\": {",
+    "    \"architecture_unowned_components\": 0",
+    "  }",
+    "}",
+    "exit=0",
+    "$ python -m scripts.swarm_v2.architecture record --record <scratch>/architecture.json --inventory tests/fixtures/swarm_v2/architecture/inventory.json --markdown <scratch>/decisions.md",
+    "{",
+    "  \"operation\": \"fixture-inventory-1\",",
+    "  \"revision\": 1,",
+    "  \"accepted\": [",
+    "    \"embedding-backlog\"",
+    "  ],",
+    "  \"rejected\": [",
+    "    {",
+    "      \"id\": \"duplicate-dispatcher\",",
+    "      \"name\": \"Kubernetes task dispatcher\",",
+    "      \"reason\": \"inserts another coding-task queue beside Swarm reconciliation controller (AD-05)\"",
+    "    }",
+    "  ],",
+    "  \"unresolved\": [],",
+    "  \"unowned\": [],",
+    "  \"measurements\": {",
+    "    \"architecture_unowned_components\": 0",
+    "  }",
+    "}",
+    "exit=0",
+    "$ python -m scripts.swarm_v2.architecture record --record <scratch>/architecture.json --inventory tests/fixtures/swarm_v2/architecture/inventory-second.json --markdown <scratch>/decisions.md",
+    "error: inventory is based on revision 1; the record is at revision 2",
+    "exit=2",
+    "$ python -m scripts.swarm_v2.architecture rollback --record <scratch>/architecture.json --to 1 --operation rehearse-rollback --markdown <scratch>/decisions.md",
+    "{",
+    "  \"operation\": \"rehearse-rollback\",",
+    "  \"revision\": 2,",
+    "  \"rolled_back\": [",
+    "    \"Brain arc embedding backlog\"",
+    "  ],",
+    "  \"restored\": []",
+    "}",
+    "exit=0",
+    "$ python -m scripts.swarm_v2.architecture check --record <scratch>/architecture.json",
+    "ok",
+    "exit=0"
+  ],
+  "rollback_rehearsal": "wt.sh tmp --from engineer-323133-0501, then git revert of every branch commit since the dev merge base",
+  "rollback_rehearsal_output": [
+    "$ git rev-parse HEAD",
+    "51cfd7cbe2ee0d9ad4391b82b070ec2b5aa0f13d",
+    "$ git revert --no-edit 5508848058c9595a9c7987f4d4cf8651c557071e..HEAD",
+    "6",
+    "exit=0",
+    "$ git diff --stat 5508848058c9595a9c7987f4d4cf8651c557071e HEAD",
+    "(empty diff means the tree equals the dev base)",
+    "$ ls docs/swarm-v2 scripts/swarm_v2",
+    "docs/swarm-v2:",
+    "baseline-sources.json",
+    "baseline.json",
+    "baseline.md",
+    "plan-snapshot.json",
+    "",
+    "scripts/swarm_v2:",
+    "__init__.py",
+    "baseline.py",
+    "$ pytest tests/test_swarm_v2_baseline.py",
+    "111 passed in 5.41s"
+  ],
+  "rollback_command": "python -m scripts.swarm_v2.architecture rollback --to <revision> --operation <id>: restores the accepted component set of that revision and moves rolled-back components to rejected with their reason; the CLI run above rehearses it on a scratch copy",
+  "limitations": [
+    "Classification is by declaration: a proposal that declares carries none while owning a task queue passes the command and is caught by the Spec reader, as AD-05 states.",
+    "The Spec reader's third round was not run because the task sub-agent budget was spent; its round two open items are fixed with tests at the tested commit.",
+    "Operator approval is a record edit merged by pull request; the command checks approved_by and the content digest but does not authenticate the approver."
+  ]
+}

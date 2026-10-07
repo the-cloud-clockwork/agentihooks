@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-FND-02-C",
+  "tested_commit": "51cfd7cbe2ee0d9ad4391b82b070ec2b5aa0f13d",
+  "passed": 12,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_conflicting_proposals_become_unresolved_while_unrelated_ones_are_recorded",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_replayed_operation_has_no_second_effect",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_replay_with_changed_content_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_digest_ignores_key_order",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_interrupted_write_keeps_the_previous_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_written_record_is_indented_json_with_a_trailing_newline",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_rollback_restores_the_earlier_revision_and_keeps_every_rejection",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_rollback_keeps_components_up_to_the_target_revision",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_rollback_can_restore_a_later_accepted_revision",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_rollback_replay_and_refusals",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_rollback_writes_the_record_and_its_markdown",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_render_writes_markdown_only",
+      "outcome": "passed"
+    }
+  ]
+}
