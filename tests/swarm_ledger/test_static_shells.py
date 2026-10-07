@@ -81,6 +81,7 @@ def test_every_page_shell_carries_the_enforced_policy_and_no_inline_code(base, p
     assert status == 200
     assert policy(headers) == POLICY
     assert "unsafe" not in headers["Content-Security-Policy"]
+    assert headers["X-Content-Type-Options"] == "nosniff"
     assert headers["Cache-Control"] == "no-store"
     assert re.findall(r"<script(?![^>]*\ssrc=)[^>]*>", body) == []
     assert "<style" not in body
@@ -139,7 +140,10 @@ def test_each_asset_is_served_immutable_under_the_page_version(base, name):
     assert status == 200
     assert body == core.static_assets()[name].read_text(encoding="utf-8")
     assert headers["Cache-Control"] == "public, max-age=31536000, immutable"
-    assert headers["Content-Type"].startswith("text/css" if name.endswith(".css") else "text/javascript")
+    assert headers["Content-Type"] == ("text/css" if name.endswith(".css") else "text/javascript") + "; charset=utf-8"
+    assert headers["Content-Length"] == str(len(core.static_assets()[name].read_bytes()))
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert "Content-Security-Policy" not in headers
 
 
 @pytest.mark.parametrize(
@@ -196,6 +200,57 @@ def test_the_ledger_rows_carry_their_swarm_state(base, monkeypatch):
 def test_the_event_snapshot_carries_only_the_ledger_and_swarm(monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, ledger=None: {"state": "running"})
     assert set(server.stream_resources(SLUG)) == {"ledger", "swarm"}
+
+
+def test_the_asset_list_names_every_page_file_by_its_served_path():
+    static = core.MODULES.parent
+    assets = core.static_assets()
+    assert (assets["palette.css"], assets["tooltips.js"]) == (core.PALETTE, core.TOOLTIPS)
+    assert {name for name in assets if name.startswith("home/")} == {"home/home.js"}
+    assert {name for name in assets if name.startswith("css/")} == {f"css/{p.name}" for p in static.glob("css/*.css")}
+    assert {name for name in assets if name.startswith("js/")} == {f"js/{p.name}" for p in core.MODULES.glob("*.js")}
+    assert len(assets) == 2 + len(list(static.glob("css/*.css"))) + len(list(core.MODULES.glob("*.js"))) + 1
+
+
+def test_the_page_version_separates_each_asset_name_from_its_bytes():
+    assert core.page_version({"ab": b"c"}) != core.page_version({"a": b"bc"})
+
+
+def test_the_bin_shell_leaves_the_watermark_slot_empty(base):
+    assert '/css/tooltips.css">\n<main class="bin">' in server.index_page("bin")
+
+
+def test_the_shell_names_the_server_port_and_an_empty_token_when_the_record_has_none(base, monkeypatch):
+    monkeypatch.setattr(server.repository, "read_page", lambda slug: "<html></html>")
+    page = server.page_for(SLUG)
+    assert '<meta name="ledger-token" content="">' in page
+    assert f'<meta name="ledger-port" content="{server.PORT}">' in page
+
+
+def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
+    sweeps, passes = [], []
+    monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: sweeps.append(len(passes)))
+    monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
+    monkeypatch.setattr(server.repository, "pages", lambda: [])
+    monkeypatch.setattr(server, "sample_streams", lambda: None)
+    monkeypatch.setattr(server, "reloading", lambda: False)
+
+    def tick(interval):
+        passes.append(interval)
+        if len(passes) == 31:
+            raise StopIteration
+
+    monkeypatch.setattr(server.time, "sleep", tick)
+    with pytest.raises(StopIteration):
+        server.watch_seeds()
+    assert sweeps == [0, 15, 30]
+
+
+def test_upgrading_a_record_fills_every_placeholder(base):
+    new_ledger.upgrade_page(SLUG)
+    page = core.paths(SLUG)[0].read_text(encoding="utf-8")
+    assert "__LEDGER_" not in page
+    assert "<title>Shell &lt;ledger&gt;</title>" in page
 
 
 def history(copies):
