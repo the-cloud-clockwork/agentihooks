@@ -285,6 +285,12 @@ class HerdrRuntime:
 
         return {s.name for s in sessions() if s.name}
 
+    def reported(self, agent: AgentRecord) -> bool:
+        from scripts.terminate_agent import sessions
+
+        session = live_binding.bound_session(agent, sessions())
+        return session is not None and session.status == "alive"
+
     def bindings(self, agents: list[AgentRecord]) -> dict:
         from scripts.terminate_agent import sessions
 

@@ -18,7 +18,7 @@ from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import control_notifications, lifetime, live_binding, phase_state, session_model
+from scripts.swarm import control_notifications, lifetime, live_binding, master_start, phase_state, session_model
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -79,6 +79,7 @@ class Runtime(Protocol):
     def has_capacity(self, config) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
+    def reported(self, agent: AgentRecord) -> bool: ...
     def bindings(self, agents: list[AgentRecord]) -> dict: ...
     def pane_open(self, agent: AgentRecord) -> bool: ...
     def recover(self, name: str) -> Placed: ...
@@ -100,6 +101,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     doc = ledger.state(slug)
     rows = {t["id"]: t for t in doc["tasks"]}
     exits.sweep(InboxStore(store.redis), slug, store, lambda: {t["id"]: t for t in ledger.state(slug)["tasks"]})
+    actions += master_start.observe(slug, config, store, ledger, runtime, now_ms)
     actions += _verify(slug, store, ledger, runtime, rows, now_ms)
     actions += _reap(slug, store, ledger, runtime, rows, now_ms)
     actions += lifetime.retire_idle_master(slug, store, ledger, runtime, rows, now_ms)
@@ -121,7 +123,8 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms)
     _conversations(slug, store, runtime)
     _session_models(slug, store)
-    transfers.observe(store, slug, runtime.live_names())
+    starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
+    transfers.observe(store, slug, runtime.live_names() - starting)
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
 
 
@@ -186,7 +189,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     agents, actions = store.agents(slug), []
     facts = runtime.bindings(agents)
     for agent in agents:
-        if agent.state == "awaiting-decision":
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         task = rows.get(agent.task, {})
         ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
@@ -222,7 +225,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
-        if agent.state == "awaiting-decision":
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         task = rows.get(agent.task, {})
         ended = agent.lane != MASTER and (task.get("done") or task.get("state") in {"done", "blocked", "handoff"})
@@ -548,7 +551,8 @@ def _master(slug, config, store, runtime, now_ms):
         if any(a.lane != MASTER for a in agents):
             return []
         return [_retire_master(slug, store, runtime, m) for m in masters]
-    if any(m.state != "finished" for m in masters):
+    pending = master_start.read(store, slug)
+    if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []
     if not runtime.has_capacity(config):
         return ["no session slot for the master, waiting"]
@@ -558,23 +562,31 @@ def _master(slug, config, store, runtime, now_ms):
     try:
         store.seats.occupy(record.seat, name, now_ms)
         transfer = transfers.attach(store, slug, record)
-        placed = runtime.spawn(
-            config,
-            MASTER,
-            name,
-            primed(
+        task = (
+            {**pending["task"], "transfer": transfer}
+            if pending
+            else primed(
                 store,
                 slug,
                 record.seat,
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
-            ),
+            )
         )
+        master_start.begin(store, slug, name, task, now_ms)
+        placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
+        failed = master_start.read(store, slug)
+        if failed.get("attempt") == 1:
+            master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
-    store.put_agent(slug, _placed(record, placed))
-    store.clear_handoff(slug, MASTER)
+    record = _placed(record, placed)
+    reported = runtime.reported(record)
+    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    if reported:
+        store.redis.delete(store.key(slug, "master-start"))
+        store.clear_handoff(slug, MASTER)
     store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
     return [f"spawned master {name}"]
 
