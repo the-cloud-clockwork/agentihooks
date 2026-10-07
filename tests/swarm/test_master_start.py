@@ -231,7 +231,6 @@ def test_stale_finished_master_does_not_cancel_the_new_startup(store):  # noqa: 
     tick("sw", store, ledger, runtime, 1)
     old = AgentRecord("master@a1b2c3-0099", MASTER, MASTER, state="finished")
     store.put_agent("sw", old)
-    runtime.live.add(old.name)
     runtime.stuck.add(old.name)
     tick("sw", store, ledger, runtime, 2)
     tick("sw", store, ledger, runtime, DEADLINE + 1)

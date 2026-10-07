@@ -3,7 +3,7 @@
 import json
 
 from scripts import agent_choice
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm.store import MASTER
 
 ORDER = (
@@ -64,6 +64,14 @@ def failed(store, slug, reason):
     found = pending(store, slug)
     if found:
         store.redis.set(_key(store, slug), json.dumps({**found, "state": "failed", "reason": reason}))
+
+
+def handed_off(store, slug):
+    """Close the order once its master left, so the successor never receives a stale handoff order."""
+    found, inbox = pending(store, slug), InboxStore(store.redis)
+    item = inbox.get(found["item"]) if found else None
+    if item and item.state not in CLOSED:
+        inbox.close(item.id, item.address, "done", "the master handed off its seat")
 
 
 def placed(store, slug, harness):

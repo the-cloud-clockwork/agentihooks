@@ -27,11 +27,15 @@ OTHER = {"claude": "codex", "codex": "claude"}
 class AffinityRuntime(FakeRuntime):
     def __init__(self, fail_master=False):
         super().__init__()
-        self.fail_master = fail_master
+        self.fail_master, self.store, self.orders_at_spawn = fail_master, None, []
 
     def spawn(self, config, lane, name, task, spawns=None):
         if lane != MASTER:
             return super().spawn(config, lane, name, task, spawns)
+        order = affinity.pending(self.store, config.slug)
+        if order:
+            pending = InboxStore(self.store.redis).pending_items(f"master@{config.slug}")
+            self.orders_at_spawn.append([i.id for i in pending if i.id == order["item"]])
         if self.fail_master:
             raise SpawnError("codex has no signed in account")
         self.live.add(name)
@@ -40,6 +44,7 @@ class AffinityRuntime(FakeRuntime):
 
 
 def _start(store, runtime, harness):
+    runtime.store = store
     store.update("sw", lanes={MASTER: {"agent": harness}})
     tick("sw", store, tasks(), runtime, 1)
     (boss,) = masters(store)
@@ -70,6 +75,8 @@ def test_changing_the_affinity_orders_one_handoff_and_the_next_master_runs_on_th
     assert successor.harness == OTHER[start] and successor.seat == boss.seat
     assert runtime.live & {boss.name, successor.name} == {successor.name}
     assert affinity.pending(store, "sw") is None
+    assert item.id not in [i.id for i in InboxStore(store.redis).pending_items("master@sw")]
+    assert runtime.orders_at_spawn == [[]]
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
@@ -109,6 +116,7 @@ def test_a_failed_successor_launch_is_shown_and_keeps_the_handoff_and_the_seat_i
     assert shown["state"] == "failed" and shown["reason"] == "codex has no signed in account"
     assert store.handoff("sw", MASTER).startswith("# Handoff")
     assert waiting.id in [i.id for i in inbox.pending_items("master@sw")]
+    assert shown["item"] not in [i.id for i in inbox.pending_items("master@sw")]
     runtime.fail_master = False
     tick("sw", store, tasks(), runtime, 8)
     (successor,) = masters(store)

@@ -576,6 +576,7 @@ def _master(slug, config, store, runtime, now_ms):
             )
         )
         master_start.begin(store, slug, name, task, now_ms)
+        affinity.handed_off(store, slug)
         placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
