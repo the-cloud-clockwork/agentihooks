@@ -119,20 +119,29 @@ def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
     from scripts.targets._common import _atomic_write
 
     _i = _install_module()
-    _i._remove_agentihooks_symlinks(dst, "rule")
     items = {}
     for src in sources:
         if src.is_dir():
             items.update(
                 {item.name: item for item in src.iterdir() if filter_fn(item) and not item.name.startswith(".")}
             )
+    ledger = _i._state_links()
+    kept = frozenset(
+        name for name in items if str(dst / name) in ledger and (dst / name).is_file() and not (dst / name).is_symlink()
+    )
+    _i._remove_agentihooks_symlinks(dst, "rule", keep=kept)
     dst.mkdir(exist_ok=True)
     records = []
     for name, src in sorted(items.items()):
         path = dst / name
-        if path.exists() or path.is_symlink():
+        text = src.read_text()
+        if name in kept:
+            if path.read_text() != text:
+                _atomic_write(path, text)
+        elif path.exists() or path.is_symlink():
             continue
-        _atomic_write(path, src.read_text())
+        else:
+            _atomic_write(path, text)
         records.append((path, src, "rules"))
     if not records:
         return

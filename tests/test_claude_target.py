@@ -172,6 +172,44 @@ def test_installed_claude_rules_refresh_and_preserve_foreign_files(tmp_path, cap
     assert (rules / "foreign.md").is_symlink()
 
 
+def test_claude_rule_rerun_keeps_unchanged_copies_and_removes_only_dropped_rules(tmp_path, capsys):
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    adapter = ClaudeAdapter()
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("keep.md", "edit.md", "drop.md", "folder.md"):
+        (source / name).write_text(f"{name}\n")
+    rules = install.CLAUDE_HOME / "rules"
+    (rules / "folder.md").mkdir(parents=True)
+    install._state_record_link(rules / "folder.md", source / "folder.md", "rules")
+    adapter.install_features("rules", [("rule", source)], lambda path: path.suffix == ".md")
+    assert (rules / "folder.md").is_dir()
+    (source / "folder.md").unlink()
+    inodes = {name: (rules / name).stat().st_ino for name in ("keep.md", "edit.md", "drop.md")}
+    capsys.readouterr()
+
+    adapter.install_features("rules", [("rule", source)], lambda path: path.suffix == ".md")
+
+    assert capsys.readouterr().out == ""
+    assert {name: (rules / name).stat().st_ino for name in inodes} == inodes
+
+    (source / "drop.md").unlink()
+    (source / "edit.md").write_text("EDITED\n")
+    adapter.install_features("rules", [("rule", source)], lambda path: path.suffix == ".md")
+
+    out = capsys.readouterr().out
+    assert out.count("Removed managed rule") == 1
+    assert "  [RM] Removed managed rule: drop.md" in out
+    assert not (rules / "drop.md").exists()
+    assert str(rules / "drop.md") not in install._state_links()
+    assert (rules / "keep.md").stat().st_ino == inodes["keep.md"]
+    assert (rules / "edit.md").read_text() == "EDITED\n"
+    assert sorted(path.name for path in rules.iterdir()) == ["edit.md", "folder.md", "keep.md"]
+    assert install._state_links()[str(rules / "keep.md")]["rule_sources"] == [str(source)]
+    assert install._state_links()[str(rules / "edit.md")]["rule_sources"] == [str(source)]
+
+
 def test_uninstall_removes_copied_claude_rules_as_last_artifact(tmp_path, monkeypatch, capsys):
     from argparse import Namespace
     from types import SimpleNamespace
