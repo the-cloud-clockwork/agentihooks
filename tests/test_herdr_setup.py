@@ -8,14 +8,18 @@ from scripts import herdr_setup
 
 
 class Runner:
-    def __init__(self, status: str = ""):
+    def __init__(self, status: str = "", writes: dict | None = None):
         self.calls: list[list[str]] = []
         self.options: dict[tuple[str, ...], dict] = {}
         self.status = status
+        self.writes = writes or {}
 
     def __call__(self, command, **kwargs):
         self.calls.append(list(command))
         self.options[tuple(command)] = kwargs
+        if command[1:3] == ["integration", "install"] and command[3] in self.writes:
+            path, data = self.writes[command[3]]
+            path.write_bytes(data)
         out = self.status if command[1:] == ["integration", "status"] else ""
         return subprocess.CompletedProcess(command, 0, out, "")
 
@@ -23,7 +27,12 @@ class Runner:
 @pytest.fixture
 def runner(monkeypatch, tmp_path):
     monkeypatch.setenv("HERDR_CONFIG_PATH", str(tmp_path / "herdr-config.toml"))
-    run = Runner("claude: not installed (/x)\ncodex: current (v8) (/y)\n")
+    claude, codex = tmp_path / "claude-hook.sh", tmp_path / "codex-hook.sh"
+    codex.write_bytes(b"v8")
+    run = Runner(
+        f"claude: not installed ({claude})\ncodex: current (v8) ({codex})\n",
+        {"claude": (claude, b"v10"), "codex": (codex, b"v8")},
+    )
     monkeypatch.setattr(herdr_setup.subprocess, "run", run)
     monkeypatch.setattr(herdr_setup, "binary", lambda: "/bin/herdr")
     marked = []
@@ -72,6 +81,21 @@ def test_enabled_init_installs_the_claude_and_codex_integrations(runner):
     herdr_setup.init_step("yes", interactive=False)
     assert ["/bin/herdr", "integration", "install", "claude"] in runner.calls
     assert ["/bin/herdr", "integration", "install", "codex"] in runner.calls
+    assert runner.marked == [["mark-changed", "--reason", "herdr-integration:claude"]]
+
+
+def test_an_unchanged_reinstall_records_no_session_affecting_change(monkeypatch, runner, tmp_path):
+    claude, codex = tmp_path / "claude-hook.sh", tmp_path / "codex-hook.sh"
+    claude.write_bytes(b"v10")
+    runner.status = f"claude: outdated (v9) ({claude})\ncodex: unknown ({codex})\n"
+    assert herdr_setup.configure() == 0
+    assert ["/bin/herdr", "integration", "install", "claude"] in runner.calls
+    assert runner.marked == []
+
+
+def test_a_rewritten_integration_file_marks_sessions_changed(runner, tmp_path):
+    (tmp_path / "claude-hook.sh").write_bytes(b"v9")
+    assert herdr_setup.configure() == 0
     assert runner.marked == [["mark-changed", "--reason", "herdr-integration:claude"]]
 
 

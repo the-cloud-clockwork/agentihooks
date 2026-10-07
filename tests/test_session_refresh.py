@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 
 import init_agent
@@ -50,10 +51,22 @@ def test_subagent_and_reentrant_stops_are_ignored(home, payload):
     assert refresh.due(payload, LAUNCHED, home, os.getpid()) is False
 
 
-def test_restart_kills_then_resumes_with_name_account_and_dir(monkeypatch):
+ORIGINAL = refresh.Original(
+    session_id="sid-1",
+    name="eng-a",
+    cwd="/work/wt",
+    account="acct2",
+    pid=4242,
+    profile="engineer",
+    model="opus",
+    effort="high",
+)
+
+
+def test_restart_kills_the_original_process_then_resumes_through_its_profile(monkeypatch):
     monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
-    kill, launch = refresh.restart_commands("sid-1", "eng-a", "/work/wt", "acct2")
-    assert kill == ["/bin/agentihooks", "terminate-agent", "sid-1", "--type", "claude"]
+    kill, launch = refresh.restart_commands(ORIGINAL)
+    assert kill == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "claude", "--force-shared"]
     assert launch == [
         "/bin/agentihooks",
         "init-agent",
@@ -65,12 +78,54 @@ def test_restart_kills_then_resumes_with_name_account_and_dir(monkeypatch):
         "eng-a",
         "--prompt",
         refresh.NOTE,
+        "--profile",
+        "engineer",
         "--",
         "--route",
         "acct2",
+        "--model",
+        "opus",
+        "--effort",
+        "high",
         "--resume",
         "sid-1",
     ]
+
+
+def test_original_reads_the_profile_model_and_effort_the_session_was_launched_with():
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "AGENTIHOOKS_RUN_MODEL": "opus", "AGENTIHOOKS_RUN_EFFORT": "high"}
+    original = refresh.Original.of("sid-1", "eng-a", {"cwd": "/work/wt", "account": "acct2"}, 4242, env)
+    assert original == ORIGINAL
+
+
+def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str]) -> list[list[str]]:
+    ran = []
+
+    def run(argv, **kwargs):
+        ran.append(argv)
+        return subprocess.CompletedProcess(argv, kill_rc if argv[1] == "terminate-agent" else 0)
+
+    monkeypatch.setattr(refresh.subprocess, "run", run)
+    monkeypatch.setattr(refresh, "live_session_ids", lambda: live)
+    marker = tmp_path / "closing-1"
+    refresh.restart([["ah", "terminate-agent", "4242"], ["ah", "init-agent"]], marker, "sid-1")
+    return ran
+
+
+def test_restart_resumes_only_once_no_process_carries_the_session(monkeypatch, tmp_path):
+    ran = _restart(monkeypatch, tmp_path, 0, ["sid-other"])
+    assert ran == [["ah", "terminate-agent", "4242"], ["ah", "init-agent"]]
+
+
+def test_a_refused_kill_never_launches_a_second_copy(monkeypatch, tmp_path):
+    ran = _restart(monkeypatch, tmp_path, 2, [])
+    assert ran == [["ah", "terminate-agent", "4242"]]
+    assert not (tmp_path / "closing-1").exists()
+
+
+def test_a_surviving_process_with_the_session_id_never_gets_a_resumed_copy(monkeypatch, tmp_path):
+    ran = _restart(monkeypatch, tmp_path, 0, ["sid-1"])
+    assert ran == [["ah", "terminate-agent", "4242"]]
 
 
 def test_launcher_marks_the_launch_and_closes_its_tab_after_a_refresh(tmp_path):
