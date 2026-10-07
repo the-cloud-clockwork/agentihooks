@@ -9,6 +9,13 @@ on:
   push:
     branches: [dev]
 
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base revision for mutation scope
+        required: true
+        default: origin/dev
+
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
@@ -155,6 +162,23 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
+  gate-required:
+    name: Gate — Required
+    needs: [unit, lint]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if ! jq -e 'all(.[]; .result == "success")' <<< "$NEEDS"; then
+            echo "::error::Every required gate must succeed."
+            exit 1
+          fi
+
   refresh-durations:
     needs: [unit, lint]
     if: github.event_name == 'push'
@@ -219,3 +243,73 @@ jobs:
           path: tree.txt
           retention-days: 7
           overwrite: true
+
+  mutation:
+    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select mutation tests before browser setup
+        id: selection
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+        run: python -m scripts.ci_mutation.browser --base "$BASE"
+
+      - name: Use the Ubuntu archive for browser dependencies
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 1
+        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 2
+        run: python -m playwright install --with-deps chromium
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Mutate changed Python files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+
+      - name: Mutate dispatched Python files
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BASE: ${{ inputs.base }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+
+      - name: Upload complete mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
