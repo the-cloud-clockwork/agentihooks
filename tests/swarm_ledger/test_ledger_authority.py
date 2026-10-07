@@ -42,7 +42,8 @@ def live():
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
-    page = new_ledger.render(new_ledger.build_doc({"title": "Authority", "phases": [{"title": "Proof"}]}), SLUG, port)
+    content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
+    page = new_ledger.render(new_ledger.build_doc(content), SLUG, port)
     core.paths(SLUG)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
@@ -68,14 +69,14 @@ def send(live, method, path, body=b"", **headers):
     try:
         conn.request(method, path, body, {"Host": live["host"], **headers})
         response = conn.getresponse()
-        return response.status, response.read()
+        return response.status, response.read(), response.getheader("Content-Type")
     finally:
         conn.close()
 
 
 def admin_put(live, *ops):
     headers = {"Content-Type": "application/json", "X-Ledger-Token": live["admin"]}
-    status, data = send(live, "PUT", f"/api/{SLUG}?view=agent", json.dumps({"ops": list(ops)}), **headers)
+    status, data, _ = send(live, "PUT", f"/api/{SLUG}?view=agent", json.dumps({"ops": list(ops)}), **headers)
     return status, json.loads(data) if status == 200 else data
 
 
@@ -104,7 +105,10 @@ def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
         reply = ledger.request(SLUG, [forged])
     assert forged["id"] in reply["rejected"]
     assert "t1" not in tasks(reply)
-    assert f"{WORKER} cannot write as {MASTER}" in reply["_meta"]["warnings"]
+    assert reply["_meta"]["warnings"] == [
+        "phase p1 description has 101 words, limit 100",
+        f"{WORKER} cannot write as {MASTER}",
+    ]
 
 
 def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
@@ -159,6 +163,11 @@ def test_the_operator_credential_keeps_full_administration(crew):
     assert reply["rejected"] == []
     assert reply["_meta"]["members"][OTHER]["role"] == "orchestrator"
     assert admin_put(crew, operation("join", by=OTHER, role="member"))[0] == 200
+    body = json.dumps({"changes": [{"path": "phases/p1/done", "value": True}]})
+    headers = {"Content-Type": "application/json", "X-Ledger-Token": crew["admin"]}
+    status, data, _ = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
+    assert status == 200
+    assert json.loads(data)["phases"][0]["done"] is True
 
 
 def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
@@ -172,7 +181,8 @@ def test_a_credential_for_one_name_refuses_another_agent_header(crew):
     body = json.dumps({"ops": [operation("add", by=OTHER, thread="chat", text="Header swap")]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER, header=OTHER)}
     before = core.paths(SLUG)[1].read_bytes()
-    assert send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers) == (403, b"missing or wrong ledger token")
+    refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
+    assert refused == (403, b"missing or wrong ledger token", "text/plain")
     assert core.paths(SLUG)[1].read_bytes() == before
 
 
@@ -180,8 +190,8 @@ def test_a_worker_cannot_send_page_changes(crew):
     body = json.dumps({"changes": [{"path": "title", "value": "Taken"}]})
     headers = {"Content-Type": "application/json", **agent_headers(crew, WORKER)}
     before = core.paths(SLUG)[1].read_bytes()
-    status, data = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
-    assert (status, data) == (403, b"page changes need the operator")
+    refused = send(crew, "PUT", f"/api/{SLUG}?view=agent", body, **headers)
+    assert refused == (403, b"page changes need the operator", "text/plain")
     assert core.paths(SLUG)[1].read_bytes() == before
 
 
@@ -189,9 +199,9 @@ def test_administrative_swarm_controls_need_the_operator(crew):
     body = json.dumps({"action": "start"})
     with patch.object(server, "swarm_control", return_value=({"state": "running"}, "")) as control:
         worker = send(crew, "PUT", f"/api/swarm/{SLUG}", body, **agent_headers(crew, WORKER))
-        assert worker == (403, b"swarm controls need the operator")
+        assert worker == (403, b"swarm controls need the operator", "text/plain")
         control.assert_not_called()
-        status, _ = send(crew, "PUT", f"/api/swarm/{SLUG}", body, **{"X-Ledger-Token": crew["admin"]})
+        status, _, _ = send(crew, "PUT", f"/api/swarm/{SLUG}", body, **{"X-Ledger-Token": crew["admin"]})
     assert status == 200
     control.assert_called_once()
 
@@ -201,7 +211,7 @@ def test_an_upload_is_bound_to_the_credential_name(crew):
     own = send(crew, "POST", f"/api/media/{SLUG}", image, **agent_headers(crew, WORKER))
     assert own[0] == 200
     forged = send(crew, "POST", f"/api/media/{SLUG}", image, **agent_headers(crew, WORKER, header=MASTER))
-    assert forged == (403, b"missing or wrong ledger token")
+    assert forged == (403, b"missing or wrong ledger token", "text/plain")
     with pinned():
         upload = core.LEDGER_DIR / "upload.png"
         upload.write_bytes(image)
