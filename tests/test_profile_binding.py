@@ -253,7 +253,8 @@ def test_supported_quota_transfer_preserves_resolved_run_options(monkeypatch):
         binding.continuation([], "codex")
 
 
-def test_swarm_handoff_keeps_profile_harness_model_effort_and_account(tmp_path):
+@pytest.mark.parametrize("lane_agent", ["auto", "codex"])
+def test_swarm_handoff_keeps_profile_harness_model_effort_and_account(tmp_path, lane_agent):
     from types import SimpleNamespace
 
     from scripts.swarm.runtime import HerdrRuntime
@@ -271,7 +272,7 @@ def test_swarm_handoff_keeps_profile_harness_model_effort_and_account(tmp_path):
         slug="proof",
         repo=str(tmp_path),
         code="a1b2c3",
-        lanes={"eng": {"agent": "claude", "model": "opus", "effort": "high"}},
+        lanes={"eng": {"agent": lane_agent, "model": "opus", "effort": "high"}},
         autonomy="delegate",
         compact_limit=0,
     )
