@@ -112,7 +112,7 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
 
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import AgentRecord, RedisStore
-    from scripts.swarm.tick import _placed
+    from scripts.swarm.tick import placed_record
 
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: decision())
     for key in ("AGENTIHOOKS_CLAUDE_MODEL", "AGENTIHOOKS_CLAUDE_EFFORT"):
@@ -143,7 +143,7 @@ def test_spawn_records_and_stores_classifier_choice(tmp_path, monkeypatch):
     assert seen[seen.index("--effort") + 1] == "high"
     assert (placed.model_source, placed.model_confidence) == ("pplx-decider-v1-27b", 0.9)
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    saved.put_agent("sw", _placed(AgentRecord("engineer", "eng", "t1"), placed))
+    saved.put_agent("sw", placed_record(AgentRecord("engineer", "eng", "t1"), placed))
     record = saved.agents("sw")[0]
     assert (record.model, record.effort, record.model_source, record.model_confidence) == (
         "opus",

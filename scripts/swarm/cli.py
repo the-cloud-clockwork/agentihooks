@@ -8,6 +8,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
+agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
 agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
@@ -65,6 +66,7 @@ from scripts.swarm import (
     done_gate,
     idle,
     ledger_events,
+    master_launch,
     naming,
     phase_planning,
     phase_state,
@@ -370,6 +372,21 @@ def cmd_take_master(store, args):
     print(prompt.build_master(args.slug, config.repo, record.name, task, config.autonomy))
     injection_trace.record_rows(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), priming_trace.rows(args.slug, task))
     store.clear_handoff(args.slug, MASTER)
+
+
+def cmd_master(store, args):
+    runtime = HerdrRuntime()
+    if args.slug not in store.slugs():
+        snapshot.recreate(store, args.slug, runtime.live_names())
+    launched = master_launch.up(store, args.slug, runtime, now_ms(), args.choice, input, print)
+    ledger = LedgerClient(service=True)
+    if ledger.closed(args.slug):
+        ledger.reopen(args.slug, launched.master)
+    if store.config(args.slug).state in ("stopped", "stopping"):
+        store.update(args.slug, state="paused")
+        timer.ensure(timer.entry_point())
+    ledger.join(args.slug, launched.master, "orchestrator")
+    print(json.dumps(asdict(launched)))
 
 
 def gate_mode(key, value, environ=None):
@@ -946,6 +963,10 @@ def build_parser():
     close.add_argument("--note", default="")
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
+    master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
+    pick = master_up.add_mutually_exclusive_group()
+    pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
+    pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")

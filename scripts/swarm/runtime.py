@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -95,6 +96,19 @@ def _conversation_id(session):
     if not isinstance(session, dict) or session.get("kind") != "id":
         return ""
     return session.get("value") or ""
+
+
+def _registered_conversations(found):
+    """Each named session's main conversation id by herdr pane name; a sub-agent id is no UUID and never counts."""
+    ids = {}
+    for session in found:
+        try:
+            uuid.UUID(session.session_id)
+        except ValueError:
+            continue
+        if session.name:
+            ids.setdefault(herdr_target(session.name), session.session_id)
+    return ids
 
 
 def _transfer(task):
@@ -413,12 +427,20 @@ class HerdrRuntime:
         return True
 
     def conversations(self):
-        """Each herdr pane's resumable conversation id, empty when herdr reports none; None when herdr cannot answer."""
+        """Each herdr pane's resumable conversation id, else its named session's registered main id, else empty;
+        None when herdr cannot answer."""
+        from scripts.terminate_agent import sessions
+
         try:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
             return None
-        return {row["pane_id"]: _conversation_id(row.get("agent_session")) for row in listed if row.get("pane_id")}
+        registered = _registered_conversations(sessions())
+        return {
+            row["pane_id"]: _conversation_id(row.get("agent_session")) or registered.get(row.get("name"), "")
+            for row in listed
+            if row.get("pane_id")
+        }
 
     def nudge(self, agent, text):
         from scripts.swarm.delivery import marked
