@@ -177,7 +177,7 @@ def test_a_cursor_from_the_snapshot_replays_everything_since():
     assert [data["rev"] for _, _, _, data in replay] == [2]
 
 
-@pytest.mark.parametrize("seq", ["", "x", "1x", "-1", "1.0"])
+@pytest.mark.parametrize("seq", ["", "x", "1x", "-1", "1.0", "²"])
 def test_an_unreadable_cursor_is_expired(seq):
     hub = Hub()
     opened(hub)

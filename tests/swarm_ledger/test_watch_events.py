@@ -122,6 +122,7 @@ def test_the_request_carries_the_credential_the_stream_accept_and_the_cursor(mon
         "Last-Event-ID": "c7",
     }
     assert given == {"X-Ledger-Token": "t"}
+    assert watch_ledger.request("a/b c", None, {})[0] == "http://h:1/api/v1/ledgers/a%2Fb%20c/events"
 
 
 def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkeypatch):

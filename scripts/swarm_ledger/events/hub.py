@@ -44,7 +44,7 @@ class Hub:
         if channel is None or not cursor.startswith(f"{channel.epoch}."):
             raise Expired
         seq = cursor[len(channel.epoch) + 1 :]
-        if not seq.isdigit():
+        if not (seq.isascii() and seq.isdigit()):
             raise Expired
         seq = int(seq)
         oldest = channel.log[0][0] - 1 if channel.log else channel.seq
