@@ -103,7 +103,8 @@ def test_incomplete_cached_connector_is_repaired(world, advertised, corruption):
             del doc["mcpServers"]["gw"]
         native.write_text(json.dumps(doc))
 
-    assert render.render_claude("rb-role") == home
+    home = render.render_claude("rb-role")
+    assert home is not None
     assert "gw" in json.loads((home / ".claude.json").read_text())["mcpServers"]
     assert json.loads((home.parent / "claude.mounts.json").read_text())["gw"] == {
         "mounted": True,
@@ -133,7 +134,6 @@ def test_tool_listing_failure_leaves_no_cached_home(world, advertised, monkeypat
     from scripts.profiles import connectors, render
 
     _declare(world, gw=_gateway(enabled_tools=READS))
-    home = render.rendered_root() / "rb-role" / "claude"
     if previous:
         render.render_claude("rb-role")
     listing = connectors.advertised
@@ -142,8 +142,8 @@ def test_tool_listing_failure_leaves_no_cached_home(world, advertised, monkeypat
         raise ConnectionError("refused")
 
     monkeypatch.setattr(connectors, "advertised", refuse)
-    assert render.render_claude("rb-role", force=True) == home
+    home = render.render_claude("rb-role", force=True)
     assert not (home / render.STAMP).exists()
     monkeypatch.setattr(connectors, "advertised", listing)
-    assert render.render_claude("rb-role") == home
+    assert render.render_claude("rb-role") not in (None, home)
     assert render.render_claude("rb-role") is None

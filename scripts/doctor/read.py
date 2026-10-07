@@ -5,9 +5,13 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from scripts.inbox.seats import of_swarm
+from scripts.inbox.seats import is_seat, of_swarm
 from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import MASTER, PREFIX
+
+MINUTE_MS = 60_000
+FINISHED = "finished"
+OPERATOR = "operator"
 
 HANDOFF_START = "1. Handoff document: a previous agent ran out of context and left it. Continue from it:"
 HANDOFF_END = "2. Swarm culture"
@@ -28,6 +32,23 @@ def inbox_items(inbox, slug):
             if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names):
                 rows.append({**asdict(item), "history": inbox.history(item.id)})
     return rows
+
+
+def inbox_receivers(store, inbox, slug, items):
+    """Each address the items reach: scoped within the swarm, its Doctor and the operator, live while its agent runs."""
+    from scripts.doctor.inbox import Receiver
+    from scripts.doctor.priming import doctor_slug
+
+    slugs, names = (slug, doctor_slug(slug)), NameRegistry(inbox.redis)
+    agents = {a.name: a for s in slugs for a in store.agents(s) if a.state != FINISHED}
+    found = {}
+    for address in {item["address"] for item in items}:
+        if address != OPERATOR and not any(of_swarm(address, s, names) for s in slugs):
+            found[address] = Receiver(scoped=False)
+            continue
+        agent = agents.get(names.resolve(inbox.seats.occupant(address).occupant if is_seat(address) else address))
+        found[address] = Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS) if agent else Receiver()
+    return found
 
 
 def _handoff(prompt):

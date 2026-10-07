@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 
@@ -9,3 +11,7 @@ def _no_live_classifier_children(monkeypatch):
         raise FileNotFoundError
 
     monkeypatch.setattr(fallbacks.subprocess, "run", missing)
+    for name in [name for name in os.environ if name.startswith("AH_CC_TOKEN_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.delenv("AGENTIHOOKS_ROUTE_ACCOUNT", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-placeholder")

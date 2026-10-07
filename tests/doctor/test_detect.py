@@ -32,6 +32,25 @@ def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     assert seen == [(store, "sw", 42)]
 
 
+def test_the_inbox_reader_holds_delivered_mail_to_its_receiver_and_leaves_out_outside_sessions():
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    box = InboxStore(store.redis)
+    store.put_agent("sw", AgentRecord(name="sw-eng-1", lane="eng", task="t1"))
+    worked = box.send("sw-eng-3", "sw-eng-1", "push your branch")
+    box.deliver(worked.id, "sw-eng-1")
+    left = box.send("sw-eng-3", "sw-eng-2", "push your branch")
+    box.deliver(left.id, "sw-eng-2")
+    box.send("sw-eng-3", "engineer-100001-0001-tmp-1", "reply with the word")
+    later = worked.created_at + 10 * 60_000
+    found = detect.readers(store, None, "sw", later, environ={})["inbox"]()
+    assert [f.id for f in found] == [f"inbox-past-window/{left.id}"]
+
+
 def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
     tasks = [
         {"state": "pr", "pr_url": "https://github.com/o/r/pull/9"},

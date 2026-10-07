@@ -158,6 +158,18 @@ def test_a_closed_template_item_is_sent_again(rig):
     assert rig.inbox() == [TEMPLATE, TEMPLATE]
 
 
+def test_a_later_stop_that_passes_closes_the_open_template_item_with_its_outcome(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "new").write_text("new\n")
+    rig.stop()
+    git(rig.tree, "add", "new")
+    git(rig.tree, "commit", "-m", "new")
+    assert rig.stop().allowed
+    [item] = InboxStore(rig.store.redis).inbox(ME)
+    assert (item.state, item.reason) == ("done", f"done: {push_stop.SETTLED}")
+    assert rig.stop().allowed
+
+
 def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(rig):
     rig.commit()
     decision = rig.stop()
