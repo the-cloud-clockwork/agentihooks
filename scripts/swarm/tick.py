@@ -70,7 +70,7 @@ class Ledger(Protocol):
 
 
 class Runtime(Protocol):
-    def has_capacity(self) -> bool: ...
+    def has_capacity(self, config) -> bool: ...
     def spawn(self, config, lane: str, name: str, task: dict, spawns: dict | None = None) -> Placed: ...
     def live_names(self) -> set[str]: ...
     def bindings(self, agents: list[AgentRecord]) -> dict: ...
@@ -347,7 +347,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane)
         for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
-            if not runtime.has_capacity():
+            if not runtime.has_capacity(config):
                 return actions + ["every agent is at its session cap, waiting"]
             if blocked := _lives_spent(slug, store, ledger, rows, task):
                 actions.append(blocked)
@@ -514,7 +514,7 @@ def _master(slug, config, store, runtime, now_ms):
         return [_retire_master(slug, store, runtime, m) for m in masters]
     if any(m.state != "finished" for m in masters):
         return []
-    if not runtime.has_capacity():
+    if not runtime.has_capacity(config):
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER, now_ms)
     record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, state="starting", seat=seat_address(slug, MASTER))

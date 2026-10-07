@@ -142,7 +142,7 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(upd
     count = len(server.ledger_summaries())
     assert count > 1
     assert (
-        '<header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>HOME</h1>'
+        '<header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>HOME</h1>'
         f"{server.FOLD_ALL}</header>" in page
     )
     assert 'class="total"' not in page
@@ -169,7 +169,7 @@ def test_the_bin_lists_days_left_and_a_restore_button(updated_at):
     assert f'<button class="act restore" type="button" data-act="restore" data-slug="{SLUG}"' in found
     assert "Restore</button>" in found
     assert (
-        '<main class="bin"><header><span class="logo" aria-hidden="true"></span><span class="brand">agentihooks</span><h1>BIN</h1><span class="total">1 ledger</span></header>'
+        '<main class="bin"><header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>BIN</h1><span class="total">1 ledger</span></header>'
         in page
     )
     assert 'class="watermark"' not in page

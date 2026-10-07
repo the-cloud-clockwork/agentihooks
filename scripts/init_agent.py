@@ -78,6 +78,17 @@ class AgentSpec:
     channel: bool = False
 
 
+SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
+SWARM_IDENTITY = (
+    "AGENTIHOOKS_SWARM",
+    "AGENTIHOOKS_SWARM_LANE",
+    "AGENTIHOOKS_SWARM_TASK",
+    "AGENTIHOOKS_SWARM_AUTONOMY",
+    "AGENTIHOOKS_SWARM_LAUNCHER",
+    effort_range.VARIABLE,
+)
+
+
 def _collector(environ: dict[str, str]) -> str:
     return environ.get("AGENTIHOOKS_OTEL_COLLECTOR", "").rstrip("/")
 
@@ -110,7 +121,14 @@ def _swarm_exports(environ: dict[str, str]) -> str:
     names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
-    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items())
+    pin = "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
+    return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
+
+
+def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
+    keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
+    dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
+    return {key: value for key, value in environ.items() if key not in dropped}
 
 
 def _config_home_export(environ: dict[str, str]) -> str:
@@ -514,6 +532,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
+        active_env = _launch_environ(active_env, name, args.handoff)
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         if args.handoff and (args.agent == "codex" or active_env.get("AGENTIHOOKS_TARGET") == "codex"):

@@ -1065,16 +1065,6 @@ def _operator_reminder(payload: dict) -> None:
         log("operator reminder failed", {"error": str(e)})
 
 
-def _operator_quiet(payload: dict) -> str:
-    try:
-        from hooks.context import operator_mode
-
-        return operator_mode.quiet_block(payload.get("session_id"), payload.get("last_assistant_message"))
-    except Exception as e:
-        log("operator quiet check failed", {"error": str(e)})
-        return ""
-
-
 def _arm_gate_lifts(payload: dict) -> None:
     try:
         from scripts.gates.base import Who
@@ -2045,9 +2035,6 @@ def on_stop(payload: dict) -> None:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
-    _quiet_block = _operator_quiet(payload)
-    if _quiet_block:
-        raise BlockAction(_quiet_block)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
@@ -2567,6 +2554,10 @@ def main() -> None:
         # Get event name from payload
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
+
+        from hooks.context.swarm_pin import unpin
+
+        unpin()
 
         # Route to handler
         handler = EVENT_HANDLERS.get(event_name)
