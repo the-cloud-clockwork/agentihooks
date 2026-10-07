@@ -247,6 +247,7 @@ def test_open_tool_call_keeps_its_records_until_the_result_lands(tmp_path, monke
     agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
     tool = receiver.observations[agent_trace._span_id("session", "t0-1")]
     assert tool.attributes["langfuse.observation.output"].startswith("0-1 x")
+    assert "a0-1-tool_use" not in agent_trace._cursor("session")["records"]
 
 
 def _without_results(records: list[dict], calls: set[str]) -> list[dict]:
