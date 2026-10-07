@@ -401,3 +401,60 @@ def test_a_parked_task_finishes_from_its_branch_after_a_restack():
 def test_stacked_steps_apply_only_to_code_work():
     lines = _steps({"kind": "research", "stack_base": [{"task": "t1", "branch": "eng-one"}]})
     assert "park <doc>" not in "\n".join(lines)
+
+
+SERENA_LINE = (
+    "mcp__serena__activate_project with its absolute path. Python is read and edited through Serena "
+    "(find_symbol, replace_symbol_body, insert_after_symbol, replace_content); built-in Edit and shell "
+    "rewrites of existing .py files are blocked."
+)
+
+
+def _block(lines, first, count):
+    start = lines.index(first)
+    return lines[start : start + count]
+
+
+def test_a_stacked_claim_on_two_dependencies_reads_exactly():
+    lines = _steps(
+        {"kind": "code", "stack_base": [{"task": "t1", "branch": "eng-one"}, {"task": "t2", "branch": "eng-two"}]}
+    )
+    head = (
+        "Your task depends on work still open. Build on top of it, push and park; the next engineer finishes it "
+        "once its dependency is done:"
+    )
+    assert _block(lines, head, 9) == [
+        head,
+        "Dependency t1 is still open on branch eng-one.",
+        "Dependency t2 is still open on branch eng-two.",
+        "1. If the repo has GitHub issues (gh repo view --json hasIssuesEnabled), open an issue naming the seams "
+        "and record it: agentihooks swarm sw issue <issue url>. Without issues the ledger task is the spec: skip "
+        "this step.",
+        f"2. Create your worktree from the dependency branch: {CUT} --from origin/eng-one, then call {SERENA_LINE} "
+        "Merge each other open dependency into it: git merge origin/eng-two.",
+        "3. Build what you can on top of the dependency: red test, least code to green. Leave what needs the "
+        "dependency finished and name it in your handoff.",
+        "4. Gates green on what you built, commit with the issue in the message (Refs #<n>) so the branch points "
+        "at the issue, push the branch (git push -u origin HEAD) and record it: agentihooks swarm sw branch.",
+        "5. Write a Handoff v2 document with the handoff skill whose Stopped at names the open dependency and what "
+        "waits on it. Leave the crew with agentihooks ledger --slug sw --as engineer@a1b2c3-0003 leave, then park: "
+        "agentihooks swarm sw park <doc>. Park comments the branch on the issue so they point at each other, and "
+        "the task waits on its branch. The swarm then closes this session; stop working.",
+        "",
+    ]
+
+
+def test_a_parked_task_opens_with_exact_finish_steps():
+    lines = _steps({"kind": "code", "branch": "eng-parked", "parked_on": ["t1"], "stacked_base": "abc"})
+    head = "Your task was parked on branch eng-parked until its dependency finished."
+    assert _block(lines, head, 4) == [
+        head,
+        "Work it end to end with the dev-cycle skill, then stop:",
+        "1. If the repo has GitHub issues (gh repo view --json hasIssuesEnabled), open an issue naming the seams "
+        "and record it: agentihooks swarm sw issue <issue url>. Without issues the ledger task is the spec: skip "
+        "this step.",
+        f"2. Create your worktree: {CUT} --from origin/eng-parked (never edit the primary checkout), then call "
+        f"{SERENA_LINE} Then run agentihooks swarm sw restack in it: it rebases the parked work onto dev. On a "
+        "conflict it lists the files: resolve them, run git rebase --continue, then run agentihooks swarm sw "
+        "restack again.",
+    ]
