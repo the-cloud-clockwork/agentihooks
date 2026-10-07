@@ -158,6 +158,20 @@ def test_sweep_checks_every_process_after_skips_and_errors(tmp_path, monkeypatch
     stopped.assert_called_once_with(row, proc)
 
 
+def test_sweep_defaults_to_a_report_without_signalling_or_logging(tmp_path, monkeypatch):
+    folder = tmp_path / "ledger"
+    folder.mkdir()
+    row = process(ppid=1)
+    proc = plant(tmp_path, row, folder)
+    stopped = Mock()
+    monkeypatch.setattr(ledger_servers, "terminate", stopped)
+    result = ledger_servers.sweep_servers({42: row}, tmp_path, proc=proc)
+    assert result[0]["action"] == "would stop"
+    assert result[0]["reason"] == "starting run ended without an owner record"
+    stopped.assert_not_called()
+    assert not (tmp_path / "gc-ledger-servers.jsonl").exists()
+
+
 def test_terminate_allows_a_grace_period_before_escalating(tmp_path, monkeypatch):
     row = process()
     monkeypatch.setattr(ledger_servers, "_process", Mock(side_effect=[row, row, None]))
