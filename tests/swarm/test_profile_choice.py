@@ -9,11 +9,21 @@ from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
+REAL_INSTALLED = profile_choice.installed
+REMEDY = (
+    "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, "
+    "or split the task into one public responsibility each, then reopen it"
+)
+INSTRUCTIONS = (
+    'Task t9 "Rank tasks before claim": which responsibility owns the public behavior this task changes? Judge what '
+    "a user or caller observes changing, from the description, parent intent and territory, never from keywords or "
+    "file names. Mixed interface and backend work follows the public behavior changed."
+)
 TASK = {
     "id": "t9",
     "title": "Rank tasks before claim",
     "description": "Claim tasks in the order the operator ranks them on the page",
-    "kind": "code",
+    "kind": "ops",
     "phase": "p1",
     "territory": ["scripts/swarm/tick.py", "scripts/swarm_ledger/static"],
     "culture": "not public",
@@ -53,22 +63,16 @@ def asked(monkeypatch):
 @pytest.fixture
 def ledger_file(monkeypatch, tmp_path):
     path = tmp_path / "sw.json"
-    path.write_text(
-        json.dumps(
-            {
-                "overview": "Swarm Design System",
-                "phases": [{"id": "p1", "title": "Ordering", "description": "Operator ranks the queue"}],
-            }
-        )
-    )
-    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: path)
+    phases = [{"id": "p0"}, {"id": "p1", "title": "Ordering", "description": "Operator ranks the queue"}, {"id": "p2"}]
+    path.write_text(json.dumps({"overview": "Swarm Design System", "phases": phases}))
+    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path}[slug])
     return path
 
 
 def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("explicit profile asked classifier"))
     decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, {**TASK, "profile": "qa"}, {})
-    assert (decision.profile, decision.source) == ("qa", "task")
+    assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
 
 
 @pytest.mark.parametrize(
@@ -84,7 +88,7 @@ def test_explicit_task_profile_wins_without_classifier(monkeypatch):
 def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane, lanes, expected):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("fixed lane asked classifier"))
     decision = profile_choice.choose("sw", lane, lanes, {"id": "t9", "title": "Fix the page layout"}, {})
-    assert (decision.profile, decision.source) == (expected, "lane")
+    assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
 
 
 def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_and_intent(asked, ledger_file):
@@ -95,14 +99,14 @@ def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_a
     assert set(questions) == {"responsibility"}
     question = questions["responsibility"]
     assert question.type == "choice"
+    assert question.instructions == INSTRUCTIONS
     assert set(question.options) == {"frontend", "engineer", "qa", "split", "unresolved"}
-    assert "t9" in question.instructions and "Rank tasks before claim" in question.instructions
     assert "claim ordering" in question.options["frontend"]
     assert state == {
         "task": "t9",
         "title": TASK["title"],
         "description": TASK["description"],
-        "kind": "code",
+        "kind": "ops",
         "territory": TASK["territory"],
         "project_intent": "Swarm Design System",
         "phase": "p1",
@@ -117,6 +121,36 @@ def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_a
         calibrated=True,
         anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
     )
+
+
+def test_bare_task_state_and_question_name_empty_fields(asked, ledger_file):
+    calls = asked("engineer")
+    profile_choice.choose("sw", "eng", {}, {"id": "t9"}, {})
+    state, questions, _ = calls[0]
+    assert questions["responsibility"].instructions.startswith('Task t9 "": which responsibility')
+    assert state == {
+        "task": "t9",
+        "title": "",
+        "description": "",
+        "kind": "code",
+        "territory": [],
+        "project_intent": "Swarm Design System",
+        "phase": "",
+        "phase_intent": "",
+    }
+    assert profile_choice.state("sw", {})["task"] == ""
+    assert profile_choice.state("sw", {"phase": "p2"})["phase_intent"] == ": "
+    assert profile_choice.anchors({"id": "t9"}) == ("task:t9",)
+
+
+def test_close_summary_is_not_parent_intent_and_missing_ledger_is_empty(monkeypatch, tmp_path):
+    from scripts.swarm_ledger import ledger_close
+
+    path = tmp_path / "sw.json"
+    path.write_text(json.dumps({"overview": f"Intent {ledger_close.MARK} summary"}))
+    monkeypatch.setattr(profile_choice, "ledger_path", lambda slug: {"sw": path, "gone": tmp_path / "x.json"}[slug])
+    assert profile_choice.state("sw", {})["project_intent"] == "Intent"
+    assert profile_choice.state("gone", {})["project_intent"] == ""
 
 
 @pytest.mark.parametrize(
@@ -134,12 +168,13 @@ def test_contradictory_keywords_never_override_the_classifier(asked, title, answ
 
 @pytest.mark.parametrize("choice", ["split", "unresolved"])
 def test_mixed_or_unclear_responsibility_refuses_with_actionable_reason(asked, choice):
-    asked(choice)
+    asked(choice, confidence=0.97)
     with pytest.raises(profile_choice.ProfileUnresolved) as raised:
         profile_choice.choose("sw", "eng", {}, TASK, {})
-    reason = str(raised.value)
-    assert choice in reason and "pplx-decider-v1-27b" in reason
-    assert "agentihooks ledger --slug sw task set t9 profile=" in reason
+    assert str(raised.value) == (
+        f"task t9 profile is unresolved: pplx-decider-v1-27b answered {choice} with confidence 0.97, "
+        f"the floor is 0.60: {REMEDY}"
+    )
 
 
 @pytest.mark.parametrize("confidence,floor", [(0.59, {}), (0.7, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.75"})])
@@ -147,6 +182,12 @@ def test_low_confidence_refuses_instead_of_guessing(asked, confidence, floor):
     asked("frontend", confidence=confidence)
     with pytest.raises(profile_choice.ProfileUnresolved, match=f"frontend with confidence {confidence:.2f}"):
         profile_choice.choose("sw", "eng", {}, TASK, floor)
+
+
+def test_an_answer_without_confidence_refuses(asked):
+    asked("frontend", confidence=None)
+    with pytest.raises(profile_choice.ProfileUnresolved, match="frontend with confidence 0.00"):
+        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
 
 
 def test_confidence_at_floor_is_accepted(asked):
@@ -159,22 +200,37 @@ def test_unavailable_classifier_never_falls_back_to_engineer(monkeypatch):
         raise ClassifierUnavailable("no decision backend answered")
 
     monkeypatch.setattr(profile_choice, "decide", unavailable)
-    with pytest.raises(profile_choice.ProfileUnresolved, match="no decision backend answered.*task set t9 profile="):
+    with pytest.raises(profile_choice.ProfileUnresolved) as raised:
         profile_choice.choose("sw", "eng", {}, TASK, {})
+    assert (
+        str(raised.value) == f"task t9 profile classification is unavailable (no decision backend answered): {REMEDY}"
+    )
 
 
 @pytest.mark.parametrize(
-    "lane,task",
-    [("eng", {**TASK, "profile": "ghost"}), ("master", {"id": "master"}), ("eng", TASK)],
+    "lane,task,profile",
+    [("eng", {**TASK, "profile": "ghost"}, "ghost"), ("master", {"id": "t9"}, "master"), ("eng", TASK, "frontend")],
 )
-def test_missing_profile_refuses_with_reason(monkeypatch, asked, lane, task):
+def test_missing_profile_refuses_with_reason(monkeypatch, asked, lane, task, profile):
     asked("frontend")
-    monkeypatch.setattr(profile_choice, "installed", lambda name: False)
-    with pytest.raises(profile_choice.ProfileUnresolved, match="is not installed"):
+    monkeypatch.setattr(profile_choice, "installed", lambda name: name != profile)
+    with pytest.raises(profile_choice.ProfileUnresolved) as raised:
         profile_choice.choose("sw", lane, {}, task, {})
+    assert str(raised.value) == (
+        f"task t9 needs profile {profile}, which is not installed: install it with agentihooks init or {REMEDY}"
+    )
 
 
-def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked):
+def test_installed_asks_the_profile_resolver(monkeypatch):
+    from scripts.targets import _common
+
+    found = {"engineer": "/profiles/engineer"}
+    monkeypatch.setattr(_common, "_install_module", lambda: SimpleNamespace(_resolve_profile_dir=found.get))
+    assert REAL_INSTALLED("engineer") is True
+    assert REAL_INSTALLED("ghost") is False
+
+
+def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, ledger_file):
     asked("frontend")
     calls = []
 
@@ -200,14 +256,28 @@ def test_runtime_refuses_launch_on_unresolved_profile(tmp_path, asked):
         rt.spawn(store.SwarmConfig("sw", str(tmp_path), 1, 0, code="a1b2c3"), "eng", "a", TASK)
 
 
-def test_tick_blocks_task_with_the_unresolved_reason(swarm):
-    ledger, rt = tasks(("t1", "eng")), FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
+def _commenting(ledger):
     ledger.comments = []
-    ledger.comment = lambda slug, task_id, text, by: ledger.comments.append((task_id, text, by))
+    ledger.comment = lambda slug, task_id, text, by: ledger.comments.append((slug, task_id, text, by))
+    return ledger
+
+
+def test_tick_blocks_task_with_the_unresolved_reason(swarm):
+    ledger = _commenting(tasks(("t1", "eng")))
+    rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
     actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    assert ledger.comments == [("t1", "profile unresolved: set it", "swarm")]
+    assert ledger.comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
     assert "blocked t1: profile unresolved: set it" in actions
+
+
+def test_unresolved_leaves_a_task_that_moved_on(swarm):
+    ledger = _commenting(tasks(("t1", "eng")))
+    ledger.rows["t1"]["state"] = "done"
+    rows = {"t1": dict(ledger.rows["t1"])}
+    said = tick._unresolved("sw", ledger, rows, "t1", "why")
+    assert said == "task t1 is done on the ledger, its profile stays unresolved"
+    assert ledger.rows["t1"]["state"] == "done" and ledger.comments == []
 
 
 def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):

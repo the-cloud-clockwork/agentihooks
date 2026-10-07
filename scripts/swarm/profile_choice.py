@@ -98,7 +98,7 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
 
 def state(slug: str, task: dict) -> dict:
     doc = _ledger(slug)
-    phase = next((p for p in doc.get("phases", []) if p.get("id") == task.get("phase")), {})
+    phases = (p for p in doc.get("phases", []) if p.get("id") == task.get("phase"))
     return {
         "task": task.get("id", ""),
         "title": task.get("title", ""),
@@ -107,7 +107,7 @@ def state(slug: str, task: dict) -> dict:
         "territory": list(task.get("territory", [])),
         "project_intent": doc.get("overview", "").partition(ledger_close.MARK)[0].strip(),
         "phase": task.get("phase", ""),
-        "phase_intent": f"{phase.get('title', '')}: {phase.get('description', '')}" if phase else "",
+        "phase_intent": next((f"{p.get('title', '')}: {p.get('description', '')}" for p in phases), ""),
     }
 
 
@@ -119,7 +119,7 @@ def anchors(task: dict) -> tuple:
 def _ledger(slug: str) -> dict:
     path = ledger_path(slug).expanduser()
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
 
