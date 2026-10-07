@@ -10,10 +10,17 @@ OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
 EVERYONE = "swarm"
 SENT_TTL_S = 30 * 24 * 3600
+MASTER_RULE = "Answer the operator in your next turn: reply to this message saying what you will do."
+ANSWER_RULE = (
+    "Answer the operator in your next turn: reply to this message saying what you will do. If the work is not "
+    "yours, send it to {master} with agentihooks msg send naming why, and say so in your reply. "
+    "Never only forward it."
+)
 
 
 def addresses(slug, event, doc, agents):
     live = [a for a in agents if a.state != "finished"]
+    master = master_address(slug, live)
     if event.get("kind") == SYNC_ORDER:
         return [a.seat or a.name for a in live]
     target = event.get("target", "")
@@ -22,15 +29,27 @@ def addresses(slug, event, doc, agents):
         mention = MENTION_RE.match(event.get("note_text", event.get("text", "")))
         to = mention.group(1) if mention else ""
         if to == EVERYONE:
-            return [a.seat or a.name for a in live]
+            everyone = [a.seat or a.name for a in live]
+            return everyone if master in everyone else [*everyone, master]
         found = [a for a in live if to in (a.name, a.lane)]
     elif target.startswith("tasks/"):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    boss = next((a for a in live if a.lane == MASTER), None)
-    master = (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
     return [a.seat or a.name for a in found] or [master]
+
+
+def master_address(slug, live):
+    boss = next((a for a in live if a.lane == MASTER), None)
+    return (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
+
+
+def primed(text, event, address, master):
+    """An operator chat line carries the rule that its receiver answers it, so no agent only forwards it."""
+    if event.get("target") != "chat":
+        return text
+    rule = MASTER_RULE if address == master else ANSWER_RULE.format(master=master)
+    return f"{text}\n{rule}"
 
 
 def relay(inbox, store, slug, doc, events, line):
@@ -47,5 +66,9 @@ def relay(inbox, store, slug, doc, events, line):
         if not inbox.redis.set(inbox.key("ledger-sent", ref), 1, nx=True, ex=SENT_TTL_S):
             continue
         text = f"On ledger {slug}: {line(event)}"
-        sent += [inbox.send(OPERATOR, address, text, ref=ref) for address in addresses(slug, event, doc, agents)]
+        master = master_address(slug, [a for a in agents if a.state != "finished"])
+        sent += [
+            inbox.send(OPERATOR, address, primed(text, event, address, master), ref=ref)
+            for address in addresses(slug, event, doc, agents)
+        ]
     return sent
