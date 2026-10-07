@@ -255,6 +255,19 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
         assert install["if"] == "steps.lookup.outputs.skip != 'true' && steps.artifacts.outputs.browser == 'true'"
 
 
+def test_equivalence_runs_every_replay_at_once_after_one_browser_setup():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+    replays = [step for step in steps if "_replay.py" in step.get("run", "")]
+    assert len(replays) == 1
+    run = replays[0]["run"]
+    assert run.count("repository_replay.py") == 3 and run.count("page_replay.py") == 3
+    assert run.count(" &\n") == 6 and "wait" in run
+    assert steps.index(_browser_install(steps)) < steps.index(replays[0])
+    assert all("Path('head/" not in step.get("run", "") for step in steps)
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
