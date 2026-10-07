@@ -98,6 +98,95 @@ def codex_home() -> Path:
     return Path(raw).expanduser() if raw else Path.home() / ".codex"
 
 
+_TOOL_FILTERS = ("enabled_tools", "disabled_tools")
+_WHOLE_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+
+
+def _codex_stdio(name: str, spec: dict) -> dict:
+    from hooks.secrets import scan as _scan_secrets
+
+    _i = _install_module()
+    entry: dict = {"command": spec["command"]}
+    if spec.get("args"):
+        entry["args"] = list(spec["args"])
+    clean_env: dict = {}
+    for ek, ev in dict(spec.get("env") or {}).items():
+        ev_s = scannable(str(ev))
+        hits = _scan_secrets(ev_s, mode="strict") if ev_s else []
+        if hits:
+            _i._cprint(
+                f"  [!!] MCP '{name}' env var '{ek}' looks like a credential "
+                f"({', '.join(hits)}) — dropped from config.toml. Export it in "
+                "the shell environment instead of writing it to disk."
+            )
+            continue
+        clean_env[ek] = ev
+    if clean_env:
+        entry["env"] = clean_env
+        _forward_env_references(entry)
+    return entry
+
+
+def _codex_http(name: str, spec: dict) -> dict:
+    # Claude expands ${VAR} in header values; codex sends them literally (gateway 401 on the raw placeholder).
+    from hooks.secrets import scan as _scan_secrets
+
+    _i = _install_module()
+    entry: dict = {"url": spec["url"]}
+    clean_headers: dict = {}
+    env_headers: dict = {}
+    for hk, hv in dict(spec.get("headers") or {}).items():
+        hv_s = str(hv)
+        bearer = re.fullmatch(r"Bearer\s+\$\{?(\w+)\}?", hv_s)
+        whole = _WHOLE_REFERENCE.fullmatch(hv_s)
+        if hk.lower() == "authorization" and bearer:
+            entry["bearer_token_env_var"] = bearer.group(1)
+        elif whole:
+            env_headers[hk] = whole.group(1) or whole.group(2)
+        elif has_env_reference(hv_s):
+            _i._cprint(
+                f"  [!!] MCP '{name}' header '{hk}' uses a ${{VAR}}/$VAR reference inside a longer value — "
+                "codex does not expand these; header dropped. Make the whole value one ${VAR} "
+                "(mapped to env_http_headers) or an Authorization Bearer ${VAR} (mapped to bearer_token_env_var)."
+            )
+        elif hits := _scan_secrets(hv_s, mode="strict"):
+            _i._cprint(
+                f"  [!!] MCP '{name}' header '{hk}' looks like a credential "
+                f"({', '.join(hits)}) — dropped from config.toml. Reference it via "
+                "Authorization Bearer ${VAR} (mapped to bearer_token_env_var) "
+                "instead of a literal value."
+            )
+        else:
+            clean_headers[hk] = hv
+    if clean_headers:
+        entry["http_headers"] = clean_headers
+    if env_headers:
+        entry["env_http_headers"] = env_headers
+    return entry
+
+
+def codex_mcp_entry(name: str, spec: dict) -> tuple[dict | None, str]:
+    """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
+    if drop_if_credentialed(name, spec, "config.toml"):
+        return None, "credential-shaped literal in url, command or args"
+    if spec.get("type") == "sse":
+        _install_module()._cprint(
+            f"  [!!] MCP '{name}' uses SSE — codex has no SSE transport; skipped. "
+            "Expose a streamable-HTTP endpoint and re-run init."
+        )
+        return None, "codex has no SSE transport"
+    if spec.get("command"):
+        entry = _codex_stdio(name, spec)
+    elif spec.get("url"):
+        entry = _codex_http(name, spec)
+    else:
+        return None, "no command or url"
+    entry.update({key: list(spec[key]) for key in _TOOL_FILTERS if spec.get(key)})
+    if spec.get("default_tools_approval_mode"):
+        entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
+    return entry, ""
+
+
 class CodexAdapter:
     name = "codex"
 
@@ -376,80 +465,8 @@ class CodexAdapter:
         table = doc.setdefault("mcp_servers", {})
         added: list[str] = []
         for name, spec in servers.items():
-            spec = dict(spec)
-            if drop_if_credentialed(name, spec, "config.toml"):
-                continue
-            stype = spec.get("type", "stdio" if spec.get("command") else "http")
-            if stype == "sse":
-                _i._cprint(
-                    f"  [!!] MCP '{name}' uses SSE — codex has no SSE transport; skipped. "
-                    "Expose a streamable-HTTP endpoint and re-run init."
-                )
-                continue
-            from hooks.secrets import scan as _scan_secrets
-
-            entry: dict = {}
-            if spec.get("command"):
-                entry["command"] = spec["command"]
-                if spec.get("args"):
-                    entry["args"] = list(spec["args"])
-                if spec.get("env"):
-                    clean_env: dict = {}
-                    for ek, ev in dict(spec["env"]).items():
-                        ev_s = scannable(str(ev))
-                        if not ev_s:
-                            # Nothing but ${VAR} references — no literal to scan.
-                            clean_env[ek] = ev
-                            continue
-                        hits = _scan_secrets(ev_s, mode="strict")
-                        if hits:
-                            _i._cprint(
-                                f"  [!!] MCP '{name}' env var '{ek}' looks like a credential "
-                                f"({', '.join(hits)}) — dropped from config.toml. Export it in "
-                                "the shell environment instead of writing it to disk."
-                            )
-                            continue
-                        clean_env[ek] = ev
-                    if clean_env:
-                        entry["env"] = clean_env
-                        _forward_env_references(entry)
-            elif spec.get("url"):
-                entry["url"] = spec["url"]
-                # Claude Code expands ${VAR} placeholders in header values at
-                # connect time; codex sends them LITERALLY (verified: gateway
-                # 401 on the raw placeholder). Authorization Bearer ${VAR}
-                # maps to codex's native bearer_token_env_var; any other
-                # placeholder-bearing header is dropped with a warning.
-                import re as _re
-
-                clean_headers: dict = {}
-                for hk, hv in dict(spec.get("headers") or {}).items():
-                    hv_s = str(hv)
-                    # Braced or unbraced — codex expands neither, so both map
-                    # to its native env indirection or get dropped.
-                    bearer = _re.fullmatch(r"Bearer\s+\$\{?(\w+)\}?", hv_s)
-                    if hk.lower() == "authorization" and bearer:
-                        entry["bearer_token_env_var"] = bearer.group(1)
-                    elif has_env_reference(hv_s):
-                        _i._cprint(
-                            f"  [!!] MCP '{name}' header '{hk}' uses a ${{VAR}}/$VAR reference — "
-                            "codex does not expand these; header dropped. Use a literal value "
-                            "or an Authorization Bearer ${VAR} (mapped to bearer_token_env_var)."
-                        )
-                    else:
-                        hits = _scan_secrets(hv_s, mode="strict")
-                        if hits:
-                            _i._cprint(
-                                f"  [!!] MCP '{name}' header '{hk}' looks like a credential "
-                                f"({', '.join(hits)}) — dropped from config.toml. Reference it via "
-                                "Authorization Bearer ${VAR} (mapped to bearer_token_env_var) "
-                                "instead of a literal value."
-                            )
-                        else:
-                            clean_headers[hk] = hv
-                if clean_headers:
-                    entry["http_headers"] = clean_headers
-            else:
+            entry, _ = codex_mcp_entry(name, dict(spec))
+            if entry is None:
                 continue
             table[name] = entry
             added.append(name)

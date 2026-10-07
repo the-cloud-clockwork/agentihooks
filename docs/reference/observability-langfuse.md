@@ -210,3 +210,59 @@ Langfuse MCP server (`stacks/langfuse/mcp`), registered on the LiteLLM gateway a
 A gateway key reaches only the tools its LiteLLM unit allows (`litellm-state`
 units). A unit that lists `langfuse_tools` but not these three tool names does
 not see them.
+
+### Mounting only the three reads in a profile
+
+The gateway advertises each tool as `<server>-<tool>`, so the three reads are
+`langfuse_tools-swarm_traces_by_tag`, `langfuse_tools-swarm_session_timeline` and
+`langfuse_tools-swarm_error_latency_summary`. The header `x-mcp-servers:
+langfuse_tools` narrows the gateway catalogue to that one server; no header
+narrows the tools inside it. A profile declares the connector in its `.mcp.json`
+with an `enabled_tools` allowlist of those advertised names (and optionally
+`disabled_tools`), keeping every credential as a `${VAR}` reference:
+
+```json
+{
+  "mcpServers": {
+    "langfuse": {
+      "type": "http",
+      "url": "http://10.10.30.200/mcp/",
+      "headers": {
+        "Host": "llm.homeofanton.com",
+        "Authorization": "Bearer ${MCP_KEY_GATEWAY}",
+        "x-mcp-servers": "langfuse_tools"
+      },
+      "enabled_tools": [
+        "langfuse_tools-swarm_traces_by_tag",
+        "langfuse_tools-swarm_session_timeline",
+        "langfuse_tools-swarm_error_latency_summary"
+      ],
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}
+```
+
+`agentihooks profile render <name> --target claude|codex` turns that into each
+harness's own filter:
+
+- **Codex** mounts the declared entry with `enabled_tools` as written,
+  `Authorization: Bearer ${VAR}` as `bearer_token_env_var`, any other header
+  whose whole value is `${VAR}` as `env_http_headers`, and literal headers as
+  `http_headers`. Codex defers MCP tools behind its tool search, so a session
+  finds the three through search rather than its initial tool list. Under
+  `approval_policy = "never"` Codex refuses an MCP call that needs approval;
+  `default_tools_approval_mode = "approve"` on the declaration lets the three
+  reads run. Claude never receives this field.
+- **Claude** has no per-server allowlist (a `tools` field on a server entry
+  drops the server). The render lists the server's advertised tools with the
+  declared references resolved in memory, writes the entry without the filter
+  fields, and adds `mcp__<server>__<tool>` to `permissions.deny` in the rendered
+  `settings.json` for every advertised tool outside the allowlist. A tool the
+  server adds later stays visible until the next render.
+
+Each render writes `<target>.mounts.json` beside the profile homes, naming every
+declared server as mounted (with its allowlist, and any allowlisted name the
+server does not advertise) or unmounted with the reason, and prints each gap.
+On Claude an allowlisted server stays unmounted when it is not an HTTP server,
+a referenced variable is unset, or the tool listing fails.
