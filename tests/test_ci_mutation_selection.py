@@ -171,16 +171,19 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     engine = SimpleNamespace(
         tests_by_mangled_function_name={
             "scripts.sample.x_f": {"tests/test_sample.py::test_slow", "tests/test_other.py::test_o"},
-            "scripts.sample.x_g": {"tests/test_sample.py::test_fast"},
+            "scripts.sample.x_g": {"tests/test_sample.py::test_fast", "tests/test_sample.py::TestCase::test_m"},
             "hooks.other.x_h": {"tests/test_sample.py::test_slow", "tests/test_other.py::test_o"},
+            "scripts.unselected.x_u": {"tests/test_sample.py::test_slow"},
         },
         duration_by_test={"tests/test_sample.py::test_slow": 2, "tests/test_sample.py::test_fast": 1},
     )
     engine.duration_by_test["tests/test_other.py::test_o"] = 3
+    engine.duration_by_test["tests/test_sample.py::TestCase::test_m"] = 0
     test_calls = []
 
     class PytestRunner:
         def run_tests(self, *, mutant_name, tests):
+            assert isinstance(self, PytestRunner)
             test_calls.append((mutant_name, tests))
             return 0
 
@@ -235,8 +238,9 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert config.source_paths == [Path("hooks/")]
         assert engine.tests_by_mangled_function_name == {
             "scripts.sample.x_f": {"tests/test_sample.py::test_slow"},
-            "scripts.sample.x_g": {"tests/test_sample.py::test_fast"},
+            "scripts.sample.x_g": {"tests/test_sample.py::test_fast", "tests/test_sample.py::TestCase::test_m"},
             "hooks.other.x_h": {"tests/test_other.py::test_o"},
+            "scripts.unselected.x_u": set(),
         }
         runner.PytestRunner().run_tests(mutant_name=None, tests=[])
         runner.PytestRunner().run_tests(mutant_name=None, tests=["tests/test_x.py::t"])
@@ -245,7 +249,12 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             (None, []),
             (
                 None,
-                ["tests/test_sample.py::test_fast", "tests/test_sample.py::test_slow", "tests/test_other.py::test_o"],
+                [
+                    "tests/test_sample.py::TestCase::test_m",
+                    "tests/test_sample.py::test_fast",
+                    "tests/test_sample.py::test_slow",
+                    "tests/test_other.py::test_o",
+                ],
             ),
             (None, ["tests/test_x.py::t"]),
             ("m", ["tests/test_y.py::t"]),

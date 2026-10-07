@@ -46,10 +46,51 @@ def test_process_runs_in_requested_directory_and_captures_stderr(tmp_path):
     assert sorted(log.read_text().splitlines()) == sorted([str(tmp_path), "error"])
 
 
-def test_process_writes_no_bytecode(tmp_path):
+def test_process_writes_no_bytecode(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
     log = tmp_path / "process.log"
-    assert run_process([sys.executable, "-c", "import sys; print(sys.dont_write_bytecode)"], tmp_path, 10, log) == 0
-    assert log.read_text() == "True\n"
+    code = "import os, sys; print(sys.dont_write_bytecode, os.environ['PYTHONDONTWRITEBYTECODE'])"
+    assert run_process([sys.executable, "-c", code], tmp_path, 10, log) == 0
+    assert log.read_text() == "True 1\n"
+
+
+def _two_groups(tmp_path):
+    for path in ("hooks/sample.py", "scripts/ci_mutation/identity.py"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("def f():\n    return 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sample.py").write_text("pass\n")
+    (tmp_path / "tests/test_identity.py").write_text("pass\n")
+    return {"hooks/sample.py": {2}, "scripts/ci_mutation/identity.py": {2}}
+
+
+def test_every_group_reached_after_the_deadline_is_reported_over_budget(tmp_path, monkeypatch, capsys):
+    clock = iter([0, 9, 9, 10, 10])
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", lambda *args: pytest.fail("ran past budget"))
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 10)
+    assert report["failed"]
+    assert report["not_mutated"] == [
+        {"path": "hooks/sample.py", "reason": "over budget"},
+        {"path": "scripts/ci_mutation/identity.py", "reason": "over budget"},
+    ]
+    assert "hooks/sample.py: not mutated, over budget" in capsys.readouterr().out
+
+
+def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_run(tmp_path, monkeypatch):
+    calls = []
+
+    def mutate(root, work, selected, deadline):
+        calls.append(list(selected))
+        if "hooks/sample.py" in selected:
+            return {}, "mutmut failed with exit 1"
+        return {path: [] for path in selected}, ""
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 60)
+    assert calls == [["hooks/sample.py"], ["scripts/ci_mutation/identity.py"]]
+    assert report["not_mutated"] == [{"path": "hooks/sample.py", "reason": "mutmut failed with exit 1"}]
+    assert [result["path"] for result in report["files"]] == ["scripts/ci_mutation/identity.py"]
 
 
 def test_empty_scope_passes_without_mutmut(tmp_path):
