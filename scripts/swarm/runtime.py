@@ -187,6 +187,32 @@ class HerdrRuntime:
                     return harness, f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(f"no {agent} account has placeable quota seats")
 
+    def _quota_transfer(self, saved, profile, environ):
+        from scripts.swarm import quota_handoff
+
+        account = quota_handoff.successor(
+            self._quota_accounts,
+            self._quota_cap,
+            self._quota_floor,
+            not plugins.claude_only(profile),
+            quota_handoff.Thresholds.from_env(environ),
+        )
+        if account is None:
+            raise SpawnError("no account has room for a quota handoff")
+        return {
+            **saved,
+            "harness": account.harness,
+            "account": account.name,
+            **({"model": ""} if account.harness != saved["harness"] else {}),
+        }
+
+    def _saved_choice(self, saved, profile, quota_transfer, environ):
+        if quota_transfer:
+            return saved["harness"], "quota handoff"
+        if plugins.claude_only(profile) and saved["harness"] != "claude":
+            raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
+        return self.choose(saved["harness"], environ)
+
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
@@ -202,15 +228,15 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}")
-        if saved and want and saved["harness"] != want:
+        quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        saved = self._quota_transfer(saved, profile, environ) if saved and quota_transfer else saved
+        if saved and want and saved["harness"] != want and not quota_transfer:
             saved = {}
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
-            if plugins.claude_only(profile) and saved["harness"] != "claude":
-                raise SpawnError("unsupported handoff: required profile cannot mount on the original harness")
             requested = saved["harness"]
-            agent, reason = self.choose(requested, environ)
+            agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             share, floor = codex_split(config, environ)
             agent, reason = agent_choice.choose_shared(requested, environ, spawns, share, floor, choose=self.choose)
@@ -225,7 +251,7 @@ class HerdrRuntime:
         )
         priming_trace.write(self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile)
-        if saved:
+        if saved.get("model"):
             picked = model_pick.ModelPick(
                 saved["model"],
                 saved["effort"],
@@ -233,7 +259,7 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = model_pick.pick(agent, chosen, task, environ)
+            picked = model_pick.pick(agent, {} if quota_transfer else chosen, task, environ)
         else:
             picked = _lane_default(lane, agent, chosen)
         mode = PLAN_MODE if (lane, agent) == ("plan", "claude") else []

@@ -136,9 +136,10 @@ def tick(slug, store, ledger, runtime, now_ms):
         config = store.update(slug, state="running")
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, quota_handoff
 
     actions += capacity.apply(slug, config, store, ledger, runtime, now_ms)
+    actions += quota_handoff.warn(slug, store, dict(os.environ))
     if not sleeping:
         actions += _codex_hook_order()
         actions += _master_down(slug, config, store, ledger, runtime, now_ms)
