@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Plan scope classification excludes test areas and the shared mutation clearance
+  file while preserving their edit authorization in the traced verdict.
+
 - Permanent swarm closure settles seat mail with named outcomes; terminal notices
   skip retired masters and unresolved recipients are cancelled. Resumable seats
   retain their mail. Doctor inbox findings distinguish unread delivery from
