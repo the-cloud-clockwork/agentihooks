@@ -2,7 +2,7 @@
   "package": "SV2-FND-02",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1395",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1397",
-  "tested_commit": "51cfd7cbe2ee0d9ad4391b82b070ec2b5aa0f13d",
+  "tested_commit": "7029e5b3eeea46d8dc3702065246e23992452182",
   "evidence_class": "local fixture runs against the committed record; mocked, no live infrastructure read or mutated",
   "states": {
     "observed": "the committed record passes check with one coding-task authority and no unowned component",
@@ -72,7 +72,7 @@
     "b": "evidence/SV2-FND-02/b-result.json",
     "c": "evidence/SV2-FND-02/c-result.json",
     "manifest": "evidence/SV2-FND-02/manifest.json",
-    "pytest_output": "72 passed in 0.65s",
+    "pytest_output": "82 passed in 0.70s",
     "judge": "CI Tests and Mutation runs on the pull request head"
   },
   "cli_run": [

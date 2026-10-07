@@ -1,7 +1,7 @@
 {
   "case": "T-SV2-FND-02-B",
-  "tested_commit": "51cfd7cbe2ee0d9ad4391b82b070ec2b5aa0f13d",
-  "passed": 41,
+  "tested_commit": "7029e5b3eeea46d8dc3702065246e23992452182",
+  "passed": 51,
   "failed": 0,
   "tests": [
     {
@@ -161,11 +161,51 @@
       "outcome": "passed"
     },
     {
+      "test": "tests/test_swarm_v2_architecture.py::test_names_that_differ_only_in_case_conflict",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_the_dispatcher_refusal_names_every_recorded_authority",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_accepted_verdict_carries_no_reason",
+      "outcome": "passed"
+    },
+    {
       "test": "tests/test_swarm_v2_architecture.py::test_the_declaration_refusal_names_every_required_field",
       "outcome": "passed"
     },
     {
       "test": "tests/test_swarm_v2_architecture.py::test_a_corrected_proposal_needs_a_new_operation_at_the_current_revision",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv0---inventory]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv1---inventory]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv2---to]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv3---operation]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv4-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_rejects_a_non_integer_rollback_target",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_check_and_render_take_no_inventory",
       "outcome": "passed"
     }
   ]
