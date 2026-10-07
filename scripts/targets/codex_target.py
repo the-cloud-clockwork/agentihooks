@@ -182,6 +182,8 @@ def codex_mcp_entry(name: str, spec: dict) -> tuple[dict | None, str]:
     else:
         return None, "no command or url"
     entry.update({key: list(spec[key]) for key in _TOOL_FILTERS if spec.get(key)})
+    if spec.get("default_tools_approval_mode"):
+        entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
     return entry, ""
 
 

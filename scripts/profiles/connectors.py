@@ -21,7 +21,7 @@ from scripts.targets._common import (
 )
 from scripts.targets.codex_target import codex_mcp_entry
 
-FILTERS = ("enabled_tools", "disabled_tools")
+CODEX_ONLY = ("enabled_tools", "disabled_tools", "default_tools_approval_mode")
 CREDENTIALED = "credential-shaped literal in url, command or args"
 NO_ALLOWLIST = "Claude has no native tool allowlist; only an http server's tools can be listed"
 LIST_TIMEOUT_SECONDS = 30
@@ -105,7 +105,7 @@ def claude(servers: dict, dst: str) -> tuple[dict, list[str], dict]:
         if reason:
             manifest[name] = _unmounted(reason)
             continue
-        plain = {key: value for key, value in spec.items() if key not in FILTERS}
+        plain = {key: value for key, value in spec.items() if key not in CODEX_ONLY}
         mounted[name] = sanitize_env_and_headers(name, plain, dst)
         deny += [f"mcp__{name}__{tool}" for tool in denied]
         manifest[name] = _mounted(spec, absent)

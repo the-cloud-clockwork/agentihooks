@@ -600,6 +600,19 @@ class TestCodexEntry:
         spec = {"url": "https://g.example/mcp", "enabled_tools": ("a", "b"), "disabled_tools": []}
         assert codex_mcp_entry("gw", spec) == ({"url": "https://g.example/mcp", "enabled_tools": ["a", "b"]}, "")
 
+    def test_declared_approval_mode_reaches_codex(self, said):
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"url": "https://g.example/mcp", "default_tools_approval_mode": "approve"}
+        assert codex_mcp_entry("gw", spec) == (
+            {"url": "https://g.example/mcp", "default_tools_approval_mode": "approve"},
+            "",
+        )
+        assert codex_mcp_entry("gw", {**spec, "default_tools_approval_mode": ""}) == (
+            {"url": "https://g.example/mcp"},
+            "",
+        )
+
     def test_unmountable_servers_say_why(self, said):
         from scripts.targets.codex_target import codex_mcp_entry
 

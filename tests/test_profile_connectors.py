@@ -147,7 +147,7 @@ def test_claude_mounts_plain_entries_and_collects_deny_rules(listing, said):
         "leaky": {"command": "s", "args": ["--token", leak]},
         "stdio": {"command": "s", "enabled_tools": READS},
         "gw": {"type": "http", "url": "u", "headers": {"A": "${GW_REF:-x}"}, "enabled_tools": ["lf-a", "lf-z"]},
-        "plain": {"command": "p", "disabled_tools": ["t"]},
+        "plain": {"command": "p", "disabled_tools": ["t"], "default_tools_approval_mode": "approve"},
     }
     mounted, deny, manifest = connectors.claude(servers, "dst.json")
     assert mounted == {

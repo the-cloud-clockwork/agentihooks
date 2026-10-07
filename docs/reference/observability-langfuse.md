@@ -236,7 +236,8 @@ with an `enabled_tools` allowlist of those advertised names (and optionally
         "langfuse_tools-swarm_traces_by_tag",
         "langfuse_tools-swarm_session_timeline",
         "langfuse_tools-swarm_error_latency_summary"
-      ]
+      ],
+      "default_tools_approval_mode": "approve"
     }
   }
 }
@@ -249,7 +250,10 @@ harness's own filter:
   `Authorization: Bearer ${VAR}` as `bearer_token_env_var`, any other header
   whose whole value is `${VAR}` as `env_http_headers`, and literal headers as
   `http_headers`. Codex defers MCP tools behind its tool search, so a session
-  finds the three through search rather than its initial tool list.
+  finds the three through search rather than its initial tool list. Under
+  `approval_policy = "never"` Codex refuses an MCP call that needs approval;
+  `default_tools_approval_mode = "approve"` on the declaration lets the three
+  reads run. Claude never receives this field.
 - **Claude** has no per-server allowlist (a `tools` field on a server entry
   drops the server). The render lists the server's advertised tools with the
   declared references resolved in memory, writes the entry without the filter
