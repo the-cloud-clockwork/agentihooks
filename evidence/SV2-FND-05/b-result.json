@@ -1,0 +1,251 @@
+{
+  "case": "T-SV2-FND-05-B",
+  "tested_commit": "379ca75db1e4b1adbc7934456171f5488194915e",
+  "passed": 35,
+  "failed": 0,
+  "test_live_path_rejections_total": {
+    "escape": 5,
+    "program": 35,
+    "redis": 4,
+    "write": 2
+  },
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_symlink_trap_to_a_live_home_aborts_and_counts",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "escape": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_rejections_reach_the_test_report_as_the_package_measurement",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_parent_escape_and_a_live_environment_value_abort[parent]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "escape": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_parent_escape_and_a_live_environment_value_abort[environ]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "escape": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_an_environment_naming_a_live_home_is_refused",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "escape": 2,
+        "redis": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_write_into_a_live_root_aborts_without_mutating_it",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "write": 2
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_live_program_outside_the_test_directory_aborts[argocd]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 3
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_live_program_outside_the_test_directory_aborts[helm]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 3
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_live_program_outside_the_test_directory_aborts[herdr]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 3
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_live_program_outside_the_test_directory_aborts[kubectl]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 3
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[env]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[timeout-nohup]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-flags]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[substitution]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[backtick]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[os-system]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[env-option]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[timeout-option]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[xargs-option]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-keywords]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-bang]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-group]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-option-value]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[wrapped-shell-quoted]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[shell-argument]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[backslash]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[double-quote-splice]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[single-quote-splice]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[parameter-default]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_wrapped_or_shell_spawned_live_program_aborts[unbalanced-quote]",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_an_environment_without_path_is_checked_on_the_default_exec_path",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 1
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_live_program_name_as_an_argument_is_left_alone",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_fake_symlinked_to_a_live_binary_aborts",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "program": 2
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_a_key_outside_the_run_prefix_is_refused",
+      "outcome": "passed",
+      "test_live_path_rejections_total": {
+        "redis": 3
+      }
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_b_the_guards_are_inert_outside_a_test",
+      "outcome": "passed"
+    }
+  ]
+}

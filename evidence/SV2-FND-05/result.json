@@ -1,0 +1,65 @@
+{
+  "package": "SV2-FND-05",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1465",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1468",
+  "tested_commit": "379ca75db1e4b1adbc7934456171f5488194915e",
+  "evidence_class": "local fixture runs of the package test file and CI on the pull request; mocked, no live infrastructure read or mutated",
+  "states": {
+    "observed": "on dev before this change, from an agent shell, the swarm tick test spawned the real herdr binary through the herdr sweep and the swarm command line tests failed on inherited swarm session variables; both pass with the new defaults",
+    "accepted": "writes into live roots, live kubectl, helm, argocd and herdr spawns, fixture root escapes, foreign Redis keys, sweeps by a non-owning run and removals of a root another run owns abort the test and count by dimension",
+    "committed": "suite guards in tests/conftest.py, tests/installer_isolation.py and tests/swarm_v2_isolation.py, the conformance tests, docs/swarm-v2/development.md and the case results at the tested commit",
+    "externally_verified": "CI Tests on the pull request head that adds this record; the tested commit differs from that head only by the evidence folder"
+  },
+  "interfaces": [
+    "tests.swarm_v2_isolation: live_roots, LIVE_ROOTS, RUN_ID, RUN_PREFIX, refuse, REJECTIONS, METRIC, confine, build, Identities (environ, key, traps), confine_environ, owned, acquire, sweep, remove, refuse_live_program audit hook",
+    "tests/conftest.py _isolate_real_user_paths: protected live roots, inherited AGENTIHOOKS_* removed, KUBECONFIG and XDG_CONFIG_HOME in the test directory, VAULT_ROOT and HERDR_CONFIG_PATH unset, herdr absent by default, hook Redis keys on the run prefix, per test rejection counts as user property test_live_path_rejections_total",
+    "tests/installer_isolation.py: write refusals count under the write dimension",
+    "docs/swarm-v2/development.md: canonical Python, independent lint and format checks, isolation contract",
+    "evidence/SV2-FND-05/generate_case_results.py: case results and summed measurement from a junit report"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 (CI matrix)",
+    "pytest": "junit user properties; CI runs with the junitxml plugin disabled, so the measurement comes from the package run with --junitxml"
+  },
+  "measurements": {
+    "test_live_path_rejections_total": {
+      "T-SV2-FND-05-A": {},
+      "T-SV2-FND-05-B": {
+        "escape": 5,
+        "program": 35,
+        "redis": 4,
+        "write": 2
+      },
+      "T-SV2-FND-05-C": {
+        "cleanup": 3,
+        "redis": 2
+      }
+    }
+  },
+  "test_results": {
+    "a": "evidence/SV2-FND-05/a-result.json",
+    "b": "evidence/SV2-FND-05/b-result.json",
+    "c": "evidence/SV2-FND-05/c-result.json",
+    "manifest": "evidence/SV2-FND-05/manifest.json",
+    "pytest_output": "50 passed, 0 failed",
+    "affected_subset": "34 test files that spawn herdr, kubectl, helm or argocd, use hook Redis keys or the moved config variables: 1776 passed with two workers at 964cf2c4"
+  },
+  "authority": "test fixtures take no actor input; a fixture grant is its run id, written to the root marker and the Redis owner key, and only that run id may sweep or remove what it created",
+  "rollback_rehearsal": "on a throwaway checkout at the reviewed code head, reverting every package commit back to the merge base leaves no file different from the merge base, and the previous suite guards still pass",
+  "rollback_rehearsal_output": [
+    "$ git revert --no-commit a8e17acc..2d6bd70b",
+    "exit=0",
+    "$ git diff --stat a8e17acc (tree after revert vs merge base)",
+    "files differing: 0",
+    "$ pytest tests/test_installer_isolation.py tests/test_live_redis_guard.py (reverted tree)",
+    "36 passed in 15.36s"
+  ],
+  "rollback_command": "revert the pull request; the package stores no state outside the repository and each test run's temporary roots and Redis keys belong to that run only",
+  "limitations": [
+    "Only keys built by the hooks package carry the per run prefix; the swarm, inbox and gate stores keep production agentihooks names and are tested against a per test fakeredis. Changing them is production code, outside this package's scope.",
+    "The fixture Redis boundary is a socket inside the fixture root, database 15 and the run prefix; no dedicated Redis user is created.",
+    "No default kubectl fake is installed: a missing binary fails as missing and a real one is refused; tests install their own fakes.",
+    "A program started by os.spawn* or named only by a shell variable's run time value is not seen; os.spawn* raises no audit event.",
+    "Where a real kubectl, helm, argocd or herdr is installed, a shell command naming one as an argument is refused too."
+  ]
+}

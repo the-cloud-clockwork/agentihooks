@@ -576,7 +576,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if route == "/healthz":
             return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
-        if route == "/logo.png":
+        if route in ("/logo.png", "/favicon.ico"):
             return self.send_logo()
         if route.startswith("/media/"):
             return self.send_media(*route.removeprefix("/media/").partition("/")[::2])

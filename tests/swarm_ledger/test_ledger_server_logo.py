@@ -19,6 +19,8 @@ from tests.swarm_ledger.ledger_page import chromium, page_source, rendered_home 
 LOGO_LINK = '<a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a>'
 BRAND = f'<header>{LOGO_LINK}<span class="brand">agentihooks</span>'
 WATERMARK = '<div class="watermark" aria-hidden="true"></div>'
+LEDGER_FAVICON = '<link rel="icon" type="image/png" href="/favicon.ico">'
+HOME_FAVICON = "<link rel=icon type=image/png href=/favicon.ico>"
 
 
 def rule(selector):
@@ -159,3 +161,31 @@ def test_send_logo_answers_the_png_with_a_day_of_caching_or_a_plain_404(tmp_path
     sent, body = logo_response(tmp_path / "missing.png")
     assert sent[:2] == [404, ("Content-Type", "text/plain")]
     assert body == b"no logo"
+
+
+def test_the_server_serves_the_logo_as_the_favicon(tmp_path):
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"\x89PNG\r\n\x1a\nlogo")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_address[1]}/favicon.ico", headers={"Host": f"127.0.0.1:{server.PORT}"}
+        )
+        with patch.object(server, "LOGO", logo), urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "image/png"
+            assert resp.read() == logo.read_bytes()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_every_page_shell_links_the_favicon_in_its_head():
+    server.repository.create("icon", {"title": "Icon", "phases": [{"title": "p", "description": "d"}]})
+    ledger = server.page_for("icon")
+    bin_view = server.index_page(view="bin")
+    home = server.index_page()
+    for page, link in ((ledger, LEDGER_FAVICON), (bin_view, HOME_FAVICON), (home, HOME_FAVICON)):
+        assert page.count("favicon") == 1
+        assert page.index("</title>") < page.index(link) < page.index("stylesheet")

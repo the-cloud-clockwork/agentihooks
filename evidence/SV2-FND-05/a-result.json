@@ -1,0 +1,53 @@
+{
+  "case": "T-SV2-FND-05-A",
+  "tested_commit": "379ca75db1e4b1adbc7934456171f5488194915e",
+  "passed": 11,
+  "failed": 0,
+  "test_live_path_rejections_total": {},
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_every_live_resolver_points_inside_the_test_directory",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_live_roots_cover_the_brain_vault_kube_herdr_and_every_configured_home",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_the_suite_write_guard_protects_the_run_live_roots",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_hook_redis_keys_carry_the_run_test_prefix",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_identities_build_every_root_inside_the_fixture",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_identities_steer_claude_codex_brain_and_kube_into_the_fixture",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_a_second_independent_fixture_shares_no_root_or_prefix",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_a_fake_kubectl_and_herdr_under_the_test_directory_run",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_an_unrelated_program_and_a_missing_live_program_are_left_alone",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_writes_inside_the_fixture_are_allowed",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_isolation.py::test_a_herdr_is_absent_by_default_and_the_swarm_session_does_not_leak_in",
+      "outcome": "passed"
+    }
+  ]
+}
