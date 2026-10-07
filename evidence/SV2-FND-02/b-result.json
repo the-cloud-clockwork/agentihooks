@@ -1,0 +1,212 @@
+{
+  "case": "T-SV2-FND-02-B",
+  "tested_commit": "b9e778460e0850f19fead7822d9af7bd33164597",
+  "passed": 51,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields0-unknown kind 'queue']",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields1-unknown kind None]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields2-code_owner must name exactly one owner from the record]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields3-state_owner must name exactly one owner from the record]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields4-deployment_owner must name exactly one owner from the record]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields5-the worker image excludes brain tick stack (AD-06)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields6-the worker image excludes transcript database (AD-06)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields7-inserts another coding-task queue beside Swarm reconciliation controller (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields8-inserts another coding-task queue beside Swarm reconciliation controller (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields9-inserts another coding-task queue beside Swarm reconciliation controller (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields10-a backlog must be bounded and carry one of transcripts, changed_content (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields11-a backlog must be bounded and carry one of transcripts, changed_content (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields12-a backlog must be bounded and carry one of transcripts, changed_content (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields13-a backlog must be bounded and carry one of transcripts, changed_content (AD-05)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields14-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields15-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields16-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields17-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields18-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields19-a proposal must declare carries as one of changed_content, coding_tasks, none, transcripts, launches_agents as true or false, and a non-empty authoritative_state]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_review_rejects_proposals_outside_the_frozen_architecture[fields20-the worker image excludes Brain Tick Stack (AD-06)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_unlisted_worker_component_is_unresolved[Brain tick stack (worker sidecar)]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_unlisted_worker_component_is_unresolved[Embedding model server]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_unlisted_worker_component_is_unresolved[Transcript DB]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_unowned_proposals_are_counted",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_unowned_recorded_component_is_counted_and_fails_check",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_check_reports_every_broken_rule",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_check_lists_repeated_names_in_order",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_check_fails_on_a_broken_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_operator_change_in_the_record_admits_that_dispatcher_only",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_operator_change_covers_only_the_exact_approved_content",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_proposal_cannot_approve_itself",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_stale_revision_is_refused_and_the_record_is_unchanged",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_newer_base_revision_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_documents_with_the_wrong_schema_are_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_inventory_with_repeated_proposal_ids_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_reports_a_refusal_without_a_traceback",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_rejection_reasons_never_echo_proposal_content",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_undeclared_proposal_never_makes_a_declared_one_conflict",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_names_that_differ_only_in_case_conflict",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_the_dispatcher_refusal_names_every_recorded_authority",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_an_accepted_verdict_carries_no_reason",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_the_declaration_refusal_names_every_required_field",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_a_corrected_proposal_needs_a_new_operation_at_the_current_revision",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv0---inventory]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv1---inventory]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv2---to]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv3---operation]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_requires_its_arguments[argv4-command]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_cli_rejects_a_non_integer_rollback_target",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/test_swarm_v2_architecture.py::test_check_and_render_take_no_inventory",
+      "outcome": "passed"
+    }
+  ]
+}

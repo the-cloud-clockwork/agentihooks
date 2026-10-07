@@ -38,8 +38,10 @@ def test_cli_contract_and_result(monkeypatch, backend):
         assert kwargs["timeout"] == 17.5
         assert json.loads(kwargs["input"])["state"] == REQUEST.state
         assert json.loads(kwargs["input"])["questions"] == REQUEST.wire()["questions"]
-        if args[0] == "claude":
-            assert args[:5] == ["claude", "-p", "--model", "haiku", "--output-format"]
+        if args[0] == "bash":
+            assert args[4:6] == ["claude", "--agentihooks-report"]
+            args = args[args.index("-p") :]
+            assert args[:4] == ["-p", "--model", "haiku", "--output-format"]
             assert args[args.index("--output-format") + 1] == "json"
             assert args[args.index("--tools") + 1] == ""
             assert "--no-session-persistence" in args

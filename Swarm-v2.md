@@ -1141,7 +1141,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Implementation status: planned; not executed by publication of this document.
 - Dependencies: [SV2-FND-01](#sv2-fnd-01).
 - Integration gate: `G0`, subject to all earlier applicable acceptance gates.
-- Owned path candidates: `docs/swarm-v2/decisions.md (new); Swarm-v2.md`.
+- Owned path candidates: `docs/swarm-v2/decisions.md (new); docs/swarm-v2/architecture.json (new); scripts/swarm_v2/architecture.py (new); tests/test_swarm_v2_architecture.py (new); tests/fixtures/swarm_v2/architecture/ (new); evidence/SV2-FND-02/ (new); Swarm-v2.md`.
 - Required fixture: A design inventory containing one duplicate task dispatcher and one legitimate embedding backlog.
 - Intended change: Prevent the implementation from recreating overlapping schedulers or embedding the entire brain stack in workers.
 
@@ -1158,7 +1158,7 @@ Baseline references: [SRC-AH-GUIDE] [SRC-BRAIN-89] [SRC-ANTON-CA]
 - Output contract: Every target component has one code owner, one state owner, and one deployment owner.
 - Rejection contract: A proposal that inserts another coding-task queue is rejected unless the operator explicitly changes the architecture.
 - Recovery contract: Conflicting design proposals are recorded as unresolved decisions while unrelated implementation continues.
-- Mutation scope: Documentation, fixtures, and compatibility metadata only; no live infrastructure mutation.
+- Mutation scope: Documentation, fixtures, compatibility metadata, and the offline review command that reads and writes only the architecture record; no live infrastructure mutation.
 - Compatibility obligation: compare the affected public behavior with the preceding accepted protocol or explicitly local compatibility path.
 - Authority obligation: derive actor and scope from the fixture grant or operator role; never infer permission from a display label.
 - State obligation: distinguish observed, accepted, committed, and externally verified outcomes in the implementation report.

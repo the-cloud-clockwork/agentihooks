@@ -1,9 +1,14 @@
+import importlib.util
 import os
 import shlex
 import subprocess
 import sys
+import threading
 import xml.etree.ElementTree as ET
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import pytest
 import yaml
@@ -17,9 +22,11 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
     assert scan["needs"] == ["unit"]
-    assert "sonar-reusable.yml" in scan["uses"]
-    assert "pytest" not in scan["with"]["test_command"]
-    assert "combine.sh" in scan["with"]["test_command"]
+    merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
+    assert "pytest" not in merge["run"]
+    assert "combine.sh" in merge["run"]
+    assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 
 
@@ -111,3 +118,119 @@ def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("method,status", [("GET", 200), ("POST", 201), ("GET", 403)])
+def test_proxy_forwards_headers_uploads_and_backend_status(monkeypatch, method, status):
+    spec = importlib.util.spec_from_file_location("sonar_proxy", ROOT / ".github/coverage/proxy.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    received = []
+
+    class Backend(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.handle_request()
+
+        def do_POST(self):
+            self.handle_request()
+
+        def handle_request(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            received.append((self.command, self.path, dict(self.headers), body))
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b"backend result")
+
+        def log_message(self, format, *args):
+            pass
+
+    with (
+        ThreadingHTTPServer(("127.0.0.1", 0), Backend) as backend,
+        ThreadingHTTPServer(("127.0.0.1", 0), module.SonarProxy) as proxy,
+    ):
+        monkeypatch.setenv("SONAR_HOST_URL", f"http://127.0.0.1:{backend.server_port}")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "fixture")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "fixture")
+        threads = [threading.Thread(target=server.serve_forever) for server in (backend, proxy)]
+        for thread in threads:
+            thread.start()
+        try:
+            body = b"analysis payload" if method == "POST" else None
+            request = Request(
+                f"http://127.0.0.1:{proxy.server_port}/api/ce/submit?projectKey=fixture",
+                data=body,
+                headers={"Authorization": "fixture", "Content-Type": "application/octet-stream"},
+                method=method,
+            )
+            try:
+                response = urlopen(request, timeout=5)
+            except HTTPError as error:
+                response = error
+            with response:
+                assert response.status == status
+                assert response.read() == b"backend result"
+            assert received[0][0:2] == (method, "/api/ce/submit?projectKey=fixture")
+            headers = {name.lower(): value for name, value in received[0][2].items()}
+            assert headers["cf-access-client-id"] == "fixture"
+            assert headers["cf-access-client-secret"] == "fixture"
+            assert headers["authorization"] == "fixture"
+            assert received[0][3] == (body or b"")
+        finally:
+            backend.shutdown()
+            proxy.shutdown()
+            for thread in threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()
+
+
+def test_proxy_rejects_redirect_without_forwarding_credentials(monkeypatch):
+    spec = importlib.util.spec_from_file_location("sonar_proxy", ROOT / ".github/coverage/proxy.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    received = []
+
+    class Sink(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append(dict(self.headers))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink.server_port}/")
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    with (
+        ThreadingHTTPServer(("127.0.0.1", 0), Sink) as sink,
+        ThreadingHTTPServer(("127.0.0.1", 0), Redirect) as backend,
+        ThreadingHTTPServer(("127.0.0.1", 0), module.SonarProxy) as proxy,
+    ):
+        monkeypatch.setenv("SONAR_HOST_URL", f"http://127.0.0.1:{backend.server_port}")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "fixture")
+        monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "fixture")
+        servers = (sink, backend, proxy)
+        threads = [threading.Thread(target=server.serve_forever) for server in servers]
+        for thread in threads:
+            thread.start()
+        try:
+            request = Request(f"http://127.0.0.1:{proxy.server_port}/", headers={"Authorization": "fixture"})
+            try:
+                response = urlopen(request, timeout=5)
+            except HTTPError as error:
+                response = error
+            with response:
+                assert response.status == 502
+            assert received == []
+        finally:
+            for server in servers:
+                server.shutdown()
+            for thread in threads:
+                thread.join(timeout=5)
+                assert not thread.is_alive()

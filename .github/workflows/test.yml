@@ -129,19 +129,74 @@ jobs:
 
   sonar:
     needs: [unit]
+    runs-on: anton
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
-    uses: The-Cloud-Clockwork/.github/.github/workflows/sonar-reusable.yml@main
-    with:
-      python_version: "3.12"
-      install_command: python -m pip install "coverage>=7.4"
-      test_command: GH_TOKEN="${{ github.token }}" bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 4
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install "coverage>=7.4"
+
+      - name: Merge shard coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/coverage/combine.sh "$GITHUB_RUN_ID" 4
+
+      - name: Start Cloudflare Access proxy
+        id: proxy
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python .github/coverage/proxy.py > sonar-proxy.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+          for attempt in {1..5}; do
+            if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: http://127.0.0.1:9000
+
+      - name: SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: http://127.0.0.1:9000
+
+      - name: Upload coverage and analysis evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-report
+          path: |
+            coverage.xml
+            .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Stop the proxy
+        if: always() && steps.proxy.outputs.pid != ''
+        env:
+          PROXY_PID: ${{ steps.proxy.outputs.pid }}
+        run: kill "$PROXY_PID"
 
   lint:
     runs-on: ubuntu-latest
