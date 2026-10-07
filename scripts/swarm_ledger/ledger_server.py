@@ -303,6 +303,7 @@ MIN_COMPACT, MAX_COMPACT = 100, 1000
 QUOTA_PROBE_TIMEOUT_S = 120
 AUTONOMY = ("manual", "assist", "delegate", "full")
 EFFORTS = ("low", "medium", "high", "max")
+MASTER_AGENTS = ("claude", "codex")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
@@ -350,9 +351,14 @@ def control_argv(body):
         pairs.append(f"autonomy={body['autonomy']}")
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
+    if "master_agent" in body:
+        if body["master_agent"] not in MASTER_AGENTS:
+            raise ValueError(f"master_agent must be one of {', '.join(MASTER_AGENTS)}")
+        pairs.append(f"master-agent={body['master_agent']}")
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy or gates"
+            "set needs max_eng, max_ci, max_plan, codex_share, compact_limit, effort_min, effort_max, autonomy, "
+            "master_agent or gates"
         )
     return ["set", *pairs]
 

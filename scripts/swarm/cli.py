@@ -15,6 +15,7 @@ agentihooks swarm <id> set snapshot-minutes=N                      automatic sna
 agentihooks swarm <id> set codex-share=PCT codex-min-week-left=PCT   share of auto lane spawns sent to Codex (default 30, 5)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
 agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
+agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          operator message to the swarm chat
 agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
@@ -58,6 +59,7 @@ from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, 
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
+    affinity,
     control_notifications,
     delivery,
     done_gate,
@@ -402,6 +404,8 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     config = store.update(args.slug, **changes)
+    asked = any(pair.startswith("master-agent=") for pair in args.pairs)
+    master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
     if config.state == "running":
         for action in run_tick(store, args.slug):
             print(action)
@@ -420,6 +424,7 @@ def cmd_set(store, args):
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
                 "lanes": config.lanes,
+                "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
             }
         )
     )
@@ -483,6 +488,15 @@ def _snapshot_line(auto):
     return f"snapshots  last automatic snapshot {taken}  {every}  kept {auto['kept']}"
 
 
+def _affinity_line(report):
+    line = f"master affinity  desired {report['desired']}  live {report['live'] or 'none'}"
+    order = report["order"]
+    if order is None:
+        return line
+    reason = f": {order['reason']}" if order["reason"] else ""
+    return f"{line}  order to {order['to']} {order['state']}{reason}"
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -507,6 +521,7 @@ def cmd_status(store, args):
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
     print(_snapshot_line(auto_snapshot(config)))
+    print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tModel source\tConfidence")
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"

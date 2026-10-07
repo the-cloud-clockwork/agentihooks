@@ -18,7 +18,15 @@ from scripts.handoff import transfers
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import control_notifications, lifetime, live_binding, master_start, phase_state, session_model
+from scripts.swarm import (
+    affinity,
+    control_notifications,
+    lifetime,
+    live_binding,
+    master_start,
+    phase_state,
+    session_model,
+)
 from scripts.swarm import idle as idle_state
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
@@ -554,6 +562,8 @@ def _master(slug, config, store, runtime, now_ms):
     pending = master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
         return []
+    if any(m.name in runtime.live_names() for m in masters):
+        return ["the old master is still running, waiting for it to end before starting the next"]
     if not runtime.has_capacity(config):
         return ["no session slot for the master, waiting"]
     name = store.next_name(slug, MASTER, now_ms)
@@ -573,14 +583,17 @@ def _master(slug, config, store, runtime, now_ms):
             )
         )
         master_start.begin(store, slug, name, task, now_ms)
+        affinity.handed_off(store, slug)
         placed = runtime.spawn(config, MASTER, name, task)
     except Exception as exc:
         transfers.failed(store, slug, record)
         store.drop_agent(slug, name)
+        affinity.failed(store, slug, str(exc))
         failed = master_start.read(store, slug)
         if failed.get("attempt") == 1:
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
+    affinity.placed(store, slug, placed.harness)
     record = _placed(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))

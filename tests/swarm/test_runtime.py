@@ -417,8 +417,9 @@ def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
     )
     task = {**SEAT_TASKS[lane], "profile": "engineer"}
     placed = runtime.spawn(config, lane, "engineer@a1b2c3-0001", task, spawns=spawns)
-    assert seen["argv"][seen["argv"].index("--agent") + 1] == "claude"
-    assert placed.harness == "claude"
+    expected = "codex" if (lane, lane_agent) == ("master", "codex") else "claude"
+    assert seen["argv"][seen["argv"].index("--agent") + 1] == expected
+    assert placed.harness == expected
 
 
 @pytest.mark.parametrize(("share", "swarm_share", "capacity"), [(0, "30", False), (30, "0", True), (None, "0", False)])
