@@ -1,3 +1,4 @@
+import fcntl
 import json
 import re
 from collections import Counter
@@ -7,8 +8,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 from referencing import Registry, Resource
 
-SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "swarm_v2"
-FAILURES: Counter = Counter()
+SCHEMAS = Path(__file__).resolve().parents[2] / "docs" / "swarm-v2" / "schemas"
 
 
 def load(schemas: Path = SCHEMAS) -> dict:
@@ -20,7 +20,8 @@ def load(schemas: Path = SCHEMAS) -> dict:
         name: Draft202012Validator(json.loads((schemas / spec["schema"]).read_text()), registry=registry)
         for name, spec in compat["contracts"].items()
     }
-    return {"compat": compat, "validators": validators, "identifier": common["$defs"]["identifier"]["pattern"]}
+    identifier = common["$defs"]["identifier"]["pattern"]
+    return {"compat": compat, "validators": validators, "identifier": identifier, "failures": Counter()}
 
 
 def write_version(contracts: dict, name: str) -> str:
@@ -28,11 +29,11 @@ def write_version(contracts: dict, name: str) -> str:
     return f"{spec['major']}.{spec['write_minor']}"
 
 
-def failures() -> dict[str, int]:
-    return {f"{contract}/{reason}": count for (contract, reason), count in FAILURES.items()}
+def failures(contracts: dict) -> dict[str, int]:
+    return {f"{contract}/{reason}": count for (contract, reason), count in contracts["failures"].items()}
 
 
-def _refusal(contracts: dict, doc, error: str, reason: str, detail: str, retry: str = "new_request") -> dict:
+def _refusal(contracts: dict, doc: object, error: str, reason: str, detail: str, retry: str = "new_request") -> dict:
     op = doc.get("operation_id") if isinstance(doc, dict) else None
     known = isinstance(op, str) and re.fullmatch(contracts["identifier"], op)
     return {
@@ -57,7 +58,7 @@ def _problem(contracts: dict, name: str, doc) -> tuple[str, str] | None:
         return "not_an_object", "a record must be a JSON object"
     spec = contracts["compat"]["contracts"][name]
     version = doc.get("schema_version")
-    match = re.fullmatch(r"(\d+)\.(\d+)", version) if isinstance(version, str) else None
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)", version) if isinstance(version, str) else None
     if not match:
         return "missing_version", "schema_version must be MAJOR.MINOR"
     major, minor = int(match[1]), int(match[2])
@@ -76,11 +77,11 @@ def _problem(contracts: dict, name: str, doc) -> tuple[str, str] | None:
     return ("schema_invalid", _describe(error)) if error else None
 
 
-def check(contracts: dict, name: str, doc) -> dict | None:
+def check(contracts: dict, name: str, doc: object) -> dict | None:
     problem = _problem(contracts, name, doc)
     if problem is None:
         return None
-    FAILURES[(name, problem[0])] += 1
+    contracts["failures"][(name, problem[0])] += 1
     return _refusal(contracts, doc, "invalid_request", *problem)
 
 
@@ -93,11 +94,18 @@ def _write(path: Path, text: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def admit(contracts: dict, store: Path, name: str, doc) -> dict:
+def admit(contracts: dict, store: Path, name: str, doc: object) -> dict:
     refusal = check(contracts, name, doc)
     if refusal:
         return refusal
     folder = store / name
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / ".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _commit(contracts, folder, doc)
+
+
+def _commit(contracts: dict, folder: Path, doc: dict) -> dict:
     record = folder / f"{doc['operation_id']}.json"
     text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
     if record.exists():
@@ -111,7 +119,6 @@ def admit(contracts: dict, store: Path, name: str, doc) -> dict:
     if authority["task_generation"] < generations.get(authority["task_id"], 0):
         detail = "task generation is older than the accepted generation"
         return _refusal(contracts, doc, "stale_generation", "older_generation", detail, retry="never")
-    folder.mkdir(parents=True, exist_ok=True)
     generations[authority["task_id"]] = authority["task_generation"]
     _write(index, json.dumps(generations, indent=2, sort_keys=True) + "\n")
     _write(record, text)

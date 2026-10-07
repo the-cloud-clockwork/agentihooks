@@ -1,5 +1,7 @@
 import copy
+import fcntl
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -7,18 +9,11 @@ import pytest
 import scripts.swarm_v2.contracts as contracts
 
 FIXTURES = Path(__file__).parent / "fixtures"
-SCHEMAS = Path(contracts.__file__).resolve().parents[2] / "schemas" / "swarm_v2"
+SCHEMAS = Path(contracts.__file__).resolve().parents[2] / "docs" / "swarm-v2" / "schemas"
 AUTHORITY_CONTRACTS = ["launch", "heartbeat", "command", "checkpoint", "session_event", "context_pack", "receipt"]
 
 
-@pytest.fixture(autouse=True)
-def _fresh_counter():
-    contracts.FAILURES.clear()
-    yield
-    contracts.FAILURES.clear()
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def loaded():
     return contracts.load()
 
@@ -46,7 +41,7 @@ def _refusal(reason, detail, operation_id, error="invalid_request", retry="new_r
 @pytest.mark.parametrize("family", ["current", "previous-minor", "newer-minor"])
 def test_supported_families_pass_the_check(loaded, contract, family):
     assert contracts.check(loaded, contract, _fixture(contract, family)) is None
-    assert contracts.failures() == {}
+    assert contracts.failures(loaded) == {}
 
 
 @pytest.mark.parametrize("contract", AUTHORITY_CONTRACTS)
@@ -81,7 +76,7 @@ def test_a_future_major_is_refused_before_any_write(loaded, tmp_path, contract):
     if contract != "error":
         assert contracts.admit(loaded, tmp_path / "store", contract, doc) == expected
         assert _snapshot(tmp_path / "store") == {}
-    assert contracts.failures()[f"{contract}/unsupported_major"] >= 1
+    assert contracts.failures(loaded) == {f"{contract}/unsupported_major": 2 if contract != "error" else 1}
 
 
 @pytest.mark.parametrize("contract", AUTHORITY_CONTRACTS)
@@ -95,7 +90,7 @@ def test_an_absent_execution_generation_is_refused_before_any_write(loaded, tmp_
     expected = _refusal("missing_authority", "authority lacks task_generation", "another-op")
     assert contracts.admit(loaded, tmp_path / "store", contract, doc) == expected
     assert _snapshot(tmp_path / "store") == before
-    assert contracts.failures() == {f"{contract}/missing_authority": 1}
+    assert contracts.failures(loaded) == {f"{contract}/missing_authority": 1}
 
 
 def test_a_record_without_authority_names_every_missing_field(loaded):
@@ -111,7 +106,7 @@ def test_the_counter_keeps_one_entry_per_contract_and_reason(loaded):
     contracts.check(loaded, "launch", _fixture("launch", "future-major"))
     contracts.check(loaded, "launch", _fixture("launch", "missing-authority"))
     contracts.check(loaded, "receipt", _fixture("receipt", "future-major"))
-    assert contracts.failures() == {
+    assert contracts.failures(loaded) == {
         "launch/unsupported_major": 2,
         "launch/missing_authority": 1,
         "receipt/unsupported_major": 1,
@@ -126,6 +121,10 @@ def test_the_counter_keeps_one_entry_per_contract_and_reason(loaded):
         ("v2.1", "missing_version", "schema_version must be MAJOR.MINOR"),
         ("2.1.0", "missing_version", "schema_version must be MAJOR.MINOR"),
         (2.1, "missing_version", "schema_version must be MAJOR.MINOR"),
+        ("2x1", "missing_version", "schema_version must be MAJOR.MINOR"),
+        ("\u0662.1", "missing_version", "schema_version must be MAJOR.MINOR"),
+        ("2.\u0661", "missing_version", "schema_version must be MAJOR.MINOR"),
+        ("2a.1", "missing_version", "schema_version must be MAJOR.MINOR"),
         ("1.9", "unsupported_major", "schema major 1 is not supported; this reader accepts major 2"),
     ],
 )
@@ -143,6 +142,7 @@ def test_a_minor_below_the_oldest_supported_is_refused(loaded):
         "unsupported_minor", "schema minor 0 is older than the oldest supported minor 1", doc["operation_id"]
     )
     assert contracts.check(narrowed, "heartbeat", _fixture("heartbeat")) is None
+    assert contracts.failures(narrowed) == {"heartbeat/unsupported_minor": 1}
 
 
 def test_a_non_object_record_is_refused_with_an_unknown_operation(loaded):
@@ -263,7 +263,7 @@ def test_an_older_generation_cannot_overwrite_a_newer_accepted_record(loaded, tm
         retry="never",
     )
     assert _snapshot(tmp_path / "store") == before
-    assert contracts.failures() == {}
+    assert contracts.failures(loaded) == {}
 
 
 def test_the_same_generation_and_a_newer_one_are_both_accepted(loaded, tmp_path):
@@ -299,14 +299,34 @@ def test_an_interrupted_record_write_recovers_on_retry_without_a_duplicate(loade
     with pytest.raises(OSError, match="transport cut"):
         contracts.admit(loaded, tmp_path / "store", "launch", doc)
     assert calls == ["generations.json", f"{doc['operation_id']}.json"]
-    assert sorted(p.name for p in (tmp_path / "store" / "launch").iterdir()) == ["generations.json"]
+    assert sorted(p.name for p in (tmp_path / "store" / "launch").iterdir()) == [".lock", "generations.json"]
     monkeypatch.setattr(Path, "replace", real)
     assert contracts.admit(loaded, tmp_path / "store", "launch", doc)["state"] == "accepted"
     assert contracts.admit(loaded, tmp_path / "store", "launch", doc)["state"] == "replayed"
     assert sorted(p.name for p in (tmp_path / "store" / "launch").iterdir()) == [
+        ".lock",
         "generations.json",
         f"{doc['operation_id']}.json",
     ]
+
+
+def test_admission_waits_for_the_store_lock_held_by_another_writer(loaded, tmp_path):
+    folder = tmp_path / "store" / "heartbeat"
+    folder.mkdir(parents=True)
+    results = []
+    with (folder / ".lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        writer = threading.Thread(
+            target=lambda: results.append(
+                contracts.admit(loaded, tmp_path / "store", "heartbeat", _fixture("heartbeat"))
+            )
+        )
+        writer.start()
+        writer.join(timeout=0.3)
+        assert writer.is_alive()
+        assert sorted(p.name for p in folder.iterdir()) == [".lock"]
+    writer.join(timeout=10)
+    assert results == [{"state": "accepted", "operation_id": "heartbeat-synthetic-0007-0041"}]
 
 
 def test_the_stored_record_is_canonical_json(loaded, tmp_path):
@@ -343,6 +363,7 @@ def test_the_admission_module_imports_no_other_repository_package():
     imports = [line.split()[1] for line in source.splitlines() if line.startswith(("import ", "from "))]
     assert sorted(imports) == [
         "collections",
+        "fcntl",
         "json",
         "jsonschema",
         "jsonschema.exceptions",

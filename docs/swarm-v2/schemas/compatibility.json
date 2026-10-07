@@ -105,7 +105,7 @@
       ]
     },
     "session_event": {
-      "schema": "session_event.json",
+      "schema": "session-event.json",
       "owner": "agentihooks",
       "consumers": [
         "agentihooks",
@@ -127,7 +127,7 @@
       ]
     },
     "context_pack": {
-      "schema": "context_pack.json",
+      "schema": "context-pack.json",
       "owner": "agentibrain-kernel",
       "consumers": [
         "agentihooks"

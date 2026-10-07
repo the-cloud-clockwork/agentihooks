@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.contracts.swarm_v2 import build_fixtures, consumer
 
 ROOT = Path(__file__).resolve().parents[3]
-SCHEMAS = ROOT / "schemas" / "swarm_v2"
+SCHEMAS = ROOT / "docs" / "swarm-v2" / "schemas"
 HERE = Path(__file__).parent
 FIXTURES = HERE / "fixtures"
 COMPAT = json.loads((SCHEMAS / "compatibility.json").read_text())
