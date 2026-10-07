@@ -1,6 +1,7 @@
 import hashlib
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -198,7 +199,10 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
     assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
-    assert questions["size"].instructions == "How much work is the whole plan?"
+    assert questions["size"].instructions == (
+        "How much source work is the plan? Judge only pieces with nonempty areas; "
+        "test only pieces and the shared mutation clearance file are supporting proof, not additional scope."
+    )
     assert questions["size"].levels == ["trivial", "one pull request", "several pull requests", "a whole phase"]
     assert record == {
         "verdict": "pass",
@@ -234,6 +238,74 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         "filed": [],
         "at": 5,
     }
+
+
+@pytest.mark.parametrize(
+    "areas, expected",
+    [
+        (("tests", "tests/fixtures/profile", "./tests/swarm", "mutation-cleared.txt"), []),
+        (
+            ("./scripts/init_agent.py", "tests/test_profile_binding.py", "./mutation-cleared.txt"),
+            ["./scripts/init_agent.py"],
+        ),
+        (
+            ("tests_extra/module.py", "scripts/tests.py", "scripts/mutation-cleared.txt"),
+            ["tests_extra/module.py", "scripts/tests.py", "scripts/mutation-cleared.txt"],
+        ),
+    ],
+)
+def test_scope_input_excludes_only_shared_proof_areas(ask, areas, expected):
+    fake = ask(1.0)
+    pieces = [trace_plan.Piece("proof backed source change", areas, "deliver the task")]
+    record = trace_plan.trace(pieces, INTENT, None, now_ms=5)
+    [(state, questions, _)] = fake.calls
+    assert state["pieces"][0]["areas"] == expected
+    assert questions["size"].instructions == (
+        "How much source work is the plan? Judge only pieces with nonempty areas; "
+        "test only pieces and the shared mutation clearance file are supporting proof, not additional scope."
+    )
+    assert record["pieces"][0]["areas"] == list(areas)
+    assert record["pieces"][0]["kept"] is True
+
+
+@pytest.mark.parametrize("name", ["versioned_resources", "incremental_observations"])
+def test_observed_plans_keep_source_scope_and_original_proof_areas(monkeypatch, name):
+    fixture = json.loads((Path(__file__).parents[1] / "fixtures" / "plan_scope" / f"{name}.json").read_text())
+    pieces = trace_plan.parse(fixture["plan"], fixture["observed_task"])
+    calls = []
+
+    def classify(state, questions, **kwargs):
+        calls.append(state)
+        source_areas = [area for p in state["pieces"] for area in p["areas"]]
+        assert not any(area.startswith("tests/") or area == "mutation-cleared.txt" for area in source_areas)
+        return DecisionResult(answers(*([1.0] * len(pieces))), "scope-control", calibrated=True)
+
+    monkeypatch.setattr(trace_plan, "decide", classify)
+    record = trace_plan.trace(pieces, fixture["intent"], None, now_ms=5)
+    assert record["verdict"] == "pass"
+    assert record["size"]["name"] == "one pull request"
+    assert [row["areas"] for row in record["pieces"]] == [list(p.areas) for p in pieces]
+    assert any("mutation-cleared.txt" in row["areas"] for row in record["pieces"])
+    assert [[p["what"], p["why"]] for p in calls[0]["pieces"]] == [[p.what, p.why] for p in pieces]
+
+
+def test_oversized_source_plan_still_fails_with_all_source_areas_visible(monkeypatch):
+    fixture = json.loads((Path(__file__).parents[1] / "fixtures" / "plan_scope" / "oversized.json").read_text())
+    pieces = trace_plan.parse(fixture["plan"], fixture["observed_task"])
+
+    def classify(state, questions, **kwargs):
+        assert [area for p in state["pieces"] for area in p["areas"]] == [
+            "services/billing",
+            "services/identity",
+            "apps/dashboard",
+            "infrastructure/database",
+        ]
+        return DecisionResult(answers(1.0, 1.0, 1.0, 1.0, score=3.0), "scope-control", calibrated=True)
+
+    monkeypatch.setattr(trace_plan, "decide", classify)
+    record = trace_plan.trace(pieces, fixture["intent"], None, now_ms=5)
+    assert record["verdict"] == "fail"
+    assert record["reasons"] == ["the plan is sized a whole phase at confidence 0.90, above one pull request"]
 
 
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])
