@@ -55,13 +55,13 @@ def followup_text(task_id, what):
     return f"Cut from the plan of task {task_id}: {what}"
 
 
-def _piece(line, number, task_id):
+def _piece(line, number, task_id, task_ids):
     parts = [part.strip() for part in line[2:].split("|")]
     areas = tuple(area for area in (a.strip() for a in parts[1].split(",")) if area) if len(parts) == 3 else ()
     if len(parts) != 3 or not (parts[0] and areas and parts[2]):
         raise ValueError(f"plan line {number} is not a piece; write {FORMAT}")
     piece = Piece(parts[0], areas, parts[2])
-    found = ledger_comments.problems(followup_text(task_id, piece.what), "item")
+    found = ledger_comments.problems(followup_text(task_id, piece.what), "item", task_ids=task_ids)
     if found:
         raise ValueError(
             f"plan line {number}: the ledger would refuse its follow up, write what in plain words: {'; '.join(found)}"
@@ -69,8 +69,10 @@ def _piece(line, number, task_id):
     return piece
 
 
-def parse(text, task_id):
-    pieces = [_piece(line, n, task_id) for n, line in enumerate(text.splitlines(), 1) if line.startswith("- ")]
+def parse(text, task_id, task_ids=()):
+    pieces = [
+        _piece(line, n, task_id, task_ids) for n, line in enumerate(text.splitlines(), 1) if line.startswith("- ")
+    ]
     if not pieces:
         raise ValueError(f"the plan holds no pieces; write {FORMAT}")
     if len(pieces) > MAX_PIECES:
@@ -91,6 +93,7 @@ def intent(doc, task_id):
         "phase intent": phase.get("description", ""),
         "task": task.get("title", ""),
         "task intent": task.get("description", ""),
+        "task ids": [t["id"] for t in doc.get("tasks", [])],
     }
 
 
@@ -213,7 +216,7 @@ def run(folder, state, ledger, who, mode, home=None, now_ms=None):
         text = (folder / PLAN).read_text()
     except OSError:
         raise ValueError(f"write the plan first: {folder / PLAN}, {FORMAT}") from None
-    pieces = parse(text, who.task)
+    pieces = parse(text, who.task, state.get("task ids", ()))
     previous = load(folder)
     if previous.get("plan_hash") == plan_hash(pieces):
         return previous, False

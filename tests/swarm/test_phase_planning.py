@@ -482,6 +482,26 @@ def test_ledger_client_writes_a_phase_comment_and_a_review_record(monkeypatch):
     }
 
 
+def test_ledger_client_sends_an_override_only_when_one_is_given(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: sent.append(ops) or {})
+    )
+    client = ledger_client.LedgerClient()
+    override = {"reason": "Accepted", "problems": ["Task t1 names no territory."]}
+    client.review_phase("demo", "p1", "approved", by="master@a1b2c3-0001", override=override)
+    client.review_phase("demo", "p1", "approved", by="master@a1b2c3-0001", override=None)
+    [[with_override], [without]] = sent
+    assert {k: v for k, v in with_override.items() if k != "id"} == {
+        "op": "phase_review",
+        "by": "master@a1b2c3-0001",
+        "item": "phases/p1",
+        "state": "approved",
+        "override": override,
+    }
+    assert "override" not in without
+
+
 def build_task(ledger, tid, pid="p1", done=True):
     ledger.add_task(SLUG, {"task": tid, "title": f"Task {tid}", "lane": "eng", "phase": pid}, "init-swarm")
     if done:
