@@ -1,0 +1,93 @@
+{
+  "package": "SV2-FND-03",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1412",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1413",
+  "tested_commit": "987e447f16527107998a4f2864aeae4e84574f69",
+  "evidence_class": "local fixture runs and CI on the pull request head; mocked, no live infrastructure read or mutated",
+  "states": {
+    "observed": "every shared fixture validates to its expected verdict in an isolated consumer that loads no producer module",
+    "accepted": "current, previous-minor and newer-minor records admitted; future-major and missing-authority records refused before any write",
+    "committed": "schemas, compatibility manifest and fixtures at the tested commit",
+    "externally_verified": "CI Tests run 37688292113 on the tested commit: lint, eight unit shards, sonar, mutation (393 killed, 0 survived) and Gate passed"
+  },
+  "interfaces": [
+    "docs/swarm-v2/schemas/{launch,heartbeat,command,checkpoint,session-event,context-pack,receipt,error}.json (JSON Schema 2020-12, urn:swarm-v2 ids)",
+    "docs/swarm-v2/schemas/common.json (shared envelope, identifiers, reserved authority names)",
+    "docs/swarm-v2/schemas/compatibility.json (owner, consumers, supported minors, authority fields, rules)",
+    "tests/contracts/swarm_v2/fixtures (families and index.json with expectations and hashes)",
+    "tests/contracts/swarm_v2/consumer.py (standalone consumer, jsonschema and referencing only)",
+    "scripts.swarm_v2.contracts: load, check, admit, write_version, contract_validation_failures_total"
+  ],
+  "supported_versions": {
+    "major": 2,
+    "readable_minors": ">= 2.0, newer minors additive",
+    "write_minor": "2.1",
+    "owners": {
+      "launch": "agentihooks",
+      "heartbeat": "agentihooks",
+      "command": "agentihooks",
+      "checkpoint": "agentihooks",
+      "session_event": "agentihooks",
+      "context_pack": "agentibrain-kernel",
+      "receipt": "agentibrain-kernel",
+      "error": "agentihooks"
+    }
+  },
+  "measurements": {
+    "contract_validation_failures_total": "counted per contract and reason on each loaded contract set; fixture runs observe unsupported_major and missing_authority for every authority contract, and 0 for supported families",
+    "consumer_fixtures": 46,
+    "consumer_verdicts": {
+      "valid": 24,
+      "invalid": 22
+    },
+    "consumer_mismatches": 0,
+    "consumer_producer_modules": []
+  },
+  "test_results": {
+    "a": "evidence/SV2-FND-03/a-result.json",
+    "b": "evidence/SV2-FND-03/b-result.json",
+    "c": "evidence/SV2-FND-03/c-result.json",
+    "manifest": "evidence/SV2-FND-03/manifest.json",
+    "pytest_output": "104 passed in 2.40s",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37688292113",
+    "mutation": {
+      "scripts/swarm_v2/contracts.py": {
+        "killed": 393,
+        "survived": 0
+      }
+    }
+  },
+  "rollback_rehearsal": "wt.sh tmp --from the tested commit, then git revert of every branch commit since the dev merge base, on a throwaway checkout removed afterwards",
+  "rollback_rehearsal_output": [
+    "$ git rev-parse HEAD",
+    "987e447f16527107998a4f2864aeae4e84574f69",
+    "$ git revert --no-edit c2f475c4bb7394de33508ba1128677e857a4867c..HEAD",
+    "exit=0",
+    "$ git diff --stat c2f475c4bb7394de33508ba1128677e857a4867c HEAD",
+    "(empty diff means the tree equals the dev base)",
+    "$ ls docs/swarm-v2 scripts/swarm_v2 tests/contracts",
+    "ls: cannot access 'tests/contracts': No such file or directory",
+    "docs/swarm-v2:",
+    "architecture.json",
+    "baseline-sources.json",
+    "baseline.json",
+    "baseline.md",
+    "decisions.md",
+    "plan-snapshot.json",
+    "",
+    "scripts/swarm_v2:",
+    "__init__.py",
+    "architecture.py",
+    "baseline.py",
+    "$ pytest tests/test_swarm_v2_architecture.py tests/test_swarm_v2_baseline.py",
+    "193 passed in 6.72s"
+  ],
+  "rollback_command": "lower write_minor in compatibility.json so producers write the previous minor while readers keep accepting both; reverting the pull request removes only schemas, fixtures and the admission module, no stored state",
+  "limitations": [
+    "admit is an in-repo reference store with a host-local flock; the controller and archive services own their durable stores in later packages.",
+    "JSON Schema cannot compare sibling fields, so byte_end >= byte_start and the conditional byte range of session events are unchecked.",
+    "checkpoint_sequence and renewal_sequence ordering is owned by SV2-CKP-04 and SV2-LDG-02; these contracts publish the fields.",
+    "The producer-module check in the consumer looks for the scripts and hooks packages only.",
+    "Top-level unknown fields pass through by design; consumers read authority only from the closed authority object."
+  ]
+}
