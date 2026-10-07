@@ -37,7 +37,7 @@ OFFER_DIRECTIVE = (
     "start a swarm from the plan with the init-swarm skill. Do not implement the plan here. Only if the operator "
     f"says no ledger and no swarm, run `{DECLINE}`."
 )
-TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+TOKEN_RE = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
 SMALL_DIRECTIVE = (
     "LEDGER DECISION: the operator's rule puts this work on a small ledger ({reason}) and no ledger is bound to "
     "this session. Create it before any other tool call, even for a one line fix: the operator made this call, "
@@ -140,11 +140,10 @@ def _ledger_dir(env):
 def _named_ledger(payload, env):
     ledgers = _ledger_dir(env)
     try:
-        binned = dict(json.loads((ledgers / ".bin.json").read_text(encoding="utf-8")))
+        binned = dict(json.loads((ledgers / ".bin.json").read_bytes()))
     except (OSError, ValueError, TypeError):
         binned = {}
-    for token in TOKEN_RE.findall(_plan_text(payload).lower()):
-        slug = token.rstrip("._-")
+    for slug in TOKEN_RE.findall(_plan_text(payload).lower()):
         if slug not in binned and (ledgers / f"{slug}.json").is_file():
             return slug
     return ""
@@ -153,7 +152,7 @@ def _named_ledger(payload, env):
 def _plan_text(payload):
     tool_input = payload.get("tool_input") or {}
     try:
-        return Path(tool_input["planFilePath"]).read_text(encoding="utf-8")
+        return Path(tool_input["planFilePath"]).read_bytes().decode()
     except (KeyError, TypeError, OSError, ValueError):
         return str(tool_input.get("plan") or tool_input.get("summary") or "")
 

@@ -294,6 +294,14 @@ def test_a_plan_naming_no_existing_ledger_gets_the_swarm_directive(isolated, tex
     assert decision.directive(plan_accept(text, isolated / "missing.md")) == decision.SWARM_DIRECTIVE
 
 
+def test_a_plan_without_text_names_no_ledger(isolated, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
+    for slug in ("none", "xxxx"):
+        ledger(isolated, slug)
+    payload = {"session_id": "c1", "hook_event_name": "PostToolUse", "tool_name": "exit_plan_mode", "tool_input": {}}
+    assert decision.directive(payload) == decision.SWARM_DIRECTIVE
+
+
 @pytest.mark.parametrize("content", ["not json", "[1]"])
 def test_an_unreadable_bin_hides_no_ledger(isolated, content, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
