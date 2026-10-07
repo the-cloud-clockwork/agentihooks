@@ -1,8 +1,13 @@
 import json
 import shlex
+import time
 from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def first_next(text: str) -> str:
@@ -63,14 +68,14 @@ def _change(store, slug, transfer, change, seat=""):
             raise SwarmError("The transfer changed; retry the command") from exc
 
 
-def attach(store, slug: str, agent, at: int) -> dict | None:
+def attach(store, slug: str, agent) -> dict | None:
     rows = [r for r in list_transfers(store, slug) if r["task"] == agent.task and not r["successor"]]
     if not rows:
         return None
     occupancy = store.seats.occupant(agent.seat)
 
     def change(row):
-        row.update(successor=agent.name, seat=agent.seat, generation=occupancy.generation, attached_at=at)
+        row.update(successor=agent.name, seat=agent.seat, generation=occupancy.generation, attached_at=now_ms())
 
     return _change(store, slug, rows[-1]["id"], change)
 
@@ -83,12 +88,13 @@ def fresh(store, slug: str, transfer: str, at: int) -> dict:
     return _change(store, slug, transfer, change)
 
 
-def failed(store, slug: str, agent, at: int) -> None:
+def failed(store, slug: str, agent) -> None:
     for row in list_transfers(store, slug):
         if row["successor"] != agent.name or row["binding"]["state"] == "live":
             continue
+        at = now_ms()
 
-        def change(current):
+        def change(current, at=at):
             current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": "Launch failed"}
 
         _change(store, slug, row["id"], change)
@@ -104,7 +110,7 @@ def failed(store, slug: str, agent, at: int) -> None:
         store.redis.hset(store.key(slug, "transfers"), retry["id"], json.dumps(retry))
 
 
-def observe(store, slug: str, live: set[str], at: int) -> None:
+def observe(store, slug: str, live: set[str]) -> None:
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live":
             continue
@@ -114,7 +120,7 @@ def observe(store, slug: str, live: set[str], at: int) -> None:
         state = "live" if row["successor"] in live else "absent"
 
         def change(current, state=state):
-            current["binding"] = {"state": state, "at": at, "session": current["successor"]}
+            current["binding"] = {"state": state, "at": now_ms(), "session": current["successor"]}
 
         _change(store, slug, row["id"], change)
 
