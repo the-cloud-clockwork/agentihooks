@@ -85,10 +85,14 @@ def _oldest(transcript: str, offset: int, fallback_ms: int) -> int:
 
 
 def _fallback(stat, cursor_path: Path, cursor: dict) -> int:
-    """When no timestamped record is readable: the transcript time, else the oldest queued span, else the cursor time."""
+    """When no timestamped record is readable: the transcript time, else the oldest queued event, else the cursor time."""
     if stat:
         return int(stat.st_mtime * 1000)
-    queued = [int(spec["start_ns"]) // 1_000_000 for spec in cursor.get("pending") or [] if spec.get("start_ns")]
+    queued = [
+        int(spec.get("end_ns", spec["start_ns"]) if spec.get("parent_id") is None else spec["start_ns"]) // 1_000_000
+        for spec in cursor.get("pending") or []
+        if spec.get("start_ns")
+    ]
     return min(queued) if queued else int(cursor_path.stat().st_mtime * 1000)
 
 
