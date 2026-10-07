@@ -74,6 +74,7 @@ def test_published_work_tail_ids_can_have_uppercase_letters(store):
         "UPPER": {"latest_progress": "step"}
     }
 
+
 def test_unsafe_workspace_id_keeps_an_empty_tail_without_a_hive_read(store):
     state = {"tasks": [{"id": "../bad", "workspace": "/legacy/task"}]}
     assert server.workspace_tails("sw", state) == {}
