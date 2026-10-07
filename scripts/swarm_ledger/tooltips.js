@@ -31,6 +31,7 @@
     ['[data-gate-name="subagents"]', "Counts subagent launches and continuations per task against its budget."],
     ['[data-gate-name="intent"]', "Checks changes against task, phase and project intent, including failed or pending tick verdicts."],
     ['[data-gate-name="claim-stop"]', "Checks unfinished work, checked waits, failing checks and merges due when an agent stops."],
+    ['[data-gate-name="push-stop"]', "Pushes the task branch when an agent stops, and checks for uncommitted work or pushed work with no pull request or ledger line."],
     ['[data-gate-name="claims"]', "Counts agent lives claiming each task against the three claim limit."],
     ['[data-gate-name="talk"]', "Counts engineer and CI ledger talk writes since their last outcome against the talk budget."],
     ['[data-gate-name="watch"]', "Counts watch calls since the last action against the count and watch to action ratio limits."],

@@ -16,6 +16,7 @@ from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
 from scripts.gates.placement import PlacementGate
+from scripts.gates.push_stop import PushStop
 from scripts.gates.quiet import QuietClaim
 from scripts.gates.reruns import RerunBudget
 from scripts.gates.subagents import SubagentBudget
@@ -34,6 +35,7 @@ GATES = {
         IntentGate(),
         BuildGate(),
         ClaimStop(),
+        PushStop(),
         QuietClaim(),
     )
 }

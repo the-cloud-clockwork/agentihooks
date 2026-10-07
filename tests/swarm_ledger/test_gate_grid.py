@@ -13,6 +13,7 @@ ORDER = [
     "intent",
     "build",
     "claim-stop",
+    "push-stop",
     "quiet",
     "claims",
     "trace-plan",
