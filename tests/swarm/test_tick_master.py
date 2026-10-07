@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.inbox.seats import seat_address
@@ -219,18 +218,14 @@ def test_no_live_engineer_is_told_once(store):  # noqa: F811
 
 @pytest.mark.parametrize("state", ["finished", "awaiting-decision"])
 def test_a_finished_or_awaiting_engineer_is_never_promoted(state):
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    swarm = RedisStore(redis)
-    swarm.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
-    swarm.put_agent("sw", AgentRecord(ENGINEER, "eng", "t1", state=state, seat="eng-1@sw"))
-    runtime, ledger = FakeRuntime(), tasks()
-    runtime.live.add(ENGINEER)
-    tick_master._save(swarm, "sw", {"since": 1})
-    actions = tick_master.run("sw", swarm.config("sw"), swarm, ledger, runtime, 1 + DOWN, lambda: [BROKEN])
+    swarm, runtime = direct(AgentRecord(ENGINEER, "eng", "t1", state=state, seat="eng-1@sw"))
+    actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, 1 + DOWN, lambda: [BROKEN])
     assert actions == ["master down 5 minutes, forced a master launch", BROKEN, "no live engineer to promote"]
 
 
 def direct(*agents):
+    import fakeredis
+
     swarm = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     swarm.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     runtime = FakeRuntime()
