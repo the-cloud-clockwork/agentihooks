@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -131,7 +131,9 @@ class Page:
 
     def route(self, route, html):
         request = route.request
-        if "/api/swarm/" in request.url:
+        if is_events(request.url):
+            fulfill_events(route, swarm=self.payload)
+        elif "/api/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
             route.fulfill(json=self.payload)

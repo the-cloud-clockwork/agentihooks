@@ -8,6 +8,8 @@ from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
 from scripts.swarm.store import SwarmError
 
+WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
+
 
 def shell(argv: list[str]) -> subprocess.CompletedProcess:
     try:
@@ -31,6 +33,17 @@ def _pushed(branch):
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {branch}")
     if remote[0] != _out(["git", "rev-parse", "HEAD"], "cannot read the worktree head"):
         raise SwarmError(f"the worktree holds commits origin lacks; push {branch} first")
+    if _out(["git", "status", "--porcelain"], "cannot inspect the worktree"):
+        raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
+
+
+def _worktree() -> str:
+    top = _out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree")
+    common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], "cannot locate the repo")
+    root = _out(["bash", str(WT_SCRIPT), "root"], "cannot locate the worktree root")
+    if Path(top).resolve().parent != Path(root).resolve() / Path(common).parent.name:
+        raise SwarmError(f"park removes only a worktree wt.sh new made under {root}; {top} is not one")
+    return top
 
 
 def _issue_ready(row):
@@ -81,6 +94,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
     _pushed(row.get("branch"))
+    top = _worktree()
     _issue_ready(row)
     open_ = _open_dependencies(row, rows)
     found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
@@ -93,7 +107,13 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
-    return fields
+    return fields, top
+
+
+def remove_worktree(top: str) -> str:
+    refused = f"the task is parked and its seat handed off, but wt.sh done could not remove {top}"
+    _out(["bash", str(WT_SCRIPT), "done", Path(top).name, "--repo", top], refused)
+    return top
 
 
 def _restack_branch() -> str:

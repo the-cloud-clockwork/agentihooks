@@ -416,8 +416,22 @@ def test_each_domain_schema_rejects_unknown_fields_without_mutation(live):
             },
         )
         assert status == 400
-        assert reply == {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}}
+        message = f"Operation {kind} does not match its schema at field unexpected"
+        assert reply == {"error": {"code": "schema_invalid", "message": message}}
     assert request(live, "GET", "metadata") == before
+
+
+def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
+    cases = [
+        ({"op": "sync", "id": "two-unknown", "zz": 1, "aa": 1}, "sync", "aa"),
+        ({"op": "task_add", "id": "nested", "depends_on": [1]}, "task_add", "depends_on"),
+    ]
+    for operation, kind, field in cases:
+        message = f"Operation {kind} does not match its schema at field {field}"
+        assert request(live, "POST", "operations", {"ops": [operation], "guards": {}}) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": message}},
+        )
 
 
 def test_stale_cursor_missing_guard_and_origin_are_rejected(live):
@@ -1005,6 +1019,10 @@ def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
         expected = "Request does not match the resource schema"
         if index == 0:
             expected = "At least one operation is required"
+        if index in (5, 6, 7, 8):
+            expected = "Operation sync does not match its schema at field id"
+        if index == 9:
+            expected = "Operation join does not match its schema at field by"
         if index in (10, 11):
             expected = "Checkbox changes need a distinct operation identifier"
         assert request(live, "POST", "operations", payload) == (
@@ -1057,12 +1075,13 @@ def test_operation_string_and_identifier_limits_are_central(live):
         {"operation_id": "", "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
         {"operation_id": "x" * 201, "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
     ]
-    for payload in payloads:
+    for index, payload in enumerate(payloads):
+        message = "Request does not match the resource schema"
+        if index == 0:
+            message = "Operation title_set does not match its schema at field text"
         assert request(live, "POST", "operations", payload) == (
             400,
-            {
-                "error": {"code": "schema_invalid", "message": "Request does not match the resource schema"},
-            },
+            {"error": {"code": "schema_invalid", "message": message}},
         )
 
 

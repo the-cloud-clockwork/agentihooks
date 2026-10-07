@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -63,6 +63,8 @@ def tab(browser, server):
         request = route.request
         if request.url == URL:
             return route.fulfill(body=html, content_type="text/html")
+        if is_events(request.url):
+            return fulfill_events(route, ledger=server)
         if request.url != API:
             return route.abort()
         if request.method == "PUT":

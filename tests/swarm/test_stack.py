@@ -19,16 +19,30 @@ ISSUE = "https://github.com/o/r/issues/7"
 NOW = 5_000
 NOTE = "The next engineer restacks it onto dev and finishes it."
 READ_FIRST = "- ledger:sw/tasks/t1 the task and its contract\n"
+ROOT = "/home/me/dev/worktrees"
+TOP = f"{ROOT}/repo/engineer-a1b2c3-0001"
+LOCATE = [
+    ["git", "rev-parse", "--show-toplevel"],
+    ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ["bash", str(stack.WT_SCRIPT), "root"],
+]
+REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
 
 
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
+        self.status, self.top = "", TOP
 
     def __call__(self, argv):
         self.calls.append(argv)
         code = 1 if tuple(argv[:3]) in self.fail else 0
         out = {
+            ("git", "rev-parse", "--show-toplevel"): self.top,
+            ("git", "rev-parse", "--path-format=absolute"): "/home/me/dev/repo/.git",
+            ("bash", str(stack.WT_SCRIPT), "root"): ROOT,
+            ("git", "status", "--porcelain"): self.status,
+        }.get(tuple(argv[:3])) or {
             ("git", "rev-parse"): HEAD,
             ("git", "ls-remote"): f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else "",
             ("git", "merge-base"): BASE,
@@ -90,6 +104,7 @@ def _refused(parked, capsys, says):
     assert capsys.readouterr().err == f"swarm: {says}\n"
     assert "parked_on" not in ledger.rows["t1"] and "stacked_base" not in ledger.rows["t1"]
     assert ledger.comments == [] and shell.comments() == []
+    assert REMOVE not in shell.calls
     assert store.handoff("sw", "t1") == ""
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
 
@@ -111,6 +126,21 @@ def test_park_refuses_a_branch_with_unpushed_commits(parked, capsys):
     assert parked[3].calls[-1] == ["git", "rev-parse", "HEAD"]
 
 
+def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):
+    parked[3].status = " M scripts/x.py"
+    _refused(parked, capsys, "the worktree holds uncommitted changes; commit them and push eng-t1 first")
+    assert parked[3].calls[-1] == ["git", "status", "--porcelain"]
+
+
+@pytest.mark.parametrize(
+    "top", ["/elsewhere/engineer-a1b2c3-0001", f"{ROOT}/other/engineer-a1b2c3-0001", "/home/me/dev/repo"]
+)
+def test_park_refuses_a_worktree_outside_the_worktree_script_root(parked, capsys, top):
+    parked[3].top = top
+    _refused(parked, capsys, f"park removes only a worktree wt.sh new made under {ROOT}; {top} is not one")
+    assert parked[3].calls[-3:] == LOCATE
+
+
 def test_park_refuses_a_task_without_an_issue_where_the_repo_has_issues(parked, capsys):
     parked[1].rows["t1"]["issue_url"] = ""
     _refused(parked, capsys, "the repo has issues; open one and run swarm issue before parking")
@@ -127,6 +157,10 @@ def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
     ("failing", "says"),
     [
         (("git", "rev-parse", "HEAD"), "cannot read the worktree head"),
+        (("git", "status", "--porcelain"), "cannot inspect the worktree"),
+        (("git", "rev-parse", "--show-toplevel"), "cannot locate the worktree"),
+        (("git", "rev-parse", "--path-format=absolute"), "cannot locate the repo"),
+        (("bash", str(stack.WT_SCRIPT), "root"), "cannot locate the worktree root"),
         (("gh", "repo", "view"), "cannot tell whether the repo has issues"),
         (("git", "fetch", "origin"), "cannot fetch eng-a"),
         (("git", "merge-base", "HEAD"), "eng-a shares no history"),
@@ -180,17 +214,57 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     assert shell.calls == [
         ["git", "ls-remote", "--heads", "origin", "eng-t1"],
         ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--porcelain"],
+        *LOCATE,
         ["git", "fetch", "origin", "eng-a"],
         ["git", "merge-base", "HEAD", "origin/eng-a"],
         ["git", "rev-list", "--count", BASE],
         ["gh", "issue", "comment", ISSUE, "--body", body],
+        REMOVE,
     ]
     assert json.loads(capsys.readouterr().out) == {
         "task": "t1",
         "parked_on": ["a"],
         "stacked_base": BASE,
+        "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
+
+
+def test_park_removes_the_worktree_only_after_the_seat_is_handed_off(parked, monkeypatch):
+    store, _, _, shell, doc = parked
+
+    def answer(argv):
+        if argv == REMOVE:
+            assert store.handoff("sw", "t1") == doc.read_text()
+            assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
+        return shell(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert park(doc) == 0
+    assert shell.calls[-1] == REMOVE
+
+
+def test_park_reports_a_worktree_it_could_not_remove_after_parking(parked, capsys):
+    store, ledger, _, shell, doc = parked
+    shell.fail = (tuple(REMOVE[:3]),)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: the task is parked and its seat handed off, but wt.sh done could not remove {TOP}: boom\n"
+    )
+    calls = len(shell.calls)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: {AGENT} already handed off its seat; remove a leftover worktree with wt.sh done\n"
+    )
+    assert len(shell.calls) == calls and len(transfers.list_transfers(store, "sw")) == 1
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert store.handoff("sw", "t1") == doc.read_text()
+
+
+def test_the_worktree_script_ships_with_the_package():
+    assert stack.WT_SCRIPT.is_file()
+    assert stack.WT_SCRIPT.parts[-5:] == ("package", "skills", "worktree", "scripts", "wt.sh")
 
 
 def test_park_comments_the_ledger_task_naming_the_blocker_in_plain_words(parked):

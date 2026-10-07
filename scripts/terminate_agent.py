@@ -239,7 +239,10 @@ def _close_pane(pane: str, socket: str) -> str:
     from scripts import herdr_host
 
     try:
-        herdr_host._cli(["pane", "close", pane], {**os.environ, **({"HERDR_SOCKET_PATH": socket} if socket else {})})
+        herdr_host._cli(
+            ["pane", "close", pane],
+            {**os.environ, "HERDR_SOCKET_PATH": herdr_host.server_socket({"HERDR_SOCKET_PATH": socket})},
+        )
     except (herdr_host.HerdrError, OSError) as exc:
         return "closed" if "not found" in str(exc) else f"close-failed ({exc})"
     return "closed"
