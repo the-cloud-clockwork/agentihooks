@@ -111,8 +111,11 @@ class HerdrRuntime:
     def spawn(self, config, lane, name, task, spawns=None):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         saved = _transfer(task)
-        chosen = {**chosen, "profile": saved["profile"]} if saved else chosen
-        decision = profile_choice.choose(config.slug, lane, chosen, task, environ)
+        decision = (
+            profile_choice.ProfileDecision(saved["profile"], "handoff", "original seat profile")
+            if saved
+            else profile_choice.choose(config.slug, lane, chosen, task, environ)
+        )
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         if saved:

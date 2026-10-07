@@ -79,6 +79,15 @@ def test_handoff_preserves_unpinned_profile_and_decision_metadata(launching, sou
     assert result.profile_decision["validation"]["profile"] == "qa"
 
 
+def test_handoff_of_a_default_lane_profile_is_never_reclassified(launching, monkeypatch):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="engineer", harness="claude")
+    monkeypatch.setattr(runtime.profile_choice, "classify", lambda *a: pytest.fail("handoff reclassified its seat"))
+    result = engine.spawn(config, "eng", "worker", task)
+    assert calls[-1][calls[-1].index("--profile") + 1] == "engineer"
+    assert (result.profile, result.profile_decision["source"]) == ("engineer", "handoff")
+
+
 def test_handoff_refuses_to_clamp_saved_effort(launching):
     engine, config, task, saved, calls = launching
     config.effort_min = config.effort_max = "high"
