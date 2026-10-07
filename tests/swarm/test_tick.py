@@ -264,6 +264,34 @@ def test_failed_launches_do_not_consume_lives_and_preserve_each_error(store, err
     assert [row["state"] for row in store.launches("sw")].count("started") == 1
 
 
+class FailingFor(FakeRuntime):
+    def __init__(self, *failing):
+        super().__init__()
+        self.failing, self.tried = set(failing), []
+
+    def spawn(self, config, lane, name, task, spawns=None):
+        if lane != MASTER:
+            self.tried.append(task["id"])
+        if task["id"] in self.failing:
+            raise SpawnError("MCP_KEY_GATEWAY is unset")
+        return super().spawn(config, lane, name, task, spawns)
+
+
+def test_a_failing_launch_does_not_stop_the_spawns_behind_it(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "ci")), FailingFor("t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+    assert ledger.rows["t1"]["state"] == "open"
+
+
+def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FailingFor("t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.tried == ["t1", "t2", "t3"]
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+
+
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
     ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
     spawn = runtime.spawn
@@ -1103,23 +1131,52 @@ def test_only_a_claim_that_ends_parked_on_an_unfinished_blocker_keeps_its_claim_
     assert store.claims("sw", "t2") == lives
 
 
-def test_overlapping_territories_are_never_claimed_together(store):
+def test_an_overlapping_task_is_claimed_once_the_non_overlapping_work_is_taken(store):
     ledger = FakeLedger(
         [
-            {"id": "t1", "territory": ["scripts/swarm"]},
-            {"id": "t2", "territory": ["scripts/swarm/tick.py"]},
-            {"id": "t3", "lane": "ci", "territory": ["scripts/swarm/"]},
+            {"id": "t1", "territory": ["hooks"]},
+            {"id": "t2", "territory": ["hooks/x.py"]},
+            {"id": "t3", "territory": ["docs"]},
         ]
     )
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert spawned_ids(runtime) == ["t1"]
-    ledger.rows["t1"]["state"] = "pr"
+    assert spawned_ids(runtime) == ["t1", "t3"]
+    store.update("sw", max_eng=3)
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert spawned_ids(runtime) == ["t1"]
-    ledger.rows["t1"]["state"] = "done"
-    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned_ids(runtime) == ["t1", "t3", "t2"]
+    assert runtime.tasks[2]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks/x.py"]}]
+    assert runtime.tasks[0]["overlaps"] == [] and runtime.tasks[1]["overlaps"] == []
+
+
+def test_a_broad_territory_never_stops_a_claim(store):
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "territory": ["scripts"]},
+            {"id": "t2", "territory": ["scripts/swarm/tick.py", "docs"]},
+            {"id": "t3", "lane": "ci", "territory": ["./scripts/"]},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1", "t2", "t3"]
+    first, second = runtime.spawned[0][1], runtime.spawned[1][1]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": first, "areas": ["scripts/swarm/tick.py"]}]
+    assert runtime.tasks[2]["overlaps"] == [
+        {"task": "t1", "claimant": first, "areas": ["scripts"]},
+        {"task": "t2", "claimant": second, "areas": ["scripts/swarm/tick.py"]},
+    ]
+
+
+def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(store):
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    del ledger.rows["t1"]["claimed_by"]
+    ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "out_of_scope": False, "territory": ["hooks"]}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": "", "areas": ["hooks"]}]
 
 
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
@@ -1158,20 +1215,32 @@ def test_a_blocked_urgent_task_is_skipped_for_a_ready_normal_one(store):
     assert spawned_ids(runtime) == ["t2"] and ledger.rows["t1"]["state"] == "open"
 
 
-def test_an_urgent_task_never_takes_a_territory_an_active_claim_holds(store):
+def test_an_urgent_task_sharing_a_territory_an_active_claim_holds_is_still_claimed(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t1"]["state"] == "claimed"
+    assert spawned_ids(runtime) == ["t1", "t2"] and ledger.rows["t1"]["state"] == "claimed"
 
 
 def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "rank": "urgent", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert spawned_ids(runtime) == ["t2"]
+    assert spawned_ids(runtime) == ["t2", "t1"]
+
+
+def test_a_non_overlapping_task_is_claimed_ahead_of_a_higher_ranked_overlapping_one(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
+    ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3", "rank": "low", "territory": ["docs"]}
+    store.update("sw", max_eng=2)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t3"]
 
 
 def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):

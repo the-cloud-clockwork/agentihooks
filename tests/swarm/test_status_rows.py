@@ -206,7 +206,7 @@ def test_status_config_names_the_swarm_at_its_code_beside_the_codex_target(store
     assert (config["slug"], config["code"], config["name"], config["codex_share"]) == ("sw", code, f"swarm@{code}", 10)
 
 
-def test_status_keeps_report_only_launch_misses_outside_findings(store, monkeypatch):
+def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     from scripts.swarm import launch_check
 
     store.create(SwarmConfig("sw", "/repo", 1, 1))
@@ -216,4 +216,4 @@ def test_status_keeps_report_only_launch_misses_outside_findings(store, monkeypa
     monkeypatch.setattr(status, "page_quota", lambda: {})
     report = status.status_report(store, "sw", {"tasks": []})
     assert report["launch_checks"] == [saved]
-    assert report["findings"] == []
+    assert [f["id"] for f in report["findings"]] == ["launch-check/engineer@a1b2c3-0001/base"]

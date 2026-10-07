@@ -143,7 +143,9 @@ def test_model_and_effort_require_native_flags(mounted):
     with (root / "environ").open("ab") as stream:
         stream.write(b"AGENTIHOOKS_RUN_MODEL=opus\0AGENTIHOOKS_RUN_EFFORT=high\0")
     (root / "cmdline").write_bytes(b"claude\0")
-    assert set(live_binding.compare(agent, live_binding.read(agent, 42, proc))) == {"model", "effort"}
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("", "")
+    assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
 
 
 def test_codex_home_hooks_and_native_effort(mounted):
@@ -169,6 +171,51 @@ def test_codex_home_hooks_and_native_effort(mounted):
     assert live_binding.compare(agent, live_binding.read(agent, 42, proc)) == {}
     (home / "config.toml").write_text("[features]\nhooks = false\n")
     assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+def test_flagless_claude_session_reads_model_and_effort_from_its_home(mounted):
+    agent, proc, home = mounted
+    path = home / "settings.json"
+    data = json.loads(path.read_text())
+    path.write_text(json.dumps({**data, "model": "opus", "effortLevel": "high"}))
+    (proc / "42" / "cmdline").write_bytes(b"claude\0")
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("opus", "high")
+    assert live_binding.compare(agent, facts) == {}
+    (proc / "42" / "cmdline").write_bytes(b"claude\0--model\0sonnet\0--effort\0low\0")
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("sonnet", "low")
+    assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
+
+
+def test_flagless_codex_session_reads_model_and_effort_from_its_home(mounted):
+    agent, proc, home = mounted
+    agent = replace(
+        agent,
+        harness="codex",
+        model="gpt-6.1-sol",
+        account="default",
+        profile_decision={"validation": {"home": str(home), "model": "gpt-6.1-sol", "effort": "high"}},
+    )
+    root = proc / "42"
+    (root / "comm").write_text("codex")
+    (root / "environ").write_bytes(f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0".encode())
+    (root / "cmdline").write_bytes(b"codex\0")
+    (home / "config.toml").write_text(
+        'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n\n[features]\nhooks = true\n'
+    )
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    wrapper.chmod(0o700)
+    hooks = {event: [{"hooks": [{"type": "command", "command": str(wrapper)}]}] for event in EVENTS}
+    (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("gpt-6.1-sol", "high")
+    assert live_binding.compare(agent, facts) == {}
+    (root / "cmdline").write_bytes(b'codex\0-m\0gpt-7\0-c\0model_reasoning_effort="low"\0')
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("gpt-7", "low")
+    assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
 
 
 @pytest.mark.parametrize("content", ["broken", "[]"])

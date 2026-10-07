@@ -894,7 +894,7 @@ def test_status_text_names_the_promoted_engineer(env, capsys):
     assert "promoted  engineer@a1b2c3-0001  restoring the master: master spawn failed: boom" in out
 
 
-def test_status_text_logs_report_only_launch_misses_without_a_finding(env, capsys):
+def test_status_text_logs_a_base_miss_as_enforced_with_a_finding(env, capsys):
     from scripts.swarm import launch_check
 
     store, _, _ = env
@@ -906,8 +906,10 @@ def test_status_text_logs_report_only_launch_misses_without_a_finding(env, capsy
     run("sw", "status")
     out = capsys.readouterr().out.splitlines()
     assert "launch  engineer@a1b2c3-0001  failed  60000ms" in out
-    assert "  base  report only  expected package:engineer; observed engineer" in out
-    assert not any(line.startswith("finding  launch check") for line in out)
+    assert "  base  enforced  expected package:engineer; observed engineer" in out
+    assert (
+        "finding  launch check  engineer@a1b2c3-0001/base: engineer@a1b2c3-0001 failed its launch check on base" in out
+    )
 
 
 def test_status_text_logs_enforced_and_passed_launch_checks(env, capsys):

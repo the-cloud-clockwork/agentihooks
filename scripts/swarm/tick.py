@@ -465,7 +465,7 @@ def _reopen(slug, ledger, rows, task_id):
 def _claimable(slug, store, rows, doc, lane):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
-    picked = []
+    clear, overlapping = [], []
     for t in sorted(rows.values(), key=ledger_rank.order):
         if (
             t.get("lane") == lane
@@ -474,17 +474,23 @@ def _claimable(slug, store, rows, doc, lane):
             and not t.get("out_of_scope")
             and store.claimant(slug, t["id"]) is None
             and phase_state.admits(t, doc)
-            and _unblocked(t, rows, held)
+            and _unblocked(t, rows)
         ):
-            picked.append(t)
-            held.append(t.get("territory") or [])
-    return picked
+            mine = t.get("territory") or []
+            if any(_overlaps(mine, other) for other in held):
+                overlapping.append(t)
+                continue
+            clear.append(t)
+            held.append(mine)
+    return clear + overlapping
 
 
-def _unblocked(task, rows, held):
-    if _parked(task, rows) or not all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or []):
-        return False
-    return not any(_overlaps(task.get("territory") or [], other) for other in held)
+def _launch_order(slug, store, tasks):
+    return sorted(tasks, key=lambda task: bool(store.launch_failure(slug, task["id"])))
+
+
+def _unblocked(task, rows):
+    return not _parked(task, rows) and all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
 
 
 def _parked(task, rows):
@@ -506,7 +512,22 @@ def _refund_parked(slug, store, rows, task_id):
 
 
 def _overlaps(mine, theirs):
-    return any(_nested(a, b) or _nested(b, a) for a in map(_area, mine) for b in map(_area, theirs))
+    return bool(_shared(mine, theirs))
+
+
+def _shared(mine, theirs):
+    pairs = [(a, b) for a in map(_area, mine) for b in map(_area, theirs)]
+    return sorted({b if _nested(a, b) else a for a, b in pairs if _nested(a, b) or _nested(b, a)})
+
+
+def _sharing(task, rows):
+    mine = task.get("territory") or []
+    running = [t for t in rows.values() if t.get("state") in ACTIVE and t["id"] != task["id"]]
+    return [
+        {"task": t["id"], "claimant": t.get("claimed_by") or "", "areas": areas}
+        for t in running
+        if (areas := _shared(mine, t.get("territory") or []))
+    ]
 
 
 def _area(entry):
@@ -529,7 +550,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     held = _held_for_master(slug, store, now_ms)
     for lane, cap in (("eng", config.max_eng), ("ci", config.max_ci), ("plan", config.max_plan)):
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        for task in _claimable(slug, store, rows, doc, lane)[: max(cap - busy, 0)]:
+        for task in _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))[: max(cap - busy, 0)]:
             if held:
                 return actions + held
             if not runtime.has_capacity(config):
@@ -544,6 +565,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             if handoff:
                 task["handoff"] = handoff
             task["stack_base"] = _stack_base(task, rows)
+            task["overlaps"] = _sharing(task, rows)
             saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
             preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
             seat = _free_seat(slug, lane, taken, preferred)
@@ -581,7 +603,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
-                return actions
+                continue
             store.count_claim(slug, task["id"])
             store.record_launch(slug, record, "started")
             store.put_agent(slug, placed_record(record, placed))

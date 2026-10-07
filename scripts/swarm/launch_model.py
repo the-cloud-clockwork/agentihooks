@@ -2,6 +2,7 @@
 
 import json
 import tomllib
+from pathlib import Path
 
 from hooks.targets import codex_home
 from scripts.claude_config import claude_home
@@ -40,12 +41,18 @@ def _load(path, parse, error):
         return {}
 
 
+def configured(harness: str, home: Path | None = None) -> dict:
+    if harness == "codex":
+        return _renamed(
+            _load((home or codex_home()) / "config.toml", tomllib.loads, tomllib.TOMLDecodeError), CODEX_KEYS
+        )
+    return _renamed(_load((home or claude_home()) / "settings.json", json.loads, ValueError), CLAUDE_KEYS)
+
+
 def read(harness: str, argv: tuple[str, ...]) -> tuple[str, str]:
     if harness == "codex":
-        config = _renamed(_load(codex_home() / "config.toml", tomllib.loads, tomllib.TOMLDecodeError), CODEX_KEYS)
         flags = {**_renamed(_codex_overrides(argv), CODEX_KEYS), **_named(argv, CODEX_FLAGS)}
     else:
-        config = _renamed(_load(claude_home() / "settings.json", json.loads, ValueError), CLAUDE_KEYS)
         flags = _named(argv, CLAUDE_FLAGS)
-    found = {"model": "", "effort": "", **config, **flags}
+    found = {"model": "", "effort": "", **configured(harness), **flags}
     return found["model"], found["effort"]
