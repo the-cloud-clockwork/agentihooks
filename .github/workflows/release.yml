@@ -1,12 +1,5 @@
 name: Release
 
-# Inlined (was: The-Cloud-Clockwork/.github release-reusable.yml) because the
-# reusable workflow hardcodes `runs-on: anton`. agentihooks is a PUBLIC repo and
-# must not execute on the self-hosted fleet runner; this job runs on
-# GitHub-hosted ubuntu-latest, matching the ci/test/pages move. Behaviour mirrors
-# the reusable workflow: compute next version, bump the version file, commit +
-# tag + push to the release branch, cut a GitHub release, then dispatch
-# publish-pypi.yml at the new tag.
 on:
   workflow_dispatch:
     inputs:
@@ -15,75 +8,99 @@ on:
         required: true
         type: choice
         options: [patch, minor, major]
+      dry_run:
+        description: "Open the bump pull request without merging, tagging or publishing"
+        type: boolean
+        default: false
       publish_pypi:
-        description: "Publish to PyPI from the new tag right away. The release dance leaves this off and publishes from main after the dev->main PR merges"
+        description: "Publish from the new tag. The release dance leaves this off and publishes from main after its pull request merges"
         type: boolean
         default: false
 
+concurrency:
+  group: release-version
+  cancel-in-progress: false
+
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     environment: release
+    env:
+      GH_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
     steps:
+      - name: Check automation credentials
+        run: ': "${GH_TOKEN:?A repository automation token is required}"'
+
       - uses: actions/checkout@v4
         with:
           ref: dev
           fetch-depth: 0
-          token: ${{ secrets.ORG_GITHUB_TOKEN || github.token }}
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
 
       - name: Compute next version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
-          CURRENT=$(python3 - <<'EOF'
+          CURRENT=$(python3 - <<'PY'
           import tomllib
           with open("pyproject.toml", "rb") as f:
               print(tomllib.load(f)["project"]["version"])
-          EOF
+          PY
           )
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          case "${{ inputs.bump }}" in
+          case "$BUMP" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
             patch) PATCH=$((PATCH + 1)) ;;
+            *) exit 1 ;;
           esac
           NEXT="${MAJOR}.${MINOR}.${PATCH}"
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Releasing $CURRENT -> $NEXT"
 
-      - name: Bump version in pyproject.toml
+      - name: Open and merge the version bump pull request
+        id: bump
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.next }}"/' pyproject.toml
+          sed -i "s/^version = \".*\"/version = \"$NEXT\"/" pyproject.toml
+          bash scripts/ci_bot_pr.sh "automation/release-$GITHUB_RUN_ID" "Release v$NEXT" pyproject.toml "$DRY_RUN"
 
-      - name: Commit, tag, and push
+      - name: Tag the merged version
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          MERGED: ${{ steps.bump.outputs.merged }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore: release v${{ steps.version.outputs.next }}"
-          git tag "v${{ steps.version.outputs.next }}"
-          git push origin dev
-          git push origin "v${{ steps.version.outputs.next }}"
+          git fetch origin dev
+          git merge-base --is-ancestor "$MERGED" origin/dev
+          git show "$MERGED:pyproject.toml" > released.toml
+          python3 - <<'PY'
+          import os
+          import tomllib
+          with open("released.toml", "rb") as f:
+              assert tomllib.load(f)["project"]["version"] == os.environ["NEXT"]
+          PY
+          git tag "v$NEXT" "$MERGED"
+          git push origin "refs/tags/v$NEXT"
 
       - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          gh release create "v${{ steps.version.outputs.next }}" \
-            --repo "${{ github.repository }}" \
-            --title "v${{ steps.version.outputs.next }}" \
-            --generate-notes \
-            --latest
+          gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --generate-notes --latest
 
       - name: Dispatch publish-pypi at the new tag
-        if: inputs.publish_pypi
+        if: ${{ !inputs.dry_run && inputs.publish_pypi }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          TAG="v${{ steps.version.outputs.next }}"
-          gh workflow run publish-pypi.yml --repo "${{ github.repository }}" --ref "$TAG"
-          echo "Dispatched publish-pypi.yml at $TAG"
+          gh workflow run publish-pypi.yml --repo "$GITHUB_REPOSITORY" --ref "v$NEXT"

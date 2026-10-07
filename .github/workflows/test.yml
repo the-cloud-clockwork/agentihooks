@@ -149,49 +149,6 @@ jobs:
         if: steps.lookup.outputs.skip != 'true'
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
-  refresh-durations:
-    needs: [unit, lint]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Refresh measured durations
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TREE: ${{ github.event.head_commit.tree_id }}
-        run: |
-          git fetch origin dev
-          if [[ "$(git rev-parse origin/dev)" != "$GITHUB_SHA" ]]; then
-            echo "dev moved; the newer run will refresh durations"
-            exit 0
-          fi
-          source_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$TREE" \
-            --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)] | first.workflow_run.id // empty')
-          python -m tests.refresh_durations --ci-run "${source_run:-$GITHUB_RUN_ID}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .test_durations
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Refresh stored test durations"
-          if ! git push origin HEAD:dev; then
-            git fetch origin dev
-            if [[ "$(git rev-parse origin/dev)" != "$GITHUB_SHA" ]]; then
-              echo "dev moved; the newer run will refresh durations"
-              exit 0
-            fi
-            exit 1
-          fi
-
   record-pass:
     needs: [unit, lint]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.unit.result == 'success' && needs.lint.result == 'success' }}

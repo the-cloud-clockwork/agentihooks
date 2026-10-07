@@ -1,0 +1,38 @@
+name: Refresh test durations
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-test-durations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          token: ${{ secrets.ORG_GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Refresh measured durations through a pull request
+        run: |
+          : "${GH_TOKEN:?A repository automation token is required}"
+          python -m tests.refresh_durations --ci 5
+          test -s .test_durations
+          test "$(python -c 'import json; print(len(json.load(open(".test_durations"))))')" -gt 0
+          bash scripts/ci_bot_pr.sh "automation/durations-$(date -u +%F)" "Refresh stored test durations" .test_durations
