@@ -5,6 +5,7 @@ the slice check faults unless an override names its reason.
 """
 
 import os
+from dataclasses import dataclass
 
 from scripts.swarm import phase_state, slice_check
 from scripts.swarm.store import ASSIST, MANUAL, MASTER, SwarmError
@@ -12,6 +13,13 @@ from scripts.swarm.store import ASSIST, MANUAL, MASTER, SwarmError
 BUTTONS = "use Approve plan or Send back on the phase in the ledger page"
 DECISIONS = {"approve": "approved", "send-back": "sent_back"}
 RECOMMEND = "post your recommendation as a comment on the phase"
+
+
+@dataclass(frozen=True)
+class Decision:
+    action: str
+    note: str
+    override: str
 
 
 def refusal(agent, autonomy, phase, doc):
@@ -29,7 +37,7 @@ def refusal(agent, autonomy, phase, doc):
     return ""
 
 
-def decide(ledger, slug, agent, autonomy, phase_id, action, note, override=""):
+def decide(ledger, slug, agent, autonomy, phase_id, decision):
     doc = ledger.state(slug)
     phase = next((p for p in doc["phases"] if p["id"] == phase_id), None)
     if phase is None:
@@ -38,11 +46,12 @@ def decide(ledger, slug, agent, autonomy, phase_id, action, note, override=""):
     if reason:
         raise SwarmError(reason)
     problems = slice_check.check(phase, doc, slice_check.Limits.from_env(os.environ))
-    override = override.strip() if problems and action == "approve" else ""
-    if problems and action == "approve" and not override:
+    override = decision.override.strip() if problems else ""
+    if problems and decision.action == "approve" and not override:
         raise SwarmError(faulted(phase_id, problems))
     record = {"reason": override, "problems": problems} if override else None
-    ledger.review_phase(slug, phase_id, DECISIONS[action], by=agent.name, note=note, override=record)
+    state = DECISIONS[decision.action]
+    ledger.review_phase(slug, phase_id, state, by=agent.name, note=decision.note, override=record)
     review = next(p for p in ledger.state(slug)["phases"] if p["id"] == phase_id)["review"]
     result = {"phase": phase_id, **{k: review[k] for k in ("state", "rounds", "escalated") if k in review}}
     return {**result, "problems": problems, **({"override": override} if override else {})}

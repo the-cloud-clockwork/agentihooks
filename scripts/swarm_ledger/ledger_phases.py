@@ -114,12 +114,14 @@ def check_override(op: dict) -> None:
     if op["state"] != "approved":
         raise ValueError("only an approval carries an override")
     override = op["override"]
-    shaped = isinstance(override, dict) and set(override) == {"reason", "problems"}
-    reason, problems = (override["reason"], override["problems"]) if shaped else ("", [])
+    malformed = ValueError("an override needs a reason and the problems it overrode")
+    if not isinstance(override, dict) or set(override) != {"reason", "problems"}:
+        raise malformed
+    reason, problems = override["reason"], override["problems"]
     if not isinstance(reason, str) or not reason.strip() or not isinstance(problems, list) or not problems:
-        raise ValueError("an override needs a reason and the problems it overrode")
+        raise malformed
     if not all(isinstance(problem, str) for problem in problems):
-        raise ValueError("an override needs a reason and the problems it overrode")
+        raise malformed
 
 
 def check_append(op: dict) -> None:

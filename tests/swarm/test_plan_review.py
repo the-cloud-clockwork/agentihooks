@@ -116,7 +116,11 @@ def test_a_blank_override_is_no_override(faulted, capsys):
 def test_send_back_prints_the_problems(faulted, capsys):
     store, _ = faulted
     code, out = plan(capsys, store, "send-back", "p1", "--note", "Lengthen the task")
-    assert (code, out["state"], out["problems"]) == (0, "sent_back", [SHORT])
+    assert (code, out) == (
+        0,
+        {"phase": "p1", "state": "sent_back", "rounds": 1, "escalated": False, "problems": [SHORT]},
+    )
+    assert "override" not in phase("p1")["review"]
 
 
 def test_an_override_is_only_for_approve(faulted, capsys):
