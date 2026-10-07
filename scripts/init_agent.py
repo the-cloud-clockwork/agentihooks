@@ -13,6 +13,7 @@ from pathlib import Path
 
 from scripts import agent_choice, claude_trust, herdr_host, operator_env
 from scripts.swarm import effort_range
+from scripts.targets.codex_target import codex_home, restore_hook_order
 
 
 def _is_wsl(environ: dict[str, str]) -> bool:
@@ -610,6 +611,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
                 file=sys.stderr,
             )
+    if agent == "codex":
+        moved = restore_hook_order(codex_home(active_env))
+        report.append(f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged")
     marker = _started_marker(launcher)
     if host == "herdr":
         try:

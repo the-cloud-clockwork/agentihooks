@@ -1155,3 +1155,23 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
     assert [i.id for i in inbox.inbox("engineer@a1b2c3-0001")] == [closed.id]
+
+
+@pytest.mark.parametrize("drifted", [True, False])
+def test_the_tick_restores_the_approved_codex_hook_order_and_journals_it(store, drifted):
+    import json
+
+    from scripts.targets.codex_target import codex_home
+
+    home = codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
+    herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
+    groups = [herdr, ours] if drifted else [ours, herdr]
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups}}, indent=2))
+
+    actions = tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+
+    line = f"restored the approved Codex hook order in {home / 'hooks.json'}: SessionStart"
+    assert (line in actions) is drifted
+    assert json.loads((home / "hooks.json").read_text())["hooks"]["SessionStart"][0] == ours

@@ -942,3 +942,81 @@ class TestTeardownDestructiveEdges:
         assert not (home / "hooks.json").exists()
         baks = list(home.glob("hooks*.bak*"))
         assert baks and any("operator_hook_i_care_about" in b.read_text() for b in baks)
+
+
+def _hooks_file(home, session_start):
+    home.mkdir(parents=True, exist_ok=True)
+    doc = {"hooks": {"SessionStart": session_start, "Stop": [_own_group(home)]}}
+    (home / "hooks.json").write_text(json.dumps(doc, indent=2))
+    return home / "hooks.json"
+
+
+def _own_group(home):
+    return {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
+
+
+_HERDR = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
+
+
+class TestRestoreHookOrder:
+    def test_a_drifted_file_gets_the_agentihooks_group_back_first(self, adapter):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        path = _hooks_file(home, [_HERDR, _own_group(home)])
+
+        assert restore_hook_order(home) == ["SessionStart"]
+        assert json.loads(path.read_text())["hooks"] == {
+            "SessionStart": [_own_group(home), _HERDR],
+            "Stop": [_own_group(home)],
+        }
+
+    def test_an_approved_file_is_left_untouched(self, adapter):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        path = _hooks_file(home, [_own_group(home), _HERDR])
+        before = (path.read_text(), path.stat().st_mtime_ns)
+
+        assert restore_hook_order(home) == []
+        assert (path.read_text(), path.stat().st_mtime_ns) == before
+
+    def test_a_rendered_home_restores_the_operator_file_through_its_link(self, adapter, tmp_path):
+        from scripts.targets.codex_target import restore_hook_order
+
+        operator = codex_home()
+        path = _hooks_file(operator, [_HERDR, _own_group(operator)])
+        rendered = tmp_path / "profiles" / "engineer" / "codex"
+        rendered.mkdir(parents=True)
+        (rendered / "hooks.json").symlink_to(path)
+
+        assert restore_hook_order(rendered) == ["SessionStart"]
+        assert (rendered / "hooks.json").is_symlink()
+        assert json.loads(path.read_text())["hooks"]["SessionStart"] == [_own_group(operator), _HERDR]
+
+    @pytest.mark.parametrize("text", [None, "{not json", '{"hooks": []}'])
+    def test_a_missing_or_unreadable_file_is_left_alone(self, adapter, text):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        if text is not None:
+            (home / "hooks.json").write_text(text)
+
+        assert restore_hook_order(home) == []
+        assert (home / "hooks.json").exists() is (text is not None)
+
+    def test_the_restored_file_matches_what_init_writes(self, adapter):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [_HERDR]}}))
+        adapter.write_settings({})
+        installed = (home / "hooks.json").read_text()
+        doc = json.loads(installed)
+        doc["hooks"]["SessionStart"].reverse()
+        (home / "hooks.json").write_text(json.dumps(doc, indent=2))
+
+        assert restore_hook_order(home) == ["SessionStart"]
+        assert (home / "hooks.json").read_text() == installed

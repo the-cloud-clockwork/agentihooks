@@ -33,6 +33,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.targets.codex_target import codex_home, restore_hook_order
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -125,6 +126,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += _orphans(slug, store, ledger, rows)
     if not sleeping:
+        actions += _codex_hook_order()
         actions += _master_down(slug, config, store, ledger, runtime, now_ms)
         actions += _master(slug, config, store, runtime, now_ms)
         if config.state == "running":
@@ -134,6 +136,13 @@ def tick(slug, store, ledger, runtime, now_ms):
     starting = {a.name for a in store.agents(slug) if a.lane == MASTER and a.state == "starting"}
     transfers.observe(store, slug, runtime.live_names() - starting)
     return actions + _settle(slug, config, store, ledger, rows, doc) + _close_space(slug, config, store, runtime)
+
+
+def _codex_hook_order():
+    home = codex_home()
+    moved = restore_hook_order(home)
+    path = (home / "hooks.json").resolve()
+    return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
 
 
 def _close_space(slug, config, store, runtime):

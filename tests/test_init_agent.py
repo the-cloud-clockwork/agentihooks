@@ -832,3 +832,39 @@ def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypa
     launcher = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("launcher="))
     lines = Path(launcher.split("=", 1)[1]).read_text().splitlines()
     assert "export MCP_PROTOCOL_NEGOTIATION=legacy" in lines
+
+
+def _codex_hooks(home, first):
+    ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
+    herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
+    home.mkdir(parents=True, exist_ok=True)
+    groups = [ours, herdr] if first == "ours" else [herdr, ours]
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups}}, indent=2))
+    return home / "hooks.json", ours
+
+
+@pytest.mark.parametrize(
+    ("first", "field"), [("herdr", "codex_hooks=restored:SessionStart"), ("ours", "codex_hooks=unchanged")]
+)
+def test_a_codex_launch_restores_the_approved_hook_order_before_codex_starts(
+    monkeypatch, tmp_path, capsys, first, field
+):
+    path, ours = _codex_hooks(tmp_path / ".codex", first)
+    untouched = path.stat().st_mtime_ns
+    seen = {}
+
+    def popen(command, **kwargs):
+        seen["first"] = json.loads(path.read_text())["hooks"]["SessionStart"][0]
+        Path(command[-1]).with_suffix(".started").touch()
+
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t", str(launcher)])
+    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    argv = ["--dir", str(tmp_path), "--name", "cx", "--agent", "codex", "--start-timeout", "0", "--route-timeout", "0"]
+
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    assert field in capsys.readouterr().out.splitlines()
+    assert seen["first"] == ours
+    assert first == "herdr" or path.stat().st_mtime_ns == untouched
