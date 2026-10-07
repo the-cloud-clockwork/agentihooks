@@ -231,3 +231,17 @@ def test_signal_does_not_authorize_another_command_in_the_chain(
     with pytest.raises(BlockAction) as blocked:
         _check(separator.join(commands))
     assert str(blocked.value).startswith(block)
+
+
+@pytest.mark.parametrize("authorized", ["gh workflow run release.yml --ref dev", _MAIN_MERGE])
+def test_release_signal_cannot_skip_a_blocked_rule_in_any_order(grant, monkeypatch, authorized):
+    from itertools import permutations
+
+    from hooks.context import prod_lockdown
+    from hooks.hook_manager import BlockAction
+
+    grant("release")
+    for rules in permutations(prod_lockdown._BLOCKED):
+        monkeypatch.setattr(prod_lockdown, "_BLOCKED", rules)
+        with pytest.raises(BlockAction):
+            _check(f"{authorized}; {_TAG_PUSH}")
