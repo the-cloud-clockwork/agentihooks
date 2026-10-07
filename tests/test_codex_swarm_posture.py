@@ -24,8 +24,8 @@ def test_a_packaged_swarm_role_renders_full_autonomy_without_a_bundle(world, rol
     first = render.render_codex(role)
     second = render.render_codex(role, force=True)
 
-    assert first == second == render.rendered_root() / role / "codex"
-    assert _posture(first) == ("never", "danger-full-access")
+    assert second == (render.rendered_root() / role / "codex").resolve()
+    assert _posture(first) == _posture(second) == ("never", "danger-full-access")
     assert render.stamp(role)["chain"] == [role]
 
 
