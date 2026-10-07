@@ -28,7 +28,7 @@ and `tests/installer_isolation.py`, gives every test:
 | Redis | connections to port 6379 are refused and the swarm Redis URL is a missing socket; keys built by the `hooks` package (`hooks._redis`, the memory store, the event relay) carry the run prefix `agentihooks-test-<run id>`. The swarm, inbox and gate stores under `scripts/` keep their production `agentihooks:*` names and are tested against a per-test fakeredis |
 | herdr | `herdr_host.binary()` and `herdr_setup.binary()` report no herdr, as in CI |
 | Live writes | any write into a live root, from any code, aborts the test |
-| Live programs | spawning a real `kubectl`, `helm`, `argocd` or `herdr`, one that resolves outside the test directory, aborts the test. The guard checks the program of a direct spawn; every argument after a leading `env`, `timeout`, `nohup`, `nice`, `sudo`, `exec`, `command`, `xargs`, `stdbuf` or `setsid`; and every word of a shell `-c` command, including commands run through `os.system`. A live program named as a shell argument (`echo kubectl`) is therefore refused too where one is installed. A program started by `os.spawn*`, or by an absolute path hidden in a variable, is not seen: `os.spawn*` raises no audit event |
+| Live programs | spawning a real `kubectl`, `helm`, `argocd` or `herdr`, one that resolves outside the test directory, aborts the test. The guard checks the program of a direct spawn; every argument after a leading `env`, `timeout`, `nohup`, `nice`, `sudo`, `exec`, `command`, `xargs`, `stdbuf` or `setsid`; and every word of a shell `-c` command, including commands run through `os.system`, after quotes and backslash escapes are removed and with `$`, `=` and `:-` treated as separators, so `${VAR:-kubectl}` and `ku""bectl` are caught. A live program named as a shell argument (`echo kubectl`) is therefore refused too where one is installed. A program started by `os.spawn*`, or whose name the shell builds at run time from a variable's value, is not seen: `os.spawn*` raises no audit event, and a variable's value is not known before the shell runs |
 
 The live roots are read once, from the environment the run started with: the home names `.claude`, `.claude.json`,
 `.codex`, `.copilot`, `.agentihooks`, `.agents`, `.agentibrain`, `.kube`, `.config/herdr`, `.bashrc`, `.local/bin`
@@ -67,7 +67,7 @@ Checks, each of which aborts the test and counts `test_live_path_rejections_tota
 | `sweep(redis, identities)` | a sweep by a run that does not own the prefix's owner marker (`redis`) |
 | `remove(identities)` | a root whose `.fixture-run` marker names another run, or a live root (`cleanup`) |
 
-Writes into live roots count under `write`, live programs under `program`. The autouse fixture records each test's nonzero counts as the junit property `test_live_path_rejections_total`, which `evidence/SV2-FND-05/generate_case_results.py` sums per case.
+Writes into live roots count under `write`, live programs under `program`. The autouse fixture records each test's nonzero counts as the junit property `test_live_path_rejections_total`, which `evidence/SV2-FND-05/generate_case_results.py` sums per case. CI's test job disables the junit report, so the case results come from the package's own run with `--junitxml`, the command recorded in the evidence manifest.
 
 ## Recovery
 

@@ -6,6 +6,7 @@ started with, before any fixture redirects it.
 
 import os
 import re
+import shlex
 import shutil
 import sys
 import uuid
@@ -53,7 +54,7 @@ SHELLS = frozenset({"sh", "bash", "dash", "zsh"})
 WRAPPERS = frozenset({"env", "timeout", "nohup", "nice", "sudo", "exec", "command", "xargs", "stdbuf", "setsid"})
 SHELL_COMMAND_FLAG = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
 # Every word of a shell command is checked, so a live program named as an argument there is refused too.
-TOKENS = re.compile(r"[\s;&|()`{}!<>\"']+|\$\(")
+TOKENS = re.compile(r"[\s;&|()`{}!<>\"'\\$=]+|:-?")
 # os.spawn* raises no audit event, so a program started through it is not seen.
 SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.system"})
 
@@ -227,7 +228,6 @@ def _shell_command(argv: list[str]) -> str | None:
     flags = argv[start + 1 :]
     index = next((i for i, flag in enumerate(flags) if SHELL_COMMAND_FLAG.fullmatch(flag)), None)
     return flags[index + 1] if index is not None and index + 1 < len(flags) else None
-    return None
 
 
 def _programs(argv) -> list[str]:
@@ -239,7 +239,11 @@ def _programs(argv) -> list[str]:
     words = argv if Path(argv[0]).name in WRAPPERS else argv[:1]
     command = _shell_command(argv)
     if command is not None:
-        words = words + TOKENS.split(command)
+        try:
+            spliced = shlex.split(command)
+        except ValueError:
+            spliced = [command]
+        words = words + [word for part in spliced for word in TOKENS.split(part)]
     return [word for word in words if word]
 
 

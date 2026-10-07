@@ -283,6 +283,11 @@ def test_b_a_live_program_outside_the_test_directory_aborts(tmp_path_factory, mo
         lambda: subprocess.run(["bash", "-o", "pipefail", "-c", "kubectl get"], capture_output=True),
         lambda: subprocess.run(["env", "FOO=1", "sh", "-c", "echo x && 'kubectl' get"], capture_output=True),
         lambda: subprocess.run(["sh", "-c", "echo kubectl"], capture_output=True),
+        lambda: subprocess.run(["sh", "-c", "\\kubectl get"], capture_output=True),
+        lambda: subprocess.run(["sh", "-c", 'ku""bectl get'], capture_output=True),
+        lambda: subprocess.run(["sh", "-c", "ku''bectl get"], capture_output=True),
+        lambda: subprocess.run(["sh", "-c", "${K:-kubectl} get"], capture_output=True),
+        lambda: subprocess.run(["sh", "-c", "'kubectl"], capture_output=True),
     ],
     ids=[
         "env",
@@ -300,6 +305,11 @@ def test_b_a_live_program_outside_the_test_directory_aborts(tmp_path_factory, mo
         "shell-option-value",
         "wrapped-shell-quoted",
         "shell-argument",
+        "backslash",
+        "double-quote-splice",
+        "single-quote-splice",
+        "parameter-default",
+        "unbalanced-quote",
     ],
 )
 def test_b_a_wrapped_or_shell_spawned_live_program_aborts(tmp_path_factory, monkeypatch, rejections, spawn):
@@ -329,7 +339,6 @@ def test_b_a_live_program_name_as_an_argument_is_left_alone(tmp_path_factory, mo
     outside = tmp_path_factory.mktemp("live-bin")
     _fake_program(outside, "kubectl", "LIVE")
     monkeypatch.setenv("PATH", f"{outside}{os.pathsep}{os.environ['PATH']}")
-    (tmp_path_factory.mktemp("notes") / "n.txt").write_text("kubectl helm\n")
     done = subprocess.run(["echo", "kubectl", "helm"], capture_output=True, text=True)
     assert done.stdout == "kubectl helm\n"
 
