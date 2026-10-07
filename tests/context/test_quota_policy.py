@@ -92,6 +92,33 @@ def test_other_accounts_carry_their_stored_cap(monkeypatch):
     assert [c.cap for c in qp._other_accounts({"beta": 3})] == [None]
 
 
+def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatch):
+    from scripts import claude_quota_balancer as balancer
+
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [(123.0, beta)])
+    [found] = qp._other_accounts({})
+    assert (found.sessions, found.observed_at) == (0, 123.0)
+
+
+def test_an_open_account_with_exactly_the_minimum_routing_left_wins_over_a_full_one():
+    edge = qp.Candidate("beta", 0, 100 - qp.MIN_ROUTING_LEFT, 0, time.time())
+    full = qp.Candidate("gamma", 10, 50, 5, time.time())
+    assert _decide(10, 98.5, [edge, full]).target.account == "beta"
+
+
+def test_among_open_good_accounts_the_most_routing_left_wins():
+    assert _decide(10, 98.5, [_c("beta", 10, 70), _c("gamma", 10, 30)]).target.account == "gamma"
+
+
+def test_an_account_without_its_own_cap_shows_the_default_in_the_texts():
+    d = _decide(10, 98.5, [_c("beta", 10, 40, sessions=1)])
+    assert "1/2 sessions" in qp._others_text(d)
+    assert "1/2 sessions" in qp.render(d, "sess-1", "/tmp")
+
+
 def test_operator_push_replaces_stop_and_wait():
     assert _decide(10, 98.5, [], push=True).action == "push"
     assert _decide(99.2, 50, [], push=True).action == "push"

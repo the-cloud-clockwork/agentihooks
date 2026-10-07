@@ -158,7 +158,7 @@ def page_quota(now: float | None = None) -> dict:
         _page_cache.update(at=now, quota=_page_quota(now))
     quota = _page_cache["quota"]
     caps = {harness: session_caps.stored(harness) for harness in session_caps.HARNESSES}
-    rows = [{**row, "cap": caps.get(row["agent"], {}).get(row["account"], quota["cap"])} for row in quota["rows"]]
+    rows = [{**row, "cap": caps[row["agent"]].get(row["account"], quota["cap"])} for row in quota["rows"]]
     return {**quota, "rows": rows}
 
 
