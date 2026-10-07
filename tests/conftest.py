@@ -320,6 +320,13 @@ def _swarm_codes_in_order(monkeypatch):
     monkeypatch.setattr(naming, "_mint", lambda: f"{next(codes):06x}")
 
 
+@pytest.fixture(autouse=True)
+def _swarm_runs_as_installed(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
+
+
 @pytest.fixture
 def mock_env():
     """Provide a clean environment for tests."""

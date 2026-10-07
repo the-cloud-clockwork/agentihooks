@@ -1,7 +1,9 @@
 """The systemd user timer that runs `agentihooks swarm tick` every minute; nothing runs between ticks."""
 
+import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
@@ -66,3 +68,25 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
     run(["systemctl", "--user", "enable", "--now", f"{WAKER}.service"], capture_output=True, text=True, timeout=30)
     proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
     return proc.returncode == 0
+
+
+def _roots():
+    from scripts.targets._common import _install_module
+
+    _i = _install_module()
+    return _i.AGENTIHOOKS_ROOT, _i.install_root()
+
+
+def installed_refusal():
+    running, installed = (Path(root).resolve() for root in _roots())
+    if running == installed:
+        return ""
+    return f"this run comes from {running}, not the installed agentihooks at {installed}"
+
+
+def entry_point(scripts_dir=None, which=shutil.which):
+    script = Path(scripts_dir or sysconfig.get_path("scripts")) / "agentihooks"
+    found = which("agentihooks")
+    if found and Path(found).resolve() == script.resolve():
+        return found
+    return str(script)

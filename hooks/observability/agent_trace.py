@@ -472,10 +472,13 @@ class _ExportErrors(logging.Handler):
 
 def _log_failure(status: object, reason: str) -> None:
     from hooks.observability import otel
+    from hooks.secrets import redact
 
     endpoint = (otel.langfuse_exporter_config() or {}).get("endpoint", "")
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sys.stderr.write(f"{stamp} agent_trace export failed endpoint={endpoint} status={status} reason={reason}\n")
+    sys.stderr.write(
+        f"{stamp} agent_trace export failed endpoint={endpoint} status={status} reason={redact(reason, mode='strict')}\n"
+    )
 
 
 def _save_progress(session_id: str, state: dict) -> None:

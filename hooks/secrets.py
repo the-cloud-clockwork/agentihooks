@@ -7,7 +7,7 @@ Supports tiered pattern sets controlled by ``AGENTIHOOKS_SECRETS_MODE``:
   off      → no scanning
   warn     → standard patterns (7), scan only (caller decides action)
   standard → standard patterns (7), scan + block
-  strict   → standard + extended patterns (Slack/Stripe/JWT), scan + block
+  strict   → standard + extended patterns (Slack/Stripe/JWT/Bearer), scan + block
 """
 
 import re
@@ -50,7 +50,9 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     ),
     _Pattern(
         "private_key",
-        re.compile(r"-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE KEY-----"),
+        re.compile(
+            r"-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE KEY-----(?:.*?-----END\s+\1\s+PRIVATE KEY-----|.*)", re.DOTALL
+        ),
     ),
     _Pattern(
         "bearer_token",
@@ -65,8 +67,8 @@ _STANDARD_PATTERNS: list[_Pattern] = [
         # Match KEY = VALUE but skip env var references ($VAR), placeholders (<...> or {...}),
         # comparisons (==, ===), and quoted values under 8 chars such as Terraform time units
         re.compile(
-            r"(?:PASSWORD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)\s*(?:=(?!=)|:)\s*"
-            r"""(?:["'](?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))""",
+            r"(?:PASSWORD|(?<!/)PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)(?:\s*(?:=(?!=)|:)\s*"
+            r"""(?:["'](?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))|["']\s*:\s*["'][^\s"'$<{]{8,})""",
             re.IGNORECASE,
         ),
         _is_literal_secret,
@@ -85,6 +87,10 @@ _STRICT_PATTERNS: list[_Pattern] = [
     _Pattern(
         "jwt_token",
         re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    ),
+    _Pattern(
+        "bearer_value",
+        re.compile(r"\bBearer\s+[A-Za-z0-9._\-+/]{20,}", re.IGNORECASE),
     ),
 ]
 
