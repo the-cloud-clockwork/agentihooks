@@ -95,11 +95,14 @@ class SurfaceLadder(unittest.TestCase):
         self.assertRegex(re.search(r"(?m)^body \{([^}]*)\}", ledger).group(1), r"background: var\(--canvas\)")
         self.assertRegex(re.search(r"body\{([^}]*)\}", self.pages["home"]).group(1), r"background:var\(--canvas\)")
 
-    def test_no_drop_shadows_only_glow(self):
+    def test_drop_shadows_come_only_from_the_lift_and_spill_roles(self):
         for name, css in self.pages.items():
             for value in re.findall(r"box-shadow:\s*([^;}]+)", css):
                 for layer in value.split(","):
                     if layer.strip() in ("none", "inherit"):
+                        continue
+                    if layer.strip().startswith("var("):
+                        self.assertIn(layer.strip(), ("var(--panel-lift)", "var(--tab-spill)"), (name, layer))
                         continue
                     offsets = re.findall(r"-?[\d.]+(?:px)?", layer)[:2]
                     self.assertTrue(layer.strip().startswith("inset") or offsets == ["0", "0"], (name, layer))
@@ -113,9 +116,18 @@ class SurfaceLadder(unittest.TestCase):
                 for layer in value.split(","):
                     self.assertFalse(re.match(r"\s*0\s+0\s+[\d.]+px", layer), (name, layer))
 
-    def test_the_canvas_has_no_wash_behind_it(self):
+    def test_the_canvas_carries_the_indigo_top_wash_and_the_blue_corner_wash(self):
         tokens = dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
-        self.assertEqual(tokens["--backdrop"].strip(), "none")
+        washes = [w.strip() for w in re.split(r",\s*(?=radial-gradient)", tokens["--backdrop"])]
+        self.assertEqual(
+            washes,
+            [
+                "radial-gradient(ellipse 70% 45% at 50% -8%, var(--indigo-600-012), transparent 70%)",
+                "radial-gradient(ellipse 40% 30% at 100% 0%, var(--blue-500-006), transparent 75%)",
+            ],
+        )
+        self.assertEqual(tokens["--indigo-600-012"], "rgba(58, 61, 238, .12)")
+        self.assertEqual(tokens["--blue-500-006"], "rgba(59, 130, 246, .06)")
 
     def test_no_capsule_badges(self):
         ledger = self.pages["ledger"]
@@ -123,6 +135,123 @@ class SurfaceLadder(unittest.TestCase):
             rule = re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", ledger).group(1)
             self.assertNotRegex(rule, r"(?<![-\w])background:", selector)
             self.assertNotRegex(rule, r"(?<![-\w])border:", selector)
+
+
+def tokens():
+    return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", palette()))
+
+
+def resolve(name):
+    found = tokens()
+    value = found[name].strip()
+    while value.startswith("var(") and value.endswith(")") and value[4:-1] in found:
+        value = found[value[4:-1]].strip()
+    return value
+
+
+def declared(css, selector):
+    merged = {}
+    for heads, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        if selector in (part.strip() for part in heads.split(",")):
+            for line in body.split(";"):
+                if ":" in line:
+                    prop, value = line.split(":", 1)
+                    merged[prop.strip()] = value.strip()
+    return merged
+
+
+class BluePalette(unittest.TestCase):
+    def setUp(self):
+        self.ledger = css_of((SCRIPTS / "template.html").read_text(encoding="utf-8"))
+        self.home = home_style()
+
+    def test_the_ramp_holds_the_approved_blue_values(self):
+        expected = {
+            "--ink-950": "#010104",
+            "--steel-060": "#0e131b",
+            "--steel-100": "#151c29",
+            "--steel-160": "#1b2636",
+            "--steel-200": "#222f44",
+            "--indigo-300": "#9188dd",
+            "--indigo-600": "#3a3dee",
+            "--blue-600": "#155dfc",
+        }
+        for name, colour in expected.items():
+            self.assertEqual(tokens()[name], colour, name)
+
+    def test_roles_take_the_blue_ramp_instead_of_white_lifts(self):
+        expected = {
+            "--canvas": "#010104",
+            "--veil": "#0e131b",
+            "--hover": "#151c29",
+            "--rule": "#151c29",
+            "--surface-2": "#1b2636",
+            "--edge": "#222f44",
+            "--tab-active": "#9188dd",
+            "--ring": "#155dfc",
+            "--data-line": "#3a3dee",
+            "--data-fill-start": "rgba(58, 61, 238, .30)",
+            "--data-fill-end": "rgba(58, 61, 238, .04)",
+            "--surface-1": "transparent",
+        }
+        for role, colour in expected.items():
+            self.assertEqual(resolve(role), colour, role)
+        self.assertNotIn("255, 255, 255", palette())
+
+    def test_the_ledger_keeps_its_state_colours(self):
+        expected = {
+            "--positive": "#4ade80",
+            "--warn": "#facc15",
+            "--signal": "#ef4444",
+            "--destructive": "#ef4444",
+            "--accent": "#3b82f6",
+        }
+        for role, colour in expected.items():
+            self.assertEqual(resolve(role), colour, role)
+
+    def test_panels_are_frameless_at_rest_and_take_the_blue_edge_and_lift_on_hover(self):
+        self.assertEqual(resolve("--panel-edge"), "rgba(147, 197, 253, .10)")
+        self.assertEqual(
+            tokens()["--panel-lift"],
+            "inset 0 1px 0 var(--blue-300-010), 0 10px 30px -14px var(--blue-500-035), 0 0 0 1px var(--blue-500-018)",
+        )
+        panels = {"ledger": ("section", "#swarm-box"), "home": (".home .panel",)}
+        for page, selectors in panels.items():
+            css = getattr(self, page)
+            for selector in selectors:
+                rest, hover = declared(css, selector), declared(css, f"{selector}:hover")
+                self.assertEqual(rest.get("outline"), "1px solid transparent", selector)
+                self.assertEqual(rest.get("outline-offset"), "-1px", selector)
+                self.assertNotIn("border", rest, selector)
+                self.assertEqual(hover.get("outline-color"), "var(--panel-edge)", selector)
+                self.assertEqual(hover.get("box-shadow"), "var(--panel-lift)", selector)
+
+    def test_the_active_tab_takes_the_indigo_underline_and_its_spill(self):
+        active = declared(self.ledger, '.tab[aria-selected="true"]')
+        self.assertEqual(active.get("color"), "var(--tab-active)")
+        self.assertEqual(active.get("border-bottom-color"), "var(--tab-active)")
+        self.assertEqual(active.get("box-shadow"), "var(--tab-spill)")
+        self.assertEqual(tokens()["--tab-spill"], "0 6px 12px -8px var(--indigo-300-055)")
+        self.assertEqual(tokens()["--indigo-300-055"], "rgba(145, 136, 221, .55)")
+
+    def test_rows_hover_on_the_hover_step(self):
+        self.assertEqual(declared(self.ledger, ".sw-table tbody tr:hover td").get("background"), "var(--hover)")
+        self.assertEqual(declared(self.home, "li.row:hover").get("background"), "var(--hover)")
+
+    def test_focus_takes_the_blue_ring(self):
+        self.assertEqual(declared(self.ledger, ":focus-visible").get("outline"), "2px solid var(--ring)")
+        for name, css in (("ledger", self.ledger), ("home", self.home)):
+            for value in re.findall(r"outline:\s*([^;}]+)", css):
+                self.assertNotRegex(value, r"var\(--(?:accent|accent-2|link)\)", name)
+
+    def test_progress_bars_take_the_data_fill_and_line(self):
+        fill = declared(self.ledger, ".bar > i")
+        self.assertEqual(fill.get("background"), "linear-gradient(90deg, var(--data-fill-start), var(--data-fill-end))")
+        self.assertEqual(fill.get("border-right"), "2.5px solid var(--data-line)")
+
+    def test_no_text_glow_anywhere(self):
+        for name, css in (("palette", palette()), ("ledger", self.ledger), ("home", self.home)):
+            self.assertNotIn("text-shadow", css, name)
 
 
 if __name__ == "__main__":

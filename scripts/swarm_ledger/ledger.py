@@ -106,10 +106,10 @@ def credentials(slug, service=False):
     return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
 
 
-def request(slug, ops=None, service=False):
+def request(slug, ops=None, service=False, timeout=10):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(BASE, credentials(slug, service))
+    client = ResourceClient(BASE, credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
@@ -126,12 +126,18 @@ def export(slug: str, service: bool = False) -> dict:
     return ResourceClient(BASE, credentials(slug, service)).request(slug, "export", {})["data"]
 
 
+class Missing(SystemExit):
+    pass
+
+
 def call(slug, ops=None, service=False):
     try:
         return request(slug, ops, service)
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError:
+        if not repository.exists(slug):
+            raise Missing(f"ledger {slug} does not exist") from None
         subprocess.run([sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True)
     try:
         return request(slug, ops, service)

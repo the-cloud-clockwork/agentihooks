@@ -69,6 +69,19 @@ lock for its whole life, so a session never has two.
 - **Full text, masked.** Prompts, replies and tool input and output are
   exported after strict secret redaction (`hooks.secrets.redact`). Each field is
   capped at `AGENTIHOOKS_LANGFUSE_FIELD_MAX_CHARS` (32000) characters.
+  Claude keeps only a preview of a large tool output in its transcript and
+  writes the whole output to a file in the session's `tool-results` folder; the
+  exporter sends that file through the same masking and cap. When the file
+  cannot be read, the preview is sent and the characters it leaves out count as
+  truncation.
+- **Transfers.** A session started by a quota handoff (`init-agent --handoff`)
+  or a swarm seat handoff carries `agentihooks.correlation.predecessor.session.id`
+  and `predecessor.trace.id` naming the session it continues; any other launch
+  carries `predecessor.session.id.state=missing`.
+- **Codex compaction.** A Codex `compacted` record keeps the session in one
+  trace and is not exported as a turn. `codex exec resume <id> /compact` sends
+  `/compact` as an ordinary prompt and writes no `compacted` record, so under
+  `exec` only Codex's automatic compaction is covered.
 - **Identity.** Session id, user id (the routed Claude account, else `$USER`)
   and tags `swarm:`, `agent:`, `lane:`, `task:`, `account:`, each only when its
   value is set. Swarm spawns carry all five; a session opened by hand carries

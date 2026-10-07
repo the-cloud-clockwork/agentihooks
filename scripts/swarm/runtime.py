@@ -11,6 +11,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from scripts import agent_choice
+from scripts.handoff import envelope
+from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
@@ -124,6 +126,11 @@ def _transfer(task):
     return saved
 
 
+def _predecessor(task):
+    conversation = (task.get("handoff_envelope") or {}).get("conversation_id")
+    return conversation if task.get("transfer") and conversation != envelope.UNKNOWN else None
+
+
 class HerdrRuntime:
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
@@ -202,6 +209,7 @@ class HerdrRuntime:
                 *_model_args(agent, picked.__dict__, environ, effort_range.of(config), preserve=bool(saved)),
                 *mode,
             ],
+            predecessor=_predecessor(task),
         )
         return replace(
             placed,
@@ -271,7 +279,7 @@ class HerdrRuntime:
         argv += ["--inbox-channel"] if agent == "claude" else []
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
 
-    def _launch(self, config, lane, task_id, name, argv):
+    def _launch(self, config, lane, task_id, name, argv, predecessor=None):
         agent = argv[argv.index("--agent") + 1]
         launched_at = int(time.time() * 1000)
         try:
@@ -281,7 +289,8 @@ class HerdrRuntime:
                 text=True,
                 timeout=SPAWN_TIMEOUT_S,
                 env={
-                    **os.environ,
+                    **{key: value for key, value in os.environ.items() if key != PREDECESSOR},
+                    **({PREDECESSOR: predecessor} if predecessor else {}),
                     "AGENTIHOOKS_SWARM": config.slug,
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
