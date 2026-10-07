@@ -1,0 +1,12 @@
+{
+  "case": "T-SV2-IDN-01-C",
+  "tested_commit": "adc5491688364657155a331accfc1ddccd6b25af",
+  "evidence_class": "local isolated Git fixtures; not live rollout or CI proof",
+  "passed": 3,
+  "tests": [
+    "test_alias_rename_recovery_and_rollback[0]",
+    "test_alias_rename_recovery_and_rollback[1]",
+    "test_alias_chain_is_replayed_without_changing_its_map"
+  ],
+  "project_identity_ambiguities_total": 0
+}
