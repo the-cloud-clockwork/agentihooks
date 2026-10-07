@@ -285,11 +285,9 @@ def test_an_unpinned_session_runs_a_variable_command_script():
 
 
 def test_inline_scripts_read_each_shell_c_form():
-    assert list(inline_scripts("bash -c 'a'; sh -ec 'b'; zsh -o pipefail -c 'c'; bash x.sh -c 'e'; ls -c 'd'")) == [
-        "a",
-        "b",
-        "c",
-    ]
+    text = "bash x.sh -c 'e'; bash -c 'a' -c 'f'; sh +x -ec 'b'; zsh -o pipefail -c 'c'; ls -c 'd'; bash -c"
+    assert list(inline_scripts(text)) == ["a", "b", "c", ""]
+    assert list(inline_scripts("bash -o")) == []
 
 
 def test_variable_programs_skip_keywords_and_assignments():

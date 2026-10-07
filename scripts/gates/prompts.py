@@ -49,15 +49,15 @@ def inline_scripts(text):
         index = program_index(words)
         if index is None or PurePosixPath(words[index]).name not in SHELLS:
             continue
-        rest = iter(words[index + 1 :])
+        rest = iter([*words[index + 1 :], ""])
         for word in rest:
             if INLINE_FLAG.fullmatch(word):
-                yield next(rest, "")
+                yield next(rest)
                 break
             if not word.startswith(("-", "+")):
                 break
             if word in OPTION_VALUES:
-                next(rest, None)
+                next(rest)
 
 
 def variable_programs(script):
