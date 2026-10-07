@@ -274,6 +274,23 @@ def test_source_rewritten_in_place_is_read_from_its_start(tmp_path, monkeypatch,
     assert _scans(path) == 0
 
 
+@pytest.mark.parametrize("cut", [1, 0])
+def test_resume_point_holds_only_a_whole_boundary_line(cut, tmp_path, monkeypatch, quiet):
+    records = _claude(4, 3)
+    _, _, path = _run(tmp_path, monkeypatch, "capped", CAP, records, len(records))
+    agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    paged = agent_trace._cursor("session")["paged"]
+    point = paged["source"]
+    assert point["boundary"] == paged["boundary"]
+    data = path.read_bytes()
+    if cut:
+        path.write_bytes(data[: point["offset"] - 1])
+    else:
+        path.write_bytes(b"#" * (point["offset"] - 1) + b"\n" + data[point["offset"] :])
+    agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    assert agent_trace._cursor("session")["paged"]["source"]["offset"] == 0
+
+
 def test_kept_records_needs_both_the_cut_entry_and_its_prompt():
     records = [
         {"type": "turn_context", "payload": {"model": "a"}},

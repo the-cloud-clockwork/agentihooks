@@ -599,7 +599,7 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         handle.seek(point["line"])
         line = handle.read(point["offset"] - point["line"])
     try:
-        return record_id(json.loads(line)) == point["boundary"]
+        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
     except (ValueError, UnicodeDecodeError, AttributeError):
         return False
 
