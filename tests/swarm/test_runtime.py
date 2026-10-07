@@ -390,13 +390,18 @@ def test_a_zero_codex_share_spawns_claude_when_the_picker_chooses_codex(
     assert placed.harness == "claude"
 
 
-@pytest.mark.parametrize(("share", "capacity"), [(0, False), (30, True)])
-def test_a_free_codex_slot_counts_only_while_the_codex_share_allows_codex(tmp_path, monkeypatch, share, capacity):
+@pytest.mark.parametrize(("share", "swarm_share", "capacity"), [(0, "30", False), (30, "0", True), (None, "0", False)])
+def test_a_free_codex_slot_counts_only_while_the_codex_share_allows_codex(
+    tmp_path, monkeypatch, share, swarm_share, capacity
+):
     from scripts import agent_choice
 
     monkeypatch.setattr(agent_choice, "codex_week_left", lambda *_: 90.0)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_CODEX_SHARE", swarm_share)
 
     def choose(requested, environ):
+        if requested:
+            return requested, "requested"
         if environ.get("AGENTIHOOKS_AGENT_PRIORITY") == "claude":
             return "claude", agent_choice.ALL_FULL
         return "codex", "fallthrough: claude is at its session cap"
