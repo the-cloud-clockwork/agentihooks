@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from hooks.lifecycle.act import ActionError
@@ -12,6 +13,7 @@ from hooks.lifecycle.model import ACTIONABLE
 from hooks.lifecycle.run import sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
 from hooks.lifecycle.timer import install_timer, remove_timer
+from scripts import herdr_gc
 from scripts.swarm import naming
 
 GB = 1 << 30
@@ -135,7 +137,13 @@ def main(argv: list[str]) -> int:
         print(install_timer(sys.executable, root) if args.install_timer else remove_timer())
         return 0
     report = sweep(scope=str(Path(args.path).resolve()) if args.path else "", act=args.enforce)
-    print(json.dumps(report, indent=2)) if args.json else _print_report(report)
+    report["herdr"] = herdr_gc.run(dict(os.environ), int(time.time() * 1000), args.enforce)
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    _print_report(report)
+    for line in report["herdr"]:
+        print(f"herdr: {line}")
     return 0
 
 

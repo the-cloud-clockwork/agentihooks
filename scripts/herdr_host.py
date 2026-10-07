@@ -20,6 +20,7 @@ class Placement:
     workspace_id: str
     tab_id: str
     pane_id: str
+    terminal_id: str = ""
 
 
 def binary() -> str | None:
@@ -97,7 +98,12 @@ def _env_args(env: dict[str, str]) -> list[str]:
 
 
 def _placed(pane: dict) -> Placement:
-    return Placement(workspace_id=pane["workspace_id"], tab_id=pane["tab_id"], pane_id=pane["pane_id"])
+    return Placement(
+        workspace_id=pane["workspace_id"],
+        tab_id=pane["tab_id"],
+        pane_id=pane["pane_id"],
+        terminal_id=pane.get("terminal_id", ""),
+    )
 
 
 def target_workspace(workspace: str, directory: Path, environ: dict[str, str]) -> tuple[str | None, str]:

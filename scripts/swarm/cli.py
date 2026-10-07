@@ -194,6 +194,13 @@ def cmd_tick(store, args):
                 print(f"{slug}: {action}")
         except Exception as exc:
             print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    from scripts import herdr_gc
+
+    try:
+        for line in herdr_gc.run(dict(os.environ), now_ms(), True):
+            print(f"herdr: {line}")
+    except Exception as exc:
+        print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def cmd_waker(store, args):

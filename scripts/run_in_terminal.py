@@ -3,9 +3,10 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from scripts import herdr_host
+from scripts import herdr_host, herdr_panes
 from scripts.init_agent import LAUNCH_GRACE_S, _select_host
 
 NATIVE_SCRIPT = (
@@ -27,6 +28,8 @@ def _in_herdr(directory: Path, title: str, command: str, workspace: str, environ
     herdr_host.ensure_server(environ)
     placed = herdr_host.open_pane(directory, title, {}, "tab", workspace, environ)
     if command:
+        owner = environ.get("AGENTIHOOKS_AGENT_NAME", "")
+        herdr_panes.record(placed, "run-in-terminal", owner, environ, int(time.time() * 1000))
         herdr_host._cli(["pane", "run", placed.pane_id, command], environ)
     return [f"workspace_id={placed.workspace_id}", f"tab_id={placed.tab_id}", f"pane_id={placed.pane_id}"]
 
