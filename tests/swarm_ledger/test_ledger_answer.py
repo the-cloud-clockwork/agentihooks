@@ -112,6 +112,7 @@ def test_malformed_answers_are_refused(op, message):
 
 def test_answer_text_passes_the_plain_words_filter():
     core.check_op(answer(1, "questions/q"))
+    core.check_op(answer(1, "questions/q", text="a" * ledger_answer.MAX_TEXT))
     with pytest.raises(ValueError):
         core.check_op(answer(1, "questions/q", text="Merged in 0123abcd4567 at 10:42."))
 
