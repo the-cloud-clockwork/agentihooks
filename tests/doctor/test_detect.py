@@ -1,5 +1,9 @@
+import pytest
+
 from scripts.doctor import detect
 from scripts.swarm.health.findings import Finding
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 STALE = Finding("stale claim", "watch-eng-1", "no change for 40 minutes", ("task t1",), "30 minutes", 40)
 
@@ -22,6 +26,32 @@ def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
         {"state": "pr", "pr_url": "https://github.com/o/other/pull/12"},
     ]
     assert detect.open_pulls(tasks) == [("o/other", 12), ("o/r", 9)]
+
+
+def test_the_health_detector_judges_only_what_the_current_health_pass_reports(monkeypatch):
+    import json
+
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    record = {"seen_at": 0, "verdict": None, "returned": False, "evidence": ["task t1 (pr)"], "measure": 4}
+    for agent in ("s-eng-1", "s-eng-2"):
+        store.redis.hset(store.key("s", "findings"), f"idle-with-claim/{agent}", json.dumps(record))
+    state = {"tasks": [{"id": "t1"}], "_meta": {"events": [{"kind": "x"}]}}
+    ledger = type("Ledger", (), {"state": lambda self, slug: state})()
+    seen = []
+
+    def current(store_, slug, config, tasks, events):
+        seen.append((slug, tasks, events))
+        return [{"id": "idle-with-claim/s-eng-2"}]
+
+    monkeypatch.setattr(detect.status, "findings", current)
+    monkeypatch.setattr(store, "config", lambda slug: None)
+    found = detect.readers(store, ledger, "s", 10**12, environ={})["health"]()
+    assert [f.id for f in found] == ["unjudged-finding/idle-with-claim/s-eng-2"]
+    assert seen == [("s", state["tasks"], state["_meta"]["events"])]
 
 
 def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch):

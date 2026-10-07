@@ -153,3 +153,17 @@ def test_a_judged_finding_is_read_back_with_its_detail_and_verdict(store):
     assert verdict["value"] == "established"
     with pytest.raises(SwarmError, match="no Doctor finding"):
         loop.judged(store, DOCTOR, "stale-claim/nobody")
+
+
+def aged(minutes, *evidence):
+    return Finding("inbox past window", "item-1", f"pending for {minutes} minutes", evidence, "window", minutes)
+
+
+def test_a_judged_finding_whose_only_growth_is_age_stays_judged_until_its_evidence_changes(store):
+    step(store, T0, [aged(10, "from a to b", "0 wakes")], closed=[])
+    loop.verdicts(store, DOCTOR).judge(aged(10).id, "false-positive", "known", "master", T0 + MINUTE_MS)
+    step(store, T0 + 90 * MINUTE_MS, [aged(100, "from a to b", "0 wakes")], closed=[])
+    assert len(master_items(store)) == 1
+    step(store, T0 + 100 * MINUTE_MS, [aged(110, "from a to b", "1 wake")], closed=[])
+    [_, again] = master_items(store)
+    assert f"{aged(0).id}: pending for 110 minutes. It came back after a false-positive verdict." in again.text

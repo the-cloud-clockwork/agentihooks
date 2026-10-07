@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Swarm exits settle delivered and read inbox items, preserve transferred work,
   and settle late messages using the recorded exit. Notices for exited senders
   reach the swarm master seat.
+- Doctor findings judged once return only with evidence other than age, the
+  task cost detector counts uncached tokens (cache reads left out), and the
+  unjudged finding detector judges only findings the current health pass
+  reports.
 
 ## [2.17.0] - 2026-10-01
 

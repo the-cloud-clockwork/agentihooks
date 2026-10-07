@@ -68,6 +68,39 @@ def test_after_the_cooldown_it_returns_only_if_its_evidence_grew(board):
     assert shown(store, [watching(34)], T0 + HOUR + 1) == ["over-monitoring/sw-master-1"]
 
 
+def aging(minutes, wakes):
+    return Finding("inbox past window", "i1", f"pending for {minutes} minutes", (f"{wakes} wakes",), "window", minutes)
+
+
+def test_with_new_evidence_required_a_measure_grown_by_age_alone_stays_judged(board):
+    _, store = board
+    store.visible([aging(10, 0)], T0, HOUR, new_evidence=True)
+    store.judge("inbox-past-window/i1", "false-positive", "", "operator", T0)
+    assert store.visible([aging(200, 0)], T0 + 3 * HOUR, HOUR, new_evidence=True) == []
+    assert shown(store, [aging(200, 0)], T0 + 3 * HOUR) == ["inbox-past-window/i1"]
+
+
+def test_with_new_evidence_required_changed_evidence_and_a_grown_measure_bring_it_back(board):
+    _, store = board
+    store.visible([aging(10, 0)], T0, HOUR, new_evidence=True)
+    store.judge("inbox-past-window/i1", "false-positive", "", "operator", T0)
+    assert store.visible([aging(9, 1)], T0 + HOUR, HOUR, new_evidence=True) == []
+    [back] = store.visible([aging(70, 1)], T0 + HOUR, HOUR, new_evidence=True)
+    assert back["id"] == "inbox-past-window/i1"
+
+
+def test_a_verdict_kept_without_its_evidence_compares_with_the_last_pass(board):
+    client, store = board
+    store.visible([aging(10, 0)], T0, HOUR, new_evidence=True)
+    store.judge("inbox-past-window/i1", "false-positive", "", "operator", T0)
+    record = json.loads(client.redis.hget(KEY, "inbox-past-window/i1"))
+    del record["verdict"]["evidence"]
+    client.redis.hset(KEY, "inbox-past-window/i1", json.dumps(record))
+    assert store.visible([aging(100, 0)], T0 + 2 * HOUR, HOUR, new_evidence=True) == []
+    [back] = store.visible([aging(110, 1)], T0 + 2 * HOUR, HOUR, new_evidence=True)
+    assert back["id"] == "inbox-past-window/i1"
+
+
 def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
     _, store = board
     store.visible([watching(33)], T0, HOUR)
@@ -101,6 +134,7 @@ def test_a_verdict_is_kept_with_the_swarm_keys_and_names_who_gave_it(board):
         "by": "sw-master-1",
         "at": T0,
         "measure": 33,
+        "evidence": ["33 watch calls", "2 actions"],
     }
 
 
