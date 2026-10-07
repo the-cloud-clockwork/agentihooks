@@ -96,6 +96,47 @@ class TestConfigToml:
         assert 'approval_policy = "never"' in text
         assert 'sandbox_mode = "danger-full-access"' in text
 
+    @pytest.mark.parametrize("recorded", [None, "older"])
+    def test_matching_posture_is_recorded_without_warning(self, adapter, capsys, recorded):
+        import tomlkit
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        settings = {"approval_policy": "never", "sandbox_mode": "danger-full-access"}
+        (home / "config.toml").write_text(tomlkit.dumps(settings))
+        if recorded:
+            (home / ".agentihooks-managed.json").write_text(
+                json.dumps({"approval_policy": "on-request", "sandbox_mode": "workspace-write"})
+            )
+
+        adapter.write_settings(settings)
+
+        assert "hand-set" not in capsys.readouterr().out
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == settings
+        doc = tomlkit.parse((home / "config.toml").read_text())
+        assert {key: doc[key] for key in settings} == settings
+
+    def test_different_unrecorded_posture_warns_and_survives(self, adapter, said):
+        import tomlkit
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        settings = {"approval_policy": "on-request", "sandbox_mode": "workspace-write"}
+        (home / "config.toml").write_text(tomlkit.dumps(settings))
+
+        adapter.write_settings({"approval_policy": "never", "sandbox_mode": "danger-full-access"})
+
+        warnings = [line for line in said if "hand-set" in line]
+        assert warnings == [
+            "  [!!] config.toml 'approval_policy' hand-set to 'on-request' (managed value would be "
+            "'never') — leaving operator value in place",
+            "  [!!] config.toml 'sandbox_mode' hand-set to 'workspace-write' (managed value would be "
+            "'danger-full-access') — leaving operator value in place",
+        ]
+        doc = tomlkit.parse((home / "config.toml").read_text())
+        assert {key: doc[key] for key in settings} == settings
+        assert json.loads((home / ".agentihooks-managed.json").read_text()) == {}
+
     def test_default_translation_does_not_override_operator_choice(self, adapter):
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
@@ -218,6 +259,29 @@ class TestHooksJson:
             h for g in doc["hooks"]["SessionStart"] for h in g["hooks"] if h["command"].endswith("agentihooks-hook.sh")
         ]
         assert len(own) == 1
+
+    def test_rerun_over_unchanged_hooks_prints_no_trust_advice(self, adapter, capsys):
+        adapter.write_settings({})
+        before = (codex_home() / "hooks.json").stat().st_mtime_ns
+        capsys.readouterr()
+        adapter.write_settings({})
+        adapter.post_install_reconcile([], "")
+        out = capsys.readouterr().out
+        assert "run /hooks" not in out
+        assert "hooks.json unchanged; existing Codex hook trust holds" in out
+        assert (codex_home() / "hooks.json").stat().st_mtime_ns == before
+
+    def test_changed_hooks_file_prints_trust_advice_once(self, adapter, capsys):
+        adapter.write_settings({})
+        path = codex_home() / "hooks.json"
+        doc = json.loads(path.read_text())
+        del doc["hooks"]["SessionStart"]
+        path.write_text(json.dumps(doc))
+        capsys.readouterr()
+        adapter.write_settings({})
+        adapter.post_install_reconcile([], "")
+        assert capsys.readouterr().out.count("run /hooks") == 1
+        assert "SessionStart" in json.loads(path.read_text())["hooks"]
 
     @pytest.mark.parametrize("ours_first", [True, False])
     def test_reinstall_keeps_own_group_first_so_codex_trust_positions_hold(self, adapter, ours_first):

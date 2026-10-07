@@ -69,6 +69,7 @@ class AgentRecord:
     input_prompt: str = ""
     input_ticks: int = 0
     choice: str = ""
+    launched_at: int = 0
 
 
 class RedisStore:
