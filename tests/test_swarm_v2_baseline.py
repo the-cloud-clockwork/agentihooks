@@ -56,7 +56,7 @@ def _by_repo(report):
 
 
 def _command(*argv, name="probe", **extra):
-    return baseline.Probe(name=name, kind="command", argv=(*argv, "--version"), **extra)
+    return baseline.Probe(name=name, kind="command", argv=argv, **extra)
 
 
 @pytest.fixture
@@ -68,10 +68,13 @@ def planted(tmp_path):
 def server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            body = {"/ok": b'{"version": "1.2"}', "/bare": b'{"status": "ok"}', "/list": b"[1]"}.get(
-                self.path, b"<html>"
-            )
-            self.send_response(200)
+            body = {
+                "/ok": b'{"version": "1.2"}',
+                "/bare": b'{"status": "ok"}',
+                "/list": b"[1]",
+                "/empty": b'{"version": ""}',
+            }.get(self.path, b"<html>")
+            self.send_response(500 if self.path == "/err" else 200)
             self.end_headers()
             self.wfile.write(body)
 
@@ -142,15 +145,15 @@ def test_unavailable_endpoint_is_unverified_never_empty(planted):
 def test_missing_command_and_missing_repo_are_unverified(planted):
     sources, _ = planted
     data = json.loads(sources.read_text())
-    data["repositories"][2]["probes"] = [
-        {"name": "cluster", "kind": "command", "argv": ["kubectl-absent", "--version"]}
-    ]
     data["repositories"][0]["url"] = "missing.git"
     sources.write_text(json.dumps(data))
     repos = _by_repo(_collect(sources, FIRST))
-    assert repos["antoncore"]["deployed"] == [
-        {"name": "cluster", "status": "unverified", "value": None, "reason": "command not found"}
-    ]
+    assert baseline.observe(_command("kubectl-absent", name="cluster"), {"commit": None}) == {
+        "name": "cluster",
+        "status": "unverified",
+        "value": None,
+        "reason": "command not found",
+    }
     source = repos["agentihooks"]["source"]
     assert {k: source[k] for k in ("branch", "status", "commit")} == {
         "branch": "dev",
@@ -158,7 +161,7 @@ def test_missing_command_and_missing_repo_are_unverified(planted):
         "commit": None,
     }
     assert source["reason"].startswith("exit 128: fatal: ")
-    assert repos["antoncore"]["unknown_live"] == ["live autoscaling group desired capacity", "cluster"]
+    assert repos["agentihooks"]["unknown_live"] == ["swarm controller version on Anton"]
 
 
 def test_branch_absent_from_remote_is_unresolved(planted):
@@ -244,6 +247,8 @@ def test_unsupported_probe_kind_is_unverified():
         ("/bare", "unverified", None, "endpoint answered without version"),
         ("/list", "unverified", None, "endpoint answered without version"),
         ("/html", "unverified", None, "answer is not JSON"),
+        ("/empty", "unverified", None, "empty answer"),
+        ("/err", "unverified", None, "http 500"),
     ],
 )
 def test_http_probe(server, monkeypatch, path, status, value, reason):
@@ -281,6 +286,21 @@ def test_http_probe_without_configured_url(monkeypatch):
         (("git", "push"), False),
         (("bash", "-c", "kubectl get pods"), False),
         ((), False),
+        (("git", "--version"), True),
+        (("git", "--version", "x"), False),
+        (("rm", "x", "--version"), False),
+        (("kubectl", "delete", "pod", "x", "--version"), False),
+        (("kubectl", "config", "use-context", "describe"), False),
+        (("kubectl", "debug", "node/x", "--image=busybox", "get"), False),
+        (("kubectl", "--context", "get", "delete"), False),
+        (
+            ("kubectl", "-n", "ns", "--namespace", "ns", "--kubeconfig", "k", "--cluster", "c", "--user", "u", "get"),
+            True,
+        ),
+        (("kubectl", "--request-timeout=5s", "-o", "get"), False),
+        (("kubectl", "--request-timeout=5s", "get", "pods"), True),
+        (("kubectl", "--context"), False),
+        (("kubectl",), False),
     ],
 )
 def test_read_only_allows_only_reads(argv, allowed):

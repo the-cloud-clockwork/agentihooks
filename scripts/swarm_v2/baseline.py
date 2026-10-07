@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,30 +17,8 @@ COMMAND_TIMEOUT = 30
 HTTP_TIMEOUT = 5
 REASON_LIMIT = 200
 KUBECTL_READS = frozenset({"get", "describe", "version"})
-KUBECTL_WRITES = frozenset(
-    {
-        "annotate",
-        "apply",
-        "autoscale",
-        "cordon",
-        "cp",
-        "create",
-        "delete",
-        "drain",
-        "edit",
-        "exec",
-        "expose",
-        "label",
-        "patch",
-        "replace",
-        "rollout",
-        "run",
-        "scale",
-        "set",
-        "taint",
-        "uncordon",
-    }
-)
+KUBECTL_VALUE_FLAGS = frozenset({"--context", "-n", "--namespace", "--kubeconfig", "--cluster", "--user"})
+VERSION_COMMANDS = frozenset({("agentihooks", "--version"), ("git", "--version")})
 REGENERATE = (
     "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json"
     " --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md"
@@ -105,11 +84,24 @@ def _repo_url(url: str, base: Path) -> str:
     return str(base / Path(url).expanduser()) if url else ""
 
 
+def _kubectl_verb(args: tuple[str, ...]) -> str:
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in KUBECTL_VALUE_FLAGS:
+            skip = True
+        elif not arg.startswith("-"):
+            return arg
+        elif "=" not in arg:
+            return ""
+    return ""
+
+
 def read_only(argv: tuple[str, ...]) -> bool:
-    if argv[-1:] == ("--version",):
+    if argv in VERSION_COMMANDS:
         return True
-    words = set(argv[1:])
-    return argv[:1] == ("kubectl",) and bool(words & KUBECTL_READS) and not words & KUBECTL_WRITES
+    return argv[:1] == ("kubectl",) and _kubectl_verb(argv[1:]) in KUBECTL_READS
 
 
 def _probe(raw: dict) -> Probe:
@@ -190,6 +182,8 @@ def _read_http(probe: Probe) -> dict:
     try:
         with urllib.request.urlopen(base + probe.path, timeout=HTTP_TIMEOUT) as response:
             body = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return _unverified(probe, f"http {exc.code}")
     except OSError as exc:
         return _unverified(probe, f"unreachable ({type(exc).__name__})")
     except ValueError:
