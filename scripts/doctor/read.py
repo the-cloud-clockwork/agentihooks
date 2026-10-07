@@ -92,7 +92,7 @@ def handoffs(store, inbox, home, slug):
     for key in sorted(store.redis.scan_iter(match=waiting + "*")):
         task = key[len(waiting) :]
         seat = store.handoff_seat(slug, task)
-        holder = store.seats.occupant(seat).occupant if seat else ""
-        handoff = {"seat": seat, "task": task, "from": holder, "to": "", "at": 0, "document": store.handoff(slug, task)}
+        author = (store.handoff_envelope(slug, task) or {}).get("agent", "")
+        handoff = {"seat": seat, "task": task, "from": author, "to": "", "at": 0, "document": store.handoff(slug, task)}
         found.append(_record(store, handoff, sent))
     return found
