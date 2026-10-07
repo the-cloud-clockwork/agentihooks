@@ -183,7 +183,7 @@ def test_a_lasting_misattribution_keeps_its_finding_while_the_session_grows():
     later = _binding(traces=[], remote=None, local=_local(accepted=90))
     [first] = traces.findings(_record(early), LIMITS)
     [again] = traces.findings(_record(later), LIMITS)
-    assert again.id == first.id
+    assert again.id == first.id == f"telemetry-misattributed/{AGENT}.{STARTED}.unattributed"
 
 
 def test_a_missing_remote_field_is_not_a_mismatch():
