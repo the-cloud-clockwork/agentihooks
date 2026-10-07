@@ -3,12 +3,29 @@ from pathlib import Path
 import pytest
 
 from scripts.gates import Call, Gate, Who
-from scripts.gates.prompts import PromptGuard, refusal, removals, targets
+from scripts.gates.prompts import (
+    PromptGuard,
+    inline_scripts,
+    refusal,
+    removals,
+    script_refusal,
+    targets,
+    variable_programs,
+)
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 CWD = "/home/op/dev/worktrees/repo/engineer-1-1"
 HOME = "/home/op"
 OBSERVED = "mkdir -p /home/op/x && cd /home/op/dev/tcc-ecosystem/agentihooks && rm -rf * ;"
+SUBAGENT_OBSERVED = (
+    'bash -e -c \'replay() { name=$1; shift; if ! "$@" > /dev/null 2>&1; then echo "failed $name"; fi; }; '
+    'replay bad false & failed=0; for job in $(jobs -p); do wait "$job" || failed=1; done; exit "$failed"\'; '
+    'echo "exit without return 1: $?"; grep -n "return 1" /home/op/x/swarm_ledger/page_replay.py | head -3'
+)
+SUBAGENT_RAN = (
+    'bash -e -c \'sleep 0.3 & (sleep 0.1; exit 3) & sleep 0.2 & failed=0; echo "listed: $(jobs -p | wc -l)"; '
+    'for job in $(jobs -p); do wait "$job" || failed=1; done; echo "failed=$failed"; exit "$failed"\''
+)
 
 
 def bash(command, cwd=CWD):
@@ -30,6 +47,8 @@ def test_it_matches_bash_calls_naming_rm():
     assert gate.matches(bash("rm -f a.txt"))
     assert gate.matches(bash("rmdir build"))
     assert not gate.matches(bash("ls -la"))
+    assert gate.matches(bash("bash -c '\"$@\"' _ ls"))
+    assert gate.matches(bash("sh -c '`which ls`'"))
     assert not gate.matches(Call("Read", {"command": "rm -rf *"}))
 
 
@@ -212,3 +231,77 @@ def test_with_no_working_directory_only_the_dot_paths_stand_for_the_workspace():
     assert not decide("rm -rf ..", cwd="").allowed
     assert not decide("rm -rf /usr", cwd="").allowed
     assert decide("rm -f a.txt", cwd="").allowed
+
+
+def test_the_observed_subagent_script_is_denied_naming_the_variable_command():
+    decision = decide(SUBAGENT_OBSERVED)
+    assert not decision.allowed
+    assert decision.reason == script_refusal("$@")
+
+
+def test_a_shell_c_script_with_literal_programs_still_runs():
+    assert decide(SUBAGENT_RAN).allowed
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash -c 'f() { \"$@\"; }; f ls'",
+        "sh -c '$CMD --version'",
+        "bash -ec 'if ! \"$@\"; then exit 1; fi' _ true",
+        "bash -lc 'cd /home/op/x && $TOOL run'",
+        "zsh -c '`which ls` -la'",
+        "sudo bash -c 'while true; do $NEXT; done'",
+        "bash -c 'for f in a b; do \"$f\"; done'",
+        "ssh-agent; bash -c \"bash -c '\\$RUN'\"",
+        "bash -c 'sh <<EOF\n$X\nEOF'",
+        "bash -euo pipefail -c '\"$@\"' _ ls",
+        "bash -oe pipefail -c '$X'",
+        "bash -co pipefail '$X'",
+        "bash -O extglob +o posix --rcfile /home/op/x/rc -c '$X'",
+        "bash -c 'cat <<EOF | sh\n$X\nEOF'",
+    ],
+)
+def test_a_shell_c_script_running_a_variable_command_is_denied(command):
+    decision = decide(command)
+    assert not decision.allowed
+    assert "shell -c script" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash -c 'echo \"$@\"' _ a b",
+        "bash -c 'for f in a b; do echo $f; done'",
+        "bash -c 'X=$(date); echo $X'",
+        "$EDITOR notes.txt",
+        "echo bash -c '$X'",
+        "bash script.sh $X",
+        'bash deploy.sh -c "$TARGET"',
+        "sh -e build.sh -c $ENV",
+    ],
+)
+def test_a_variable_outside_command_position_or_outside_a_shell_c_script_passes(command):
+    assert decide(command).allowed
+
+
+def test_an_unpinned_session_runs_a_variable_command_script():
+    assert PromptGuard(home=HOME).decide(bash(SUBAGENT_OBSERVED), Who(), None).allowed
+
+
+def test_inline_scripts_read_each_shell_c_form():
+    text = "bash x.sh -c 'e'; bash -c 'a' -c 'f'; sh +x -ec 'b'; zsh -o pipefail -c 'c'; ls -c 'd'; bash -c"
+    assert list(inline_scripts(text)) == ["a", "b", "c", ""]
+    assert list(inline_scripts("bash -o")) == []
+
+
+def test_variable_programs_skip_keywords_and_assignments():
+    assert list(variable_programs('if ! "$@"; then X=1 $Y; fi; { $Z; }; name=$1; echo $W')) == ["$@", "$Y", "$Z"]
+
+
+def test_the_script_refusal_names_the_command_and_both_safe_forms():
+    assert script_refusal("$@") == (
+        "The harness stops this shell -c script for a yes or no that nobody in a swarm answers: it runs the command "
+        "'$@', a variable or command output the harness reads as an rm it cannot check. Name each program in the "
+        "script literally, or run the commands without a shell -c wrapper."
+    )
