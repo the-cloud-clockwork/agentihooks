@@ -9,7 +9,7 @@ CREATORS = ("master", "operator")
 QUOTE_WORDS = 3
 CALLER = (
     "only a master or the operator creates a ledger or a swarm in the shared ledger folder; run a proof on a "
-    "scratch ledger folder (LEDGER_DIR) with a spare port (LEDGER_PORT)"
+    "scratch ledger folder (LEDGER_DIR)"
 )
 REDIS = "a swarm on a scratch ledger folder needs its own Redis: set AGENTIHOOKS_SWARM_REDIS_URL to a proof Redis"
 FLOOR = (

@@ -170,7 +170,7 @@ def test_the_master_in_the_home_folder_on_another_port_gets_the_pinned_port(monk
 def test_the_creator_reads_the_server_folder_rule(monkeypatch, pinned):
     seen = []
 
-    def shared_directory(directory=None, environ=None):
+    def shared_directory(environ):
         seen.append(environ)
         return pinned
 
