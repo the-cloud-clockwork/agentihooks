@@ -54,6 +54,10 @@ jobs:
             exit 1
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
+      - name: Use the Ubuntu archive for browser dependencies
+        timeout-minutes: 1
+        run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+
       - name: Install the page replay browser
         timeout-minutes: 2
         run: python -m playwright install --with-deps chromium

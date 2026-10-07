@@ -206,6 +206,23 @@ def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
         assert install["timeout-minutes"] == 2
 
 
+def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
+    lint = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    equivalence = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"][
+        "ledger-equivalence"
+    ]["steps"]
+    for steps in (lint, equivalence):
+        mirror = next(step for step in steps if step.get("name") == "Use the Ubuntu archive for browser dependencies")
+        install = next(step for step in steps if "playwright install --with-deps chromium" in step.get("run", ""))
+        assert steps.index(mirror) < steps.index(install)
+        assert mirror["run"] == r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt"
+        assert mirror["timeout-minutes"] == 1
+    assert (
+        next(step for step in lint if step.get("name") == "Use the Ubuntu archive for browser dependencies")["if"]
+        == "steps.lookup.outputs.skip != 'true'"
+    )
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())
