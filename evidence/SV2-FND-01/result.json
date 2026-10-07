@@ -1,0 +1,46 @@
+{
+  "package": "SV2-FND-01",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1372",
+  "collector_commit": "7d5544e09c45401f59dacea8e765c9c725a6d48a",
+  "baseline_commit": "26f080400bd9a7d261c0b86834cdbf57cb69f300",
+  "evidence_class": "live read-only observation; no infrastructure mutation",
+  "observed_at": "2026-10-07T19:28:16Z",
+  "measurements": {
+    "baseline_unverified_items": 1,
+    "baseline_drift_items": 0
+  },
+  "drift_entries_since_plan_snapshot": 3,
+  "unverified_deployed_values": [
+    "agentibrain-kernel: brain-api version"
+  ],
+  "source_heads": {
+    "agentihooks": "d074deceeeb0ed58a16eccd15acf2165982385bb",
+    "agentibrain-kernel": "e58e687e8c9edc6acab8115e7eb15db302b704dc",
+    "antoncore": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c"
+  },
+  "interfaces_present": 25,
+  "interfaces_missing": 0,
+  "acceptance": {
+    "T-SV2-FND-01-A": [
+      "tests/test_swarm_v2_baseline.py::test_report_separates_source_deployed_and_unknown_for_every_repo",
+      "tests/test_swarm_v2_baseline.py::test_second_independent_fixture_gives_the_same_shape",
+      "tests/test_swarm_v2_baseline.py::test_interfaces_are_present_missing_or_unverified"
+    ],
+    "T-SV2-FND-01-B": [
+      "tests/test_swarm_v2_baseline.py::test_unavailable_endpoint_is_unverified_never_empty",
+      "tests/test_swarm_v2_baseline.py::test_missing_command_and_missing_repo_are_unverified",
+      "tests/test_swarm_v2_baseline.py::test_interfaces_without_checkout_or_head_are_unverified"
+    ],
+    "T-SV2-FND-01-C": [
+      "tests/test_swarm_v2_baseline.py::test_rerun_after_one_repo_advances_adds_drift_without_moving_branches",
+      "tests/test_swarm_v2_baseline.py::test_unresolved_rerun_keeps_previous_commit_out_of_drift",
+      "tests/test_swarm_v2_baseline.py::test_cli_writes_json_and_markdown_and_reads_previous"
+    ]
+  },
+  "live_negative": "Same sources with an absent kubectl context: both antoncore cluster probes unverified with the kubectl error, baseline_unverified_items 3; no empty or zero value recorded.",
+  "limitations": [
+    "brain-api /health exposes no version field, so the deployed brain version stays unverified.",
+    "agentihooks has no Anton deployment yet; its only deployed value is the workstation install version.",
+    "AWS autoscaling group live capacity was not read; it is listed as an unknown live value."
+  ]
+}
