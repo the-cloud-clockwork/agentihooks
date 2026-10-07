@@ -152,3 +152,30 @@ def test_the_prompt_requests_one_handoff_document_and_a_learned_reason(lane):
     else:
         assert "then run agentihooks swarm sw handoff <doc> and stop;" in instruction
     assert "<lesson because reason>" in rendered
+
+
+def test_codex_master_handoff_next_uses_the_inbox_wait():
+    from scripts.swarm import prompt
+
+    action = "Rearm a Monitor on the ledger and continue."
+    task = {
+        "id": "master",
+        "harness": "codex",
+        "seat": "master@sw",
+        "handoff": "# Handoff v2\n## Next\n" + action + "\n## Read first\nNone\n",
+        "transfer": {"id": "transfer", "next": action, "handoff": "saved handoff"},
+    }
+    text = prompt.build_master("sw", "/repo", "master", task)
+    assert "Monitor" not in text
+    assert "agentihooks msg inbox" in text
+    assert "agentihooks swarm sw wait --inbox" in text
+    assert "Monitor" in task["handoff"]
+    assert task["transfer"]["next"] == action
+
+
+def test_claude_master_preserves_its_handoff_next():
+    from scripts.swarm import prompt
+
+    action = "Rearm a Monitor on the ledger and continue."
+    task = {"id": "master", "harness": "claude", "handoff": "# Handoff v2\n## Next\n" + action}
+    assert action in prompt.build_master("sw", "/repo", "master", task)

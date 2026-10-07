@@ -228,3 +228,52 @@ def test_an_agent_without_a_seat_is_told_by_name(tick):
 def test_cli_wait_refuses_a_checked_wait_for_an_unknown_kind():
     with pytest.raises(SwarmError, match="wait on one of: checks, reply, task"):
         waits.on("deploy", "x")
+
+
+def test_inbox_wait_returns_pending_seat_work_without_a_pane_prompt(started, capsys):
+    store, _ = started
+    capsys.readouterr()
+    store.seats.occupy("master@sw", ME, at=1)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "master@sw", "inspect the result")
+    assert run("sw", "--as", ME, "wait", "--inbox") == 0
+    result = json.loads(capsys.readouterr().out)
+    returned = {entry["id"]: entry for entry in result["items"]}
+    assert returned[item.id]["text"] == item.text
+    assert result["timed_out"] is False
+    assert held(store) is None
+
+
+@pytest.mark.parametrize("minutes", ["0", "-1", "61"])
+def test_inbox_wait_refuses_unbounded_duration(started, minutes):
+    assert run("sw", "--as", ME, "wait", minutes, "--inbox") == 1
+
+
+def test_inbox_wait_cannot_also_wait_on_checks(started):
+    assert run("sw", "--as", ME, "wait", "--inbox", "--on", "checks", URL) == 1
+
+
+def test_inbox_wait_timeout_and_failure_clear_the_declared_wait(started, monkeypatch, capsys):
+    from scripts.inbox import receive
+
+    store, _ = started
+    capsys.readouterr()
+    calls = []
+
+    def empty(inbox, me, timeout):
+        calls.append((me, timeout, held(store)))
+        return []
+
+    monkeypatch.setattr(receive, "receive", empty)
+    assert run("sw", "--as", ME, "wait", "2", "--inbox") == 0
+    assert json.loads(capsys.readouterr().out) == {"items": [], "timed_out": True}
+    assert calls[0][:2] == (ME, 120)
+    assert calls[0][2]["reason"] == "inbox work"
+    assert held(store) is None
+
+    def failed(*args):
+        raise InboxError("store unavailable")
+
+    monkeypatch.setattr(receive, "receive", failed)
+    assert run("sw", "--as", ME, "wait", "--inbox") == 1
+    assert held(store) is None

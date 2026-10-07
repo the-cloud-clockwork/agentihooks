@@ -128,7 +128,12 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
             or occupancy.generation != row["generation"]
         ):
             raise SwarmError("Only the current successor occupant can confirm this handoff")
-        if not row["next"] or next_action.strip() != row["next"]:
+        expected = row["next"]
+        if agent.lane == "master" and agent.harness == "codex":
+            from scripts.profiles.codex_master import next_action as codex_next
+
+            expected = codex_next(expected, slug)
+        if not expected or next_action.strip() != expected:
             raise SwarmError("Confirm the first Next action exactly as written in the handoff")
         row["continuity"] = {"state": "confirmed", "at": at, "by": agent.name, "next": next_action.strip()}
 

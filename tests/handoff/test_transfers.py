@@ -106,3 +106,25 @@ def test_a_failed_successor_keeps_its_outcome_and_a_retry_can_confirm(setup, mon
     result = transfers.confirm(store, "sw", retry["id"], successor, retry["next"], 21)
     assert result["binding"]["state"] == "live"
     assert result["continuity"]["state"] == "confirmed"
+
+
+def test_codex_master_confirms_the_adapted_next_without_changing_the_record(setup):
+    from scripts.profiles.codex_master import waiting
+
+    store, old = setup
+    old = replace(old, lane="master", task="master", seat="master@sw")
+    store.seats.occupy(old.seat, old.name, 1)
+    action = "Rearm a Monitor on the ledger."
+    document = "# Handoff v2\n## Next\n" + action + "\n## Read first\nNone\n"
+    transfer = transfers.record(store, "sw", old, "recycle", document, 2)
+    new = replace(old, name="master-new", harness="codex", state="working")
+    store.seats.occupy(new.seat, new.name, 3)
+    transfers.attach(store, "sw", new, 3)
+
+    result = transfers.confirm(store, "sw", transfer["id"], new, waiting("sw"), 4)
+    assert result["continuity"]["state"] == "confirmed"
+    assert result["continuity"]["next"] == waiting("sw")
+    assert result["next"] == action
+    assert result["handoff"] == document
+    with pytest.raises(SwarmError, match="exactly"):
+        transfers.confirm(store, "sw", transfer["id"], new, "some other action", 5)

@@ -668,8 +668,25 @@ def cmd_trace_plan(store, args):
     print(json.dumps(trace_plan.report(agent.task, record, block)))
 
 
+def cmd_wait_inbox(store, args, agent):
+    from scripts.inbox.receive import receive
+
+    minutes = args.minutes if args.minutes is not None else 1
+    if args.on or not 0 < minutes <= waits.BARE_MAX_MINUTES:
+        raise SwarmError("an inbox wait takes one to sixty minutes and cannot also wait on a dependency")
+    at = now_ms()
+    idle.declare_wait(store.redis, args.slug, agent.name, at + minutes * 60_000, "inbox work", at)
+    try:
+        items = receive(InboxStore(store.redis), agent.name, minutes * 60)
+        print(json.dumps({"items": [asdict(item) for item in items], "timed_out": not items}))
+    finally:
+        idle.end_wait(store.redis, args.slug, agent.name)
+
+
 def cmd_wait(store, args):
     agent = _me(store, args)
+    if args.inbox:
+        return cmd_wait_inbox(store, args, agent)
     held = waits.on(*args.on) if args.on else None
     if held is None and (args.minutes or 0) <= 0:
         raise SwarmError("a wait lasts a whole number of minutes above zero")
@@ -918,6 +935,7 @@ def build_parser():
     wait.add_argument("minutes", type=int, nargs="?")
     wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
     wait.add_argument("--reason", default="")
+    wait.add_argument("--inbox", action="store_true")
     reported = sub.add_parser("progress")
     reported.add_argument("--doing", required=True)
     reported.add_argument("--ends-when", required=True)

@@ -608,6 +608,44 @@ def test_codex_render_links_into_the_claude_profile(world):
     assert os.readlink(sources) == str(render.sources.path("rb-role", "claude", render.rendered_root()))
 
 
+def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    _write(
+        world["bundle"] / ".claude" / "rules" / "waiting.md",
+        "# Process Watching\n\n- Start a `Monitor` on long running work.\n"
+        "- `Monitor` watches processes; `CronCreate` schedules work.\n\n"
+        "# Preserve\n\nDo not mutate the master pane or expose credentials.\n",
+    )
+    _commit(world["bundle"], "master")
+
+    out = render.render_codex("master")
+    persona = (out / "AGENTS.md").read_text()
+    claude = (render.rendered_root() / "master" / "claude" / "CLAUDE.md").read_text()
+    assert "Monitor" not in persona
+    assert "agentihooks msg inbox" in persona
+    assert "agentihooks swarm <slug> wait --inbox" in persona
+    assert "Do not mutate the master pane or expose credentials." in persona
+    assert "Start a `Monitor`" in claude
+    assert not (out / "AGENTS.md").is_symlink()
+    assert render.render_codex("master") is None
+
+
+def test_codex_master_updates_an_old_linked_persona(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    _commit(world["bundle"], "master")
+    out = render.render_codex("master")
+    agents = out / "AGENTS.md"
+    agents.unlink()
+    agents.symlink_to(render.rendered_root() / "master" / "claude" / "CLAUDE.md")
+
+    assert render.render_codex("master") == out
+    assert not agents.is_symlink()
+
+
 def test_codex_render_offers_each_command_as_a_hardlinked_skill(world):
     from scripts.profiles import render
 
