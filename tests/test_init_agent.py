@@ -839,12 +839,12 @@ def _codex_hooks(home, first):
     herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
     home.mkdir(parents=True, exist_ok=True)
     groups = [ours, herdr] if first == "ours" else [herdr, ours]
-    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups}}, indent=2))
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups, "Stop": groups}}, indent=2))
     return home / "hooks.json", ours
 
 
 @pytest.mark.parametrize(
-    ("first", "field"), [("herdr", "codex_hooks=restored:SessionStart"), ("ours", "codex_hooks=unchanged")]
+    ("first", "field"), [("herdr", "codex_hooks=restored:SessionStart,Stop"), ("ours", "codex_hooks=unchanged")]
 )
 def test_a_codex_launch_restores_the_approved_hook_order_before_codex_starts(
     monkeypatch, tmp_path, capsys, first, field

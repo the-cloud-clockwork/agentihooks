@@ -33,7 +33,6 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
-from scripts.targets.codex_target import codex_home, restore_hook_order
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
@@ -139,6 +138,8 @@ def tick(slug, store, ledger, runtime, now_ms):
 
 
 def _codex_hook_order():
+    from scripts.targets.codex_target import codex_home, restore_hook_order
+
     home = codex_home()
     moved = restore_hook_order(home)
     path = (home / "hooks.json").resolve()

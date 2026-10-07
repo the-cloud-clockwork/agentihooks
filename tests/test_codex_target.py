@@ -3,6 +3,7 @@
 import json
 import shlex
 import subprocess
+from pathlib import Path
 
 import install  # binds the installer identity conftest patches; also used directly below
 import pytest
@@ -946,7 +947,7 @@ class TestTeardownDestructiveEdges:
 
 def _hooks_file(home, session_start):
     home.mkdir(parents=True, exist_ok=True)
-    doc = {"hooks": {"SessionStart": session_start, "Stop": [_own_group(home)]}}
+    doc = {"hooks": {"Notes": "kept", "SessionStart": session_start, "Stop": [_own_group(home), _HERDR]}}
     (home / "hooks.json").write_text(json.dumps(doc, indent=2))
     return home / "hooks.json"
 
@@ -967,9 +968,33 @@ class TestRestoreHookOrder:
 
         assert restore_hook_order(home) == ["SessionStart"]
         assert json.loads(path.read_text())["hooks"] == {
+            "Notes": "kept",
             "SessionStart": [_own_group(home), _HERDR],
-            "Stop": [_own_group(home)],
+            "Stop": [_own_group(home), _HERDR],
         }
+
+    def test_every_drifted_event_is_restored(self, adapter):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        path = _hooks_file(home, [_HERDR, _own_group(home)])
+        doc = json.loads(path.read_text())
+        doc["hooks"]["Stop"].reverse()
+        path.write_text(json.dumps(doc))
+
+        assert restore_hook_order(home) == ["SessionStart", "Stop"]
+        assert json.loads(path.read_text())["hooks"]["Stop"] == [_own_group(home), _HERDR]
+
+    @pytest.mark.parametrize(
+        ("environ", "expected"),
+        [
+            ({"CODEX_HOME": " ~/cx , /other", "HOME": "/h"}, "~/cx"),
+            ({"HOME": "/h"}, "/h/.codex"),
+            ({}, "~/.codex"),
+        ],
+    )
+    def test_the_codex_home_comes_from_the_given_environment(self, environ, expected):
+        assert codex_home(environ) == Path(expected).expanduser()
 
     def test_an_approved_file_is_left_untouched(self, adapter):
         from scripts.targets.codex_target import restore_hook_order

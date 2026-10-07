@@ -1168,10 +1168,10 @@ def test_the_tick_restores_the_approved_codex_hook_order_and_journals_it(store, 
     ours = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
     herdr = {"hooks": [{"command": "bash herdr-agent-state.sh session", "timeout": 10, "type": "command"}]}
     groups = [herdr, ours] if drifted else [ours, herdr]
-    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups}}, indent=2))
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": groups, "Stop": groups}}, indent=2))
 
     actions = tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
 
-    line = f"restored the approved Codex hook order in {home / 'hooks.json'}: SessionStart"
+    line = f"restored the approved Codex hook order in {home / 'hooks.json'}: SessionStart, Stop"
     assert (line in actions) is drifted
     assert json.loads((home / "hooks.json").read_text())["hooks"]["SessionStart"][0] == ours

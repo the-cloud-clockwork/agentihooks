@@ -98,15 +98,13 @@ def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     """Resolve CODEX_HOME (first entry when the env var is a comma list)."""
     env = os.environ if environ is None else environ
     raw = env.get("CODEX_HOME", "").split(",")[0].strip()
-    if raw:
-        return Path(raw).expanduser()
-    return Path(env["HOME"]) / ".codex" if env.get("HOME") else Path.home() / ".codex"
+    return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
 
 
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
-        isinstance(h, dict) and _command_is_wrapper(h.get("command", ""), wrapper) for h in hooks
+        isinstance(h, dict) and _command_is_wrapper(str(h.get("command")), wrapper) for h in hooks
     )
 
 
