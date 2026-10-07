@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from pathlib import Path
 
@@ -217,7 +218,10 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, github=lambda url: red)
     run(store, in_pr(), now_ms=red.red_at + 21 * MINUTE, github=lambda url: red)
     assert len(texts(store, ENG_SEAT)) == 1 and "red" in texts(store, ENG_SEAT)[0]
-    pushed = ledger_events.PullRequest("OPEN", None, red.pushed_at + 30 * MINUTE, True)
+    rerun = dataclasses.replace(red, red_at=red.red_at + 10 * MINUTE)
+    run(store, in_pr(), now_ms=rerun.red_at + 20 * MINUTE, github=lambda url: rerun)
+    assert len(texts(store, ENG_SEAT)) == 1
+    pushed = ledger_events.PullRequest("OPEN", None, red.pushed_at + 30 * MINUTE, True, head="pushed")
     run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
     assert len(texts(store, ENG_SEAT)) == 2
 
@@ -254,7 +258,10 @@ def test_the_push_is_the_earliest_workflow_run_and_the_red_result_the_earliest_r
     assert found.pushed_at == ledger_events.iso_ms("2026-10-05T01:40:19Z")
     assert found.red_at == ledger_events.iso_ms("2026-10-05T01:40:21Z")
     raw["checkSuites"] = [{"status": "QUEUED", "workflowRun": None}]
-    assert ledger_events.pull_request(raw).pushed_at == ledger_events.iso_ms("2026-10-05T01:40:12Z")
+    raw["commits"][0]["committedDate"] = "2026-10-04T23:40:12Z"
+    unrun = ledger_events.pull_request(raw)
+    assert unrun.pushed_at == ledger_events.iso_ms("2026-10-04T23:40:12Z")
+    assert ledger_events.red_window(unrun.pushed_at, unrun.red_at, unrun.red_at + 20 * MINUTE - 1) is None
 
 
 def test_green_or_unreadable_pull_requests_make_no_item(store):

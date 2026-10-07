@@ -69,6 +69,22 @@ def test_a_head_pushed_after_its_red_result_waits_the_window_from_its_push():
     assert len(ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS)) == 1
 
 
+def test_an_old_commit_pushed_now_is_not_reported_before_the_window_from_its_red_result():
+    planted = _red(load("ci"))
+    planted["committed_at"] = ledger_events.iso_ms("2026-10-05T12:00:00Z")
+    assert ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS - 1) == []
+    assert len(ci.red_checks(planted, _red_at(planted) + ledger_events.RED_QUIET_MS)) == 1
+
+
+def test_the_window_starts_at_the_earliest_red_check():
+    planted = _red(load("ci"))
+    planted["checks"][1]["conclusion"] = "failure"
+    planted["checks"][1]["completed_at"] = "2026-10-05T14:20:00Z"
+    first = ledger_events.iso_ms("2026-10-05T14:20:00Z")
+    assert ci.red_checks(planted, first + ledger_events.RED_QUIET_MS - 1) == []
+    assert ci.red_checks(planted, first + ledger_events.RED_QUIET_MS)[0].measure == 2
+
+
 def test_a_push_since_the_red_head_restarts_the_window():
     planted = _red(load("ci"))
     stale = _red_at(planted) + 3 * ledger_events.RED_QUIET_MS
