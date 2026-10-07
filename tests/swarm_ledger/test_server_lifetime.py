@@ -18,8 +18,18 @@ SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
 
 
 def running(pid):
-    row = server_lifetime.process(pid, Path("/proc"))
-    return row is not None and row["state"] != "Z"
+    try:
+        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) != "Z"
+    except OSError:
+        return False
+
+
+def test_running_reads_a_process_reaped_mid_read_as_gone(monkeypatch):
+    def reaped(self, *args, **kwargs):
+        raise ProcessLookupError(3, "No such process")
+
+    monkeypatch.setattr(Path, "read_text", reaped)
+    assert running(os.getpid()) is False
 
 
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])

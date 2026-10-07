@@ -252,7 +252,7 @@ def test_terminate_signals_only_the_observed_process(tmp_path, monkeypatch, outc
     assert read.call_args_list == [call(42, tmp_path), call(42, tmp_path)]
 
 
-@pytest.mark.parametrize("current", [process(start=101), None])
+@pytest.mark.parametrize("current", [process(start=101), process(start=99), None])
 def test_terminate_refuses_a_changed_process_identity(tmp_path, monkeypatch, current):
     monkeypatch.setattr(ledger_servers, "_process", lambda pid, proc: current)
     kill = Mock()
