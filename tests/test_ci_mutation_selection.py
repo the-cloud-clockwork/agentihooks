@@ -148,7 +148,6 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             }
         )
     )
-    monkeypatch.chdir(tmp_path)
     test_runner = object()
     data = SimpleNamespace(exit_code_by_key={"selected": None})
     loaded = []
@@ -197,7 +196,9 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     def cli(args):
         assert args == ["run", "--max-children", "6"]
         stream = __import__("io").StringIO()
-        names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
+        with monkeypatch.context() as generation:
+            generation.chdir(tmp_path)
+            names = runner.write_all_mutants_to_file(out=stream, source="source", filename=Path("scripts/sample.py"))
         assert names == ["selected"]
         assert stream.getvalue().endswith("generated = True\n")
         observations = []
