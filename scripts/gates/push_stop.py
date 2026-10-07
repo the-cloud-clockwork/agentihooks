@@ -37,7 +37,7 @@ def git(path, *args):
 
 def count(path, *args):
     done = git(path, "rev-list", "--count", *args)
-    return int(done.stdout.strip() or 0) if done.returncode == 0 else 0
+    return int(done.stdout) if done.returncode == 0 else 0
 
 
 def inspect(path, own):
@@ -74,7 +74,7 @@ def record_text(remote, branch, head):
 
 
 def spoke_since(events, name, at):
-    return any(event.get("by") == name and event.get("at", 0) > at for event in events)
+    return any(event.get("by") == name and event["at"] > at for event in events)
 
 
 def read(ledger, slug):
@@ -102,7 +102,7 @@ class PushStop:
             return Decision()
         ledger = self.ledger()
         doc = read(ledger, who.swarm)
-        task = next((t for t in doc.get("tasks", []) if t.get("id") == who.task), None) if doc else {}
+        task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
         store, owed = self.connect(), False

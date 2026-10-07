@@ -1,12 +1,14 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from scripts.gates import Call, Gate, Who
+from scripts.gates import Call, Gate, Who, push_stop
 from scripts.gates.progress import Progress
-from scripts.gates.push_stop import TEMPLATE, PushStop, record_text
+from scripts.gates.push_stop import TEMPLATE, PushStop, count, record_text
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
+from scripts.swarm.naming import plain
 from scripts.swarm.store import RedisStore, SwarmError
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -49,6 +51,8 @@ def rig(tmp_path):
     tree = root / "repo" / BRANCH
     git(seed, "fetch", "origin")
     git(seed, "worktree", "add", "-b", BRANCH, str(tree), "origin/dev")
+    git(seed, "remote", "set-url", "--push", "origin", str(origin))
+    git(seed, "remote", "set-url", "origin", "https://github.com/o/r.git")
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger({"id": "t1", "state": "claimed", "claimed_by": ME, "pr_url": "", "kind": "code"})
     gate = PushStop(connect=lambda: store, ledger=lambda: ledger, root=root, now=lambda: NOW)
@@ -102,7 +106,11 @@ def test_commits_ahead_of_origin_are_pushed_by_the_hook_and_recorded_on_the_task
     assert rig.stop().allowed
     assert rig.remote_head() == head
     assert git(rig.tree, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{BRANCH}"
-    assert rig.ledger.comments == [("demo", "t1", record_text(str(rig.origin), BRANCH, head), "swarm")]
+    record = (
+        f"The stop hook pushed the task branch https://github.com/o/r/tree/{BRANCH} with its head at "
+        f"https://github.com/o/r/commit/{head}"
+    )
+    assert rig.ledger.comments == [("demo", "t1", record, "swarm")]
     mark = Progress(rig.store.redis, SLUG).read(ME)
     assert (mark.outcome, mark.outcome_at) == ("pushed", NOW)
 
@@ -239,10 +247,16 @@ def test_another_agents_worktree_is_left_alone(rig):
     ],
 )
 def test_a_master_a_planner_and_the_operators_sessions_are_never_gated(rig, who):
-    rig.commit()
-    (rig.tree / "new").write_text("new\n")
+    rig.ledger.state = lambda slug: {"tasks": [rig.ledger.task], "_meta": {"events": []}}
+    own = rig.root / "repo" / plain(who.name)
+    if not own.exists():
+        git(rig.seed, "worktree", "add", "-b", plain(who.name), str(own), "origin/dev")
+    (own / "work").write_text("work")
+    git(own, "add", "work")
+    git(own, "commit", "-m", "work")
+    (own / "new").write_text("new\n")
     assert rig.stop(who).allowed
-    assert rig.remote_head() == ""
+    assert git(rig.seed, "ls-remote", "--heads", str(rig.origin)).count("refs/heads/") == 1
 
 
 def test_a_plan_task_is_never_gated(rig):
@@ -293,3 +307,59 @@ def test_a_refused_record_keeps_the_push(rig):
     head = rig.commit()
     assert rig.stop().reason == TEMPLATE
     assert rig.remote_head() == head
+
+
+def test_a_branch_with_no_work_of_its_own_stops_freely_after_a_pushed_outcome(rig):
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    assert rig.stop().allowed
+
+
+def test_a_pushed_outcome_at_zero_is_answered_only_by_a_later_line(rig):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", 0)
+    rig.ledger.events.append({"by": ME, "at": 0, "kind": "comment added"})
+    assert not rig.stop().allowed
+
+
+def test_a_task_the_ledger_no_longer_holds_is_not_gated(rig):
+    rig.ledger.task["id"] = "t9"
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize("meta", [None, {}])
+def test_a_ledger_with_no_events_counts_as_no_line_since_the_push(rig, meta):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    doc = {"tasks": [rig.ledger.task]} | ({} if meta is None else {"_meta": meta})
+    rig.ledger.state = lambda slug: doc
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_worktrees_sit_under_the_configured_root_or_the_home_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "trees"))
+    assert PushStop().root() == str(tmp_path / "trees")
+    monkeypatch.delenv("WORKTREE_ROOT")
+    assert PushStop().root() == Path.home() / "dev" / "worktrees"
+
+
+def test_the_clock_is_epoch_milliseconds():
+    import time
+
+    before = int(time.time() * 1000)
+    assert before <= PushStop().now() <= int(time.time() * 1000)
+
+
+def test_git_runs_in_the_worktree_with_a_timeout(monkeypatch):
+    seen = []
+    monkeypatch.setattr(push_stop.subprocess, "run", lambda argv, **kw: seen.append((argv, kw)))
+    push_stop.git("/w", "status")
+    assert seen == [(["git", "-C", "/w", "status"], {"capture_output": True, "text": True, "timeout": 60})]
+
+
+def test_a_count_git_cannot_answer_is_zero(tmp_path):
+    assert count(tmp_path, "HEAD") == 0
