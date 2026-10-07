@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.swarm.reaper import Outcome
 from scripts.swarm.runtime import PLAN_MODE, HerdrRuntime
 from scripts.swarm.store import AgentRecord
 from tests.swarm.profile_fixture import validated
@@ -642,13 +643,17 @@ def test_resume_without_an_account_lets_the_router_pick_one(tmp_path):
     assert "--route" not in _passed(seen["runs"][0])
 
 
-def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path):
+def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_path, scratch):
     from scripts.swarm.tick import SpawnError
 
+    homes = scratch("t1")
     runtime, config, agent, seen = _resuming(tmp_path, "someone-else")
+    ended = []
+    runtime.end = lambda name, pid, homes: ended.append((name, pid, homes)) or Outcome()
     with pytest.raises(SpawnError, match="conversation c0ffee"):
         runtime.resume(config, agent, "you were restored")
-    assert any("terminate-agent" in argv for argv in seen["runs"])
+    assert ended == [("engineer@a1b2c3-0001", 123, homes)]
+    assert not any("terminate-agent" in argv for argv in seen["runs"])
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 

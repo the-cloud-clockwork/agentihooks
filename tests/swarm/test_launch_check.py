@@ -218,7 +218,8 @@ def test_tick_waits_until_the_deadline_before_failing(store, monkeypatch):
     }
 
 
-def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
+def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, scratch):
+    homes = scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
     runtime.profile = "anton"
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -227,6 +228,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch):
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert any(a.startswith(f"retired {first} after its launch check failed on profile") for a in actions)
     assert first in runtime.killed
+    assert runtime.homes[first] == homes
     failed = launch_check.report(store, "sw", "t1")
     assert (failed["at"], failed["elapsed_ms"], failed["held"]) == (LAUNCH + 60_000, 60_000, False)
     assert runtime.tasks[1]["launch_assignment"]["profile"] == "engineer"

@@ -74,6 +74,14 @@ def test_dead_launch_retries_without_waiting_for_worker_grace(store):  # noqa: F
     assert runtime.masters[-1][1]["handoff"] == "Retain this handoff"
 
 
+def test_an_unreported_launch_is_retired_with_the_master_scratch_homes(store, scratch):  # noqa: F811
+    homes, runtime, ledger = scratch(MASTER), StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    old = masters(store)[0]
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    assert runtime.homes[old.name] == homes
+
+
 def test_stuck_launch_alerts_and_keeps_original_until_retirement_succeeds(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     tick("sw", store, ledger, runtime, 1)
