@@ -178,6 +178,8 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
         saved = {**live_binding.assignment(agent), "seat": agent.seat}
+        if not saved["profile"]:
+            saved["profile"] = task.get("profile") or store.config(slug).lanes.get(agent.lane, {}).get("profile", "")
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
         actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
     return actions

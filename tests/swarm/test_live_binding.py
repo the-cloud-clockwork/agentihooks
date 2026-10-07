@@ -857,3 +857,22 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     monkeypatch.setattr(live_binding, "read", lambda agent, pid: {"pid": pid})
     agent = AgentRecord("engineer", "eng", "one", harness="claude")
     assert HerdrRuntime().bindings([agent]) == {"engineer": {"pid": 22}}
+
+
+def test_legacy_master_relaunch_uses_its_declared_profile(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    store.update("sw", lanes={"master": {"profile": "master"}})
+    tick("sw", store, ledger, runtime, 100)
+    old = next(a for a in store.agents("sw") if a.lane == "master")
+    store.put_agent("sw", replace(old, model="opus", effort="high"))
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, **({"profile": "master"} if a.name == old.name else {})}
+        for a in agents
+    }
+    tick("sw", store, ledger, runtime, 200)
+    saved = runtime.masters[-1][1]["launch_assignment"]
+    assert saved["profile"] == "master"
+    assert saved["model"] == "opus"
+    assert saved["effort"] == "high"
