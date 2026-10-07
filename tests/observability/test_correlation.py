@@ -644,8 +644,8 @@ def test_the_trace_root_carries_envelope_counters_freshness_and_truncation(monke
     assert cursor["turns"] == 2 and cursor["accepted_at"].endswith("+00:00")
 
     agent_trace.export_session("sess-1", path, _identity())
-    root = exporter.batches[1][0].attributes
-    assert root["agentihooks.export.last_accepted_at"] == cursor["accepted_at"]
+    assert len(exporter.batches) == 1
+    assert agent_trace._root_attributes("sess-1")["agentihooks.export.last_accepted_at"] == cursor["accepted_at"]
 
 
 SUCCESS_AND_FAILURE = [
@@ -676,7 +676,7 @@ SUCCESS_AND_FAILURE = [
 ]
 
 
-@pytest.mark.parametrize(("accepted", "result"), [(True, "accepted"), (False, "failed")])
+@pytest.mark.parametrize(("accepted", "result"), [(True, "accepted"), (False, "unconfirmed")])
 def test_each_tool_outcome_reaches_the_collector_joined_to_the_trace(monkeypatch, tmp_path, accepted, result):
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
     exporter = _Exporter(result=accepted)
@@ -708,7 +708,7 @@ def test_each_tool_outcome_reaches_the_collector_joined_to_the_trace(monkeypatch
     assert events["tool-a"]["gen_ai.tool.name"] == "Bash"
     assert flushed == [True]
     assert signals.read("sess-1")[f"traces.{result}"] == len(exporter.batches[0])
-    assert (tmp_path / "cursor" / "sess-1.json").exists() is accepted
+    assert bool(agent_trace._cursor("sess-1")["accepted"]) is accepted
 
 
 def test_a_collector_event_and_its_trace_share_one_trace_id(monkeypatch):
