@@ -26,7 +26,9 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert sonar["needs"] == ["unit"]
     assert "if" not in sonar
     assert not sonar.get("continue-on-error")
-    assert sonar["uses"] == "The-Cloud-Clockwork/.github/.github/workflows/sonar-reusable.yml@main"
+    gate = next(step for step in sonar["steps"] if step.get("uses") == "sonarsource/sonarqube-quality-gate-action@v1")
+    assert "if" not in gate
+    assert not gate.get("continue-on-error")
     assert "needs" not in jobs["lint"]
     assert "needs" not in jobs["unit"]
 
