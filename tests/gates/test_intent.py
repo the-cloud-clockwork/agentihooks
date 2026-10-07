@@ -107,9 +107,8 @@ class TestGate:
         decision = intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path))
         assert not decision.allowed
         assert decision.reason == (
-            f"intent check failed for task {TASK}: the phase can use this change at probability 0.10. Deliver the "
-            f"missing piece, then run agentihooks swarm {SLUG} pr <url> for a new check, or block with "
-            f'agentihooks swarm {SLUG} block "<why>"'
+            f"intent check failed for task {TASK}: the phase can use this change at probability 0.10. "
+            + intent.fix_steps(SLUG)
         )
 
     @pytest.mark.parametrize(
@@ -346,8 +345,9 @@ class TestState:
     @pytest.mark.parametrize("body,expected", [(None, ""), ("Closes 4", "Closes 4")])
     def test_pr_view_reads_title_body_and_file_paths(self, body, expected):
         raw = {"title": "T", "body": body, "files": [{"path": "a.py", "additions": 1}, {"path": "b.py"}]}
-        ran = Ran((0, json.dumps(raw)), (0, ""))
+        ran = Ran((0, json.dumps(raw)), (0, ""), (0, "abc123\n"))
         assert intent.pr_view(URL, run=ran) == {
+            "head": "abc123",
             "title": "T",
             "body": expected,
             "files": ["a.py", "b.py"],
@@ -404,10 +404,7 @@ def run_pass(tmp_path, mode="enforce", usable=0.1, doc=DOC, view=None):
 
 
 FAIL_REASON = "the phase can use this change at probability 0.10, under 0.3"
-FAIL_TEXT = (
-    f"The intent check failed: {FAIL_REASON}. Deliver the missing piece and run swarm pr again, "
-    "or block the task with these reasons."
-)
+FAIL_TEXT = f"The intent check failed: {FAIL_REASON}. " + intent.fix_steps(SLUG)
 
 
 class TestCheckPass:
