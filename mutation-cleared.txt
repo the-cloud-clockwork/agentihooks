@@ -735,6 +735,34 @@
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_request__mutmut_4:af0af85b23380d0c7c51dbaa1258d2ea95e98cef722213c7cc6265b6b9ddc716": {
+    "reader": "Standards",
+    "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
+  },
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_request__mutmut_5:0998bb7cc0915b802d758f795db0d447a8cdc38a1e3ca981dafc617cad0a0713": {
+    "reader": "Standards",
+    "reason": "urllib capitalizes request header names, so the changed key casing sends the same header."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
+    "reader": "Standards",
+    "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁrefused__mutmut_19:abd65b2f5e3dd98506b15c18eefd38150a9ca5498070281a717f5d6bb8bd21b3": {
+    "reader": "Standards",
+    "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
+  },
+  "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_16:dc9dc80483d6edda2efaec6e7d00b47741dc689d950cc6f898380fe94c36d224": {
+    "reader": "Standards",
+    "reason": "Uppercasing the ASCII sensitive field regex under re.I changes no matches or outputs. Standards verified identical matches including Unicode case variants across all Unicode code points."
+  },
+  "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_33:3c891f388ad74b96a60f5693ec94dad8db1aeb7c41fa5883cbf135b7e9fae29b": {
+    "reader": "Standards",
+    "reason": "Lowercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
+  "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_34:9c51a3907bd4aee652398441fa5330acc1ce49f6bd5c8bb3e6e36b095a603e19": {
+    "reader": "Standards",
+    "reason": "Uppercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  },
   "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_6:3f6c79fa333f7b5e2d7bb17a56f8ba534cb5c9702c13ab9d8cbc4ebdf1a8797d": {
     "reader": "Standards",
     "reason": "The sole production caller passes InboxStore.pending(), sorted ascending by (created_at, sequence, id). Once an item is younger than the fixed window, every subsequent item is younger and performs no withdrawal or action append. Break and continue therefore process the same eligible items. Sorted creation-time sequences through length six were exhaustively compared with identical results."
