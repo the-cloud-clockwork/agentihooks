@@ -171,6 +171,19 @@ class StatsSync(unittest.TestCase):
         self.assertEqual(rejected, [])
         self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["followups"], {"done": 1, "total": 1})
 
+    def test_refresh_runs_after_later_task_mutations_in_the_same_batch(self):
+        reply, rejected = core.sync(
+            SLUG,
+            ops=[
+                {"op": "stats_sync", "id": "batch"},
+                {"op": "task_add", "id": "new", "by": "boss", "task": "t1", "title": "New work", "lane": "eng"},
+            ],
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["tasks"], {"done": 0, "total": 1})
+        self.assertEqual(reply["_meta"]["stats_refresh"]["calculation"]["remaining"], 1)
+        self.assertIsNone(reply["_meta"]["stats_refresh"]["calculation"]["minutes"])
+
 
 if __name__ == "__main__":
     unittest.main()
