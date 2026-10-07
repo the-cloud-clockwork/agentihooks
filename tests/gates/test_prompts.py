@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.gates import Call, Gate, Who
-from scripts.gates.prompts import PromptGuard
+from scripts.gates.prompts import PromptGuard, refusal, removals, targets
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 CWD = "/home/op/dev/worktrees/repo/engineer-1-1"
@@ -66,6 +68,8 @@ def test_a_glob_target_is_denied(command):
         "sudo rm -rf $HOME/.cache",
         "eval 'rm -rf $X'",
         "rm -rf ~other/dir",
+        "rm -rf /home/op/x/$NAME",
+        "rm -f a.txt; rm -rf $X",
     ],
 )
 def test_a_target_known_only_when_it_runs_is_denied(command):
@@ -82,9 +86,11 @@ def test_a_target_known_only_when_it_runs_is_denied(command):
         "cd /home/op/x || true && rm -rf build",
         "pushd /home/op/x; rmdir empty",
         "cd /home/op/x && ls; rm -rf build",
+        "cd /home/op/x && rm -rf build",
+        'bash -c "cd /home/op/x; rm -f a.txt"',
     ],
 )
-def test_a_relative_target_after_an_unguarded_cd_is_denied(command):
+def test_a_relative_target_after_a_cd_is_denied(command):
     decision = decide(command)
     assert not decision.allowed
     assert "after a cd" in decision.reason
@@ -104,6 +110,11 @@ def test_a_relative_target_after_an_unguarded_cd_is_denied(command):
         "rm -rf /home/op/dev/worktrees/repo/engineer-1-1",
         "rm -rf /home/op/dev/worktrees",
         "rm -rf '\\\\'",
+        "rm -rf ~/.",
+        "rm -f > /dev/null /usr",
+        "rm -f 2>/dev/null /usr",
+        "rm -f -- /usr",
+        "rm -rf /home/op/x/build /etc",
     ],
 )
 def test_a_system_home_or_workspace_directory_is_denied(command):
@@ -133,8 +144,13 @@ def test_substitutions_up_to_the_cap_pass_and_backticks_count():
         "rm -rf build dist",
         "rm -f -- -odd-name",
         "rmdir /home/op/x/empty",
-        "cd /home/op/x && rm -rf build",
+        "rm -f build; cd /home/op/x",
         "cd /home/op/x; rm -rf /home/op/x/build",
+        "cd /home/op/x; rm -f ~/notes.txt",
+        "rm -rf /home/op/Xdir",
+        "rm -rf /srv/data",
+        "rm -f /home/op/x/a.txt > /tmp",
+        "rm -rf /home/op/x/build 2>&1",
         "rm -f /home/op/x/a.txt 2>/dev/null",
         "rm -f /home/op/x/a.txt > /dev/null",
         "cat <<'EOF' > s.sh\nrm -rf $X *\nEOF",
@@ -146,6 +162,45 @@ def test_substitutions_up_to_the_cap_pass_and_backticks_count():
 )
 def test_a_named_target_passes(command):
     assert decide(command).allowed
+
+
+def test_the_refusal_names_the_reason_and_both_safe_forms():
+    assert refusal("why") == (
+        "The harness stops this rm for a yes or no that nobody in a swarm answers: why. Remove a scratch folder with "
+        "agentihooks scratch rm <dir>; otherwise name each file or directory by its absolute path, with no glob, "
+        "variable or command output, and no cd before it."
+    )
+
+
+def test_each_class_names_its_target():
+    assert decide("rm -rf /usr").reason == refusal(
+        "the target '/usr' is a protected directory: the filesystem root, a top level directory, the home "
+        "directory, or the working directory or one of its parents"
+    )
+    assert decide("rm -f $X").reason == refusal(
+        "the target '$X' is a variable or command output known only when it runs"
+    )
+    assert decide("rm -f a*").reason == refusal("the target 'a*' is a glob")
+    assert decide("cd /a; rm b").reason == refusal(
+        "the relative target 'b' runs after a cd that can fail and leave the shell elsewhere"
+    )
+
+
+def test_removals_yield_each_rm_with_whether_a_cd_came_first():
+    assert list(removals("rm a; cd /x; command rmdir b; ls; rm -- c")) == [
+        (["a"], False),
+        (["b"], True),
+        (["--", "c"], True),
+    ]
+    assert list(removals("-x")) == []
+
+
+def test_targets_skip_options_and_redirects():
+    assert targets(["-rf", "a", "2>/dev/null", ">", "out", "--", "-b", "c"]) == ["a", "-b", "c"]
+
+
+def test_the_home_defaults_to_the_user_home():
+    assert PromptGuard().home == str(Path.home())
 
 
 def test_an_unpinned_session_is_never_judged():

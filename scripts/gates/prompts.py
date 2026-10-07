@@ -7,19 +7,17 @@ and asks for nothing, so these rm classes are the whole set.
 
 import posixpath
 import re
-import shlex
 from pathlib import Path, PurePosixPath
 
 from scripts.gates.base import Decision
-from scripts.gates.identity import CONTROL, program_index
+from scripts.gates.identity import program_index, simple_commands
 
 REMOVERS = frozenset({"rm", "rmdir"})
 DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd"})
-GUARDED = "&&"
 GLOB = re.compile(r"[*?[]")
 RUNTIME_VALUE = re.compile(r"[$`]|^~[^/]")
-REDIRECT_OPERATOR = re.compile(r"^\d*[<>]+$")
 REDIRECT = re.compile(r"^\d*[<>]")
+REDIRECT_OPERATOR = re.compile(r"^\d*[<>]+$")
 SUBSTITUTION = re.compile(r"\$\(|`[^`]*`")
 SUBSTITUTION_CAP = 64
 
@@ -32,69 +30,29 @@ def refusal(why):
     )
 
 
-def _tokens(text):
-    lexer = shlex.shlex(text, posix=True, punctuation_chars="".join(sorted(CONTROL)))
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return text.split()
-
-
-def _separates(token, previous):
-    return CONTROL.issuperset(token) and not (token == "&" and previous[-1:] in ("<", ">"))
-
-
-def _nests(words, token):
-    return " " in token and bool(words) and (words[-1] == "-c" or PurePosixPath(words[0]).name == "eval")
-
-
-def _changes_directory(words):
-    index = program_index(words)
-    return index is not None and PurePosixPath(words[index]).name in DIRECTORY_CHANGERS
-
-
-def commands(text):
-    """Each simple command's words, and whether a cd before it can have failed with the command still running."""
-    words, previous, changed, unguarded = [], "", False, False
-    for token in _tokens(text):
-        if token and _separates(token, previous):
-            if words:
-                yield words, unguarded
-                changed = changed or _changes_directory(words)
-            unguarded = unguarded or (changed and token != GUARDED)
-            words = []
-        else:
-            if _nests(words, token):
-                yield from commands(token)
-            words.append(token)
-        previous = token
-    if words:
-        yield words, unguarded
+def removals(text):
+    """Each rm or rmdir's arguments, and whether a cd came before it in the same command."""
+    moved = False
+    for words in simple_commands(text):
+        index = program_index(words)
+        name = "" if index is None else PurePosixPath(words[index]).name
+        if name in REMOVERS:
+            yield words[index + 1 :], moved
+        moved = moved or name in DIRECTORY_CHANGERS
 
 
 def targets(args):
     found, options, skip = [], True, False
     for word in args:
         if skip:
-            skip = word == "&"
-        elif REDIRECT_OPERATOR.match(word):
-            skip = True
+            skip = False
         elif REDIRECT.match(word):
-            continue
+            skip = bool(REDIRECT_OPERATOR.match(word))
         elif options and word == "--":
             options = False
         elif not (options and word.startswith("-")):
             found.append(word)
     return found
-
-
-def removals(text):
-    for words, unguarded in commands(text):
-        index = program_index(words)
-        if index is not None and PurePosixPath(words[index]).name in REMOVERS:
-            yield words[index + 1 :], unguarded
 
 
 class PromptGuard:
@@ -116,18 +74,18 @@ class PromptGuard:
         found = list(removals(text))
         if found and (count := len(SUBSTITUTION.findall(text))) > SUBSTITUTION_CAP:
             return Decision.deny(refusal(f"the command holds {count} command substitutions, too many to read"))
-        for args, unguarded in found:
+        for args, moved in found:
             for target in targets(args):
-                if why := self.hazard(target, call.cwd, unguarded):
+                if why := self.hazard(target, call.cwd, moved):
                     return Decision.deny(refusal(why))
         return Decision()
 
-    def hazard(self, target, cwd, unguarded):
+    def hazard(self, target, cwd, moved):
         if RUNTIME_VALUE.search(target):
             return f"the target '{target}' is a variable or command output known only when it runs"
         if GLOB.search(target):
             return f"the target '{target}' is a glob"
-        if unguarded and not target.startswith(("/", "~")):
+        if moved and not target.startswith(("/", "~")):
             return f"the relative target '{target}' runs after a cd that can fail and leave the shell elsewhere"
         if self.protected(target, cwd):
             return (

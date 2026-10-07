@@ -13,8 +13,8 @@ SHIM = "pre-bash.rm+bash.rmdir+bash.bash+bash.sh+bash.zsh+bash.eval-prompt_guard
 OBSERVED = "mkdir -p {cwd}/x && cd {cwd} && rm -rf * ;"
 
 
-@pytest.fixture
-def hook(tmp_path):
+@pytest.fixture(params=["claude", "codex"])
+def hook(tmp_path, request):
     home, bundle = tmp_path / "ahome", tmp_path / "bundle"
     conditions = bundle / ".claude" / "conditions"
     conditions.mkdir(parents=True)
@@ -26,7 +26,7 @@ def hook(tmp_path):
         **os.environ,
         "PYTHONPATH": str(ROOT),
         "AGENTIHOOKS_HOME": str(home),
-        "AGENTIHOOKS_TARGET": "claude",
+        "AGENTIHOOKS_TARGET": request.param,
         "AGENTIHOOKS_DISABLE_BYPASS_LOOKUP": "1",
         "CONDITIONS_ENABLED": "true",
         "BRAIN_ENABLED": "false",
