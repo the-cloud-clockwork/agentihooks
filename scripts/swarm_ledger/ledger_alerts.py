@@ -63,7 +63,6 @@ def derive(doc, ctx, raised, before):
         }
         rows.append(alert)
         live.add(text)
-        known.add(text)
         ctx.dirty = True
     done = [a for a in rows if a["state"] == DONE]
     gone = {id(a) for a in done[: max(0, len(done) - DONE_KEPT)]}

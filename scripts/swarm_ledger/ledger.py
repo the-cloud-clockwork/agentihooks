@@ -369,13 +369,12 @@ def cmd_priority(args):
 
 def cmd_alert(args):
     if args.action == "list":
-        open_ = [a for a in call(args.slug).get("alerts", []) if a.get("state") != "done"]
-        print(json.dumps(open_, ensure_ascii=False, indent=2))
+        print(json.dumps([a for a in call(args.slug)["alerts"] if a["state"] != "done"], indent=2))
         return
     if not args.id or (args.action == "close") != bool(args.outcome):
         sys.exit('alert claim needs ID; alert close needs ID and "OUTCOME"')
     send(args, f"alert_{args.action}", target=args.id, **({"outcome": args.outcome} if args.outcome else {}))
-    print(json.dumps({"alert": args.id, "state": "claimed" if args.action == "claim" else "done"}))
+    print(json.dumps({"alert": args.id, "action": args.action}))
 
 
 def cmd_relay(args):

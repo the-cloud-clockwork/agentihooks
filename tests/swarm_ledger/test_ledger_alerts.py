@@ -167,15 +167,33 @@ def test_the_cli_claims_and_closes_an_alert_as_its_caller(monkeypatch):
 
 def test_the_cli_lists_only_open_and_claimed_alerts(monkeypatch, capsys):
     rows = [{"id": "a", "state": "open"}, {"id": "b", "state": "claimed"}, {"id": "c", "state": "done"}]
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: {"alerts": rows})
+    asked = []
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: asked.append(slug) or {"alerts": rows})
     ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "alert", "list"]))
-    assert [a["id"] for a in json.loads(capsys.readouterr().out)] == ["a", "b"]
+    assert asked == [SLUG]
+    assert capsys.readouterr().out == json.dumps(rows[:2], indent=2) + "\n"
+
+
+def test_the_cli_prints_the_alert_and_the_action_it_took(monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None, service=False: {})
+    for argv in (["alert", "claim", "al-1-0"], ["alert", "close", "al-1-0", "Trimmed"]):
+        ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", *argv]))
+    assert capsys.readouterr().out.splitlines() == [
+        '{"alert": "al-1-0", "action": "claim"}',
+        '{"alert": "al-1-0", "action": "close"}',
+    ]
+
+
+def test_the_cli_refuses_an_unknown_alert_action():
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "alert", "reopen", "al-1-0"])
 
 
 def test_the_cli_refuses_a_claim_without_an_id_or_with_an_outcome():
     for argv in (["alert", "claim"], ["alert", "claim", "al-1-0", "why"]):
-        with pytest.raises(SystemExit, match="alert claim needs ID"):
+        with pytest.raises(SystemExit) as stopped:
             ledger.cmd_alert(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", *argv]))
+        assert stopped.value.code == 'alert claim needs ID; alert close needs ID and "OUTCOME"'
 
 
 def test_claim_and_close_are_recorded_as_events_by_their_author():
@@ -237,6 +255,40 @@ def test_only_the_newest_done_alerts_are_kept():
     assert [a["id"] for a in doc["alerts"]] == [f"d{i}" for i in range(2, 202)] + ["o"]
 
 
+def derived(rows, raised, before):
+    doc, ctx = {"alerts": rows}, SimpleNamespace(rev=7, at=1, dirty=False)
+    ledger_alerts.derive(doc, ctx, raised, before)
+    return [(a["text"], a["state"]) for a in doc["alerts"]], ctx.dirty
+
+
+def test_an_open_text_is_not_raised_twice_and_a_closed_one_returns_after_its_warning_cleared():
+    rows = [{"id": "o", "text": "x", "state": "open"}, {"id": "d", "text": "y", "state": "done"}]
+    found, dirty = derived(rows, [("sync", "x"), ("sync", "y")], [])
+    assert found == [("x", "open"), ("y", "done"), ("y", "open")] and dirty is True
+
+
+def test_warnings_already_known_before_the_first_alert_still_become_alerts():
+    assert derived([], [("size", "x")], ["x"]) == ([("x", "open")], True)
+
+
+def test_one_warning_found_twice_in_a_sync_raises_one_alert():
+    assert derived([], [("sync", "x"), ("sync", "x")], []) == ([("x", "open")], True)
+
+
+def test_a_skipped_warning_does_not_stop_the_ones_after_it():
+    rows = [{"id": "o", "text": "x", "state": "open"}]
+    assert derived(rows, [("sync", "x"), ("sync", "z")], [])[0] == [("x", "open"), ("z", "open")]
+
+
+def test_nothing_new_leaves_the_sync_clean():
+    assert derived([{"id": "o", "text": "x", "state": "open"}], [("sync", "x")], ["x"])[1] is False
+
+
+def test_an_alert_op_on_a_ledger_without_alerts_is_refused():
+    op = {"op": "alert_claim", "id": "k", "target": "al-1-0"}
+    assert ledger_alerts.apply({}, op, SimpleNamespace(at=1)) is False
+
+
 def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
     alert = {"id": "al-4-0", "source": "size", "text": "phase p1 description has 120 words, limit 100"}
     assert ledger_alerts.message("demo", alert) == (
@@ -246,12 +298,15 @@ def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
     )
 
 
-def test_delivery_marks_each_alert_sent_for_thirty_days_and_skips_claimed_ones(inbox):
+def test_delivery_marks_each_alert_sent_for_thirty_days_and_skips_claimed_and_sent_ones(inbox):
     claimed = {"id": "al-5-0", "text": "t", "source": "size", "target": "master", "state": "claimed", "rev": 5}
-    fresh = {**claimed, "id": "al-5-1", "state": "open"}
-    sent = ledger_alerts.deliver(inbox, SLUG, [claimed, fresh], 5, "master@x")
-    assert [item.address for item in sent] == ["master@x"]
-    assert inbox.redis.ttl(inbox.key("alert-sent", SLUG, "al-5-1")) == 30 * 24 * 3600
+    sent_before = {**claimed, "id": "al-5-1", "state": "open"}
+    fresh = {**claimed, "id": "al-5-2", "state": "open"}
+    ledger_alerts.deliver(inbox, SLUG, [sent_before], 5, "master@x")
+    sent = ledger_alerts.deliver(inbox, SLUG, [claimed, sent_before, fresh], 5, "master@x")
+    assert [(item.address, item.text) for item in sent] == [("master@x", ledger_alerts.message(SLUG, fresh))]
+    key = inbox.key("alert-sent", SLUG, "al-5-2")
+    assert inbox.redis.ttl(key) == 30 * 24 * 3600 and inbox.redis.get(key) == "1"
 
 
 def test_alerts_from_an_earlier_sync_are_not_sent_again(inbox, capsys):
