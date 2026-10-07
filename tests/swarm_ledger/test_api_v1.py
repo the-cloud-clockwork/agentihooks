@@ -931,10 +931,16 @@ def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
         {"ops": [], "guards": {}, "id": "change", "changes": [{"path": "phases/p1/done", "base": 1, "value": True}]},
         {"ops": [], "guards": {}, "id": "change", "changes": [{"path": "unsupported", "value": True}]},
     ]
-    for payload in invalid:
-        status, reply = request(live, "POST", "operations", payload)
-        assert status == 400
-        assert reply["error"]["code"] == "schema_invalid"
+    for index, payload in enumerate(invalid):
+        expected = "Request does not match the resource schema"
+        if index == 0:
+            expected = "At least one operation is required"
+        if index in (10, 11):
+            expected = "Checkbox changes need a distinct operation identifier"
+        assert request(live, "POST", "operations", payload) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": expected}},
+        )
     assert request(live, "POST", "operations", {"ops": [{"op": "unknown", "id": "unknown"}], "guards": {}}) == (
         400,
         {"error": {"code": "schema_invalid", "message": "Unknown operation"}},
@@ -963,3 +969,53 @@ def test_client_transport_retains_timeout_and_json_headers(live):
         assert outgoing.get_header("Content-type") == "application/json"
         assert outgoing.get_method() == "GET"
         assert outgoing.data is None
+
+
+def test_operation_string_and_identifier_limits_are_central(live):
+    payloads = [
+        {"ops": [{"op": "title_set", "id": "long-title", "text": "x" * 100001}], "guards": {}},
+        {"operation_id": "", "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
+        {"operation_id": "x" * 201, "ops": [{"op": "sync", "id": "sync"}], "guards": {}},
+    ]
+    for payload in payloads:
+        assert request(live, "POST", "operations", payload) == (
+            400,
+            {
+                "error": {"code": "schema_invalid", "message": "Request does not match the resource schema"},
+            },
+        )
+
+
+def test_body_size_and_json_rejection_are_stable(live):
+    path = f"/api/v1/ledgers/{SLUG}/export"
+    headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+    for content, extra in (
+        (b"{", {}),
+        (b"{}", {"Content-Length": "-1"}),
+        (b"{}", {"Content-Length": str(server.MAX_BODY + 1)}),
+    ):
+        status, data, _ = send(live, "POST", path, content, **{**headers, **extra})
+        assert (status, json.loads(data)) == (
+            400,
+            {"error": {"code": "schema_invalid", "message": "Request body must be a bounded JSON object"}},
+        )
+    content = b"{}" + b" " * (server.MAX_BODY - 2)
+    status, data, _ = send(live, "POST", path, content, **headers)
+    assert status == 200
+    assert json.loads(data)["data"]["title"] == "Authority"
+
+
+def test_versioned_logs_exclude_query_and_bearer(live, capsys):
+    from datetime import datetime
+    from unittest.mock import patch
+
+    clock = datetime(2026, 10, 7, 9, 0, 0)
+    capsys.readouterr()
+    original = server.time.strftime
+    with patch.object(server.time, "strftime", side_effect=lambda fmt, *args: original(fmt, clock.timetuple())):
+        status, _ = request(live, "GET", "metadata?token=private-canary", **{"X-Ledger-Token": "credential-canary"})
+    assert status == 403
+    logged = capsys.readouterr().err
+    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata\n"
+    assert "private-canary" not in logged
+    assert "credential-canary" not in logged
