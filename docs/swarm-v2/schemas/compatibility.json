@@ -14,7 +14,9 @@
     "A consumer vendors these schema files and validates with a JSON Schema 2020-12 validator; it never imports the owner's runtime package.",
     "Schemas reference only urn:swarm-v2 identifiers inside this directory.",
     "Rollback lowers write_minor so producers write the previous minor while readers keep accepting both.",
-    "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object."
+    "Schemas fix wire layout; the field tables and examples in plan section 22 list field sets, and their authority fields travel inside the authority object.",
+    "These contracts publish checkpoint_sequence and renewal_sequence; SV2-CKP-04 orders checkpoints when it promotes the latest pointer, and SV2-LDG-02 orders heartbeat renewals.",
+    "Admission fences each task across every contract: an older task_generation, or another execution at the accepted generation, is refused as stale_generation."
   ],
   "contracts": {
     "launch": {

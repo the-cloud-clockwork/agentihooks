@@ -17938,6 +17938,7 @@ Unknown optional fields must survive a read-modify-write cycle when the consumer
 An unknown field must not silently become authorization context.
 An unknown required capability causes a typed incompatibility response before a worker starts.
 Each record carries a globally unique record identity within its owning storage domain.
+The published wire schemas in `docs/swarm-v2/schemas/` carry every authority field inside a closed `authority` object; the field tables and examples in this appendix list field sets, not wire layout.
 Timestamp fields use UTC with an explicit zone.
 Lease decisions use server time; clients cannot extend authority by supplying a future timestamp.
 A display timestamp is not an ordering or concurrency-control primitive.

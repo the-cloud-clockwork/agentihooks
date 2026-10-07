@@ -27,6 +27,10 @@ def _snapshot(store: Path) -> dict:
     return {str(p.relative_to(store)): p.read_bytes() for p in sorted(store.rglob("*")) if p.is_file()}
 
 
+def _files(store: Path) -> list[str]:
+    return sorted(str(p.relative_to(store)) for p in store.rglob("*") if p.is_file())
+
+
 def _refusal(reason, detail, operation_id, error="invalid_request", retry="new_request"):
     return {
         "schema_version": "2.1",
@@ -56,8 +60,8 @@ def test_admitting_current_and_previous_minor_records_writes_them(loaded, tmp_pa
         }
         stored = json.loads((tmp_path / "store" / contract / f"{family}-op.json").read_text())
         assert stored == doc
-    generations = json.loads((tmp_path / "store" / contract / "generations.json").read_text())
-    assert generations == {"implement-session-ingestion": 3}
+    generations = json.loads((tmp_path / "store" / "generations.json").read_text())
+    assert generations == {"implement-session-ingestion": {"generation": 3, "execution_id": "exe-synthetic-0007"}}
 
 
 def test_a_second_independent_store_accepts_without_state_from_the_first(loaded, tmp_path):
@@ -295,8 +299,11 @@ def test_the_same_generation_and_a_newer_one_are_both_accepted(loaded, tmp_path)
     other["authority"]["task_id"] = "another-task"
     other["authority"]["task_generation"] = 1
     assert contracts.admit(loaded, tmp_path / "store", "heartbeat", other)["state"] == "accepted"
-    generations = json.loads((tmp_path / "store" / "heartbeat" / "generations.json").read_text())
-    assert generations == {"another-task": 1, "implement-session-ingestion": 4}
+    generations = json.loads((tmp_path / "store" / "generations.json").read_text())
+    assert generations == {
+        "another-task": {"generation": 1, "execution_id": "exe-synthetic-0007"},
+        "implement-session-ingestion": {"generation": 4, "execution_id": "exe-synthetic-0007"},
+    }
 
 
 def test_an_interrupted_record_write_recovers_on_retry_without_a_duplicate(loaded, tmp_path, monkeypatch):
@@ -314,19 +321,19 @@ def test_an_interrupted_record_write_recovers_on_retry_without_a_duplicate(loade
     with pytest.raises(OSError, match="transport cut"):
         contracts.admit(loaded, tmp_path / "store", "launch", doc)
     assert calls == ["generations.json", f"{doc['operation_id']}.json"]
-    assert sorted(p.name for p in (tmp_path / "store" / "launch").iterdir()) == [".lock", "generations.json"]
+    assert _files(tmp_path / "store") == [".lock", "generations.json"]
     monkeypatch.setattr(Path, "replace", real)
     assert contracts.admit(loaded, tmp_path / "store", "launch", doc)["state"] == "accepted"
     assert contracts.admit(loaded, tmp_path / "store", "launch", doc)["state"] == "replayed"
-    assert sorted(p.name for p in (tmp_path / "store" / "launch").iterdir()) == [
+    assert _files(tmp_path / "store") == [
         ".lock",
         "generations.json",
-        f"{doc['operation_id']}.json",
+        f"launch/{doc['operation_id']}.json",
     ]
 
 
 def test_admission_waits_for_the_store_lock_held_by_another_writer(loaded, tmp_path):
-    folder = tmp_path / "store" / "heartbeat"
+    folder = tmp_path / "store"
     folder.mkdir(parents=True)
     results = []
     with (folder / ".lock").open("w") as held:
@@ -339,7 +346,7 @@ def test_admission_waits_for_the_store_lock_held_by_another_writer(loaded, tmp_p
         writer.start()
         writer.join(timeout=0.3)
         assert writer.is_alive()
-        assert sorted(p.name for p in folder.iterdir()) == [".lock"]
+        assert _files(folder) == [".lock"]
     writer.join(timeout=10)
     assert results == [{"state": "accepted", "operation_id": "heartbeat-synthetic-0007-0041"}]
 
@@ -349,8 +356,10 @@ def test_the_stored_record_is_canonical_json(loaded, tmp_path):
     contracts.admit(loaded, tmp_path / "store", "heartbeat", doc)
     text = (tmp_path / "store" / "heartbeat" / f"{doc['operation_id']}.json").read_text()
     assert text == json.dumps(doc, indent=2, sort_keys=True) + "\n"
-    generations = (tmp_path / "store" / "heartbeat" / "generations.json").read_text()
-    assert generations == '{\n  "implement-session-ingestion": 3\n}\n'
+    generations = (tmp_path / "store" / "generations.json").read_text()
+    assert generations == (
+        '{\n  "implement-session-ingestion": {\n    "execution_id": "exe-synthetic-0007",\n    "generation": 3\n  }\n}\n'
+    )
 
 
 def test_writers_use_the_write_minor_and_rollback_lowers_it(loaded):
@@ -387,3 +396,37 @@ def test_the_admission_module_imports_no_other_repository_package():
         "re",
         "referencing",
     ]
+
+
+def test_a_newer_generation_fences_every_contract_of_the_task(loaded, tmp_path):
+    heartbeat = _fixture("heartbeat")
+    heartbeat["authority"]["task_generation"] = 4
+    assert contracts.admit(loaded, tmp_path / "store", "heartbeat", heartbeat)["state"] == "accepted"
+    before = _snapshot(tmp_path / "store")
+    refusal = contracts.admit(loaded, tmp_path / "store", "checkpoint", _fixture("checkpoint"))
+    assert refusal == _refusal(
+        "older_generation",
+        "task generation is older than the accepted generation",
+        "checkpoint-synthetic-0002",
+        error="stale_generation",
+        retry="never",
+    )
+    assert _snapshot(tmp_path / "store") == before
+
+
+def test_another_execution_cannot_share_an_accepted_generation(loaded, tmp_path):
+    contracts.admit(loaded, tmp_path / "store", "command", _fixture("command"))
+    before = _snapshot(tmp_path / "store")
+    rival = _fixture("command")
+    rival["operation_id"] = "rival-op"
+    rival["authority"]["execution_id"] = "exe-synthetic-0008"
+    assert contracts.admit(loaded, tmp_path / "store", "command", rival) == _refusal(
+        "generation_held",
+        "another execution holds this task generation",
+        "rival-op",
+        error="stale_generation",
+        retry="never",
+    )
+    assert _snapshot(tmp_path / "store") == before
+    rival["authority"]["task_generation"] = 4
+    assert contracts.admit(loaded, tmp_path / "store", "command", rival)["state"] == "accepted"

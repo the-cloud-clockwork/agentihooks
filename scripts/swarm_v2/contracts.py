@@ -98,15 +98,14 @@ def admit(contracts: dict, store: Path, name: str, doc: object) -> dict:
     refusal = check(contracts, name, doc)
     if refusal:
         return refusal
-    folder = store / name
-    folder.mkdir(parents=True, exist_ok=True)
-    with (folder / ".lock").open("w") as lock:
+    (store / name).mkdir(parents=True, exist_ok=True)
+    with (store / ".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _commit(contracts, folder, doc)
+        return _commit(contracts, store, name, doc)
 
 
-def _commit(contracts: dict, folder: Path, doc: dict) -> dict:
-    record = folder / f"{doc['operation_id']}.json"
+def _commit(contracts: dict, store: Path, name: str, doc: dict) -> dict:
+    record = store / name / f"{doc['operation_id']}.json"
     text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
     if record.exists():
         if record.read_text() == text:
@@ -114,12 +113,19 @@ def _commit(contracts: dict, folder: Path, doc: dict) -> dict:
         detail = "operation id already holds a different record"
         return _refusal(contracts, doc, "revision_conflict", "operation_reused", detail)
     authority = doc["authority"]
-    index = folder / "generations.json"
+    index = store / "generations.json"
     generations = json.loads(index.read_text()) if index.exists() else {}
-    if authority["task_generation"] < generations.get(authority["task_id"], 0):
+    held = generations.get(authority["task_id"], {"generation": 0, "execution_id": None})
+    if authority["task_generation"] < held["generation"]:
         detail = "task generation is older than the accepted generation"
         return _refusal(contracts, doc, "stale_generation", "older_generation", detail, retry="never")
-    generations[authority["task_id"]] = authority["task_generation"]
+    if authority["task_generation"] == held["generation"] and authority["execution_id"] != held["execution_id"]:
+        detail = "another execution holds this task generation"
+        return _refusal(contracts, doc, "stale_generation", "generation_held", detail, retry="never")
+    generations[authority["task_id"]] = {
+        "generation": authority["task_generation"],
+        "execution_id": authority["execution_id"],
+    }
     _write(index, json.dumps(generations, indent=2, sort_keys=True) + "\n")
     _write(record, text)
     return {"state": "accepted", "operation_id": doc["operation_id"]}
