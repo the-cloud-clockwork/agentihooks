@@ -52,6 +52,8 @@ def inline_scripts(text):
         rest = iter([*words[index + 1 :], ""])
         for word in rest:
             if INLINE_FLAG.fullmatch(word):
+                if OPTION_VALUE.fullmatch(word):
+                    next(rest)
                 yield next(rest)
                 break
             if not word.startswith(("-", "+")):
