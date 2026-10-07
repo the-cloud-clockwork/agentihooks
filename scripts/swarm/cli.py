@@ -91,7 +91,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
 from scripts.swarm.store import ASSIST, AUTONOMY, DELEGATE, MASTER, SwarmConfig, SwarmError, codex_split, connect
@@ -139,7 +139,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None):
                 else "the ledger is in the bin, stopped"
             ]
         inbox = InboxStore(store.redis)
-        doc = ledger.state(slug)
+        try:
+            doc = ledger.state(slug)
+        except LedgerGone as exc:
+            first = store.redis.set(store.key(slug, "ledger-gone"), 1, nx=True)
+            return [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
         actions = phase_planning.planning_pass(inbox, store, slug, doc, ledger, store.config(slug))
         if actions:
             doc = ledger.state(slug)
