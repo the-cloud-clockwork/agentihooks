@@ -29,6 +29,56 @@ def _run_probe(tmp_path, body, preload=""):
     return result, sentinel
 
 
+@pytest.mark.parametrize("seed_state", [False, True])
+def test_external_render_fixture_requires_home_isolation(tmp_path, seed_state):
+    suite = tmp_path / "external"
+    suite.mkdir()
+    (suite / "test_render.py").write_text(
+        "from tests.test_profile_render import world\n\ndef test_render(world):\n    assert world['bundle'].is_dir()\n"
+    )
+    operator = tmp_path / "operator"
+    state_dir = operator / ".agentihooks"
+    state_dir.mkdir(parents=True)
+    state = state_dir / "state.json"
+    backup = state_dir / "state.json.bak"
+    if seed_state:
+        state.write_bytes(b'{"bundle":{"path":"operator-bundle"}}\n')
+        backup.write_bytes(b'{"previous":"operator-state"}\n')
+    before = {path.name: path.read_bytes() for path in state_dir.iterdir()}
+    env = dict(os.environ, HOME=str(operator), PYTHONPATH=f"{REPO}:{REPO / 'scripts'}")
+    for key in (
+        "AGENTIHOOKS_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_HOME_DIR",
+        "AGENTIHOOKS_CLAUDE_HOME",
+        "CODEX_HOME",
+        "COPILOT_HOME",
+    ):
+        env.pop(key, None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(suite),
+            "-q",
+            "--confcutdir",
+            str(suite),
+            "--basetemp",
+            str(tmp_path / "pytest"),
+        ],
+        env=env,
+        cwd=suite,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert {path.name: path.read_bytes() for path in state_dir.iterdir()} == before
+    assert list(operator.iterdir()) == [state_dir]
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "fixture '_isolate_real_user_paths' not found" in result.stdout
+
+
 @pytest.mark.parametrize(
     "preload", ["import install", "import scripts.install", "import install\nimport scripts.install"]
 )
