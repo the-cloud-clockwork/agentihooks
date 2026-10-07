@@ -1,10 +1,11 @@
+import json
 import os
 from pathlib import Path
 
 import pytest
 
 from scripts.handoff import transfers
-from scripts.swarm import cli, take_master
+from scripts.swarm import cli, live_binding, take_master
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -15,9 +16,10 @@ DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 
 @pytest.fixture
-def taker(env, monkeypatch):  # noqa: F811
+def taker(env, monkeypatch, tmp_path):  # noqa: F811
     store, ledger, rt = env
     named = []
+    monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     ledger.calls, ledger.is_closed = [], False
     ledger.closed = lambda slug: ledger.is_closed
     ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", by))
@@ -65,6 +67,92 @@ def test_take_master_keeps_an_unreported_profile_empty(taker, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_PROFILE", raising=False)
     assert run("sw", "take-master") == 0
     assert next(a for a in store.agents("sw") if a.lane == "master").profile == ""
+
+
+def _mounted_session(tmp_path, monkeypatch, report=None):
+    home = tmp_path / "master" / "claude"
+    home.mkdir(parents=True)
+    hooks = {event: [{"hooks": [{"type": "command", "command": "python3 -m hooks"}]}] for event in live_binding.EVENTS}
+    (home / "settings.json").write_text(json.dumps({"hooks": hooks}))
+    validation = {
+        "profile": "master",
+        "harness": "claude",
+        "home": str(home.resolve()),
+        "state": "validated",
+        "pid": 4242,
+        "account": "team",
+        "model": "opus",
+        "effort": "high",
+    }
+    path = tmp_path / "profile-report.json"
+    report = {
+        "profile": "master",
+        "harness": "claude",
+        "state": "validated",
+        "validation": validation,
+        **(report or {}),
+    }
+    path.write_text(json.dumps(report))
+    root = tmp_path / "proc" / "4242"
+    root.mkdir(parents=True)
+    (root / "comm").write_text("claude")
+    (root / "cmdline").write_bytes(b"claude\0--model\0opus\0--effort\0high\0")
+    (root / "environ").write_bytes(
+        f"CLAUDE_CONFIG_DIR={home}\0AGENTIHOOKS_PROFILE=master\0AGENTIHOOKS_PROFILE_REPORT={path}\0"
+        "AH_CC_TOKEN_team=private-value\0".encode()
+    )
+    monkeypatch.setattr(take_master, "PROC", tmp_path / "proc")
+    monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
+    monkeypatch.setattr(take_master, "argv_of", lambda pid: ("claude", "--model", "sonnet", "--effort", "low"))
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "engineer")
+    return tmp_path / "proc", validation
+
+
+def _master(store):
+    return next(a for a in store.agents("sw") if a.lane == "master")
+
+
+def test_take_master_records_the_canary_validated_binding_and_routed_account(taker, tmp_path, monkeypatch):
+    store, _, _, _ = taker
+    proc, validation = _mounted_session(tmp_path, monkeypatch)
+    assert run("sw", "take-master") == 0
+    master = _master(store)
+    fields = (master.profile, master.harness, master.model, master.effort, master.account)
+    assert fields == ("master", "claude", "opus", "high", "team")
+    assert master.profile_decision == {"validation": validation}
+    facts = live_binding.read(master, 4242, proc)
+    assert live_binding.record(store, "sw", master, facts, 1) == {}
+    assert live_binding.findings(store, "sw") == []
+    assert "private-value" not in json.dumps(master.__dict__)
+
+
+@pytest.mark.parametrize("report", [{"state": "pending"}, {"state": "failed"}, {"validation": {"pid": 9}}])
+def test_a_canary_state_not_validated_for_this_session_is_not_recorded(taker, tmp_path, monkeypatch, report):
+    store, _, _, _ = taker
+    _mounted_session(tmp_path, monkeypatch, report)
+    assert run("sw", "take-master") == 0
+    master = _master(store)
+    fields = (master.profile, master.harness, master.model, master.effort, master.account)
+    assert fields == ("engineer", "claude", "sonnet", "low", "team")
+    assert master.profile_decision == {}
+
+
+@pytest.mark.parametrize(
+    "environ", [b"", b"AGENTIHOOKS_PROFILE_REPORT=/missing/report.json\0", b"AGENTIHOOKS_PROFILE_REPORT=\0"]
+)
+def test_a_session_without_a_readable_canary_state_records_its_routed_account(taker, tmp_path, monkeypatch, environ):
+    store, _, _, _ = taker
+    _mounted_session(tmp_path, monkeypatch)
+    (tmp_path / "proc" / "4242" / "environ").write_bytes(environ + b"AH_CC_TOKEN_team=private-value\0")
+    assert run("sw", "take-master") == 0
+    master = _master(store)
+    assert (master.profile, master.account, master.profile_decision) == ("engineer", "team", {})
+
+
+def test_a_session_with_no_live_process_records_no_account(taker):
+    store, _, _, _ = taker
+    assert run("sw", "take-master") == 0
+    assert (_master(store).account, _master(store).profile_decision) == ("", {})
 
 
 def test_argv_of_reads_a_process_command_line():
