@@ -151,7 +151,7 @@ def record_id(record: dict) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def iter_complete_records(transcript_path: str, start: int = 0):
+def iter_complete_records(transcript_path: str, start: int):
     position = start
     with open(transcript_path, "rb") as handle:
         handle.seek(start)
@@ -162,20 +162,16 @@ def iter_complete_records(transcript_path: str, start: int = 0):
             try:
                 record = json.loads(line)
             except (ValueError, UnicodeDecodeError):
-                record = None
+                yield None, position
+                continue
             yield (record if isinstance(record, dict) else None), position
 
 
 def complete_records(transcript_path: str) -> tuple[list[dict], int, int]:
-    records = []
-    position = 0
-    unsupported = 0
-    for record, position in iter_complete_records(transcript_path):
-        if record is None:
-            unsupported += 1
-        else:
-            records.append(record)
-    return records, position, unsupported
+    read = list(iter_complete_records(transcript_path, 0))
+    records = [record for record, _ in read if record is not None]
+    position = read[-1][1] if read else 0
+    return records, position, len(read) - len(records)
 
 
 def mask_value(value: object) -> object:

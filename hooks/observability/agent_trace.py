@@ -179,7 +179,7 @@ def _assistant_text(entries: list[dict]) -> str:
 
 
 def _turn_output(turn: list[dict], carry: Mapping | None) -> str:
-    earlier = (carry or {}).get("text", "")
+    earlier = carry["text"] if carry else ""
     return "\n\n".join(text for text in (earlier, _assistant_text(turn)) if text)
 
 
@@ -583,7 +583,7 @@ def _resume_point(state: dict, transcript_path: str) -> dict:
     stat = Path(transcript_path).stat()
     point = paged.get("source") or {}
     if (point.get("device"), point.get("inode")) != (stat.st_dev, stat.st_ino) or not _still_at(transcript_path, point):
-        point = {"device": stat.st_dev, "inode": stat.st_ino, "line": 0, **start}
+        point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
     if point.get("boundary") != paged["boundary"]:
         point = _scan_to(transcript_path, point, paged["boundary"])
     paged["source"] = point
@@ -599,7 +599,7 @@ def _still_at(transcript_path: str, point: dict) -> bool:
         handle.seek(point["line"])
         line = handle.read(point["offset"] - point["line"])
     try:
-        return line.endswith(b"\n") and record_id(json.loads(line)) == point["boundary"]
+        return record_id(json.loads(line)) == point["boundary"]
     except (ValueError, UnicodeDecodeError, AttributeError):
         return False
 
@@ -792,7 +792,7 @@ def _send_pending(session_id: str, state: dict, exporter) -> None:
 
 def _message_id(entry: dict) -> object:
     message = entry.get("message")
-    return message.get("id") if entry.get("type") == "assistant" and isinstance(message, dict) else None
+    return message.get("id") if isinstance(message, dict) else None
 
 
 def _open_calls(entry: dict, results: dict) -> bool:
@@ -804,37 +804,34 @@ def _open_calls(entry: dict, results: dict) -> bool:
 
 def _paging_cut(all_turns: list[list[dict]], results: dict) -> tuple[int, int] | None:
     """(turn, entry) of the first entry kept: everything before it is closed and may be paged out."""
+    flat = [
+        ((turn_index, entry_index), entry)
+        for turn_index, turn in enumerate(all_turns)
+        for entry_index, entry in enumerate(turn)
+    ]
     cut = None
-    previous = None
-    for turn_index, turn in enumerate(all_turns):
-        for entry_index, entry in enumerate(turn):
-            if previous is not None and not (_message_id(entry) and _message_id(entry) == _message_id(previous)):
-                cut = (turn_index, entry_index)
-            if _open_calls(entry, results):
-                return cut
-            previous = entry
+    for index, (position, entry) in enumerate(flat):
+        message = _message_id(entry)
+        if index and (message is None or message != _message_id(flat[index - 1][1])):
+            cut = position
+        if _open_calls(entry, results):
+            break
     return cut
 
 
 def _aggregate(session_id: str, records: list[dict], paged: Mapping) -> dict:
     entries = _normalize(records)
-    all_turns = turns(entries)
-    results = _results(entries)
-    spans = {}
-    for index, turn in enumerate(all_turns):
-        carry = paged.get("open") if index == 0 else None
-        spans.update({spec.span_id: spec for spec in _turn_spans(session_id, index + 1, turn, 0, results, carry)})
-    generations = [entry["message"] for turn in all_turns for _, entry in _generations(turn).values()]
-    usage = [_usage_attributes(message.get("usage") or {}) for message in generations]
-    models = [message.get("model") for message in generations if message.get("model")]
+    spans = session_spans(entries, Identity(session_id), paged=paged)
+    root = spans[0]
     return {
-        "turns": len(all_turns),
-        "spans": set(spans),
-        "truncated": _truncated_fields(list(spans.values())),
-        "unsupported": _unsupported_io(records, entries),
-        "input_tokens": sum(item["gen_ai.usage.input_tokens"] for item in usage),
-        "output_tokens": sum(item["gen_ai.usage.output_tokens"] for item in usage),
-        "model": models[-1] if models else "",
+        "turns": root.attributes["agent.turns"],
+        "spans": {spec.span_id for spec in spans[1:]},
+        "truncated": _truncated_fields(spans[1:]) + paged.get("truncated", 0),
+        "unsupported": _unsupported_io(records, entries) + paged.get("unsupported", 0),
+        "input_tokens": root.attributes["gen_ai.usage.input_tokens"],
+        "output_tokens": root.attributes["gen_ai.usage.output_tokens"],
+        "model": root.attributes["gen_ai.request.model"],
+        "start_ns": root.start_ns,
     }
 
 
@@ -865,34 +862,37 @@ def _page_accepted(session_id: str, state: dict) -> None:
     entries = _normalize(values)
     all_turns = turns(entries)
     cut = _paging_cut(all_turns, _results(entries))
-    if cut is None or cut[0] == 0 and cut[1] <= 1:
+    kept = None if cut is None else _kept_records(values, all_turns, cut)
+    if kept is None:
         return
-    kept = _kept_records(values, all_turns, cut)
-    dropped = sorted(set(range(len(values))) - set(kept or ()))
-    if not kept or not dropped:
+    dropped = [index for index in range(len(values)) if index not in kept]
+    if not dropped:
         return
     paged = state.get("paged") or {}
     turn, entry = cut
-    target = {key: value for key, value in paged.items() if key != "open"}
-    if entry > 1:
-        earlier = paged.get("open", {}).get("text", "") if turn == 0 else ""
-        text = "\n\n".join(t for t in (earlier, _assistant_text(all_turns[turn][1:entry])) if t)
-        target["open"] = {"text": text, "previous_ns": _ns(all_turns[turn][entry - 1])}
+    carry = {}
+    if entry:
+        text = _turn_output(all_turns[turn][1:entry], paged.get("open") if turn == 0 else None)
+        carry["open"] = {"text": text, "previous_ns": _ns(all_turns[turn][entry - 1])}
     full = _aggregate(session_id, values, paged)
-    rest = _aggregate(session_id, [values[index] for index in kept], target)
-    for key in ("turns", "truncated", "unsupported", "input_tokens", "output_tokens"):
-        target[key] = paged.get(key, 0) + full[key] - rest[key]
-    target["spans"] = paged.get("spans", 0) + len(full["spans"] - rest["spans"])
-    target["model"] = full["model"] or paged.get("model", "")
-    target.setdefault("input", _prompt_text(all_turns[0]))
-    target.setdefault("start_ns", _ns(all_turns[0][0]))
-    target["boundary"] = keys[dropped[-1]]
+    rest = _aggregate(session_id, [values[index] for index in kept], carry)
+    target = {
+        key: full[key] - rest[key] for key in ("turns", "truncated", "unsupported", "input_tokens", "output_tokens")
+    }
+    target.update(
+        carry,
+        spans=paged.get("spans", 0) + len(full["spans"] - rest["spans"]),
+        model=full["model"],
+        input=paged.get("input", _prompt_text(all_turns[0])),
+        start_ns=full["start_ns"],
+        boundary=keys[dropped[-1]],
+        source=paged.get("source"),
+    )
     for span_id in full["spans"] - rest["spans"]:
-        state["accepted"].pop(f"{span_id:016x}", None)
-    window = [keys[index] for index in kept]
-    state["records"] = {key: records[key] for key in window}
+        del state["accepted"][f"{span_id:016x}"]
+    state["records"] = {keys[index]: values[index] for index in kept}
     for name in ("accepted_records", "pending_records"):
-        state[name] = {key: value for key, value in state.get(name, {}).items() if key in state["records"]}
+        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
     state.pop("legacy_turns", None)
     state["paged"] = target
 

@@ -3,7 +3,7 @@ import json
 import pytest
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from hooks.observability import agent_trace, otel
+from hooks.observability import agent_trace, otel, transcript
 
 CAP = 24_000
 
@@ -103,12 +103,21 @@ def _codex(turns: int, calls: int) -> list[dict]:
     return records
 
 
+def _noisy(records: list) -> list:
+    middle = len(records) // 2
+    return [*records[:2], "not json", *records[2:middle], "[1]", *records[middle:]]
+
+
 SESSIONS = {
-    "claude-many-turns": lambda: _claude(12, 5),
-    "claude-one-long-turn": lambda: _claude(1, 60),
-    "codex-many-turns": lambda: _codex(12, 5),
-    "codex-one-long-turn": lambda: _codex(1, 60),
+    "claude-many-turns": lambda: _noisy(_claude(12, 5)),
+    "claude-one-long-turn": lambda: _noisy(_claude(1, 60)),
+    "codex-many-turns": lambda: _noisy(_codex(12, 5)),
+    "codex-one-long-turn": lambda: _noisy(_codex(1, 60)),
 }
+
+
+def _line(record) -> str:
+    return (record if isinstance(record, str) else json.dumps(record)) + "\n"
 
 
 def _observed(receiver: Receiver) -> dict:
@@ -140,7 +149,7 @@ def _run(tmp_path, monkeypatch, name: str, cap: int, records: list[dict], chunk:
 
     for start in range(0, len(records), chunk):
         with path.open("a") as handle:
-            handle.write("".join(json.dumps(record) + "\n" for record in records[start : start + chunk]))
+            handle.write("".join(_line(record) for record in records[start : start + chunk]))
         flush()
     for _ in range(len(records)):
         state = agent_trace._cursor("session")
@@ -165,6 +174,7 @@ def quiet(monkeypatch):
 def test_export_continues_past_the_pending_cap_without_lost_or_doubled_observations(
     session, tmp_path, monkeypatch, quiet
 ):
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
     records = SESSIONS[session]()
     reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
     capped, cursor_sizes, path = _run(tmp_path, monkeypatch, "capped", CAP, records, 9)
@@ -173,8 +183,30 @@ def test_export_continues_past_the_pending_cap_without_lost_or_doubled_observati
     state = agent_trace._cursor("session")
     assert "overflow" not in state and not state["pending"]
     assert state["source"]["accepted_bytes"] == path.stat().st_size
+    assert state["source"]["records"] == len(records) - 2 and state["unsupported_records"] == 2
     assert max(cursor_sizes) < 4 * CAP
     assert len(state["records"]) < len(records) / 4
+    root = next(span for span in capped.observations.values() if span.parent is None)
+    assert root.attributes["agentihooks.export.truncated_fields"] > 0
+    assert _scans(path) == 0
+
+
+def _scans(path) -> int:
+    calls = []
+    scan = agent_trace._scan_to
+
+    agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+
+    def counted(*args):
+        calls.append(args)
+        return scan(*args)
+
+    agent_trace._scan_to = counted
+    try:
+        agent_trace.export_session("session", str(path), agent_trace.Identity("session"))
+    finally:
+        agent_trace._scan_to = scan
+    return len(calls)
 
 
 def test_paging_alone_exports_nothing(tmp_path, monkeypatch, quiet):
@@ -233,3 +265,52 @@ def test_source_rewritten_in_place_is_read_from_its_start(tmp_path, monkeypatch,
     turn = receiver.observations[agent_trace._span_id("session", "p-late")]
     assert turn.name == "turn 5"
     assert agent_trace._cursor("session")["paged"]["source"]["offset"] == 0
+    assert _scans(path) == 0
+
+
+def test_kept_records_needs_both_the_cut_entry_and_its_prompt():
+    records = [
+        {"type": "turn_context", "payload": {"model": "a"}},
+        {"type": "turn_context", "payload": {"model": "b"}},
+        {"uuid": "p"},
+        {"uuid": "x"},
+        {"uuid": "y"},
+    ]
+    turn = [{"uuid": "p"}, {"uuid": "x"}, {"uuid": "y"}]
+    assert agent_trace._kept_records(records, [turn], (0, 2)) == [1, 2, 4]
+    assert agent_trace._kept_records(records, [turn], (0, 0)) == [1, 2, 3, 4]
+    assert agent_trace._kept_records(records, [[{"uuid": "missing"}, *turn[1:]]], (0, 2)) is None
+    assert agent_trace._kept_records(records, [[turn[0], {"uuid": "missing"}]], (0, 1)) is None
+
+
+def test_session_without_a_model_reports_an_empty_model():
+    entries = [{"type": "user", "uuid": "p", "timestamp": _stamp(1), "message": {"content": "ask"}}]
+    root = agent_trace.session_spans(entries, agent_trace.Identity("session"))[0]
+    assert root.attributes["gen_ai.request.model"] == ""
+
+
+def test_complete_records_of_an_empty_source(tmp_path):
+    path = tmp_path / "empty.jsonl"
+    path.write_text("")
+    assert transcript.complete_records(str(path)) == ([], 0, 0)
+    path.write_text('{"a": 1}\nnot json\n[2]\n{"b"')
+    assert transcript.complete_records(str(path)) == ([{"a": 1}], len('{"a": 1}\nnot json\n[2]\n'), 2)
+
+
+def test_staging_beside_waiting_records_reports_the_exact_pending_size(tmp_path, monkeypatch, quiet):
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    records = _claude(1, 1)
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("".join(_line(record) for record in records[:2]))
+    state = agent_trace._progress("session")
+    agent_trace._stage_source(state, str(path))
+    state["pending"] = [{"name": "unsent"}]
+    with path.open("a") as handle:
+        handle.write(_line(records[2]))
+    probe = json.loads(json.dumps(state))
+    agent_trace._stage_source(probe, str(path))
+    expected = agent_trace._pending_bytes(probe, probe["records"], probe["pending"])
+    monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", expected - 1)
+    agent_trace._stage_source(state, str(path))
+    assert state["overflow"] == {"bytes": expected, "limit": expected - 1}
+    assert len(state["records"]) == 2
