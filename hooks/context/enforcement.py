@@ -194,7 +194,7 @@ def _load_profile_enforcements() -> list[dict]:
     if not profile:
         return []
     entries = []
-    for _name, profile_dir in profile_chain.profile_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
+    for _name, profile_dir in profile_chain.rendered_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
     return entries
 
