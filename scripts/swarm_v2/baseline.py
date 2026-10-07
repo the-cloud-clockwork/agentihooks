@@ -14,6 +14,31 @@ GIT_TIMEOUT = 30
 COMMAND_TIMEOUT = 30
 HTTP_TIMEOUT = 5
 REASON_LIMIT = 200
+KUBECTL_READS = frozenset({"get", "describe", "version"})
+KUBECTL_WRITES = frozenset(
+    {
+        "annotate",
+        "apply",
+        "autoscale",
+        "cordon",
+        "cp",
+        "create",
+        "delete",
+        "drain",
+        "edit",
+        "exec",
+        "expose",
+        "label",
+        "patch",
+        "replace",
+        "rollout",
+        "run",
+        "scale",
+        "set",
+        "taint",
+        "uncordon",
+    }
+)
 REGENERATE = (
     "python -m scripts.swarm_v2.baseline --sources docs/swarm-v2/baseline-sources.json"
     " --previous docs/swarm-v2/baseline.json --json docs/swarm-v2/baseline.json --markdown docs/swarm-v2/baseline.md"
@@ -68,8 +93,18 @@ def _repo_url(url: str, base: Path) -> str:
     return str(base / Path(url).expanduser()) if url else ""
 
 
+def read_only(argv: tuple[str, ...]) -> bool:
+    if argv[-1:] == ("--version",):
+        return True
+    words = set(argv[1:])
+    return argv[:1] == ("kubectl",) and bool(words & KUBECTL_READS) and not words & KUBECTL_WRITES
+
+
 def _probe(raw: dict) -> Probe:
-    return Probe(**{**raw, "argv": tuple(raw.get("argv", ()))})
+    probe = Probe(**{**raw, "argv": tuple(raw.get("argv", ()))})
+    if probe.kind == "command" and not read_only(probe.argv):
+        raise ValueError(f"probe {probe.name} is not a read-only command")
+    return probe
 
 
 def load_sources(path: Path | str) -> Sources:
@@ -117,6 +152,8 @@ def _unverified(probe: Probe, reason: str) -> dict:
 def _verified(probe: Probe, value: str) -> dict:
     if probe.unique:
         value = " ".join(sorted(set(value.split())))
+    if not value:
+        return _unverified(probe, "empty answer")
     return {"name": probe.name, "status": "verified", "value": sanitize(value)}
 
 
@@ -139,8 +176,10 @@ def _read_http(probe: Probe) -> dict:
     try:
         with urllib.request.urlopen(base + probe.path, timeout=HTTP_TIMEOUT) as response:
             body = json.loads(response.read())
-    except (OSError, ValueError) as exc:
-        return _unverified(probe, sanitize(str(exc))[:REASON_LIMIT])
+    except OSError as exc:
+        return _unverified(probe, f"unreachable ({type(exc).__name__})")
+    except ValueError:
+        return _unverified(probe, "answer is not JSON")
     value = body.get(probe.field) if isinstance(body, dict) else None
     if value is None:
         return _unverified(probe, f"endpoint answered without {probe.field}")
@@ -223,8 +262,8 @@ def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def collect(sources: Sources, previous: dict | None = None, now: Callable[[], str] = _utc_now) -> dict:
-    observed_at = now()
+def collect(sources: Sources, previous: dict | None = None, now: Callable[[], str] | None = None) -> dict:
+    observed_at = (now or _utc_now)()
     repositories = [_observe_repo(repo, sources.branch) for repo in sources.repositories]
     new_drift = _drift(previous, repositories, observed_at)
     history = list(previous.get("drift", ())) if previous else []
