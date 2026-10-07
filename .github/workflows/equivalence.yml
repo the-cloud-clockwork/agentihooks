@@ -54,6 +54,29 @@ jobs:
             exit 1
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
+      - name: Install the page replay browser
+        run: python -m playwright install --with-deps chromium
+      - name: Compare recorded page actions
+        run: |
+          python -I head/tests/swarm_ledger/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json
+          python -I head/tests/swarm_ledger/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json
+          cmp base-page.json head-page.json
+      - name: Plant a dropped chat recipient in the extracted page modules
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('head/scripts/swarm_ledger/static/js/chat.js')
+          source = path.read_text()
+          needle = 'return to && !text.startsWith("@") ? `@${to} ${text}` : text;'
+          assert source.count(needle) == 1
+          path.write_text(source.replace(needle, 'return text;'))
+          PY
+          python -I head/tests/swarm_ledger/page_replay.py "$PWD/head" "$RUNNER_TEMP/fault-page" fault-page.json
+          if cmp -s base-page.json fault-page.json; then
+            echo 'FAIL: planted chat fault escaped the page equivalence check'
+            exit 1
+          fi
+          echo 'PASS: identical base and head pages; planted chat fault rejected'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -62,3 +85,6 @@ jobs:
             base.json
             head.json
             fault.json
+            base-page.json
+            head-page.json
+            fault-page.json

@@ -1,12 +1,11 @@
 import json
 import subprocess
-from pathlib import Path
 
-PAGE = Path(__file__).parents[2] / "scripts/swarm_ledger/template.html"
+from tests.swarm_ledger.ledger_page import page_source
 
 
 def _rows(agents):
-    page = PAGE.read_text()
+    page = page_source()
     functions = [
         "function " + name + "(" + page.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
         for name in ("span", "modelText", "agentRows")
@@ -29,7 +28,7 @@ def test_a_promoted_engineer_row_is_marked_promoted():
 
 
 def test_the_state_cell_shows_the_promoted_label():
-    page = PAGE.read_text()
+    page = page_source()
     assert (
         'a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state)' in page
     )

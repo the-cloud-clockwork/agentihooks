@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import show
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import new_ledger  # noqa: E402
@@ -44,7 +46,7 @@ def page_html():
 def lines(browser):
     tab = browser.new_page(viewport={"width": 1600, "height": 900})
     try:
-        tab.set_content(page_html())
+        show(tab, page_html())
         return tab.evaluate(
             """(sections) => {
               const probe = document.createElement("div");

@@ -4,6 +4,8 @@ import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
@@ -23,7 +25,7 @@ SECTIONS = {
 
 
 def page():
-    return TEMPLATE.read_text(encoding="utf-8")
+    return page_source()
 
 
 def function_source(name):

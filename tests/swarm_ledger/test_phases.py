@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger, ledger_phase_cli, ledger_phases, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger.ledger_page import page_source
 
 SLUG = "phase-fields-proof"
 
@@ -248,7 +249,7 @@ def test_page_round_trip_preserves_phase_fields_and_old_phases():
             "comments": [],
         },
     ]
-    source = core.TEMPLATE.read_text()
+    source = page_source()
     functions = "\n".join(
         "function " + name + "(" + source.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
         for name in ("entries", "withDefaults")

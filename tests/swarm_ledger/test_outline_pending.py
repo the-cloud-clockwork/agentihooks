@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import new_ledger  # noqa: E402
@@ -74,6 +76,7 @@ def tab(browser, server):
         route.fulfill(body=json.dumps(server), content_type="application/json")
 
     context.route("**/*", handle)
+    serve_modules(context)
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     page.goto(URL)

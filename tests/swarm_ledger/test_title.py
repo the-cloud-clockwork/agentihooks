@@ -2,6 +2,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
@@ -60,7 +62,7 @@ class TitleOp(unittest.TestCase):
 
 
 class TitleHeader(unittest.TestCase):
-    page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+    page = page_source()
 
     def test_pen_button_sits_next_to_the_title(self):
         self.assertIn('id="title-edit"', self.page)

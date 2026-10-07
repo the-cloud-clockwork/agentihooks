@@ -9,6 +9,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
@@ -74,7 +76,7 @@ class DoctorControls(unittest.TestCase):
         self.assertEqual([c.args[0][1:] for c in popen.call_args_list], [["doctor", SLUG, "stop"]])
 
     def test_the_panel_carries_doctor_buttons(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         box = page.split('id="doctor-box"', 1)[1].split('id="health-box"', 1)[0]
         self.assertIn('data-swarm="doctor_start"', box)
         self.assertIn('data-swarm="doctor_stop"', box)
@@ -86,7 +88,7 @@ class DoctorControls(unittest.TestCase):
         self.assertEqual(out, [False, True, False])
 
     def test_stop_doctor_asks_for_a_confirm_and_names_itself(self):
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         self.assertIn('doctor_stop: "Stop the Doctor crew and close its linked ledger."', page)
         out = run_js(["opNote"], '[opNote("done", "doctor_start"), opNote("pending", "doctor_stop")]')
         self.assertEqual(

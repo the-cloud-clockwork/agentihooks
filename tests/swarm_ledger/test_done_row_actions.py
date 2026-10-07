@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.swarm_ledger.ledger_page import serve_modules
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/done-rows"
 API = "http://ledger.test/api/__LEDGER_SLUG__"
@@ -46,6 +48,7 @@ def ledger(browser):
         return route.abort()
 
     context.route("**/*", answer)
+    serve_modules(context)
     page = context.new_page()
     page.goto(URL)
     yield page, served
