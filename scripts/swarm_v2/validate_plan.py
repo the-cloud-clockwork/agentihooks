@@ -1,5 +1,4 @@
 import argparse
-import copy
 import fcntl
 import hashlib
 import json
@@ -64,7 +63,7 @@ def load_plan(path: Path | str) -> dict:
     ends = [h.start() for h in heads[1:]] + [len(text)]
     packages = {}
     for head, end in zip(heads, ends):
-        section = text[head.end() : end].split("\n#### ", 1)[0]
+        section = text[head.end() : end].split("\n#### ")[0]
         packages[head.group(1)] = _package(head.group(1), section)
     return {"packages": packages, "invariants": INVARIANT_RE.findall(text)}
 
@@ -86,8 +85,14 @@ def load_index(path: Path | str) -> dict:
     return data
 
 
+def _matches(pattern: re.Pattern, value: object) -> bool:
+    return isinstance(value, str) and bool(pattern.fullmatch(value))
+
+
 def _ref_error(item: dict, root: Path) -> str:
-    ref = str(item.get("ref", ""))
+    ref = item.get("ref")
+    if not isinstance(ref, str):
+        return REF
     if URL_RE.fullmatch(ref):
         return ""
     parts = PurePosixPath(ref).parts
@@ -121,7 +126,7 @@ def _item_errors(item: dict, root: Path) -> list[str]:
     errors = [_ref_error(item, root)]
     if kind in PROVES and not errors[0] and not _result_ref(str(item["ref"]), root):
         errors.append(RESULT)
-    if kind in NEEDS_COMMIT and not SHA_RE.fullmatch(str(item.get("commit", ""))):
+    if kind in NEEDS_COMMIT and not _matches(SHA_RE, item.get("commit")):
         errors.append("commit must be a full 40 character sha")
     if (kind in NEEDS_CASE or "case" in item) and item.get("case") not in CASE_IDS:
         errors.append("case must be one of A, B, C")
@@ -180,9 +185,8 @@ def _proves(item: dict, case: str) -> bool:
 
 
 def _pull_request(item: dict, repository: str) -> bool:
-    return item.get("kind") == "pull_request" and bool(
-        re.fullmatch(rf"https://github\.com/[\w.-]+/{re.escape(repository)}/pull/\d+", str(item.get("ref", "")))
-    )
+    pattern = re.compile(rf"https://github\.com/[\w.-]+/{re.escape(repository)}/pull/\d+")
+    return item.get("kind") == "pull_request" and _matches(pattern, item.get("ref"))
 
 
 def _screenshot_note(evidence: list[dict], case: str, classes: list[str]) -> str:
@@ -345,8 +349,7 @@ def _restore(path: Path | str, backup: Path | str, operation: str, plan: dict, r
         raise EvidenceError(f"backup at revision {saved['revision']} lacks operations the registry has recorded")
     if current and current["revision"] == saved["revision"] and digest(current) != digest(saved):
         raise EvidenceError(f"backup at revision {saved['revision']} differs from the registry at the same revision")
-    index = copy.deepcopy(saved)
-    index["revision"] += 1
+    index = {**saved, "revision": saved["revision"] + 1}
     result = {
         "operation": operation,
         "revision": index["revision"],

@@ -1,12 +1,13 @@
+import contextlib
 import copy
 import fcntl
 import hashlib
+import io
 import json
 import shutil
-import subprocess
-import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,34 +88,35 @@ def _alone(package, entry):
 
 
 def _run(*args):
-    return subprocess.run(
-        [sys.executable, "-m", "scripts.swarm_v2.validate_plan", *map(str, args)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.chdir(ROOT), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = vp.main([str(a) for a in args])
+    return SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
 
 
 # T-SV2-FND-04-A
 
 
 def test_a_plan_reader_returns_every_package_with_repository_gate_dependencies_and_cases():
-    assert len(PLAN["packages"]) == 150
-    assert PLAN["packages"]["SV2-FND-03"] == {
+    plan = vp.load_plan(ROOT / "Swarm-v2.md")
+    assert len(plan["packages"]) == 150
+    assert plan["packages"]["SV2-FND-03"] == {
         "repository": "agentihooks",
         "gate": "G0",
         "dependencies": ["SV2-FND-02"],
         "cases": {"A": "T-SV2-FND-03-A", "B": "T-SV2-FND-03-B", "C": "T-SV2-FND-03-C"},
     }
-    assert PLAN["packages"]["SV2-FND-01"]["dependencies"] == []
-    assert PLAN["packages"]["SV2-CAP-01"]["repository"] == "antoncore"
-    assert PLAN["packages"]["SV2-REL-05"]["gate"] == "G12"
+    assert plan["packages"]["SV2-FND-01"]["dependencies"] == []
+    assert plan["packages"]["SV2-CAP-01"]["repository"] == "antoncore"
+    assert plan["packages"]["SV2-REL-05"]["gate"] == "G12"
+    assert plan == PLAN
 
 
 def test_a_plan_reader_returns_every_invariant_in_order():
-    assert len(PLAN["invariants"]) == 34
-    assert PLAN["invariants"][:2] == ["INV-R01", "INV-R02"]
-    assert PLAN["invariants"][-1] == "INV-B12"
+    invariants = vp.load_plan(ROOT / "Swarm-v2.md")["invariants"]
+    assert len(invariants) == 34
+    assert invariants[:2] == ["INV-R01", "INV-R02"]
+    assert invariants[-1] == "INV-B12"
 
 
 def test_a_gate_map_lists_each_gate_with_its_packages_in_plan_order():
@@ -891,3 +893,131 @@ def test_a_registry_holding_a_non_object_evidence_item_is_refused_on_record(tmp_
     path.write_text(json.dumps(index))
     _refused(path, lambda: vp.record(path, _change(evidence=[_pull()]), PLAN, ROOT), "SV2-FND-03: evidence needs an id")
     assert "## Failed experiments\n\nNone." in vp.render(index, PLAN, _check(index))
+
+
+def test_a_plan_package_section_ends_at_the_next_heading(tmp_path):
+    plan = tmp_path / "plan.md"
+    cases = "".join(
+        f"- {k} case: [T-SV2-ZZZ-0{{n}}-{c}](#t).\n"
+        for k, c in (("Positive", "A"), ("Negative", "B"), ("Recovery", "C"))
+    )
+    plan.write_text(
+        "#### SV2-ZZZ-01: First\n\n- Integration gate: `G3`.\n"
+        + cases.format(n=1)
+        + "\n#### T-SV2-ZZZ-01-A: case\n\n- Repository: `elsewhere`.\n- Dependencies: [SV2-ZZZ-09](#x).\n"
+        + "\n#### T-SV2-ZZZ-01-B: case\n\ntext\n"
+        + "\n#### SV2-ZZZ-02: Second\n\n- Repository: `Xrepo`.\n- Integration gate: `G4`.\n"
+        + cases.format(n=2)
+    )
+    assert vp.load_plan(plan) == {
+        "packages": {
+            "SV2-ZZZ-01": {
+                "repository": "",
+                "gate": "G3",
+                "dependencies": [],
+                "cases": {c: f"T-SV2-ZZZ-01-{c}" for c in "ABC"},
+            },
+            "SV2-ZZZ-02": {
+                "repository": "Xrepo",
+                "gate": "G4",
+                "dependencies": [],
+                "cases": {c: f"T-SV2-ZZZ-02-{c}" for c in "ABC"},
+            },
+        },
+        "invariants": [],
+    }
+
+
+@pytest.mark.parametrize("ref", ["", "/etc/passwd"])
+def test_an_empty_or_absolute_file_ref_is_refused_even_with_a_sha256(ref):
+    item = {**_test("A"), "ref": ref, "sha256": "0" * 64}
+    assert _errors(_alone("SV2-FND-04", _complete(item))) == [
+        "SV2-FND-04/case-a: ref must be an https link or a repository file with its sha256"
+    ]
+
+
+def test_a_screenshot_with_an_unknown_case_is_refused():
+    shot = {"id": "SV2-FND-04/shot", "kind": "screenshot", "case": "D", "ref": f"{PULL}#shot"}
+    assert _errors(_alone("SV2-FND-04", _complete(shot))) == ["SV2-FND-04/shot: case must be one of A, B, C"]
+
+
+def test_a_screenshot_for_a_package_in_two_classes_names_both():
+    shot = {"id": "SV2-VAL-03/shot", "kind": "screenshot", "case": "C", "ref": f"{PULL}#shot"}
+    reasons = [r for p, r in _findings(_alone("SV2-VAL-03", _complete(shot))) if p == "SV2-VAL-03"]
+    assert reasons[3] == (
+        "T-SV2-VAL-03-C: missing recovery proof; a screenshot cannot satisfy transcript durability and scope"
+        " isolation acceptance"
+    )
+
+
+def test_a_replay_with_reordered_keys_is_the_same_operation(tmp_path):
+    path = _registry(tmp_path)
+    change = _change(evidence=[_pull()], claim="complete")
+    first = vp.record(path, change, PLAN, ROOT)
+    reordered = dict(reversed(list(change.items())))
+    assert vp.record(path, reordered, PLAN, ROOT) == first
+
+
+def test_the_registry_is_written_as_indented_json_and_a_stale_temporary_file_is_replaced(tmp_path):
+    path = _registry(tmp_path)
+    (tmp_path / "evidence-index.json.tmp").write_text("stale")
+    vp.record(path, _change(evidence=[_pull()]), PLAN, ROOT)
+    assert path.read_text() == json.dumps(vp.load_index(path), indent=2) + "\n"
+    assert not (tmp_path / "evidence-index.json.tmp").exists()
+
+
+def test_each_operation_records_the_hash_of_what_it_applied(tmp_path):
+    path = _registry(tmp_path)
+    change = _change(evidence=[_pull()])
+    vp.record(path, change, PLAN, ROOT)
+    vp.reopen(path, "SV2-FND-03", "reopen-1")
+    backup = tmp_path / "backup.json"
+    shutil.copy(path, backup)
+    saved = vp.load_index(backup)
+    vp.restore(path, backup, "restore-1", PLAN, ROOT)
+    hashes = [o["sha256"] for o in vp.load_index(path)["operations"]]
+    assert hashes == [vp.digest(change), vp.digest({"reopen": "SV2-FND-03"}), vp.digest({"restore": saved})]
+    assert vp.digest({"b": 1, "a": 2}) == hashlib.sha256(b'{"a": 2, "b": 1}').hexdigest()
+
+
+def test_a_restore_reusing_an_operation_with_another_backup_is_a_conflict(tmp_path):
+    path = _registry(tmp_path)
+    first = tmp_path / "first.json"
+    shutil.copy(path, first)
+    vp.restore(path, first, "restore-1", PLAN, ROOT)
+    second = tmp_path / "second.json"
+    shutil.copy(path, second)
+    _refused(
+        path,
+        lambda: vp.restore(path, second, "restore-1", PLAN, ROOT),
+        "operation restore-1 was already recorded with different content",
+    )
+
+
+def test_a_render_command_writes_the_markdown_from_the_registry(tmp_path):
+    markdown = tmp_path / "index.md"
+    result = _run("render", "--markdown", markdown)
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert markdown.read_text() == MARKDOWN.read_text()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["record"],
+        ["restore", "--operation", "o"],
+        ["restore", "--backup", "b"],
+        ["reopen", "--operation", "o"],
+        ["reopen", "--package", "p"],
+        ["check", "--markdown", "m"],
+        ["check", "--change", "c"],
+        ["record", "--change", "c", "--operation", "o"],
+        ["reopen", "--package", "p", "--operation", "o", "--backup", "b"],
+        ["restore", "--backup", "b", "--operation", "o", "--package", "p"],
+        [],
+    ],
+)
+def test_the_command_line_refuses_missing_or_foreign_options(args):
+    with pytest.raises(SystemExit) as caught:
+        _run(*args)
+    assert caught.value.code == 2
