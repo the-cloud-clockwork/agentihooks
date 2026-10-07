@@ -40,6 +40,8 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         source = root / name
         if source.is_dir():
             shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    if (root / ".test_durations").is_file():
+        shutil.copy(root / ".test_durations", work / ".test_durations")
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
