@@ -1,3 +1,4 @@
+from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 
 
@@ -18,14 +19,14 @@ def reruns(record: dict) -> list[Finding]:
     ]
 
 
-def red_checks(record: dict) -> list[Finding]:
+def red_checks(record: dict, now_ms: int) -> list[Finding]:
     checks = [
         c
         for c in record["checks"]
         if c["head_sha"] == record["pr"]["head"]["sha"]
         and c["conclusion"] in {"failure", "timed_out", "action_required", "startup_failure"}
     ]
-    if not checks:
+    if not checks or now_ms - record["committed_at"] < ledger_events.RED_QUIET_MS:
         return []
     return [
         Finding(
@@ -73,5 +74,5 @@ def flaky_tests(record: dict) -> list[Finding]:
     return found
 
 
-def findings(record: dict) -> list[Finding]:
-    return [*reruns(record), *red_checks(record), *flaky_tests(record)]
+def findings(record: dict, now_ms: int) -> list[Finding]:
+    return [*reruns(record), *red_checks(record, now_ms), *flaky_tests(record)]
