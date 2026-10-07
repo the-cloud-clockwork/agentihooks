@@ -43,6 +43,31 @@ def test_every_claim_the_tick_makes_counts_one_agent_life(store):  # noqa: F811
     assert (len(runtime.spawned), store.claims("sw", "t1"), store.claims("sw", "t2")) == (1, 1, 0)
 
 
+def test_three_failed_launches_spend_the_lives_and_the_block_names_the_last_failure(store):  # noqa: F811
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime(fail=True)
+    for now_ms in (1_000, 2_000, 3_000):
+        tick("sw", store, ledger, runtime, now_ms=now_ms)
+    assert (store.claims("sw", "t1"), ledger.rows["t1"]["state"], ledger.comments) == (3, "open", [])
+    store.put_handoff("sw", "t1", "handoff body", envelope={"reason": "recycle"})
+    actions = tick("sw", store, ledger, runtime, now_ms=4_000)
+    reason = refusal(3, "recycle", "herdr down", "sw", "t1")
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert ledger.comments == [("sw", "t1", reason, "swarm")]
+    assert f"blocked t1: {reason}" in actions
+    assert (store.claims("sw", "t1"), store.launch_failure("sw", "t1")) == (0, "")
+
+
+def test_a_successful_launch_after_failures_counts_its_claim_once(store):  # noqa: F811
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime(fail=True)
+    for now_ms in (1_000, 2_000):
+        tick("sw", store, ledger, runtime, now_ms=now_ms)
+    runtime.fail = False
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    assert ([task for _, _, task in runtime.spawned], store.claims("sw", "t1")) == (["t1"], 3)
+    assert ledger.rows["t1"]["state"] == "claimed"
+
+
 def test_a_third_life_is_allowed(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 2)
@@ -60,10 +85,10 @@ def test_a_fourth_claim_is_refused_and_the_task_blocked_for_the_master(store):  
     assert [task for _, _, task in runtime.spawned] == ["t2"]
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", refusal(3, "recycle", "sw", "t1"), "swarm")]
-    assert f"blocked t1: {refusal(3, 'recycle', 'sw', 't1')}" in actions
+    assert ledger.comments == [("sw", "t1", refusal(3, "recycle", "none", "sw", "t1"), "swarm")]
+    assert f"blocked t1: {refusal(3, 'recycle', 'none', 'sw', 't1')}" in actions
     assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in gate_rows()] == [
-        ("claims", "deny", "swarm", "t1", refusal(3, "recycle", "sw", "t1"))
+        ("claims", "deny", "swarm", "t1", refusal(3, "recycle", "none", "sw", "t1"))
     ]
 
 
@@ -81,7 +106,7 @@ def test_without_a_pending_handoff_the_summary_says_none(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     lives(store, 4)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert ledger.comments == [("sw", "t1", refusal(4, "none", "sw", "t1"), "swarm")]
+    assert ledger.comments == [("sw", "t1", refusal(4, "none", "none", "sw", "t1"), "swarm")]
     assert "drained" in actions
     assert ledger.notes == ["The swarm has no task left to start, one blocked task waits for you"]
 
@@ -94,7 +119,7 @@ def test_observe_lets_the_fourth_claim_through_and_logs_the_would_be_deny(store,
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert [task for _, _, task in runtime.spawned] == ["t1"]
     assert (ledger.rows["t1"]["state"], ledger.comments, store.claims("sw", "t1")) == ("claimed", [], 4)
-    assert [(r["kind"], r["reason"]) for r in gate_rows()] == [("observe", refusal(3, "none", "sw", "t1"))]
+    assert [(r["kind"], r["reason"]) for r in gate_rows()] == [("observe", refusal(3, "none", "none", "sw", "t1"))]
 
 
 def test_off_skips_the_cap(store):  # noqa: F811

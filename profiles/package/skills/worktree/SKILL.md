@@ -7,7 +7,7 @@ description: >
   edit. Use when a session starts work in a repo, when the operator says
   "worktree", "new worktree", "wt new", "list worktrees", "clean up the worktree",
   or when overlapping sub-agent work needs its own isolated checkout.
-argument-hint: "new | tmp [--from REF] | ls [--all] | done <name> [--force]"
+argument-hint: "new [--from REF] | tmp [--from REF] | ls [--all] | done <name> [--force]"
 ---
 
 # Worktree — one per development cycle, always off the base branch
@@ -27,6 +27,7 @@ DEST="$("$WT" new --repo <repo-dir>)"
 - The name comes from code, never typed: `agentihooks name worktree` builds it from the session (the plain swarm agent name, else `session-<id>`), then `-2`, `-3` for a further one; it is also the branch name. A name the session did not build is refused. Outside an agent session a typed name stands. `--repo` defaults to the repo containing the current directory; the primary checkout is resolved even from inside another worktree.
 - Every edit, test, commit and push of this cycle happens under `$DEST`, by this session and by every sub-agent it launches. Brief each sub-agent with `$DEST` as its working directory and absolute paths inside it.
 - A sub-agent gets its own worktree only when its files overlap another agent's. Create it with the same command, which takes the next built name; it is also cut from the base branch, and its branch ships to it on its own.
+- A task stacked on an open dependency starts from that dependency's branch: `"$WT" new --repo <repo-dir> --from origin/<dependency-branch>` fetches it fresh and cuts the branch there. Names, refusals and limits are unchanged, and `done` still judges merged against `origin/<base>`.
 
 Completion criterion: `$DEST` exists, `git -C "$DEST" rev-parse --abbrev-ref HEAD` prints `<name>`.
 

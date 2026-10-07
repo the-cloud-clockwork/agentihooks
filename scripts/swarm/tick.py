@@ -432,6 +432,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                     actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
                     continue
                 task.update(fields)
+                store.count_claim(slug, task["id"])
                 store.seats.occupy(seat, name, now_ms)
                 task["transfer"] = transfers.attach(store, slug, record)
                 placed = runtime.spawn(
@@ -439,13 +440,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 )
             except Exception as exc:
                 transfers.failed(store, slug, record)
+                store.note_launch_failure(slug, task["id"], str(exc))
                 actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
                 if isinstance(exc, ProfileUnresolved):
                     actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
                 return actions
             store.put_agent(slug, _placed(record, placed))
             store.count_spawn(slug, placed.harness)
-            store.count_claim(slug, task["id"])
             store.clear_handoff(slug, task["id"])
             store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
             actions.append(f"spawned {name} for {task['id']}")
@@ -477,7 +478,8 @@ def _claim_cap(slug, store, ledger, rows, task):
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
-    reason = claim_cap.refusal(lives, last, slug, task["id"])
+    failure = store.launch_failure(slug, task["id"]) or "none"
+    reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
     gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
     if kind == "observe":
