@@ -29,6 +29,7 @@ def bundle(tmp_path, monkeypatch):
         "planning": "kind: overlay\nwears: [planner]\n",
         "broken": "kind: overlay\nwears: engineer\n",
         "garbled": "kind: overlay\nwears: [engineer\n",
+        "scalar": "just text\n",
         "engineer": "extends: package:engineer\n",
     }
     for name, text in manifests.items():

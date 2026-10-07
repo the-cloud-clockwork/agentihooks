@@ -49,7 +49,7 @@ def available() -> list[dict]:
     for manifest in sorted((bundle / "profiles").glob("*/profile.yml")) if bundle else []:
         try:
             roles = profile_chain.wears(manifest.parent)
-        except (ValueError, yaml.YAMLError):
+        except (AttributeError, ValueError, yaml.YAMLError):
             continue
         if roles:
             found.append({"name": manifest.parent.name, "wears": roles})

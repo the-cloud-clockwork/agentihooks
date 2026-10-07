@@ -371,13 +371,14 @@ def _binding_export(environ: dict[str, str]) -> str:
         "AGENTIHOOKS_PROFILE_REPORT",
         "AGENTIHOOKS_HOME",
         "AGENTIHOOKS_PROFILE",
-        "AGENTIHOOKS_OVERLAYS",
         "CODEX_HOME",
         "AGENTIHOOKS_RUN_MODEL",
         "AGENTIHOOKS_RUN_EFFORT",
         effort_range.VARIABLE,
     )
-    return "".join(f"export {key}={shlex.quote(environ[key])}\n" for key in names if environ.get(key))
+    exported = "".join(f"export {key}={shlex.quote(environ[key])}\n" for key in names if environ.get(key))
+    worn = environ.get("AGENTIHOOKS_OVERLAYS", "") if environ.get("AGENTIHOOKS_PROFILE") else None
+    return exported if worn is None else f"{exported}export AGENTIHOOKS_OVERLAYS={shlex.quote(worn)}\n"
 
 
 def _linux_command(launcher: Path, directory: Path, title: str) -> list[str] | None:

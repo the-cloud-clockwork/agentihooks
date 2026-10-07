@@ -478,6 +478,23 @@ def test_a_continued_session_wears_the_overlays_of_its_environment(profile, monk
     assert "overlays=tuner,trader\n" in capsys.readouterr().out
 
 
+def test_a_launch_without_overlays_clears_overlays_the_caller_wears(profile, monkeypatch, tmp_path):
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    assert _dry_launch(tmp_path, ["--profile", "engineer"], {"AGENTIHOOKS_OVERLAYS": "tuner"}) == 0
+    text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert "export AGENTIHOOKS_OVERLAYS=''\n" in text
+    assert "export AGENTIHOOKS_OVERLAYS=tuner" not in text
+
+
+def test_a_launch_without_a_profile_exports_no_overlays(monkeypatch, tmp_path):
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    assert _dry_launch(tmp_path, [], {"AGENTIHOOKS_OVERLAYS": "tuner"}) == 0
+    text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert "AGENTIHOOKS_OVERLAYS" not in text
+
+
 def test_a_continued_session_without_overlays_wears_none(profile, monkeypatch, tmp_path):
     _, renderer = profile
     monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
