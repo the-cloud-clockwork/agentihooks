@@ -262,13 +262,18 @@ def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_a
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
+    asked = []
+
     def get(path, params):
         if path == "traces":
+            assert params["page"] >= 1 and params["page"] not in asked
+            asked.append(params["page"])
             return _page([_trace_row(f"p{params['page']}", "u")], params["page"], 9)
         return _page([], 1, 1)
 
-    rows, coverage, _ = traces_read.history("s", get, tmp_path, traces_read.Budget(trace_pages=2))
-    assert [r["id"] for r in rows] == ["p1", "p2"]
+    rows, coverage, failures = traces_read.history("s", get, tmp_path, traces_read.Budget(trace_pages=2))
+    assert [r["id"] for r in rows] == ["p1", "p2"] and failures == []
+    asked.clear()
     budget = traces_read.Budget(history_seconds=1)
     rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
     assert [r["id"] for r in rows] == ["p1"] and coverage["listed"] is False
@@ -285,3 +290,11 @@ def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path):
     data = traces_read.record("s", [], agents, 2000, langfuse, home=tmp_path, budget=traces_read.Budget(active_page=3))
     assert [c[1]["limit"] for c in langfuse.calls if c[0] == "observations"] == [3, 1]
     assert data["reader"]["historical"]["covered"] == 1
+
+
+def test_record_runs_the_history_budget_on_its_own_clock(tmp_path):
+    budget = traces_read.Budget(history_seconds=1)
+    data = traces_read.record(
+        "s", [], [], 1000, Langfuse([_trace_row("a", "u")]), home=tmp_path, budget=budget, clock=_ticks(2)
+    )
+    assert data["reader"]["historical"]["covered"] == 0
