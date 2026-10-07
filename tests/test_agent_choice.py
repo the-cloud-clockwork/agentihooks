@@ -302,3 +302,4 @@ def test_share_picks_count_share_choices_from_since_with_the_latest_row_per_name
         {"name": "d", "harness": "codex", "started_at": 200, "choice": "forced"},
     ]
     assert agent_choice.share_picks(rows, 100) == {"codex": 1, "claude": 1}
+    assert agent_choice.share_picks([{"name": "e", "harness": "codex", "choice": "share"}], 1) == {}
