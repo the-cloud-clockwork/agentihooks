@@ -101,13 +101,13 @@ def test_edit_leaving_invalid_toml_without_version_text_is_allowed(tmp_path):
 
 
 @pytest.mark.parametrize("replace_all", [True, False])
-def test_switch_replaces_every_occurrence_only_with_replace_all(tmp_path, replace_all):
-    target = _manifest(tmp_path, '# version = "2.17.0"\n' + _STATIC + "\n[tool.setuptools_scm]\n")
+def test_replace_all_decides_which_occurrences_change(tmp_path, replace_all):
+    target = _manifest(tmp_path, '# version = "2.17.0"\n' + _STATIC)
     payload = _edit(target, 'version = "2.17.0"', 'dynamic = ["version"]', replace_all=replace_all)
     if replace_all:
-        check_version_guard(payload)
-    else:
         _refused(payload)
+    else:
+        check_version_guard(payload)
 
 
 def test_static_version_bump_is_refused(tmp_path):
@@ -169,14 +169,39 @@ def test_switch_adding_a_capitalised_version_is_refused(tmp_path):
     _refused(_rewrite(_manifest(tmp_path), _TAGGED + '\n[tool.other]\nVersion = "9.9.9"\n'))
 
 
-def test_version_edit_on_an_already_dynamic_manifest_is_refused(tmp_path):
+def test_edit_around_a_version_setting_with_unchanged_values_is_allowed(tmp_path):
     target = _manifest(tmp_path, _TAGGED + _PYTEST)
-    _refused(_edit(target, 'minversion = "8.0"', 'minversion = "8.0"\naddopts = "-q"'))
+    check_version_guard(_edit(target, 'minversion = "8.0"', 'minversion = "8.0"\naddopts = "-q"'))
 
 
-def test_switch_with_missing_old_string_is_refused(tmp_path):
-    target = _manifest(tmp_path, _STATIC + "\n[tool.setuptools_scm]\n")
-    _refused(_edit(target, 'version = "1.0.0"', 'dynamic = ["version"]'))
+def test_unrelated_edit_on_a_dynamic_manifest_is_allowed(tmp_path):
+    check_version_guard(_edit(_manifest(tmp_path, _TAGGED), 'description = "old"', 'description = "new"'))
+
+
+def test_deleting_a_tool_version_setting_without_new_string_is_allowed(tmp_path):
+    target = _manifest(tmp_path, _STATIC + _PYTEST)
+    check_version_guard(
+        {"tool_name": "Edit", "tool_input": {"file_path": str(target), "old_string": 'minversion = "8.0"\n'}}
+    )
+
+
+def test_write_without_content_on_a_manifest_without_package_version_is_allowed(tmp_path):
+    check_version_guard({"tool_name": "Write", "tool_input": {"file_path": str(_manifest(tmp_path, _PYTEST))}})
+
+
+def test_manifest_that_is_not_utf8_is_still_guarded(tmp_path):
+    target = tmp_path / "pyproject.toml"
+    target.write_bytes(_STATIC.replace("old", "caf\xe9").encode("latin-1"))
+    _refused(_edit(target, "2.17.0", "2.18.0"))
+
+
+def test_capitalised_version_bump_in_an_unreadable_manifest_is_refused(tmp_path):
+    target = _manifest(tmp_path, '[project\nVersion = "1.0.0"\n')
+    _refused(_edit(target, "1.0.0", "1.1.0"))
+
+
+def test_edit_whose_old_string_is_absent_changes_no_version(tmp_path):
+    check_version_guard(_edit(_manifest(tmp_path), 'version = "1.0.0"', 'dynamic = ["version"]'))
 
 
 def test_switch_to_invalid_toml_is_refused(tmp_path):
@@ -204,18 +229,35 @@ def test_cargo_manifest_bare_number_bump_is_refused(tmp_path):
 
 
 def test_cargo_manifest_switch_is_refused(tmp_path):
-    target = _manifest(tmp_path, '[package]\nname = "x"\nversion = "1.0.0"\n', "Cargo.toml")
-    _refused(_rewrite(target, '[package]\nname = "x"\ndynamic = ["version"]\n\n[tool.setuptools_scm]\n'), "Cargo.toml")
+    _refused(_rewrite(_manifest(tmp_path, _STATIC, "Cargo.toml"), _TAGGED), "Cargo.toml")
 
 
 def test_package_json_bump_to_invalid_json_is_refused(tmp_path):
     target = _manifest(tmp_path, '{"name": "x", "version": "1.0.0"}\n', "package.json")
-    _refused(_edit(target, '"version": "1.0.0"}', '"version": "1.1.0",'), "package.json")
+    _refused(_edit(target, '"1.0.0"}', '"1.1.0",'), "package.json")
+
+
+def test_package_json_reformat_with_the_same_version_is_allowed(tmp_path):
+    target = _manifest(tmp_path, '{"name": "x", "version": "1.0.0"}\n', "package.json")
+    check_version_guard(_edit(target, '"version": "1.0.0"', '"version":"1.0.0"'))
+
+
+def test_version_file_bump_is_refused(tmp_path):
+    _refused(_rewrite(_manifest(tmp_path, "2.17.0\n", "VERSION"), "2.18.0\n"), "VERSION")
+
+
+def test_version_txt_bump_is_refused(tmp_path):
+    _refused(_edit(_manifest(tmp_path, "2.17.0\n", "version.txt"), "2.17.0", "2.18.0"), "version.txt")
+
+
+def test_version_file_whitespace_change_is_allowed(tmp_path):
+    check_version_guard(_rewrite(_manifest(tmp_path, "2.17.0\n", "VERSION"), " 2.17.0"))
 
 
 def test_existing_manifest_relative_to_cwd_is_guarded(tmp_path):
-    _manifest(tmp_path)
-    payload = _edit("pyproject.toml", "2.17.0", "2.18.0")
+    (tmp_path / "sub").mkdir()
+    _manifest(tmp_path / "sub")
+    payload = _edit("sub/pyproject.toml", "2.17.0", "2.18.0")
     payload["cwd"] = str(tmp_path)
     _refused(payload)
 
@@ -234,3 +276,28 @@ def test_codex_patch_bump_is_refused(tmp_path):
 
 def test_write_without_content_is_refused(tmp_path):
     _refused({"tool_name": "Write", "tool_input": {"file_path": str(_manifest(tmp_path))}})
+
+
+def test_poetry_version_bump_is_refused(tmp_path):
+    target = _manifest(tmp_path, '[tool.poetry]\nname = "x"\nversion = "1.0.0"\n')
+    _refused(_edit(target, "1.0.0", "1.1.0"))
+
+
+def test_cargo_workspace_version_bump_is_refused(tmp_path):
+    target = _manifest(tmp_path, '[workspace.package]\nversion = "1.0.0"\n', "Cargo.toml")
+    _refused(_edit(target, "1.0.0", "1.1.0"), "Cargo.toml")
+
+
+def test_prefixed_fallback_version_on_a_dynamic_manifest_is_refused(tmp_path):
+    target = _manifest(tmp_path, _TAGGED)
+    _refused(_edit(target, "[tool.setuptools_scm]\n", '[tool.setuptools_scm]\nfallback_version = "v2.18.0"\n'))
+
+
+def test_switch_changing_another_version_key_is_refused(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.other]\nversion = "1.0"\n')
+    _refused(_rewrite(target, _TAGGED + '\n[tool.other]\nversion = "1.1"\n'))
+
+
+def test_unrelated_key_ending_in_version_is_not_a_version_key(tmp_path):
+    target = _manifest(tmp_path, _STATIC + '\n[tool.ruff]\ntarget-version = "py311"\n')
+    check_version_guard(_edit(target, 'target-version = "py311"', 'target-version = "py312"'))

@@ -4,8 +4,9 @@ Version bumping should be handled by CI/CD workflows (release.yml),
 not by the AI editing pyproject.toml, package.json, Cargo.toml, etc.
 
 Raises BlockAction when Edit or Write targets a project manifest file
-and the content contains a version field change, or when the parsed version of
-pyproject.toml, Cargo.toml or package.json changes. The one allowed change is
+and the content contains a version field change. pyproject.toml, Cargo.toml
+and package.json are judged by their parsed version keys and VERSION files by
+their content. The one allowed change is
 switching pyproject.toml from a static version to a setuptools-scm tag derived
 one that adds no version literal.
 """
@@ -34,13 +35,11 @@ _VERSION_PATTERNS = [
     re.compile(r'"version"\s*:\s*"', re.IGNORECASE),
 ]
 
-_VERSION_LITERAL = re.compile(r'[\w.-]*version"?\s*[=:]\s*["\']?[\w.+-]*', re.IGNORECASE)
+_VERSION_LITERAL = re.compile(r'version"?\s*[=:]\s*["\']?[\w.+-]*', re.IGNORECASE)
 
-_VERSION_KEYS = {
-    "pyproject.toml": ("project", "version"),
-    "Cargo.toml": ("package", "version"),
-    "package.json": ("version",),
-}
+_PARSED_FILES = {"pyproject.toml", "Cargo.toml", "package.json"}
+
+_PLAIN_FILES = {"VERSION", "version.txt"}
 
 _UNREADABLE = object()
 
@@ -76,7 +75,13 @@ def check_version_guard(payload: dict) -> None:
     if filename not in _VERSION_FILES:
         return
 
-    if filename in _VERSION_KEYS and _allows_parsed_change(filename, target, tool_name, tool_input):
+    if filename in _PLAIN_FILES:
+        before = target.read_text(errors="replace")
+        if before.strip() != _edited_text(tool_name, tool_input, before).strip():
+            _refuse(filename)
+        return
+
+    if filename in _PARSED_FILES and _parsed_verdict(filename, target, tool_name, tool_input):
         return
 
     # Check if the change touches a version field
@@ -102,24 +107,17 @@ def check_version_guard(payload: dict) -> None:
 def _edited_text(tool_name: str, tool_input: dict, before: str) -> str:
     if tool_name == "Write":
         return tool_input.get("content", "")
-    count = -1 if tool_input.get("replace_all") else 1
-    return before.replace(tool_input.get("old_string", ""), tool_input.get("new_string", ""), count)
+    old, new = tool_input.get("old_string", ""), tool_input.get("new_string", "")
+    return before.replace(old, new) if tool_input.get("replace_all") else before.replace(old, new, 1)
 
 
 def _version_literals(text: str) -> set[str]:
     return set(_VERSION_LITERAL.findall(text))
 
 
-def _switches_to_tag_version(before: dict, after: dict) -> bool:
+def _switches_to_tag_version(after: dict) -> bool:
     dynamic = _field(after, ("project", "dynamic"))
-    return (
-        isinstance(_field(before, ("project", "version")), str)
-        and isinstance(_field(after, ("project",)), dict)
-        and _field(after, ("project", "version")) is None
-        and isinstance(dynamic, list)
-        and "version" in dynamic
-        and _field(after, ("tool", "setuptools_scm")) is not None
-    )
+    return isinstance(dynamic, list) and "version" in dynamic and _field(after, ("tool", "setuptools_scm")) is not None
 
 
 def _parsed(filename: str, text: str) -> object:
@@ -135,21 +133,31 @@ def _field(data: object, keys: tuple[str, ...]) -> object:
     return data
 
 
-def _allows_parsed_change(filename: str, target: Path, tool_name: str, tool_input: dict) -> bool:
-    before_text = target.read_text(encoding="utf-8", errors="replace")
+def _version_fields(data: object, path: tuple[str, ...] = ()) -> dict[tuple[str, ...], object]:
+    found = {}
+    if isinstance(data, dict):
+        for key, value in data.items():
+            name = (*path, key)
+            if key.lower() == "version" or key.lower().endswith("_version"):
+                found[name] = value
+            found.update(_version_fields(value, name))
+    return found
+
+
+def _parsed_verdict(filename: str, target: Path, tool_name: str, tool_input: dict) -> bool:
+    before_text = target.read_text(errors="replace")
     after_text = _edited_text(tool_name, tool_input, before_text)
     before, after = _parsed(filename, before_text), _parsed(filename, after_text)
     if before is _UNREADABLE or after is _UNREADABLE:
-        changed = _version_literals(before_text) != _version_literals(after_text)
-    elif filename == "pyproject.toml" and _switches_to_tag_version(before, after):
-        if _version_literals(after_text) <= _version_literals(before_text):
-            return True
-        changed = True
-    else:
-        changed = _field(before, _VERSION_KEYS[filename]) != _field(after, _VERSION_KEYS[filename])
-    if changed:
+        if _version_literals(before_text) != _version_literals(after_text):
+            _refuse(filename)
+        return False
+    kept = _version_fields(before)
+    if filename == "pyproject.toml" and _switches_to_tag_version(after):
+        kept.pop(("project", "version"), None)
+    if _version_fields(after) != kept:
         _refuse(filename)
-    return False
+    return True
 
 
 def _refuse(filename: str) -> None:
