@@ -59,6 +59,7 @@ CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 LOGO = ROOT / "media" / "agentihooks-logo.png"
 HOME_PAGE = CODE_DIR / "home.html"
+MODULE_RE = re.compile(r"/static/([0-9a-f]{12})/js/([a-z]+)\.js")
 CODE_DIRS = (
     CODE_DIR,
     *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates")),
@@ -614,6 +615,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_media(*route.removeprefix("/media/").partition("/")[::2])
         if route.startswith("/artifacts/"):
             return self.send_media(*route.removeprefix("/artifacts/").partition("/")[::2], store=ledger_artifacts)
+        if route.startswith("/static/"):
+            return self.send_module(route)
         if route == "/":
             ledger_bin.tidy()
             bin_closed_without_swarm()
@@ -687,6 +690,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "max-age=86400")
         self.end_headers()
         self.wfile.write(data)
+
+    def send_module(self, route):
+        match = MODULE_RE.fullmatch(route)
+        path = match and core.MODULES / f"{match.group(2)}.js"
+        if not path or match.group(1) != core.page_version() or not path.is_file():
+            return self.send(404, "no such module", "text/plain")
+        return self.send(200, path.read_text(encoding="utf-8"), "text/javascript; charset=utf-8")
 
     def send_media(self, slug, media_id, store=ledger_media):
         try:

@@ -3,6 +3,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from tests.swarm_ledger.ledger_page import page_source
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
@@ -236,7 +238,7 @@ class TaskBlockersOnThePage(unittest.TestCase):
         import json
         import subprocess
 
-        page = (SCRIPTS / "template.html").read_text(encoding="utf-8")
+        page = page_source()
         source = "function taskBlockers(" + page.split("  function taskBlockers(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
         script = f"{source}\nconst ts = {json.dumps(tasks)};\nprocess.stdout.write(JSON.stringify(ts.map((t) => taskBlockers(t, ts))));"
         return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)

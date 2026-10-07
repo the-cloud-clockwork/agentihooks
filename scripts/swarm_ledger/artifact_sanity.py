@@ -8,6 +8,8 @@ from collections import Counter
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parent / "template.html"
+MODULES = TEMPLATE.parent / "static" / "js"
+PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
 VIEWPORT = {"width": 1920, "height": 1080}
 BASELINE_CH = 90
 WIDTH_FACTOR = 2
@@ -179,6 +181,11 @@ def page_html(files: list[Path]) -> str:
     return html.replace("__LEDGER_PORT__", "9")
 
 
+def _module(route):
+    name = route.request.url.rsplit("/", 1)[1]
+    route.fulfill(body=(MODULES / name).read_text(encoding="utf-8"), content_type="text/javascript; charset=utf-8")
+
+
 def run(browser, files: list[Path]) -> dict[str, list[str]]:
     by_name = {path.name: path for path in files}
     tab = browser.new_page(viewport=VIEWPORT)
@@ -190,7 +197,10 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
                 content_type=TYPES[Path(route.request.url).suffix],
             ),
         )
-        tab.set_content(page_html(files))
+        html = page_html(files)
+        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        tab.route("**/static/*/js/*.js", _module)
+        tab.goto(PAGE_URL)
         return {path.name: _view(tab, path) for path in files}
     finally:
         tab.close()
