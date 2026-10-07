@@ -1,4 +1,5 @@
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -40,6 +41,12 @@ def _argv(pid):
             return [item.decode() for item in handle.read().split(b"\0") if item]
     except OSError:
         return []
+
+
+def _handles_term(pid):
+    with open(f"/proc/{pid}/status") as handle:
+        masks = [int(line.split()[1], 16) for line in handle if line.startswith(("SigIgn:", "SigCgt:"))]
+    return any(mask & 1 << (signal.SIGTERM - 1) for mask in masks)
 
 
 def _until(check):
@@ -243,6 +250,7 @@ def test_a_group_that_vanished_counts_as_ended():
 
 def test_a_process_gets_time_to_exit_on_sigterm(plant):
     graceful = plant(GRACEFUL, name=NAME)
+    _until(lambda: _handles_term(graceful.pid))
     assert reaper.retire(NAME, graceful.pid, []).ended == (graceful.pid,)
     assert _gone(graceful) and graceful.returncode == 0
 
@@ -250,6 +258,7 @@ def test_a_process_gets_time_to_exit_on_sigterm(plant):
 def test_a_term_resistant_process_is_killed(plant, monkeypatch):
     monkeypatch.setattr(reaper, "TRIES", 4)
     stubborn = plant(STUBBORN, name=NAME)
+    _until(lambda: _handles_term(stubborn.pid))
     assert reaper.retire(NAME, stubborn.pid, []).ended == (stubborn.pid,)
     assert _gone(stubborn) and stubborn.returncode == -9
 

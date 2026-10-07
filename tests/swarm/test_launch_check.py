@@ -295,6 +295,26 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
+def test_master_notification_names_only_enforced_misses(store, monkeypatch, tmp_path):
+    from hooks.context import profile_chain
+
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {"bundle": {"path": str(tmp_path)}})
+    store.update("sw", state="running")
+    store.update("sw", max_eng=0)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    agent = next(a for a in store.agents("sw") if a.name == first)
+    (tmp_path / "profiles" / agent.profile).mkdir(parents=True)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on joining the ledger and holding its seat. "
+        "It is being retired and relaunched once."
+    ]
+    assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{first}/joined"]
+    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
+
+
 def test_a_base_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
@@ -308,9 +328,10 @@ def test_a_base_only_miss_is_reported_without_a_relaunch(store, monkeypatch, tmp
     assert f"{first} failed its launch check on base; reported only" in actions
     assert first not in runtime.killed
     assert len(runtime.spawned) == 1
-    assert f"launch-check/{first}/base" in [f.id for f in launch_check.findings(store, "sw")]
+    assert launch_check.findings(store, "sw") == []
+    assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["base"]
     assert first not in launch_check.judged(store, "sw")
-    assert any("package base role" in note and "reported only" in note for note in ledger.notes)
+    assert ledger.notes == []
 
 
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
@@ -497,6 +518,22 @@ def test_findings_carry_the_field_evidence_and_threshold(store, launched):
             1,
         )
     ]
+
+
+@pytest.mark.parametrize("report_only", [frozenset({"overlay"}), frozenset()])
+def test_only_enforced_misses_raise_findings(store, launched, monkeypatch, report_only):
+    agent, _, _ = launched
+    monkeypatch.setattr(launch_check, "REPORT_ONLY", report_only)
+    found = {
+        "overlay": {"expected": "package:engineer", "actual": "engineer"},
+        "name": {"expected": "a", "actual": "b"},
+    }
+    launch_check.record(store, "sw", agent, found, LAUNCH, 0)
+    expected = [f"launch-check/{agent.name}/name"]
+    if not report_only:
+        expected.insert(0, f"launch-check/{agent.name}/overlay")
+    assert [f.id for f in launch_check.findings(store, "sw")] == expected
+    assert launch_check.report(store, "sw", "t1")["misses"] == found
 
 
 def test_a_pending_check_for_a_gone_agent_is_forgotten(store, monkeypatch):
