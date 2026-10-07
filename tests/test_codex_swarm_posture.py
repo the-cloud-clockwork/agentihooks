@@ -61,3 +61,18 @@ def test_a_stamp_refuses_a_linked_bundle_whose_folder_is_gone(world, tmp_path):
 
     with pytest.raises(ValueError, match="^linked bundle .*gone is missing"):
         render.stamp("engineer")
+
+
+def test_a_scratch_render_refuses_a_linked_bundle_whose_folder_is_gone(world, tmp_path, capsys):
+    from scripts.profiles import render
+
+    gone = tmp_path / "gone"
+    world["install"]._save_state({"bundle": {"path": str(gone)}})
+    out = tmp_path / "scratch"
+
+    assert render.main(["render", "engineer", "--out", str(out)]) == 1
+
+    assert capsys.readouterr().err == (
+        f"ERROR: linked bundle {gone} is missing; relink it with agentihooks bundle link <path> before rendering\n"
+    )
+    assert not out.exists()

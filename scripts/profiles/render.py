@@ -395,7 +395,7 @@ def rendered_profiles(target: str) -> list[str]:
 
 
 def _render_scratch(args: argparse.Namespace) -> int:
-    bundle = args.bundle or _install_module()._get_bundle_path()
+    bundle = args.bundle or _bundle()
     env = {**os.environ, "AGENTIHOOKS_HOME": str(args.out.resolve())}
     if bundle is not None:
         env["AGENTIHOOKS_BUNDLE_PATH"] = str(bundle.resolve())
@@ -429,9 +429,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.target == "copilot":
         print("copilot per-run profiles are not supported", file=sys.stderr)
         return 2
-    if args.out is not None:
-        return _render_scratch(args)
     try:
+        if args.out is not None:
+            return _render_scratch(args)
         out = render(args.target, args.name, force=args.force)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
