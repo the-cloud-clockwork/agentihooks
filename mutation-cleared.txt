@@ -1,124 +1,4 @@
 {
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
-    "reader": "Standards",
-    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
-  },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
-    "reader": "Standards",
-    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
-  },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
-    "reader": "Standards",
-    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
-  },
-  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
-    "reader": "Standards",
-    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
-  },
-  "hooks/classifier/core.py:hooks.classifier.core.x_decide__mutmut_7:9cfe374bb198931057ba4d1b4368fdfc1c62d2eea613c32d386779220d784fba": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "False initializer is overwritten on normal calls; request failures log identical null result fields and preserve the exception."
-  },
-  "hooks/classifier/decision_log.py:hooks.classifier.decision_log.x_failure_record__mutmut_11:371cac31d5d97e321ff71eb59af36561c58be823976040dd2dde9c1be2eedaf0": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
-  },
-  "hooks/classifier/decision_log.py:hooks.classifier.decision_log.x_failure_record__mutmut_9:b2c086d1229cdddd0d692009f52a5dbdcc09f9229ea90e5d95d48aa1e92221fa": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_12:2cabb7671681cb3294fcf66d519f4c6cb9b5bb3aa2f155994707b5e6d9558920": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Missing route defaults None and empty string are false; no token lookup or OAuth assignment occurs. Present routes and exported environment are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_14:23c23e84c9fbc6c0dd6944e5491646e1e29120c256529890a662a8d5e939475a": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Omitted route default is None; no token lookup or OAuth assignment occurs for an absent route. Present routes are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_20:4b483437b8ee003ff3bf7c2ed425068a19f81292e0dbe7aac9571d0062baec7c": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Missing selected token defaults None and empty string are false; no native OAuth assignment occurs. Present selected tokens are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_22:2f277ca5be3c78f23d53bcab7aa9925a8fe6db9ea04763ee34d1b9433ce4c206": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Omitted selected token default is None; no native OAuth assignment occurs for an absent token. Present selected tokens are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_10:68f16ef1177b1b5bd5339441b6514a603bd025584a810cf33bdaca434c0d66e1": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_4:6160b931b8d4c35a78d0c9c063ea9e67d60d1ee09be6fbbb8f2b7a4bb3207842": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_6:88cb7ea93033df694297c1b80d79581a3f6a2a7213a4f7a54d9cea4b7e14016b": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_9:bf17642a9769009860f5bc081ddf0668700a5cc7df74adf6fafc9d4bb1552399": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
-  },
-  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
-  },
-  "hooks/context/conditions.py:hooks.context.conditions.x__git_out__mutmut_17:7e83af62eb5a9556bbfc625512b67cce33a0a983daf72c5be3a31b0cf2f14941": {
-    "reader": "Standards",
-    "reason": "The timeout bounds only a hung git; a timeout of four seconds takes the same path as three, and the TimeoutExpired path is tested."
-  },
-  "hooks/context/conditions.py:hooks.context.conditions.x__read_only_shell__mutmut_6:34f007662439ddc94e96969768aeb55d806d4123526217d22f8a7d36ba4a2f3d": {
-    "reader": "Standards",
-    "reason": "The stripped text is used only for the redirect count and targets; the replacement holds no redirect sign and is never a target, and heads come from the raw command."
-  },
-  "hooks/context/conditions.py:hooks.context.conditions.x_parse_filename__mutmut_18:a6288aca9993c9d6efea2ba799f9170d9579e894edd31f3ebe21f43c79c132cc": {
-    "reader": "Standards",
-    "reason": "tool_matcher.parse lowercases its input, so inserting any or ANY yields the same matcher, key and index bucket."
-  },
-  "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
-    "reader": "Standards",
-    "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
-  },
-  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_10:5083d173913ca57a7cde46ad75ea8759760b5a2af928d3aaad4acedd7b7e3300": {
-    "reader": "standards_reader",
-    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
-  },
-  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_11:d76453fc01b08eb178c6115a5b2617fe7d060d695a445dc4f1cfa1b53a2c36b0": {
-    "reader": "standards_reader",
-    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
-  },
-  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_3:a444ba56d03f89d04462b9e55b8e29a151281708f2cfd246462c700e6a758ed6": {
-    "reader": "standards_reader",
-    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
-  },
-  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_5:7cceeab6b1acc148900d5f5a290cb0fcc7929fe0c2bf82f88c723d4b6c546b4a": {
-    "reader": "standards_reader",
-    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
-  },
-  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_11:8ae8489f0af9364207071bfabe5a22a308624d7d8ea659719e87617ed7c0402d": {
-    "reader": "Standards",
-    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
-  },
-  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_13:9c8cd87ccec233a4d42979c4a21eca3f276bb47d2648d9aa1c952bced3d41132": {
-    "reader": "Standards",
-    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
-  },
-  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_16:f4539d9897457d7a59f3b0adf7bfbf1155ad5f54a96da0c00fbb27a5d8ddb3e9": {
-    "reader": "Standards",
-    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
-  },
   "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_52:01622f33bcc9fe0c5032b2b0b2ab5be8e6195e4407cac994d0799c1ee82d0e02": {
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
@@ -183,9 +63,253 @@
     "reader": "Standards",
     "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
   },
-  "scripts/deps_preflight.py:scripts.deps_preflight.x_unsatisfied__mutmut_4:3c279b2b1c55719f14a873a27f130ab523419d59f4d9d174e56e4fc199ea3634": {
-    "reader": "standards_reader",
-    "reason": "The synthetic skill dependency check field is unused by its sole consumer, which reads only id, kind and hint; CLI output and exit status are identical."
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_13:ce23f8251c274740f77013f93f6859b9b3cb19ce3980edda2459798f0e1091d6": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_14:527757a47f1153cc8eeb015e3a6f31c57eff58a7e05e68f5c292bdd8991f8533": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_18:07dfa5b18842f75a13c721d74a1a2f4ccf117d1968e974f32a29d2708d621de4": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  },
+  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_35:d50ca94a7ad62d23b42962df006ce068499d70ef774a1dc14508a43125c6dc99": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "When rounds is absent, changing the type-check default from zero to one preserves integer validation. Supplied rounds is unchanged and the stored review still defaults to zero."
+  },
+  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_43:ad2c72a392f5327baa8e97d84cc58b6798d5fc2c98cf52127ee02860045f0e48": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "When rounds is absent, changing the negative-comparison default from zero to one preserves acceptance because both are nonnegative. Supplied rounds is unchanged and the stored review still defaults to zero."
+  },
+  "scripts/mcp_daemon.py:scripts.mcp_daemon.x__client_entry__mutmut_5:39a2235dabb2a3bc9148c4399c9d5f776829d26875120c3f9629b9be3531feb8": {
+    "reader": "Standards /root/standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  },
+  "hooks/classifier/core.py:hooks.classifier.core.x_decide__mutmut_7:9cfe374bb198931057ba4d1b4368fdfc1c62d2eea613c32d386779220d784fba": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "False initializer is overwritten on normal calls; request failures log identical null result fields and preserve the exception."
+  },
+  "hooks/classifier/decision_log.py:hooks.classifier.decision_log.x_failure_record__mutmut_9:b2c086d1229cdddd0d692009f52a5dbdcc09f9229ea90e5d95d48aa1e92221fa": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
+  },
+  "hooks/classifier/decision_log.py:hooks.classifier.decision_log.x_failure_record__mutmut_11:371cac31d5d97e321ff71eb59af36561c58be823976040dd2dde9c1be2eedaf0": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_5:c63c45f1668d7ba8e0cdd0a6d8644e9daf4d4a0256db7665b22486526fd4089d": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_6:cf037e1ee9471bc922edf71c28b727752be292deb85898276bb48d0b3ed9dd2d": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_10:9c5c029295a8637e03110a972820332ef68743e5f825bcd0d0eb85a423dd76ea": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_4:6160b931b8d4c35a78d0c9c063ea9e67d60d1ee09be6fbbb8f2b7a4bb3207842": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_6:88cb7ea93033df694297c1b80d79581a3f6a2a7213a4f7a54d9cea4b7e14016b": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_9:bf17642a9769009860f5bc081ddf0668700a5cc7df74adf6fafc9d4bb1552399": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_10:68f16ef1177b1b5bd5339441b6514a603bd025584a810cf33bdaca434c0d66e1": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_12:2cabb7671681cb3294fcf66d519f4c6cb9b5bb3aa2f155994707b5e6d9558920": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Missing route defaults None and empty string are false; no token lookup or OAuth assignment occurs. Present routes and exported environment are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_14:23c23e84c9fbc6c0dd6944e5491646e1e29120c256529890a662a8d5e939475a": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Omitted route default is None; no token lookup or OAuth assignment occurs for an absent route. Present routes are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_20:4b483437b8ee003ff3bf7c2ed425068a19f81292e0dbe7aac9571d0062baec7c": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Missing selected token defaults None and empty string are false; no native OAuth assignment occurs. Present selected tokens are unchanged."
+  },
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_22:2f277ca5be3c78f23d53bcab7aa9925a8fe6db9ea04763ee34d1b9433ce4c206": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Omitted selected token default is None; no native OAuth assignment occurs for an absent token. Present selected tokens are unchanged."
+  },
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_61:741607c5da72527617c61861300147033b70a9a1edcbe32ab56a84a37d9a4585": {
+    "reader": "Standards",
+    "reason": "build_persona reads pending_rules only through a truthiness check, so an empty list and None render the same persona."
+  },
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_7:6ef10d40716dffe816d0047f12c2c6aa17de202e1bc4f34b60cab5f6bdf66508": {
+    "reader": "Standards",
+    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
+  },
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_9:db650bcc5795fba8ce5b52cdf81787eff48ad84aac2763ff09f571e17b294e40": {
+    "reader": "Standards",
+    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
+  },
+  "scripts/swarm_ledger/ledger_core.py:scripts.swarm_ledger.ledger_core.x_sync__mutmut_45:2bf422db14b95136fa0fe1fdb2b39a5ae8e90546be926d3d6150b549406d4918": {
+    "reader": "Standards",
+    "reason": "json.dumps treats ensure_ascii as a truth value, so None and False write identical bytes."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_2:0766c7e16ccc270811e3db18723200a340c54931164ede9f6cd6904a89a9bac3": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_3:0cda8c824382f55f9e4e0b9f399856f9365e6883790bf10ff3030f514843c2c9": {
+    "reader": "Standards /root/standards",
+    "reason": "False and None have the same false truth value in argparse."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_10:3136ccf21897a7566d6b8b5ba04f2ca68861c2a1648f24a686d3db428cf56f6e": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_13:c5d8c3f9ca7a5543fb0edc5454af4dce15c3f4b71baf0ef546af1e9d5c4327ac": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_20:91a2107bb666bd0a8d6236d009b4f0cb8e001ba1ecedb7ea2398368526606ca9": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_22:91b1cf229879c499c0af05f2689df00140bc8befc565e914c2cf442fc07f7952": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_46:2085aef4a54ce95ccf47db3617526cd578ed796cd23e20b77a6aa199310358e9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_47:5421a566d31e45e68a56112d16a54a8f9b3f2e6b4898eaf779cdc8bd09324d87": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_49:377a6610a3c77277eda2730d2dcfaa2a237606aade63eceb93f0a3dec2b653d9": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_51:4c921b9cf51d37eb17a03454fec807127891e96d74072dd4727c93bef3ee4e37": {
+    "reader": "Standards /root/standards",
+    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_35:7c0a36c84aafb488f246e9d44e97322663e734ec1a168bc42d2eaca8d774f03a": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_37:972a27b9dc1bbf70ca5df60a0b7301cb66c0d98cf5b8781e46529431cfae995f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_43:7287b0e795ede253d6db09994deaa8690effb47dde4a441d6b8647f3001b557f": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_46:71b315daf5b45ef7aa8e2c0bf9c396a176389f9026a537f846852bb6fd17451c": {
+    "reader": "Standards /root/standards",
+    "reason": "Empty and None defaults select the same model or effort fallback."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_port_held__mutmut_7:f81d7fd245b87bb253cce437f7d57b97d3f88a2b187ad9fb823e14e3d471b215": {
+    "reader": "Standards",
+    "reason": "Linux SO_REUSEADDR treats both 1 and 2 as enabled. The independent reader observed getsockopt returning 1 and an occupied listener returning bind errno 98 for both values."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_ensure__mutmut_3:83b5c3341eba581ced3779613419d723ad3759b23941b92a53d6879c071fd292": {
+    "reader": "Standards",
+    "reason": "False and None are only tested through not started before both branches assign True. The independent reader verified identical truth values at both reads; the value is never returned or printed."
+  },
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
+    "reader": "Standards",
+    "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
+  },
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
+    "reader": "Standards /root/standards",
+    "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_9:621e1e54433d2b39917cb539813e8bf1440aa9e6142ff41ec747585be6765b94": {
+    "reader": "Standards /root/standards",
+    "reason": "Hex escape digit case denotes the same escape byte."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_21:6579613443d4e3d56e7997967a445eb4a9eb66234972d92237cc5913a1136686": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_33:472bb940820328ca7dce0df9d3140d760f71ec3973dcd2a0cb0024eb50627267": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  },
+  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_waiting_on_input__mutmut_17:df825097be97b85aa5ab7ad35adccc47e7215e4eca4ce205b5aa0f8d0da9038a": {
+    "reader": "Standards /root/standards",
+    "reason": "Missing tick counts zero and one both remain below the four tick finding threshold."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_5:16538ba358287064156593d27f28e92076b6df14247465396575de341381c291": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before ledger is used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_7:b352cc411cb90bb7cef57ba21a5944c592da8836b567de21e9c76ca6589d685c": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before task rows are used."
+  },
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_9:3a19000dfa0194f0917d772f84ef1ae2082dd6416e19320087b022e52e6045d5": {
+    "reader": "Standards /root/standards",
+    "reason": "Master observation returns before time is used."
+  },
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_7:a2b21da0043f0338cd4a8e0abde5f84f0ab330550851ef37a99260567d4365be": {
+    "reader": "Standards",
+    "reason": "Missing-lane fallback None compares false to plan, identically to eng; present lanes are unchanged."
+  },
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_9:155c10d7db7cd9a90cb659faf65c8296c91cf88ec51f969b765288d4217f974d": {
+    "reader": "Standards",
+    "reason": "Omitting the fallback produces None; validation decisions remain identical."
+  },
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_12:747e01d76ab13d252e441fed518a6baf08549498c3fd7d3a0df07930366ad2a3": {
+    "reader": "Standards",
+    "reason": "XXengXX and eng both compare false to plan; fallback has no other use."
+  },
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_13:b301907356784e75e70a6b414e8b695786a03434d3d3dc8ab2f31e968703ac73": {
+    "reader": "Standards",
+    "reason": "ENG and eng both compare false to plan; fallback has no other use."
+  },
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_scaffold__mutmut_31:43500b49967aa73a3494cc3f3ccb1eb29f575a696a113e8dc682f7707d944bc7": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same codec and produce identical bytes."
+  },
+  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence__mutmut_88:ad63b86a19f7b8761207798ae88acf1a8d39c2124904d8f5fcfc0925a466292d": {
+    "reader": "Standards",
+    "reason": "ensure_ascii None and False select the same JSON encoding branch."
+  },
+  "scripts/swarm/slice_check.py:scripts.swarm.slice_check.x__task__mutmut_11:ba393c0fa500035d35fae755c4bfdb362d38932e495d22a7752b9b01fbaf4419": {
+    "reader": "Standards",
+    "reason": "Any default description under twenty words yields the same under twenty words problem line; an empty and an XXXX default both returned it."
+  },
+  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_3:013146ed3e90e52f4d04638c2bef67bbddf2feeb4dbd9da39e3cb2730acdc3c3": {
+    "reader": "Standards",
+    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
+  },
+  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_5:bdc5ca81647e17a4b7402b00bc2fd3afd7eb5ab58a954af5a2a118110724599a": {
+    "reader": "Standards",
+    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_4:7eb9df48341711ef7344d46516437927658a4f1f065ff883a2baea322165d793": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  },
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_8:915250a1ca1031d8e199f284abd1b773aceff4ddb82e37915432831c67693df3": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
   },
   "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_13:771f38c7ac22eabed121f1e31d06bec7e6cc799228c034d1957e2fd61fe98a83": {
     "reader": "Standards",
@@ -243,10 +367,6 @@
     "reader": "Standards",
     "reason": "Only argparse help text changes, which no command output or exit code reads."
   },
-  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_4:7eb9df48341711ef7344d46516437927658a4f1f065ff883a2baea322165d793": {
-    "reader": "Standards",
-    "reason": "Only argparse help text changes, which no command output or exit code reads."
-  },
   "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_51:0fb2ebf5fd7039d92d540422513bcfed350be43c733fee9070b4ae07254f5666": {
     "reader": "Standards",
     "reason": "The check default only feeds truth tests, where None and the empty string act the same."
@@ -267,17 +387,117 @@
     "reader": "Standards",
     "reason": "Only argparse help text changes, which no command output or exit code reads."
   },
-  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_8:915250a1ca1031d8e199f284abd1b773aceff4ddb82e37915432831c67693df3": {
-    "reader": "Standards",
-    "reason": "Only argparse help text changes, which no command output or exit code reads."
-  },
   "scripts/gc_cli.py:scripts.gc_cli.x__scratch_new__mutmut_6:7835e08b538729f87d3555b9739426427b6911716bea99d510b3591bcf5e16e1": {
     "reader": "Standards",
     "reason": "The built name only feeds truth tests and an or fallback, where None and the empty string act the same."
   },
-  "scripts/mcp_daemon.py:scripts.mcp_daemon.x__client_entry__mutmut_5:39a2235dabb2a3bc9148c4399c9d5f776829d26875120c3f9629b9be3531feb8": {
-    "reader": "Standards /root/standards",
-    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_space__mutmut_1:681eaca2f4e66cd0a3553171332fd6b1655f9d80e82d11b95502037ef032a2a2": {
+    "reader": "Standards",
+    "reason": "A changed default slug is still not a proof slug, so the label stays repo and code."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x__clean__mutmut_12:4fb4618b48213b4eab942a5786cf204463c2648cf06eea1421b16feb92548c53": {
+    "reader": "Standards",
+    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_5:cea2e7ee10d185b0dc8894880204201dc8db0f2267fb5844060bc9b406ede81f": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_9:7255a9b5ff4351838ec93ba7be6dcd17ae44bbc4e1420a524fdc3bda1028ff49": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_23:2b3d98ff355d60b711fb2b1139e036ce124cac16d96d7d1bd18ec9ae4ce187ee": {
+    "reader": "Standards",
+    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_25:5384ddd7792fa78525c37eac7fc7a3a1b626494561441f35d0602d0c47e6e622": {
+    "reader": "Standards",
+    "reason": "A placeholder path that is not a git dir falls back to the folder name exactly like the empty path."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_session_base__mutmut_25:ed4b344397b1099febd47535f333babb792d1a11ce0427de3ecff5bad9ad6416": {
+    "reader": "Standards",
+    "reason": "The placeholder has no hex characters after lowering and stripping, so it acts as a missing id."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_worktree__mutmut_14:50cbeaffaf4b85db159528ee201b0c67f17961a40424951b58ca394b3e66f878": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_tmp_worktree__mutmut_14:e902f20f3d1d342c3697f42354b21dfdd07e4b0df302ba4536653f1dac137fd5": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_plan_slug__mutmut_15:b0d4a10470d0f0e1e021b02a9fdc6a2c1cab0837db75c02abfcb77ff584360fc": {
+    "reader": "Standards",
+    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_proof_slug__mutmut_42:ebfc1495213a90b5992410dd5ab704e473860d5a6ee8858a94e57b7954d01a74": {
+    "reader": "Standards",
+    "reason": "One extra candidate past the taken count never changes which first free name is picked."
+  },
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_is_built_slug__mutmut_4:d2882cb3fe0c11f9cad4339cc890853c6ff2d26179b72a832527f41597cc3e3f": {
+    "reader": "Standards",
+    "reason": "A placeholder matches no slug pattern, exactly like the empty string."
+  },
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
+    "reader": "Standards",
+    "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."
+  },
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__norm__mutmut_2:37e780ff917e694f8a1fa9284bb3b798ce523c2fb66d21aeab001a0c422b9b58": {
+    "reader": "Standards",
+    "reason": "Quote and recorded words pass through the same join, and the uppercase separator can only sit at token boundaries of lowercased text, so containment and the returned words are unchanged for every input."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_3:598997e79f7d412167c6beee1ac5fbdcca3b57fb3508ad28c522061f439fef33": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_4:9b560b3ea8ee97b8922ab8351286750b7970668329d2c637234a54bdcaa23c49": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_22:26bef4343065a27111b4674bf5791768f1b78a1edc7883bd3910126b2247e099": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_44:ff6bf571515052f282afd075fe537c98e6917c4f74038e1db2466cbf96d9d1fe": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_45:dd9465c9ef8129804fadd87b9b90455a5b5e605b288544bb0bd62198c9e1cadc": {
+    "reader": "Standards",
+    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
+    "reader": "Standards",
+    "reason": "A missing Content-Type falls back to a string that still fails the JSON prefix check, so the reply stays 415."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_4:36d3beba1cd47ad89a91902da0d676d2b1ad9b87097be0a3cc581c2935f66222": {
+    "reader": "Standards",
+    "reason": "Splitting on every question mark leaves the same first piece, so the route match is unchanged."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
+    "reader": "Standards",
+    "reason": "A second split point leaves the same first piece, so the route match is unchanged."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x_parse_filename__mutmut_18:a6288aca9993c9d6efea2ba799f9170d9579e894edd31f3ebe21f43c79c132cc": {
+    "reader": "Standards",
+    "reason": "tool_matcher.parse lowercases its input, so inserting any or ANY yields the same matcher, key and index bucket."
+  },
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_2:423fbca59abf4c06741e3f0559c5ced30eb8a0a01742e757a875ef7ad400629a": {
+    "reader": "Standards",
+    "reason": "The recorder writes json.dumps rows, which are ASCII, so every ASCII compatible locale codec decodes them to the same text."
+  },
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_4:9e1ebae557e612a845bc7237c35999a4b6215d20f6b7ef4724741ea44b81cb8b": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same codec and decode identical text."
+  },
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_5:f5e23bf533a952c9edfe36d3d3648ec52d1334ecc4fcb592118c37debc4ca22e": {
+    "reader": "Standards",
+    "reason": "build_persona only checks if pending_rules, so None and an empty list take the same branch for every input."
   },
   "scripts/profiles/measure.py:scripts.profiles.measure.x_measure__mutmut_12:71a459019722821de6458cdce66ec4927a6f9afb1a46b4fa5daa459ab745fb36": {
     "reader": "Standards",
@@ -287,69 +507,53 @@
     "reader": "Standards",
     "reason": "prepare treats an empty and a None effort the same: select_profile.prepare falls back with `effort or native_effort or default_effort`, so the profile default applies either way."
   },
-  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_5:f5e23bf533a952c9edfe36d3d3648ec52d1334ecc4fcb592118c37debc4ca22e": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_1:22c036ec25caa9297fe7ec7adc4e062a2b37bf413c1d29cce86032f8ee4907a6": {
     "reader": "Standards",
-    "reason": "build_persona only checks if pending_rules, so None and an empty list take the same branch for every input."
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
   },
-  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_61:741607c5da72527617c61861300147033b70a9a1edcbe32ab56a84a37d9a4585": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_3:27ea0c4ceebdf02082cc8d9f1216648744f9179bf5c9da88f3b7025a20993eff": {
     "reader": "Standards",
-    "reason": "build_persona reads pending_rules only through a truthiness check, so an empty list and None render the same persona."
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_46:2085aef4a54ce95ccf47db3617526cd578ed796cd23e20b77a6aa199310358e9": {
-    "reader": "Standards /root/standards",
-    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_4:b9c9543d038e1b0a69b604664227b815ca5136cbf40f82e9f8b9f7e6926461d6": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_47:5421a566d31e45e68a56112d16a54a8f9b3f2e6b4898eaf779cdc8bd09324d87": {
-    "reader": "Standards /root/standards",
-    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_6:1f6a63fb480bb4fbae1e1b4ba37449e208522e88087198be1e33f6e376fe1acf": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_49:377a6610a3c77277eda2730d2dcfaa2a237606aade63eceb93f0a3dec2b653d9": {
-    "reader": "Standards /root/standards",
-    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_4:4fe314b3d1f16cda1066861a9ccd963e611f6967fd06f237750723688b7bb23a": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__config_effort__mutmut_51:4c921b9cf51d37eb17a03454fec807127891e96d74072dd4727c93bef3ee4e37": {
-    "reader": "Standards /root/standards",
-    "reason": "Supported effort literals contain one equals sign and no uppercase X; the split or strip variant produces identical output for every supported effort."
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_6:c9be4449868d4c7f9452753211d2131461aefd29ed69a06e16a0b01036b3c3ff": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_10:3136ccf21897a7566d6b8b5ba04f2ca68861c2a1648f24a686d3db428cf56f6e": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_3:a444ba56d03f89d04462b9e55b8e29a151281708f2cfd246462c700e6a758ed6": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_13:c5d8c3f9ca7a5543fb0edc5454af4dce15c3f4b71baf0ef546af1e9d5c4327ac": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_5:7cceeab6b1acc148900d5f5a290cb0fcc7929fe0c2bf82f88c723d4b6c546b4a": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_20:91a2107bb666bd0a8d6236d009b4f0cb8e001ba1ecedb7ea2398368526606ca9": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_10:5083d173913ca57a7cde46ad75ea8759760b5a2af928d3aaad4acedd7b7e3300": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_22:91b1cf229879c499c0af05f2689df00140bc8befc565e914c2cf442fc07f7952": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
+  "hooks/context/trace_sweep.py:hooks.context.trace_sweep.x__needle__mutmut_11:d76453fc01b08eb178c6115a5b2617fe7d060d695a445dc4f1cfa1b53a2c36b0": {
+    "reader": "standards_reader",
+    "reason": "Missing text or no received rows defaults to None or XXXX; normalization yields four characters, below the twenty character needle minimum, so every output is unchanged."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_2:0766c7e16ccc270811e3db18723200a340c54931164ede9f6cd6904a89a9bac3": {
-    "reader": "Standards /root/standards",
-    "reason": "False and None have the same false truth value in argparse."
+  "scripts/deps_preflight.py:scripts.deps_preflight.x_unsatisfied__mutmut_4:3c279b2b1c55719f14a873a27f130ab523419d59f4d9d174e56e4fc199ea3634": {
+    "reader": "standards_reader",
+    "reason": "The synthetic skill dependency check field is unused by its sole consumer, which reads only id, kind and hint; CLI output and exit status are identical."
   },
-  "scripts/select_profile.py:scripts.select_profile.x__native_options__mutmut_3:0cda8c824382f55f9e4e0b9f399856f9365e6883790bf10ff3030f514843c2c9": {
-    "reader": "Standards /root/standards",
-    "reason": "False and None have the same false truth value in argparse."
-  },
-  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_35:7c0a36c84aafb488f246e9d44e97322663e734ec1a168bc42d2eaca8d774f03a": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
-  },
-  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_37:972a27b9dc1bbf70ca5df60a0b7301cb66c0d98cf5b8781e46529431cfae995f": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
-  },
-  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_43:7287b0e795ede253d6db09994deaa8690effb47dde4a441d6b8647f3001b557f": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
-  },
-  "scripts/select_profile.py:scripts.select_profile.x_main__mutmut_46:71b315daf5b45ef7aa8e2c0bf9c396a176389f9026a537f846852bb6fd17451c": {
-    "reader": "Standards /root/standards",
-    "reason": "Empty and None defaults select the same model or effort fallback."
+  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_1:c51314edcc197dbd6ec40fd80806b8f5b874aeba677094e327d471fdf4d6e7ba": {
+    "reader": "standards_reader",
+    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
   },
   "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_17:5fb6ac3e56aba36934fd369ec4beb2e18d0d4585e1b641e9904f278ca1264456": {
     "reader": "standards_reader",
@@ -359,17 +563,57 @@
     "reader": "standards_reader",
     "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
   },
-  "scripts/skill_links.py:scripts.skill_links.x_dangling__mutmut_1:c51314edcc197dbd6ec40fd80806b8f5b874aeba677094e327d471fdf4d6e7ba": {
-    "reader": "standards_reader",
-    "reason": "With the installation ledger unchanged, omitting the cached ledger reloads identical entries through the existing ownership predicate; returned paths and output are identical, only repeated reads differ."
-  },
   "scripts/skill_links.py:scripts.skill_links.x_repair__mutmut_12:006ff0d8d23d31f02ed9cff652cf641d86cf1c5cc5798763bbb7a5518ffb2f35": {
     "reader": "standards_reader",
     "reason": "The existing global install record helper defaults its target to claude, so omitting the explicit claude argument selects the same record and preserves output."
   },
-  "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_6:57190dbe02406a32dfabc33537cfeb564d6b45d494bb952f0f9304e8630513dd": {
     "reader": "Standards",
-    "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_8:e2803e6e1b388fdd1fc78524831e6a3456418629675d0f72ff3f73500e551a9b": {
+    "reader": "Standards",
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_23:a8158a3ed8d7c24b7f7bc338c597ff1d301437e6247110eb763faa007c50ba4b": {
+    "reader": "Standards",
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_25:c81d0e3db8891441b0cfd28155f0563ef68dfee95ce03fe763956cbe19b1e516": {
+    "reader": "Standards",
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_40:eaedbf4a62c8327edc6b4f274a2c8eb2ea280c38099c63223b3c40f246f73ffe": {
+    "reader": "Standards",
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_42:56ac4f73cbc1ec13a84f7ccf890447b82ed22904850f8505327ba7519015b6a8": {
+    "reader": "Standards",
+    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__git_out__mutmut_17:7e83af62eb5a9556bbfc625512b67cce33a0a983daf72c5be3a31b0cf2f14941": {
+    "reader": "Standards",
+    "reason": "The timeout bounds only a hung git; a timeout of four seconds takes the same path as three, and the TimeoutExpired path is tested."
+  },
+  "hooks/context/conditions.py:hooks.context.conditions.x__read_only_shell__mutmut_6:34f007662439ddc94e96969768aeb55d806d4123526217d22f8a7d36ba4a2f3d": {
+    "reader": "Standards",
+    "reason": "The stripped text is used only for the redirect count and targets; the replacement holds no redirect sign and is never a target, and heads come from the raw command."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_11:8ae8489f0af9364207071bfabe5a22a308624d7d8ea659719e87617ed7c0402d": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_13:9c8cd87ccec233a4d42979c4a21eca3f276bb47d2648d9aa1c952bced3d41132": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "hooks/hook_manager.py:hooks.hook_manager.x_on_pre_tool_use__mutmut_16:f4539d9897457d7a59f3b0adf7bfbf1155ad5f54a96da0c00fbb27a5d8ddb3e9": {
+    "reader": "Standards",
+    "reason": "The session id default predates this change; a payload without a session id has no armed gate under any default, so the guard returns the same block."
+  },
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_parse__mutmut_3:263bf3ec69ce3470d3ef19936de50aabb005e6ca3ba04cf56bf0ea01d528adf0": {
+    "reader": "Standards",
+    "reason": "Levels never contain a colon, so partition and rpartition yield the same refused or accepted pair."
   },
   "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x__without_effort__mutmut_8:5504daec29b77ca155b65a24cb546dfb3958aba296ea0ec3b87f7fcaf77d5178": {
     "reader": "Standards",
@@ -383,229 +627,13 @@
     "reader": "Standards",
     "reason": "parse of an empty and of an unknown range string both return the default range."
   },
-  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x_parse__mutmut_3:263bf3ec69ce3470d3ef19936de50aabb005e6ca3ba04cf56bf0ea01d528adf0": {
-    "reader": "Standards",
-    "reason": "Levels never contain a colon, so partition and rpartition yield the same refused or accepted pair."
-  },
-  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_2:423fbca59abf4c06741e3f0559c5ced30eb8a0a01742e757a875ef7ad400629a": {
-    "reader": "Standards",
-    "reason": "The recorder writes json.dumps rows, which are ASCII, so every ASCII compatible locale codec decodes them to the same text."
-  },
-  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_4:9e1ebae557e612a845bc7237c35999a4b6215d20f6b7ef4724741ea44b81cb8b": {
-    "reader": "Standards",
-    "reason": "UTF-8 and utf-8 resolve to the same codec and decode identical text."
-  },
-  "scripts/swarm/health/findings.py:scripts.swarm.health.findings.x_waiting_on_input__mutmut_17:df825097be97b85aa5ab7ad35adccc47e7215e4eca4ce205b5aa0f8d0da9038a": {
-    "reader": "Standards /root/standards",
-    "reason": "Missing tick counts zero and one both remain below the four tick finding threshold."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x__clean__mutmut_12:4fb4618b48213b4eab942a5786cf204463c2648cf06eea1421b16feb92548c53": {
-    "reader": "Standards",
-    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_is_built_slug__mutmut_4:d2882cb3fe0c11f9cad4339cc890853c6ff2d26179b72a832527f41597cc3e3f": {
-    "reader": "Standards",
-    "reason": "A placeholder matches no slug pattern, exactly like the empty string."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_plan_slug__mutmut_15:b0d4a10470d0f0e1e021b02a9fdc6a2c1cab0837db75c02abfcb77ff584360fc": {
-    "reader": "Standards",
-    "reason": "Text is lowered before the strip, so uppercase X in the strip set can never match."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_proof_slug__mutmut_42:ebfc1495213a90b5992410dd5ab704e473860d5a6ee8858a94e57b7954d01a74": {
-    "reader": "Standards",
-    "reason": "One extra candidate past the taken count never changes which first free name is picked."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_23:2b3d98ff355d60b711fb2b1139e036ce124cac16d96d7d1bd18ec9ae4ce187ee": {
-    "reader": "Standards",
-    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_25:5384ddd7792fa78525c37eac7fc7a3a1b626494561441f35d0602d0c47e6e622": {
-    "reader": "Standards",
-    "reason": "A placeholder path that is not a git dir falls back to the folder name exactly like the empty path."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_5:cea2e7ee10d185b0dc8894880204201dc8db0f2267fb5844060bc9b406ede81f": {
-    "reader": "Standards",
-    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_9:7255a9b5ff4351838ec93ba7be6dcd17ae44bbc4e1420a524fdc3bda1028ff49": {
-    "reader": "Standards",
-    "reason": "The git timeout bound only matters for a hung git; the name read is the same."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_session_base__mutmut_25:ed4b344397b1099febd47535f333babb792d1a11ce0427de3ecff5bad9ad6416": {
-    "reader": "Standards",
-    "reason": "The placeholder has no hex characters after lowering and stripping, so it acts as a missing id."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_space__mutmut_1:681eaca2f4e66cd0a3553171332fd6b1655f9d80e82d11b95502037ef032a2a2": {
-    "reader": "Standards",
-    "reason": "A changed default slug is still not a proof slug, so the label stays repo and code."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_tmp_worktree__mutmut_14:e902f20f3d1d342c3697f42354b21dfdd07e4b0df302ba4536653f1dac137fd5": {
-    "reader": "Standards",
-    "reason": "One extra candidate past the taken count never changes which first free name is picked."
-  },
-  "scripts/swarm/naming.py:scripts.swarm.naming.x_worktree__mutmut_14:50cbeaffaf4b85db159528ee201b0c67f17961a40424951b58ca394b3e66f878": {
-    "reader": "Standards",
-    "reason": "One extra candidate past the taken count never changes which first free name is picked."
-  },
-  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_12:828d31cc739947d900704d92e3787db2d2e1ebbdc6f3c7c7f15480c16d87f32b": {
-    "reader": "Standards",
-    "reason": "The confirmation pattern is matched with re.I, so upper casing its letters matches exactly the same footers."
-  },
-  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_21:6579613443d4e3d56e7997967a445eb4a9eb66234972d92237cc5913a1136686": {
-    "reader": "Standards /root/standards",
-    "reason": "Literal word case preserves all regex matches under re.I."
-  },
-  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_33:472bb940820328ca7dce0df9d3140d760f71ec3973dcd2a0cb0024eb50627267": {
-    "reader": "Standards /root/standards",
-    "reason": "Literal word case preserves all regex matches under re.I."
-  },
-  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_9:621e1e54433d2b39917cb539813e8bf1440aa9e6142ff41ec747585be6765b94": {
-    "reader": "Standards /root/standards",
-    "reason": "Hex escape digit case denotes the same escape byte."
-  },
-  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_3:013146ed3e90e52f4d04638c2bef67bbddf2feeb4dbd9da39e3cb2730acdc3c3": {
-    "reader": "Standards",
-    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
-  },
-  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_5:bdc5ca81647e17a4b7402b00bc2fd3afd7eb5ab58a954af5a2a118110724599a": {
-    "reader": "Standards",
-    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
-  },
   "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_24:19c788d22295248b72afdded7a527a1d127caff334f57559dcc85f7a5ff35f9f": {
     "reader": "Standards",
     "reason": "A missing pane text defaults to a string with no input marker, confirmation line or escape codes, so selection_prompt and typed_input both return empty exactly as for an empty default."
   },
-  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1observe__mutmut_40:4123c5fa4c231ce83765b6bf1b66e0f332b14e490a50d5d71dae6844e29bd60f": {
-    "reader": "Standards /root/standards",
-    "reason": "Absent capture text is empty or XXXX; both lack a selection dialog and return the same observed state."
-  },
-  "scripts/swarm/slice_check.py:scripts.swarm.slice_check.x__task__mutmut_11:ba393c0fa500035d35fae755c4bfdb362d38932e495d22a7752b9b01fbaf4419": {
-    "reader": "Standards",
-    "reason": "Any default description under twenty words yields the same under twenty words problem line; an empty and an XXXX default both returned it."
-  },
-  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_5:16538ba358287064156593d27f28e92076b6df14247465396575de341381c291": {
-    "reader": "Standards /root/standards",
-    "reason": "Master observation returns before ledger is used."
-  },
-  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_7:b352cc411cb90bb7cef57ba21a5944c592da8836b567de21e9c76ca6589d685c": {
-    "reader": "Standards /root/standards",
-    "reason": "Master observation returns before task rows are used."
-  },
-  "scripts/swarm/tick.py:scripts.swarm.tick.x__reap__mutmut_9:3a19000dfa0194f0917d772f84ef1ae2082dd6416e19320087b022e52e6045d5": {
-    "reader": "Standards /root/standards",
-    "reason": "Master observation returns before time is used."
-  },
-  "scripts/swarm_ledger/ledger_core.py:scripts.swarm_ledger.ledger_core.x_sync__mutmut_45:2bf422db14b95136fa0fe1fdb2b39a5ae8e90546be926d3d6150b549406d4918": {
-    "reader": "Standards",
-    "reason": "json.dumps treats ensure_ascii as a truth value, so None and False write identical bytes."
-  },
-  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_35:d50ca94a7ad62d23b42962df006ce068499d70ef774a1dc14508a43125c6dc99": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "When rounds is absent, changing the type-check default from zero to one preserves integer validation. Supplied rounds is unchanged and the stored review still defaults to zero."
-  },
-  "scripts/swarm_ledger/ledger_phases.py:scripts.swarm_ledger.ledger_phases.x_check_review__mutmut_43:ad2c72a392f5327baa8e97d84cc58b6798d5fc2c98cf52127ee02860045f0e48": {
-    "reader": "Standards reviewer /root/standards",
-    "reason": "When rounds is absent, changing the negative-comparison default from zero to one preserves acceptance because both are nonnegative. Supplied rounds is unchanged and the stored review still defaults to zero."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_ensure__mutmut_3:83b5c3341eba581ced3779613419d723ad3759b23941b92a53d6879c071fd292": {
-    "reader": "Standards",
-    "reason": "False and None are only tested through not started before both branches assign True. The independent reader verified identical truth values at both reads; the value is never returned or printed."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_1:22c036ec25caa9297fe7ec7adc4e062a2b37bf413c1d29cce86032f8ee4907a6": {
-    "reader": "Standards",
-    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_23:a8158a3ed8d7c24b7f7bc338c597ff1d301437e6247110eb763faa007c50ba4b": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_25:c81d0e3db8891441b0cfd28155f0563ef68dfee95ce03fe763956cbe19b1e516": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_3:27ea0c4ceebdf02082cc8d9f1216648744f9179bf5c9da88f3b7025a20993eff": {
-    "reader": "Standards",
-    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_40:eaedbf4a62c8327edc6b4f274a2c8eb2ea280c38099c63223b3c40f246f73ffe": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_42:56ac4f73cbc1ec13a84f7ccf890447b82ed22904850f8505327ba7519015b6a8": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_6:57190dbe02406a32dfabc33537cfeb564d6b45d494bb952f0f9304e8630513dd": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_8:e2803e6e1b388fdd1fc78524831e6a3456418629675d0f72ff3f73500e551a9b": {
-    "reader": "Standards",
-    "reason": "encoding=None or encoding=\"UTF-8\" on reading palette.css, tooltips.js or home.html: all three files are pure ASCII (no byte above 0x7F), so every ASCII-compatible decoding yields the same text and the same page."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_port_held__mutmut_7:f81d7fd245b87bb253cce437f7d57b97d3f88a2b187ad9fb823e14e3d471b215": {
-    "reader": "Standards",
-    "reason": "Linux SO_REUSEADDR treats both 1 and 2 as enabled. The independent reader observed getsockopt returning 1 and an occupied listener returning bind errno 98 for both values."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_4:36d3beba1cd47ad89a91902da0d676d2b1ad9b87097be0a3cc581c2935f66222": {
-    "reader": "Standards",
-    "reason": "Splitting on every question mark leaves the same first piece, so the route match is unchanged."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_7:b236342b0227b49ca801ecc70cad325efd4519a4eb9998cf3954b53f396594d8": {
-    "reader": "Standards",
-    "reason": "A second split point leaves the same first piece, so the route match is unchanged."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_22:26bef4343065a27111b4674bf5791768f1b78a1edc7883bd3910126b2247e099": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_23:f743e0991c556738ecf79cc64f14696cbb6a6e8247e9f7510570b658b4e25b27": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
-    "reader": "Standards",
-    "reason": "A missing Content-Type falls back to a string that still fails the JSON prefix check, so the reply stays 415."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_3:598997e79f7d412167c6beee1ac5fbdcca3b57fb3508ad28c522061f439fef33": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_44:ff6bf571515052f282afd075fe537c98e6917c4f74038e1db2466cbf96d9d1fe": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_45:dd9465c9ef8129804fadd87b9b90455a5b5e605b288544bb0bd62198c9e1cadc": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_4:9b560b3ea8ee97b8922ab8351286750b7970668329d2c637234a54bdcaa23c49": {
-    "reader": "Standards",
-    "reason": "HTTP header names are case insensitive, so the request headers answer the same lookup in any case."
-  },
-  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1receive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.xǁHandlerǁreceive__mutmut_3:47b0a5f5739a912849451da407cb6339e358d2d3c322d33c37aa97a1e532db78": {
     "reader": "Standards",
     "reason": "FileLedgerRepository.get_document branches on reconcile truthiness; False and None select the identical locked persisted-document read."
-  },
-  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_12:747e01d76ab13d252e441fed518a6baf08549498c3fd7d3a0df07930366ad2a3": {
-    "reader": "Standards",
-    "reason": "XXengXX and eng both compare false to plan; fallback has no other use."
-  },
-  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_13:b301907356784e75e70a6b414e8b695786a03434d3d3dc8ab2f31e968703ac73": {
-    "reader": "Standards",
-    "reason": "ENG and eng both compare false to plan; fallback has no other use."
-  },
-  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_7:a2b21da0043f0338cd4a8e0abde5f84f0ab330550851ef37a99260567d4365be": {
-    "reader": "Standards",
-    "reason": "Missing-lane fallback None compares false to plan, identically to eng; present lanes are unchanged."
-  },
-  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_9:155c10d7db7cd9a90cb659faf65c8296c91cf88ec51f969b765288d4217f974d": {
-    "reader": "Standards",
-    "reason": "Omitting the fallback produces None; validation decisions remain identical."
-  },
-  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_scaffold__mutmut_31:43500b49967aa73a3494cc3f3ccb1eb29f575a696a113e8dc682f7707d944bc7": {
-    "reader": "Standards",
-    "reason": "UTF-8 and utf-8 resolve to the same codec and produce identical bytes."
   },
   "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_10:141e8079219216f05e310be8020efb48c38cdbfc5c7db7568cad3dcdf789adc2": {
     "reader": "Standards",
@@ -630,26 +658,6 @@
   "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_17:3b5563eddcc9c946680e42b0d49b3afc9e6707565a41787601877c92fe53c545": {
     "reader": "Standards",
     "reason": "Creation supplies a new empty members dictionary; _join defaults the missing role to member and records the same joined event."
-  },
-  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_4:b9c9543d038e1b0a69b604664227b815ca5136cbf40f82e9f8b9f7e6926461d6": {
-    "reader": "Standards",
-    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
-  },
-  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_render__mutmut_6:1f6a63fb480bb4fbae1e1b4ba37449e208522e88087198be1e33f6e376fe1acf": {
-    "reader": "Standards",
-    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
-  },
-  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_4:4fe314b3d1f16cda1066861a9ccd963e611f6967fd06f237750723688b7bb23a": {
-    "reader": "Standards",
-    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
-  },
-  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_upgrade_page__mutmut_6:c9be4449868d4c7f9452753211d2131461aefd29ed69a06e16a0b01036b3c3ff": {
-    "reader": "Standards",
-    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
-  },
-  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence__mutmut_88:ad63b86a19f7b8761207798ae88acf1a8d39c2124904d8f5fcfc0925a466292d": {
-    "reader": "Standards",
-    "reason": "ensure_ascii None and False select the same JSON encoding branch."
   },
   "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_auto_bin__mutmut_18:a48917aaad3de6ad3c2783e6223fc519af6d63dad91b5e592baa35976bc2a10b": {
     "reader": "Standards",
@@ -691,28 +699,20 @@
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1events_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁevents_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1get_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁget_document__mutmut_12:5564d2623e14c85100e77a910247efd21328caebb4f372d48c565eb6827086a2": {
     "reader": "Standards",
     "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
   },
-  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.xǁFileLedgerRepositoryǁread_snapshot__mutmut_6:4cf49a8e028eef0200c330b480f3e0598383a25882b4167acf0cf88fcc4f6f48": {
     "reader": "Standards",
     "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
-  },
-  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_7:6ef10d40716dffe816d0047f12c2c6aa17de202e1bc4f34b60cab5f6bdf66508": {
-    "reader": "Standards",
-    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
-  },
-  "scripts/targets/claude_target.py:scripts.targets.claude_target.x_settings_document__mutmut_9:db650bcc5795fba8ce5b52cdf81787eff48ad84aac2763ff09f571e17b294e40": {
-    "reader": "Standards",
-    "reason": "settings_document reads profile_env only through a truthiness check, so a missing env key yields a falsy value with or without the empty-dict default."
   }
 }
