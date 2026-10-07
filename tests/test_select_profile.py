@@ -414,3 +414,18 @@ def test_init_agent_allows_supported_profile_harness_pair(profile, tmp_path, cap
     assert f"agent={agent}\n" in output.out
     assert "profile=engineer\n" in output.out
     assert "status=dry-run\n" in output.out
+
+
+def test_a_dependency_restart_relaunches_through_the_original_profile(profile, monkeypatch, tmp_path, capsys):
+    from hooks.lifecycle import refresh
+
+    original = refresh.Original("sid-1", "eng-a", str(tmp_path), "", 4242, "engineer", "opus", "high")
+    _, launch = refresh.restart_commands(original)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    assert init_agent.main(["--dry-run", *launch[2:]], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)}) == 0
+    text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert "select-profile engineer --agent claude --" in text
+    assert "--model opus --effort high" in text
+    assert "--resume sid-1" in text
+    assert "profile=engineer" in capsys.readouterr().out
