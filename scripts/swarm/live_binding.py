@@ -146,10 +146,8 @@ def bound_session(agent: AgentRecord, sessions: list[Session]) -> Session | None
 
 
 def _unheld(agent: AgentRecord) -> list[str]:
-    held = assignment(agent)
-    if not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness):
-        held["home"] = ""
-    return [field for field, value in held.items() if not value]
+    homeless = not agent.profile_decision.get("validation", {}).get("home") and not (agent.profile and agent.harness)
+    return [field for field, value in assignment(agent).items() if not value or (field == "home" and homeless)]
 
 
 def unknown(agent: AgentRecord, facts: dict) -> list[str]:

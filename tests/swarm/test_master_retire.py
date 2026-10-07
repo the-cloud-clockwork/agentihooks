@@ -294,3 +294,46 @@ def test_the_idle_limit_leaves_a_master_held_for_another_reason_alone(swarm):
     assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
     assert runtime.masters[-1][0] != master.name
     assert lifetime.IDLE_LIMIT == "the swarm idle limit"
+
+
+def test_the_ask_names_its_reason_and_its_close_says_where_the_work_went(swarm):
+    store, _, _, master = swarm
+    master_retire.hold(store, "sw", master, "a named reason", True, 200)
+    (ask,) = asks(store, master.name)
+    assert ask.text.startswith("The swarm is retiring you: a named reason. ")
+    master_retire.forget(store, "sw", master.name)
+    assert InboxStore(store.redis).get(ask.id).reason == "done: the master handed off or was retired"
+
+
+def test_a_master_at_exactly_the_idle_limit_is_not_asked(swarm):
+    store, runtime, ledger, master = swarm
+    runtime.statuses[master.name] = "idle"
+    tick("sw", store, ledger, runtime, master.started_at + 6 * 60 * 60 * 1000)
+    assert asks(store, master.name) == []
+
+
+def test_a_done_master_past_the_idle_limit_is_asked(swarm):
+    store, runtime, ledger, master = swarm
+    runtime.statuses[master.name] = "done"
+    tick("sw", store, ledger, runtime, master.started_at + 6 * 60 * 60 * 1000 + 1)
+    assert master_retire.reason(store, "sw", master.name) == lifetime.IDLE_LIMIT
+
+
+def test_a_held_master_does_not_stop_a_later_agent_from_being_verified(swarm):
+    store, runtime, ledger, master = swarm
+    worker = replace(master, name="engineer@zz", lane="eng", task="t1", seat="eng-1@sw", pane_id="w1:p9")
+    store.put_agent("sw", worker)
+    runtime.live.add(worker.name)
+    runtime.bindings = lambda agents: {a.name: {**live_binding.assignment(a), "hooks": False} for a in agents}
+    tick("sw", store, ledger, runtime, 200)
+    assert master.name not in runtime.killed and worker.name in runtime.killed
+
+
+def test_a_stopping_master_without_a_handoff_is_retired_at_the_deadline(swarm):
+    store, runtime, ledger, master = swarm
+    store.update("sw", state="stopping")
+    tick("sw", store, ledger, runtime, 200)
+    tick("sw", store, ledger, runtime, 200 + WAIT - 1)
+    assert master.name not in runtime.killed
+    actions = tick("sw", store, ledger, runtime, 200 + WAIT)
+    assert runtime.killed == [master.name] and actions[-1] == "stopped"
