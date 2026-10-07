@@ -29,7 +29,8 @@ def test_recorded_requests_exercise_the_required_behavior(tmp_path):
     assert documents[6]["tasks"][0]["state"] == "claimed"
     assert documents[7]["tasks"][0]["state"] == documents[8]["tasks"][0]["state"] == "done"
     [seed] = [json.loads(r["stale_seed"]["body"]) for r in records if "stale_seed" in r]
-    assert seed["overview"] == "Agent edit" and seed["phases"][0]["done"] is True
+    assert seed["overview"] == "Recorded requests" and seed["phases"][0]["done"] is True
+    assert any("too old to merge" in warning for warning in seed["_meta"]["warnings"])
     assert [r["bin"]["status"] for r in records if "bin" in r] == [200, 200, 404]
     assert len(records[-1]["inbox"]) == 2
     assert {r["address"] for r in records[-1]["inbox"]} == {"master@replay"}
