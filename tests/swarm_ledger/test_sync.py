@@ -4,9 +4,10 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
-from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
+
+from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 
 SLUG = "sync-2026-01-01"
 
