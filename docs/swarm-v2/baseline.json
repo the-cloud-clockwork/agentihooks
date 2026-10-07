@@ -1,13 +1,13 @@
 {
   "schema": "swarm-v2-baseline/1",
-  "observed_at": "2026-10-07T19:37:44Z",
+  "observed_at": "2026-10-07T19:59:39Z",
   "repositories": [
     {
       "repo": "agentihooks",
       "source": {
         "branch": "dev",
         "status": "resolved",
-        "commit": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d"
+        "commit": "f6d48929a0d43347feca07d9510ca91e14b49dbe"
       },
       "interfaces": [
         {
@@ -157,9 +157,9 @@
       "deployed": [
         {
           "name": "ArgoCD synced revision",
-          "status": "verified",
-          "value": "0edc7cdf2edf154e879db6d8b41c2bdb92e65c8c",
-          "matches_source": true
+          "status": "unverified",
+          "value": null,
+          "reason": "exit 1: E1007 22:00:07.087008 2326560 <redacted-host>] \"Unexpected error when reading response body\" err=\"net/http: request canceled (Client.Timeout or context cancellation while reading body)\"\nerror: unexpec"
         },
         {
           "name": "cluster autoscaler image",
@@ -168,7 +168,8 @@
         }
       ],
       "unknown_live": [
-        "live autoscaling group desired capacity and instance counts (AWS read access not exercised)"
+        "live autoscaling group desired capacity and instance counts (AWS read access not exercised)",
+        "ArgoCD synced revision"
       ]
     }
   ],
@@ -196,10 +197,16 @@
       "from": "d074deceeeb0ed58a16eccd15acf2165982385bb",
       "to": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d",
       "observed_at": "2026-10-07T19:37:44Z"
+    },
+    {
+      "repo": "agentihooks",
+      "from": "2bfd09c2f23dbb54c59baaba1cb0c1948fb1f55d",
+      "to": "f6d48929a0d43347feca07d9510ca91e14b49dbe",
+      "observed_at": "2026-10-07T19:59:39Z"
     }
   ],
   "measurements": {
-    "baseline_unverified_items": 1,
+    "baseline_unverified_items": 2,
     "baseline_drift_items": 1
   }
 }
