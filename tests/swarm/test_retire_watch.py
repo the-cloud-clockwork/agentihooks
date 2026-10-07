@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.swarm import retire_watch
@@ -12,6 +11,8 @@ REFUSED = {"process": 77, "refusal": "survived SIGKILL: 77"}
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     s.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     return s
