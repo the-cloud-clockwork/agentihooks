@@ -5,7 +5,7 @@ from collections.abc import Mapping
 WORKERS = frozenset({"eng", "ci"})
 WAIT_TOOLS = frozenset({"Bash", "Monitor"})
 SHELL_WAIT_RE = re.compile(
-    r"(?:^|[;&|({\n])\s*(?:sleep\s+\S|(?:until|while)\s[^;\n]*[;\n]\s*do\b"
+    r"(?:^|[;&|({\n])\s*(?:(?:do|then|else|nohup|timeout\s+\S+)\s+)*(?:sleep\s+\S|(?:until|while)\s[^;\n]*[;\n]\s*do\b"
     r"|gh\s+run\s+watch\b|gh\s+pr\s+checks\b[^;&|\n]*--watch)"
 )
 
