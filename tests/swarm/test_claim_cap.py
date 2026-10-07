@@ -43,18 +43,12 @@ def test_every_claim_the_tick_makes_counts_one_agent_life(store):  # noqa: F811
     assert (len(runtime.spawned), store.claims("sw", "t1"), store.claims("sw", "t2")) == (1, 1, 0)
 
 
-def test_three_failed_launches_spend_the_lives_and_the_block_names_the_last_failure(store):  # noqa: F811
+def test_failed_launches_leave_the_task_open_without_spending_lives(store):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime(fail=True)
-    for now_ms in (1_000, 2_000, 3_000):
+    for now_ms in (1_000, 2_000, 3_000, 4_000):
         tick("sw", store, ledger, runtime, now_ms=now_ms)
-    assert (store.claims("sw", "t1"), ledger.rows["t1"]["state"], ledger.comments) == (3, "open", [])
-    store.put_handoff("sw", "t1", "handoff body", envelope={"reason": "recycle"})
-    actions = tick("sw", store, ledger, runtime, now_ms=4_000)
-    reason = refusal(3, "recycle", "herdr down", "sw", "t1")
-    assert ledger.rows["t1"]["state"] == "blocked"
-    assert ledger.comments == [("sw", "t1", reason, "swarm")]
-    assert f"blocked t1: {reason}" in actions
-    assert (store.claims("sw", "t1"), store.launch_failure("sw", "t1")) == (0, "")
+    assert (store.claims("sw", "t1"), ledger.rows["t1"]["state"], ledger.comments) == (0, "open", [])
+    assert store.launch_failure("sw", "t1") == "herdr down"
 
 
 def test_a_successful_launch_after_failures_counts_its_claim_once(store):  # noqa: F811
@@ -64,7 +58,7 @@ def test_a_successful_launch_after_failures_counts_its_claim_once(store):  # noq
     runtime.fail = False
     tick("sw", store, ledger, runtime, now_ms=3_000)
     tick("sw", store, ledger, runtime, now_ms=4_000)
-    assert ([task for _, _, task in runtime.spawned], store.claims("sw", "t1")) == (["t1"], 3)
+    assert ([task for _, _, task in runtime.spawned], store.claims("sw", "t1")) == (["t1"], 1)
     assert ledger.rows["t1"]["state"] == "claimed"
 
 
