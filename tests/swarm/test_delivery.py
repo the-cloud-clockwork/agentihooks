@@ -24,7 +24,7 @@ class PageLedger:
     def __init__(self):
         self.said = []
 
-    def say(self, slug, text, by=None):
+    def relay(self, slug, text, by):
         self.said.append((text, by))
 
 
@@ -101,10 +101,10 @@ def test_a_refused_page_post_closes_that_item_alone_and_tells_its_sender(store):
     from scripts.swarm.store import SwarmError
 
     class StrictLedger(PageLedger):
-        def say(self, slug, text, by=None):
+        def relay(self, slug, text, by):
             if "18:45" in text:
                 raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
-            super().say(slug, text, by)
+            super().relay(slug, text, by)
 
     box = InboxStore(store.redis)
     refused = box.send("sw-eng-1", "operator", "the job finished at 18:45")

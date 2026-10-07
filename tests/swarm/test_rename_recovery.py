@@ -75,7 +75,7 @@ def test_existing_replies_and_targeted_messages_use_aliases(store):
     assert delivery.recipients(store, "sw", old, "master") == [agent]
     assert delivery.recipients(store, "sw", "all", old) == []
     posted = []
-    ledger = SimpleNamespace(say=lambda slug, text, by: posted.append((text, by)))
+    ledger = SimpleNamespace(relay=lambda slug, text, by: posted.append((text, by)))
     assert delivery.relay_to_page(inbox, "sw", [agent], ledger) == 1
     assert posted == [("report", new)]
     assert inbox.get(item.id).state == "done"
