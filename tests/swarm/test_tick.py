@@ -340,6 +340,37 @@ def test_every_lane_takes_a_session_before_any_lane_takes_a_second(store):
     assert ledger.rows["t2"]["state"] == "open"
 
 
+def test_the_spawn_pass_says_when_it_stops_at_the_session_cap(store):
+    actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "eng")), SessionsLeft(1), now_ms=1_000)
+    assert "every agent is at its session cap, waiting" in actions
+
+
+def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime, seen = tasks(("t1", "eng")), FakeRuntime(), []
+    spawn = runtime.spawn
+
+    def watching(config, lane, name, task, spawns=None):
+        seen.extend(a.state for a in store.agents("sw") if a.name == name and lane != MASTER)
+        return spawn(config, lane, name, task, spawns)
+
+    runtime.spawn = watching
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert seen == ["starting"]
+    assert 0 < store.redis.pttl(store.key("sw", "claim", "t1")) <= LEASE_MS
+    assert [e["at"] for e in store.seats.history("eng-1@sw")] == [1_000]
+    assert "kind" not in ledger.rows["t1"]
+
+
+def test_a_task_claimed_elsewhere_mid_pass_does_not_stop_the_tasks_behind_it(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    claim = store.claim
+    store.claim = lambda slug, task, agent, lease: task != "t1" and claim(slug, task, agent, lease)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t2"]
+
+
 def test_a_dead_agent_with_an_open_pull_request_hands_the_task_back(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
