@@ -308,6 +308,13 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
 
 def test_dev_push_refreshes_stored_durations_after_tests_pass():
     workflow = _workflow()
+    if "refresh-durations" not in workflow["jobs"]:
+        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
+        assert len(scheduled["on"]["schedule"]) == 1
+        command = next(step["run"] for step in scheduled["jobs"]["refresh"]["steps"] if "run" in step)
+        assert "python -m tests.refresh_durations --ci 5" in command
+        assert "scripts/ci_bot_pr.sh" in command
+        return
     job = workflow["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint"]
     assert job["if"] == "github.event_name == 'push'"
@@ -325,6 +332,17 @@ def test_dev_push_refreshes_stored_durations_after_tests_pass():
 
 @pytest.mark.parametrize("moved,source", [("before", "42"), ("during", "42"), ("never", "42"), ("never", "")])
 def test_duration_refresh_never_replays_old_measurements_onto_new_dev(tmp_path, moved, source):
+    if "refresh-durations" not in _workflow()["jobs"]:
+        scheduled = yaml.safe_load((_ROOT / ".github/workflows/refresh-durations.yml").read_text())
+        checkout = next(
+            step for step in scheduled["jobs"]["refresh"]["steps"] if step.get("uses") == "actions/checkout@v4"
+        )
+        assert checkout["with"]["ref"] == "dev"
+        helper = (_ROOT / "scripts/ci_bot_pr.sh").read_text()
+        assert 'git push origin "HEAD:refs/heads/$branch"' in helper
+        assert "HEAD:dev" not in helper
+        assert "pull --rebase" not in helper
+        return
     command = next(
         step["run"]
         for step in _workflow()["jobs"]["refresh-durations"]["steps"]
