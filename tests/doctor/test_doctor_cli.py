@@ -476,10 +476,18 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
 @pytest.mark.parametrize(
     "finding,flags,error",
     [
-        ("failed-spawn/mu1", ["--since", "2026-10-07T09:00Z"], "must be supplied together"),
-        ("failed-spawn/mu1", ["--until", "2026-10-07T12:00Z"], "must be supplied together"),
-        ("failed-spawn/mu1", ["--since", "bad", "--until", "2026-10-07T12:00Z"], "--since takes an ISO time"),
-        ("failed-spawn/mu1", ["--since", "2026-10-07T09:00Z", "--until", "bad"], "--until takes an ISO time"),
+        ("failed-spawn/mu1", ["--since", "2026-10-07T09:00Z"], "--since and --until must be supplied together"),
+        ("failed-spawn/mu1", ["--until", "2026-10-07T12:00Z"], "--since and --until must be supplied together"),
+        (
+            "failed-spawn/mu1",
+            ["--since", "bad", "--until", "2026-10-07T12:00Z"],
+            "--since takes an ISO time such as 2026-10-06T12:00Z, not bad",
+        ),
+        (
+            "failed-spawn/mu1",
+            ["--since", "2026-10-07T09:00Z", "--until", "bad"],
+            "--until takes an ISO time such as 2026-10-06T12:00Z, not bad",
+        ),
         (
             "failed-spawn/mu1",
             ["--since", "2026-10-07T12:00Z", "--until", "2026-10-07T12:00Z"],
@@ -498,7 +506,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "only supported for failed-spawn",
+            "journal bounds are only supported for failed-spawn findings",
         ),
     ],
 )
@@ -508,5 +516,39 @@ def test_failed_spawn_measure_refuses_invalid_bounds(env, monkeypatch, capsys, f
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     assert doctor.main([WATCHED, "measure", finding, *flags]) == 1
     output = capsys.readouterr()
-    assert error in output.err
+    assert output.err == f"doctor: {error}\n"
     assert output.out == ""
+
+
+def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
+    seen = []
+    monkeypatch.setattr(
+        doctor.detect.spawn_read, "records", lambda *a, **kw: seen.append(kw) or {"slug": WATCHED, "actions": []}
+    )
+    flags = ["--since", "2026-10-07T13:00Z", "--until", "2026-10-07T16:00Z"]
+    assert doctor.main([WATCHED, "measure", "failed-spawn/mu1", *flags]) == 0
+    assert seen == [{"since": "@1791378000.000", "until": "@1791388800.000"}]
+    assert capsys.readouterr().out == "failed-spawn/mu1 0\n"
+
+
+def test_other_measures_read_every_detector_at_one_instant(env, monkeypatch, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
+    calls = []
+
+    def readers(actual_store, ledger, slug, now):
+        calls.append((actual_store, type(ledger), slug, now))
+        return {"health": lambda: [STALE], "inbox": lambda: 1 / 0}
+
+    monkeypatch.setattr(doctor.detect, "readers", readers)
+    assert doctor.main([WATCHED, "measure", STALE.id]) == 0
+    assert calls == [(store, swarm_cli.LedgerClient, WATCHED, 1791388800000)]
+    output = capsys.readouterr()
+    assert output.out == f"{STALE.id} {STALE.measure}\n"
+    assert output.err == "the inbox detector failed: ZeroDivisionError: division by zero\n"
