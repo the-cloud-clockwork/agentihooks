@@ -1,6 +1,7 @@
 """Who a ledger request acts for: the operator's page credential, or one agent's credential bound to ledger and name.
 
-A pinned swarm session sends the agent credential, so the server derives its author and role from the binding.
+A pinned swarm session sends the agent credential, so the server derives its author and role from the binding. The
+binding governs the transport a session selects; any process of the operator's user can read the page credential.
 """
 
 import hashlib
@@ -13,13 +14,17 @@ def agent_token(admin, slug, name):
     return hmac.new(admin.encode(), f"{slug}\n{name}".encode(), hashlib.sha256).hexdigest()
 
 
+def _same(given, expected):
+    return hmac.compare_digest(given.encode(), expected.encode())
+
+
 def principal(admin, slug, token, agent):
     """'' for the operator, the agent's name for a bound agent, None for a refused credential."""
     if not admin or not token:
         return None
-    if token == admin:
+    if _same(token, admin):
         return ""
-    if agent and token == agent_token(admin, slug, agent):
+    if agent and _same(token, agent_token(admin, slug, agent)):
         return agent
     return None
 

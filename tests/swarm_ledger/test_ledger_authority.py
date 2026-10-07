@@ -11,13 +11,15 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import ledger  # noqa: E402
-import ledger_authority as authority  # noqa: E402
+import ledger as cli_ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
+from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
+from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
+
+server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
 
 SLUG = "authority-proof"
@@ -50,6 +52,7 @@ def live():
         patch.object(server, "doctor_phrase", return_value=None),
         patch.object(server, "ALLOWED_HOSTS", {host}),
         patch.object(ledger, "BASE", f"http://{host}"),
+        patch.object(cli_ledger, "BASE", f"http://{host}"),
     ):
         thread.start()
         try:
@@ -140,7 +143,7 @@ def test_a_bound_master_still_adds_tasks(crew):
 
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
     alias = "engineer-323133-0256"
-    with pinned(), patch.object(authority, "resolve_name", lambda name: WORKER if name == alias else name):
+    with pinned(), patch.object(server.authority, "resolve_name", lambda name: WORKER if name == alias else name):
         said = operation("add", by=alias, thread="chat", text="Alias control")
         reply = ledger.request(SLUG, [said])
     assert said["id"] not in reply["rejected"]
@@ -219,6 +222,30 @@ def test_the_principal_resolves_from_the_credential():
     assert authority.principal("admin-secret", SLUG, "", None) is None
     assert authority.principal(None, SLUG, "", None) is None
     assert authority.principal("", SLUG, "", None) is None
+    assert authority.principal("", SLUG, authority.agent_token("", SLUG, WORKER), WORKER) is None
+    assert authority.principal("admin-secret", SLUG, "admin-secrét", None) is None
+
+
+def test_call_keeps_the_service_choice_when_it_retries_after_starting_the_server():
+    seen = []
+
+    def request(slug, ops, service):
+        seen.append((slug, ops, service))
+        if len(seen) % 2:
+            raise OSError("not answering")
+        return {"rejected": []}
+
+    with patch.object(ledger, "request", request), patch.object(ledger.subprocess, "run") as run:
+        assert ledger.call(SLUG, [], service=True) == {"rejected": []}
+        assert ledger.call(SLUG) == {"rejected": []}
+    assert seen == [(SLUG, [], True), (SLUG, [], True), (SLUG, None, False), (SLUG, None, False)]
+    assert run.call_count == 2
+
+
+def test_a_page_without_a_token_sends_an_empty_credential(live):
+    core.paths("tokenless")[0].write_text("<html></html>")
+    with patch.dict(os.environ, {"AGENTIHOOKS_SWARM": ""}):
+        assert ledger.credentials("tokenless") == {"X-Ledger-Token": ""}
 
 
 def test_refusals_name_why_each_op_is_refused():
