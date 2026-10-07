@@ -957,9 +957,10 @@ def reloading(environ=os.environ) -> bool:
 
 def watch_seeds(interval=2.0):
     seen = {}
-    started = code_stamp() if reloading() else None
+    started = code_stamp()
+    reload = reloading()
     while True:
-        if started is not None:
+        if reload:
             reload_if_changed(started)
         try:
             ledger_bin.tidy()
