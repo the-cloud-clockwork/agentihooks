@@ -87,18 +87,16 @@ def _repo_url(url: str, base: Path) -> str:
     return str(base / Path(url).expanduser()) if url else ""
 
 
-def _kubectl_verb(args: tuple[str, ...]) -> str:
-    skip = False
-    for arg in args:
-        if skip:
-            skip = False
-        elif arg in KUBECTL_VALUE_FLAGS:
-            skip = True
+def _kubectl_verb(args: tuple[str, ...]) -> str | None:
+    words = iter(args)
+    for arg in words:
+        if arg in KUBECTL_VALUE_FLAGS:
+            next(words, None)
         elif not arg.startswith("-"):
             return arg
         elif "=" not in arg:
-            return ""
-    return ""
+            return None
+    return None
 
 
 def read_only(argv: tuple[str, ...]) -> bool:
@@ -184,7 +182,7 @@ def _run_command(probe: Probe) -> dict:
 
 
 def _read_http(probe: Probe) -> dict:
-    base = os.environ.get(probe.url_env, "") if probe.url_env else probe.url
+    base = os.environ.get(probe.url_env) if probe.url_env else probe.url
     if not base:
         return _unverified(probe, f"{probe.url_env} is not set")
     try:
@@ -233,14 +231,13 @@ def _interface(checkout: str, commit: str, path: str) -> dict:
 def check_interfaces(repo: Repository, commit: str | None) -> list[dict]:
     if not repo.interfaces:
         return []
-    reason = ""
     if not commit:
         reason = "source head unresolved"
     elif not repo.checkout:
         reason = "no local checkout configured"
     else:
         found = _git_ok(repo.checkout, "cat-file", "-e", f"{commit}^{{commit}}")
-        reason = {None: "git did not answer", False: "source head not in local checkout"}.get(found, "")
+        reason = {None: "git did not answer", False: "source head not in local checkout"}.get(found)
     if reason:
         return [{"path": path, "status": "unverified", "reason": reason} for path in repo.interfaces]
     return [_interface(repo.checkout, commit, path) for path in repo.interfaces]
@@ -263,7 +260,7 @@ def _observe_repo(repo: Repository, branch: str) -> dict:
 def _drift(previous: dict | None, repositories: list[dict], observed_at: str) -> list[dict]:
     if not previous:
         return []
-    before = {r["repo"]: r["source"].get("commit") for r in previous.get("repositories", ())}
+    before = {r["repo"]: r["source"].get("commit") for r in previous["repositories"]}
     entries = []
     for repo in repositories:
         old, new = before.get(repo["repo"]), repo["source"]["commit"]
@@ -287,7 +284,7 @@ def collect(sources: Sources, previous: dict | None = None, now: Callable[[], st
     observed_at = (now or _utc_now)()
     repositories = [_observe_repo(repo, sources.branch) for repo in sources.repositories]
     new_drift = _drift(previous, repositories, observed_at)
-    history = list(previous.get("drift", ())) if previous else []
+    history = list(previous["drift"]) if previous else []
     return {
         "schema": SCHEMA,
         "observed_at": observed_at,
@@ -367,7 +364,7 @@ def _write(path: Path, text: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Record Swarm v2 source and deployment baselines read-only.")
-    parser.add_argument("--sources", required=True, type=Path)
+    parser.add_argument("--sources", required=True)
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--json", required=True, type=Path)
     parser.add_argument("--markdown", required=True, type=Path)

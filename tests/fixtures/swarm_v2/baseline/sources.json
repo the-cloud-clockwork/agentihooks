@@ -41,7 +41,8 @@
           "argv": [
             "git",
             "--version"
-          ]
+          ],
+          "revision": true
         }
       ],
       "unknown_live": [

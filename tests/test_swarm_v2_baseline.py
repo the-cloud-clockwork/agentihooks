@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -101,7 +101,7 @@ def test_report_separates_source_deployed_and_unknown_for_every_repo(planted):
     assert repos["agentihooks"]["unknown_live"] == ["swarm controller version on Anton"]
     git_version = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True).stdout.strip()
     assert repos["antoncore"]["deployed"] == [
-        {"name": "read-only command stand-in", "status": "verified", "value": git_version}
+        {"name": "read-only command stand-in", "status": "verified", "value": git_version, "matches_source": False}
     ]
     assert repos["antoncore"]["unknown_live"] == ["live autoscaling group desired capacity"]
     assert report["schema"] == "swarm-v2-baseline/1"
@@ -426,7 +426,12 @@ def test_missing_git_binary(monkeypatch, planted):
         raise FileNotFoundError(args[0][0])
 
     monkeypatch.setattr(baseline.subprocess, "run", absent)
-    assert baseline.resolve_head("x.git", "dev")["reason"] == "git not found"
+    assert baseline.resolve_head("x.git", "dev") == {
+        "branch": "dev",
+        "status": "unresolved",
+        "commit": None,
+        "reason": "git not found",
+    }
     assert baseline._git_ok("x", "status") is None
 
 
@@ -492,6 +497,77 @@ def test_older_previous_cannot_overwrite_newer_output(planted, tmp_path, monkeyp
     assert (out / "b.json").read_text() == before
 
 
+def _record_run(monkeypatch, stdout="", returncode=0):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+    monkeypatch.setattr(baseline.subprocess, "run", run)
+    return calls
+
+
+RUN_KWARGS = {"capture_output": True, "text": True, "check": False}
+
+
+def test_subprocess_calls_capture_text_with_bounded_timeouts(monkeypatch):
+    calls = _record_run(monkeypatch, stdout="v\n")
+    baseline.resolve_head("u.git", "dev")
+    baseline.observe(_command("tool"), {"commit": None})
+    assert baseline._git_ok("c", "status") is True
+    assert calls == [
+        (["git", "ls-remote", "u.git", "refs/heads/dev"], {**RUN_KWARGS, "timeout": baseline.GIT_TIMEOUT}),
+        (["tool"], {**RUN_KWARGS, "timeout": baseline.COMMAND_TIMEOUT}),
+        (["git", "-C", "c", "status"], {**RUN_KWARGS, "timeout": baseline.GIT_TIMEOUT}),
+    ]
+
+
+def test_http_probe_uses_bounded_timeout(monkeypatch):
+    seen = []
+
+    def urlopen(url, timeout):
+        seen.append((url, timeout))
+        raise OSError("down")
+
+    monkeypatch.setattr(baseline.urllib.request, "urlopen", urlopen)
+    probe = baseline.Probe(name="h", kind="http", url="http://h", path="/p", field="v")
+    assert baseline.observe(probe, {"commit": None})["reason"] == "unreachable (OSError)"
+    assert seen == [("http://h/p", baseline.HTTP_TIMEOUT)]
+
+
+def test_ref_line_with_extra_tab_is_not_the_branch(monkeypatch):
+    _record_run(monkeypatch, stdout="abc\tjunk\trefs/heads/dev\n")
+    assert baseline.resolve_head("u.git", "dev")["reason"] == "refs/heads/dev not found"
+
+
+def test_unverified_count_weighs_each_item_once():
+    verified = {"status": "verified"}
+    repos = [
+        {"source": {"status": "resolved"}, "deployed": [verified, verified], "interfaces": [{"status": "present"}]},
+        {"source": {"status": "unresolved"}, "deployed": [], "interfaces": [{"status": "unverified"}]},
+    ]
+    assert baseline._unverified_count(repos) == 2
+
+
+def test_minimal_repository_entry_loads_with_empty_defaults(tmp_path):
+    sources = tmp_path / "s.json"
+    sources.write_text(json.dumps({"branch": "dev", "repositories": [{"name": "r", "url": "r.git"}]}))
+    assert baseline.load_sources(str(sources)) == baseline.Sources(
+        branch="dev",
+        repositories=(baseline.Repository(name="r", url=str(tmp_path / "r.git"), probes=(), unknown_live=()),),
+    )
+
+
+def test_cli_requires_every_path_and_describes_itself(capsys):
+    with pytest.raises(SystemExit):
+        baseline.main([])
+    assert "the following arguments are required: --sources, --json, --markdown" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        baseline.main(["--help"])
+    assert "Record Swarm v2 source and deployment baselines read-only." in capsys.readouterr().out
+
+
 def test_missing_previous_file_is_refused(planted, tmp_path, capsys):
     sources, _ = planted
     with pytest.raises(SystemExit) as exit_info:
@@ -505,6 +581,8 @@ def test_failed_write_leaves_no_temporary_file(tmp_path, monkeypatch):
     target = tmp_path / "out" / "b.json"
 
     def broken(self, target_path):
+        assert (self.name, target_path) == ("b.json.tmp", target)
+        assert self.read_text() == "x"
         raise OSError("rename failed")
 
     monkeypatch.setattr(Path, "replace", broken)
@@ -576,7 +654,7 @@ def test_markdown_renders_every_state_exactly():
                     {"name": "img", "status": "verified", "value": "i:1"},
                     {"name": "api", "status": "unverified", "value": None, "reason": "a|b\nc"},
                 ],
-                "unknown_live": ["api"],
+                "unknown_live": ["api", "x"],
             },
             {
                 "repo": "b",
@@ -601,7 +679,7 @@ def test_markdown_renders_every_state_exactly():
         "| Repository | Source | Deployed | Unknown live values |\n"
         "|---|---|---|---|\n"
         "| a | dev `c1` | rev: verified `c1`, matches source; old: verified `c0`, differs from source; "
-        "img: verified `i:1`; api: unverified (a\\|b c) | api |\n"
+        "img: verified `i:1`; api: unverified (a\\|b c) | api, x |\n"
         "| b | dev unresolved (timed out) | none probed | none |\n"
         "\n"
         "## Source-proven interfaces\n"
@@ -642,6 +720,7 @@ def test_utc_now_format(monkeypatch):
     class Clock:
         @staticmethod
         def now(tz):
+            assert tz is UTC
             return datetime(2026, 10, 7, 15, 4, 5, tzinfo=tz)
 
     monkeypatch.setattr(baseline, "datetime", Clock)
@@ -650,8 +729,8 @@ def test_utc_now_format(monkeypatch):
 
 def test_cli_writes_json_and_markdown_and_reads_previous(planted, tmp_path, monkeypatch):
     sources, _ = planted
-    out_json = tmp_path / "out" / "baseline.json"
-    out_md = tmp_path / "out" / "baseline.md"
+    out_json = tmp_path / "out" / "deep" / "baseline.json"
+    out_md = tmp_path / "out" / "deep" / "baseline.md"
     argv = ["--sources", str(sources), "--json", str(out_json), "--markdown", str(out_md)]
     monkeypatch.setattr(baseline, "_utc_now", lambda: FIRST)
     assert baseline.main(argv) == 0
