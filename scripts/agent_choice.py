@@ -104,7 +104,7 @@ def choose_shared(
     choose=choose,
 ) -> tuple[str, str]:
     """Codex while its share of the swarm's recent share picks is below the target and its week has room, else the
-    priority choice; a zero share or a known week under the minimum turns any Codex choice into Claude."""
+    priority choice; a zero share or a known week under the minimum turns an automatic Codex choice into Claude."""
     if not requested and spawns is not None:
         codex, total = spawns.get("codex", 0), sum(spawns.values())
         if codex * 100 < share * max(total, 1) and not at_cap("codex", environ):
@@ -112,7 +112,7 @@ def choose_shared(
             if left is not None and left >= min_week_left:
                 return "codex", f"codex share {codex}/{total} below {share}%"
     agent, reason = choose(requested, environ)
-    if agent == "codex" and not codex_open(environ, share, min_week_left):
+    if not requested and agent == "codex" and not codex_open(environ, share, min_week_left):
         return "claude", choose("", {**environ, "AGENTIHOOKS_AGENT_PRIORITY": "claude"})[1]
     return agent, reason
 
