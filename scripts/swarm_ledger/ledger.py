@@ -141,7 +141,9 @@ def call(slug, ops=None, service=False):
         subprocess.run([sys.executable, str(HERE / "ledger_server.py"), "--ensure"], check=False, capture_output=True)
     try:
         return request(slug, ops, service)
-    except (OSError, urllib.error.HTTPError) as exc:
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
+    except OSError as exc:
         sys.exit(f"ledger server not answering on {BASE}: {exc}")
 
 

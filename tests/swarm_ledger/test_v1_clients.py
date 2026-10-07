@@ -120,6 +120,26 @@ def test_cli_retry_and_revision_conflict_keep_their_behaviour(routes):
     assert legacy(routes) == []
 
 
+@pytest.mark.parametrize(
+    ("thread", "text", "reason"),
+    [
+        ("chat", "Merged at 15:45 UTC", "clock time '15:45 UTC'"),
+        ("phases/p1/comments", " ".join(["word"] * 51), "51 words, at most 50"),
+        ("phases/p1/comments", "Shipped on 2026-10-07", "date '2026-10-07'"),
+    ],
+)
+def test_cli_prints_the_plain_words_reason_for_a_refused_write(routes, thread, text, reason):
+    before = request_rows("chat")
+    operation = {"op": "add", "id": f"cli-refused-{uuid.uuid4().hex[:8]}", "thread": thread, "by": "api-reader"}
+    with pytest.raises(SystemExit) as exit_:
+        cli_ledger.call(SLUG, [{**operation, "text": text}])
+    message = str(exit_.value)
+    assert message.startswith("server refused: 400 ")
+    assert "write plain words for the operator" in message and reason in message
+    assert request_rows("chat") == before
+    assert legacy(routes) == []
+
+
 class Recorder:
     def __init__(self, reply=None, error=None):
         self.calls, self.reply, self.error = [], reply, error

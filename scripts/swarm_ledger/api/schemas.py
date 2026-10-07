@@ -1,4 +1,5 @@
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
 
 from .errors import APIError
 
@@ -128,6 +129,17 @@ def operation_schema(kind: str) -> dict:
     }
 
 
+def mismatched_field(schema: dict, operation: dict) -> str | None:
+    error = best_match(Draft202012Validator(schema).iter_errors(operation))
+    if error is None:
+        return None
+    if error.absolute_path:
+        return str(error.absolute_path[0])
+    if error.validator == "required":
+        return next(key for key in schema["required"] if key not in operation)
+    return sorted(set(operation) - set(schema["properties"]))[0]
+
+
 def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
     validate(MUTATION, payload)
     operations = list(payload["ops"])
@@ -140,11 +152,13 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
         kind = operation.get("op")
         if kind not in FIELDS:
             raise APIError(400, "schema_invalid", "Unknown operation")
-        validate(operation_schema(kind), operation)
+        field = mismatched_field(operation_schema(kind), operation)
+        if field is not None:
+            raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
         core.check_body({"ops": operations}, task_ids)
-    except ValueError:
-        raise APIError(400, "schema_invalid", "Operation does not match its domain schema") from None
+    except ValueError as exc:
+        raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None
     if len({op["id"] for op in operations}) != len(operations):
         raise APIError(400, "schema_invalid", "Operation identifiers must be distinct")
     if payload.get("changes"):
