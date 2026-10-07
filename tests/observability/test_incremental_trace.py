@@ -1273,3 +1273,15 @@ def test_literal_marker_and_secret_in_key_do_not_mask_public_values():
         expected_key: {"value": "controlled-literal-value"}
     }
     assert source.mask_value({key: {"password": 12345678}}) == {expected_key: {"password": "[REDACTED:generic_secret]"}}
+
+
+def test_existing_marker_in_sensitive_value_cannot_hide_literal_suffix():
+    from hooks.observability import transcript as source
+    from hooks.secrets import contains_generic_secret
+
+    value = "[REDACTED:generic_secret]controlled-literal-value"
+    assert contains_generic_secret('password="' + value + '"') is True
+    assert source.mask_value({"password": value}) == {"password": "[REDACTED:generic_secret]"}
+    assert contains_generic_secret('ordinary="' + value + '"') is False
+    assert source.mask_value({"ordinary": value}) == {"ordinary": value}
+    assert contains_generic_secret("password=$ENV_REFERENCE") is False

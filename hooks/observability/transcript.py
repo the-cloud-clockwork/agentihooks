@@ -193,18 +193,16 @@ def mask_value(value: object) -> object:
 
 
 def mask_member(key: str, value: object) -> object:
-    from hooks.secrets import redact
+    from hooks.secrets import contains_generic_secret, redact
 
     if isinstance(value, (list, tuple)):
         return [mask_member(key, item) for item in value]
     if isinstance(value, dict):
         probe = f"{key}=12345678"
-        redacted = redact(probe, mode="standard")
-        context = key if redacted.count("[REDACTED:generic_secret]") > probe.count("[REDACTED:generic_secret]") else ""
+        context = key if contains_generic_secret(probe) else ""
         return {redact(name, mode="strict"): mask_member(context or name, item) for name, item in value.items()}
     masked = mask_value(value)
     contextual = f"{key}={json.dumps(masked, ensure_ascii=False)}"
-    redacted = redact(contextual, mode="standard")
-    if redacted.count("[REDACTED:generic_secret]") > contextual.count("[REDACTED:generic_secret]"):
+    if contains_generic_secret(contextual):
         return "[REDACTED:generic_secret]"
     return masked
