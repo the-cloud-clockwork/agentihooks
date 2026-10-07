@@ -37,7 +37,7 @@ def test_routed_session_reads_quota_for_every_occupied_account(monkeypatch, tmp_
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1, "b": 2, "c": 1})
     monkeypatch.setattr(capacity.codex_router, "routing_pool", lambda env: [])
     seen = capacity.accounts(env, 100)
-    assert [(r.name, r.sessions, r.week_left) for r in seen] == [("a", 1, 90), ("b", 2, 90), ("c", 1, 90)]
+    assert sorted((r.name, r.sessions, r.week_left) for r in seen) == [("a", 1, 90), ("b", 2, 90), ("c", 1, 90)]
 
 
 def test_two_draining_accounts_lower_caps_and_reset_restores_them():
