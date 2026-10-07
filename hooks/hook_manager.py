@@ -1877,6 +1877,12 @@ def on_post_tool_use(payload: dict) -> None:
                 "ci_manifesto AskUserQuestion signal detection failed",
                 {"error": str(e)},
             )
+        try:
+            from scripts.gates.placement import heard as placement_heard
+
+            placement_heard(payload)
+        except Exception as e:
+            log("placement answer record failed", {"error": str(e)})
 
     # Log transcript entries to hooks.log (for debugging)
     session_id = payload.get("session_id", "")
