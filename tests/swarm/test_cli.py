@@ -28,6 +28,7 @@ def env(monkeypatch, tmp_path):
     ledger.said = []
     ledger.comments = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by: ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -824,7 +825,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     def refuse(slug, text, by=None):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
-    ledger.say = refuse
+    ledger.relay = refuse
     ran = []
     for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
         real = getattr(module, name)

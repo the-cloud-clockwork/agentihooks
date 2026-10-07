@@ -99,6 +99,15 @@ def _overlays(dirs: list[tuple[str, Path]]) -> list[str]:
     return [n for n, _ in dirs if n in declared_names]
 
 
+def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
+    digest = hashlib.sha256()
+    for root in [_install_module().PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
+        for path in sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+            digest.update(f"{path}\0".encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     commit = ""
     if bundle is not None:
@@ -108,6 +117,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     return {
         "bundle_commit": commit,
         "base": _base_digest(),
+        "profiles": _profiles_digest(dirs),
         "chain": chain,
         "overlays": _overlays(dirs),
         "plugins": plugins.role_defaults(chain),

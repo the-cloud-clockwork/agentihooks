@@ -972,6 +972,81 @@ def test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done(store
     assert spawned_ids(runtime) == ["t1", "t2"]
 
 
+def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_branch(store):
+    store.update("sw", max_eng=3)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0", "t9"]}, {"id": "t9"}])
+    ledger.rows["t9"].update(state="done", done=True)
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t1", "t0"]
+    ledger.rows["t1"]["branch"] = "engineer-a1b2c3-0001"
+    ledger.rows["t0"].update(state="pr", branch="engineer-a1b2c3-0002")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t0", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001"},
+        {"task": "t0", "branch": "engineer-a1b2c3-0002"},
+    ]
+    assert runtime.tasks[0]["stack_base"] == []
+
+
+@pytest.mark.parametrize(
+    ("state", "branch"), [("open", "engineer-x"), ("blocked", "engineer-x"), ("claimed", ""), ("pr", "")]
+)
+def test_a_dependency_that_is_not_active_or_has_no_branch_still_holds_the_task(store, state, branch):
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state=state, branch=branch, out_of_scope=True)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t2"]["state"] == "open"
+
+
+@pytest.mark.parametrize("field", ["depends_on", "parked_on"])
+def test_a_task_naming_a_task_missing_from_the_ledger_is_held(store, field):
+    ledger, runtime = FakeLedger([{"id": "t2", field: ["gone"]}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == [] and ledger.rows["t2"]["state"] == "open"
+
+
+def test_a_parked_task_waits_for_its_blocker_and_then_takes_a_finish_claim_with_its_handoff(store):
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"], "parked_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["branch"] = "engineer-a1b2c3-0001"
+    store.put_handoff("sw", "t2", "parked on its branch until t1 merges")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1"] and ledger.rows["t2"]["state"] == "open"
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert runtime.tasks[-1]["handoff"] == "parked on its branch until t1 merges"
+    assert runtime.tasks[-1]["stack_base"] == []
+
+
+@pytest.mark.parametrize(
+    ("parked_on", "blocker_done", "lives"), [(["t1"], False, 0), ([], False, 1), (["t1"], True, 1)]
+)
+def test_only_a_claim_that_ends_parked_on_an_unfinished_blocker_keeps_its_claim_life(
+    store, parked_on, blocker_done, lives
+):
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"]["branch"] = "engineer-a1b2c3-0001"
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t2"] and store.claims("sw", "t2") == 1
+    agent = next(a for a in workers(store) if a.task == "t2")
+    ledger.rows["t1"].update(state="done" if blocker_done else "pr", done=blocker_done)
+    ledger.rows["t2"]["parked_on"] = parked_on
+    store.put_handoff("sw", "t2", "stopped here", seat=agent.seat)
+    store.put_agent("sw", replace(agent, state="finished"))
+    store.update("sw", state="paused")
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert agent.name in runtime.killed and ledger.rows["t2"]["state"] == "open"
+    assert store.claims("sw", "t2") == lives
+
+
 def test_overlapping_territories_are_never_claimed_together(store):
     ledger = FakeLedger(
         [
