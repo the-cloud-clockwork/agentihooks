@@ -1,9 +1,12 @@
 import argparse
 import copy
+import fcntl
 import hashlib
 import json
 import re
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 SCHEMA = "swarm-v2-evidence-index/1"
@@ -13,11 +16,12 @@ MARKDOWN = "docs/swarm-v2/evidence-index.md"
 CLASSES = ("transcript_durability", "scope_isolation", "execution_safety", "knowledge_integrity")
 CLAIMS = ("open", "complete")
 CASES = (("A", "positive case result"), ("B", "negative case result"), ("C", "recovery proof"))
-PROVES = frozenset({"test", "live_canary"})
+PROVES = ("live_canary", "test")
 NEEDS_COMMIT = frozenset({"test", "pull_request", "live_canary", "migration"})
 NEEDS_CASE = frozenset({"test", "live_canary", "experiment"})
 NEEDS_OUTCOME = frozenset({"test", "live_canary", "experiment", "migration"})
-KINDS = NEEDS_COMMIT | NEEDS_CASE | {"screenshot"}
+KINDS = tuple(sorted(NEEDS_COMMIT | NEEDS_CASE | {"screenshot"}))
+CASE_IDS = tuple(case for case, _ in CASES)
 REF = "ref must be an https link or a repository file with its sha256"
 PACKAGE_RE = re.compile(r"^#### (SV2-[A-Z]+-\d\d): ", re.M)
 PACKAGE_ID = re.compile(r"SV2-[A-Z]+-\d\d")
@@ -25,6 +29,7 @@ INVARIANT_RE = re.compile(r"^`(INV-[A-Z]\d\d)`:", re.M)
 CASE_RE = re.compile(r"^- (?:Positive|Negative|Recovery) case: \[(T-SV2-[A-Z]+-\d\d-([ABC]))\]", re.M)
 URL_RE = re.compile(r"https://\S+")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
+IMAGE_RE = re.compile(r"\.(?:png|jpe?g|gif|webp|bmp|svg)$", re.I)
 
 
 class EvidenceError(ValueError):
@@ -36,12 +41,16 @@ def _field(section: str, name: str) -> str:
     return match.group(1) if match else ""
 
 
-def _package(section: str) -> dict:
+def _package(pid: str, section: str) -> dict:
+    gate = re.search(r"`(G\d+)`", _field(section, "Integration gate"))
+    cases = {case: test for test, case in CASE_RE.findall(section)}
+    if not gate or len(cases) != len(CASES):
+        raise EvidenceError(f"{pid} in the plan lacks its integration gate or one of its three acceptance cases")
     return {
         "repository": _field(section, "Repository").strip("`."),
-        "gate": _field(section, "Integration gate").split("`")[1],
+        "gate": gate.group(1),
         "dependencies": PACKAGE_ID.findall(_field(section, "Dependencies")),
-        "cases": {case: test for test, case in CASE_RE.findall(section)},
+        "cases": cases,
     }
 
 
@@ -52,7 +61,7 @@ def load_plan(path: Path | str) -> dict:
     packages = {}
     for head, end in zip(heads, ends):
         section = text[head.end() : end].split("\n#### ", 1)[0]
-        packages[head.group(1)] = _package(section)
+        packages[head.group(1)] = _package(head.group(1), section)
     return {"packages": packages, "invariants": INVARIANT_RE.findall(text)}
 
 
@@ -71,7 +80,7 @@ def load_index(path: Path | str) -> dict:
 
 
 def _ref_error(item: dict, root: Path) -> str:
-    ref = item.get("ref", "")
+    ref = str(item.get("ref", ""))
     if URL_RE.fullmatch(ref):
         return ""
     parts = PurePosixPath(ref).parts
@@ -90,9 +99,11 @@ def _item_errors(item: dict, root: Path) -> list[str]:
     if kind not in KINDS:
         return [f"unknown kind {kind!r}"]
     errors = [_ref_error(item, root)]
-    if kind in NEEDS_COMMIT and not SHA_RE.fullmatch(item.get("commit", "")):
+    if kind in PROVES and IMAGE_RE.search(str(item.get("ref", ""))):
+        errors.append("a test or live canary result cannot be an image")
+    if kind in NEEDS_COMMIT and not SHA_RE.fullmatch(str(item.get("commit", ""))):
         errors.append("commit must be a full 40 character sha")
-    if (kind in NEEDS_CASE or "case" in item) and item.get("case") not in dict(CASES):
+    if (kind in NEEDS_CASE or "case" in item) and item.get("case") not in CASE_IDS:
         errors.append("case must be one of A, B, C")
     if kind in NEEDS_OUTCOME and item.get("outcome") not in ("passed", "failed"):
         errors.append("outcome must be passed or failed")
@@ -123,7 +134,7 @@ def _package_errors(index: dict, plan: dict, root: Path) -> list[str]:
         if entry["claim"] not in CLAIMS:
             errors.append(f"{pid}: unknown claim {entry['claim']!r}")
         for item in entry["evidence"]:
-            if "id" not in item:
+            if not isinstance(item.get("id"), str):
                 errors.append(f"{pid}: evidence needs an id")
                 continue
             ids.append(item["id"])
@@ -146,7 +157,7 @@ def _proves(item: dict, case: str) -> bool:
 
 def _pull_request(item: dict, repository: str) -> bool:
     return item.get("kind") == "pull_request" and bool(
-        re.fullmatch(rf"https://github\.com/[\w.-]+/{re.escape(repository)}/pull/\d+", item.get("ref", ""))
+        re.fullmatch(rf"https://github\.com/[\w.-]+/{re.escape(repository)}/pull/\d+", str(item.get("ref", "")))
     )
 
 
@@ -157,24 +168,25 @@ def _screenshot_note(evidence: list[dict], case: str, classes: list[str]) -> str
     return f"; a screenshot cannot satisfy {scope}"
 
 
-def _missing(index: dict, plan: dict, pid: str) -> list[str]:
+def _missing(index: dict, plan: dict, pid: str, seen: tuple[str, ...] = ()) -> list[str]:
     spec, evidence = plan["packages"][pid], index["packages"][pid]["evidence"]
     reasons = []
-    if not any(_pull_request(e, spec["repository"]) for e in evidence):
+    tested = [e.get("commit") for e in evidence if _pull_request(e, spec["repository"])]
+    if not tested:
         reasons.append("no pull request with a tested commit")
     classes = _classes(index, pid)
     for case, label in CASES:
-        if not any(_proves(e, case) for e in evidence):
+        if not any(_proves(e, case) and (not tested or e.get("commit") in tested) for e in evidence):
             reasons.append(f"{spec['cases'][case]}: missing {label}{_screenshot_note(evidence, case, classes)}")
     for dep in spec["dependencies"]:
-        if not _complete(index, plan, dep):
+        if dep in seen or not _complete(index, plan, dep, (*seen, pid)):
             reasons.append(f"dependency {dep} lacks complete evidence")
     return reasons
 
 
-def _complete(index: dict, plan: dict, pid: str) -> bool:
+def _complete(index: dict, plan: dict, pid: str, seen: tuple[str, ...]) -> bool:
     entry = index["packages"].get(pid)
-    return bool(entry) and entry["claim"] == "complete" and not _missing(index, plan, pid)
+    return bool(entry) and entry["claim"] == "complete" and not _missing(index, plan, pid, seen)
 
 
 def check(index: dict, plan: dict, root: Path | str) -> dict:
@@ -206,6 +218,14 @@ def _write(path: Path | str, index: dict) -> None:
         tmp.unlink(missing_ok=True)
 
 
+@contextmanager
+def _locked(path: Path | str) -> Iterator[None]:
+    path = Path(path)
+    with path.with_name(f".{path.name}.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def _replayed(index: dict, operation: str, sha256: str) -> dict | None:
     done = next((o for o in index["operations"] if o["id"] == operation), None)
     if done and done["sha256"] != sha256:
@@ -228,7 +248,7 @@ def _recorded(index: dict) -> dict[str, dict]:
     return {e.get("id"): e for entry in index["packages"].values() for e in entry["evidence"]}
 
 
-def record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict:
+def _record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict:
     index = load_index(path)
     operation, sha256 = change["operation"], digest(change)
     done = _replayed(index, operation, sha256)
@@ -259,6 +279,11 @@ def record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict
     return _commit(path, index, operation, sha256, result)
 
 
+def record(path: Path | str, change: dict, plan: dict, root: Path | str) -> dict:
+    with _locked(path):
+        return _record(path, change, plan, root)
+
+
 def _readable(path: Path | str) -> dict | None:
     try:
         return load_index(path)
@@ -266,7 +291,13 @@ def _readable(path: Path | str) -> dict | None:
         return None
 
 
-def restore(path: Path | str, backup: Path | str, operation: str, plan: dict, root: Path | str) -> dict:
+def _replaced(path: Path | str, current: dict | None) -> str:
+    if current:
+        return f"revision {current['revision']}"
+    return "unreadable" if Path(path).exists() else "missing"
+
+
+def _restore(path: Path | str, backup: Path | str, operation: str, plan: dict, root: Path | str) -> dict:
     saved = load_index(backup)
     sha256 = digest({"restore": saved})
     current = _readable(path)
@@ -278,6 +309,8 @@ def restore(path: Path | str, backup: Path | str, operation: str, plan: dict, ro
         raise EvidenceError(
             f"backup at revision {saved['revision']} is older than the registry at revision {current['revision']}"
         )
+    if current and saved["operations"][: len(current["operations"])] != current["operations"]:
+        raise EvidenceError(f"backup at revision {saved['revision']} lacks operations the registry has recorded")
     if current and current["revision"] == saved["revision"] and digest(current) != digest(saved):
         raise EvidenceError(f"backup at revision {saved['revision']} differs from the registry at the same revision")
     index = copy.deepcopy(saved)
@@ -286,13 +319,19 @@ def restore(path: Path | str, backup: Path | str, operation: str, plan: dict, ro
         "operation": operation,
         "revision": index["revision"],
         "restored_from": saved["revision"],
+        "replaced": _replaced(path, current),
         "packages": len(index["packages"]),
         "evidence": len(_recorded(index)),
     }
     return _commit(path, index, operation, sha256, result)
 
 
-def reopen(path: Path | str, package: str, operation: str) -> dict:
+def restore(path: Path | str, backup: Path | str, operation: str, plan: dict, root: Path | str) -> dict:
+    with _locked(path):
+        return _restore(path, backup, operation, plan, root)
+
+
+def _reopen(path: Path | str, package: str, operation: str) -> dict:
     index = load_index(path)
     sha256 = digest({"reopen": package})
     done = _replayed(index, operation, sha256)
@@ -305,6 +344,11 @@ def reopen(path: Path | str, package: str, operation: str) -> dict:
     index["revision"] += 1
     result = {"operation": operation, "revision": index["revision"], "package": package, "claim": "open"}
     return _commit(path, index, operation, sha256, result)
+
+
+def reopen(path: Path | str, package: str, operation: str) -> dict:
+    with _locked(path):
+        return _reopen(path, package, operation)
 
 
 def _failed(index: dict) -> list[str]:
@@ -403,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return _run(args)
-    except EvidenceError as exc:
+    except (OSError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

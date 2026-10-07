@@ -1,8 +1,11 @@
 import copy
+import fcntl
+import hashlib
 import json
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -159,8 +162,16 @@ def test_a_render_lists_gates_requirements_claims_and_the_measurement():
     assert "| INV-M01 | transcript durability | SV2-SES-04, SV2-IDX-01, SV2-VAL-03 |" in text
     assert "| SV2-FND-01 | agentihooks | G0 | complete | 4 | none |" in text
     assert "| SV2-SES-04 | agentihooks | G4 | complete | 1 | 5 |" in text
-    assert "packages_missing_evidence: 1" in text
-    assert "## Failed experiments\n\nNone." in text
+    findings = text.split("## Findings\n\n")[1].split("\n\n")[0]
+    durability = "; a screenshot cannot satisfy transcript durability acceptance"
+    assert findings.splitlines() == [
+        "- SV2-SES-04: no pull request with a tested commit",
+        f"- SV2-SES-04: T-SV2-SES-04-A: missing positive case result{durability}",
+        f"- SV2-SES-04: T-SV2-SES-04-B: missing negative case result{durability}",
+        f"- SV2-SES-04: T-SV2-SES-04-C: missing recovery proof{durability}",
+        "- SV2-SES-04: dependency SV2-SES-03 lacks complete evidence",
+    ]
+    assert text.endswith("## Failed experiments\n\nNone.\n\npackages_missing_evidence: 1\n")
 
 
 def test_a_check_command_prints_clean_for_the_committed_registry():
@@ -497,7 +508,14 @@ def test_restoring_a_backup_preserves_ids_and_pull_request_links(tmp_path):
     shutil.copy(path, backup)
     path.write_text("{ torn write")
     result = vp.restore(path, backup, "restore-1", PLAN, ROOT)
-    assert result == {"operation": "restore-1", "revision": 3, "restored_from": 2, "packages": 4, "evidence": 14}
+    assert result == {
+        "operation": "restore-1",
+        "revision": 3,
+        "restored_from": 2,
+        "replaced": "unreadable",
+        "packages": 4,
+        "evidence": 14,
+    }
     restored, saved = vp.load_index(path), vp.load_index(backup)
     assert restored["packages"] == saved["packages"]
     assert restored["requirements"] == saved["requirements"]
@@ -507,7 +525,8 @@ def test_restoring_a_backup_preserves_ids_and_pull_request_links(tmp_path):
 def test_restoring_over_a_missing_registry_works(tmp_path):
     backup = _registry(tmp_path)
     path = tmp_path / "gone.json"
-    assert vp.restore(path, backup, "restore-1", PLAN, ROOT)["revision"] == 2
+    result = vp.restore(path, backup, "restore-1", PLAN, ROOT)
+    assert (result["revision"], result["replaced"]) == (2, "missing")
     assert vp.load_index(path)["packages"] == vp.load_index(backup)["packages"]
 
 
@@ -544,7 +563,7 @@ def test_a_newer_backup_restores_over_an_older_registry(tmp_path):
     shutil.copy(path, backup)
     path.write_bytes(older)
     result = vp.restore(path, backup, "restore-1", PLAN, ROOT)
-    assert (result["restored_from"], result["revision"]) == (2, 3)
+    assert (result["restored_from"], result["revision"], result["replaced"]) == (2, 3, "revision 1")
     assert vp.load_index(path)["packages"]["SV2-FND-04"]["evidence"] == [_pull()]
 
 
@@ -621,3 +640,146 @@ def test_writes_leave_no_temporary_file(tmp_path):
     path = _registry(tmp_path)
     vp.record(path, _change(evidence=[_pull()]), PLAN, ROOT)
     assert [p.name for p in tmp_path.glob("evidence-index*")] == ["evidence-index.json"]
+
+
+# Review round one
+
+
+def _plan(packages, invariants=()):
+    return {"packages": packages, "invariants": list(invariants)}
+
+
+def _spec(*dependencies):
+    cases = {c: f"T-SV2-ZZZ-01-{c}" for c in "ABC"}
+    return {"repository": "agentihooks", "gate": "G0", "dependencies": list(dependencies), "cases": cases}
+
+
+def test_a_plan_package_without_its_gate_or_cases_is_refused(tmp_path):
+    head = "#### SV2-ZZZ-01: Sample\n\n- Repository: `agentihooks`.\n"
+    case = "- Recovery case: [T-SV2-ZZZ-01-C](#t).\n"
+    plan = tmp_path / "plan.md"
+    plan.write_text(head + "- Integration gate: none.\n" + case)
+    message = "^SV2-ZZZ-01 in the plan lacks its integration gate or one of its three acceptance cases$"
+    with pytest.raises(vp.EvidenceError, match=message):
+        vp.load_plan(plan)
+    plan.write_text(head + "- Integration gate: `G0`, subject to gates.\n" + case)
+    with pytest.raises(vp.EvidenceError, match=message):
+        vp.load_plan(plan)
+
+
+def test_a_dependency_cycle_is_named_instead_of_recursing():
+    plan = _plan({"SV2-AAA-01": _spec("SV2-BBB-01"), "SV2-BBB-01": _spec("SV2-AAA-01")})
+    full = [_pull(), _test("A"), _test("B"), _test("C")]
+    index = {"requirements": [], "packages": {p: _complete(*full) for p in plan["packages"]}}
+    index["packages"]["SV2-BBB-01"]["evidence"] = [{**item, "id": f"b-{i}"} for i, item in enumerate(full)]
+    result = vp.check(index, plan, ROOT)
+    assert result["findings"] == [
+        {"package": "SV2-AAA-01", "reason": "dependency SV2-BBB-01 lacks complete evidence"},
+        {"package": "SV2-BBB-01", "reason": "dependency SV2-AAA-01 lacks complete evidence"},
+    ]
+
+
+def test_case_results_from_another_commit_than_the_pull_request_do_not_count():
+    index = _alone("SV2-FND-04", _complete(_pull(commit="b" * 40), _test("A"), _test("B"), _test("C")))
+    assert _findings(index) == [
+        ("SV2-FND-04", "T-SV2-FND-04-A: missing positive case result"),
+        ("SV2-FND-04", "T-SV2-FND-04-B: missing negative case result"),
+        ("SV2-FND-04", "T-SV2-FND-04-C: missing recovery proof"),
+    ]
+
+
+def test_a_second_pull_request_at_the_tested_commit_satisfies_the_cases():
+    later = _pull(eid="SV2-FND-04/pull-request-2", commit="b" * 40)
+    index = _alone("SV2-FND-04", _complete(later, _pull(), _test("A"), _test("B"), _test("C")))
+    assert _findings(index) == []
+
+
+@pytest.mark.parametrize("kind", ["test", "live_canary"])
+def test_an_image_cannot_be_a_test_or_live_canary_result(kind):
+    sha = hashlib.sha256((ROOT / SCREENSHOT).read_bytes()).hexdigest()
+    shot = {**_test("C", kind=kind), "ref": SCREENSHOT, "sha256": sha}
+    index = _alone("SV2-FND-04", _complete(_pull(), _test("A"), _test("B"), shot))
+    assert _errors(index) == ["SV2-FND-04/case-c: a test or live canary result cannot be an image"]
+    linked = {**_test("C", kind=kind), "ref": f"{PULL}/pod.JPG"}
+    assert _errors(_alone("SV2-FND-04", _complete(linked))) == [
+        "SV2-FND-04/case-c: a test or live canary result cannot be an image"
+    ]
+
+
+def test_an_image_screenshot_or_experiment_is_not_refused():
+    sha = hashlib.sha256((ROOT / SCREENSHOT).read_bytes()).hexdigest()
+    shot = {"id": "SV2-FND-04/shot", "kind": "screenshot", "ref": SCREENSHOT, "sha256": sha}
+    tried = {**_experiment(), "ref": f"{PULL}/pod.png"}
+    assert _errors(_alone("SV2-FND-04", _complete(shot, tried))) == []
+
+
+def test_non_string_evidence_fields_are_refused_without_crashing():
+    items = [
+        {**_test("A"), "kind": ["test"]},
+        {**_test("B"), "case": ["B"]},
+        {**_test("C"), "commit": [COMMIT], "ref": [PULL]},
+        {**_pull(), "id": ["x"]},
+    ]
+    assert _errors(_alone("SV2-FND-04", _complete(*items))) == [
+        "SV2-FND-04/case-a: unknown kind ['test']",
+        "SV2-FND-04/case-b: case must be one of A, B, C",
+        "SV2-FND-04/case-c: ref must be an https link or a repository file with its sha256",
+        "SV2-FND-04/case-c: commit must be a full 40 character sha",
+        "SV2-FND-04: evidence needs an id",
+    ]
+
+
+def test_a_backup_missing_recorded_operations_is_refused(tmp_path):
+    path = _registry(tmp_path)
+    fork = tmp_path / "fork.json"
+    shutil.copy(path, fork)
+    vp.record(path, _change("op-a", evidence=[_pull()]), PLAN, ROOT)
+    vp.record(fork, _change("op-b", evidence=[_test("A")]), PLAN, ROOT)
+    vp.record(fork, _change("op-c", 2, evidence=[_test("B")]), PLAN, ROOT)
+    _refused(
+        path,
+        lambda: vp.restore(path, fork, "restore-1", PLAN, ROOT),
+        "backup at revision 3 lacks operations the registry has recorded",
+    )
+
+
+def _waits_for_the_lock(tmp_path, call, args):
+    results = []
+    with (tmp_path / ".evidence-index.json.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        writer = threading.Thread(target=lambda: results.append(call(*args)))
+        writer.start()
+        writer.join(timeout=0.3)
+        assert writer.is_alive()
+        assert vp.load_index(tmp_path / "evidence-index.json")["revision"] == 1
+    writer.join(timeout=10)
+    assert [r["revision"] for r in results] == [2]
+
+
+def test_a_record_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.record, (path, _change(), PLAN, ROOT))
+
+
+def test_a_restore_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.restore, (path, path, "op-1", PLAN, ROOT))
+
+
+def test_a_reopen_waits_for_the_registry_lock_held_by_another_writer(tmp_path):
+    path = _registry(tmp_path)
+    _waits_for_the_lock(tmp_path, vp.reopen, (path, "SV2-FND-03", "op-1"))
+
+
+def test_a_missing_registry_file_is_a_refusal_not_a_traceback(tmp_path):
+    result = _run("check", "--index", tmp_path / "none.json")
+    assert result.returncode == 2
+    assert result.stderr == f"error: [Errno 2] No such file or directory: '{tmp_path / 'none.json'}'\n"
+
+
+def test_a_change_without_an_operation_is_a_refusal_not_a_traceback(tmp_path):
+    path = _registry(tmp_path)
+    change = tmp_path / "change.json"
+    change.write_text(json.dumps({"base_revision": 1, "package": "SV2-FND-04", "evidence": []}))
+    result = _run("record", "--index", path, "--change", change, "--markdown", tmp_path / "index.md")
+    assert (result.returncode, result.stderr) == (2, "error: 'operation'\n")
