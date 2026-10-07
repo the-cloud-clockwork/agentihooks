@@ -1,8 +1,8 @@
 name: Publish to PyPI
 
-# Triggered exclusively by release.yml via downstream_workflows dispatch.
-# Do NOT add `push: tags: ["v*"]` back — the release workflow pushes the tag
-# AND dispatches this workflow. Both triggers fire in parallel and race to
+# Dispatched by hand from main in the release dance, or by release.yml when
+# publish_pypi is on. Do NOT add `push: tags: ["v*"]` back — the release
+# workflow pushes the tag AND can dispatch this workflow. Both triggers fire in parallel and race to
 # upload the same artifact; one loses with PyPI 400 'File already exists'.
 on:
   workflow_dispatch:

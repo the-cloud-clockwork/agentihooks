@@ -36,7 +36,9 @@ means, in order:
    no commit. Package metadata derives its version from the tag through
    setuptools-scm. `publish_pypi` stays off. Add `-f dry_run=true` to tag and
    verify a build only inside the CI checkout, without pushing or releasing.
-3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2.
+3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2 and
+   before anything else merges into `dev`: step 5 refuses to publish unless the
+   tag's tree matches `main`.
 4. **Merge the PR** — `gh pr merge --rebase` (`--squash` only when GitHub cannot
    rebase; then merge `origin/main` back into `dev` at once and check that
    `git rev-parse HEAD^{tree}` is unchanged, or the next PR replays every file as a
