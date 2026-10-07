@@ -140,7 +140,15 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     selection = tmp_path / "lines.json"
-    selection.write_text(json.dumps({"scripts/sample.py": [2, 5], "hooks/other.py": []}))
+    selection.write_text(
+        json.dumps(
+            {
+                "scripts/sample.py": {"lines": [2, 5], "tests": ["tests/test_sample.py"]},
+                "hooks/other.py": {"lines": [], "tests": ["tests/test_other.py"]},
+            }
+        )
+    )
+    monkeypatch.chdir(tmp_path)
     test_runner = object()
     data = SimpleNamespace(exit_code_by_key={"selected": None})
     loaded = []
@@ -188,6 +196,11 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert observations == [cwd]
         assert namespace.get("__doc__") == ("sample contract" if header else None)
         assert Path.cwd() == cwd
+        assert engine_config.Config.get().source_paths == [project / "hooks"]
+        copy = {"__file__": str(tmp_path / "copy/scripts/sample.py"), "observe": observe}
+        engine_config.Config.reset()
+        exec(stream.getvalue(), copy)
+        assert observations == [cwd, cwd]
         assert engine_config.Config.get().source_paths == [project / "hooks"]
         assert calls == [("scripts/sample.py", "source", {2, 5})]
         assert runner.collect_or_load_stats(test_runner) == "collected"
