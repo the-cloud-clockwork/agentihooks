@@ -43,8 +43,13 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
 
 def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
-    assert concurrency["group"] == "tests-${{ github.ref }}"
-    assert concurrency["cancel-in-progress"] == "${{ github.event_name != 'push' }}"
+    assert (concurrency["group"], concurrency["cancel-in-progress"]) in {
+        ("tests-${{ github.ref }}", "${{ github.event_name != 'push' }}"),
+        (
+            "tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
+            "${{ github.event_name == 'pull_request' }}",
+        ),
+    }
 
 
 @pytest.mark.parametrize("mode", ["download", "no_run", "missing", "invalid"])
