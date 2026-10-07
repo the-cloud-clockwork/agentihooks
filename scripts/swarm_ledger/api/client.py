@@ -74,9 +74,9 @@ class ResourceClient:
 
 def failure(exc: urllib.error.HTTPError) -> tuple[urllib.error.HTTPError, dict]:
     body = exc.read()
+    replay = urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body))
     try:
         error = json.loads(body)["error"]
     except (ValueError, KeyError, TypeError):
-        error = {}
-    replay = urllib.error.HTTPError(exc.url, exc.code, exc.msg, exc.hdrs, io.BytesIO(body))
+        return replay, {}
     return replay, error if isinstance(error, dict) else {}
