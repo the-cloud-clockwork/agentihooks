@@ -30,7 +30,7 @@ _REDACTIONS = (
     (re.compile(r"\b(?:gh[oprsu]_|github_pat_|glpat-|sk-|xox[abp]-)[A-Za-z0-9_-]{8,}"), "<redacted>"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<redacted>"),
     (re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+"), "<redacted-url>"),
-    (re.compile(r"\b[\w.-]+@(?!sha\d+:)[\w-]+(?:\.[\w-]+)*:[^\s\"'<>]+"), "<redacted-url>"),
+    (re.compile(r"\b[\w.-]+@(?!sha\d+:)[\w-]+(?:\.[\w-]+)*:[^\s\"'<>]*"), "<redacted-url>"),
     (re.compile(r"\b(?=[\w.-]*[A-Za-z])[\w-]+(?:\.[\w-]+)*:\d{2,5}\b"), "<redacted-host>"),
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<redacted-ip>"),
 )
@@ -104,7 +104,12 @@ def _kubectl_verb(args: tuple[str, ...]) -> str:
 def read_only(argv: tuple[str, ...]) -> bool:
     if argv in VERSION_COMMANDS:
         return True
-    return argv[:1] == ("kubectl",) and _kubectl_verb(argv[1:]) in KUBECTL_READS
+    secrets = any(_names_secret(part) for arg in argv for part in arg.split(","))
+    return argv[:1] == ("kubectl",) and _kubectl_verb(argv[1:]) in KUBECTL_READS and not secrets
+
+
+def _names_secret(part: str) -> bool:
+    return part in {"secret", "secrets"} or part.startswith(("secret/", "secrets/")) or "/secrets" in part
 
 
 def _probe(raw: dict) -> Probe:
@@ -353,8 +358,11 @@ def render_markdown(report: dict) -> str:
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+    try:
+        tmp.write_text(text)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -364,10 +372,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", required=True, type=Path)
     parser.add_argument("--markdown", required=True, type=Path)
     args = parser.parse_args(argv)
+    if args.previous and not args.previous.exists():
+        parser.error(f"{args.previous} does not exist")
     previous = json.loads(args.previous.read_text()) if args.previous else None
     current = json.loads(args.json.read_text()) if args.json.exists() else None
     if current and (previous is None or previous["observed_at"] < current["observed_at"]):
-        parser.error(f"{args.json} holds a newer baseline than --previous; pass it as --previous")
+        parser.error(f"{args.json} holds a newer baseline; pass it as --previous")
     report = collect(load_sources(args.sources), previous=previous)
     _write(args.json, json.dumps(report, indent=2) + "\n")
     _write(args.markdown, render_markdown(report))

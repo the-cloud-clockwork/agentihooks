@@ -488,8 +488,49 @@ def test_older_previous_cannot_overwrite_newer_output(planted, tmp_path, monkeyp
     with pytest.raises(SystemExit) as exit_info:
         _cli(sources, out, older if use_previous else None)
     assert exit_info.value.code == 2
-    assert "holds a newer baseline than --previous; pass it as --previous" in capsys.readouterr().err
+    assert f"{out / 'b.json'} holds a newer baseline; pass it as --previous" in capsys.readouterr().err
     assert (out / "b.json").read_text() == before
+
+
+def test_missing_previous_file_is_refused(planted, tmp_path, capsys):
+    sources, _ = planted
+    with pytest.raises(SystemExit) as exit_info:
+        _cli(sources, tmp_path / "out", tmp_path / "absent.json")
+    assert exit_info.value.code == 2
+    assert f"{tmp_path / 'absent.json'} does not exist" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_failed_write_leaves_no_temporary_file(tmp_path, monkeypatch):
+    target = tmp_path / "out" / "b.json"
+
+    def broken(self, target_path):
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(Path, "replace", broken)
+    with pytest.raises(OSError, match="rename failed"):
+        baseline._write(target, "x")
+    assert list(target.parent.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("kubectl", "get", "secret", "x", "-o", "jsonpath={.data}"),
+        ("kubectl", "get", "secrets"),
+        ("kubectl", "describe", "secret/x"),
+        ("kubectl", "get", "secrets/x"),
+        ("kubectl", "get", "pods,secrets"),
+        ("kubectl", "get", "--raw=/api/v1/namespaces/n/secrets"),
+    ],
+)
+def test_read_only_refuses_secret_reads(argv):
+    assert baseline.read_only(argv) is False
+    assert baseline.read_only(tuple(a.replace("secret", "configmap") for a in argv)) is True
+
+
+def test_sanitize_redacts_ssh_auth_failures():
+    assert baseline.sanitize("ops@anton-k3s.internal: Permission denied") == "<redacted-url> Permission denied"
 
 
 def test_interfaces_are_present_missing_or_unverified(planted):
