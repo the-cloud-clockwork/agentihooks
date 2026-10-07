@@ -889,3 +889,77 @@ def test_artifact_collection_and_lifecycle_keep_domain_state(live, tmp_path):
         == []
     )
     assert len(client.collection(SLUG, "artifacts")) == 1
+
+
+def test_notes_question_answers_members_and_counts_are_resources(live):
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    client.mutate(SLUG, [{"op": "add", "id": "n1", "thread": "notes", "text": "Operator note"}])
+    client.mutate(SLUG, [{"op": "add", "id": "nc1", "thread": "notes/n1/comments", "text": "Note comment"}])
+    client.mutate(SLUG, [{"op": "add_item", "id": "q1", "by": "swarm", "list": "questions", "text": "Question"}])
+    client.mutate(SLUG, [{"op": "add", "id": "a1", "thread": "questions/q1/answers", "text": "Operator answer"}])
+    assert client.request(SLUG, "notes/n1")["data"]["text"] == "Operator note"
+    assert client.collection(SLUG, "notes/n1/comments")[0]["text"] == "Note comment"
+    assert client.collection(SLUG, "questions/q1/answers")[0]["text"] == "Operator answer"
+    assert client.request(SLUG, "members/api-reader")["data"]["role"] == "member"
+    counts = client.request(SLUG, "counts")["data"]
+    assert counts["notes"] == 1
+    assert counts["questions"] == 1
+    assert request(live, "GET", "notes/missing")[0] == 404
+    assert request(live, "GET", "notes/n1/unsupported")[0] == 404
+    assert request(live, "GET", "members/missing")[0] == 404
+
+
+def test_central_mutation_schema_boundaries_leave_state_unchanged(live):
+    before = request(live, "GET", "metadata")
+    operation = {"op": "sync", "id": "sync-proof"}
+    invalid = [
+        {"ops": [], "guards": {}},
+        {"ops": [operation], "guards": []},
+        {"ops": [operation], "guards": {"metadata": "invalid"}},
+        {"ops": [operation], "guards": {}, "unexpected": True},
+        {"ops": [operation] * 101, "guards": {}},
+        {"ops": [{**operation, "id": ""}], "guards": {}},
+        {"ops": [{**operation, "id": "x" * 201}], "guards": {}},
+        {"ops": [{"op": "sync"}], "guards": {}},
+        {"ops": [{**operation, "id": 1}], "guards": {}},
+        {"ops": [{"op": "join", "id": "joined", "by": 1}], "guards": {}},
+        {"ops": [operation], "guards": {}, "changes": [{"path": "phases/p1/done", "value": True}]},
+        {"ops": [operation], "guards": {}, "id": "sync-proof", "changes": [{"path": "phases/p1/done", "value": True}]},
+        {"ops": [], "guards": {}, "id": "change", "changes": [{"path": "phases/p1/done", "base": 1, "value": True}]},
+        {"ops": [], "guards": {}, "id": "change", "changes": [{"path": "unsupported", "value": True}]},
+    ]
+    for payload in invalid:
+        status, reply = request(live, "POST", "operations", payload)
+        assert status == 400
+        assert reply["error"]["code"] == "schema_invalid"
+    assert request(live, "POST", "operations", {"ops": [{"op": "unknown", "id": "unknown"}], "guards": {}}) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Unknown operation"}},
+    )
+    assert request(
+        live, "POST", "operations", {"ops": [{"op": "title_set", "id": "empty-title", "text": ""}], "guards": {}}
+    ) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema"}},
+    )
+    assert request(live, "GET", "metadata") == before
+
+
+def test_client_transport_retains_timeout_and_json_headers(live):
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    original = ledger.urllib.request.urlopen
+    with patch.object(ledger.urllib.request, "urlopen", wraps=original) as opened:
+        assert client.request(SLUG, "metadata")["data"]["title"] == "Authority"
+        assert opened.call_args.kwargs["timeout"] == 10
+        outgoing = opened.call_args.args[0]
+        assert outgoing.get_header("Content-type") == "application/json"
+        assert outgoing.get_method() == "GET"
+        assert outgoing.data is None
