@@ -1,4 +1,8 @@
 {
+  "scripts/swarm/stack.py:scripts.swarm.stack.x__restack_base__mutmut_13:14cda51a2caf4cc4c81831736d54310a4b6a693ca5a80db277471627fe5715f9": {
+    "reader": "Standards",
+    "reason": "The parked stacked base is the producer generated merge base commit SHA. Git rev-parse --verify resolves SHA^{commit} identically with --end-of-options and --END-OF-OPTIONS: both exit zero with the same resolved SHA and empty stderr. All later operations receive that same SHA; the ruling excludes option-like metadata."
+  },
   "scripts/init_agent.py:scripts.init_agent.x_main__mutmut_7:9278452f74c086ae83e213fd3a422b61e1b96f750ca792ec23358bc7608879d5": {
     "reader": "Standards /root/standards_reader",
     "reason": "Fallback case is erased by capitalize: claude and CLAUDE both become Claude. Truthy inputs bypass the fallback identically; every falsy input yields the same source label and refusal behavior."
