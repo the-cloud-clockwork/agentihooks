@@ -85,6 +85,12 @@ dev = [
 [project.scripts]
 agentihooks = "scripts.install:main"
 
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=9.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
 [tool.setuptools.packages.find]
 include = ["hooks*", "scripts*", "profiles*"]
 
