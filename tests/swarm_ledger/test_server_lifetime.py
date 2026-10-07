@@ -18,10 +18,8 @@ SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
 
 
 def running(pid):
-    try:
-        return (Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]) != "Z"
-    except FileNotFoundError:
-        return False
+    row = server_lifetime.process(pid, Path("/proc"))
+    return row is not None and row["state"] != "Z"
 
 
 @pytest.mark.parametrize("ending", ["exit", "terminate", "kill"])
