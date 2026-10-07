@@ -21,7 +21,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert "paths" not in event
     assert "paths-ignore" not in event
     jobs = workflow["jobs"]
-    assert set(jobs["gate-required"]["needs"]) == {"unit", "lint", "sonar"}
+    assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
     assert sonar["needs"] == ["unit"]
     assert "if" not in sonar

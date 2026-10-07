@@ -1190,7 +1190,11 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "caps go to four",
     ):
         assert needle in text, needle
-    assert "never edit code, commit or merge" in text
+    assert (
+        "\nYou troubleshoot with read only diagnostics, plan with the operator and configure the swarm, the ledger "
+        "and the operator's environment with him through the agentihooks commands and tools. You never edit code "
+        "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
+    ) in text
     assert "wt.sh new" not in text and "done --pr" not in text
 
 
