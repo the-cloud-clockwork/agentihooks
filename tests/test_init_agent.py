@@ -507,8 +507,9 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
 
 
 def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
-    text = _dry_launcher(monkeypatch, tmp_path, "successor", AGENT_ENV, "--handoff", "--prompt", "doc")
-    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
+    assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=AGENT_ENV) == 0
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
+    assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in launcher.read_text()
 
 
 def test_an_agent_relaunching_itself_keeps_its_swarm_identity(monkeypatch, tmp_path):
