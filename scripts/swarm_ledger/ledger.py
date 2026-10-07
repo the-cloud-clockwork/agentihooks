@@ -538,17 +538,21 @@ def cmd_task(args):
         if not isinstance(fields.get(name, {}), dict):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
-    for name, (allowed, example) in OBJECT_FORMS.items():
-        if isinstance(fields.get(name, {}), str):
-            sys.exit(
-                f"task set takes one {name}.KEY=VALUE pair per key among {allowed}, e.g. {example}, not {name}=VALUE"
-            )
+    refuse_plain_objects(fields)
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields)
     print(json.dumps({"task": args.id, **fields}))
 
 
 def comma_list(text):
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def refuse_plain_objects(fields):
+    for name, (allowed, example) in OBJECT_FORMS.items():
+        if isinstance(fields.get(name, {}), str):
+            sys.exit(
+                f"task set takes one {name}.KEY=VALUE pair per key among {allowed}, e.g. {example}, not {name}=VALUE"
+            )
 
 
 def cmd_prompt(args):
